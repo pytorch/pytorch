@@ -3896,6 +3896,10 @@ def parse_args(args=None):
     parsed = parser.parse_args(args)
     if parsed.batch_invariant and not parsed.accuracy:
         parser.error("--batch-invariant requires --accuracy")
+    if parsed.dashboard and parsed.performance:
+        # Dashboard memory should measure the warmed model, not compile/autotune
+        # transients.
+        parsed.use_warm_peak_memory = True
     return parsed
 
 
@@ -4698,6 +4702,38 @@ def run(runner, args, original_dir=None):
                 )
             else:
                 name = model_name
+                if (
+                    args.accuracy
+                    and name in runner.skip_accuracy_checks_large_models_dashboard
+                ):
+                    current_name = name
+                    current_device = device
+                    current_batch_size = batch_size
+                    current_backend = args.backend
+                    current_mode = (
+                        "training"
+                        if args.training
+                        else "inference"
+                        if args.inference
+                        else ""
+                    )
+                    if args.float16:
+                        current_dtype = "float16"
+                    elif args.bfloat16:
+                        current_dtype = "bfloat16"
+                    elif args.float32:
+                        current_dtype = "float32"
+                    elif args.amp:
+                        current_dtype = "amp"
+                    else:
+                        current_dtype = ""
+                    current_quantization = args.quantization
+                    current_settings = vars(args)
+                    runner._write_accuracy_row(
+                        "pass_due_to_skip", get_dynamo_stats(), args.tag
+                    )
+                    continue
+
                 try:
                     with tqdm(desc="loading model"):
                         extra_args = []

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -102,7 +102,11 @@ from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    guard_or_false,
+    SymExprPrinter,
+)
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
@@ -555,8 +559,6 @@ def _get_while_loop_carried_input_specs(
 
 
 def _statically_known_equal(a: object, b: object) -> bool:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
     result = a == b
     if isinstance(result, torch.SymBool):
         return guard_or_false(result)
@@ -564,8 +566,6 @@ def _statically_known_equal(a: object, b: object) -> bool:
 
 
 def _statically_known_leq(a: object, b: object) -> bool:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
     result = a <= b  # type: ignore[operator]
     if isinstance(result, torch.SymBool):
         return guard_or_false(result)
@@ -2983,6 +2983,21 @@ def run_pre_grad_passes(
     return model_
 
 
+@dataclass(frozen=True)
+class _ConstantDecompTable(Generic[_P, _T]):
+    """
+    Picklable wrapper around a user-supplied decomposition dict.
+
+    This module-level class is addressable as (module, qualname), so pickle can
+    serialize an instance by reducing its single field.
+    """
+
+    table: dict[OpOverload, Callable[_P, _T]]
+
+    def __call__(self) -> dict[OpOverload, Callable[_P, _T]]:
+        return self.table
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -3004,9 +3019,9 @@ def compile_fx(
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
     if decompositions is not None:
-
-        def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
-            return decompositions  # pyrefly: ignore[bad-return]
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = (
+            _ConstantDecompTable(decompositions)
+        )
     else:
         get_decomp_fn = select_decomp_table
 
