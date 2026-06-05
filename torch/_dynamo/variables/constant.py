@@ -661,6 +661,32 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
         return VariableTracker.build(tx, result)
 
+    def nb_xor_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int and frozenset define nb_xor.
+        # https://github.com/python/cpython/blob/3.13/Objects/longobject.c#L5587 (long_xor)
+        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1984-L1990 (set_xor)
+        # bool inherits int's nb_xor via slot inheritance.
+        from .object_protocol import type_implements_nb_xor
+
+        if not type_implements_nb_xor(type(self.value)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        xor_method = getattr(self_.python_type(), "__xor__", None)
+        if xor_method is None:
+            return ConstantVariable.create(NotImplemented)
+        result = xor_method(v, w)
+        if result is NotImplemented:
+            return ConstantVariable.create(NotImplemented)
+        return VariableTracker.build(tx, result)
+
     def nb_negative_impl(
         self,
         tx: Any,

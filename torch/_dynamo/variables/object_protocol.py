@@ -850,6 +850,8 @@ NB_SLOT_MAPPING = {
     "nb_inplace_multiply": PyNumberSlots.NB_INPLACE_MULTIPLY,
     "nb_and": PyNumberSlots.NB_AND,
     "nb_inplace_and": PyNumberSlots.NB_INPLACE_AND,
+    "nb_xor": PyNumberSlots.NB_XOR,
+    "nb_inplace_xor": PyNumberSlots.NB_INPLACE_XOR,
 }
 
 
