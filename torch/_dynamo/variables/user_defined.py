@@ -50,7 +50,10 @@ from torch.utils._pytree import GetAttrKey, is_structseq_class
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function
-from ..create_parameter_op import do_not_convert_to_tracable_parameter
+from ..create_parameter_op import (
+    allow_convert_to_tracable_parameter,
+    do_not_convert_to_tracable_parameter,
+)
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
@@ -1501,7 +1504,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         ),
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
-            with do_not_convert_to_tracable_parameter():
+            # Module constructors commonly create Parameter attributes; keep the
+            # general sourceless Parameter graph break for other user classes.
+            parameter_ctor_context = (
+                allow_convert_to_tracable_parameter()
+                if issubclass(self.value, torch.nn.Module)
+                else do_not_convert_to_tracable_parameter()
+            )
+            with parameter_ctor_context:
                 result = tx.inline_user_function_return(
                     VariableTracker.build(
                         tx, polyfills.instantiate_user_defined_class_object

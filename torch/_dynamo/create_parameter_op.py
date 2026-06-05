@@ -66,5 +66,22 @@ def do_not_convert_to_tracable_parameter() -> Generator[bool, None, None]:
         _TLS.convert_tracable_parameter = old_flag
 
 
+@contextmanager
+def allow_convert_to_tracable_parameter() -> Generator[bool, None, None]:
+    old_flag = getattr(_TLS, "convert_tracable_parameter", True)
+    old_force = getattr(_TLS, "force_tracable_parameter", False)
+    _TLS.convert_tracable_parameter = True
+    _TLS.force_tracable_parameter = True
+    try:
+        yield True
+    finally:
+        _TLS.convert_tracable_parameter = old_flag
+        _TLS.force_tracable_parameter = old_force
+
+
 def can_convert_to_tracable_parameter() -> bool:
     return getattr(_TLS, "convert_tracable_parameter", True)
+
+
+def force_tracable_parameter() -> bool:
+    return getattr(_TLS, "force_tracable_parameter", False)

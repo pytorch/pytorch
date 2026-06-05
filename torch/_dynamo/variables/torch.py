@@ -54,6 +54,7 @@ from .. import config, graph_break_hints, polyfills, variables
 from ..codegen import PyCodegen
 from ..create_parameter_op import (
     can_convert_to_tracable_parameter,
+    force_tracable_parameter,
     new_parameter_placeholder,
     tracable_create_parameter,
 )
@@ -3799,7 +3800,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
-        if config.graph_break_on_nn_param_ctor:
+        if config.graph_break_on_nn_param_ctor and not force_tracable_parameter():
             # Need user to manually move since we cannot
             unimplemented(
                 gb_type="Attempted to use `torch.nn.Parameter()` constructor with Dynamo",
