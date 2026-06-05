@@ -751,6 +751,7 @@ class TestProfilerITT(TestCase):
 
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
+    @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
     @parametrize("version", [1, 2])
     def test_cupti_monitor_buffer_pool_reuse(self, version):
         # The CUPTI monitor's buffer pool is pure C++ (no CUDA/cupti-python), so
@@ -851,6 +852,7 @@ class TestProfiler(TestCase):
         self.assertNotEqual(ptr_c, ptr_b)
         self.assertEqual(pyprof._cupti_monitor_allocated_buffers(), 2)
 
+    @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
     def test_cupti_monitor_v2_record_layout_capture(self):
         # The v2 complete callback snapshots the CUPTI user-defined record layout
         # (valid only during the callback) into the current layout epoch, so the
