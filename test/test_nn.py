@@ -13595,6 +13595,14 @@ if __name__ == '__main__':
                                         r'lambda must be in range \[0,.*input dtype.*BFloat16.*found 1e\+39'):
                 F.softshrink(x_bf16, lambd=1e39)
 
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_softshrink_lambd_type_promotion(self, device, dtype):
+        x = torch.tensor([-10.0625], dtype=dtype, device=device)
+        lambd = 9.99
+        lambd_in_dtype = torch.tensor(lambd, dtype=dtype).item()
+        expected = torch.tensor([x.item() + lambd_in_dtype], dtype=dtype, device=device)
+        self.assertEqual(F.softshrink(x, lambd), expected)
+
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     def test_fold(self, device):
         def test_dtype(fn, input, dtype):

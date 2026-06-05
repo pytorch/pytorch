@@ -642,7 +642,7 @@ void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
 void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.common_dtype(), "softshrink_cpu", [&]() {
-    auto lambd_val = lambd.to<float>();
+    auto lambd_val = static_cast<float>(lambd.to<scalar_t>());
     auto lambdVec = Vectorized<float>(lambd_val);
     cpu_kernel_vec(
       iter,

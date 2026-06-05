@@ -3575,6 +3575,19 @@ class CommonTemplate:
             for a, b in zip(out, ref):
                 self.assertTrue(torch.allclose(a, b))
 
+    def test_softshrink_reduced_float_lambd_type_promotion(self):
+        for dtype in [torch.bfloat16, torch.float16]:
+            x = torch.tensor([-10.0625], dtype=dtype, device=self.device)
+            lambd = 9.99
+
+            def fn(x):
+                return torch.nn.functional.softshrink(x, lambd=lambd)
+
+            self.assertEqual(fn(x), torch.nn.functional.softshrink(x, lambd=lambd))
+            self.assertEqual(
+                torch.compile(fn)(x), torch.nn.functional.softshrink(x, lambd=lambd)
+            )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
