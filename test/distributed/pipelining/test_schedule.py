@@ -37,6 +37,7 @@ from torch.distributed.pipelining.schedules import (
     F,
     get_schedule_class,
     I,
+    PipelineScheduleMulti,
     PipelineScheduleSingle,
     RECV_B,
     RECV_F,
@@ -45,7 +46,11 @@ from torch.distributed.pipelining.schedules import (
     UNSHARD,
     W,
 )
-from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
+from torch.distributed.pipelining.stage import (
+    _PipelineStageBase,
+    _RecvInfo,
+    PipelineStage,
+)
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
@@ -87,6 +92,57 @@ class MockPipelineStage(_PipelineStageBase):
         pass
 
 
+def _make_adjacency_stage(
+    stage_index, num_stages, group_rank, args_recv_info, act_send_info
+):
+    """Factory for a minimal mock stage used by adjacency-guard tests."""
+
+    class _AdjacencyTestStage(MockPipelineStage):
+        def __init__(self):
+            super().__init__(
+                num_stages=num_stages,
+                group_size=num_stages,
+                group_rank=group_rank,
+            )
+            self.stage_index = stage_index
+            self.device = "cpu"
+
+        def _get_init_p2p_neighbors_ops(self):
+            return []
+
+        def _prepare_forward_infra(self, *args, **kwargs):
+            self.args_recv_info = args_recv_info
+            self.act_send_info = act_send_info
+            return tuple()
+
+        def _prepare_backward_infra(self, *args, **kwargs):
+            return None
+
+        def clear_runtime_states(self):
+            return None
+
+        def get_fwd_recv_ops(self, mb_index):
+            return []
+
+        def get_fwd_send_ops(self, mb_index):
+            return []
+
+        def get_bwd_recv_ops(self, mb_index):
+            return []
+
+        def get_bwd_send_ops(self, mb_index):
+            return []
+
+    return _AdjacencyTestStage()
+
+
+def _run_adjacency_validation(stage, num_stages):
+    """Run one step of PipelineScheduleMulti to trigger adjacency validation."""
+    schedule = PipelineScheduleMulti([stage], n_microbatches=1)
+    schedule.pipeline_order = {i: [None] for i in range(num_stages)}
+    schedule.step()
+
+
 class ScheduleTest(TestCase):
     def test_get_schedule_class(self):
         # List of all expected schedule names
@@ -118,6 +174,34 @@ class ScheduleTest(TestCase):
             # Test that the original name is included in the error message
             with self.assertRaisesRegex(ValueError, f"{name}"):
                 get_schedule_class(name)
+
+    def test_adjacency_guard_rejects_nonadjacent_send(self):
+        # Stage 0 sending to stage 2 (skip connection)
+        stage = _make_adjacency_stage(0, 3, 0, {0: tuple()}, {0: [2]})
+        with self.assertRaisesRegex(RuntimeError, "adjacent-stage communication"):
+            _run_adjacency_validation(stage, 3)
+
+    def test_adjacency_guard_rejects_nonadjacent_recv(self):
+        # Stage 3 receiving from stage 0 (non-adjacent)
+        stage = _make_adjacency_stage(
+            3,
+            4,
+            3,
+            {0: (_RecvInfo("x", source=0, buffer=None, tensor_meta=None),)},
+            {},
+        )
+        with self.assertRaisesRegex(RuntimeError, "adjacent-stage communication"):
+            _run_adjacency_validation(stage, 4)
+
+    def test_adjacency_guard_allows_adjacent_send(self):
+        # Stage 0 -> stage 1 is valid
+        stage = _make_adjacency_stage(0, 3, 0, {0: tuple()}, {0: [1]})
+        _run_adjacency_validation(stage, 3)
+
+    def test_adjacency_guard_allows_empty_recv_middle_stage(self):
+        # Middle stage with no recv is fine (no non-adjacent peers)
+        stage = _make_adjacency_stage(1, 3, 1, {0: tuple()}, {0: [2]})
+        _run_adjacency_validation(stage, 3)
 
     @parametrize(
         "ScheduleClass",
@@ -308,6 +392,7 @@ instantiate_parametrized_tests(ScheduleTest)
 
 class TestSchedulePlan(TestCase):
     def setUp(self):
+        super().setUp()
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
         # These should succeed since num_microbatches % group_size == 0
         self.test_cases = [

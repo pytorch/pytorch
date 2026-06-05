@@ -530,32 +530,34 @@ class BenchmarkRequest:
             create_tensor_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
         try:
-            fn = self.make_run_fn(*input_tensors, out=out)
-        except NonzeroWorkspaceNotSupportedError:
-            # Skipping all ops with nonzero workspace requirements
-            autotuning_log.info("Skipping op due to nonzero workspace requirement")
-            return float("inf")
+            try:
+                fn = self.make_run_fn(*input_tensors, out=out)
+            except NonzeroWorkspaceNotSupportedError:
+                # Skipping all ops with nonzero workspace requirements
+                autotuning_log.info("Skipping op due to nonzero workspace requirement")
+                return float("inf")
 
-        if debug:
-            load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
-            start_ts = time.time()
+            if debug:
+                load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
+                start_ts = time.time()
 
-        if self.benchmark_with_cudagraphs:
-            res = benchmarker.benchmark_gpu_with_cuda_graph(fn)
-        else:
-            res = self.do_bench(fn, *input_tensors, out)
+            if self.benchmark_with_cudagraphs:
+                res = benchmarker.benchmark_gpu_with_cuda_graph(fn)
+            else:
+                res = self.do_bench(fn, *input_tensors, out)
 
-        if debug:
-            bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
-            autotuning_log.debug(
-                "InChildProcess %s: load %f, create tensor %f, bench %f",
-                self,
-                load_elapse,  # type: ignore[possibly-undefined]
-                create_tensor_elapse,  # type: ignore[possibly-undefined]
-                bench_elapse,
-            )
-        self.cleanup_run_fn()
-        return res
+            if debug:
+                bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
+                autotuning_log.debug(
+                    "InChildProcess %s: load %f, create tensor %f, bench %f",
+                    self,
+                    load_elapse,  # type: ignore[possibly-undefined]
+                    create_tensor_elapse,  # type: ignore[possibly-undefined]
+                    bench_elapse,
+                )
+            return res
+        finally:
+            self.cleanup_run_fn()
 
 
 class _TestBenchmarkRequest(BenchmarkRequest):
@@ -680,11 +682,17 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.kpack = kpack
         self.workspace_size = workspace_size
         self.workspace_zero_fill = workspace_zero_fill
+        self._benchmark_module: Any | None = None
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        mod = PyCodeCache.load_by_key_path(
+            self.module_cache_key,
+            self.module_path,
+            set_sys_modules=False,
+        )
+        self._benchmark_module = mod
         autotuning_log.debug(
             "benchmark module key: %s, path: %s",
             self.module_cache_key,
@@ -752,12 +760,64 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 benchmark_run=True,
             )
 
-    def precompile(self):
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
-        kernel = getattr(mod, self.kernel_name)
-        kernel.precompile()
+    def cleanup_run_fn(self) -> None:
+        # Authoritative cleanup for one benchmark module load. Higher-level
+        # finally blocks may call this again as safety nets, so keep it idempotent.
+        mod = self._benchmark_module
+        self._benchmark_module = None
 
-        self.n_regs = kernel.launchers[0].n_regs
+        cached_mod = PyCodeCache.modules_no_attr.pop(self.module_path, None)
+        if mod is None:
+            mod = cached_mod
+
+        if mod is not None:
+            kernel = getattr(mod, self.kernel_name, None)
+            release_benchmark_artifacts = getattr(
+                kernel, "release_benchmark_artifacts", None
+            )
+            if release_benchmark_artifacts is not None:
+                release_benchmark_artifacts()
+            release_static_launchers = getattr(
+                kernel, "_release_static_launchers_except", None
+            )
+            if (
+                release_benchmark_artifacts is None
+                and release_static_launchers is not None
+            ):
+                release_static_launchers(None)
+            elif release_benchmark_artifacts is None:
+                for launcher in getattr(kernel, "launchers", ()) or ():
+                    close = getattr(getattr(launcher, "__self__", None), "close", None)
+                    if close is not None:
+                        close()
+                for compile_result in getattr(kernel, "compile_results", ()) or ():
+                    close = getattr(
+                        getattr(compile_result, "kernel", None), "close", None
+                    )
+                    if close is not None:
+                        close()
+
+        PyCodeCache.modules[:] = [
+            module
+            for module in PyCodeCache.modules
+            if getattr(module, "__file__", None) != self.module_path
+        ]
+        PyCodeCache.linemaps.pop(self.module_path, None)
+
+    def precompile(self):
+        try:
+            mod = PyCodeCache.load_by_key_path(
+                self.module_cache_key,
+                self.module_path,
+                set_sys_modules=False,
+            )
+            self._benchmark_module = mod
+            kernel = getattr(mod, self.kernel_name)
+            kernel.precompile()
+
+            self.n_regs = kernel.launchers[0].n_regs
+        finally:
+            self.cleanup_run_fn()
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
@@ -886,7 +946,11 @@ class SubgraphBenchmarkRequest(BenchmarkRequest):
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        mod = PyCodeCache.load_by_key_path(
+            self.module_cache_key,
+            self.module_path,
+            set_sys_modules=False,
+        )
         sym_input_values = self.sym_input_values
         # Create a new list each call since mod.call does args.clear()
         return lambda: mod.call([*sym_input_values, *input_tensors])
@@ -1153,7 +1217,11 @@ class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         Create a function to run the CuteDSL kernel with the given input and output tensors.
         Similar to TritonBenchmarkRequest.make_run_fn but for CuteDSL kernels.
         """
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        mod = PyCodeCache.load_by_key_path(
+            self.module_cache_key,
+            self.module_path,
+            set_sys_modules=False,
+        )
 
         # Logic replicated async_compile
         from .codegen.cutedsl.cutedsl_kernel import MAIN_SUFFIX

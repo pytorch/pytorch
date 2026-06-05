@@ -83,8 +83,8 @@ struct TensorMetadata {
 //   4. TENSOR_LIST_OPTIONAL: a list of optional tensors
 //   5. SCALAR: a scalar value
 // If we need to support more types in the future, we will add more types in the
-// ParameterTag enum. For example, we will extend the enum to support string,
-// Dimname and so on to support more types of input parameters of aten
+// ParameterTag enum. For example, we will extend the enum to support string
+// and so on to support more types of input parameters of aten
 // operations.
 enum ParameterTag {
   TENSOR,
@@ -117,7 +117,7 @@ struct ParameterMetadata {
   ParameterMetadataValue value_;
   // The order of the parameter is used to distinguish the parameters with the
   // same tag. For example, an operation with two input tensors, the first
-  // tensor is a optional tensor and the second tensor is a tensor. The first
+  // tensor is an optional tensor and the second tensor is a tensor. The first
   // tensor will have the order 0 and the second tensor will have the order 1.
   uint64_t order_{};
 

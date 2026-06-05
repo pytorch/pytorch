@@ -364,7 +364,12 @@ class TestPythonRegistration(TestCase):
                 with self.assertRaisesRegex(
                     RuntimeError, "already a kernel registered from python"
                 ):
-                    my_lib2.impl(torch.ops.aten.mul.Tensor, my_mul, "ZeroTensor")
+                    my_lib2.impl(
+                        torch.ops.aten.mul.Tensor,
+                        my_mul,
+                        "ZeroTensor",
+                        allow_override=False,
+                    )
 
             # Validate that lib2 is not affected by removing lib1
             self.assertFalse(torch.mul(x, y)._is_zerotensor())
@@ -2828,7 +2833,10 @@ class TestWrapperSubclassAliasing(TestCase):
         self._test_wrapper_subclass_aliasing(op, args, kwargs)
 
     def test_wrapper_subclass_aliasing_conv2d(self, device):
-        args = (torch.randn(4, 4, 4, 4), torch.randn(4, 4, 4, 4))
+        args = (
+            torch.randn(4, 4, 4, 4, device=device),
+            torch.randn(4, 4, 4, 4, device=device),
+        )
         kwargs = {}
         # conv2d has a default arg 'int[2] strides=0',
         # which torchscript expands into 'int[2] strides=[0, 0]'
@@ -2841,12 +2849,12 @@ class TestWrapperSubclassAliasing(TestCase):
 
     def test_wrapper_subclass_aliasing_out_op(self, device):
         # Make sure that _return_and_correct_aliasing can handle kwargs w mutable tensors
-        args = (torch.ones(4), torch.ones(4))
-        kwargs = {"out": torch.empty(4)}
+        args = (torch.ones(4, device=device), torch.ones(4, device=device))
+        kwargs = {"out": torch.empty(4, device=device)}
         self._test_wrapper_subclass_aliasing(torch.ops.aten.add.out, args, kwargs)
 
     def test_wrapper_subclass_aliasing_fft_fft2(self, device):
-        args = (torch.randn(4, 4),)
+        args = (torch.randn(4, 4, device=device),)
         kwargs = {}
         # fft_fft2 has a default arg 'int[1] dim=[-2,-1]',
         # Make sure that _return_and_correct_aliasing can handle this case
