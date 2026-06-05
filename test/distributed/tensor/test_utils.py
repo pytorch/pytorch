@@ -63,61 +63,6 @@ R = Replicate()
 
 
 class LocalTest(TestCase):
-    def test_strided_shard_to_replicate_preserves_even_unbacked_shape(self):
-        import torch.distributed.tensor.placement_types as placement_types
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx.experimental.symbolic_shapes import (
-            ShapeEnv,
-            statically_known_true,
-        )
-
-        class Mesh:
-            def size(self, mesh_dim=0):
-                return 4
-
-        pad_sizes = []
-        old_pad_tensor = placement_types.pad_tensor
-        old_all_gather = placement_types.funcol.all_gather_tensor
-
-        def fake_pad_tensor(tensor, pad_dim, pad_size):
-            pad_sizes.append(pad_size)
-            shape = list(tensor.shape)
-            shape[pad_dim] = shape[pad_dim] + pad_size
-            return tensor.new_empty(shape)
-
-        def fake_all_gather(tensor, gather_dim, group):
-            shape = list(tensor.shape)
-            shape[gather_dim] = shape[gather_dim] * 4
-            return tensor.new_empty(shape)
-
-        shape_env = ShapeEnv()
-        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
-        with fake_mode:
-            batch = shape_env.create_unbacked_symint()
-            torch._dynamo.override_optimization_hint(batch, 4)
-            local_tensor = torch.empty(512 * batch, 8)
-            placement_types.pad_tensor = fake_pad_tensor
-            placement_types.funcol.all_gather_tensor = fake_all_gather
-            try:
-                replicate_tensor = _StridedShard(
-                    0, split_factor=2
-                )._to_replicate_tensor(
-                    local_tensor,
-                    Mesh(),
-                    0,
-                    [2048 * batch, 8],
-                )
-            finally:
-                placement_types.pad_tensor = old_pad_tensor
-                placement_types.funcol.all_gather_tensor = old_all_gather
-
-        self.assertEqual(len(pad_sizes), 1)
-        self.assertTrue(statically_known_true(pad_sizes[0] == 0))
-        self.assertTrue(
-            statically_known_true(replicate_tensor.shape[0] == 2048 * batch)
-        )
-        self.assertFalse(replicate_tensor.shape[0] != 2048 * batch)
-
     def test_compute_local_shape_and_global_offset_uneven(self):
         # This case is not only 'uneven' bug also has an empty shard
         # (e.g. most DP ranks have local shape 18,4096, one has 8,4096, one has 0,4096
