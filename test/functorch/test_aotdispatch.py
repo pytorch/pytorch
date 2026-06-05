@@ -9390,6 +9390,45 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(inference_compile_calls[0], 1)
         self.assertIsNone(aot_config.inference_compiler)
 
+    def test_process_inputs_preserves_nested_fake_subclass_metadata(self):
+        from torch._functorch._aot_autograd.frontend_utils import process_inputs
+        from torch._functorch.aot_autograd import AOTConfig
+
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions=None,
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=True,
+            enable_log=False,
+            dynamic_shapes=True,
+        )
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        metadata_token = object()
+        with fake_mode:
+            inner_a = fake_mode.from_tensor(torch.ones(2, 3))
+            inner_b = fake_mode.from_tensor(torch.ones(2, 3))
+            inner_c = fake_mode.from_tensor(torch.ones(2, 3))
+            inner_d = fake_mode.from_tensor(torch.ones(2, 3))
+            inner_a._issue_132896_metadata = metadata_token
+            nested_arg = TwoTensor(
+                TwoTensor(inner_a, inner_b),
+                TwoTensor(inner_c, inner_d),
+            )
+
+        fake_flat_args, _ = process_inputs(
+            [nested_arg], aot_config, fake_mode, fake_mode.shape_env
+        )
+        out = fake_flat_args[0]
+
+        self.assertIs(out, nested_arg)
+        self.assertIs(out.a, nested_arg.a)
+        self.assertIs(out.a.a, inner_a)
+        self.assertIs(out.a.a._issue_132896_metadata, metadata_token)
+
     def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
             run_functionalized_fw_and_collect_metadata,

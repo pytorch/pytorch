@@ -108,28 +108,33 @@ def process_inputs(
                     return fake_mode.from_tensor(x)
                 return x
             if is_traceable_wrapper_subclass(x):
-                attrs, _ = x.__tensor_flatten__()
-                # See if all inner tensors are FakeTensors from this mode
-                all_this_fake = True
-                for a in attrs:
-                    match getattr(x, a):
-                        case FakeTensor() as v:
-                            if v.fake_mode is not fake_mode:
+
+                def all_tensor_attrs_are_fake_from_this_mode(
+                    wrapper_subclass: Any,
+                ) -> bool:
+                    attrs, _ = wrapper_subclass.__tensor_flatten__()
+                    for a in attrs:
+                        attr = getattr(wrapper_subclass, a)
+                        if isinstance(attr, FakeTensor):
+                            if attr.fake_mode is not fake_mode:
                                 # FakeTensor subclass from a different mode.
                                 # Fall through to refakify.
-                                all_this_fake = False
-                                break
-                        case torch.Tensor():
-                            all_this_fake = False
-                            break
-                        case OpaqueBase():
+                                return False
+                        elif is_traceable_wrapper_subclass(attr):
+                            if not all_tensor_attrs_are_fake_from_this_mode(attr):
+                                return False
+                        elif isinstance(attr, torch.Tensor):
+                            return False
+                        elif isinstance(attr, OpaqueBase):
                             pass
-                        case unexpected:
+                        else:
                             raise AssertionError(
-                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                                f"expected Tensor or OpaqueBase, got {type(attr)}"
                             )
+                    return True
 
-                if all_this_fake:
+                # See if all inner tensors are FakeTensors from this mode.
+                if all_tensor_attrs_are_fake_from_this_mode(x):
                     return x
 
             # see note [Tensor Fakification and Symbol Caching]
