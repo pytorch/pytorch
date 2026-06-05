@@ -374,16 +374,21 @@ def insert_deferred_runtime_asserts(
                 torch.ops.aten._assert_scalar.default,
             ):
                 cond = node.args[0] if node.args else node.kwargs.get("cond")
+                assert_expr = _get_sym_val(cond) if isinstance(cond, fx.Node) else None
+                duplicate_assert = (
+                    assert_expr is not None
+                    and assert_expr in expr_to_proxy
+                    and assert_expr in added_asserts
+                )
                 if (
                     cond == True  # noqa: E712
-                    or (assert_expr := _get_sym_val(cond)) in expr_to_proxy
-                    and assert_expr in added_asserts
+                    or duplicate_assert
                 ):
                     arg = cond
                     gm.graph.erase_node(node)
                     if isinstance(arg, fx.Node) and not arg.users:
                         gm.graph.erase_node(arg)
-                else:
+                elif assert_expr is not None:
                     added_asserts.add(assert_expr)  # type: ignore[arg-type]
 
             # hash cons, replace function calls that return torch.SymInts with direct references to
