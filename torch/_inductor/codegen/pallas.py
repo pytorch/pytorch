@@ -11,7 +11,11 @@ import sympy
 
 import torch
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import ModularIndexing
+from torch.utils._sympy.functions import (
+    Max as TorchMax,
+    Min as TorchMin,
+    ModularIndexing,
+)
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
@@ -310,6 +314,12 @@ class PallasKernelOverrides(OpOverrides):
             V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
         )
         return PallasKernelOverrides.to_dtype(var, dtype)
+
+    @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        # Pallas index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
+        return PallasKernelOverrides.index_expr(expr, dtype)
 
     @staticmethod
     def constant(val, dtype: torch.dtype) -> str:
@@ -2110,8 +2120,17 @@ class PallasKernel(SIMDKernel):
 
         buf_size = buf_obj.get_size()
 
-        # 0-dimensional (scalar) buffer - use [...] to access it
         if len(buf_size) == 0:
+            return _BufferIndexing(
+                index_str="...", needs_flatten=indexing.needs_flatten
+            )
+
+        # if buffer size is 1, and index is an integer, use "..."
+        if (
+            len(buf_size) == 1
+            and buf_size[0] == 1
+            and not self._has_iteration_vars(index)
+        ):
             return _BufferIndexing(
                 index_str="...", needs_flatten=indexing.needs_flatten
             )
@@ -2384,7 +2403,7 @@ class PallasKernel(SIMDKernel):
             self.has_flatten_indexing = True
             self.flatten_indexed_buffers.add(name)
             # Flatten then index for non-contiguous access (gather operation)
-            has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
+            has_minmax = index.has(sympy.Min, sympy.Max, TorchMin, TorchMax)
             idx_dtype = "jnp.int32" if self.is_tpu else "jnp.int64"
             idx = (
                 f"({indexing.index_str}).astype({idx_dtype})"
@@ -2737,7 +2756,7 @@ class PallasKernel(SIMDKernel):
             # Block variable indexing (e.g., im2col) - use flattened scatter
             scatter_op = "add" if mode == "atomic_add" else "set"
             return [
-                f"{out}[...] = {out}[...].flatten().at[({indexing.index_str}).flatten()].{scatter_op}("
+                f"{out}[...] = {out}[...].flatten().at[jnp.asarray({indexing.index_str}).flatten()].{scatter_op}("
                 f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
             ]
 
@@ -2761,8 +2780,8 @@ class PallasKernel(SIMDKernel):
                 self.outputs_need_read.add(out)
                 alias_param = f"{out}_alias"
                 lines.append(
-                    f"{out}[...] = {alias_param}[...].flatten().at[({indexing.index_str}).flatten()].{scatter_op}("
-                    f"{value_expr}.flatten()).reshape({out}.shape)"
+                    f"{out}[...] = {alias_param}[...].flatten().at[jnp.asarray({indexing.index_str}).flatten()].{scatter_op}("
+                    f"jnp.asarray({value_expr}).flatten()).reshape({out}.shape)"
                 )
             else:
                 lines.append(f"{out}[{indexing.index_str}] = {value_expr}")
@@ -3135,6 +3154,11 @@ class PallasKernel(SIMDKernel):
                     # Get base index expression
                     indexing = self._get_index_expr(index)
 
+                    # Adjust index for buffer shape (scalar, multi-dim, etc.)
+                    indexing = self._adjust_index_for_buffer_shape(
+                        name, index, indexing
+                    )
+
                     # Check for im2col-like patterns
                     indexing = self._check_im2col_pattern(index, indexing)
 
@@ -3312,7 +3336,7 @@ class PallasKernel(SIMDKernel):
         pointwise_numel: int | None = self._compute_prefix_numel(pointwise_prefixes)
         reduction_numel: int | None = self._compute_reduction_numel()
         n_reduction_dims = sum(
-            1 for var, entry in self.range_tree_nodes.items() if entry.is_reduction
+            1 for entry in self.range_tree_nodes.values() if entry.is_reduction
         )
 
         is_partial_reduction = (
@@ -4098,7 +4122,7 @@ from torch._inductor.runtime.runtime_utils import (
         """
         pw_idx = 0
         r_idx = 0
-        n_pw = sum(1 for _, e in self.range_tree_nodes.items() if not e.is_reduction)
+        n_pw = sum(1 for e in self.range_tree_nodes.values() if not e.is_reduction)
         for sym, entry in self.range_tree_nodes.items():
             if sym == var_sym:
                 return pw_idx if not entry.is_reduction else n_pw + r_idx
@@ -4738,30 +4762,50 @@ from torch._inductor.runtime.runtime_utils import (
                     )
             code.writeline("]")
 
-            # Build input_output_aliases for zero-copy donation
+            # Build donation info for zero-copy aliasing. Current torch_tpu
+            # exposes donate_argnums (the donated input indices); older
+            # versions took input_output_aliases ({input: output}). torch_tpu
+            # itself maps the latter to list(input_output_aliases.keys()), so
+            # the donated input indices are the alias-pair keys.
             if ctx.alias_pairs:
                 alias_map_str = ", ".join(f"{i}: {o}" for (i, o) in ctx.alias_pairs)
                 code.writeline(f"_input_output_aliases = {{ {alias_map_str} }}")
+                donate_argnums_str = ", ".join(str(i) for (i, _o) in ctx.alias_pairs)
+                code.writeline(f"_donate_argnums = [{donate_argnums_str}]")
             else:
                 code.writeline("_input_output_aliases = {}")
+                code.writeline("_donate_argnums = []")
 
             code.writeline("try:")
             with code.indent():
                 code.writeline(
-                    f"tpu_torch_pallas.call_custom_kernel("
+                    f"_results = tpu_torch_pallas.call_custom_kernel("
+                    f"'{kernel_name_str}', kernel_key, "
+                    f"inputs=input_tensors, "
+                    f"output_shapes=output_shape_tensors, "
+                    f"donate_argnums=_donate_argnums)"
+                )
+            code.writeline("except TypeError:")
+            with code.indent():
+                code.writeline(
+                    f"_results = tpu_torch_pallas.call_custom_kernel("
                     f"'{kernel_name_str}', kernel_key, "
                     f"inputs=input_tensors, "
                     f"output_shapes=output_shape_tensors, "
                     f"input_output_aliases=_input_output_aliases)"
                 )
-            code.writeline("except TypeError:")
+            # call_custom_kernel returns freshly allocated result tensors;
+            # donate_argnums only lets the kernel reuse the donated buffers
+            # internally, it does not write back into the passed-in tensors.
+            # Copy each result into the aliased output buffer the caller reads
+            # (this mirrors torch_tpu's own JaxCallable alias handling).
+            code.writeline("if _results is not None:")
             with code.indent():
                 code.writeline(
-                    f"tpu_torch_pallas.call_custom_kernel("
-                    f"input_tensors, output_shape_tensors, "
-                    f"'{kernel_name_str}', kernel_key, "
-                    f"_input_output_aliases)"
+                    "for _in_idx, _out_idx in _input_output_aliases.items():"
                 )
+                with code.indent():
+                    code.writeline("input_tensors[_in_idx].copy_(_results[_out_idx])")
 
     def _codegen_main_entry_default(
         self, ctx: _CodegenContext, jit_wrapper_name: str

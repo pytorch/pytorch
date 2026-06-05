@@ -75,7 +75,7 @@ else:
     def _get_pg_from_name(mesh: "DeviceMesh", name: str) -> ProcessGroup:
         """
         This method allows us to torch.compile through DeviceMesh and lift its
-        PGs a inputs to the graph since all PGs will have a source from the
+        PGs as inputs to the graph since all PGs will have a source from the
         DeviceMesh through the `_pg_registry`.
         This will be moved to the DeviceMesh backend object once we separate
         DeviceMesh into the frontend and backend.
@@ -232,7 +232,7 @@ else:
                         "Cannot provide _layout and/or _rank_map if passing explicit mesh"
                     )
                 if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
-                    raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
+                    mesh = mesh.to("cpu")
                 mesh_tensor = (
                     mesh.detach().to(dtype=torch.int).contiguous()
                     if isinstance(mesh, torch.Tensor)

@@ -5,6 +5,7 @@ import logging
 import warnings
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
@@ -19,6 +20,24 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 _scaled_dot_product_attention = aten.scaled_dot_product_attention
+
+
+_INFERENCE_ONLY_SFDP_PATTERNS = frozenset(
+    OrderedSet(
+        [
+            "_sfdp_pattern_13",
+            "_sfdp_pattern_15",
+            "_sfdp_pattern_17",
+            "_sfdp_pattern_18",
+            "_sfdp_pattern_19",
+            "_sfdp_pattern_20",
+            "_sfdp_pattern_21",
+            "_sfdp_pattern_22",
+            "_sfdp_pattern_23",
+            "_sfdp_pattern_24",
+        ]
+    )
+)
 
 
 def _sfdp_pattern_1(query, key, value, inv_scale):
@@ -1314,6 +1333,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     f"expected workaround to be a dict, got {type(workaround)}"
                 )
             name = pattern.__name__
+            pattern_name = name
 
             if dtype != torch.float:
                 name += "_half"
@@ -1325,20 +1345,21 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
             if args[0].size(0) == 1:
                 name += "_bs1"
 
-            training_name = name + "_training"
-            yield (
-                training_name,
-                {
-                    "search_fn": pattern,
-                    "replace_fn": replacement,
-                    "example_inputs": args,
-                    "trace_fn": joint_fwd_bwd,
-                    "pass_dicts": patterns,
-                    "extra_check": extra_check,
-                    "scalar_workaround": workaround,
-                    "skip_duplicates": True,
-                },
-            )
+            if pattern_name not in _INFERENCE_ONLY_SFDP_PATTERNS:
+                training_name = name + "_training"
+                yield (
+                    training_name,
+                    {
+                        "search_fn": pattern,
+                        "replace_fn": replacement,
+                        "example_inputs": args,
+                        "trace_fn": joint_fwd_bwd,
+                        "pass_dicts": patterns,
+                        "extra_check": extra_check,
+                        "scalar_workaround": workaround,
+                        "skip_duplicates": True,
+                    },
+                )
             inference_workaround = {}
             if workaround:
                 if len(workaround) > 2:

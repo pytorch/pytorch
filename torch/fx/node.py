@@ -507,7 +507,7 @@ class Node(_NodeBase):
     @compatibility(is_backward_compatible=True)
     def insert_arg(self, idx: int, arg: Argument) -> None:
         """
-        Insert an positional argument to the argument list with given index.
+        Insert a positional argument to the argument list with given index.
 
         Args:
 

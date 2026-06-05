@@ -557,7 +557,7 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
         # Find the earliest/first user -- target_node.
         if len(allreduce.outputs) < 1:
             raise AssertionError(
-                f"Found a allreduce that has zero outputs/users -- {allreduce}."
+                f"Found an allreduce that has zero outputs/users -- {allreduce}."
             )
         # Initialize the target node to avoid typing issues.
         target_node = next(iter(next(iter(allreduce.outputs)).users))

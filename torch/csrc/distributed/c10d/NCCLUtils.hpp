@@ -98,6 +98,10 @@ static_assert(
 #define NCCL_HAS_COMM_OFFLOAD
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 0)
+#define NCCL_HAS_MAX_P2P_PEERS
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \

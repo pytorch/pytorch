@@ -173,7 +173,7 @@ class CppCSEVariable(CSEVariable):
                     if isinstance(arg, CppCSEVariable)
                 ]
             )
-            if name == "index_expr":
+            if name in ("index_expr", "value_expr"):
                 self._set_dependent_itervars(args[0])
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
@@ -402,7 +402,7 @@ class LocalBufferContext:
                 self.global_to_local[global_buffer_name] = local_buffer
                 if global_buffer_name not in V.graph.removed_buffers:
                     # Record the global buffers that are removed by this LocalBufferContext
-                    # since which may need to restore. Refer to issue:
+                    # since they may need to be restored. Refer to issue:
                     # https://github.com/pytorch/pytorch/issues/144186
                     self.removed_buffers.add(global_buffer_name)
                     V.graph.removed_buffers.add(global_buffer_name)
