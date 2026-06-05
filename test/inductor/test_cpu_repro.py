@@ -6985,6 +6985,28 @@ class CPUReproTests(TestCase):
         self.assertFalse(cpu_tanh_storage.should_realize_on_reuse(1))
         self.assertTrue(cpu_tanh_storage.should_realize_on_reuse(2))
 
+        def inner_multi_user_fn(index):
+            value = ops.load("in0", index[0])
+            for _ in range(23):
+                value = ops.mul(value, ops.constant(1.0001, torch.float32))
+                value = ops.add(value, ops.constant(0.1, torch.float32))
+            return value
+
+        cpu_multi_user_storage = StorageBox(
+            Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=inner_multi_user_fn,
+                ranges=[10],
+            )
+        )
+        self.assertEqual(cpu_multi_user_storage.data.inner_fn_opcount().num_ops, 49)
+        self.assertFalse(cpu_multi_user_storage.has_large_inner_fn())
+        self.assertFalse(cpu_multi_user_storage.should_realize_on_reuse(5))
+        self.assertTrue(cpu_multi_user_storage.should_realize_on_reuse(6))
+        with config.patch(realize_opusers_threshold=6):
+            self.assertFalse(cpu_multi_user_storage.should_realize_on_reuse(6))
+
         def inner_reads_fn(index):
             value = ops.constant(0.0, torch.float32)
             for i in range(10):
