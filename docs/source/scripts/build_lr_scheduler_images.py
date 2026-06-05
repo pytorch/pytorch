@@ -32,12 +32,14 @@ if not LR_SCHEDULER_IMAGE_PATH.exists():
     LR_SCHEDULER_IMAGE_PATH.mkdir()
 
 model = torch.nn.Linear(10, 1)
-optimizer = optim.SGD(model.parameters(), lr=0.05)
 
 num_epochs = 100
 
-scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=num_epochs // 5)
-scheduler2 = ExponentialLR(optimizer, gamma=0.9)
+def constant_exponential_schedulers(opt):
+    return [
+        ConstantLR(opt, factor=0.1, total_iters=num_epochs // 5),
+        ExponentialLR(opt, gamma=0.9),
+    ]
 
 schedulers = [
     (lambda opt: LambdaLR(opt, lr_lambda=lambda epoch: epoch // 30)),
@@ -53,20 +55,19 @@ schedulers = [
     (lambda opt: CyclicLR(opt, base_lr=0.01, max_lr=0.1, step_size_up=10)),
     (lambda opt: OneCycleLR(opt, max_lr=0.01, epochs=10, steps_per_epoch=10)),
     (lambda opt: ReduceLROnPlateau(opt, mode="min")),
-    (lambda opt: ChainedScheduler([scheduler1, scheduler2])),
+    (lambda opt: ChainedScheduler(constant_exponential_schedulers(opt))),
     (
         lambda opt: SequentialLR(
-            opt, schedulers=[scheduler1, scheduler2], milestones=[num_epochs // 5]
+            opt, constant_exponential_schedulers(opt), milestones=[num_epochs // 5]
         )
     ),
 ]
-
 
 def plot_function(scheduler):
     plt.clf()
     plt.grid(color="k", alpha=0.2, linestyle="--")
     lrs = []
-    optimizer.param_groups[0]["lr"] = 0.05
+    optimizer = optim.SGD(model.parameters(), lr=0.05)
     scheduler = scheduler(optimizer)
 
     plot_path = LR_SCHEDULER_IMAGE_PATH / f"{scheduler.__class__.__name__}.png"
