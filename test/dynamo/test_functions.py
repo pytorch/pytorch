@@ -5513,6 +5513,61 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(2)
         self.assertEqual(fn(x), fn_opt(x))
 
+    def test_is_numpy_meshgrid_outputs_distinct(self):
+        def fn(x):
+            a, b = np.meshgrid(x.numpy(), x.numpy())
+            if a is b:
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        self.assertEqual(fn(x), fn_opt(x))
+
+    def test_is_numpy_broadcast_arrays_alias_guards(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, a, b):
+            r0, r1 = np.broadcast_arrays(a, b)
+            if r0 is r1:
+                return x + 1
+            else:
+                return x + 2
+
+        x = torch.zeros(2)
+        a = np.array(1)
+        b = np.array(2)
+
+        self.assertEqual(fn(x, a, a), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x, a, b), x + 2)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(fn(x, a, a), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_numpy_linalg_qr_namedtuple_attr(self):
+        def fn(x):
+            return torch.from_numpy(np.linalg.qr(x.numpy()).Q)
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.eye(2)
+        self.assertEqual(fn(x), fn_opt(x))
+
+    def test_numpy_container_result_non_array_items(self):
+        def fn(x):
+            shape = np.shape(x.numpy())
+            broadcast_shape = np.broadcast_shapes(shape, (1,))
+            return x + shape[0] + broadcast_shape[0]
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        self.assertEqual(fn(x), fn_opt(x))
+
     def test_id_numpy_bool_scalar_singleton(self):
         def fn(x):
             return x + (1 if id(np.bool_(True)) == id(np.bool_(True)) else 2)
