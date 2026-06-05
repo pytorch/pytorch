@@ -5720,7 +5720,6 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             in_grad_placements,
             device_mesh,
             redistribute_inputs,
-            enable_spmd_types,
             *user_args,
         ) = args
 
