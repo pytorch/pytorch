@@ -43,6 +43,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals, guard_or_true
 from torch.fx.graph_module import GraphModule
+from torch.fx.node import Node
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import py_sym_types
@@ -96,6 +97,44 @@ from .utils import (
     strict_zip,
     unlift_tokens,
 )
+
+
+def _collect_compiled_autograd_output_deps(
+    fw_module: GraphModule,
+    fw_metadata: ViewAndMutationMeta,
+) -> list[tuple[int, ...]]:
+    output_node = next(n for n in fw_module.graph.nodes if n.op == "output")
+    flat_outputs = output_node.args[0]
+    if not isinstance(flat_outputs, (list, tuple)):
+        return [() for _ in range(fw_metadata.num_outputs)]
+
+    # Raw partitioned forward outputs include leading effect tokens when token
+    # unlifting is disabled. Runtime wrappers strip those before the autograd
+    # epilogue sees mutated inputs and user outputs.
+    start = len(fw_metadata.tokens) + fw_metadata.num_mutated_inp_runtime_indices
+    user_outputs = flat_outputs[start : start + fw_metadata.num_outputs]
+    node_to_output_idxs: dict[Node, list[int]] = defaultdict(list)
+    for idx, output in enumerate(user_outputs):
+        if isinstance(output, Node):
+            node_to_output_idxs[output].append(idx)
+
+    output_deps: list[tuple[int, ...]] = []
+    for output_idx, output in enumerate(user_outputs):
+        deps: set[int] = set()
+        if isinstance(output, Node):
+            seen: set[Node] = set()
+            stack = list(output.all_input_nodes)
+            while stack:
+                node = stack.pop()
+                if node in seen:
+                    continue
+                seen.add(node)
+                for dep_idx in node_to_output_idxs.get(node, ()):
+                    if dep_idx != output_idx:
+                        deps.add(dep_idx)
+                stack.extend(node.all_input_nodes)
+        output_deps.append(tuple(sorted(deps)))
+    return output_deps
 
 
 def is_opaque_node(node: Any) -> bool:
@@ -2457,6 +2496,10 @@ def aot_stage2_autograd(
         fw_metadata,
         aot_config,
         partition_fn,
+    )
+
+    fw_metadata.compiled_autograd_output_deps = _collect_compiled_autograd_output_deps(
+        fw_module, fw_metadata
     )
 
     min_cut_info_str = getattr(fx_g.graph, "_min_cut_info_str", None)
