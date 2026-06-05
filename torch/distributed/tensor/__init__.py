@@ -9,6 +9,7 @@ from torch.distributed.tensor._api import (
     DTensor,
     empty,
     full,
+    logspace,
     ones,
     rand,
     randn,
@@ -41,6 +42,7 @@ __all__ = [
     "ones",
     "empty",
     "full",
+    "logspace",
     "rand",
     "randn",
     "zeros",
@@ -85,6 +87,7 @@ distribute_module.__module__ = "torch.distributed.tensor"
 ones.__module__ = "torch.distributed.tensor"
 empty.__module__ = "torch.distributed.tensor"
 full.__module__ = "torch.distributed.tensor"
+logspace.__module__ = "torch.distributed.tensor"
 rand.__module__ = "torch.distributed.tensor"
 randn.__module__ = "torch.distributed.tensor"
 zeros.__module__ = "torch.distributed.tensor"
