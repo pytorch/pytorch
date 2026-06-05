@@ -4818,11 +4818,15 @@ class AutogradFunctionApplyVariable(VariableTracker):
         non_differentiable_idx = []
         if ctx.non_differentiable is not None:
             non_differentiable_set = set(ctx.non_differentiable)
-            if not isinstance(fwd_out, variables.BaseListVariable):
-                raise AssertionError("Expected fwd_out to be a BaseListVariable")
-            for i, x in enumerate(fwd_out.items):
-                if x.is_tensor() and x.as_proxy() in non_differentiable_set:
-                    non_differentiable_idx.append(i)
+            if fwd_out.is_tensor():
+                if fwd_out.as_proxy() in non_differentiable_set:
+                    non_differentiable_idx.append(0)
+            else:
+                if not isinstance(fwd_out, variables.BaseListVariable):
+                    raise AssertionError("Expected fwd_out to be a BaseListVariable")
+                for i, x in enumerate(fwd_out.items):
+                    if x.is_tensor() and x.as_proxy() in non_differentiable_set:
+                        non_differentiable_idx.append(i)
 
         dirty_idx: list[int] = []
         if ctx.dirty_tensors is not None:

@@ -1429,6 +1429,33 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_mark_single_output_non_differentiable(self):
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.mark_non_differentiable(output)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 0
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return MyFunction.apply(x)
+
+        x = torch.randn(4, requires_grad=True)
+        ref = MyFunction.apply(x)
+        res = fn(x)
+        self.assertEqual(ref, res)
+        self.assertFalse(ref.requires_grad)
+        self.assertFalse(res.requires_grad)
+
     def test_mark_multi_output_non_differentiable(self):
         from torch.autograd import Function
 
@@ -2833,6 +2860,34 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         x = torch.tensor([1.0, 2.0], requires_grad=True)
         result = torch.func.grad(loss_fn)(x)
         self.assertEqual(result, torch.tensor([2.0, 2.0]))
+
+    def test_new_style_autograd_function_with_vmap_compiled(self):
+        class NewStyleOp(torch.autograd.Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return NewStyleOp.apply(x)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        result = torch.vmap(compiled_fn)(x)
+        self.assertEqual(result, x * 2)
+
+        result.sum().backward()
+        self.assertEqual(x.grad, torch.full_like(x, 2))
 
     def test_old_style_autograd_function_with_grad_compiled(self):
         """Old-style autograd.Function compiled should work with torch.func.grad.

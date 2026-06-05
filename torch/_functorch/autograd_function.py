@@ -823,6 +823,8 @@ class AutogradFunctionApply(HigherOrderOperator):
         saved_for_backward_idx = fwd_kwargs["saved_for_backward_idx"]
 
         class ApplyTemplate(torch.autograd.Function):
+            generate_vmap_rule = True
+
             @staticmethod
             def forward(*args: Any, **kwargs: Any) -> Any:
                 nonlocal saved_values
