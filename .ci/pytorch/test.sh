@@ -522,6 +522,7 @@ test_lazy_tensor_meta_reference_disabled() {
 }
 
 test_dynamo_core() {
+  install_torchrec_and_fbgemm
   time python test/run_test.py \
     --include-dynamo-core-tests \
     --verbose \

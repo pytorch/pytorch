@@ -234,15 +234,28 @@ function install_fbgemm() {
   rm -rf fbgemm
 }
 
+function get_fbgemm_build_variant() {
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+    echo "rocm"
+  elif [[ "$BUILD_ENVIRONMENT" == *cuda* ]] ; then
+    echo "cuda"
+  else
+    echo "cpu"
+  fi
+}
+
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
   torchrec_commit=$(get_pinned_commit torchrec)
+
+  local fbgemm_build_variant
+  fbgemm_build_variant=$(get_fbgemm_build_variant)
 
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build pyre-extensions
 
-  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+  if [[ "$fbgemm_build_variant" == "rocm" ]] ; then
     # install torchrec first because it installs fbgemm nightly on top of rocm fbgemm
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     pip_uninstall fbgemm-gpu-nightly
@@ -271,8 +284,8 @@ function install_torchrec_and_fbgemm() {
   else
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     # Skip fbgemm for CUDA 13 as it's not compatible yet
-    if [[ "$BUILD_ENVIRONMENT" != *cuda13* ]]; then
-      install_fbgemm "cuda"
+    if [[ "$fbgemm_build_variant" != "cuda" || "$BUILD_ENVIRONMENT" != *cuda13* ]]; then
+      install_fbgemm "${fbgemm_build_variant}"
     fi
   fi
 }
