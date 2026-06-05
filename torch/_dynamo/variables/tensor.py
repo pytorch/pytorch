@@ -2423,6 +2423,27 @@ class TensorVariable(VariableTracker):
             ),
         )
 
+    def nb_true_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__truediv__(x)`` calls — the
+        # ``operator.truediv`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.truediv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # Tensor.__hash__ is `return id(self)`, so hash == id.
         # Always use the FakeTensor identity so aliased tensors
@@ -2777,6 +2798,23 @@ class SymNodeVariable(VariableTracker):
             tx,
             tx.output.create_proxy(
                 "call_function", operator.floordiv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_true_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.truediv, *proxy_args_kwargs([lhs, rhs], {})
             ),
             sym_num=None,
         )
