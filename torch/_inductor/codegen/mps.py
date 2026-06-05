@@ -112,21 +112,25 @@ class MetalExprPrinter(ExprPrinter_):
         return f"metal::max({typecast_a}, {typecast_b})"
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
+        if len(expr.args) != 1:
+            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         # pyrefly: ignore [missing-attribute]
         return f"metal::abs({self._print(expr.args[0])})"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
+        if len(expr.args) != 1:
+            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         # pyrefly: ignore [missing-attribute]
         return f"static_cast<long>(metal::rint({self._print(expr.args[0])}))"
 
     def _print_RoundDecimal(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 2
+        if len(expr.args) != 2:
+            raise AssertionError(f"expected 2 args, got {len(expr.args)}")
         number, ndigits = expr.args
         if number.is_integer:
             # ndigits < 0 should have been filtered by the sympy function
-            assert ndigits < 0
+            if ndigits >= 0:
+                raise AssertionError(f"expected ndigits < 0, got {ndigits}")
             raise ValueError(
                 f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
             )
@@ -140,12 +144,14 @@ class MetalExprPrinter(ExprPrinter_):
         return f"static_cast<float>({self._print(lhs)}) / static_cast<float>({self._print(rhs)})"
 
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 2
+        if len(expr.args) != 2:
+            raise AssertionError(f"expected 2 args, got {len(expr.args)}")
         x, y = map(self.doprint, expr.args)
         return f"metal::precise::pow(static_cast<float>({x}), static_cast<float>({y}))"
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
+        if len(expr.args) != 1:
+            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         x = self.doprint(expr.args[0])
         return f"static_cast<float>({x})"
 
@@ -159,19 +165,22 @@ class MetalExprPrinter(ExprPrinter_):
             return str(expr)
 
     def _print_FloorToInt(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
+        if len(expr.args) != 1:
+            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         x = self.doprint(expr.args[0])
         return f"static_cast<int>(metal::floor(static_cast<float>({x})))"
 
     _print_floor = _print_FloorToInt
 
     def _print_TruncToInt(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
+        if len(expr.args) != 1:
+            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         x = self.doprint(expr.args[0])
         return f"static_cast<int>(metal::trunc({x}))"
 
     def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
+        if len(expr.args) != 1:
+            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         x = self.doprint(expr.args[0])
         return f"metal::precise::log2({x})"
 
@@ -616,7 +625,8 @@ class MetalKernel(SIMDKernel):
         if elem_count:
             var_def += f"[{self.sexpr(elem_count)}]"
         if default_value is not None:
-            assert not is_threadgroup, "Thread group var can not have default value"
+            if is_threadgroup:
+                raise AssertionError("Thread group var can not have default value")
             var_def += f" = {default_value}"
         self.indexing_code.writeline(var_def + self.suffix)
         return var
@@ -646,8 +656,10 @@ class MetalKernel(SIMDKernel):
     ) -> CSEVariable | tuple[CSEVariable, ...]:
         """Codegen a reduction operation.
         Only sum and prod operations are somewhat reasonable optimized"""
-        assert self.inside_reduction
-        assert not self._load_mask
+        if not self.inside_reduction:
+            raise AssertionError("expected to be inside reduction")
+        if self._load_mask:
+            raise AssertionError("expected no load mask during reduction")
 
         def _unwrap_helper(res3: CSEVariable) -> tuple[CSEVariable, ...]:
             # Uwraps vec3 dtype into individual components
@@ -798,7 +810,8 @@ class MetalKernel(SIMDKernel):
             )
             return _unwrap_helper(wf_res)
         if reduction_type == "welford_combine":
-            assert isinstance(value, tuple), "Input to welford combine must be tuple"
+            if not isinstance(value, tuple):
+                raise AssertionError("Input to welford combine must be tuple")
             acc_buf = self._new_idxvar("float3", acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             inp_value = f"float3({value[0]}, {value[1]}, {value[2]})"
@@ -1002,7 +1015,8 @@ class MetalKernel(SIMDKernel):
                 if "error" in self.headers:
                     code.writeline("device c10::metal::ErrorMessages* error_buf,")
 
-                assert len(idx_vars) < 4, "Up to 3 index variables are supported"
+                if len(idx_vars) >= 4:
+                    raise AssertionError("Up to 3 index variables are supported")
                 thread_pos_dtype = (
                     f"uint{len(idx_vars)}" if len(idx_vars) > 1 else "uint"
                 )

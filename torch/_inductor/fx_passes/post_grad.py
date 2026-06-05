@@ -468,20 +468,24 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
-        assert len(kwargs) == 0, (
-            "kwargs of map are not merged into args before entering decompose_map_to_while_loop_pass"
-        )
+        if len(kwargs) != 0:
+            raise AssertionError(
+                "kwargs of map are not merged into args before entering decompose_map_to_while_loop_pass"
+            )
         subgraph, fx_xs, fx_additional_inputs = args
         sub_gm: torch.fx.GraphModule = getattr(gm, subgraph.target)
         cur_node = match.nodes[0]
         mapped_outputs = cur_node.meta["val"]
 
         def lower_to_while_loop(*args, **kwargs):
-            assert len(kwargs) == 0
+            if len(kwargs) != 0:
+                raise AssertionError(f"expected no kwargs, got {kwargs}")
             xs, additional_inputs = pytree.tree_unflatten(args, tree_spec)
-            assert isinstance(xs, (tuple, list)) and isinstance(
-                additional_inputs, (tuple, list)
-            ), (xs, additional_inputs)
+            if not (
+                isinstance(xs, (tuple, list))
+                and isinstance(additional_inputs, (tuple, list))
+            ):
+                raise AssertionError((xs, additional_inputs))
             map_length = xs[0].size(0)
             loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
 
@@ -587,7 +591,8 @@ def resolve_shape_to_proxy(
                 ),
             )
         else:
-            assert isinstance(s, int)
+            if not isinstance(s, int):
+                raise AssertionError(f"expected int, got {type(s).__name__}")
             ret.append(s)
     return ret
 
@@ -658,12 +663,14 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
     def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.scan import _extract_carry_and_out
 
-        assert len(kwargs) == 0, (
-            "kwargs of scan are not merged into args before entering decompose_scan_to_while_loop_pass"
-        )
+        if len(kwargs) != 0:
+            raise AssertionError(
+                "kwargs of scan are not merged into args before entering decompose_scan_to_while_loop_pass"
+            )
 
         combine_subgraph, fx_init, fx_xs, fx_additional_inputs = args
-        assert combine_subgraph.op == "get_attr", "first arg is not combine_subgraph"
+        if combine_subgraph.op != "get_attr":
+            raise AssertionError("first arg is not combine_subgraph")
         sub_gm: torch.fx.GraphModule = getattr(gm, combine_subgraph.target)
         cur_node = match.nodes[0]
         num_init_leaves = len(fx_init)
@@ -673,7 +680,8 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
             """
             The traced graph of this function will be used to replace the original scan fx_node.
             """
-            assert len(kwargs) == 0
+            if len(kwargs) != 0:
+                raise AssertionError(f"expected no kwargs, got {kwargs}")
 
             # Step 1: construct necessary inputs to while_loop based on scan's input.
             (
@@ -1041,7 +1049,8 @@ def is_valid_splitwithsizes_cat(match):
     get_item_args = OrderedSet(
         get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
     )
-    assert None not in get_item_args
+    if None in get_item_args:
+        raise AssertionError(f"expected no None in get_item_args, got {get_item_args}")
     split_sizes = get_arg_value(split_node, 1, "split_sizes")
     # All parts of split should be included in the cat
     if get_item_args != OrderedSet(range(len(split_sizes))):
@@ -1214,7 +1223,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
         input_storages.add(get_node_storage(node))
 
     output_node = next(iter(reversed(graph.nodes)))
-    assert output_node.op == "output"
+    if output_node.op != "output":
+        raise AssertionError(f"expected output node, got {output_node.op}")
     outputs = output_node.args[0]
     if not isinstance(outputs, (list, tuple)):
         # nested subgraphs can have singleton outputs
@@ -1376,7 +1386,8 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            assert len(args) == 1
+            if len(args) != 1:
+                raise AssertionError(f"expected 1 arg, got {len(args)}")
             mode = args[0]
             return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
 
@@ -1407,9 +1418,8 @@ def decompose_auto_functionalized(graph):
                 and "val" not in node.meta
             ):
                 const_attr = getattr(graph.owning_module, node.target)  # type: ignore[arg-type]
-                assert isinstance(
-                    const_attr, (torch.fx.GraphModule, pytree.TreeSpec)
-                ), (type(const_attr), const_attr)
+                if not isinstance(const_attr, (torch.fx.GraphModule, pytree.TreeSpec)):
+                    raise AssertionError((type(const_attr), const_attr))
                 return const_attr
             return node
 
@@ -1420,7 +1430,8 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            assert len(args) == 1
+            if len(args) != 1:
+                raise AssertionError(f"expected 1 arg, got {len(args)}")
             mutable_op = args[0]
             return auto_functionalized_v2_dense(
                 mutable_op, only_clone_these_bases, **kwargs
@@ -1467,7 +1478,8 @@ def decompose_auto_functionalized(graph):
         graph.erase_node(node)
 
     for attr_name in removable_attrs:
-        assert isinstance(attr_name, str)
+        if not isinstance(attr_name, str):
+            raise AssertionError(f"expected str, got {type(attr_name).__name__}")
         delattr(graph.owning_module, attr_name)
 
     graph.lint()
@@ -1774,10 +1786,11 @@ class ConstructorMoverPass:
         self.allow_inputs = allow_inputs
         self.allow_outputs = allow_outputs
 
-        assert isinstance(target, str), (
-            "target should be a string representing the device type. "
-            f"Got: {type(target).__name__}"
-        )
+        if not isinstance(target, str):
+            raise AssertionError(
+                "target should be a string representing the device type. "
+                f"Got: {type(target).__name__}"
+            )
 
     def allow_cpu_device(self, node: fx.Node) -> bool:
         """

@@ -105,7 +105,10 @@ class MemoryDep(Dep):
         """
         Can return None if not able to decide loop orders.
         """
-        assert self.num_vars == other.num_vars
+        if self.num_vars != other.num_vars:
+            raise AssertionError(
+                f"expected num_vars to match, got {self.num_vars} and {other.num_vars}"
+            )
 
         # ignore broadcast for now since broadcast causes extra 0 strides
         # which makes it hard to decide the correct loop orders.
@@ -155,7 +158,10 @@ class MemoryDep(Dep):
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
         order = [stride_to_index[s] for s in other_strides]
 
-        assert OrderedSet(order) == OrderedSet(range(self.num_vars))
+        if OrderedSet(order) != OrderedSet(range(self.num_vars)):
+            raise AssertionError(
+                f"expected order to be a permutation of range({self.num_vars}), got {order}"
+            )
         return order
 
     def get_offset(self) -> sympy.Expr:
@@ -446,7 +452,10 @@ class ReadWrites:
         )
 
     def with_read(self, dep: Dep | OrderedSet[Dep]) -> "ReadWrites":
-        assert isinstance(dep, (WeakDep, StarDep, OrderedSet))
+        if not isinstance(dep, (WeakDep, StarDep, OrderedSet)):
+            raise AssertionError(
+                f"expected WeakDep, StarDep, or OrderedSet, got {type(dep)}"
+            )
         if not isinstance(dep, OrderedSet):
             dep = OrderedSet([dep])
         return ReadWrites(
@@ -582,7 +591,8 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self._reads.add(MemoryDep(name, *self.canonicalize(index)))
 
     def load_seed(self, name: str, index: int) -> None:
-        assert isinstance(index, int)
+        if not isinstance(index, int):
+            raise AssertionError(f"expected index to be int, got {type(index)}")
         self.load(name, sympy.Integer(index))
 
     def store(
@@ -837,7 +847,10 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         check: bool = True,
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
-        assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
+        if isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean)):
+            raise AssertionError(
+                f"index_var must not be a sympy Expr or Boolean, got {type(index_var)}"
+            )
         self.symbols |= self.get_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
 
@@ -865,7 +878,8 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         return (None,) * num_values if num_values > 1 else None
 
     def masked(self, mask: Any, body: Callable[..., Any], other: Any) -> None:
-        assert callable(body), "masked body must always be callable."
+        if not callable(body):
+            raise AssertionError("masked body must always be callable.")
         # The body can make additional calls, for e.g. ops.indirect_indexing
         body()
 

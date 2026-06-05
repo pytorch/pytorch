@@ -117,10 +117,12 @@ def _hierarchical_indexer_cute(
     """Return an indexer that preserves multi-dimensional indices for CuteDSL."""
 
     def indexer(indices: Sequence[Expr]) -> Expr:
-        assert offset == Integer(0), "Offset not supported for hierarchical indexing"
-        assert len(indices) == len(size), (
-            f"Rank mismatch: got {len(indices)} indices for tensor of rank {len(size)}"
-        )
+        if offset != Integer(0):
+            raise AssertionError("Offset not supported for hierarchical indexing")
+        if len(indices) != len(size):
+            raise AssertionError(
+                f"Rank mismatch: got {len(indices)} indices for tensor of rank {len(size)}"
+            )
         if not indices:
             return Integer(0)
         if len(indices) == 1:
@@ -196,7 +198,8 @@ def is_trivial_score_graph(graph_module: GraphModule) -> bool:
     nodes = list(graph.nodes)
     placeholders = [n for n in nodes if n.op == "placeholder"]
     output = [n for n in nodes if n.op == "output"]
-    assert len(output) == 1, "Got graph w/ multiple outputs"
+    if len(output) != 1:
+        raise AssertionError("Got graph w/ multiple outputs")
     output_val = output[0].args[0]
     # The identity graph just sends the score straight through
     return output_val == placeholders[0]
@@ -208,7 +211,8 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
     nodes = list(graph.nodes)
     placeholders = [n for n in nodes if n.op == "placeholder"]
     output = [n for n in nodes if n.op == "output"]
-    assert len(output) == 1, "Got graph w/ multiple outputs"
+    if len(output) != 1:
+        raise AssertionError("Got graph w/ multiple outputs")
     output_val = output[0].args[0]
 
     # mask mod graph is empty if we have 4 inputs and full_default output
@@ -354,7 +358,8 @@ def create_flex_flash_attention_kernel(
     v_head_dim = value.get_size()[-1]
     device = query.get_device()
     dtype = query.get_dtype()
-    assert device is not None, "Device must be specified"
+    if device is None:
+        raise AssertionError("Device must be specified")
 
     # Match stride pattern from query tensor
     q_strides = query.get_stride()
@@ -396,7 +401,8 @@ def create_flex_flash_attention_kernel(
     has_full_blocks = full_kv_num_blocks is not None
 
     choices: list[Any] = []
-    assert flash_attention_cutedsl_template is not None
+    if flash_attention_cutedsl_template is None:
+        raise AssertionError("flash_attention_cutedsl_template must not be None")
 
     input_nodes = [query, key, value, lse]
     if has_full_blocks:
@@ -563,7 +569,8 @@ def create_flex_flash_attention_backward_kernel(
     _, num_heads_kv, seq_len_kv, v_head_dim = value.get_size()
     device = query.get_device()
     dtype = query.get_dtype()
-    assert device is not None
+    if device is None:
+        raise AssertionError("Device must not be None")
 
     grad_query_strides = infer_dense_strides(
         [batch_size, num_heads, seq_len_q, head_dim], query.get_stride()
@@ -621,9 +628,14 @@ def create_flex_flash_attention_backward_kernel(
 
     has_block_mask = mask_graph_buffer is not None
     if has_block_mask:
-        assert q_indices is not None
-        assert full_q_num_blocks is not None
-        assert full_q_indices is not None
+        if q_indices is None:
+            raise AssertionError("q_indices required when block mask is present")
+        if full_q_num_blocks is None:
+            raise AssertionError(
+                "full_q_num_blocks required when block mask is present"
+            )
+        if full_q_indices is None:
+            raise AssertionError("full_q_indices required when block mask is present")
         input_nodes.extend(
             [
                 cast(TensorBox, q_num_blocks),

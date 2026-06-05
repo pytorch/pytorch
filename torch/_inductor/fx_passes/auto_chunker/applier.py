@@ -82,7 +82,8 @@ class ChunkingApplier:
         self.chunks_for_recovering: dict[Node, list[Node]] = {}
         for node in self.subgraph_output:
             meta = get_chunking_meta(node)
-            assert meta
+            if not meta:
+                raise AssertionError("expected chunking meta for subgraph output node")
             if meta.chunk_dim is not None:
                 self.chunks_for_recovering[node] = []
             else:
@@ -135,11 +136,13 @@ class ChunkingApplier:
             else:
                 self.subgraph_body.append(node)
 
-        assert len(self.subgraph_body) > 0
+        if len(self.subgraph_body) <= 0:
+            raise AssertionError("expected non-empty subgraph body")
 
     def replace_tangent_to_one(self) -> None:
         for idx, node in enumerate(self.overriden_tangent):
-            assert is_tangent_node(node)
+            if not is_tangent_node(node):
+                raise AssertionError(f"expected tangent node, got {node}")
 
             fake_tensor = node.meta["val"]
             one = self.parent_graph.call_function(
@@ -160,7 +163,8 @@ class ChunkingApplier:
         """
         for node_idx, subgraph_input in enumerate(self.subgraph_input):
             meta = get_chunking_meta(subgraph_input)
-            assert meta is not None
+            if meta is None:
+                raise AssertionError("expected chunking meta for subgraph input")
 
             # not chunked
             if meta.chunk_dim is None:
@@ -232,17 +236,22 @@ class ChunkingApplier:
             env[input_node] = _create_placeholder_node(input_node)
 
         for overriden_tangent_node in self.overriden_tangent.values():
-            assert overriden_tangent_node is not None
+            if overriden_tangent_node is None:
+                raise AssertionError("expected overriden tangent node to be set")
             env[overriden_tangent_node] = _create_placeholder_node(
                 overriden_tangent_node
             )
 
         for accum in self.accumulators.values():
-            assert accum is not None
+            if accum is None:
+                raise AssertionError("expected accumulator to be set")
             env[accum] = _create_placeholder_node(accum)
 
         for original_node in self.subgraph_body + self.subgraph_output:
-            assert original_node.op != "placeholder"
+            if original_node.op == "placeholder":
+                raise AssertionError(
+                    f"unexpected placeholder node in subgraph body/output: {original_node}"
+                )
 
             # Chunk aten.full
             if (
@@ -299,7 +308,8 @@ class ChunkingApplier:
         # Do the accumulation inside this subgraph
         for node, accum in self.accumulators.items():
             lhs = env[node]
-            assert accum is not None
+            if accum is None:
+                raise AssertionError("expected accumulator to be set")
             rhs = env[accum]
 
             # add `addend` and `accum`
@@ -321,7 +331,8 @@ class ChunkingApplier:
         return sub_gm
 
     def build_subgraphs(self) -> None:
-        assert self.chunk_sizes is not None
+        if self.chunk_sizes is None:
+            raise AssertionError("expected chunk_sizes to be set")
         for chunk_size in self.chunk_sizes:
             if chunk_size in self.chunk_size_to_gm_attr:
                 continue
@@ -337,7 +348,8 @@ class ChunkingApplier:
 
     def call_subgraph_for_each_chunk(self) -> None:
         for chunk_id in range(self.num_chunk):
-            assert self.chunk_sizes is not None
+            if self.chunk_sizes is None:
+                raise AssertionError("expected chunk_sizes to be set")
             chunk_size = self.chunk_sizes[chunk_id]
             subgraph_id = self.chunk_size_to_gm_attr[chunk_size]
             sub_gm = self.parent_graph.get_attr(subgraph_id)
@@ -346,7 +358,8 @@ class ChunkingApplier:
             chunks_iter = iter(self.chunked_subgraph_input)
             for node in self.subgraph_input:
                 chunking_meta = get_chunking_meta(node)
-                assert chunking_meta is not None
+                if chunking_meta is None:
+                    raise AssertionError("expected chunking meta for subgraph input")
                 if chunking_meta.chunk_dim is not None:
                     args.append(next(chunks_iter)[chunk_id])
                 else:
@@ -356,7 +369,8 @@ class ChunkingApplier:
             args += list(self.overriden_tangent.values())  # type: ignore[arg-type]
 
             for accum in self.accumulators.values():
-                assert accum is not None
+                if accum is None:
+                    raise AssertionError("expected accumulator to be set")
                 args.append(accum)
 
             output_node = self.parent_graph.call_function(
@@ -382,7 +396,8 @@ class ChunkingApplier:
         """
         for node in self.subgraph_output:
             meta = get_chunking_meta(node)
-            assert meta is not None
+            if meta is None:
+                raise AssertionError("expected chunking meta for subgraph output")
 
             recovered: torch.fx.Node = node
 
@@ -409,7 +424,8 @@ class ChunkingApplier:
                         prims.convert_element_type.default, (recovered, original_dtype)
                     )
 
-            assert recovered is not node
+            if recovered is node:
+                raise AssertionError("expected recovered node to differ from original")
             node.replace_all_uses_with(recovered)
 
     def erase_original_nodes(self) -> None:

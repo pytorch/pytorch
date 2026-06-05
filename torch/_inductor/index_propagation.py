@@ -190,9 +190,8 @@ class IndexPropVar:
         return IndexPropVar(expr, is_symbolic=True)
 
     def __post_init__(self):
-        assert not self.is_symbolic or isinstance(self.value, TypedExpr), (
-            "Symbolic IndexPropVar must contain a TypedExpr"
-        )
+        if not (not self.is_symbolic or isinstance(self.value, TypedExpr)):
+            raise AssertionError("Symbolic IndexPropVar must contain a TypedExpr")
 
 
 IndexPropResult: TypeAlias = IndexPropVar | tuple["IndexPropResult", ...]

@@ -39,7 +39,8 @@ def _get_collective_key(coll_node: fx.Node) -> str:
         kwargs=coll_node.kwargs,
         normalize_to_only_use_kwargs=True,
     )
-    assert opt_args_kwargs is not None
+    if opt_args_kwargs is None:
+        raise AssertionError("normalize_function returned None for collective node")
     _, kwargs = opt_args_kwargs
     raw_group_name = kwargs.get("group_name", None)
     group_name = (
@@ -112,7 +113,8 @@ def set_cached_runtime(key: str, value: float) -> None:
 def get_hint(x: int | torch.SymInt) -> int | None:
     if isinstance(x, int):
         return x
-    assert isinstance(x, torch.SymInt)
+    if not isinstance(x, torch.SymInt):
+        raise AssertionError(f"expected int or SymInt, got {type(x)}")
     return x.node.hint if x.node.has_hint() else None
 
 
@@ -134,7 +136,8 @@ def can_benchmark_collective() -> bool:
 
 
 def _median(lst):
-    assert len(lst) > 0
+    if len(lst) == 0:
+        raise AssertionError("expected non-empty list for median")
     return torch.median(torch.tensor(lst)).item()
 
 
@@ -224,7 +227,8 @@ def benchmark_collective_with_cuda_events_impl(
         kwargs=n.kwargs,
         normalize_to_only_use_kwargs=True,
     )
-    assert opt_args_kwargs is not None
+    if opt_args_kwargs is None:
+        raise AssertionError("normalize_function returned None for collective node")
     group_name = _resolve_group_name(opt_args_kwargs[1]["group_name"])
     group_size = _get_group_size_by_name(group_name)
 
@@ -243,7 +247,8 @@ def benchmark_collective_with_cuda_events_impl(
 
             total_elems = 1
             for dim in shape:
-                assert dim is not None
+                if dim is None:
+                    raise AssertionError(f"expected non-None dim, got {dim}")
                 total_elems *= dim
 
             actual_bytes = total_elems * t.dtype.itemsize

@@ -85,7 +85,8 @@ def _unpack_tma_descriptor_args(var_name: str, sig_type: str) -> list[str]:
     &var.strides[i]...
     """
     match = re.match(r"tensordesc<[^[]*\[([^\]]*)\]", sig_type)
-    assert match is not None, f"Cannot parse tensordesc signature: {sig_type}"
+    if match is None:
+        raise AssertionError(f"Cannot parse tensordesc signature: {sig_type}")
     ndim = match.group(1).count(",") + 1
     result = [f"&{var_name}.m"]
     for i in range(ndim):
@@ -210,16 +211,23 @@ class DeferredTritonCallWrapper:
             return self.generate_lazy(wrapper)
 
         params = CudaKernelParamCache.get(self.kernel_name)
-        assert params, f"CudaKernelParamCache not populated for {self.kernel_name}"
+        if not params:
+            raise AssertionError(
+                f"CudaKernelParamCache not populated for {self.kernel_name}"
+            )
         def_args = params["def_args"]
         arg_types = self.arg_types
         inductor_meta = params["inductor_meta"]
 
         if "extra_launcher_args" in inductor_meta and len(def_args) > len(arg_types):
             # extra_launcher_args should already be in def_args
-            assert len(def_args) == len(arg_types) - len(
+            if len(def_args) != len(arg_types) - len(
                 inductor_meta["extra_launcher_args"]
-            )
+            ):
+                raise AssertionError(
+                    "expected len(def_args) == len(arg_types) - "
+                    f"len(extra_launcher_args), got {len(def_args)}"
+                )
             arg_types = arg_types + [SymbolicCallArg] * len(
                 inductor_meta["extra_launcher_args"]
             )
@@ -261,9 +269,10 @@ class DeferredTritonCallWrapper:
         - wrapper_arg_names: params accepted by the C++ wrapper function
         - kernel_arg_names: params passed to the GPU kernel launch (non-constexpr only)
         """
-        assert self.triton_meta is not None, (
-            f"triton_meta is required for lazy compile of {self.kernel_name}"
-        )
+        if self.triton_meta is None:
+            raise AssertionError(
+                f"triton_meta is required for lazy compile of {self.kernel_name}"
+            )
         signature = self.triton_meta.get("signature", {})
         inductor_meta = self.inductor_meta or {}
         extra_launcher_args_count = len(inductor_meta.get("extra_launcher_args", []))
@@ -305,10 +314,11 @@ class DeferredTritonCallWrapper:
         # Add TMA tensor args after grid args
         if tma_tensor_args:
             sig_tma_keys = list(self._get_tma_args().keys())
-            assert list(tma_tensor_args.keys()) == sig_tma_keys, (
-                f"TMA tensor args order mismatch for {self.kernel_name}: "
-                f"{list(tma_tensor_args.keys())} vs signature order {sig_tma_keys}"
-            )
+            if list(tma_tensor_args.keys()) != sig_tma_keys:
+                raise AssertionError(
+                    f"TMA tensor args order mismatch for {self.kernel_name}: "
+                    f"{list(tma_tensor_args.keys())} vs signature order {sig_tma_keys}"
+                )
         for desc_name in tma_tensor_args:
             wrapper_arg_names.append(f"_tma_tensor_{desc_name}")
 
@@ -321,7 +331,8 @@ class DeferredTritonCallWrapper:
 
         # For PrecomputedGrid, generate switch statement on config_index
         if grid_type == "PrecomputedGrid":
-            assert self.inductor_meta is not None
+            if self.inductor_meta is None:
+                raise AssertionError("inductor_meta is required for PrecomputedGrid")
             precomputed_grids = self.inductor_meta.get("precomputed_grids", [])
             extra_launcher_args = self.inductor_meta.get("extra_launcher_args", [])
 
@@ -625,10 +636,8 @@ class DeferredTritonCallWrapper:
         If enable_kernel_profile is enabled, all args related information would be packed in this function.
         """
         triton_meta = params["triton_meta"]
-        assert len(self.arg_types) == len(params["def_args"]), (
-            self.arg_types,
-            params["def_args"],
-        )
+        if len(self.arg_types) != len(params["def_args"]):
+            raise AssertionError((self.arg_types, params["def_args"]))
         arg_type_lookup = dict(zip(params["def_args"], self.arg_types))
         # difference between Python and C++ wrapper: C++ wrapper strips out equal_to_1 constants
         call_args = [
@@ -870,13 +879,13 @@ class CppWrapperGpu(CppWrapperCpu):
         if V.graph.aot_mode and V.graph.inputs_to_check:
             for idx in V.graph.inputs_to_check:
                 input_name = V.graph.graph_input_names[idx]
-                assert input_name in V.graph.graph_inputs, (
-                    f"{input_name} not found in graph inputs"
-                )
+                if input_name not in V.graph.graph_inputs:
+                    raise AssertionError(f"{input_name} not found in graph inputs")
                 value = V.graph.graph_inputs[input_name]
-                assert isinstance(value, TensorBox), (
-                    f"{input_name} is expected to be tensor but found as {type(value)}"
-                )
+                if not isinstance(value, TensorBox):
+                    raise AssertionError(
+                        f"{input_name} is expected to be tensor but found as {type(value)}"
+                    )
                 warn_msg = (
                     f"Input {idx} was compiled as {GPU_ALIGN_BYTES}-bytes aligned, "
                     "but it is not aligned at run time. Copying to an aligned tensor "
@@ -972,7 +981,8 @@ static struct TritonKernelCompileInit {{
         if isinstance(desc, TMADescriptorExperimental):
             self._generate_experimental_tma_descriptor(desc)
         else:
-            assert isinstance(desc, TMADescriptorStable)
+            if not isinstance(desc, TMADescriptorStable):
+                raise AssertionError(f"expected TMADescriptorStable, got {type(desc)}")
             self._generate_stable_tma_descriptor(desc)
 
     def _generate_experimental_tma_descriptor(self, desc):
@@ -1298,7 +1308,8 @@ static struct TritonKernelCompileInit {{
     def prepare_triton_wrapper_args(
         self, call_args: list[Any], arg_types: list[Any]
     ) -> tuple[list[Any], list[Any]]:
-        assert len(call_args) == len(arg_types), (call_args, arg_types)
+        if len(call_args) != len(arg_types):
+            raise AssertionError((call_args, arg_types))
         new_args = []
         new_args_types = []
         for arg, arg_type in zip(call_args, arg_types):

@@ -193,10 +193,13 @@ class CuteDSLTemplateKernel(Kernel):
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
         """Set the active subgraph body for template processing."""
-        assert all(
+        if not all(
             hasattr(self, field.name)
             for field in dataclasses.fields(CuteDSLSubgraphInfo)
-        )
+        ):
+            raise AssertionError(
+                "expected all CuteDSLSubgraphInfo fields to be set on self"
+            )
         old_state = {
             key.name: getattr(self, key.name)
             for key in dataclasses.fields(CuteDSLSubgraphInfo)
@@ -235,9 +238,8 @@ class CuteDSLTemplateKernel(Kernel):
     @contextlib.contextmanager
     def create_subgraph_body(self, body_name: str, *, clear_cse: bool = False):
         """Create a new subgraph body for template processing."""
-        assert body_name not in self.subgraph_bodies, (
-            f"Subgraph body '{body_name}' already exists"
-        )
+        if body_name in self.subgraph_bodies:
+            raise AssertionError(f"Subgraph body '{body_name}' already exists")
         new_cse = self.cse.clone() if clear_cse else None
         self.subgraph_bodies[body_name] = CuteDSLSubgraphInfo(
             body=IndentedBuffer(),
@@ -307,14 +309,16 @@ class CuteDSLTemplateKernel(Kernel):
                 code.splice(renames.getvalue())
             return code.getvalue()
 
-        assert "<DEF_KERNEL>" not in self.render_hooks
+        if "<DEF_KERNEL>" in self.render_hooks:
+            raise AssertionError("<DEF_KERNEL> hook already registered")
         # Placeholder-based rendering: hook will be called when template encounters "<DEF_KERNEL>"
         self.render_hooks["<DEF_KERNEL>"] = hook
         return "<DEF_KERNEL>"
 
     def get_output(self):
         """Get the actual argument name for the output buffer."""
-        assert self.output_node, "Output node must exist to get output buffer name"
+        if not self.output_node:
+            raise AssertionError("Output node must exist to get output buffer name")
         buf_name = self.output_node.get_name()
         output = self.args.output_buffers.get(buf_name, None)
         if output is None:
@@ -394,14 +398,20 @@ class CuteDSLTemplateKernel(Kernel):
 
     def _get_subgraph(self, subgraph_number: int):
         """Get subgraph by number for modification processing."""
-        assert isinstance(subgraph_number, int)
-        assert isinstance(self.subgraphs, list)
-        assert subgraph_number < len(self.subgraphs), (
-            f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
-        )
-        assert self.body.getvalue() == "", (
-            "Body should be clear before adding a modification"
-        )
+        if not isinstance(subgraph_number, int):
+            raise AssertionError(
+                f"expected subgraph_number to be int, got {type(subgraph_number)}"
+            )
+        if not isinstance(self.subgraphs, list):
+            raise AssertionError(
+                f"expected self.subgraphs to be list, got {type(self.subgraphs)}"
+            )
+        if subgraph_number >= len(self.subgraphs):
+            raise AssertionError(
+                f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
+            )
+        if self.body.getvalue() != "":
+            raise AssertionError("Body should be clear before adding a modification")
         return self.subgraphs[subgraph_number]
 
     def modification(
@@ -423,9 +433,10 @@ class CuteDSLTemplateKernel(Kernel):
                 self, subgraph_number, fixed_inputs, mask
             )
             with V.set_kernel_handler(self), V.set_ops_handler(modification_handler):
-                assert isinstance(subgraph, (ComputedBuffer, list)), (
-                    f"Expected ComputedBuffer or List[ComputedBuffer], got {type(subgraph)}"
-                )
+                if not isinstance(subgraph, (ComputedBuffer, list)):
+                    raise AssertionError(
+                        f"Expected ComputedBuffer or List[ComputedBuffer], got {type(subgraph)}"
+                    )
 
                 if isinstance(subgraph, list):
                     raise NotImplementedError(
@@ -440,9 +451,10 @@ class CuteDSLTemplateKernel(Kernel):
                     out = subgraph.data.inner_fn(())
 
             if output_name is not None:
-                assert out is not None, (
-                    f"Expected computation result for named output {output_name}"
-                )
+                if out is None:
+                    raise AssertionError(
+                        f"Expected computation result for named output {output_name}"
+                    )
                 self.body.writeline(f"{output_name} = {out.value}")
             else:
                 # Side-effect only: no output assignment (currently only for scatter operations)

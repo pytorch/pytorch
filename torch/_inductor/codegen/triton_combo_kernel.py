@@ -75,7 +75,8 @@ def _default_custom_combo_kernel_horizontal_partition(
         3) large reduce nodes are separated from other nodes.
     """
 
-    assert len(nodes) >= 1
+    if len(nodes) < 1:
+        raise AssertionError(f"expected at least 1 node, got {len(nodes)}")
 
     # first partition nodes based on number of block dimensions
     tilings = [node_info_map[n].tiling for n in nodes]
@@ -126,7 +127,8 @@ def _default_custom_combo_kernel_horizontal_partition(
             g for g in (not_reduction, short_reduction, long_reduction) if g
         )
 
-    assert sum(len(p) for p in nodes_per_ndim) == len(nodes)
+    if sum(len(p) for p in nodes_per_ndim) != len(nodes):
+        raise AssertionError("partitioned node count must equal input node count")
     return nodes_per_ndim
 
 
@@ -203,7 +205,10 @@ class ComboKernel(Kernel):
         for each subkernel node where each sublist is guaranteed to not exceed CUDA limits for number of args
         (read/writes) and to have the same 2D or 1D blocking strategy."""
         # TODO support combination of kernels with different block dimensions
-        assert len(subkernel_nodes) >= 1
+        if len(subkernel_nodes) < 1:
+            raise AssertionError(
+                f"expected at least 1 subkernel node, got {len(subkernel_nodes)}"
+            )
         mixed_sizes = config.combo_kernel_allow_mixed_sizes > 1 or (
             config.combo_kernel_allow_mixed_sizes == 1 and custom_algorithm
         )
@@ -224,7 +229,8 @@ class ComboKernel(Kernel):
             read_write_count = len(read_writes.reads) + len(read_writes.writes)
 
             ndim = len(tiled_groups)
-            assert ndim >= 2, f"Combokernel not support tile {tiled_groups}"
+            if ndim < 2:
+                raise AssertionError(f"Combokernel not support tile {tiled_groups}")
 
             # Skip 2d reductions (r0_,r1_) and 3D pointwise (x,y,z) from combo
             keys = tiled_groups.keys()
@@ -239,7 +245,8 @@ class ComboKernel(Kernel):
                     partition_state, read_write_count, node_info
                 )
             else:
-                assert mixed_sizes or ndim <= 3, f"No mixed sizes: tile {tiled_groups}"
+                if not (mixed_sizes or ndim <= 3):
+                    raise AssertionError(f"No mixed sizes: tile {tiled_groups}")
                 partition_state = ndim_to_partition_state[ndim]
                 ComboKernel._update_partition(
                     partition_state, read_write_count, node_info
@@ -535,7 +542,10 @@ class ComboKernel(Kernel):
             if isinstance(simplified_tree_numel, (Integer, int)):
                 code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
             else:
-                assert f"{tree.prefix}numel_{num}" in self.dynamic_shape_args
+                if f"{tree.prefix}numel_{num}" not in self.dynamic_shape_args:
+                    raise AssertionError(
+                        f"{tree.prefix}numel_{num} not in dynamic_shape_args"
+                    )
                 uniquify_block_sizes.append(f"{tree.prefix}numel")
 
             if not tree.is_reduction:
@@ -609,7 +619,10 @@ class ComboKernel(Kernel):
             if not prefix_is_reduction(prefix) or sub_kernel.inside_reduction
         }
         if sub_kernel.persistent_reduction:
-            assert sub_kernel.inside_reduction
+            if not sub_kernel.inside_reduction:
+                raise AssertionError(
+                    "persistent_reduction sub_kernel must be inside_reduction"
+                )
             heuristics = "persistent_reduction"
         elif sub_kernel.inside_reduction:
             heuristics = "reduction"
@@ -639,9 +652,10 @@ class ComboKernel(Kernel):
             num_persistent_reduction = len(
                 [e for e in heuristics_list if e == "persistent_reduction"]
             )
-            assert num_reduction == 0, (
-                "combining pointwise and reduction are not supported yet."
-            )
+            if num_reduction != 0:
+                raise AssertionError(
+                    "combining pointwise and reduction are not supported yet."
+                )
             heuristics = (
                 "pointwise_with_reduction"
                 if num_persistent_reduction > 0
@@ -679,7 +693,8 @@ class ComboKernel(Kernel):
                     )
                 if mutation in sub_kernel.args.output_buffers:
                     arg = sub_kernel.args.output_buffers[mutation]
-                    assert not isinstance(arg, RemovedArg)
+                    if isinstance(arg, RemovedArg):
+                        raise AssertionError("mutated output buffer arg was removed")
                     mutated_args.add(arg)
         return sorted(mutated_args)
 
@@ -741,7 +756,8 @@ class ComboKernel(Kernel):
 
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
-        assert dispatch is not None
+        if dispatch is None:
+            raise AssertionError("dispatch_class must not be None")
 
         # Compute the max persistent R0_BLOCK across sub-kernels.
         # This is used by _reduction_configs() to avoid generating configs
@@ -980,7 +996,8 @@ class ComboKernel(Kernel):
                 self.codegen_blocks(code)
 
             for num, sub_kernel in enumerate(self.sub_kernels):
-                assert self.dispatch_class is not None
+                if self.dispatch_class is None:
+                    raise AssertionError("dispatch_class must not be None")
                 self.dispatch_class.codegen_pid_range(self, num, code)
                 with code.indent():
                     uniquify = self.codegen_static_numels_sub_kernel(
@@ -1150,7 +1167,8 @@ class ComboKernel(Kernel):
         _, call_args, _, arg_types = self.args.python_argdefs()
 
         wrapper = V.graph.wrapper_code
-        assert self.dispatch_class is not None
+        if self.dispatch_class is None:
+            raise AssertionError("dispatch_class must not be None")
         if self.dynamic_shape_args:
             self.add_numel_to_call_args(name, call_args, arg_types)
 
