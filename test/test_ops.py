@@ -2729,7 +2729,6 @@ fake_backward_skips = {
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     skip("nn.functional.ctc_loss"),
-    xfail("index_fill"),
     skip("bmm", variant_name="triton_optimized"),
 }
 
