@@ -2349,32 +2349,17 @@ class _ModuleStackTracer(PythonKeyTracer):
     See Note [Preserving the nn module stack metadata during export non-strict mode]  # noqa: W605
     """
 
-    def __init__(self, scope_root: GraphModule) -> None:
+    def __init__(self, scope_root: Module | None = None) -> None:
         super().__init__()
         self.record_stack_traces = not fx.config.do_not_emit_stack_traces
         self._record_forward_stack_traces_only = True
-        self.scope_root = scope_root
+        self.scope_root: Module | None = None
         self.enable_attr_proxy = False
-        self.submodule_paths = {}
-        for name, m in self.scope_root.named_modules(remove_duplicate=False):
-            if m in self.submodule_paths:
-                log.info(
-                    "Shared module found between %s and %s, AttrProxy is enabled.",
-                    self.submodule_paths[m],
-                    name,
-                )
-                self.enable_attr_proxy = True
-            else:
-                self.submodule_paths[m] = name
-
         self.proxy_paths: WeakKeyDictionary[_AttrProxy, str] = WeakKeyDictionary()
         self.attr_proxy_map: WeakKeyDictionary[Module, _AttrProxy] = WeakKeyDictionary()
         self.proxy_modules: WeakKeyDictionary[_AttrProxy, Module] = WeakKeyDictionary()
         self.counter = 0
-
         self.module_id_cache = defaultdict(list)
-        for name, mod in self.scope_root.named_modules(remove_duplicate=False):
-            self.module_id_cache[id(mod)].append(name)
 
         # Build a wrapper around _AttrProxy to provide the tracer. We can't
         # store it on _AttrProxy itself beceause we mimic the underlying class
@@ -2456,12 +2441,36 @@ class _ModuleStackTracer(PythonKeyTracer):
                 }
 
         self.proxy_type = AttrProxy
+        if scope_root is not None:
+            self._init_scope_root(scope_root)
+
+    def _init_scope_root(self, scope_root: Module) -> None:
+        self.scope_root = scope_root
+        self.enable_attr_proxy = False
+        self.submodule_paths = {}
+        for name, m in self.scope_root.named_modules(remove_duplicate=False):
+            if m in self.submodule_paths:
+                log.info(
+                    "Shared module found between %s and %s, AttrProxy is enabled.",
+                    self.submodule_paths[m],
+                    name,
+                )
+                self.enable_attr_proxy = True
+            else:
+                self.submodule_paths[m] = name
+
+        self.module_id_cache = defaultdict(list)
+        for name, mod in self.scope_root.named_modules(remove_duplicate=False):
+            self.module_id_cache[id(mod)].append(name)
 
     def path_of_module(self, mod: Module) -> str:
         """
         Use tracked access path during tracing instead of the default BFS behavior.
         Still use all the possible module paths to verify the result.
         """
+        if self.scope_root is None:
+            raise RuntimeError("_ModuleStackTracer.scope_root has not been initialized")
+
         if mod is self.scope_root:
             return ""
 
@@ -2493,8 +2502,17 @@ class _ModuleStackTracer(PythonKeyTracer):
         return self.attr_proxy_map[attr_val]
 
     def trace(  # type: ignore[override]
-        self, root: Module | Callable[..., Any], concrete_args: dict[str, object] | None
+        self,
+        root: Module | Callable[..., Any],
+        concrete_args: dict[str, object] | None = None,
     ) -> fx.Graph:
+        if self.scope_root is None:
+            if not isinstance(root, Module):
+                raise RuntimeError(
+                    "_ModuleStackTracer requires a scope_root when tracing non-Module roots"
+                )
+            self._init_scope_root(root)
+
         res = super().trace(root, concrete_args)
 
         # NOTE [export non-strict fake tensor leak detection]
