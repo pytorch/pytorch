@@ -34,6 +34,7 @@ import sympy
 from sympy import Expr, Integer, Symbol
 
 import torch._export.serde.schema as export_schema
+import torch._library.custom_ops as custom_ops
 import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
@@ -9127,13 +9128,20 @@ class FallbackKernel(ExternKernelAlloc):
             ]
 
         assert self.op_overload is not None
+        metadata = {}
+        if (
+            isinstance(self.op_overload, torch._ops.OpOverload)
+            and custom_ops._maybe_get_opdef(self.op_overload) is not None
+        ):
+            metadata["torch_library_custom_op"] = "1"
+
         node = ExternKernelNode(
             name=self.get_name(),
             node=export_schema.Node(
                 target=self.op_overload.name(),
                 inputs=named_arguments,
                 outputs=output_arguments,
-                metadata={},
+                metadata=metadata,
             ),
         )
 
