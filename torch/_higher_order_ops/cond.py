@@ -450,6 +450,8 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         ignore_fresh_unbacked = mode.shape_env.ignore_fresh_unbacked_symbols()
 
     with mode, ignore_fresh_unbacked:
+        # FakeTensorMode only computes output metadata here. Branch-local checks
+        # are preserved by the branch graphs themselves, not inserted here.
         with _maybe_isolate_branch_shape_env(mode.shape_env):
             flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
         with _maybe_isolate_branch_shape_env(mode.shape_env):
@@ -545,6 +547,7 @@ def _merge_output(
         tuple(_meta_to_check),
         msg_prefix="When merging two branches' output in torch.cond, ",
     )
+
     # NYI
     if a.is_quantized or b.is_quantized:
         raise AssertionError("quantized tensors not yet implemented")
@@ -571,6 +574,22 @@ def _merge_output(
             return False
         else:
             return has_free_unbacked_symbols(s.node.expr)
+
+    same_size = tuple(SymIntEqByExpr(s) for s in a.size()) == tuple(
+        SymIntEqByExpr(s) for s in b.size()
+    )
+    same_stride = tuple(SymIntEqByExpr(s) for s in a.stride()) == tuple(
+        SymIntEqByExpr(s) for s in b.stride()
+    )
+    has_unbacked_metadata = any(
+        _has_unbacked_symbols(s)
+        for s in (*a.size(), *b.size(), *a.stride(), *b.stride())
+    )
+    if same_size and same_stride and not has_unbacked_metadata:
+        with mode:
+            return torch.empty_strided(
+                a.size(), a.stride(), dtype=a.dtype, device=a.device
+            )
 
     for s0, s1 in zip(a.size(), b.size()):
         # If there are unbacked symbols leaked out of true_branch or false_branch
