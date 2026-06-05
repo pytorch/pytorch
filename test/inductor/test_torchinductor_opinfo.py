@@ -37,8 +37,8 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
-    MI200_ARCH,
     isRocmArchAnyOf,
+    MI200_ARCH,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1339,9 +1339,7 @@ class TestInductorOpInfo(TestCase):
             # test on MI200 is about 9 * eps, so use 10 * eps as a
             # small round-number margin.
             f16_info = torch.finfo(f16)
-            overridden_kwargs.update(
-                {"atol": f16_info.tiny, "rtol": 10 * f16_info.eps}
-            )
+            overridden_kwargs.update({"atol": f16_info.tiny, "rtol": 10 * f16_info.eps})
         func = op.get_op()
 
         def fn(*args, **kwargs):
