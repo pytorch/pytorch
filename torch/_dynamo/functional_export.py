@@ -22,7 +22,7 @@ from torch._dynamo.source import GetItemSource
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
 from torch._guards import detect_fake_mode, TracingContext
-from torch.export.dynamic_shapes import _IntWrapper, _RelaxedConstraint, Constraint
+from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
@@ -916,7 +916,7 @@ def _walk_spec(
 ) -> int:
     """Walk ``(user_spec, arg_value)`` pairwise, writing leaf specs into
     ``out_leaf_specs`` starting at ``flat_idx``, and return the **count
-    of flat leaves consumed** by this subtree.
+    of flat argument leaves consumed** by this subtree.
 
     Container specs (``SeqSpec`` / ``DictSpec`` / ``ObjectSpec``) walk in
     parallel with the runtime value's pytree.
@@ -932,15 +932,9 @@ def _walk_spec(
     - **dict** (``DictSpec`` or no-spec subtree): this walker
       iterates ``arg_value.items()`` (insertion order); pytree's
       ``_dict_flatten`` does ``list(d.values())``, same order.
-      *Note*: we walk the runtime dict (not the spec dict), so spec
-      keys may be listed in any order — they're looked up by name.
     - **pytree-registered objects** (``ObjectSpec``): this walker calls
       the type's own registered ``flatten_with_keys_fn`` directly
-      (same function pytree itself dispatches to). Order is identical
-      by construction.
-    - **leaf spec**: contributes exactly one slot.
-    - **no spec (None)**: contributes ``len(pytree.tree_leaves(value))``
-      — same count pytree will emit for that subtree.
+      (same function pytree itself dispatches to).
 
     ``where`` is a human-readable path string used solely for error
     messages; it accumulates as the walker descends (e.g.
@@ -980,7 +974,7 @@ def _walk_spec(
             raise ValueError(
                 f"{where}: DictSpec expected dict, got {type(arg_value).__name__}"
             )
- 
+
         unmatched = set(user_spec) - set(arg_value)
         if unmatched:
             raise ValueError(
@@ -1037,9 +1031,7 @@ def _walk_spec(
         # Fail-fast on unmatched attrs before recursing. Non-attribute
         # keys (SequenceKey / MappingKey) contribute no matchable names.
         available_names = {
-            ke.name
-            for ke, _ in key_children
-            if isinstance(ke, pytree.GetAttrKey)
+            ke.name for ke, _ in key_children if isinstance(ke, pytree.GetAttrKey)
         }
         unmatched = set(user_spec) - available_names
         if unmatched:
@@ -1054,10 +1046,7 @@ def _walk_spec(
             # Only ``GetAttrKey`` entries can match an ObjectSpec entry
             # (ObjectSpec addresses by attribute name); any other key
             # shape contributes a static subtree.
-            if (
-                isinstance(key_entry, pytree.GetAttrKey)
-                and key_entry.name in user_spec
-            ):
+            if isinstance(key_entry, pytree.GetAttrKey) and key_entry.name in user_spec:
                 consumed += _walk_spec(
                     user_spec._fields[key_entry.name],
                     child,
@@ -1079,14 +1068,12 @@ def _walk_spec(
                 f"{type(arg_value).__name__}, not a Tensor."
             )
     elif isinstance(user_spec, (IntVar, int)):
-        # Scalar spec — arg must be a Python int, a SymInt, or the
-        # export-internal `_IntWrapper` (export wraps user ints in
-        # `_IntWrapper` upstream via `pytree.tree_map_only(int, ...)`).
-        if not isinstance(arg_value, (int, torch.SymInt, _IntWrapper)):
+        # Scalar spec — arg must be a Python int.
+        if not isinstance(arg_value, int):
             raise ValueError(
                 f"{where}: spec is {type(user_spec).__name__} "
                 f"(scalar spec) but the actual arg is "
-                f"{type(arg_value).__name__}, not int/SymInt."
+                f"{type(arg_value).__name__}, not int."
             )
     else:
         raise AssertionError(

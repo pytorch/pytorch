@@ -330,7 +330,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
 
         with self.assertRaisesRegex(
             ValueError,
-            r"shapes_spec\['xs'\].*TensorSpec.*not a Tensor",
+            r"shapes_spec\['xs'\]: spec is TensorSpec but the actual arg is list, not a Tensor\.",
         ):
             export(
                 M(),
@@ -996,11 +996,6 @@ class <lambda>(torch.nn.Module):
 
 
 class TestContainerSpec(TestCase):
-    """Container-spec walker (`_walk_spec` in
-    `torch/_dynamo/functional_export.py`): SeqSpec / DictSpec /
-    ObjectSpec on per-arg slots, partial specs, structural mismatches,
-    and pytree-walk-order alignment."""
-
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -1062,12 +1057,7 @@ class TestContainerSpec(TestCase):
         self.assertRegex(ep_str, r'd_b: "f32\[u\d+, 3\]"')
 
     def test_object_spec_on_namedtuple(self):
-        """ObjectSpec on a namedtuple subclass. Namedtuples are
-        auto-registered by pytree with ``GetAttrKey(field_name)``
-        entries (via ``_namedtuple_flatten_with_keys``), so ObjectSpec
-        works on them without any extra registration. Mark `second`
-        dynamic (not `first`) so the walker has to advance past a
-        static leaf before hitting the dynamic one."""
+        """ObjectSpec on a namedtuple."""
         from collections import namedtuple
 
         Pair = namedtuple("Pair", ["first", "second"])
@@ -1092,12 +1082,7 @@ class TestContainerSpec(TestCase):
         self.assertRegex(ep_str, r'p_second: "f32\[u\d+, 3\]"')
 
     def test_seq_spec_on_namedtuple(self):
-        """SeqSpec on a namedtuple subclass. Namedtuple is a tuple
-        subclass, so the walker's ``isinstance(arg_value, (list, tuple))``
-        check passes and treats it positionally — addressable by index
-        instead of by field name. Position 0 is None (static), position
-        1 is dynamic, so the walker has to skip past a static leaf
-        before hitting the dynamic entry."""
+        """SeqSpec on a namedtuple subclass."""
         from collections import namedtuple
 
         Pair = namedtuple("Pair", ["first", "second"])
@@ -1210,10 +1195,8 @@ class TestContainerSpec(TestCase):
         self.assertRegex(ep_str, r'box_y: "f32\[u\d+, 3\]"')
 
     def test_object_spec_on_dataclass(self):
-        """ObjectSpec on a pytree-registered dataclass marks one field
-        dynamic; the other field stays static (missing-attr semantics).
-        Mark `y` (not `x`) so the walker has to skip past `x`'s static
-        leaves first."""
+        """ObjectSpec on a pytree-registered dataclass marks `y` (not `x`)
+        dynamic, so the walker has to skip past `x`'s static leaves first."""
         import dataclasses
 
         @dataclasses.dataclass
@@ -1259,7 +1242,10 @@ class TestContainerSpec(TestCase):
                         "d": DictSpec(
                             {
                                 "foo": SeqSpec(
-                                    [TensorSpec([ShapeVar("A"), STATIC]), None]
+                                    [
+                                        TensorSpec([ShapeVar("A"), STATIC]),
+                                        TensorSpec([5, 3]),
+                                    ]
                                 )
                             }
                         )
@@ -1394,7 +1380,7 @@ class TestContainerSpec(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            r"DictSpec has entries .*'missing'.* that do not match any key",
+            r"shapes_spec\['d'\]: DictSpec has entries \['missing'\] that do not match any key in the runtime dict\. Runtime keys: \['a'\]",
         ):
             export(
                 M(),
@@ -1438,103 +1424,51 @@ class TestContainerSpec(TestCase):
             )
 
     def test_where_path_accumulates_in_nested_error(self):
-        """The ``where`` path string passed through ``_walk_spec`` must
-        accumulate as the walker descends, so errors point to the exact
-        spot in the structure. Provoked here via a nested
-        ``DictSpec({"inputs": SeqSpec([..., DictSpec({"missing": ...})])})``
-        where the innermost DictSpec has a key not in the runtime dict.
-        The full path should appear in the error message."""
+        """Errors from nested specs should report the full path to the
+        offending spot, exercising all three ``where``-formatting
+        variants: ``[str]`` (DictSpec), ``.attr`` (ObjectSpec), and
+        ``[int]`` (SeqSpec)."""
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Box:
+            items: list
+
+        pytree.register_dataclass(Box)
 
         class M(torch.nn.Module):
             def forward(self, batch):
-                return batch["inputs"][1]["data"]
+                return batch["b"].items[1]["data"]
 
         with self.assertRaisesRegex(
             ValueError,
-            # Full exact-match (re.escape'd): verifies the path
-            # accumulates as: top-level param 'batch' → DictSpec key
-            # 'inputs' → SeqSpec index [1] → nested DictSpec
-            # unmatched-key error with full path prefix.
             re.escape(
-                "shapes_spec['batch']['inputs'][1]: "
+                "shapes_spec['batch']['b'].items[1]: "
                 "DictSpec has entries ['missing'] that do not match "
                 "any key in the runtime dict. Runtime keys: ['data']"
             ),
         ):
             export(
                 M(),
-                args=(
-                    {
-                        "inputs": [
-                            torch.randn(3),
-                            {"data": torch.randn(3)},
-                        ]
-                    },
-                ),
+                args=({"b": Box(items=[torch.randn(3), {"data": torch.randn(3)}])},),
                 dynamic_shapes=ShapesSpec(
                     params=ParamsSpec(
                         {
                             "batch": DictSpec(
                                 {
-                                    "inputs": SeqSpec(
-                                        [
-                                            None,
-                                            DictSpec(
-                                                {
-                                                    "missing": TensorSpec(
-                                                        [ShapeVar("A")]
-                                                    )
-                                                }
-                                            ),
-                                        ]
-                                    )
-                                }
-                            )
-                        }
-                    )
-                ),
-                strict=True,
-            )
-
-    def test_where_path_accumulates_through_object_spec(self):
-        """Like ``test_where_path_accumulates_in_nested_error`` but
-        exercises ``.attr`` descent through an ``ObjectSpec`` (dataclass
-        traversal) in the middle of the path."""
-        import dataclasses
-
-        @dataclasses.dataclass
-        class Box:
-            items: dict[str, torch.Tensor]
-
-        pytree.register_dataclass(Box)
-
-        class M(torch.nn.Module):
-            def forward(self, batch):
-                return batch.items["foo"]
-
-        with self.assertRaisesRegex(
-            ValueError,
-            # Path: shapes_spec['batch'] (named-positional) → .items
-            # (ObjectSpec attribute) → nested DictSpec unmatched-key
-            # error.
-            re.escape(
-                "shapes_spec['batch'].items: DictSpec has entries "
-                "['missing'] that do not match any key in the runtime "
-                "dict. Runtime keys: ['foo']"
-            ),
-        ):
-            export(
-                M(),
-                args=(Box(items={"foo": torch.randn(3)}),),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec(
-                        {
-                            "batch": ObjectSpec(
-                                {
-                                    "items": DictSpec(
+                                    "b": ObjectSpec(
                                         {
-                                            "missing": TensorSpec(
-                                                [ShapeVar("A")]
+                                            "items": SeqSpec(
+                                                [
+                                                    None,
+                                                    DictSpec(
+                                                        {
+                                                            "missing": TensorSpec(
+                                                                [ShapeVar("A")]
+                                                            )
+                                                        }
+                                                    ),
+                                                ]
                                             )
                                         }
                                     )
@@ -1702,9 +1636,7 @@ class TestContainerSpec(TestCase):
         ]
         for arg_value in cases:
             expected = len(pytree.tree_leaves(arg_value))
-            consumed = _walk_spec(
-                None, arg_value, [None] * expected, 0, where="<root>"
-            )
+            consumed = _walk_spec(None, arg_value, [None] * expected, 0, where="<root>")
             self.assertEqual(
                 consumed, expected, f"no-spec leaf-count drift for {arg_value!r}"
             )
