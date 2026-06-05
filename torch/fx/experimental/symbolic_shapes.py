@@ -2693,9 +2693,10 @@ def cast_symbool_to_symint_guardless(
     if isinstance(symbool, bool):
         return 1 if symbool else 0
     int_sym = _sympy_cast_symbool_to_symint_guardless(symbool.node.expr)
+    hint = int(guarding_hint_or_throw(symbool)) if has_guarding_hint(symbool) else None
     return symbool.node.shape_env.create_symintnode(
         int_sym,
-        hint=guarding_hint_or_throw(symbool) if has_guarding_hint(symbool) else None,
+        hint=hint,
     )
 
 
