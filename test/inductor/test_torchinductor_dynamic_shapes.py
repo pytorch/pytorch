@@ -1435,7 +1435,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         torch.manual_seed(0)
 
         for n in [3, 5, 7]:
-            x = torch.randn(n, device=self.device)
+            x = torch.randn(n)
 
             expected = f(x)
             actual = compiled_f(x)
