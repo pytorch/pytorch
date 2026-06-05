@@ -3091,6 +3091,7 @@ Call this whenever a new thread is created in order to propagate values from
       static_cast<void (*)(
           const at::Tensor&, std::unordered_map<std::string, bool>)>(
           torch::jit::setTensorMetadata));
+  py_module.def("_copy_backend_meta", &torch::jit::copyBackendMeta);
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
   });

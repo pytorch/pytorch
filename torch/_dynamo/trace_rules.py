@@ -545,6 +545,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata",
         "torch._C._construct_storage_from_data_pointer",
         "torch._C._conv_determine_backend_memory_format",
+        "torch._C._copy_backend_meta",
         "torch._C._cpu._init_amx",
         "torch._C._cpu._get_cpu_capability",
         "torch._C._crash_if_aten_asan",
