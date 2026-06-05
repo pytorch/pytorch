@@ -80,7 +80,7 @@ kernel void layer_norm_single_row(
     if (simd_lane_id == 0) {
       float mean = sum / float(axis_size);
       float var = sum_sq / float(axis_size) - mean * mean;
-      var = var < 1e-6 ? 0.0f : var; // for rsqrt precision
+      var = var < 1e-9 ? 0.0f : var; // for rsqrt precision
       float inv_std = metal::precise::rsqrt(var + epsilon);
       tg_mean[0] = mean;
       tg_inv_std[0] = inv_std;
@@ -201,7 +201,7 @@ kernel void layer_norm_looped(
     if (simd_lane_id == 0) {
       float mean = s / float(axis_size);
       float var = ss / float(axis_size) - mean * mean;
-      var = var < 1e-6 ? 0.0f : var; // for rsqrt precision
+      var = var < 1e-9 ? 0.0f : var; // for rsqrt precision
       float inv_std = metal::precise::rsqrt(var + epsilon);
       tg_mean[0] = mean;
       tg_inv_std[0] = inv_std;

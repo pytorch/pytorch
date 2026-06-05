@@ -2474,6 +2474,16 @@ class TestMPS(TestCaseMPS):
         # Regression test for https://github.com/pytorch/pytorch/issues/96113
         torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
 
+    # axis_size 8 hits layer_norm_single_row, 8192 hits layer_norm_looped
+    @parametrize("axis_size", [8, 8192])
+    def test_layer_norm_small_variance(self, axis_size):
+        a, eps = 1e-4, 1e-9  # var = a^2 = 1e-8
+        row = torch.tensor([a, -a] * (axis_size // 2), dtype=torch.float32)
+        cpu_x = row.repeat(4, 1)
+        cpu_y = F.layer_norm(cpu_x, (axis_size,), eps=eps)
+        mps_y = F.layer_norm(cpu_x.to('mps'), (axis_size,), eps=eps)
+        self.assertEqual(mps_y, cpu_y)
+
     def test_ifft(self):
         # See: https://github.com/pytorch/pytorch/issues/124096
         device = torch.device("mps")
