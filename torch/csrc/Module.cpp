@@ -2902,7 +2902,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "SWIZZLE_32_4_4",
           at::blas::SwizzleType::SWIZZLE_32_4_4,
-          "Blackwell-stype 32x4x4 swizzle");
+          "Blackwell-style 32x4x4 swizzle");
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)
@@ -2978,6 +2978,10 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_key_in_tls", [](const std::string& key) -> bool {
     return at::impl::ThreadLocalPythonObjects::get_state().contains(key);
+  });
+
+  py_module.def("_remove_obj_from_tls", [](const std::string& key) {
+    at::impl::ThreadLocalPythonObjects::erase(key);
   });
 
   py_module.def("_accelerator_hooks_device_count", []() {
