@@ -26,6 +26,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from torch.multiprocessing.reductions import StorageWeakRef
 
 
 class SchemaHolder:
@@ -329,7 +330,8 @@ def read_view_information_from_args(
 # HOP and replacing the mutated inputs with corresponding outputs of this HOP.
 # This HOP effectively runs the functional version of the op when
 # called: it clones inputs that will be mutated, runs the op, and
-# then returns (output, Tensors with the new values)
+# then returns (output, Tensors with the new values). Internal callers can
+# request storage-changed flags as an additional return suffix.
 #
 # auto_functionalize_v2 is an improved version of auto_functionalize that better handle
 # re-inplacing views.
@@ -343,7 +345,9 @@ class AutoFunctionalized(HigherOrderOperator):
     Concretely, it looks at all the arguments that are mutable through
     _mutable_op's operator schema, clones those kwargs, runs
     `out = _mutable_op(**kwargs)` with the cloned values, and then returns the
-    operator output concatenated with the cloned values that were mutated.
+    operator output concatenated with the cloned values that were mutated. When
+    _return_storage_changed is true, it also returns per-mutable-argument flags
+    indicating whether the mutable op changed each cloned value's storage.
 
     We have some restrictions on `_mutable_op`.
     See `can_auto_functionalize` for the restrictions. We can likely lift
@@ -504,6 +508,74 @@ def get_mutable_args(op: OpOverload) -> tuple[list[str], list[torch.Type]]:
     return get_mutable_args_from_schema(op._schema)
 
 
+# Storage changes need an explicit signal: final sizes/strides do not
+# distinguish set_() from metadata-only mutations like transpose_().
+def _storage_refs(arg: Any) -> Any:
+    if isinstance(arg, list):
+        return [_storage_refs(elem) for elem in arg]
+    if isinstance(arg, torch.Tensor):
+        return StorageWeakRef(arg.untyped_storage())
+    return None
+
+
+def _storage_changed(arg: Any, before_storage_refs: Any) -> Any:
+    if arg is None:
+        return False
+    if isinstance(arg, list):
+        if not isinstance(before_storage_refs, list) or len(arg) != len(
+            before_storage_refs
+        ):
+            return False
+        return [
+            _storage_changed(elem, before_storage_ref)
+            for elem, before_storage_ref in zip(arg, before_storage_refs)
+        ]
+    if isinstance(arg, torch.Tensor):
+        return StorageWeakRef(arg.untyped_storage()) != before_storage_refs
+    return False
+
+
+def _mark_storage_mutation_if_necessary(
+    orig_arg: Any,
+    storage_changed: Any,
+) -> None:
+    if not storage_changed:
+        return
+
+    if isinstance(storage_changed, list):
+        if not isinstance(orig_arg, list) or len(orig_arg) != len(storage_changed):
+            return
+        for orig_elem, storage_changed_elem in zip(orig_arg, storage_changed):
+            _mark_storage_mutation_if_necessary(orig_elem, storage_changed_elem)
+        return
+
+    # Avoid a top-level import cycle: FunctionalTensor imports this module from
+    # FunctionalTensorMode.__torch_dispatch__.
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if isinstance(orig_arg, FunctionalTensor):
+        torch._functionalize_mark_storage_changed(orig_arg.elem)
+
+
+def _track_auto_functionalized_proxy_output(
+    out: tuple[Any, ...],
+    out_proxy: Any,
+    num_storage_changed: int,
+    tracer: Any,
+) -> tuple[Any, ...]:
+    if num_storage_changed == 0:
+        return track_tensor_tree(out, out_proxy, constant=None, tracer=tracer)
+
+    public_out = out[:-num_storage_changed]
+    storage_changed = out[-num_storage_changed:]
+    public_result = track_tensor_tree(
+        public_out, out_proxy, constant=None, tracer=tracer
+    )
+    if len(public_result) != len(public_out):
+        raise AssertionError("proxy output arity must match public output arity")
+    return (*public_result, *storage_changed)
+
+
 def do_auto_functionalize(
     mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: OpOverload,
@@ -547,14 +619,17 @@ def do_auto_functionalize(
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
             op,
+            _return_storage_changed=True,
             **unwrapped_kwargs,  # type: ignore[arg-type]
         )
 
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names, _ = get_mutable_args(op)
+    num_mutable_args = len(mutable_args_names)
 
-    unwrapped_actual_out: Any | tuple[Any] = unwrapped_outs[: -len(mutable_args_names)]
-    unwrapped_mutable_out = unwrapped_outs[-len(mutable_args_names) :]
+    unwrapped_actual_out: Any | tuple[Any] = unwrapped_outs[: -2 * num_mutable_args]
+    unwrapped_mutable_out = unwrapped_outs[-2 * num_mutable_args : -num_mutable_args]
+    unwrapped_storage_changed = unwrapped_outs[-num_mutable_args:]
 
     if len(op._schema.returns) == 0:
         if unwrapped_actual_out[0] is not None:
@@ -572,13 +647,16 @@ def do_auto_functionalize(
                 f"Expected {len(op._schema.returns)} outputs, got {len(unwrapped_actual_out)}"
             )
 
-    for name, unwrapped_out in zip(mutable_args_names, unwrapped_mutable_out):
+    for name, unwrapped_out, storage_changed in zip(
+        mutable_args_names, unwrapped_mutable_out, unwrapped_storage_changed
+    ):
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue
 
         # We only handle Tensor or List[Tensor] here for now.
-        def sync_update(o, orig_arg):
+        def sync_update(o, orig_arg, storage_changed):
+            _mark_storage_mutation_if_necessary(orig_arg, storage_changed)
             ctx.replace(orig_arg, o)
             ctx.commit_update(orig_arg)
             ctx.sync(orig_arg)
@@ -586,7 +664,7 @@ def do_auto_functionalize(
         orig_arg = normalized_kwargs[name]
 
         if isinstance(unwrapped_out, torch.Tensor):
-            sync_update(unwrapped_out, orig_arg)
+            sync_update(unwrapped_out, orig_arg, storage_changed)
         elif isinstance(unwrapped_out, list) and all(
             isinstance(o, torch.Tensor) for o in unwrapped_out
         ):
@@ -594,8 +672,16 @@ def do_auto_functionalize(
                 raise AssertionError(
                     f"orig_arg length ({len(orig_arg)}) != unwrapped_out length ({len(unwrapped_out)})"
                 )
-            for orig_a, o in zip(orig_arg, unwrapped_out):
-                sync_update(o, orig_a)
+            if not isinstance(storage_changed, list) or len(storage_changed) != len(
+                unwrapped_out
+            ):
+                raise AssertionError(
+                    "storage_changed length must match mutable list output length"
+                )
+            for orig_a, o, storage_changed_elem in zip(
+                orig_arg, unwrapped_out, storage_changed
+            ):
+                sync_update(o, orig_a, storage_changed_elem)
         else:
             raise RuntimeError(
                 f"unsupported type for auto-functionalization: {unwrapped_out}"
@@ -772,18 +858,21 @@ def _do_auto_functionalize_v2_for_inplace_operator(
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
     all_bases_unwrapped = ctx.unwrap_tensors([base])
     auto_func_kwargs = dict(unwrapped_kwargs, _all_bases=all_bases_unwrapped)
+    auto_func_kwargs["_return_storage_changed"] = True
 
     with ctx.redispatch_to_next():
-        unwrapped_outs = auto_functionalized_v2(
+        unwrapped_outs: Any = auto_functionalized_v2(
             op,
             **auto_func_kwargs,  # type: ignore[arg-type]
         )
 
-    # HOP returns (op_result, mutated_self_base).
+    # HOP returns (op_result, mutated_self_base, storage_changed).
     # op_result aliases mutated_self_base (inplace semantics).
     unwrapped_result = unwrapped_outs[0]
     unwrapped_mutated_base = unwrapped_outs[1]
+    unwrapped_storage_changed = unwrapped_outs[2]
 
+    _mark_storage_mutation_if_necessary(base, unwrapped_storage_changed)
     ctx.replace(base, unwrapped_mutated_base)
     ctx.commit_update(base)
     ctx.sync(base)
@@ -865,6 +954,7 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
     if "_all_bases" in unwrapped_kwargs:
         raise AssertionError(f"_all_bases already in unwrapped_kwargs for {op}")
     auto_func_kwargs = dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)
+    auto_func_kwargs["_return_storage_changed"] = True
     if isinstance(op, HigherOrderOperator):
         if "_ops_schema" in unwrapped_kwargs:
             raise AssertionError(f"_ops_schema already in unwrapped_kwargs for {op}")
@@ -879,12 +969,19 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
             **auto_func_kwargs,  # type: ignore[arg-type]
         )
 
+    num_mutable_outs = len(all_bases)
     unwrapped_actual_out: Any | tuple[Any] = (
-        unwrapped_outs if len(all_bases) == 0 else unwrapped_outs[: -len(all_bases)]
+        unwrapped_outs
+        if num_mutable_outs == 0
+        else unwrapped_outs[: -2 * num_mutable_outs]
     )
-
     unwrapped_mutable_out = (
-        [] if len(all_bases) == 0 else unwrapped_outs[-len(all_bases) :]
+        []
+        if num_mutable_outs == 0
+        else unwrapped_outs[-2 * num_mutable_outs : -num_mutable_outs]
+    )
+    unwrapped_storage_changed = (
+        [] if num_mutable_outs == 0 else unwrapped_outs[-num_mutable_outs:]
     )
 
     if isinstance(op, HigherOrderOperator):
@@ -915,19 +1012,22 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
                     f"Expected {len(schema.returns)} outputs, got {len(unwrapped_actual_out)}"
                 )
 
-    for orig_arg, unwrapped_out in zip(all_bases, unwrapped_mutable_out):
+    for orig_arg, unwrapped_out, storage_changed in zip(
+        all_bases, unwrapped_mutable_out, unwrapped_storage_changed
+    ):
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue
 
         # We only handle Tensor or List[Tensor] here for now.
-        def sync_update(o, orig_arg):
+        def sync_update(o, orig_arg, storage_changed):
+            _mark_storage_mutation_if_necessary(orig_arg, storage_changed)
             ctx.replace(orig_arg, o)
             ctx.commit_update(orig_arg)
             ctx.sync(orig_arg)
 
         if isinstance(unwrapped_out, torch.Tensor):
-            sync_update(unwrapped_out, orig_arg)
+            sync_update(unwrapped_out, orig_arg, storage_changed)
         elif isinstance(unwrapped_out, list) and all(
             isinstance(o, torch.Tensor) for o in unwrapped_out
         ):
@@ -935,8 +1035,16 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
                 raise AssertionError(
                     f"orig_arg length ({len(orig_arg)}) != unwrapped_out length ({len(unwrapped_out)})"
                 )
-            for orig_a, o in zip(orig_arg, unwrapped_out):
-                sync_update(o, orig_a)
+            if not isinstance(storage_changed, list) or len(storage_changed) != len(
+                unwrapped_out
+            ):
+                raise AssertionError(
+                    "storage_changed length must match mutable list output length"
+                )
+            for orig_a, o, storage_changed_elem in zip(
+                orig_arg, unwrapped_out, storage_changed
+            ):
+                sync_update(o, orig_a, storage_changed_elem)
         else:
             raise RuntimeError(
                 f"unsupported type for auto-functionalization: {unwrapped_out}"
@@ -950,10 +1058,12 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
 def auto_functionalized_dense(
     _mutable_op: OpOverload,
     _only_clone_these_tensors: tuple[str, ...] | None = None,
+    _return_storage_changed: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
     result = []
+    before_storage_refs = []
 
     _mutable_args_names, _ = get_mutable_args(_mutable_op)
     for name in _mutable_args_names:
@@ -973,23 +1083,37 @@ def auto_functionalized_dense(
                 )
             )
         result.append(new_kwargs[name])
+        if _return_storage_changed:
+            before_storage_refs.append(_storage_refs(new_kwargs[name]))
     out = _mutable_op(**new_kwargs)
 
+    storage_changed_out = (
+        tuple(
+            _storage_changed(updated_arg, before_storage_ref)
+            for updated_arg, before_storage_ref in zip(result, before_storage_refs)
+        )
+        if _return_storage_changed
+        else ()
+    )
     if isinstance(out, tuple):
-        return (*out, *result)  # type: ignore[return-value]
+        return (*out, *result, *storage_changed_out)  # type: ignore[return-value]
     else:
-        return (out, *result)  # type: ignore[return-value]
+        return (out, *result, *storage_changed_out)  # type: ignore[return-value]
 
 
 @auto_functionalized.py_impl(FakeTensorMode)
 def auto_functionalized_fake(
     mode,
     _mutable_op: OpOverload,
+    _return_storage_changed: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     with mode:
         result = auto_functionalized_dense(
-            _mutable_op, _only_clone_these_tensors=None, **kwargs
+            _mutable_op,
+            _only_clone_these_tensors=None,
+            _return_storage_changed=_return_storage_changed,
+            **kwargs,
         )
         return result
 
@@ -998,10 +1122,15 @@ def auto_functionalized_fake(
 def auto_functionalized_proxy(
     mode,
     _mutable_op: OpOverload,
+    _return_storage_changed: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     with disable_proxy_modes_tracing():
-        out = auto_functionalized(_mutable_op, **kwargs)
+        out = auto_functionalized(
+            _mutable_op,
+            _return_storage_changed=_return_storage_changed,
+            **kwargs,
+        )
 
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
     out_proxy = mode.tracer.create_proxy(
@@ -1010,8 +1139,12 @@ def auto_functionalized_proxy(
         (_mutable_op,),
         proxy_kwargs,
     )
-    result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
-    return result
+    return _track_auto_functionalized_proxy_output(
+        out,
+        out_proxy,
+        len(get_mutable_args(_mutable_op)[0]) if _return_storage_changed else 0,
+        mode.tracer,
+    )
 
 
 @auto_functionalized.py_functionalize_impl
@@ -1027,6 +1160,7 @@ def auto_functionalized_func(ctx, _mutable_op, **kwargs):
 def auto_functionalized_v2_dense(
     _mutable_op: _MutableOpType,
     _only_clone_these_bases: tuple[int, ...] | None = None,
+    _return_storage_changed: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     _all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
@@ -1049,12 +1183,17 @@ def auto_functionalized_v2_dense(
         _mutable_op
     )
 
-    op_kwargs_new, all_bases_new = _generate_new_op_kwargs_from_bases(
+    (
+        op_kwargs_new,
+        all_bases_new,
+        before_storage_refs,
+    ) = _generate_new_op_kwargs_from_bases(
         schema,
         kwargs,
         _all_bases,
         _only_clone_these_bases,
         _is_out,
+        _return_storage_changed,
     )
 
     out = call_op(
@@ -1066,14 +1205,28 @@ def auto_functionalized_v2_dense(
     if _is_out:
         return out  # type: ignore[return-value]
 
+    storage_changed_out = (
+        tuple(_storage_changed(all_bases_new, before_storage_refs))
+        if _return_storage_changed
+        else ()
+    )
+
     if isinstance(out, tuple):
-        return (*out, *all_bases_new)  # type: ignore[return-value]
+        return (  # type: ignore[return-value]
+            *out,
+            *all_bases_new,
+            *storage_changed_out,
+        )
     else:
-        return (out, *all_bases_new)  # type: ignore[return-value]
+        return (  # type: ignore[return-value]
+            out,
+            *all_bases_new,
+            *storage_changed_out,
+        )
 
 
 def _generate_new_op_kwargs_from_bases(
-    schema, kwargs, all_bases, _only_clone_these_bases, _is_out
+    schema, kwargs, all_bases, _only_clone_these_bases, _is_out, _return_storage_changed
 ):
     mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
 
@@ -1090,7 +1243,11 @@ def _generate_new_op_kwargs_from_bases(
             t = torch.empty_strided(size, stride, dtype=dtype, device=device)
             new_kwargs[arg_name] = t
             created_out_tensors.append(t)
-        return new_kwargs, created_out_tensors
+        return (
+            new_kwargs,
+            created_out_tensors,
+            _storage_refs(created_out_tensors) if _return_storage_changed else None,
+        )
 
     args_view_info = read_view_information_from_args(
         mutable_args_names, mutable_args_types, kwargs, all_bases
@@ -1105,6 +1262,9 @@ def _generate_new_op_kwargs_from_bases(
             return t
 
     all_bases_new = [maybe_copy(i, t) for i, t in enumerate(all_bases)]
+    before_storage_refs = (
+        _storage_refs(all_bases_new) if _return_storage_changed else None
+    )
 
     # create new args
     new_kwargs = dict(**kwargs)
@@ -1128,18 +1288,22 @@ def _generate_new_op_kwargs_from_bases(
                 all_bases_new
             )
 
-    return new_kwargs, all_bases_new
+    return new_kwargs, all_bases_new, before_storage_refs
 
 
 @auto_functionalized_v2.py_impl(FakeTensorMode)
 def auto_functionalized_v2_fake(
     mode,
     _mutable_op: _MutableOpType,
+    _return_storage_changed: bool = False,
     **kwargs: dict[str, Any],
 ) -> tuple[Any, tuple[Tensor, ...]]:
     with mode:
         result = auto_functionalized_v2_dense(
-            _mutable_op, _only_clone_these_bases=None, **kwargs
+            _mutable_op,
+            _only_clone_these_bases=None,
+            _return_storage_changed=_return_storage_changed,
+            **kwargs,
         )
         return result
 
@@ -1148,6 +1312,7 @@ def auto_functionalized_v2_fake(
 def auto_functionalized_v2_proxy(
     mode,
     _mutable_op: _MutableOpType,
+    _return_storage_changed: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     if isinstance(_mutable_op, HigherOrderOperator):
@@ -1173,12 +1338,13 @@ def auto_functionalized_v2_proxy(
             _only_clone_these_bases = tuple(range(len(all_bases)))
 
         schema = pytree.tree_unflatten([], kwargs.get("_op_schema")).schema  # type: ignore[arg-type]
-        new_kwargs, _ = _generate_new_op_kwargs_from_bases(
+        new_kwargs, _, _ = _generate_new_op_kwargs_from_bases(
             schema,
             {k: v for k, v in kwargs.items() if k not in ("_all_bases", "_op_schema")},
             all_bases,
             _only_clone_these_bases,
             _is_out=False,
+            _return_storage_changed=False,
         )
 
         _, materialized_kwargs = materialize_callable_in_args(
@@ -1203,7 +1369,11 @@ def auto_functionalized_v2_proxy(
                 kwargs[k] = materialized_kwargs[k]
 
     with disable_proxy_modes_tracing():
-        out = auto_functionalized_v2(_mutable_op, **kwargs)
+        out = auto_functionalized_v2(
+            _mutable_op,
+            _return_storage_changed=_return_storage_changed,
+            **kwargs,
+        )
 
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
 
@@ -1226,8 +1396,12 @@ def auto_functionalized_v2_proxy(
         (_mutable_op,),
         proxy_kwargs,
     )
-    result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
-    return result
+    return _track_auto_functionalized_proxy_output(
+        out,
+        out_proxy,
+        len(kwargs.get("_all_bases", [])) if _return_storage_changed else 0,
+        mode.tracer,
+    )
 
 
 @auto_functionalized_v2.py_functionalize_impl
