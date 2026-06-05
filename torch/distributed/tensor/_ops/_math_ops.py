@@ -1045,14 +1045,16 @@ def nll_loss_forward_strategy(op_schema: OpSchema) -> OpStrategy:
             redistribute_costs[1] = generate_redistribute_costs(
                 target_strategy, new_target_spec
             )
+            weight_out_spec = weight_strategy.strategies[idx].output_spec  # type: ignore[union-attr]
             new_weight_spec = DTensorSpec(
                 mesh=mesh,
                 placements=all_replicate_placements,
-                tensor_meta=weight_src_spec.tensor_meta,
+                tensor_meta=weight_out_spec.tensor_meta,
             )
             op_args_target_specs[2] = new_weight_spec
             redistribute_costs[2] = generate_redistribute_costs(
-                weight_strategy, new_weight_spec  # type: ignore[arg-type]
+                weight_strategy,
+                new_weight_spec,  # type: ignore[arg-type]
             )
             output_expected_spec = DTensorSpec(
                 mesh=mesh, placements=all_replicate_placements

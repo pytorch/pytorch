@@ -290,9 +290,7 @@ class DistMathOpsTest(DTensorTestBase):
         device_mesh = self.build_device_mesh()
         torch.manual_seed(0)
 
-        log_probs = F.log_softmax(
-            torch.randn(8, 4, device=self.device_type), dim=1
-        )
+        log_probs = F.log_softmax(torch.randn(8, 4, device=self.device_type), dim=1)
         target = torch.tensor([0, 3, 3, 3, 0, 1, 3, 2], device=self.device_type)
         # Non-uniform weights so per-rank sum(weight[target]) differs across ranks
         class_weight = torch.tensor([0.62, 2.0, 1.6, 1.39], device=self.device_type)
