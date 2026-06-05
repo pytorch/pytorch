@@ -290,7 +290,6 @@ ormqr
 outer
 pca_lowrank
 pinverse
-qr
 renorm
 solve
 svd
