@@ -629,7 +629,9 @@ class BaseTorchVariable(VariableTracker):
     def hash_impl(self, tx: Any) -> tuple[int, bool]:
         return hash(self.value), False
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -3201,11 +3203,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # prior to tracing, which is essential for creating right
         # guards. So save the shape now, and check later if it has
         # changed. If it has, graph break.
+        is_reconstructing_generator = (
+            tx.output.side_effects.is_reconstructing_generator()
+        )
         saved_out_shapes = None
         out_kwarg_vt = None
         if "out" in kwargs:
             out_kwarg_vt = kwargs["out"]
-            if tx.output.side_effects.is_reconstructing_generator():
+            if is_reconstructing_generator:
                 _check_generator_reconstruction_tensor_mutation_arg(tx, out_kwarg_vt)
 
             # e.g., out=(t1, t2, ...)
@@ -3229,7 +3234,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
-        if tx.output.side_effects.is_reconstructing_generator():
+        if is_reconstructing_generator:
             mutated_first_arg_infos = torch_function_mutated_first_arg_infos(fn_)
             mutated_first_arg = None
             if mutated_first_arg_infos:
@@ -3254,11 +3259,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 _check_generator_reconstruction_tensor_mutation_arg(
                     tx, mutated_first_arg
                 )
-            elif inplace_param_names := torch_function_inplace_param_names(fn_):
-                input_name, inplace_name = inplace_param_names
-                signature = inspect.signature(fn_)
-                param_names = tuple(signature.parameters)
-                inplace_idx = param_names.index(inplace_name)
+            elif inplace_param_info := torch_function_inplace_param_names(fn_):
+                input_name, inplace_name, inplace_idx = inplace_param_info
                 inplace_arg = kwargs.get(inplace_name)
                 if inplace_arg is None and len(args) > inplace_idx:
                     inplace_arg = args[inplace_idx]
@@ -4058,6 +4060,13 @@ class DispatchKeySetVariable(BaseTorchVariable):
     ) -> "DispatchKeySetVariable":
         install_guard(source.make_guard(GuardBuilder.DISPATCH_KEY_SET_MATCH))
         return cls(value, source=source)
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     def is_constant_fold_method(self, name: str) -> bool:
         return name == "has"

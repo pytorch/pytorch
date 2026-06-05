@@ -815,6 +815,26 @@ class GraphModule(torch.nn.Module):
         ):
             self._compile_check(fn)
 
+    def test_reconstruct_generator_yielded_new_list_mutation_in_helper(self):
+        def mutate(values, t):
+            values.append(t)
+
+        def whoo(t):
+            values = []
+            yield values
+            mutate(values, t)
+            yield values
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
     def test_subgenerator(self):
         def subgen(t):
             yield t + 1

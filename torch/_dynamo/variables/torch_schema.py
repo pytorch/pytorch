@@ -7,6 +7,7 @@ import torch
 
 
 MutatedFirstArgInfo = tuple[str, bool]
+InplaceParamInfo = tuple[str, str, int]
 
 
 def _is_tensor_list_type(typ: Any) -> bool:
@@ -85,11 +86,14 @@ def torch_function_mutated_first_arg_infos(
 @functools.lru_cache(None)
 def torch_function_inplace_param_names(
     fn: Callable[..., Any],
-) -> tuple[str, str] | None:
+) -> InplaceParamInfo | None:
     if getattr(fn, "__module__", None) != "torch.nn.functional":
         return None
 
-    params = tuple(inspect.signature(fn).parameters)
+    try:
+        params = tuple(inspect.signature(fn).parameters)
+    except (TypeError, ValueError):
+        return None
     if not params or "inplace" not in params:
         return None
-    return params[0], "inplace"
+    return params[0], "inplace", params.index("inplace")

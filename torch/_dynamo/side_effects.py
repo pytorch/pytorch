@@ -48,7 +48,14 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
-from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
+from .source import (
+    AttrSource,
+    GlobalSource,
+    LocalCellSource,
+    LocalSource,
+    Source,
+    TempLocalSource,
+)
 from .utils import is_frozen_dataclass, is_namedtuple_cls, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
@@ -351,6 +358,14 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
+    def is_reconstructing_generator_tensor_only(self) -> bool:
+        output_graph = self.output_graph_weakref()
+
+        return bool(
+            output_graph
+            and output_graph.current_tx.output.current_tracer.is_reconstructing_generator_tensor_only
+        )
+
     def _was_yielded_during_generator_reconstruction(
         self, item: VariableTracker
     ) -> bool:
@@ -359,19 +374,49 @@ class SideEffects:
             return False
 
         target = item.unwrap()
-        found = False
+
+        class Found(Exception):
+            pass
 
         def visit(vt: VariableTracker) -> None:
-            nonlocal found
             if vt is target:
-                found = True
+                raise Found
 
-        VariableTracker.visit(
-            visit,
-            getattr(output_graph.current_tx, "generated_items", []),
-            side_effects=self,
-        )
-        return found
+        try:
+            tx = output_graph.current_tx
+            while tx is not None:
+                generated_items = getattr(tx, "generated_items", None)
+                if generated_items is not None:
+                    VariableTracker.visit(
+                        visit,
+                        generated_items,
+                        side_effects=self,
+                    )
+                tx = getattr(tx, "parent", None)
+        except Found:
+            return True
+        return False
+
+    def _should_graph_break_for_generator_reconstruction_mutation(
+        self, item: VariableTracker
+    ) -> bool:
+        if self.is_reconstructing_generator_tensor_only():
+            if item.is_tensor():
+                return True
+            if isinstance(item.mutation_type, ValueMutationNew):
+                return self._was_yielded_during_generator_reconstruction(item)
+            source = item.source
+            if source is None:
+                return True
+            base = source
+            while hasattr(base, "base"):
+                base = base.base  # type: ignore[union-attr]
+            return isinstance(base, GlobalSource) or (
+                isinstance(base, LocalSource) and base.is_input
+            )
+        if isinstance(item.mutation_type, ValueMutationNew):
+            return self._was_yielded_during_generator_reconstruction(item)
+        return True
 
     def _maybe_record_side_effect(self, item: VariableTracker) -> None:
         """Record the first externally-visible side effect on the current tracer."""
@@ -399,9 +444,9 @@ class SideEffects:
         if self.should_allow_side_effects_in_hop():
             self._maybe_record_side_effect(item)
             return True
-        if self.is_reconstructing_generator() and (
-            not isinstance(item.mutation_type, ValueMutationNew)
-            or self._was_yielded_during_generator_reconstruction(item)
+        if (
+            self.is_reconstructing_generator()
+            and self._should_graph_break_for_generator_reconstruction_mutation(item)
         ):
             unimplemented(
                 gb_type="Generator reconstruction with mutations",
@@ -1785,10 +1830,17 @@ def allow_externally_visible_side_effects_in_subtracer(
 @contextlib.contextmanager
 def disallow_side_effects_in_generator(
     tx: "InstructionTranslatorBase",
+    *,
+    tensor_only: bool = False,
 ) -> Generator[None, None, None]:
     orig_val = tx.output.current_tracer.is_reconstructing_generator
+    orig_tensor_only = tx.output.current_tracer.is_reconstructing_generator_tensor_only
     try:
         tx.output.current_tracer.is_reconstructing_generator = True
+        tx.output.current_tracer.is_reconstructing_generator_tensor_only = tensor_only
         yield
     finally:
         tx.output.current_tracer.is_reconstructing_generator = orig_val
+        tx.output.current_tracer.is_reconstructing_generator_tensor_only = (
+            orig_tensor_only
+        )

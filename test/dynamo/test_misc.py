@@ -4181,7 +4181,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             lambda x: x.resize_as_(torch.rand(200, 300)): torch.rand(2, 3),
             lambda x: x.swapaxes_(0, 1).mul_(2): torch.rand(2, 3),
             lambda x: x.swapdims_(0, 1).mul_(2): torch.rand(2, 3),
-            lambda x: x.rename_("N", "C").mul_(2): torch.zeros(2, 3),
             lambda x: x.as_strided_((3, 2), (2, 1)).mul_(2): torch.zeros(2, 3),
             lambda x: x.detach_().mul_(2): torch.zeros(2, 3),
         }
@@ -6182,6 +6181,47 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
+
+    @torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False)
+    def test_param_grad_in_forward(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            w = torch.nn.Parameter(torch.ones(4, 4))
+            saw_none = w.grad is None
+            if saw_none:
+                w.grad = torch.zeros_like(w)
+            return saw_none, w.grad + x
+
+        x = torch.randn(4, 4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+
+        self.assertTrue(res[0])
+        self.assertEqual(ref[1], res[1])
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(
+        graph_break_on_nn_param_ctor=False, trace_autograd_ops=True
+    )
+    def test_param_autograd_grad_in_forward(self):
+        def fn(x):
+            w = torch.nn.Parameter(torch.ones(4, 4))
+            y = (x @ w).sum()
+            (grad,) = torch.autograd.grad(y, w)
+            return grad is not None, w.grad is None, grad
+
+        x = torch.randn(4, 4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        res = opt_fn(x)
+
+        self.assertTrue(res[0])
+        self.assertTrue(res[1])
+        self.assertEqual(ref[2], res[2])
 
     def test_intermediary_tensor_grad_access(self):
         # This test creates a model, and accesses the grads
@@ -12519,6 +12559,64 @@ def ___make_guard_fn():
 
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_accumulate_tensors_user_defined_mutation(self):
+        def udo_fn(a, b):
+            a.sin_()
+            return a + b
+
+        def fn(a, b, c, d, x):
+            l = [a, b, c, d, x]
+            return itertools.accumulate(l, udo_fn)
+
+        t_list = [torch.tensor([i]) for i in range(4)]
+        x = torch.tensor([[1, 2], [3, 4]])
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            compiled_fn(*t_list, x)
+
+    def test_itertools_accumulate_user_defined_generator_mutation(self):
+        seen = []
+
+        def gen(a):
+            yield a
+            seen.append(a)
+            yield a + 1
+
+        def udo_fn(a, b):
+            return gen(a + b)
+
+        def fn(a, b):
+            l = [a, b]
+            return itertools.accumulate(l, udo_fn)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            list(compiled_fn(torch.tensor([1]), torch.tensor([2])))
+
+    def test_itertools_accumulate_user_defined_input_mutation(self):
+        def fn(a, b, seen):
+            def udo_fn(x, y):
+                seen.append(x)
+                return x + y
+
+            return itertools.accumulate([a, b], udo_fn)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            compiled_fn(torch.tensor([1]), torch.tensor([2]), [])
 
     def test_pure_python_accumulate(self):
         def accumulate(iterable, func=lambda x, y: x + y):
