@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     TEST_CUDA_GRAPH,
+    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.logging_utils import logs_to_string
@@ -240,6 +241,71 @@ if HAS_CUDA_AND_TRITON:
             self.run_twc(foo_opt, ones)
             self.run_twc(foo_opt, zeros)
             self.assertEqual(self.get_root_children(), [0, 0])
+
+        def test_multithreaded_cudagraph_trees(self):
+            import queue
+            import threading
+            import traceback
+
+            def foo(x, y):
+                return torch.sin(x) + torch.cos(y)
+
+            opt_foo = torch.compile(foo, mode="reduce-overhead")
+            num_threads = 3
+            barrier = threading.Barrier(num_threads)
+            errors = queue.Queue()
+            results = queue.Queue()
+
+            def run_once(
+                check_manager: bool, start_barrier: threading.Barrier | None = None
+            ) -> None:
+                try:
+                    x = torch.rand(4, 4, device="cuda")
+                    y = torch.rand(4, 4, device="cuda")
+                    expected = foo(x, y)
+                    if start_barrier is not None:
+                        start_barrier.wait()
+                    opt_foo(x, y)
+                    result = opt_foo(x, y)
+                    if check_manager:
+                        manager = torch._inductor.cudagraph_trees.get_manager(
+                            x.device.index, create_if_none_exists=False
+                        )
+                        self.assertIsNotNone(manager)
+                    results.put((result, expected))
+                except Exception:
+                    errors.put(traceback.format_exc())
+
+            owner_thread = threading.Thread(target=run_once, args=(True,))
+            owner_thread.start()
+            owner_thread.join()
+
+            def check_errors() -> None:
+                if not errors.empty():
+                    messages = []
+                    while not errors.empty():
+                        messages.append(errors.get())
+                    self.fail("\n".join(messages))
+
+            check_errors()
+            result, expected = results.get()
+            torch.testing.assert_close(result, expected)
+            del result, expected
+
+            def worker() -> None:
+                run_once(True, barrier)
+
+            threads = [threading.Thread(target=worker) for _ in range(num_threads)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            check_errors()
+            while not results.empty():
+                result, expected = results.get()
+                torch.testing.assert_close(result, expected)
+                del result, expected
 
         def check_rng(self):
             @torch.compile(mode="reduce-overhead")
@@ -5052,6 +5118,10 @@ if HAS_CUDA_AND_TRITON:
                         "def triton_poi_fused_add_", 1, exactly=True
                     ).run(code[0])
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_SLOW,
+            "https://github.com/pytorch/pytorch/issues/176144",
+        )
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
         )
@@ -5239,6 +5309,41 @@ if HAS_CUDA_AND_TRITON:
             run(20)
             run(10)
             run(25)
+
+        def test_dealloc_handles_tensor_weakrefs_stack_traces_mismatch(self):
+            """Verify dealloc_current_path_weakrefs handles tensor_weakrefs /
+            stack_traces length mismatch without asserting.
+
+            This injects the mismatch directly so the deallocation path is
+            deterministic. The fix replaces the hard assert with a warning and
+            relies on zip(), matching the existing defensive pattern for
+            outputs_weakrefs in the same function.
+            """
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            inp = torch.rand([4], device="cuda")
+
+            # First call: warmup phase creates and runs a CUDAWarmupNode.
+            torch.compiler.cudagraph_mark_step_begin()
+            foo(inp)
+
+            # Simulate the tensor_weakrefs / stack_traces length divergence.
+            node = self.curr_node()
+            self.assertEqual(len(node.tensor_weakrefs), len(node.stack_traces))
+            node.tensor_weakrefs.append(None)
+
+            # Second call: transitions warmup -> recording, which invokes
+            # try_end_curr_warmup -> dealloc_current_path_weakrefs.
+            # cudagraph_mark_step_begin ensures can_start_new_generation()
+            # returns True so dealloc is actually called.
+            # Without the fix, this would hit:
+            #   assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            # With the fix, zip() safely truncates to the shorter list.
+            torch.compiler.cudagraph_mark_step_begin()
+            foo(inp)
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_opaque_value_input_cudagraph(self):

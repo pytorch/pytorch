@@ -459,6 +459,83 @@ Attempted to call function marked as skipped
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )
 
+    def test_unpack_sequence_with_wrong_length(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            a, b = [1]  # noqa: F841
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: fn(
+                torch.randn(
+                    2,
+                )
+            ),
+            """\
+Observed exception
+  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: raised exception ValueError('not enough values to unpack (expected 2, got 1)')
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0088.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    a, b = [1]  # noqa: F841""",
+        )
+
+    def test_unpack_sequence_with_non_iterable(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            a, b = 1  # noqa: RUF100
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: fn(
+                torch.randn(
+                    2,
+                )
+            ),
+            """\
+Observed exception
+  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: raised exception TypeError("'int' object is not iterable")
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0088.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    a, b = 1  # noqa: RUF100""",
+        )
+
+    def test_unpack_ex_failure(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            a, *b = []  # noqa: F841
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: fn(torch.randn(2)),
+            """\
+Observed exception
+  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: raised exception ValueError('not enough values to unpack (expected at least 1, got 0)')
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0088.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    a, *b = []  # noqa: F841""",
+        )
+
     def test_observed_exception(self):
         def fn():
             raise RuntimeError("test")
@@ -789,6 +866,24 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return x + y""",
         )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_fx_node_error_cross_device(self):
+        linear = torch.nn.Linear(10, 20, device="cuda").eval()
+
+        def fn(x):
+            return linear(x)
+
+        with self.assertRaises(TorchRuntimeError) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(1, 10))
+
+        msg = str(cm.exception)
+        self.assertIn("Tensor device mismatch", msg)
+        self.assertIn("Expected all tensors to be on the same device", msg)
+        self.assertIn("cpu", msg)
+        self.assertIn("cuda", msg)
+        self.assertNotIn("Dynamo failed to run FX node with fake tensors", msg)
+        self.assertNotIn("Unhandled FakeTensor Device Propagation", msg)
 
     def test_data_dependent_branching_fullgraph(self):
         def fn(x):
