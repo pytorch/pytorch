@@ -5777,6 +5777,15 @@ class TemplateBuffer(OperationBuffer):
     def get_allowed_prologue_inps(self) -> OrderedSet[str]:
         return self.allowed_prologue_inps
 
+    def has_aliasing_or_mutation_for_prologue_fusion(self, scheduler_node: Any) -> bool:
+        """Return whether this template's aliasing/mutation blocks prologue fusion.
+
+        The default preserves the scheduler's conservative behavior. External
+        template subclasses may override this when they can prove a prologue
+        producer only feeds independent, non-mutated template inputs.
+        """
+        return scheduler_node.has_aliasing_or_mutation()
+
     def _finalize_codegen(
         self, hook_outputs: dict[str, str]
     ) -> FinalizeCodegenResult | None:
@@ -10032,11 +10041,12 @@ class StorageBox(MutableBox):
         that is used multiple times.
         """
         if users > 1 and isinstance(self.data, (Pointwise, Reduction)):
-            if isinstance(self.data, Pointwise):
+            graph = V.graph
+            if isinstance(self.data, Pointwise) and hasattr(graph, "try_get_buffer"):
                 for dep in self.data.get_reads():
                     if not isinstance(dep, dependencies.MemoryDep):
                         continue
-                    buffer = V.graph.try_get_buffer(dep.name)
+                    buffer = graph.try_get_buffer(dep.name)
                     if not isinstance(buffer, CppTemplateBuffer):
                         continue
                     template = buffer.template
