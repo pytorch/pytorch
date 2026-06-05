@@ -483,20 +483,28 @@ def checkpoint(
             argument is ignored if ``use_reentrant=True``. Can be overridden
             globally using :func:`set_checkpoint_early_stop` context manager.
             Default: ``True``.
-        policy(Dict, optional): A dict mapping operators to
+        policy(Dict, optional): A dict mapping selectors to
             :class:`CheckpointPolicy` values, providing a convenient form of
-            selective activation checkpointing. Keys may be ``OpOverload``\\ s
-            (e.g. ``torch.ops.aten.mm.default``) or strings naming an op
-            (``"aten.mm.default"``, ``"aten::mm"``, or the packet ``"aten.mm"``
-            which matches all overloads). Operators not present in the dict
-            default to recompute. ``MUST_SAVE`` saves the op's output instead of
-            recomputing it; ``MUST_RECOMPUTE`` forces recompute even under
-            subsystems like ``torch.compile`` that might otherwise save it (in
-            eager it is a no-op since recompute is already the default). CPU
-            offload policies are not yet supported. This argument is only
-            supported when ``use_reentrant=False`` and is mutually exclusive
-            with ``context_fn``. For more advanced control (e.g. inspecting op
-            args/outputs), use ``context_fn`` with
+            selective activation checkpointing. Keys may be:
+
+            - an ``OpOverload`` (e.g. ``torch.ops.aten.mm.default``) or a string
+              naming an op (``"aten.mm.default"``, ``"aten::mm"``, or the packet
+              ``"aten.mm"`` which matches all overloads);
+            - an :class:`AutoNamingMode` auto-name
+              (``"layers.0.lin_mm.default_0"``) to target a specific op by its
+              module-qualified name, or a module-FQN prefix (``"layers.1"``) to
+              match every op under that submodule.
+
+            Selectors are resolved most-specific first (exact auto-name, then
+            longest module-FQN prefix, then op). Operators not matched default to
+            recompute. ``MUST_SAVE`` saves the op's output instead of recomputing
+            it; ``MUST_RECOMPUTE`` forces recompute even under subsystems like
+            ``torch.compile`` that might otherwise save it (in eager it is a
+            no-op since recompute is already the default). CPU offload policies
+            are not yet supported. This argument is only supported when
+            ``use_reentrant=False`` and is mutually exclusive with ``context_fn``.
+            For more advanced control (e.g. inspecting op args/outputs), use
+            ``context_fn`` with
             :func:`create_selective_checkpoint_contexts` instead.
 
     Returns:
@@ -1398,6 +1406,22 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         # The policy dict (when built from the `policy` kwarg), consulted by
         # `name`. None when constructed from a raw policy_fn.
         self._name_policy: Optional[Dict[Any, CheckpointPolicy]] = None
+        # An AutoNamingMode whose `names` registry the `policy` dict's policy_fn
+        # consults to resolve auto-name / module-FQN keys. None when no such keys
+        # are present. In eager it must be active during the forward to populate
+        # names; we enter it here so `names` is filled before policy_fn runs.
+        self._naming: Optional[AutoNamingMode] = None
+
+    def __enter__(self):
+        if self._naming is not None:
+            self._naming.__enter__()
+        return super().__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        ret = super().__exit__(exc_type, exc_val, exc_tb)
+        if self._naming is not None:
+            self._naming.__exit__(exc_type, exc_val, exc_tb)
+        return ret
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = {} if kwargs is None else kwargs
@@ -1730,7 +1754,7 @@ def _auto_name_for_node(node):
     return f"{fqn}_{op_name}_{count}"
 
 
-def _auto_name_from_proxy(tensor):
+def _node_from_proxy(tensor):
     if not isinstance(tensor, torch.Tensor):
         return None
     from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
@@ -1742,27 +1766,38 @@ def _auto_name_from_proxy(tensor):
     proxy_tensor = mode.tracer.tensor_tracker.get(mb_unwrap_functional_tensor(tensor))
     if proxy_tensor is None:
         return None
-    return _auto_name_for_node(proxy_tensor.proxy.node)
+    return proxy_tensor.proxy.node
 
 
 class _AutoNames:
     """Tensor -> auto-name mapping used by :class:`AutoNamingMode`.
 
     Eager entries are filled by ``AutoNamingMode.__torch_dispatch__``. Under
-    compile there is no eager dispatch, so a name is derived on demand from the
-    tensor's fx node (``nn_module_stack`` + op + index)."""
+    compile there is no eager dispatch, so the name (and module FQN) are derived
+    on demand from the tensor's fx node (``nn_module_stack`` + op + index)."""
 
     def __init__(self) -> None:
-        self._eager: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
+        self._eager_names: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
+        self._eager_fqns: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
+
+    def _set(self, tensor, name, fqn) -> None:
+        self._eager_names[tensor] = name
+        self._eager_fqns[tensor] = fqn
 
     def __setitem__(self, tensor, name) -> None:
-        self._eager[tensor] = name
+        self._eager_names[tensor] = name
 
     def get(self, tensor, default=None):
-        if isinstance(tensor, torch.Tensor) and tensor in self._eager:
-            return self._eager[tensor]
-        name = _auto_name_from_proxy(tensor)
-        return name if name is not None else default
+        if isinstance(tensor, torch.Tensor) and tensor in self._eager_names:
+            return self._eager_names[tensor]
+        node = _node_from_proxy(tensor)
+        return _auto_name_for_node(node) if node is not None else default
+
+    def get_fqn(self, tensor, default=None):
+        if isinstance(tensor, torch.Tensor) and tensor in self._eager_fqns:
+            return self._eager_fqns[tensor]
+        node = _node_from_proxy(tensor)
+        return _node_fqn(node) if node is not None else default
 
     def __contains__(self, tensor) -> bool:
         return self.get(tensor) is not None
@@ -1827,7 +1862,7 @@ class AutoNamingMode(TorchDispatchMode):
         count = self._func_counter[key]
         self._func_counter[key] += 1
         if isinstance(out, torch.Tensor):
-            self.names[out] = f"{fqn}_{op_name}_{count}"
+            self.names._set(out, f"{fqn}_{op_name}_{count}", fqn)
         elif isinstance(out, (tuple, list)):
             multi_output = sum(isinstance(o, torch.Tensor) for o in out) > 1
             for i, o in enumerate(out):
@@ -1835,18 +1870,45 @@ class AutoNamingMode(TorchDispatchMode):
                     name = f"{fqn}_{op_name}_{count}"
                     if multi_output:
                         name += f"_{i}"
-                    self.names[o] = name
+                    self.names._set(o, name, fqn)
         return out
 
 
-def _checkpoint_policy_from_dict(policy):
-    """Build a SAC ``policy_fn`` from a dict mapping ops to ``CheckpointPolicy``.
+def _is_op_name_str(key):
+    # Heuristic: does this string name an op (e.g. "aten::mm", "aten.mm",
+    # "aten.mm.default") as opposed to a module-FQN / auto-name?
+    if "::" in key:
+        return True
+    parts = key.split(".")
+    if len(parts) not in (2, 3):
+        return False
+    try:
+        getattr(getattr(torch.ops, parts[0]), parts[1])
+        return True
+    except Exception:
+        return False
 
-    Used to implement the ``policy`` argument of :func:`checkpoint`. Keys may be
-    ``OpOverload``\\ s or strings naming an op (``str(op)`` e.g.
-    ``"aten.mm.default"``, ``op.name()`` e.g. ``"aten::mm"``, or the packet
-    ``"aten.mm"``). Ops not present default to ``PREFER_RECOMPUTE``, matching
-    vanilla (non-selective) activation checkpointing.
+
+def _policy_has_name_keys(policy):
+    # Auto-name (e.g. "layers.0.lin_mm.default_0") and module-FQN-prefix (e.g.
+    # "layers.1") keys require module naming to resolve.
+    return any(isinstance(k, str) and not _is_op_name_str(k) for k in policy)
+
+
+def _checkpoint_policy_from_dict(policy, naming=None):
+    """Build a SAC ``policy_fn`` from a dict mapping selectors to ``CheckpointPolicy``.
+
+    Used to implement the ``policy`` argument of :func:`checkpoint`. Keys may be:
+
+    - an ``OpOverload`` (e.g. ``torch.ops.aten.mm.default``) or a string naming an
+      op (``"aten.mm.default"``, ``"aten::mm"``, or the packet ``"aten.mm"``);
+    - an :class:`AutoNamingMode` auto-name (``"layers.0.lin_mm.default_0"``) or a
+      module-FQN prefix (``"layers.1"``, matching every op under that submodule)
+      -- these require ``naming`` and are resolved most-specific first.
+
+    Resolution precedence: exact auto-name, then longest module-FQN prefix, then
+    op-identity / op-name. Ops not matched default to ``PREFER_RECOMPUTE``,
+    matching vanilla (non-selective) activation checkpointing.
     """
     if not isinstance(policy, dict):
         raise TypeError(f"checkpoint `policy` must be a dict, but got {type(policy)}.")
@@ -1864,7 +1926,20 @@ def _checkpoint_policy_from_dict(policy):
 
     def policy_fn(ctx, func, *args, **kwargs):
         # Per-tensor names (set via `name`) are applied directly by `name` itself,
-        # not here; this only resolves op-based keys.
+        # not here. Auto-name / module-FQN keys (most specific first) win over
+        # op-based keys.
+        out = ctx.op_output
+        if naming is not None and isinstance(out, torch.Tensor):
+            auto_name = naming.names.get(out)
+            if auto_name is not None and auto_name in policy:
+                return policy[auto_name]
+            fqn = naming.names.get_fqn(out)
+            if fqn:
+                parts = fqn.split(".")
+                for i in range(len(parts), 0, -1):
+                    prefix = ".".join(parts[:i])
+                    if prefix in policy:
+                        return policy[prefix]
         if func in policy:
             return policy[func]
         candidates = [str(func)]
@@ -1883,13 +1958,17 @@ def _checkpoint_policy_from_dict(policy):
 
 
 def _checkpoint_policy_context_fn(policy):
-    policy_fn = _checkpoint_policy_from_dict(policy)
+    naming = AutoNamingMode() if _policy_has_name_keys(policy) else None
+    policy_fn = _checkpoint_policy_from_dict(policy, naming)
 
     def context_fn():
         caching_mode, cached_mode = create_selective_checkpoint_contexts(policy_fn)
         # Stash the dict so `name` can resolve a name to its policy.
         caching_mode._name_policy = policy
         cached_mode._name_policy = policy
+        # In eager, the caching mode enters `naming` so auto-names are populated
+        # during the forward; under compile they are derived from the fx graph.
+        caching_mode._naming = naming
         return caching_mode, cached_mode
 
     return context_fn
