@@ -22,8 +22,9 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 def _get_shape_env():
     from torch._inductor.virtualized import V
 
-    if torch._C._does_cpp_fake_tensor_mode_exist():
-        return torch._C._get_cpp_fake_mode_shape_env()
+    cpp_fake_mode = torch._C._get_active_cpp_fake_tensor_mode()
+    if cpp_fake_mode is not None:
+        return cpp_fake_mode.shape_env
     return V.fake_mode.shape_env
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,

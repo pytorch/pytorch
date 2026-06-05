@@ -729,7 +729,6 @@ void fakeFallback(
       wrap_meta_outputs_with_default_device_logic();
       return;
     }
-    t_start = std::chrono::steady_clock::now();
   }
 
   // TODO: profiles

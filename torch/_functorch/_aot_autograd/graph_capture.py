@@ -123,8 +123,7 @@ def _create_graph(
             _allow_token_discovery=True,
         )
 
-    _cpp_fake = torch._C._does_cpp_fake_tensor_mode_exist()
-    if _cpp_fake:
+    if torch._C._get_active_cpp_fake_tensor_mode() is not None:
         torch._C._activate_cpp_fake_tensor_mode()
     with (
         enable_python_dispatcher(),
@@ -139,7 +138,7 @@ def _create_graph(
                 _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
             )(*args)
         finally:
-            if _cpp_fake:
+            if torch._C._get_active_cpp_fake_tensor_mode() is not None:
                 torch._C._deactivate_cpp_fake_tensor_mode()
 
         if args_descs is not None:

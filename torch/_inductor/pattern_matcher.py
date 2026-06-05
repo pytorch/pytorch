@@ -287,7 +287,7 @@ class Match:
         """
         from torch._inductor.virtualized import NullHandler, V
 
-        if torch._C._does_cpp_fake_tensor_mode_exist():
+        if torch._C._get_active_cpp_fake_tensor_mode() is not None:
             context = fake_mode_context(V.fake_mode)
         elif not isinstance(V.fake_mode, NullHandler) or (V.fake_mode is None):
             context = V.fake_mode

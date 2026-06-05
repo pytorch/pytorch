@@ -710,11 +710,6 @@ def maybe_disable_graph_partition(
         return contextlib.nullcontext()
 
 
-def cpp_fake_mode_shape_env():
-    """Return the ShapeEnv from the active C++ FakeTensorMode, or None."""
-    return torch._C._get_cpp_fake_mode_shape_env()
-
-
 def fake_tensor_prop(
     gm: GraphModule,
     example_inputs: Sequence[InputType],

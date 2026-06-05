@@ -3095,13 +3095,6 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
-  // Callbacks moved to PyInterpreter.cpp (fake_try_decomp, fake_try_op_impl,
-  // fake_try_prim_meta). Kept here commented out for reference.
-  //
-  // static auto tryPythonDecomp = ...;
-  // static auto tryPythonOpImpl = ...;
-  // static auto tryPythonPrimMeta = ...;
-
   py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
     return t.is_fake();
   });
@@ -3112,54 +3105,96 @@ Call this whenever a new thread is created in order to propagate values from
     return *fd;
   });
 
-  py_module.def(
-      "_make_fake_tensor",
-      [](const at::Tensor& real,
-         py::object source,
-         py::object symbolic_context) -> at::Tensor {
-        auto mode = c10::impl::FakeTensorModeTLS::get_state();
-        TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
-
-        auto converter = py::reinterpret_borrow<py::object>(
-            mode->fake_tensor_converter_->ptr(getPyInterpreter()));
-        auto shape_env = py::reinterpret_borrow<py::object>(
-            mode->shape_env_->ptr(getPyInterpreter()));
-
-        at::Tensor meta_tensor;
-        {
-          c10::impl::ExcludeDispatchKeyGuard guard(
-              {c10::DispatchKeySet(c10::DispatchKey::Fake)});
-          auto meta_obj = converter.attr("to_meta_tensor")(
-              real,
-              py::arg("shape_env") = shape_env,
-              py::arg("source") = source,
-              py::arg("symbolic_context") = symbolic_context);
-          meta_tensor = py::cast<at::Tensor>(meta_obj);
-        }
-
-        auto device = real.device();
-        meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(
-            device);
-        meta_tensor.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
-
-        return meta_tensor;
-      },
-      py::arg("real"),
-      py::arg("source") = py::none(),
-      py::arg("symbolic_context") = py::none());
-
   struct PyCppFakeTensorMode {
     std::shared_ptr<c10::FakeTensorMode> mode;
-    bool owns_tensor(const at::Tensor& t) const {
-      if (!t.is_fake())
-        return false;
-      auto tensor_mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
-      return tensor_mode.get() == mode.get();
+
+    bool operator==(const PyCppFakeTensorMode& other) const {
+      return mode.get() == other.mode.get();
+    }
+
+    // Mirrors Python FakeTensorMode.shape_env: the (Python) ShapeEnv stored on
+    // this mode, or None if it has none.
+    py::object shape_env() const {
+      if (!mode || !mode->shape_env_) {
+        return py::none();
+      }
+      return py::reinterpret_borrow<py::object>(
+          mode->shape_env_->ptr(getPyInterpreter()));
+    }
+
+    at::Tensor from_tensor(
+        const at::Tensor& real,
+        py::object source,
+        py::object symbolic_context) const {
+      TORCH_CHECK(mode != nullptr, "FakeTensorMode must be set");
+      auto converter = py::reinterpret_borrow<py::object>(
+          mode->fake_tensor_converter_->ptr(getPyInterpreter()));
+      auto shape_env = py::reinterpret_borrow<py::object>(
+          mode->shape_env_->ptr(getPyInterpreter()));
+
+      at::Tensor meta_tensor;
+      {
+        c10::impl::ExcludeDispatchKeyGuard guard(
+            {c10::DispatchKeySet(c10::DispatchKey::Fake)});
+        auto meta_obj = converter.attr("to_meta_tensor")(
+            real,
+            py::arg("shape_env") = shape_env,
+            py::arg("source") = source,
+            py::arg("symbolic_context") = symbolic_context);
+        meta_tensor = py::cast<at::Tensor>(meta_obj);
+      }
+
+      meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(
+          real.device());
+      meta_tensor.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+      return meta_tensor;
     }
   };
 
   py::class_<PyCppFakeTensorMode>(py_module, "_CppFakeTensorMode")
-      .def("owns_tensor", &PyCppFakeTensorMode::owns_tensor);
+      .def(
+          "__eq__",
+          [](const PyCppFakeTensorMode& self, py::object other) -> bool {
+            if (!py::isinstance<PyCppFakeTensorMode>(other)) {
+              return false;
+            }
+            return self == other.cast<PyCppFakeTensorMode>();
+          })
+      .def(
+          "__hash__",
+          [](const PyCppFakeTensorMode& self) {
+            return reinterpret_cast<std::uintptr_t>(self.mode.get());
+          })
+      .def_property_readonly("shape_env", &PyCppFakeTensorMode::shape_env)
+      .def(
+          "from_tensor",
+          &PyCppFakeTensorMode::from_tensor,
+          py::arg("real"),
+          py::arg("source") = py::none(),
+          py::arg("symbolic_context") = py::none());
+
+  py_module.def(
+      "_get_active_cpp_fake_tensor_mode",
+      []() -> std::optional<PyCppFakeTensorMode> {
+        auto mode = c10::impl::FakeTensorModeTLS::get_state();
+        if (mode == nullptr) {
+          return std::nullopt;
+        }
+        return PyCppFakeTensorMode{std::move(mode)};
+      });
+
+  py_module.def(
+      "maybe_get_fake_mode",
+      [](const at::Tensor& t) -> std::optional<PyCppFakeTensorMode> {
+        if (!t.defined() || !t.is_fake()) {
+          return std::nullopt;
+        }
+        auto mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
+        if (mode == nullptr) {
+          return std::nullopt;
+        }
+        return PyCppFakeTensorMode{std::move(mode)};
+      });
 
   py_module.def(
       "_create_cpp_fake_tensor_mode",
@@ -3174,8 +3209,6 @@ Call this whenever a new thread is created in order to propagate values from
             std::make_shared<c10::SafePyObject>(
                 converter.ptr(), getPyInterpreter()));
 
-        // Snapshot which ops have a Python decomp / prim meta so fakeFallback
-        // can skip the Python callback for ops that have neither.
         auto keys = py::module::import("torch._subclasses.fake_impls")
                         .attr("_cpp_fake_dispatch_op_keys")()
                         .cast<py::tuple>();
@@ -3185,6 +3218,12 @@ Call this whenever a new thread is created in order to propagate values from
         for (auto k : keys[1]) {
           mode->prim_meta_ops_.insert(k.cast<std::string>());
         }
+
+        py::object shim =
+            py::module::import("torch._subclasses.fake_impls")
+                .attr("CppFakeModeShim")(shape_env, converter);
+        mode->fake_mode_shim_ = std::make_shared<c10::SafePyObject>(
+            shim.release().ptr(), getPyInterpreter());
 
         c10::impl::FakeTensorModeTLS::create_state(mode);
         return PyCppFakeTensorMode{std::move(mode)};
@@ -3205,10 +3244,6 @@ Call this whenever a new thread is created in order to propagate values from
     c10::impl::FakeTensorModeTLS::reset_state();
   });
 
-  py_module.def("_does_cpp_fake_tensor_mode_exist", []() -> bool {
-    return c10::impl::FakeTensorModeTLS::get_state() != nullptr;
-  });
-
   py_module.def(
       "_set_cpp_fake_tensor_mode_allow_fallback_kernels",
       [](bool allow) {
@@ -3219,27 +3254,6 @@ Call this whenever a new thread is created in order to propagate values from
         mode->allow_fallback_kernels_ = allow;
       },
       py::arg("allow"));
-
-  py_module.def("_get_cpp_fake_mode_shape_env", []() -> py::object {
-    auto mode = c10::impl::FakeTensorModeTLS::get_state();
-    if (!mode || !mode->shape_env_) {
-      return py::none();
-    }
-    py::object obj = py::reinterpret_borrow<py::object>(
-        mode->shape_env_->ptr(getPyInterpreter()));
-    return obj;
-  });
-
-  py_module.def(
-      "_fake_tensor_belongs_to_active_mode", [](const at::Tensor& t) -> bool {
-        if (!t.is_fake())
-          return false;
-        auto active_mode = c10::impl::FakeTensorModeTLS::get_state();
-        if (active_mode == nullptr)
-          return false;
-        auto tensor_mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
-        return tensor_mode.get() == active_mode.get();
-      });
 
   py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();

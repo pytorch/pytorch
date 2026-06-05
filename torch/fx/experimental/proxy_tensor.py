@@ -700,7 +700,7 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
         return {k: extract_val(v) for k, v in val.items()}
     elif isinstance(val, Tensor):
         if not val.is_sparse:
-            if _has_cpp_fake_tensor and torch._C._does_cpp_fake_tensor_mode_exist():
+            if _has_cpp_fake_tensor and torch._C._get_active_cpp_fake_tensor_mode() is not None:
                 return torch.empty_strided(  # revist this
                     val.shape, val.stride(), device=val.device, dtype=val.dtype
                 )
@@ -2765,7 +2765,7 @@ class _MakefxTracer:
             if (
                 self.fake_tensor_mode is not None
                 and _has_cpp_fake_tensor
-                and torch._C._does_cpp_fake_tensor_mode_exist()
+                and torch._C._get_active_cpp_fake_tensor_mode() is not None
             ):
                 torch._C._set_cpp_fake_tensor_mode_allow_fallback_kernels(
                     self.fake_tensor_mode.allow_fallback_kernels
@@ -2908,7 +2908,7 @@ class _MakefxTracer:
         )
         with ExitStack() as stack:
             if self.fake_tensor_mode and not (
-                _has_cpp_fake_tensor and torch._C._does_cpp_fake_tensor_mode_exist()
+                _has_cpp_fake_tensor and torch._C._get_active_cpp_fake_tensor_mode() is not None
             ):
                 stack.enter_context(self.fake_tensor_mode)
             stack.enter_context(self.python_dispatcher_mode)
