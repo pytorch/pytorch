@@ -19,6 +19,7 @@ from torch._inductor.fx_utils import (
 )
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -550,6 +551,114 @@ class TestFakeTensorUpdater(TestCase):
         b = torch.randint(0, (1 << 16), (8, 4, 2, 1), dtype=torch.int32)
         graph = self._get_graph(fn, a, b)
         self._add_delete_nodes_test(graph)
+
+    def test_flex_attention_backward_updates_subgraph_inputs(self):
+        with torch._subclasses.FakeTensorMode() as mode:
+            query = mode.from_tensor(torch.randn(2, 2, 4, 8))
+            logsumexp = mode.from_tensor(torch.randn(2, 2, 4))
+            score = query.new_zeros(())
+            index = query.new_zeros((), dtype=torch.int)
+            grad = query.new_zeros(())
+            score_buffer = mode.from_tensor(torch.randn(2, 3, 4, 5).contiguous())
+            restrided_score_buffer = mode.from_tensor(
+                torch.randn(2, 3, 5, 4).permute(0, 1, 3, 2)
+            )
+            mask_buffer = mode.from_tensor(torch.randn(2, 3, 4, 5))
+            restrided_mask_buffer = mode.from_tensor(
+                torch.randn(2, 3, 5, 4).permute(0, 1, 3, 2)
+            )
+
+            def fw(score, b, h, q_idx, kv_idx, score_buffer):
+                return score + score_buffer[0, 0, 0, 0]
+
+            def joint(score, b, h, q_idx, kv_idx, grad, score_buffer):
+                return grad, None, None, None, None, score_buffer
+
+            def mask(b, h, q_idx, kv_idx, mask_buffer):
+                return mask_buffer[0, 0, 0, 0] > 0
+
+            fw_subgraph = make_fx(fw, tracing_mode="fake")(
+                score, index, index, index, index, score_buffer
+            )
+            joint_subgraph = make_fx(joint, tracing_mode="fake")(
+                score, index, index, index, index, grad, score_buffer
+            )
+            mask_subgraph = make_fx(mask, tracing_mode="fake")(
+                index, index, index, index, mask_buffer
+            )
+
+            def flex_backward(
+                query,
+                logsumexp,
+                score_buffer,
+                restrided_score_buffer,
+                mask_buffer,
+                restrided_mask_buffer,
+            ):
+                return torch.ops.higher_order.flex_attention_backward(
+                    query,
+                    query,
+                    query,
+                    query,
+                    logsumexp,
+                    query,
+                    None,
+                    fw_subgraph,
+                    joint_subgraph,
+                    (mask_subgraph,),
+                    1.0,
+                    {},
+                    (score_buffer,),
+                    (mask_buffer,),
+                )
+
+            gm = make_fx(flex_backward, tracing_mode="fake")(
+                query,
+                logsumexp,
+                score_buffer,
+                restrided_score_buffer,
+                mask_buffer,
+                restrided_mask_buffer,
+            )
+            flex_backward_node = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is torch.ops.higher_order.flex_attention_backward
+            )
+            placeholders = {
+                node.target: node for node in gm.graph.find_nodes(op="placeholder")
+            }
+            score_buffer_node = placeholders["score_buffer_1"]
+            restrided_score_buffer_node = placeholders["restrided_score_buffer_1"]
+            mask_buffer_node = placeholders["mask_buffer_1"]
+            restrided_mask_buffer_node = placeholders["restrided_mask_buffer_1"]
+            fw_subgraph = get_fake(flex_backward_node.args[7], gm)
+            joint_subgraph = get_fake(flex_backward_node.args[8], gm)
+            mask_subgraph = get_fake(flex_backward_node.args[9][-1], gm)
+            fw_placeholders = list(fw_subgraph.graph.find_nodes(op="placeholder"))
+            joint_placeholders = list(joint_subgraph.graph.find_nodes(op="placeholder"))
+            mask_placeholders = list(mask_subgraph.graph.find_nodes(op="placeholder"))
+
+            updater = FakeTensorUpdater(gm)
+            flex_backward_args = list(flex_backward_node.args)
+            self.assertEqual(flex_backward_args[12], (score_buffer_node,))
+            self.assertEqual(flex_backward_args[13], (mask_buffer_node,))
+            flex_backward_args[12] = (restrided_score_buffer_node,)
+            flex_backward_args[13] = (restrided_mask_buffer_node,)
+            flex_backward_node.args = tuple(flex_backward_args)
+
+            with V.set_fake_mode(mode):
+                updater.incremental_update()
+
+        self.assertIs(
+            fw_placeholders[-1].meta["val"], restrided_score_buffer_node.meta["val"]
+        )
+        self.assertIs(
+            joint_placeholders[-1].meta["val"], restrided_score_buffer_node.meta["val"]
+        )
+        self.assertIs(
+            mask_placeholders[-1].meta["val"], restrided_mask_buffer_node.meta["val"]
+        )
 
     def test_reorder_nodes(self):
         def fn(*args: torch.Tensor) -> torch.Tensor:

@@ -11,14 +11,21 @@ import torch._dynamo.test_case
 import torch.distributed._functional_collectives as _functional_collectives
 import torch.fx as fx
 from torch._C import FileCheck
-from torch._dynamo.utils import counters, same
+from torch._dynamo.utils import counters, detect_fake_mode, same
+from torch._functorch._aot_autograd.utils import make_boxed_func
+from torch._inductor import compile_fx
+from torch._inductor.compile_fx import _recursive_post_grad_passes
+from torch._inductor.fx_utils import get_fake
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+from torch._inductor.virtualized import V
+from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     at_least_x_gpu,
     DynamoDistributedMultiProcTestCase,
     requires_accelerator_dist_backend,
 )
+from torch.utils import _pytree as pytree
 
 
 aten = torch.ops.aten
@@ -450,6 +457,78 @@ graph():
                 correct = func(inputs)
                 self.assertTrue(same(out, correct))
                 self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_overlap_scheduling_flex_attention_backward(self):
+        def func(q, k, v, bias):
+            ar = _functional_collectives.all_reduce(bias, "sum", "0")
+
+            def score_mod(score, b, h, q_idx, kv_idx):
+                return score + ar[q_idx, kv_idx]
+
+            return flex_attention(q, k, v, score_mod=score_mod).sum()
+
+        patches = {
+            **get_patches(),
+            "aten_distributed_optimizations.enable_overlap_scheduling": True,
+            "aten_distributed_optimizations.insert_overlap_deps": True,
+            "aten_distributed_optimizations.pre_bucketing_fsdp_collectives": False,
+        }
+        compiled_graphs = []
+
+        def materialize_output(gm):
+            output = gm.graph.output_node().args[0]
+            fake_output = pytree.tree_map(lambda x: get_fake(x, gm), output)
+
+            def materialize(x):
+                if isinstance(x, torch.Tensor):
+                    return torch.zeros(tuple(x.shape), device=x.device, dtype=x.dtype)
+                return x
+
+            return pytree.tree_map(materialize, fake_output)
+
+        def compile_fx_inner(gm, example_inputs, *args, **kwargs):
+            fake_mode = detect_fake_mode(example_inputs)
+            if fake_mode is None:
+                raise AssertionError("expected fake mode from example inputs")
+            with V.set_fake_mode(fake_mode):
+                _recursive_post_grad_passes(
+                    gm, is_inference=kwargs.get("is_inference", False)
+                )
+            compiled_graphs.append(gm)
+            output = materialize_output(gm)
+            return make_boxed_func(lambda *args: output)
+
+        backend = functools.partial(
+            compile_fx.compile_fx, inner_compile=compile_fx_inner
+        )
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            q = torch.randn(1, 1, 128, 16, device=device_type, requires_grad=True)
+            k = torch.randn(1, 1, 128, 16, device=device_type, requires_grad=True)
+            v = torch.randn(1, 1, 128, 16, device=device_type, requires_grad=True)
+            bias = torch.randn(128, 128, device=device_type, requires_grad=True)
+
+            with torch._inductor.config.patch(patches):
+                loss = torch.compile(func, backend=backend, fullgraph=True)(
+                    q, k, v, bias
+                )
+                loss.backward()
+
+            self.assertEqual(len(compiled_graphs), 2)
+            self.assertTrue(
+                any("flex_attention_backward" in gm.code for gm in compiled_graphs)
+            )
+            self.assertTrue(any("control_deps" in gm.code for gm in compiled_graphs))
+            self.assertIsNotNone(q.grad)
+            self.assertIsNotNone(k.grad)
+            self.assertIsNotNone(v.grad)
+            self.assertIsNotNone(bias.grad)
 
     @torch._inductor.config.patch(get_patches())
     def test_custom_estimator_for_non_compute_nodes(self):

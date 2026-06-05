@@ -8,6 +8,7 @@ operations (e.g., collective_start -> mm -> wait), this pass wraps operations
 with control_deps to make dependencies explicit.
 """
 
+from operator import attrgetter
 from typing import Any
 
 import torch.fx as fx
@@ -242,6 +243,8 @@ def _create_subgraph_for_node(
         placeholder = subgraph.placeholder(f"arg_{idx}")
         if "val" in orig_node.meta:
             placeholder.meta.update(orig_node.meta)
+        elif orig_node.op == "get_attr" and isinstance(orig_node.target, str):
+            placeholder.meta["val"] = attrgetter(orig_node.target)(owning_module)
         node_to_placeholder[orig_node] = placeholder
 
     # Replace fx.Node instances with their placeholders
