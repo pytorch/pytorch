@@ -966,6 +966,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  TORCH_CHECK(
+      !options_->enable_reconfigure,
+      "ProcessGroupNCCL does not support enable_reconfigure "
+      "(reconfigure-based fault tolerance).");
 
   // getNcclVersion needs to get called before launching threads which can
   // potentially call getenv. getNcclVersion internally calls setenv to set some
