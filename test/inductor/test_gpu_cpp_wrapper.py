@@ -56,6 +56,40 @@ class GpuWrapperTemplate:
     pass
 
 
+def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
+    def impl(xs, dtype, device_arg, layout, memory_format):
+        if dtype != torch.float32:
+            raise AssertionError(f"Unexpected dtype: {dtype}")
+        if torch.device(device_arg).type != device:
+            raise AssertionError(f"Unexpected device: {device_arg}")
+        if layout != torch.strided:
+            raise AssertionError(f"Unexpected layout: {layout}")
+        if memory_format != torch.contiguous_format:
+            raise AssertionError(f"Unexpected memory_format: {memory_format}")
+        return (
+            xs[0]
+            .to(device=device_arg, dtype=dtype)
+            .contiguous(memory_format=memory_format)
+        )
+
+    def meta(xs, dtype, _device_arg, layout, memory_format):
+        return torch.empty_like(
+            xs[0],
+            dtype=dtype,
+            layout=layout,
+            memory_format=memory_format,
+        )
+
+    m.define(
+        "arg_helpers("
+        "Tensor[] xs, ScalarType dtype, Device device, "
+        "Layout layout, MemoryFormat memory_format"
+        ") -> Tensor"
+    )
+    m.impl("arg_helpers", impl, GPU_TYPE.upper())
+    m.impl("arg_helpers", meta, "Meta")
+
+
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
 
@@ -92,6 +126,34 @@ class TestGpuWrapper(InductorTestCase):
         with torch.utils._device.DeviceContext(self.device):
             _, code = test_torchinductor.run_and_get_cpp_code(compiled, x, 3)
         self.assertIn("torch.tensor(arg, device='cpu')", code)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_fbcode_custom_op_fallback_python_arg_helpers(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if not config.is_fbcode():
+            self.skipTest("fbcode-only cpp_wrapper symbol visibility test")
+
+        device = self.device
+        with torch.library._scoped_library(
+            "fbcode_cpp_wrapper_arg_helpers", "FRAGMENT"
+        ) as m:
+            _register_fbcode_cpp_wrapper_arg_helper_op(m, device)
+
+            def fn(x):
+                y = x.sin()
+                return torch.ops.fbcode_cpp_wrapper_arg_helpers.arg_helpers(
+                    [y],
+                    torch.float32,
+                    torch.device(device),
+                    torch.strided,
+                    torch.contiguous_format,
+                ).cos()
+
+            x = torch.randn(4, 4, device=device)
+            expected = fn(x)
+            actual = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)(x)
+            self.assertEqual(actual, expected)
 
     def test_cpp_scratch_scales_with_grid_size_for_tma(self):
         if GPU_TYPE != "cuda" or torch.version.hip:
