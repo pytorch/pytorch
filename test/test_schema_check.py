@@ -373,13 +373,9 @@ class TestSchemaCheck(JitTestCase):
         with SchemaInfoBindTestMode(self) as schemaInfoCheck:
             x.add(x)
 
+@unittest.skipIf(TEST_WITH_TORCHDYNAMO, "SchemaCheckMode is ignored by dynamo")
 class TestSchemaCheckFunctionality(TestCase):
     """Tests that SchemaCheckMode preserves op correctness — device-agnostic."""
-
-    def setUp(self):
-        if TEST_WITH_TORCHDYNAMO:
-            self.skipTest("SchemaCheckMode is ignored by dynamo")
-        super().setUp()
 
     def test_schema_check_mode_functionality(self, device):
         x = torch.rand((3, 3), device=device, requires_grad=True)
