@@ -13,6 +13,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -370,7 +371,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
         });
   }
   return std::make_tuple(
-      sorted_indices, pool_offsets, pool_sizes, mx_buffer);
+      std::move(sorted_indices),
+      std::move(pool_offsets),
+      std::move(pool_sizes),
+      std::move(mx_buffer));
 }
 
 template <typename scalar_t, bool LogSoftMax>

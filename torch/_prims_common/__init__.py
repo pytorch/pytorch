@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 
     import sympy
 
+    from torch.types import BoolLikeType
+
     class _WorksWithInt(typing.Protocol):
         def __add__(self, other: Any) -> typing.Self: ...
 
@@ -875,13 +877,18 @@ def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
     return isinstance(perm, Sequence) and sorted(perm) == list(range(rank))
 
 
-def is_same_shape(a: Sequence, b: Sequence) -> bool:
+def is_same_shape(a: Sequence, b: Sequence) -> BoolLikeType:
     """
     Compares two shapes a and b, returning True if they are the same
     (their ranks and corresponding lengths match) and False otherwise.
-    """
 
-    return tuple(a) == tuple(b)
+    Uses sym_eq for shape comparison so the result is safe to pass to
+    torch._check on tensors with unbacked SymInt dimensions; for backed
+    or concrete shapes the behaviour is unchanged.
+    """
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
+    return sym_eq(tuple(a), tuple(b))
 
 
 def is_cpu_scalar_tensor(a: object) -> TypeGuard[TensorLike]:
