@@ -237,7 +237,7 @@ class ChunkingApplier:
 
         for overriden_tangent_node in self.overriden_tangent.values():
             if overriden_tangent_node is None:
-                raise AssertionError("expected overriden tangent node to be set")
+                raise AssertionError("expected tangent node to be set")
             env[overriden_tangent_node] = _create_placeholder_node(
                 overriden_tangent_node
             )
