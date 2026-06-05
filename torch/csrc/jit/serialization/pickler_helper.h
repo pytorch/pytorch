@@ -203,6 +203,14 @@ inline void setTensorMetadata(
   setTensorMetadata(t, std::move(metadata));
 }
 
+// Copy backend metadata (c10::BackendMeta) from src tensor to dst tensor.
+// Other tensor metadata on dst is left untouched. No-op when src has none.
+inline void copyBackendMeta(const at::Tensor& src, const at::Tensor& dst) {
+  if (auto meta = src.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr()) {
+    dst.unsafeGetTensorImpl()->set_backend_meta(meta->clone(meta));
+  }
+}
+
 // Register function pointer of Tensor BackendMetadata for serialization.
 inline void TensorBackendMetaRegistry(
     c10::DeviceType t,
