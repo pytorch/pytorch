@@ -2124,6 +2124,7 @@ class TestIndexingDevice(TestCase):
 
     @serialTest()
     @dtypes(torch.complex64, torch.complex128, torch.bool)
+    @dtypesIfMPS(torch.bool, torch.complex64) # MPS does not support complex128
     def test_index_add_excluded_dtypes(self, device, dtype):
         # scatter_add_'s CUDA dispatch covers neither complex nor bool, so the
         # fast-path delegation in index_add_cuda_impl excludes these dtypes
