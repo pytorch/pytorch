@@ -1694,6 +1694,8 @@ TEST_CUDA_CUDSS = TEST_CUDA and torch.version.cuda is not None
 TEST_CUDA_GRAPH_CONDITIONAL_NODES = TEST_CUDA_GRAPH and torch.version.cuda is not None
 
 TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and torch.version.cuda is not None
+TEST_NVMATH = _check_module_exists("nvmath.bindings") and torch.version.cuda is not None
+skipIfNoNvmath = unittest.skipIf(not TEST_NVMATH, "nvmath-python not available")
 
 if TEST_CUDA_PYTHON_BINDINGS:
     def cuda_python_error_check(function_call_output):
