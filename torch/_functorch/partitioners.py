@@ -49,6 +49,7 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
 )
 from torch.fx.passes import graph_drawer
+from torch.fx.traceback import _get_memory_budget_annotation
 from torch.utils._ordered_set import OrderedSet
 from torch.utils.checkpoint import CheckpointPolicy
 
@@ -1507,6 +1508,19 @@ def _size_of(node: fx.Node) -> int:
             return sum(object_nbytes(n) for n in val.values())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
+        elif isinstance(val, (torch.ScriptObject, FakeScriptObject)):
+            # A (Fake)ScriptObject may hold tensors internally, so we cannot
+            # soundly compute its size here. Only treat it as zero size when the
+            # user has explicitly opted in via this escape hatch.
+            if config.unsafe_treat_script_objects_as_zero_size:
+                return 0
+            raise RuntimeError(
+                f"Cannot compute the size of {type(val)} on node {node}. A "
+                "ScriptObject may hold tensors internally and the partitioner "
+                "has no general way to measure its memory footprint. Set "
+                "torch._functorch.config.unsafe_treat_script_objects_as_zero_size"
+                " = True to assume such objects are zero size (unsound)."
+            )
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
     if node.op == "get_attr" or (
@@ -3791,26 +3805,69 @@ def min_cut_rematerialization_partition(
             for user in node.users:
                 node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
 
-    # Per-region memory_budget override resolution. Two reader paths share the
-    # same precedence rule: first matching node wins, custom overrides legacy.
-    #   - Legacy: node.meta["memory_budget"], populated by the
-    #     `MemoryBudgetMode` / `set_memory_budget` allow_in_graph marker.
-    #   - Custom: node.meta["custom"]["memory_budget"], populated by
-    #     `fx_traceback.annotate({"memory_budget": ...})` and propagated to all
-    #     FX nodes via _COPY_META_FIELDS["custom"]. The annotate path is the
-    #     supported replacement -- its contextmanager `finally:` restores
-    #     `current_meta` on every exit path, so it cannot leak across compiles
-    #     the way the legacy marker did (no-op __exit__ under Dynamo).
+    # memory_budget override resolution, in increasing precedence:
+    #   1. config.activation_memory_budget (global default).
+    #   2. Legacy node.meta["memory_budget"], set by the old
+    #      `MemoryBudgetMode` / `set_memory_budget` allow_in_graph marker. First
+    #      matching node wins (preserves prior behavior); we may want to remove
+    #      this path later.
+    #   3. `torch.autograd.graph.region_activation_memory_budget(...)`, read off
+    #      node.meta["custom"] via `_get_memory_budget_annotation` and propagated
+    #      onto every annotated node via _COPY_META_FIELDS["custom"]; overrides
+    #      the legacy reader.
     memory_budget = config.activation_memory_budget
     for node in joint_graph.nodes:
         if isinstance(node.meta.get("memory_budget", None), float):
             memory_budget = node.meta["memory_budget"]
             break
+
+    # The partitioner applies a single budget per joint graph, so all annotated
+    # nodes must agree and the annotation must cover every forward op; otherwise
+    # the caller mixed budgets or annotated only part of a graph (across a graph
+    # break each graph is resolved independently). Collect both in one pass.
+    region_budgets: OrderedSet[float] = OrderedSet()
+    unannotated_fw_ops: list[fx.Node] = []
     for node in joint_graph.nodes:
-        custom_budget = node.meta.get("custom", {}).get("memory_budget", None)
-        if isinstance(custom_budget, float):
-            memory_budget = custom_budget
-            break
+        budget = _get_memory_budget_annotation(node)
+        if budget is not None:
+            region_budgets.add(budget)
+        elif node.op == "call_function" and node_info.is_required_fw(node):
+            unannotated_fw_ops.append(node)
+
+    # A budget must consistently cover the entire forward, including HOP bodies.
+    # Recurse into nested subgraph modules: collect their budgets (for the
+    # agreement check) and flag any unannotated call_function (for coverage). In
+    # a consistent graph every node in every body carries the budget, so an
+    # unannotated body op means the budget did not cover that HOP.
+    all_budgets: OrderedSet[float] = OrderedSet(region_budgets)
+    for _, sub in joint_module.named_modules():
+        if isinstance(sub, fx.GraphModule) and sub.graph is not joint_graph:
+            for node in sub.graph.nodes:
+                b = _get_memory_budget_annotation(node)
+                if b is not None:
+                    all_budgets.add(b)
+                elif node.op == "call_function":
+                    unannotated_fw_ops.append(node)
+    if len(all_budgets) > 1:
+        raise RuntimeError(
+            f"torch.autograd.graph.region_activation_memory_budget: "
+            f"conflicting budgets within a single joint graph (including nested "
+            f"subgraphs): {sorted(all_budgets)}. Use a graph break to separate "
+            f"regions that need different budgets."
+        )
+
+    if all_budgets:
+        if unannotated_fw_ops:
+            raise RuntimeError(
+                f"torch.autograd.graph.region_activation_memory_budget: must "
+                f"cover the entire forward of a graph (including HOP bodies), but "
+                f"{len(unannotated_fw_ops)} forward op(s) are unannotated. Wrap "
+                f"the whole forward in a single region; use a graph break to scope "
+                f"different budgets to different graphs. Note that a graph break "
+                f"inside the annotated region can also cause unannotated ops here. "
+                f"Unannotated ops: {[n.name for n in unannotated_fw_ops]}."
+            )
+        memory_budget = next(iter(all_budgets))
     saved_values = choose_saved_values_set(
         joint_graph,
         node_info,
