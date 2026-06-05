@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import io
 import logging
+import os
 import warnings
 from unittest.mock import patch
 
@@ -222,9 +223,12 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
         self.assertIn("moo", warning_messages)
 
     def test_reorder_constant_warnings_by_default(self):
+        def helper():
+            warnings.warn("moo", category=DeprecationWarning, stacklevel=1)
+
         def f(x):
             x1 = x + x
-            warnings.warn("moo", category=DeprecationWarning, stacklevel=1)
+            helper()
             x2 = x1 * x1
             return x2
 
@@ -233,10 +237,97 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             opt_out = opt_f(x)
+            opt_warning = w[0]
 
         self.assertTrue(same((x + x) * (x + x), opt_out))
         self.assertEqual([str(i.message) for i in w], ["moo"])
-        self.assertIs(w[0].category, DeprecationWarning)
+        self.assertIs(opt_warning.category, DeprecationWarning)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            f(x)
+            eager_warning = w[0]
+
+        self.assertEqual(
+            os.path.basename(opt_warning.filename),
+            os.path.basename(eager_warning.filename),
+        )
+        self.assertEqual(opt_warning.lineno, eager_warning.lineno)
+
+    def test_dont_reorder_warnings_inside_catch_warnings_by_default(self):
+        def helper():
+            warnings.warn("moo")
+
+        def f(x):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                helper()
+                return x + len(w)
+
+        counters.clear()
+        x = torch.ones(3, 3)
+        opt_f = torch.compile(backend="eager")(f)
+        opt_out = opt_f(x)
+
+        self.assertTrue(same(x + 1, opt_out))
+        self.assertGreaterEqual(len(counters["graph_break"]), 1)
+
+    def test_dont_reorder_warnings_inside_assert_warns_by_default(self):
+        def helper():
+            warnings.warn("moo", FutureWarning)
+
+        def f(x):
+            with self.assertWarnsRegex(FutureWarning, "moo"):
+                helper()
+            return x + 1
+
+        counters.clear()
+        x = torch.ones(3, 3)
+        opt_f = torch.compile(backend="eager")(f)
+        opt_out = opt_f(x)
+
+        self.assertTrue(same(x + 1, opt_out))
+        self.assertEqual(len(counters["graph_break"]), 1)
+
+    def test_tensor_scalar_warnings_require_explicit_reorder(self):
+        def f(x):
+            warnings.warn(f"{x.sum().item()}")
+            return x + 1
+
+        with (
+            torch._dynamo.config.patch(capture_scalar_outputs=True),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Attempted to call function marked as skipped",
+            ),
+        ):
+            torch.compile(backend="eager", fullgraph=True)(f)(torch.ones(3, 3))
+
+    def test_non_default_warning_stacklevel_requires_explicit_reorder(self):
+        def f(x):
+            warnings.warn("moo", stacklevel=2)
+            return x + 1
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Attempted to call function marked as skipped",
+        ):
+            torch.compile(backend="eager", fullgraph=True)(f)(torch.ones(3, 3))
+
+    def test_reorder_warning_category_none_by_default(self):
+        def f(x):
+            warnings.warn("moo", category=None)
+            return x + 1
+
+        x = torch.ones(3, 3)
+        opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            opt_out = opt_f(x)
+
+        self.assertTrue(same(x + 1, opt_out))
+        self.assertEqual([str(i.message) for i in w], ["moo"])
+        self.assertIs(w[0].category, UserWarning)
 
     def test_tensor_warnings_still_require_explicit_reorder(self):
         def f(x):
