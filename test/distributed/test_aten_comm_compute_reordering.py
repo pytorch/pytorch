@@ -39,7 +39,7 @@ def estimate_aten_runtime(fx_node, override_size=None, compute_multiplier=1.0):
         return None
 
 
-device_type = str(get_devtype())
+device_type = get_devtype().type
 
 
 def apply_reordering_and_get_graph(graph, out_li) -> None:
