@@ -6,7 +6,6 @@ import ctypes
 import json
 import logging
 import os
-import queue
 import struct
 import threading
 import time
@@ -290,11 +289,6 @@ class CuptiMonitor:
 
         self._lock = threading.Lock()
         self._processing_done = threading.Condition(self._lock)
-        self._free_buffers: list[int] = []
-        self._buffer_keepalive: dict[int, Any] = {}
-        self._completed_queue: queue.SimpleQueue[tuple[int, int, int, int]] = (
-            queue.SimpleQueue()
-        )
         self._started = False
         self._callbacks_registered = False
         self._enabled_activities: set[int] = set()
@@ -320,76 +314,14 @@ class CuptiMonitor:
 
         self._raw_buffers_fp = None
 
-        self._buffers_requested = 0
         self._buffers_completed = 0
+        # Snapshot of the native pool size taken before stop() frees it, so
+        # stats() stays meaningful after the monitor has been stopped.
+        self._final_allocated_buffers = 0
         self._valid_bytes = 0
-        self._max_outstanding = 0
         self._outstanding_warned = False
         self._dropped_records = 0
         self._raw_chunk_count = 0
-
-        req_type = ctypes.CFUNCTYPE(
-            None,
-            ctypes.POINTER(ctypes.c_void_p),
-            ctypes.POINTER(ctypes.c_size_t),
-            ctypes.POINTER(ctypes.c_size_t),
-        )
-        comp_type = ctypes.CFUNCTYPE(
-            None,
-            ctypes.c_void_p,
-            ctypes.c_uint32,
-            ctypes.c_void_p,
-            ctypes.c_size_t,
-            ctypes.c_size_t,
-        )
-
-        @req_type
-        def request_cb(buffer_ptr, size_ptr, max_records_ptr):
-            with self._lock:
-                if self._free_buffers:
-                    ptr = self._free_buffers.pop()
-                else:
-                    arr = (ctypes.c_uint8 * self.buffer_size)()
-                    ptr = ctypes.addressof(arr)
-                    self._buffer_keepalive[ptr] = arr
-                self._buffers_requested += 1
-                outstanding = self._buffers_requested - self._buffers_completed
-                self._max_outstanding = max(self._max_outstanding, outstanding)
-                warn_backpressure = (
-                    outstanding >= _OUTSTANDING_WARN_THRESHOLD
-                    and not self._outstanding_warned
-                )
-                if warn_backpressure:
-                    self._outstanding_warned = True
-
-            buffer_ptr[0] = ptr
-            size_ptr[0] = self.buffer_size
-            max_records_ptr[0] = 0
-
-            if warn_backpressure:
-                logger.warning(
-                    "CUPTI monitor has %d outstanding activity buffers; the "
-                    "processing worker is not keeping up with CUPTI, so memory "
-                    "use will grow. Reduce traced activity or buffer size.",
-                    outstanding,
-                )
-
-        @comp_type
-        def complete_cb(ctx, stream_id, buffer, size, valid_size):
-            with self._lock:
-                self._buffers_completed += 1
-                self._valid_bytes += int(valid_size)
-            self._completed_queue.put(
-                (
-                    int(ctx) if ctx else 0,
-                    int(stream_id),
-                    int(buffer),
-                    int(valid_size),
-                )
-            )
-
-        self._request_cb = request_cb
-        self._complete_cb = complete_cb
 
     def _setup_prototypes(self) -> None:
         self._lib.cuptiGetVersion.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
@@ -471,19 +403,19 @@ class CuptiMonitor:
     def register_callbacks(self) -> None:
         if self._callbacks_registered:
             return
+        request_addr = _PY_PROFILER._cupti_monitor_buffer_request_callback_address()
+        complete_addr = _PY_PROFILER._cupti_monitor_buffer_complete_callback_address()
         self._check(
             self._lib.cuptiActivityRegisterCallbacks(
-                ctypes.cast(self._request_cb, ctypes.c_void_p),
-                ctypes.cast(self._complete_cb, ctypes.c_void_p),
+                ctypes.c_void_p(request_addr),
+                ctypes.c_void_p(complete_addr),
             ),
             "cuptiActivityRegisterCallbacks",
         )
         self._callbacks_registered = True
 
     def register_timestamp_callback(self) -> None:
-        callback_addr = getattr(  # noqa: B009
-            _PY_PROFILER, "_cupti_approximate_time_callback_address"
-        )()
+        callback_addr = _PY_PROFILER._cupti_approximate_time_callback_address()
         self._check(
             self._lib.cuptiActivityRegisterTimestampCallback(
                 ctypes.c_void_p(callback_addr)
@@ -495,15 +427,13 @@ class CuptiMonitor:
     def start(self) -> None:
         if self._started:
             raise RuntimeError("CUPTI monitor is already started")
+        _PY_PROFILER._cupti_monitor_reset_buffers()
+        _PY_PROFILER._cupti_monitor_configure_buffers(self.buffer_size)
         self.register_callbacks()
-        self._time_converter = getattr(  # noqa: B009
-            _PY_PROFILER, "_ApproximateClockToUnixTimeConverter"
-        )()
+        self._time_converter = _PY_PROFILER._ApproximateClockToUnixTimeConverter()
         self.register_timestamp_callback()
         self._session_start_unix_ns = time.time_ns()
-        self._session_start_approx_ns = int(
-            getattr(_PY_PROFILER, "_get_approximate_time")()  # noqa: B009
-        )
+        self._session_start_approx_ns = int(_PY_PROFILER._get_approximate_time())
         self._session_start_calibrated_unix_ns = self._convert_time(
             self._session_start_approx_ns
         )
@@ -551,6 +481,8 @@ class CuptiMonitor:
                 logger.warning("CUPTI monitor flush thread did not stop within 5s")
             self._flush_thread = None
         self._worker_stop.set()
+        # Unblock the decode thread waiting in get_completed().
+        _PY_PROFILER._cupti_monitor_shutdown_buffers()
         if self._worker_thread is not None:
             self._worker_thread.join(timeout=5.0)
             if self._worker_thread.is_alive():
@@ -559,6 +491,8 @@ class CuptiMonitor:
         if self._worker_error is not None:
             raise RuntimeError("CUPTI monitor worker failed") from self._worker_error
         self._close_outputs()
+        self._final_allocated_buffers = _PY_PROFILER._cupti_monitor_allocated_buffers()
+        _PY_PROFILER._cupti_monitor_reset_buffers()
         self._time_converter = None
         self._timestamp_callback = None
 
@@ -648,7 +582,7 @@ class CuptiMonitor:
         with self._lock:
             self._trace_window_events = []
             self._trace_window_start_ns = self._convert_time(
-                int(getattr(_PY_PROFILER, "_get_approximate_time")())  # noqa: B009
+                int(_PY_PROFILER._get_approximate_time())
             )
             self._trace_window_active = True
 
@@ -694,11 +628,11 @@ class CuptiMonitor:
             return {
                 "started": self._started,
                 "activities": list(self._enabled_activities),
-                "buffers_requested": self._buffers_requested,
                 "buffers_completed": self._buffers_completed,
-                "buffers_allocated": len(self._buffer_keepalive),
-                "buffers_free": len(self._free_buffers),
-                "max_outstanding_buffers": self._max_outstanding,
+                "buffers_allocated": _PY_PROFILER._cupti_monitor_allocated_buffers()
+                if self._started
+                else self._final_allocated_buffers,
+                "buffers_pending": _PY_PROFILER._cupti_monitor_pending_buffers(),
                 "valid_total_mb": self._valid_bytes / (1024 * 1024),
                 "dropped_records": self._dropped_records,
                 "raw_chunks_written": self._raw_chunk_count,
@@ -794,36 +728,51 @@ class CuptiMonitor:
     def _worker_loop(self) -> None:
         try:
             while True:
-                if self._worker_stop.is_set():
-                    try:
-                        item = self._completed_queue.get_nowait()
-                    except queue.Empty:
-                        break
-                else:
-                    try:
-                        item = self._completed_queue.get(timeout=0.1)
-                    except queue.Empty:
-                        continue
-                ctx, stream_id, buffer_ptr, valid_size = item
+                # Blocks with the GIL released until a buffer is ready; returns
+                # None once stop() calls _cupti_monitor_shutdown_buffers().
+                item = _PY_PROFILER._cupti_monitor_get_completed()
+                if item is None:
+                    break
+                buffer_ptr, valid_size, ctx, stream_id = item
                 with self._lock:
                     self._processing_inflight += 1
+                    self._buffers_completed += 1
+                    self._valid_bytes += int(valid_size)
                 try:
                     self._process_completed_buffer(
-                        ctx, stream_id, buffer_ptr, valid_size
+                        int(ctx), int(stream_id), int(buffer_ptr), int(valid_size)
                     )
                 finally:
+                    _PY_PROFILER._cupti_monitor_return_buffer(int(buffer_ptr))
                     with self._processing_done:
                         self._processing_inflight -= 1
                         self._processing_done.notify_all()
+                self._maybe_warn_backpressure()
         except BaseException as exc:
             self._worker_error = exc
             self._worker_stop.set()
+
+    def _maybe_warn_backpressure(self) -> None:
+        if self._outstanding_warned:
+            return
+        allocated = _PY_PROFILER._cupti_monitor_allocated_buffers()
+        if allocated >= _OUTSTANDING_WARN_THRESHOLD:
+            self._outstanding_warned = True
+            logger.warning(
+                "CUPTI monitor allocated %d activity buffers; the processing "
+                "worker is not keeping up with CUPTI, so memory use will grow. "
+                "Reduce traced activity or buffer size.",
+                allocated,
+            )
 
     def _wait_for_processing_idle(self, timeout_s: float) -> None:
         deadline = time.time() + timeout_s
         with self._processing_done:
             while True:
-                if self._completed_queue.empty() and self._processing_inflight == 0:
+                if (
+                    _PY_PROFILER._cupti_monitor_pending_buffers() == 0
+                    and self._processing_inflight == 0
+                ):
                     return
                 remaining = deadline - time.time()
                 if remaining <= 0:
@@ -841,8 +790,6 @@ class CuptiMonitor:
             if rc == _CUPTI_SUCCESS:
                 self._dropped_records += int(dropped.value)
             self._write_raw_buffer(ctx, stream_id, buffer_ptr, valid_size)
-            with self._lock:
-                self._free_buffers.append(buffer_ptr)
             return
 
         record_ptr = ctypes.c_void_p()
@@ -874,9 +821,6 @@ class CuptiMonitor:
         )
         if rc == _CUPTI_SUCCESS:
             self._dropped_records += int(dropped.value)
-
-        with self._lock:
-            self._free_buffers.append(buffer_ptr)
 
     def _filter_trace_window_events(
         self, events: list[dict[str, Any]], start_ns: int
@@ -1098,7 +1042,7 @@ class CuptiMonitor:
     ) -> None:
         if self._raw_buffers_fp is None:
             raise RuntimeError("raw buffer file is not open")
-        approx_ns = int(getattr(_PY_PROFILER, "_get_approximate_time")())  # noqa: B009
+        approx_ns = int(_PY_PROFILER._get_approximate_time())
         unix_ns = self._convert_time(approx_ns)
         header = _RAW_CHUNK_HEADER.pack(
             _RAW_CHUNK_MAGIC,
