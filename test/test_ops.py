@@ -31,10 +31,13 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
     OpDTypes,
     ops,
+    skip,
     skipCUDAIfNotRocm,
     skipMeta,
     skipMPS,
+    skipOps,
     skipXPU,
+    xfail,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -49,11 +52,8 @@ from torch.testing._internal.common_methods_invocations import (
     python_ref_db,
     ReductionOpInfo,
     ReductionPythonRefInfo,
-    skip,
-    skipOps,
     SpectralFuncInfo,
     UnaryUfuncInfo,
-    xfail,
 )
 from torch.testing._internal.common_utils import (
     clone_input_helper,
@@ -189,7 +189,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("nn.functional.softplus"),
     xfail("nn.functional.softshrink"),
     xfail("ormqr"),
-    xfail("qr"),
     xfail("renorm"),
     xfail("round"),
     xfail("round", "decimals_0"),
@@ -273,14 +272,10 @@ class TestCommon(TestCase):
             "aten.max.default",
             "aten.max.dim",
             "aten.max.dim_max",
-            "aten.max.names_dim",
-            "aten.max.names_dim_max",
             "aten.max.unary_out",
             "aten.min.default",
             "aten.min.dim",
             "aten.min.dim_min",
-            "aten.min.names_dim",
-            "aten.min.names_dim_min",
             "aten.min.unary_out",
             # not pointwise
             "aten.isin.Tensor_Tensor",
@@ -290,8 +285,6 @@ class TestCommon(TestCase):
             "aten.isin.Scalar_Tensor",
             "aten.isin.Scalar_Tensor_out",
             "aten.mode.default",
-            "aten.mode.dimname",
-            "aten.mode.dimname_out",
             "aten.mode.values",
         )
 
@@ -478,8 +471,7 @@ class TestCommon(TestCase):
             and op.formatted_name
             in ("signal_windows_exponential", "signal_windows_bartlett")
             and dtype == torch.float64
-            and ("cuda" in device or "xpu" in device)
-            or "cpu" in device
+            and ("cpu" in device or "cuda" in device or "xpu" in device)
         ):
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
@@ -1830,11 +1822,7 @@ class TestCommon(TestCase):
     # of other concrete devices (e.g. CPU and CUDA).
     @onlyCPU
     @ops([op for op in op_db if op.supports_out], allowed_dtypes=(torch.float32,))
-    @skipOps(
-        "TestCommon",
-        "test_meta_consistency_out_dtype_mismatch",
-        meta_consistency_out_dtype_mismatch_xfails,
-    )
+    @skipOps(meta_consistency_out_dtype_mismatch_xfails)
     @skipIfTorchDynamo("meta device runs only on eager")
     def test_meta_consistency_out_dtype_mismatch(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
@@ -2418,6 +2406,15 @@ class _TestTagsMode(TorchDispatchMode):
 @unMarkDynamoStrictTest
 class TestTags(TestCase):
     @onlyCPU
+    @skipOps(
+        {
+            skip("sparse.sampled_addmm"),
+            skip("sparse.mm", variant_name="reduce"),
+            skip("nn.functional.max_pool1d"),
+            skip("to_sparse"),
+            skip("bmm", variant_name="triton_optimized"),
+        }
+    )
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_tags(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2494,7 +2491,6 @@ class TestRefsOpsInfo(TestCase):
         "_refs.index_add_",
         "_refs.index_copy_",
         "_refs.index_fill_",
-        "_refs.native_group_norm",
     }
 
     not_in_decomp_table = {
@@ -2733,6 +2729,8 @@ fake_backward_skips = {
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     skip("nn.functional.ctc_loss"),
+    xfail("index_fill"),
+    skip("bmm", variant_name="triton_optimized"),
 }
 
 fake_autocast_backward_xfails = {
@@ -2868,6 +2866,7 @@ class TestFakeTensor(TestCase):
                     allow_dynamic_output_shape_mode, match_results=False
                 )
 
+    @skipOps({skip("bmm", variant_name="triton_optimized")})
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_pointwise_ops(self, device, dtype, op):
         name = op.name
@@ -2921,10 +2920,24 @@ class TestFakeTensor(TestCase):
                 with mode:
                     op(input, *args, **kwargs)
 
+    @skipOps(
+        {
+            xfail("item"),
+            skip("native_batch_norm"),
+            skip("bmm", variant_name="triton_optimized"),
+        }
+    )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
         self._test_fake_helper(device, dtype, op, contextlib.nullcontext)
 
+    @skipOps(
+        {
+            xfail("item"),
+            skip("native_batch_norm"),
+            skip("bmm", variant_name="triton_optimized"),
+        }
+    )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake_autocast(self, device, dtype, op):
         device_type = torch.device(device).type
@@ -2973,19 +2986,13 @@ class TestFakeTensor(TestCase):
 
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(
-        "TestFakeTensor", "test_fake_crossref_backward_no_amp", fake_backward_xfails
-    )
+    @skipOps(fake_backward_xfails | {skip("sparse.sampled_addmm")})
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(
-        "TestFakeTensor",
-        "test_fake_crossref_backward_amp",
-        fake_backward_xfails | fake_autocast_backward_xfails,
-    )
+    @skipOps(fake_backward_xfails | fake_autocast_backward_xfails)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 

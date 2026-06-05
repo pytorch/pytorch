@@ -2,6 +2,7 @@
   patterns:
   - .ci/caffe2/*
   - .ci/onnx/*
+  - .ci/docker/common/install_onnx.sh
   - aten/src/ATen/core/interned_strings.h
   - benchmarks/dynamo/**
   - docs/source/onnx.rst
@@ -37,26 +38,10 @@
   - Lint
   - pull
 
-- name: OSS CI / Auto Reviewer Routing
-  # auto-request-reviewers operates under pull_request_target with write
-  # permissions; the compute/request job split is what keeps it safe.
-  # Restrict to a small set of security-aware approvers.
-  patterns:
-  - .github/workflows/auto-request-reviewers.yml
-  - .github/scripts/match_reviewers.py
-  approved_by:
-  - albanD
-  - pytorch/pytorch-dev-infra
-  mandatory_checks_name:
-  - EasyCLA
-  - Lint
-  - pull
-
 - name: OSS CI
   patterns:
   - .github/**
   - .ci/**
-  - "-.ci/docker/**"
   - scripts/**
   - tools/**
   approved_by:
@@ -73,6 +58,7 @@
   - .github/ci_commit_pins/vision.txt
   - .github/ci_commit_pins/torchdynamo.txt
   - .github/ci_commit_pins/vllm.txt
+  - .ci/docker/ci_commit_pins/triton.txt
   approved_by:
   - pytorchbot
   mandatory_checks_name:
@@ -91,6 +77,16 @@
   - Lint
   - pull
   - slow
+
+- name: OSS CI /pytorchbot / Executorch
+  patterns:
+  - .ci/docker/ci_commit_pins/executorch.txt
+  approved_by:
+  - pytorchbot
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
 
 - name: OSS CI / pytorchbot / XLA
   patterns:
@@ -474,6 +470,7 @@
   patterns:
   - torch/_dynamo/**
   - torch/csrc/dynamo/**
+  - test/cpython/**
   - test/dynamo/**
   - test/dynamo_expected_failures/**
   - test/dynamo_skips/**
@@ -481,6 +478,8 @@
   - test/inductor_skips/**
   approved_by:
   - guilhermeleobas
+  - rtimpe
+  - trichmo
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -553,7 +552,6 @@
 - name: Metamates
   patterns:
   - '*'
-  - "-.ci/docker/**"
   approved_by:
   - 8Keep
   - aditvenk
@@ -628,6 +626,7 @@
   - slayton58
   - soulitzer
   - StellarrZ
+  - svekars
   - tianrengao
   - tianyu-l
   - tugsbayasgalan
@@ -653,7 +652,6 @@
 - name: Core Reviewers
   patterns:
   - '*'
-  - "-.ci/docker/**"
   approved_by:
   - mruberry
   - lezcano

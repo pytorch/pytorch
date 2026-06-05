@@ -1120,7 +1120,7 @@ def _get_forward_arg_names(
             names.append(name)
     # order of kwargs matters for input spec
     if kwargs:
-        names.extend([kwarg for kwarg, _ in kwargs.items()])
+        names.extend(kwargs.keys())
 
     return names
 
@@ -1800,12 +1800,13 @@ def _export_to_aten_ir_make_fx(
         with enable_python_dispatcher():
             ctx = nullcontext()
             non_strict_root = getattr(mod, "_export_root", None)
+            assigned_buffers: dict[str, str] = {}
+            hook = None
             if non_strict_root is not None:
                 ctx = _detect_attribute_assignment(non_strict_root)  # type: ignore[assignment]
 
                 # For any buffer that is assigned, we want to associate it to the final proxy node
                 # that it is assigned to. This node can then be copied into the buffer.
-                assigned_buffers: dict[str, str] = {}
                 hook = register_buffer_assignment_hook(
                     non_strict_root, assigned_buffers
                 )
@@ -1906,16 +1907,21 @@ def _export_to_aten_ir_make_fx(
                 finally:
                     torch._C._set_grad_enabled(old_state)
 
-            with (
-                ctx,
-                override_getattribute_for_subclasses(flat_args),
-                _maybe_restore_grad_state(),
-            ):
-                gm = make_fx(
-                    wrapped_fn,
-                    record_module_stack=True,
-                    pre_dispatch=True,
-                )(*flat_args)
+            try:
+                with (
+                    ctx,
+                    override_getattribute_for_subclasses(flat_args),
+                    _maybe_restore_grad_state(),
+                ):
+                    gm = make_fx(
+                        wrapped_fn,
+                        record_module_stack=True,
+                        pre_dispatch=True,
+                    )(*flat_args)
+            finally:
+                if hook is not None:
+                    hook.remove()
+                    hook = None
 
             if non_strict_root is not None:
                 input_names = _graph_input_names(gm)
@@ -1926,7 +1932,7 @@ def _export_to_aten_ir_make_fx(
                 }
                 output_node = list(gm.graph.nodes)[-1]
                 # We copy nodes corresponding to buffer assignments to buffers in the graph.
-                for buf, name in assigned_buffers.items():  # type: ignore[possibly-undefined]
+                for buf, name in assigned_buffers.items():
                     buf_node = _find_node(gm, buffer_input_names[buf])
                     name_node = _find_node(gm, name)
                     with gm.graph.inserting_before(output_node):
@@ -1936,8 +1942,6 @@ def _export_to_aten_ir_make_fx(
                             args=(buf_node, name_node),
                         )
                         new_node.meta = name_node.meta
-
-                hook.remove()  # type: ignore[possibly-undefined]
 
             def _is_impure(node):
                 if node.op == "call_function" and node.target in (
