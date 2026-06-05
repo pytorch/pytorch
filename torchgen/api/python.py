@@ -1469,6 +1469,16 @@ def dispatch_lambda_exprs(
                 f"{f.func}: incomplete tensor options args: {tensor_options_args_names}"
             )
 
+        maybe_initialize_device = (
+            """\
+if (!at::impl::tensor_has_dispatch(self)) {
+  torch::utils::maybe_initialize_device(options);
+}
+"""
+            if ps.method
+            else "torch::utils::maybe_initialize_device(options);\n"
+        )
+
         inits.append(
             f"""\
 const auto options = TensorOptions()
@@ -1477,7 +1487,7 @@ const auto options = TensorOptions()
     .layout({arg_parser_outputs["layout"].expr})
     .requires_grad({arg_parser_outputs["requires_grad"].expr})
     .pinned_memory({arg_parser_outputs["pin_memory"].expr});
-torch::utils::maybe_initialize_device(options);
+{maybe_initialize_device}\
 """
         )
         lambda_args_exprs["options"] = "options"
