@@ -3225,6 +3225,89 @@ class CPUReproTests(TestCase):
                 self.common(bitwise_fn, _args)
                 check_metrics_vec_kernel_count(1)
 
+    def test_bitwise_rejects_float_dtype_before_codegen(self):
+        bitwise_dtype_error = "only implemented for integer and Boolean tensors"
+        shift_dtype_error = "only implemented for integer tensors"
+        int_arg = torch.tensor([-1, -2, 3], dtype=torch.int32)
+
+        def check(fn, *args, dtype_error=bitwise_dtype_error):
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(InductorError, dtype_error) as ctx:
+                torch.compile(fn, backend="inductor", fullgraph=True)(*args)
+            self.assertNotIn("CppCompileError", str(ctx.exception))
+
+        for dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            float_arg = torch.tensor([-1, -2, 3], dtype=dtype)
+            other_float_arg = torch.tensor([1, 0, 3], dtype=dtype)
+
+            check(torch.bitwise_not, float_arg)
+
+            for op in (torch.bitwise_and, torch.bitwise_or, torch.bitwise_xor):
+                check(op, float_arg, other_float_arg)
+                check(lambda x, op=op: op(x, 1), float_arg)
+                check(lambda x, op=op: op(x, 1.0), int_arg)
+                check(lambda x, op=op: op(1, x), float_arg)
+
+                inplace_name = f"{op.__name__}_"
+
+                def inplace_op(x, y, inplace_name=inplace_name):
+                    x = x.clone()
+                    return getattr(x, inplace_name)(y)
+
+                check(inplace_op, float_arg, other_float_arg)
+
+                def inplace_scalar_op(x, other, inplace_name=inplace_name):
+                    x = x.clone()
+                    return getattr(x, inplace_name)(other)
+
+                check(inplace_scalar_op, float_arg, 1)
+
+            for op in (torch.bitwise_left_shift, torch.bitwise_right_shift):
+                check(op, float_arg, other_float_arg, dtype_error=shift_dtype_error)
+                check(
+                    lambda x, op=op: op(x, 1),
+                    float_arg,
+                    dtype_error=shift_dtype_error,
+                )
+                check(
+                    lambda x, op=op: op(x, 1.0),
+                    int_arg,
+                    dtype_error=shift_dtype_error,
+                )
+                check(
+                    lambda x, op=op: op(1, x),
+                    float_arg,
+                    dtype_error=shift_dtype_error,
+                )
+
+                inplace_name = f"{op.__name__}_"
+
+                def inplace_op(x, y, inplace_name=inplace_name):
+                    x = x.clone()
+                    return getattr(x, inplace_name)(y)
+
+                check(
+                    inplace_op,
+                    float_arg,
+                    other_float_arg,
+                    dtype_error=shift_dtype_error,
+                )
+
+                def inplace_scalar_op(x, other, inplace_name=inplace_name):
+                    x = x.clone()
+                    return getattr(x, inplace_name)(other)
+
+                check(
+                    inplace_scalar_op,
+                    float_arg,
+                    1,
+                    dtype_error=shift_dtype_error,
+                )
+
+        bool_arg = torch.tensor([True, False, True])
+        for op in (torch.bitwise_left_shift, torch.bitwise_right_shift):
+            check(op, bool_arg, bool_arg, dtype_error=shift_dtype_error)
+
     @requires_vectorization
     def test_vec_randn(self):
         funcs = [torch.randn, torch.rand, torch.randint]
