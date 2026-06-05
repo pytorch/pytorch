@@ -25,6 +25,7 @@ import functools
 import getpass
 import inspect
 import itertools
+import keyword
 import logging
 import os
 import re
@@ -183,7 +184,12 @@ class NNModuleToString:
     def can_convert_to_string(gm: torch.fx.GraphModule) -> bool:
         cant_convert = set()
         for _, module in gm.named_children():
-            if type(module) not in NNModuleToString.safe_reprs:
+            if isinstance(module, torch.fx.GraphModule):
+                continue
+            if (
+                type(module) not in NNModuleToString.safe_reprs
+                and not NNModuleToString._is_valid_python_expr(module.__repr__())
+            ):
                 cant_convert.add(module)
 
         if len(cant_convert) > 0:
@@ -192,22 +198,62 @@ class NNModuleToString:
         return True
 
     @staticmethod
-    def convert(gm: torch.fx.GraphModule) -> str:
+    def _is_valid_python_expr(value: str) -> bool:
+        try:
+            compile(value, "<module_repr>", "eval")
+        except SyntaxError:
+            return False
+        return True
+
+    @staticmethod
+    def _to_class_name(
+        parent_class_name: str, module_idx: int, module_name: str
+    ) -> str:
+        identifier = re.sub(r"\W", "_", module_name)
+        if not identifier or identifier[0].isdigit():
+            identifier = f"_{identifier}"
+        if keyword.iskeyword(identifier):
+            identifier = f"{identifier}_"
+        return f"{parent_class_name}_{module_idx}_{identifier}"
+
+    @staticmethod
+    def _convert_graph_module(gm: torch.fx.GraphModule, class_name: str) -> str:
         from torch.nn.modules.module import _addindent
 
         tab = " " * 4
+        submodule_definitions = []
 
         model_str = textwrap.dedent(
-            """
+            f"""
             from torch.nn import *
-            class Repro(torch.nn.Module):
+            class {class_name}(torch.nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
             """
         )
 
-        for module_name, module in gm.named_children():
-            module_str = f"{module.__repr__()}"
+        for module_idx, (module_name, module) in enumerate(gm.named_children()):
+            if isinstance(module, torch.fx.GraphModule):
+                submodule_class_name = NNModuleToString._to_class_name(
+                    class_name, module_idx, module_name
+                )
+                submodule_definitions.append(
+                    NNModuleToString._convert_graph_module(module, submodule_class_name)
+                )
+                module_str = f"{submodule_class_name}()"
+            else:
+                module_str = f"{module.__repr__()}"
+                if not NNModuleToString._is_valid_python_expr(module_str):
+                    log.warning(
+                        "Could not serialize repr of submodule %s with type %s",
+                        module_name,
+                        type(module),
+                    )
+                    model_str += (
+                        f"{tab * 2}# {module_name} omitted because its repr is "
+                        "not valid Python source\n"
+                    )
+                    module_str = "torch.nn.Module()"
             # module should be a core torch.nn.Module, so all parameters
             # should be on the same device.
             example_param = next(module.parameters(), None)
@@ -257,7 +303,11 @@ class NNModuleToString:
         #         model_str += f"    {attr} = {val!r}\n"
 
         model_str += f"{_addindent(gm.code, 4)}\n"
-        return model_str
+        return "\n".join([*submodule_definitions, model_str])
+
+    @staticmethod
+    def convert(gm: torch.fx.GraphModule) -> str:
+        return NNModuleToString._convert_graph_module(gm, "Repro")
 
 
 @functools.cache  # subprocess is expensive
