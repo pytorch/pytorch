@@ -23,9 +23,12 @@ serialized format:
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import logging
 import os
+import threading
+import weakref
 from functools import partial
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
@@ -76,6 +79,11 @@ if TYPE_CHECKING:
     from .triton_bundler import TritonBundle
 
 log = logging.getLogger(__name__)
+# Dynamo can install a cache-equivalent CompiledFxGraph from another Python
+# thread. Keep a weak per-thread graph lookup by FX graph cache key so the later
+# graph object does not replace an earlier thread's callable, without extending
+# generated runner lifetimes.
+_compiled_fx_graph_current_callables = threading.local()
 
 
 @dataclasses.dataclass
@@ -468,7 +476,8 @@ class CompiledFxGraph(OutputCode):
     to support FxGraph caching.
     """
 
-    current_callable: Callable[..., Any] | None
+    _base_callable: Callable[..., Any] | None
+    _current_callable_tls: threading.local
     recursively_apply_fns: Callable[..., Any] | None
     compiled_fn_runner: Any | None
     cache_key: str
@@ -510,6 +519,7 @@ class CompiledFxGraph(OutputCode):
     _triton_bundle: TritonBundle | None = None
     _wrap_compiled_regions: bool = False
     _defers_input_alignment: bool = False
+    _current_callable_cleared: bool = False
     _compile_context: CompileContext | None = dataclasses.field(
         default=None, init=False, repr=False, compare=False
     )
@@ -518,6 +528,104 @@ class CompiledFxGraph(OutputCode):
     # (including aliasing) from the input shapes.
     _original_gm: torch.fx.GraphModule | None = None
     _serialized_original_gm: bytes | None = None
+
+    @staticmethod
+    def _current_callable_registry() -> dict[str, weakref.ReferenceType[Any]]:
+        registry = getattr(_compiled_fx_graph_current_callables, "registry", None)
+        if registry is None:
+            registry = {}
+            _compiled_fx_graph_current_callables.registry = registry
+        return registry
+
+    def _current_callable_cache_key(self) -> str | None:
+        return getattr(self, "_fx_graph_cache_key", None)
+
+    def _current_callable_state(self) -> threading.local:
+        if not hasattr(self, "_current_callable_tls"):
+            self._current_callable_tls = threading.local()
+        return self._current_callable_tls
+
+    def _current_callable_without_registry(self) -> Callable[..., Any] | None:
+        if getattr(self, "_current_callable_cleared", False):
+            return None
+        local_state = self._current_callable_state()
+        value = getattr(local_state, "value", None)
+        owner = getattr(local_state, "owner", None)
+        if value is not None and owner is None:
+            return value
+        return getattr(self, "_base_callable", None)
+
+    def _lookup_current_callable_registry(self) -> Callable[..., Any] | None:
+        key = self._current_callable_cache_key()
+        if key is None:
+            return None
+
+        registry = self._current_callable_registry()
+        registered_graph_ref = registry.get(key)
+        if registered_graph_ref is None:
+            return None
+
+        registered_graph = registered_graph_ref()
+        if registered_graph is None:
+            registry.pop(key, None)
+            return None
+
+        value = registered_graph._current_callable_without_registry()
+        if value is None:
+            registry.pop(key, None)
+            return None
+
+        local_state = self._current_callable_state()
+        local_state.value = value
+        if registered_graph is not self:
+            local_state.owner = registered_graph
+        else:
+            local_state.owner = None
+        return value
+
+    def _set_current_callable(self, value: Callable[..., Any] | None) -> None:
+        if value is None:
+            if (key := self._current_callable_cache_key()) is not None:
+                registry = self._current_callable_registry()
+                registry_value = registry.get(key)
+                if registry_value is not None and registry_value() is self:
+                    registry.pop(key, None)
+            self._base_callable = None
+            self._current_callable_tls = threading.local()
+            self._current_callable_cleared = True
+            return
+
+        self._base_callable = value
+        self._current_callable_cleared = False
+        local_state = self._current_callable_state()
+        local_state.value = value
+        local_state.owner = None
+        if (key := self._current_callable_cache_key()) is not None:
+            self._current_callable_registry()[key] = weakref.ref(self)
+
+    def _register_current_callable(self) -> None:
+        if (
+            self._current_callable_without_registry() is not None
+            and (key := self._current_callable_cache_key()) is not None
+        ):
+            self._current_callable_registry()[key] = weakref.ref(self)
+
+    @property
+    def current_callable(self) -> Callable[..., Any] | None:
+        if getattr(self, "_current_callable_cleared", False):
+            return None
+
+        value = getattr(self._current_callable_state(), "value", None)
+        if value is not None:
+            return value
+        value = self._lookup_current_callable_registry()
+        if value is not None:
+            return value
+        return getattr(self, "_base_callable", None)
+
+    @current_callable.setter
+    def current_callable(self, value: Callable[..., Any] | None) -> None:
+        self._set_current_callable(value)
 
     def __init__(
         self,
@@ -540,7 +648,7 @@ class CompiledFxGraph(OutputCode):
         inductor_provenance_mapping_str: str | None = None,
         inductor_provenance_stack_traces_str: str | None = None,
     ) -> None:
-        self.current_callable = current_callable
+        self._set_current_callable(current_callable)
         self.compiled_fn_runner = compiled_fn_runner
         self.recursively_apply_fns = (
             compiled_fn_runner.recursively_apply_fns
@@ -719,7 +827,8 @@ class CompiledFxGraph(OutputCode):
         )
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
-        assert self.current_callable is not None
+        current_callable = self.current_callable
+        assert current_callable is not None
 
         if (
             torch._inductor.debug.RECORD_GRAPH_EXECUTION
@@ -758,9 +867,9 @@ class CompiledFxGraph(OutputCode):
                             f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
                             keyword_values={"scope": "user_scope"},
                         ):
-                            return self.current_callable(inputs)
+                            return current_callable(inputs)
                     else:
-                        return self.current_callable(inputs)
+                        return current_callable(inputs)
                 finally:
                     get_runtime_metrics_context().finish()
                     if has_active_autotune_cache_bundler:
@@ -789,6 +898,8 @@ class CompiledFxGraph(OutputCode):
         This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
         The results of this function are *not* saved in the cache itself.
         """
+        self._register_current_callable()
+
         if config.graph_partition and _unstable_customized_partition_wrapper.wrapper:
             # Mechanically apply user-specified cudagraph wrappers without modification
             assert self.recursively_apply_fns is not None
@@ -943,6 +1054,46 @@ class CompiledFxGraph(OutputCode):
         # Note: _serialized_fx_graph is already in serializable form (SerializedGraphModule)
         # so it doesn't need to be cleared
 
+    def __getstate__(self) -> dict[str, Any]:
+        state = self.__dict__.copy()
+        state.pop("_current_callable_tls", None)
+        state["_base_callable"] = None
+        state["_current_callable_cleared"] = True
+        return state
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> CompiledFxGraph:
+        result = type(self).__new__(type(self))
+        memo[id(self)] = result
+
+        local_state = self._current_callable_state()
+        for key, value in self.__dict__.items():
+            if key != "_current_callable_tls":
+                setattr(result, key, copy.deepcopy(value, memo))
+
+        result._current_callable_tls = threading.local()
+        if not getattr(result, "_current_callable_cleared", False):
+            current_callable = getattr(local_state, "value", None)
+            if current_callable is not None:
+                result._current_callable_state().value = copy.deepcopy(
+                    current_callable, memo
+                )
+            elif result._base_callable is not None:
+                result._current_callable_state().value = result._base_callable
+
+        return result
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        current_callable = state.pop("current_callable", None)
+        state.pop("_current_callable_tls", None)
+        self.__dict__.update(state)
+        if "_base_callable" not in self.__dict__:
+            self._base_callable = current_callable
+        if "_current_callable_cleared" not in self.__dict__:
+            self._current_callable_cleared = self._base_callable is None
+        self._current_callable_tls = threading.local()
+        if self._base_callable is not None:
+            self._current_callable_state().value = self._base_callable
+
     def write_to_disk(self) -> str:
         from torch._dynamo.utils import counters
         from torch._inductor.codecache import get_path, write_atomic
@@ -973,7 +1124,7 @@ class CompiledFxGraph(OutputCode):
                     self.cache_linemap,
                     constants.unwrap(self),
                 )
-                self.current_callable = code_cache.call
+                self._set_current_callable(code_cache.call)
                 self.recursively_apply_fns = getattr(
                     code_cache, "recursively_apply_fns", None
                 )
