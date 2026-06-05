@@ -3,7 +3,7 @@
 import math
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import cast, NamedTuple
+from typing import Any, cast, NamedTuple
 
 import torch
 from torch import Tensor
@@ -28,6 +28,7 @@ from torch.distributed.tensor._ops.utils import (
     register_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
+    _defer_symbolic_equality_assert,
     _StridedShard,
     Partial,
     Placement,
@@ -39,6 +40,53 @@ from torch.distributed.tensor.placement_types import (
 aten = torch.ops.aten
 
 Shape = tuple[int, ...]
+
+
+def _explicit_unbacked_hint(value: object) -> int | None:
+    from torch.fx.experimental.symbolic_shapes import (
+        free_unbacked_symbols,
+        optimization_hint,
+    )
+
+    if not isinstance(value, torch.SymInt):
+        return None
+    shape_env = getattr(value.node, "shape_env", None)
+    if shape_env is None:
+        return None
+    unbacked_symbols = free_unbacked_symbols(value.node.expr)
+    if not unbacked_symbols or not unbacked_symbols.issubset(
+        shape_env.var_to_hint_override.keys()
+    ):
+        return None
+    return int(optimization_hint(value, fallback=None))
+
+
+def _split_factor_hint(value: object) -> int | None:
+    if isinstance(value, int):
+        return int(value)
+    return _explicit_unbacked_hint(value)
+
+
+def _split_factor_matches(expected: object, actual: object) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if expected is None:
+        return False
+    if guard_or_false(expected == actual):
+        return True
+    expected_hint = _split_factor_hint(expected)
+    actual_hint = _split_factor_hint(actual)
+    if expected_hint is None or actual_hint is None or expected_hint != actual_hint:
+        return False
+    if isinstance(expected, torch.SymInt):
+        _defer_symbolic_equality_assert(
+            expected, actual_hint, reason="_StridedShard split_factor match"
+        )
+    elif isinstance(actual, torch.SymInt):
+        _defer_symbolic_equality_assert(
+            actual, expected_hint, reason="_StridedShard split_factor match"
+        )
+    return True
 
 
 class ClaimedDim(NamedTuple):
@@ -393,7 +441,11 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     - in the above, input is flattened into a single dimension and then split
       into two separate dimensions with different sizes from the input.
     """
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+    from torch.fx.experimental.symbolic_shapes import (
+        free_symbols,
+        guard_or_false,
+        guard_or_true,
+    )
 
     from_nelem = prod(from_size)
     to_size = infer_size(from_nelem, normalize_sizes(to_size))
@@ -438,19 +490,50 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
             from_group_dim = []
         else:
             # produces ([1], [1]),  ([2], [2]), ([2,3], [6])
-            while guard_or_true(f != t):
-                if (
-                    t % f == 0 or t > f
+            while not guard_or_false(f == t):
+                if from_idx < from_len and (
+                    to_idx >= to_len
+                    or guard_or_false(t % f == 0)
+                    or guard_or_false(t > f)
                 ):  # for easier symbolic comparisons, e.g. u0*u1 > u0
                     nf = from_size[from_idx]
                     from_group_dim.append(from_idx)
                     from_idx += 1
                     f *= nf
-                else:
+                elif to_idx < to_len and (
+                    from_idx >= from_len
+                    or guard_or_false(f % t == 0)
+                    or guard_or_false(f > t)
+                    or (free_symbols(f) and not free_symbols(t))
+                ):
                     nt = to_size[to_idx]
                     to_group_shape.append(nt)
                     to_idx += 1
                     t *= nt
+                elif from_idx < from_len and free_symbols(t) and not free_symbols(f):
+                    nf = from_size[from_idx]
+                    from_group_dim.append(from_idx)
+                    from_idx += 1
+                    f *= nf
+                elif to_idx < to_len and from_idx < from_len:
+                    # With unbacked dimensions, neither divisibility nor
+                    # ordering may be provable without a data-dependent guard.
+                    # Fall back to one conservative reshape group over the
+                    # remaining contiguous dims; sharding propagation can then
+                    # replicate if the exact split is not statically known.
+                    while from_idx < from_len:
+                        nf = from_size[from_idx]
+                        from_group_dim.append(from_idx)
+                        from_idx += 1
+                        f *= nf
+                    while to_idx < to_len:
+                        nt = to_size[to_idx]
+                        to_group_shape.append(nt)
+                        to_idx += 1
+                        t *= nt
+                    break
+                else:
+                    break
 
         if len(to_group_shape) > 0:
             flattened = Flatten.new(
@@ -831,7 +914,7 @@ class _ViewShardingPropagator:
                 expected_sf = self._expected_split_factor(
                     cmd, current_dim, mesh_dim, placements
                 )
-                if expected_sf == placement.split_factor:
+                if _split_factor_matches(expected_sf, placement.split_factor):
                     return mesh_dim, placement
             else:
                 return mesh_dim, placement
@@ -1010,7 +1093,7 @@ class _ViewShardingPropagator:
         sharded_dim: int,
         mesh_dim: int,
         placements: Sequence[Placement],
-    ) -> int | None:
+    ) -> int | torch.SymInt | None:
         """Compute the residual split factor for ``cmd`` after earlier mesh dims.
 
         Starts from ``math.prod(cmd.group_shape[:cmd.split_id])`` and divides
@@ -1040,10 +1123,11 @@ class _ViewShardingPropagator:
         Returns the first output dim whose Split can accommodate the combined
         sharding (mesh_size * split_factor), or ``None`` if no dim fits.
         """
-        total_shard = self.mesh_sizes[mesh_dim] * p.split_factor
-        if self.global_input_shape[p.dim] % total_shard != 0:
+        total_shard = cast(Any, self.mesh_sizes[mesh_dim]) * p.split_factor
+        input_dim_size = cast(Any, self.global_input_shape[p.dim])
+        if input_dim_size % total_shard != 0:
             return None
-        shard_size = self.global_input_shape[p.dim] // total_shard
+        shard_size = input_dim_size // total_shard
         for candidate_dim in tgt_shard_dims:
             cmd = self.rule[candidate_dim]
             if isinstance(cmd, Split):
@@ -1149,6 +1233,14 @@ class _ViewShardingPropagator:
             output_placement: Placement = Shard(tgt_shard_dim)
         else:
             split_factor = math.prod(local_tensor_shapes[input_start_idx : p.dim])
+            if isinstance(split_factor, torch.SymInt):
+                if _explicit_unbacked_hint(split_factor) is None:
+                    raise RuntimeError(
+                        "Cannot propagate strict view sharding through a symbolic "
+                        "_StridedShard split_factor without an explicit unbacked "
+                        f"hint override: split_factor={split_factor}, "
+                        f"input_shape={self.global_input_shape}, rule={self.rule}."
+                    )
             output_placement = _StridedShard(tgt_shard_dim, split_factor=split_factor)
         # Uneven sharding on a non-last flatten dim breaks _StridedShard:
         # split_factor (number of groups) must be the same on all devices,
@@ -1212,7 +1304,7 @@ class _ViewShardingPropagator:
                 expected_sf = self._expected_split_factor(
                     cmd, p.dim, mesh_dim, placements
                 )
-                if expected_sf != p.split_factor:
+                if not _split_factor_matches(expected_sf, p.split_factor):
                     continue
                 strided_shard_claimed_dims.add(ClaimedDim(p.dim, candidate_dim))
                 new_shapes = list(local_tensor_shapes)
