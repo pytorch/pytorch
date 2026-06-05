@@ -527,16 +527,12 @@ def sample_inputs_linalg_pinv_singular(
         for k in range(min(3, m, n)):
             # Note that by making the columns of `a` and `b` orthonormal we make sure that
             # the product matrix `a @ b.t()` has condition number 1 when restricted to its image
-            a = (
+            a = torch.linalg.qr(
                 torch.rand(*batch, m, k, device=device, dtype=dtype)
-                .qr()
-                .Q.requires_grad_(requires_grad)
-            )
-            b = (
+            ).Q.requires_grad_(requires_grad)
+            b = torch.linalg.qr(
                 torch.rand(*batch, n, k, device=device, dtype=dtype)
-                .qr()
-                .Q.requires_grad_(requires_grad)
-            )
+            ).Q.requires_grad_(requires_grad)
             yield SampleInput(a, args=(b,))
 
 
@@ -2639,9 +2635,8 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_eager",
                 device_type="mps",
             ),
-            # see https://github.com/pytorch/pytorch/issues/177264
             DecorateInfo(
-                unittest.expectedFailure,
+                toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-04)}),
                 "TestEagerFusionOpInfo",
                 "test_aot_autograd_symbolic_exhaustive",
                 device_type="cpu",
