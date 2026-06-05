@@ -15,7 +15,7 @@ import re
 import types
 import typing
 import warnings
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -29,7 +29,11 @@ from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
-from .immutable_collections import immutable_dict
+from .immutable_collections import (
+    _compatibility_unwrap,
+    _immutable_ordered_dict,
+    immutable_dict,
+)
 from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 from .tensor_type import TensorType
 
@@ -477,7 +481,7 @@ class CodeGen:
 
         See ``process_inputs`` for more details.
         """
-        return outputs
+        return _compatibility_unwrap(outputs)
 
     def additional_globals(self) -> list[tuple[str, Any]]:
         """
@@ -597,6 +601,13 @@ class CodeGen:
         def _get_repr(arg: object) -> str:
             if isinstance(arg, Node):  # first because common
                 return repr(arg)
+            elif isinstance(arg, _immutable_ordered_dict):
+                global_name = add_global("collections.OrderedDict", OrderedDict)
+                return (
+                    f"{global_name}(["
+                    + ", ".join(_get_repr(item) for item in arg.items())
+                    + "])"
+                )
             elif isinstance(arg, tuple) and hasattr(arg, "_fields"):
                 # Handle NamedTuples (if it has `_fields`) via add_global.
                 qualified_name = _get_qualified_name(type(arg))
@@ -623,6 +634,14 @@ class CodeGen:
                     return "(" + ", ".join(_get_repr(a) for a in arg) + ")"
             elif isinstance(arg, list):
                 return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
+            elif isinstance(arg, dict):
+                return (
+                    "{"
+                    + ", ".join(
+                        f"{_get_repr(k)}: {_get_repr(v)}" for k, v in arg.items()
+                    )
+                    + "}"
+                )
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
             elif is_opaque_value_type(type(arg)):

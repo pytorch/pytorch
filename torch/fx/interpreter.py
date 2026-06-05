@@ -15,6 +15,7 @@ from ._lazy_graph_module import _make_graph_module
 from ._symbolic_trace import Tracer
 from .graph import Graph
 from .graph_module import GraphModule
+from .immutable_collections import _compatibility_unwrap
 from .node import Argument, map_aggregate, map_arg, Node, Target
 from .proxy import Proxy
 
@@ -108,6 +109,8 @@ class Interpreter:
             graph instead of `module.graph`, using the provided `module`
             argument to satisfy any requests for state.
     """
+
+    _unwrap_output = True
 
     @compatibility(is_backward_compatible=True)
     def __init__(
@@ -445,6 +448,8 @@ class Interpreter:
         Return:
             Any: The return value referenced by the output node
         """
+        if self._unwrap_output:
+            return _compatibility_unwrap(args[0])
         return args[0]
 
     # Helper methods
@@ -565,6 +570,8 @@ class Transformer(Interpreter):
     Args:
         module (GraphModule): The ``Module`` to be transformed.
     """
+
+    _unwrap_output = False
 
     @compatibility(is_backward_compatible=True)
     def __init__(self, module: GraphModule) -> None:
