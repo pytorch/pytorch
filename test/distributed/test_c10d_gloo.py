@@ -11,6 +11,7 @@ import random
 import sys
 import tempfile
 import time
+import unittest
 from datetime import timedelta
 from functools import reduce
 from itertools import groupby
@@ -54,6 +55,7 @@ from torch.testing._internal.common_distributed import (
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
+    IS_MACOS,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
@@ -896,7 +898,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     input[i * out_size : (i + 1) * out_size] = float(self.rank + i + 1)
                 output = torch.empty(out_size)
 
-                work = dist.reduce_scatter_tensor(output, input, op=op, async_op=True)
+                work = dist.reduce_scatter_single(output, input, op=op, async_op=True)
                 work.wait()
 
                 r = self.rank
@@ -1704,6 +1706,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_reduce_stress(inputs)
 
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/71195")
     @requires_gloo()
     def test_send_recv_all_to_all(self):
         store = c10d.FileStore(self.file_name, self.world_size)
