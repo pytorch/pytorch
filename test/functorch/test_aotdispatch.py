@@ -7,6 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import copy
+import io
 import itertools
 import operator
 import unittest
@@ -5019,6 +5020,35 @@ class TestAOTExport(AOTTestCase):
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
+
+    def test_aot_export_module_graph_module_serialization(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return (self.relu(self.linear(x)),)
+
+        mod = M().eval()
+        inp = torch.randn(2, 4)
+        gm, sig = aot_export_module(
+            mod,
+            (inp,),
+            trace_joint=False,
+            decompositions=torch._decomp.core_aten_decompositions(),
+        )
+
+        buffer = io.BytesIO()
+        torch.save(gm, buffer)
+        buffer.seek(0)
+        loaded = torch.load(buffer, weights_only=False)
+
+        graph_inputs = tuple(mod.get_parameter(name) for name in sig.parameters)
+        graph_inputs += tuple(mod.get_buffer(name) for name in sig.buffers)
+        graph_inputs += (inp,)
+        self.assertEqual(gm(*graph_inputs), loaded(*graph_inputs))
 
     def test_aot_export_ban_dropout_mut_pre_dispatch(self):
         def fn(p, x):
