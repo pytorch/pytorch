@@ -1455,7 +1455,7 @@ class _InProcessFxCompile(FxCompile):
                     },
                     payload_fn=lambda: inductor_post_grad_graph_str,
                 )
-                if config.trace.provenance_tracking_level != 0:
+                if config.effective_provenance_tracking_level() != 0:
                     provenance_tracking_json = (
                         torch.fx.traceback.get_graph_provenance_json(gm.graph)
                     )
@@ -1665,7 +1665,7 @@ class _InProcessFxCompile(FxCompile):
                     # Dump provenance artifacts for debugging trace
                     inductor_provenance_tracking_node_mappings = None
                     inductor_kernel_stack_trace_str = None
-                    if config.trace.provenance_tracking_level != 0:
+                    if config.effective_provenance_tracking_level() != 0:
                         inductor_provenance_tracking_node_mappings = json.dumps(
                             torch._inductor.debug.dump_inductor_provenance_info()
                         )
@@ -2740,7 +2740,7 @@ def run_pre_grad_passes(
     )
     torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
 
-    if config.trace.provenance_tracking_level == 1:
+    if config.effective_provenance_tracking_level() == 1:
         for node in model_.graph.nodes:
             if node.stack_trace:
                 torch._inductor.debug._inductor_pre_grad_node_stack_trace[node.name] = (
@@ -2993,7 +2993,7 @@ def _compile_fx_main(
         _use_lazy_graph_module(dynamo_config.use_lazy_graph_module),
         enable_python_dispatcher(),
         torch.fx.traceback.preserve_node_meta(
-            config.trace.provenance_tracking_level == 1
+            config.effective_provenance_tracking_level() == 1
         ),
         torch._inductor.debug.reset_provenance_globals(),
     ):
@@ -3417,7 +3417,7 @@ def autograd_cache_key(
         _use_lazy_graph_module(dynamo_config.use_lazy_graph_module),
         enable_python_dispatcher(),
         torch.fx.traceback.preserve_node_meta(
-            config.trace.provenance_tracking_level == 1
+            config.effective_provenance_tracking_level() == 1
         ),
         torch._inductor.debug.reset_provenance_globals(),
         V.set_fake_mode(fake_mode),

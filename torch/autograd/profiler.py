@@ -609,10 +609,7 @@ class profile:
         if not flow_events:
             return {}, {}
 
-        flow_count = max(int(event["id"]) for event in flow_events)
-        flow_pair: list[list[int | None]] = [
-            [None, None] for _ in range(flow_count + 1)
-        ]
+        flow_pair: dict[int, list[int | None]] = {}
         prev_event = None
         for event in trace["traceEvents"]:
             if (
@@ -624,16 +621,18 @@ class profile:
             if event.get("ph") == "s":
                 if prev_event is None:
                     continue
-                flow_pair[int(event["id"])][0] = prev_event["uid"]
+                pair = flow_pair.setdefault(int(event["id"]), [None, None])
+                pair[0] = prev_event["uid"]
             elif event.get("ph") == "f":
                 if prev_event is None:
                     continue
-                flow_pair[int(event["id"])][1] = prev_event["uid"]
+                pair = flow_pair.setdefault(int(event["id"]), [None, None])
+                pair[1] = prev_event["uid"]
             prev_event = event
 
         src2dst = {}
         dst2src = {}
-        for src, dst in flow_pair:
+        for src, dst in flow_pair.values():
             if src is None or dst is None:
                 continue
             src2dst[src] = dst

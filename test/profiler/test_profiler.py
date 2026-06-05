@@ -1012,6 +1012,60 @@ class TestProfiler(TestCase):
             [(9, 16, [(0, 0, 4), (5, 8, 8)])],
         )
 
+    def test_build_flow_mapping_supports_sparse_flow_ids(self):
+        flow_id = 1_000_000_000
+        trace = {
+            "traceEvents": [
+                {
+                    "name": "aten::add",
+                    "cat": "cpu_op",
+                    "ph": "X",
+                    "ts": 0,
+                    "dur": 5,
+                    "tid": 1,
+                    "args": {},
+                },
+                {
+                    "name": "ac2g",
+                    "cat": "ac2g",
+                    "ph": "s",
+                    "id": flow_id,
+                    "ts": 5,
+                    "tid": 1,
+                    "args": {},
+                },
+                {
+                    "name": "triton_poi_fused_add_0",
+                    "cat": "kernel",
+                    "ph": "X",
+                    "ts": 10,
+                    "dur": 7,
+                    "tid": 2,
+                    "args": {},
+                },
+                {
+                    "name": "ac2g",
+                    "cat": "ac2g",
+                    "ph": "f",
+                    "id": flow_id,
+                    "ts": 17,
+                    "tid": 2,
+                    "args": {},
+                },
+            ]
+        }
+
+        prof = _profile()
+        prof._assign_uniq_id_to_event(trace)
+
+        src2dst, dst2src = prof._build_flow_mapping(
+            trace,
+            [trace["traceEvents"][1], trace["traceEvents"][3]],
+        )
+
+        self.assertEqual(src2dst, {0: 2})
+        self.assertEqual(dst2src, {2: 0})
+
     def test_add_inductor_kernel_stack_to_chrome_trace(self):
         import torch._inductor.debug as inductor_debug
 

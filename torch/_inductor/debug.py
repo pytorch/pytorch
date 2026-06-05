@@ -1176,7 +1176,7 @@ def set_kernel_post_grad_provenance_tracing(
     Returns a unique int debug handler for each call to this function.
     """
 
-    if config.trace.provenance_tracking_level == 0:
+    if config.effective_provenance_tracking_level() == 0:
         return None
 
     try:
