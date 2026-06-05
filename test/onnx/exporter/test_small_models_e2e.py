@@ -656,6 +656,23 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             [node.op_type for node in onnx_program.model.graph],
         )
 
+    def test_export_pad_sequence_from_tensor_split_indices(self):
+        class Model(torch.nn.Module):
+            def forward(self, text, batch_lengths):
+                lens = batch_lengths[1:] - batch_lengths[:-1]
+                texts = torch.nn.utils.rnn.pad_sequence(
+                    torch.tensor_split(text, batch_lengths),
+                    batch_first=True,
+                    padding_value=-1,
+                )
+                return texts, lens
+
+        text = torch.randint(1024, (1024,), dtype=torch.int64)
+        batch_lengths = torch.tensor([2, 6, 7, 11, 28, 39], dtype=torch.int64)
+
+        onnx_program = self.export(Model(), (text, batch_lengths))
+        onnx_testing.assert_onnx_program(onnx_program)
+
     def test_export_sym_min(self):
         class Model(torch.nn.Module):
             def forward(self, x):
