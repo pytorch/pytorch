@@ -2767,7 +2767,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: lcm_out
+    CPU, CUDA, MPS: lcm_out
   tags: pointwise
 
 - func: lcm(Tensor self, Tensor other) -> Tensor
