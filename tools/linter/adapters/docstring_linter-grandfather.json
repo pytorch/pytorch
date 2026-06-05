@@ -29,26 +29,29 @@
   "torch/_inductor/codecache.py": {
     "class CppPythonBindingsCodeCache": 191,
     "class HalideCodeCache": 358,
-    "class PyCodeCache": 101
+    "class PyCodeCache": 101,
+    "def CudaKernelParamCache.set()": 82
   },
   "torch/_inductor/codegen/common.py": {
     "class CSE": 173,
+    "class DataTypePropagation": 104,
     "class Kernel": 305,
     "class KernelArgs": 345,
     "class OpOverrides": 208
   },
   "torch/_inductor/codegen/cpp.py": {
-    "class CppKernelProxy": 616,
+    "class CppKernelProxy": 690,
     "class CppOverrides": 496,
-    "class CppScheduling": 819,
-    "class CppVecKernel": 867,
-    "class OuterLoopFusedSchedulerNode": 159,
+    "class CppScheduling": 961,
+    "class CppVecKernel": 974,
+    "class OuterLoopFusedSchedulerNode": 177,
     "def CppKernel.codegen_loops_impl()": 144,
     "def CppKernelProxy.codegen_functions()": 179,
     "def CppKernelProxy.legalize_lowp_fp_dtype_loopbody()": 228,
     "def CppScheduling.fuse()": 81,
     "def CppVecKernel.reduction_combine_vec()": 103,
-    "def OuterLoopFusedSchedulerNode.check_outer_fusion_loop_level_attr()": 85,
+    "def CppVecOverrides.masked()": 83,
+    "def OuterLoopFusedSchedulerNode.check_outer_fusion_loop_level_attr()": 94,
     "def TilingSelect.select_tiling()": 170
   },
   "torch/_inductor/codegen/cpp_flex_attention_template.py": {
@@ -56,13 +59,14 @@
     "def CppFlexAttentionTemplate.modification()": 102
   },
   "torch/_inductor/codegen/cpp_gemm_template.py": {
-    "def CppGemmTemplate.get_options()": 255
+    "def CppGemmTemplate.get_options()": 284
   },
   "torch/_inductor/codegen/cpp_grouped_gemm_template.py": {
     "def CppGroupedGemmTemplate.render()": 157
   },
   "torch/_inductor/codegen/cpp_template.py": {
-    "class CppTemplate": 117
+    "class CppTemplate": 117,
+    "def CppTemplate.generate()": 82
   },
   "torch/_inductor/codegen/cpp_template_kernel.py": {
     "class CppTemplateKernel": 504
@@ -114,6 +118,9 @@
   "torch/_inductor/codegen/triton_combo_kernel.py": {
     "class ComboKernel": 871
   },
+  "torch/_inductor/codegen/triton_utils.py": {
+    "def signature_of()": 83
+  },
   "torch/_inductor/codegen/wrapper.py": {
     "def PythonWrapperCodegen.benchmark_compiled_module()": 96,
     "def PythonWrapperCodegen.define_user_defined_triton_kernel()": 269,
@@ -137,6 +144,9 @@
   },
   "torch/_inductor/fx_passes/binary_folding.py": {
     "def binary_folding_init()": 417
+  },
+  "torch/_inductor/fx_passes/efficient_conv_bn_eval.py": {
+    "def efficient_conv_bn_eval_graph_transform_decomposed()": 83
   },
   "torch/_inductor/fx_passes/group_batch_fusion.py": {
     "def BatchLayernormFusion.fuse()": 136,
@@ -191,6 +201,7 @@
     "class CaptureIndexing": 175
   },
   "torch/_inductor/lowering.py": {
+    "def adaptive_max_pool2d()": 81,
     "def avg_pool2d_backward()": 163,
     "def avg_pool3d_backward()": 197,
     "def cat()": 122,
@@ -203,7 +214,8 @@
   },
   "torch/_inductor/mkldnn_ir.py": {
     "class MkldnnRnnLayer": 121,
-    "def MkldnnRnnLayer.create()": 101
+    "def MkldnnRnnLayer.create()": 101,
+    "def QConvPointWiseBinaryPT2E.create()": 81
   },
   "torch/_inductor/mkldnn_lowerings.py": {
     "def register_onednn_fusion_ops()": 1207
@@ -222,6 +234,6 @@
     "class SchedulerBuffer": 105
   },
   "torch/_inductor/utils.py": {
-    "class IndentedBuffer": 148
+    "class IndentedBuffer": 164
   }
 }
