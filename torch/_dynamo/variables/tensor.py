@@ -342,7 +342,7 @@ class TensorVariable(VariableTracker):
         """Tensor tp_richcompare: element-wise comparison producing an FX proxy."""
         from .builder import wrap_fx_proxy_cls
 
-        if isinstance(other, UserDefinedClassVariable):
+        if not isinstance(other, (SymNodeVariable, ConstantVariable, TensorVariable)):
             return ConstantVariable.create(NotImplemented)
         op_fn = cmp_name_to_op_mapping[op]
         proxy = tx.output.create_proxy(
@@ -577,6 +577,11 @@ class TensorVariable(VariableTracker):
     ) -> VariableTracker | None:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, "grad"):
             return tx.output.side_effects.load_attr(self, "grad")
+        if (
+            isinstance(self.mutation_type, AttributeMutationNew)
+            and not self.has_grad_fn
+        ):
+            return ConstantVariable.create(None)
         # None tells var_getattr to use default .grad handling
         return None
 
@@ -728,9 +733,6 @@ class TensorVariable(VariableTracker):
         if result is None:
             raise NotImplementedError
         return result
-
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return self.ndim > 0
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase", idxes: Sequence[int] | None = None
@@ -1358,7 +1360,7 @@ class TensorVariable(VariableTracker):
             if isinstance(var, TensorVariable) and var.requires_grad:
                 # Non-leaf tensors (has_grad_fn=True) must be skipped because:
                 # 1. Semantically: they're intermediates, not the leaves we want gradients for
-                # 2. Implementation: accumulate_grad polyfill can't handle .grad on non-leafs
+                # 2. Implementation: the backward rewrite can't handle .grad on non-leafs
                 #    (Dynamo creates GetAttrVariable instead of TensorVariable)
                 #
                 # In-graph created tensors without proper source also can't be handled
@@ -1418,7 +1420,7 @@ class TensorVariable(VariableTracker):
           This matches eager where only leaves get .grad.
         - User-provided (inputs=[...]): Errors if any non-leaf tensor is found.
           While eager backward(inputs=[non_leaf]) works, Dynamo cannot trace it
-          because the accumulate_grad polyfill accesses .grad, and Dynamo creates
+          because the backward rewrite accesses .grad, and Dynamo creates
           a generic GetAttrVariable for .grad on non-leaf tensors (instead of a
           TensorVariable), which cannot be used in tensor operations.
 
@@ -2180,7 +2182,7 @@ class TensorVariable(VariableTracker):
             if requires_grad:
                 tx.output.leaf_var_creation_order.append(self)
                 # For source-less intermediates, initialize .grad = None in
-                # side effects so the accumulate_grad polyfill can read/write
+                # side effects so the backward rewrite can read/write
                 # .grad naturally. Graph inputs don't need this — they handle
                 # .grad through their source.
                 if not self.source and tx.output.side_effects.is_attribute_mutation(
@@ -2297,15 +2299,16 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
         if not other.is_symnode_like():
             return VariableTracker.build(tx, NotImplemented)
-        args = [other, self] if reverse else [self, other]
-        return SymNodeVariable.create(
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
-                "call_function", operator.lshift, *proxy_args_kwargs(args, {})
+                "call_function", operator.lshift, *proxy_args_kwargs([lhs, rhs], {})
             ),
-            sym_num=None,
         )
 
     def nb_rshift_impl(
@@ -2314,15 +2317,16 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
         if not other.is_symnode_like():
             return VariableTracker.build(tx, NotImplemented)
-        args = [other, self] if reverse else [self, other]
-        return SymNodeVariable.create(
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
-                "call_function", operator.rshift, *proxy_args_kwargs(args, {})
+                "call_function", operator.rshift, *proxy_args_kwargs([lhs, rhs], {})
             ),
-            sym_num=None,
         )
 
     def nb_or_impl(
@@ -2331,14 +2335,52 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
         if not other.is_symnode_like():
             return VariableTracker.build(tx, NotImplemented)
-        return SymNodeVariable.create(
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
-                "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
+                "call_function", operator.or_, *proxy_args_kwargs([lhs, rhs], {})
             ),
-            sym_num=None,
+        )
+
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.and_, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.xor, *proxy_args_kwargs([lhs, rhs], {})
+            ),
         )
 
     def nb_multiply_impl(
@@ -2599,6 +2641,38 @@ class SymNodeVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.and_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.xor, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
     def nb_lshift_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2793,7 +2867,7 @@ class NumpyNdarrayVariable(TensorVariable):
         """ndarray tp_richcompare: element-wise comparison via numpy_operator_wrapper."""
         from ..utils import numpy_operator_wrapper
 
-        if isinstance(other, UserDefinedClassVariable):
+        if not isinstance(other, (SymNodeVariable, ConstantVariable, TensorVariable)):
             return ConstantVariable.create(NotImplemented)
         op_fn = cmp_name_to_op_mapping[op]
         proxy = tx.output.create_proxy(

@@ -4,7 +4,7 @@
 
 namespace torch::jit::mobile {
 
-// If we dont have kineto available then edge profiler does not
+// If we don't have kineto available then edge profiler does not
 // work since it relies on Kineto
 #ifdef USE_KINETO
 class TORCH_API KinetoEdgeCPUProfiler {
