@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing_extensions import Self
 
+    from ..symbolic_convert import InstructionTranslatorBase
     from .tensor import SymNodeVariable
 
 
@@ -81,23 +82,25 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
     @staticmethod
-    def create(value: Any, source: Any, **options: Any) -> VariableTracker:
+    def create(
+        value: Any,
+        source: Any,
+        *,
+        tx: InstructionTranslatorBase | None = None,
+        **options: Any,
+    ) -> VariableTracker:
         if type(value) in LazyConstantVariable.supported_types:
             return LazyConstantVariable.create(value, source, **options)
 
         # Cache based on source when no extra options are passed
-        if source is not None and not options:
-            from ..symbolic_convert import InstructionTranslator
-
-            tx = InstructionTranslator.current_tx()
-            if tx is not None:
-                cache = tx.output.variable_tracker_cache
-                cached = cache.get(source)
-                if cached is not None:
-                    return cached
-                vt = LazyVariableTracker(LazyCache(value, source), source=source)
-                cache[source] = vt
-                return vt
+        if tx is not None and source is not None and not options:
+            cache = tx.output.variable_tracker_cache
+            cached = cache.get(source)
+            if cached is not None:
+                return cached
+            vt = LazyVariableTracker(LazyCache(value, source), source=source)
+            cache[source] = vt
+            return vt
 
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
@@ -256,10 +259,10 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         cache[idx] = (result, value)
         return result
 
-    def is_hashable(self) -> bool:
+    def is_hashable_lazy(self) -> bool:
         # Checks that the underlying value is hashable without realizing the VT.
-        # This is used by ConstDictVariable tracker to find if the key LazyVT
-        # can be hashed.
+        # This is used by the is_hashable() function in hashable.py as a fast
+        # path for unrealized LazyVTs.
         def _helper(value: Any) -> bool:
             # TODO: Add support for more types
             return (

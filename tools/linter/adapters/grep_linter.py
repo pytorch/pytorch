@@ -8,6 +8,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -166,6 +167,7 @@ def lint_file(
     allowlist_pattern: str,
     replace_pattern: str,
     error_name: str,
+    line_allowlist_pattern: re.Pattern[str] | None = None,
 ) -> None:
     """
     Lint a file with one or more pattern matches, printing LintMessages as they're created.
@@ -176,6 +178,7 @@ def lint_file(
         allowlist_pattern: Pattern to check for allowlisting
         replace_pattern: Pattern for sed replacement
         error_name: Human-readable error name
+        line_allowlist_pattern: Compiled regex; lines matching this are skipped
     """
     if not line_remainders:
         return
@@ -183,6 +186,17 @@ def lint_file(
     should_skip = check_allowlist(filename, allowlist_pattern)
     if should_skip:
         return
+
+    if line_allowlist_pattern:
+        line_remainders = [
+            lr
+            for lr in line_remainders
+            if not line_allowlist_pattern.search(
+                lr.split(":", 1)[1] if ":" in lr else lr
+            )
+        ]
+        if not line_remainders:
+            return
 
     # Check if file is too large to compute replacement
     file_size = os.path.getsize(filename)
@@ -292,6 +306,10 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--line-allowlist-pattern",
+        help="if a matching line also matches this pattern, that line is skipped",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="verbose logging",
@@ -397,6 +415,10 @@ def main() -> None:
         )
         sys.exit(0)
 
+    line_allowlist_re = (
+        re.compile(args.line_allowlist_pattern) if args.line_allowlist_pattern else None
+    )
+
     # Group lines by file to call lint_file once per file
     grouped_lines = group_lines_by_file(lines)
 
@@ -407,6 +429,7 @@ def main() -> None:
             args.allowlist_pattern,
             args.replace_pattern,
             args.error_name,
+            line_allowlist_re,
         )
 
 

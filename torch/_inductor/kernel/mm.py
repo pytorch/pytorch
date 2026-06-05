@@ -18,6 +18,7 @@ from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config as inductor_config, distributed_autotune
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
@@ -626,6 +627,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
+    inp = realize_inputs(inp)
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "addmm"
 
@@ -695,8 +697,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             else:
                 templates_to_use.append(persistent_mm_template)
 
-        templates_to_use.append(addmm_contiguous_subgraph_template)
-
+        # Manually call get_template_configs as use 1-D bias if possible
+        choices.extend(
+            V.choices.get_template_configs(
+                kernel_inputs_aten, [addmm_contiguous_subgraph_template], name
+            )
+        )
     # Single unified call for all templates
     choices.extend(
         V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
@@ -887,6 +893,215 @@ def get_scaling_options(
     )  # verify that shapes are supported by at least one existing pairing
 
 
+@register_lowering(aten._scaled_mm_v2.default, type_promotion_kind=None)
+def tuned_scaled_mm_v2(
+    mat_a,
+    mat_b,
+    scale_a: list[Any],
+    recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[Any],
+    recipe_b: list[int],
+    swizzle_b: list[int],
+    bias=None,
+    out_dtype=None,
+    contraction_dim=None,
+    use_fast_accum=False,
+    layout=None,
+):
+    """
+    Performs an optimized matrix multiplication where scaling factors are
+    applied to the inputs per the supplied recipes, and optionally swizzled.
+
+    This is the _scaled_mm_v2 API, which takes scale recipes (ScalingType) and
+    swizzle patterns alongside the scale tensors, and supports multi-level
+    scaling via lists.
+    """
+    # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
+    m, n, k, layout, mat_a, mat_b = mm_args(
+        mat_a, mat_b, layout=layout, out_dtype=out_dtype
+    )
+    # below is for getting an overview logging info of inductor mms
+    counters["aten_mm_info"][f"aten._scaled_mm_v2.default_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten._scaled_mm_v2.default: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat_a.get_dtype(),
+        mat_b.get_dtype(),
+        layout,
+    )
+    name = "scaled_mm"
+    check_supported_striding(mat_a, mat_b)
+
+    assert len(scale_a) >= 1 and len(scale_b) >= 1, (
+        "scale_a and scale_b must each have at least one entry"
+    )
+
+    is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
+
+    # Swizzling is not yet wired into any template here; reject anything other
+    # than NO_SWIZZLE (=0) so we don't silently produce wrong results once a
+    # caller starts passing real swizzle patterns.
+    assert all(s == 0 for s in swizzle_a) and all(s == 0 for s in swizzle_b), (
+        "Inductor _scaled_mm_v2 lowering does not yet support non-trivial "
+        f"swizzles (got swizzle_a={list(swizzle_a)}, swizzle_b={list(swizzle_b)})"
+    )
+
+    def check_supported_recipe(recipe: list[int]) -> bool:
+        disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
+        return all(ScalingType(r) not in disallowed for r in recipe)
+
+    supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
+        recipe_b
+    )
+
+    # Only handle single-level scales (no MX/NV)
+    scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
+
+    input_nodes: list[Any]
+
+    if not bias:
+        input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real]
+    else:
+        bias_real = realize_inputs(bias)
+        input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real, bias_real]
+
+    # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
+    kernel_inputs = MMKernelInputs(
+        input_nodes, mat1_idx=0, mat2_idx=1, out_dtype=out_dtype
+    )
+
+    choices: list[ChoiceCaller] = []
+
+    # Collect all templates for unified call
+    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
+    kwarg_overrides = {}
+
+    if use_aten_gemm_kernels():
+        templates_to_use.append(aten__fp8_mm)
+        kwarg_overrides[aten__fp8_mm.uid] = dict(
+            out_dtype=out_dtype, use_fast_accum=use_fast_accum
+        )
+
+    _, is_nonzero = _is_static_problem(layout)
+
+    if (
+        # We dont have triton lowerings for the MX variants yet
+        is_single_level_scale
+        and supported_recipe
+        and scale_a[0].dtype == torch.float32
+        and is_nonzero
+        and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
+    ):
+        overriders = dict(USE_FAST_ACCUM=use_fast_accum)
+
+        # Note: No NVFP4 support at this point - can ignore swizzling, and take only the
+        #       first scale types passed.
+        scale_option_a, scale_option_b = (
+            ScalingType(recipe_a[0]),
+            ScalingType(recipe_b[0]),
+        )
+
+        # TODO (paulzhan): There is no template that exists for bias and TMA
+        # Don't run tma template currently if bias exist
+        if (
+            use_triton_tma_template(mat_a, mat_b, output_layout=layout, add_guards=True)
+            and not bias
+        ):
+            overriders["SCALE_RECIPE_A"] = scale_option_a.value
+            overriders["SCALE_RECIPE_B"] = scale_option_b.value
+
+            if use_triton_scaling_template(
+                scale_option_a, scale_option_b, epilogue_scaling_types
+            ):
+                templates_to_use.append(scaled_mm_device_tma_epilogue_scaling_template)
+                kwarg_overrides[scaled_mm_device_tma_epilogue_scaling_template.uid] = (
+                    overriders
+                )
+            elif use_triton_scaling_template(
+                scale_option_a, scale_option_b, main_loop_scaling_types
+            ):
+                overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
+                overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+
+                templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
+                kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
+                    overriders
+                )
+            else:
+                raise AssertionError(
+                    "Inductor Triton does not support scaling options that are present "
+                    + "in both epilogue scaling and main loop scaling"
+                )
+
+        if (
+            use_triton_blackwell_tma_template(
+                mat_a, mat_b, output_layout=layout, add_guards=True
+            )
+            and not bias
+        ):
+            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
+                overriders
+            )
+
+        if use_triton_scaling_template(
+            scale_option_a, scale_option_b, epilogue_scaling_types
+        ):
+            templates_to_use.append(mm_template)
+            kwarg_overrides[mm_template.uid] = overriders
+
+    # Single unified call for all templates
+    choices.extend(
+        V.choices.get_template_configs(
+            kernel_inputs,
+            templates_to_use,
+            name,
+            kwarg_overrides=kwarg_overrides,
+        )
+    )
+
+    # NVGEMM get_kernels() will return empty if the scaling mode/dtype is unsupported
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b):
+        from ..codegen.nv_universal_gemm import add_nv_universal_scaled_gemm_choices
+
+        add_nv_universal_scaled_gemm_choices(
+            choices,
+            layout,
+            input_nodes,
+            kernel_inputs=kernel_inputs,
+        )
+
+    # Early return for MX variants
+    if (
+        scale_a[0].dtype != torch.float32
+        or (not supported_recipe)
+        or (not is_single_level_scale)
+    ):
+        node, _ = autotune_select_algorithm(name, choices, input_nodes, layout)
+        return node
+
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op(name)
+    ):
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+            choices,
+            layout,
+            kernel_inputs.nodes(),  # type: ignore[arg-type]
+            use_fast_accum=use_fast_accum,  # type: ignore[arg-type]
+        )
+
+    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
+        CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
+
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
+
+
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
 def tuned_scaled_mm(
     mat_a,
@@ -962,7 +1177,7 @@ def tuned_scaled_mm(
     _, is_nonzero = _is_static_problem(layout)
 
     if (
-        # We dont have triton lowerings for the MX variants yet
+        # We don't have triton lowerings for the MX variants yet
         scale_a.dtype == torch.float32
         and is_nonzero
         and use_triton_template(layout, enable_float8=True, check_max_autotune=False)

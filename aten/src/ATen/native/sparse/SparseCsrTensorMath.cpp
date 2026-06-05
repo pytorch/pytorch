@@ -3,6 +3,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/mkl/Sparse.h>
@@ -157,7 +158,7 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
     crow_indices.dim(), " dimensional tensors, respectively.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
-  set_output_raw_strided(0, {col_indices.dim() + 1, col_indices.numel()}, {}, options, {});
+  set_output_raw_strided(0, {col_indices.dim() + 1, col_indices.numel()}, {}, options);
 }
 
 } // namespace meta
@@ -1097,8 +1098,8 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   Tensor new_values_acc = std::get<1>(acc_buffer);
   new_values_acc.fill_(rop.identity());
 
-  int64_t* columns_map_ptr = columns_map.data_ptr<int64_t>();
-  scalar_t* values_ptr = values.data_ptr<scalar_t>();
+  const int64_t* columns_map_ptr = columns_map.const_data_ptr<int64_t>();
+  const scalar_t* values_ptr = values.const_data_ptr<scalar_t>();
   acc_t* new_values_acc_ptr =
       new_values_acc.data_ptr<acc_t>();
 

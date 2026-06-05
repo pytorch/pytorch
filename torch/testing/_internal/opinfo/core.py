@@ -941,6 +941,10 @@ class OpInfo:
 
     skip_correctness_check_compile_vs_eager: bool = False
 
+    # True if the op produces nondeterministic output (e.g. uninitialized
+    # memory) that cannot be meaningfully compared across calls.
+    has_nondeterministic_output: bool = False
+
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 
@@ -2069,8 +2073,9 @@ def generate_elementwise_binary_arbitrarily_strided_tensors(
     for shape, strides, offset in strided_cases:
         a = make_arg(
             500,
+            **op.lhs_make_tensor_kwargs,
         ).as_strided(shape, strides, offset)
-        b = make_arg(shape)
+        b = make_arg(shape, **op.rhs_make_tensor_kwargs)
         yield SampleInput(a, args=(b,), kwargs=op.sample_kwargs(device, dtype, a)[0])
 
 
@@ -2084,6 +2089,10 @@ def generate_elementwise_binary_small_value_tensors(
     if exclude_zero is None:
         if hasattr(op, "rhs_make_tensor_kwargs"):
             exclude_zero = op.rhs_make_tensor_kwargs.get("exclude_zero", False)
+
+    lhs_exclude_zero = False
+    if hasattr(op, "lhs_make_tensor_kwargs"):
+        lhs_exclude_zero = op.lhs_make_tensor_kwargs.get("exclude_zero", False)
 
     # defines interesting values
     _unsigned_int_vals = (0, 1, 55, 127, 128, 190, 210, 220, 254)
@@ -2126,7 +2135,10 @@ def generate_elementwise_binary_small_value_tensors(
         raise ValueError("Unsupported dtype!")
 
     for l, r in prod:
-        l_vals.append(l)
+        if l == 0 and lhs_exclude_zero:
+            l_vals.append(1)
+        else:
+            l_vals.append(l)
         if r == 0 and exclude_zero:
             r_vals.append(1)
         else:
