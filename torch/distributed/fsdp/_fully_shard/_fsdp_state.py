@@ -239,6 +239,18 @@ class FSDPState(_State):
                 fsdp_param_group.comm_ctx = self._comm_ctx
                 fsdp_param_group._param_group_index = i
                 fsdp_param_group._num_param_groups = num_groups
+        # The reduce-scatter input-buffer cap governs the single shared
+        # reduce_scatter_states list, so resolve the per-group caps into one
+        # effective value (the most aggressive); a lower-cap group must not
+        # silently undo a higher-cap group's retention.
+        self._comm_ctx.reduce_scatter_max_input_buffers = max(
+            (
+                fsdp_param_group.reduce_scatter_max_input_buffers
+                for state in self._state_ctx.all_states
+                for fsdp_param_group in state._fsdp_param_groups
+            ),
+            default=1,
+        )
 
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
@@ -408,8 +420,11 @@ class FSDPState(_State):
                         fsdp_param_group.finalize_backward()
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
-                # Catch the last module's RS states that no subsequent
-                # module's group N-1 wait will clear.
+                # Wait on and release any retained reduce-scatter input buffers:
+                # the last module's (which no later module's rs_wait clears) and,
+                # when set_reduce_scatter_max_input_buffers retains more than
+                # one in flight, the rest. The compute stream (which reuses the
+                # memory) is ordered past each reduce-scatter first.
                 for rs_state in self._comm_ctx.reduce_scatter_states:
                     if rs_state.event is not None:
                         self._device_handle.current_stream().wait_event(rs_state.event)
