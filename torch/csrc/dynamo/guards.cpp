@@ -3958,7 +3958,11 @@ class GuardManager {
     return GuardDebugInfo(true, num_guards_executed);
   }
 
-  bool has_no_accessors() {
+  bool has_no_leaf_guards() const {
+    return _leaf_guards.empty();
+  }
+
+  bool has_no_accessors() const {
     return _accessors.empty();
   }
 
@@ -4277,6 +4281,11 @@ class RootGuardManager : public GuardManager {
 
   void add_epilogue_lambda_guard(std::unique_ptr<LeafGuard> leaf_guard) {
     _epilogue_lambda_guards.emplace_back(std::move(leaf_guard));
+  }
+
+  bool has_no_guards() const {
+    return has_no_leaf_guards() && has_no_accessors() &&
+        _epilogue_lambda_guards.empty();
   }
 
   void set_init_local_state_flag() {
@@ -7293,6 +7302,13 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
 #endif
 
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
+}
+
+bool root_guard_manager_has_no_guards(void* root) {
+  if (root == nullptr) {
+    return false;
+  }
+  return ((RootGuardManager*)root)->has_no_guards();
 }
 
 PyObject* torch_c_dynamo_guards_init() {

@@ -385,8 +385,8 @@ ModelCompatCheckResult is_compatible(
     } else {
       OperatorInfo runtime_op_info = runtime_info.operator_info.at(op_name);
 
-      // If the runtime op has no schema information its a false alarm and isn't
-      // actually usable
+      // If the runtime op has no schema information it's a false alarm and
+      // isn't actually usable
       if (!runtime_op_info.num_schema_args.has_value()) {
         result.status = ModelCompatibilityStatus::ERROR;
         std::ostringstream s;
