@@ -4,7 +4,7 @@ from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from os import linesep
-from typing import AbstractSet, Any
+from typing import Any
 
 import sympy
 
@@ -149,13 +149,13 @@ def _fuse_activations(code: str) -> str:
         ):
             assigns[stmt.targets[0].id] = stmt.value
 
-    def inline(node: ast.expr, seen: AbstractSet[str] = frozenset()) -> ast.expr:
+    def inline(node: ast.expr, seen: OrderedSet[str] = OrderedSet()) -> ast.expr:
         # Fully inline temporary assignments so the expression tree only refers
         # to function parameters (accum / read buffers) and literal constants.
         if isinstance(node, ast.Name) and node.id in assigns:
             if node.id in seen:
                 return node
-            return inline(assigns[node.id], seen | frozenset({node.id}))
+            return inline(assigns[node.id], seen | OrderedSet([node.id]))
         if isinstance(node, ast.BinOp):
             return ast.BinOp(
                 left=inline(node.left, seen),
