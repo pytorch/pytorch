@@ -12,7 +12,7 @@ from numbers import Number
 import torch
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfXPU,
@@ -38,9 +38,11 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     serialTest,
+    skipIfNoNvmath,
     skipIfTorchDynamo,
     TEST_MULTIACCELERATOR,
     TEST_WITH_ROCM,
@@ -1926,6 +1928,99 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
 
 
 instantiate_device_type_tests(TestForeach, globals(), allow_xpu=True)
+
+
+_FOREACH_MM_SHAPES = [
+    # (label, [(M, N, K)] * G)
+    ("single_group", [(64, 64, 64)]),
+    ("uniform_1024_G16", [(1024, 1024, 1024)] * 16),
+    ("uniform_2048_G8", [(2048, 2048, 2048)] * 8),
+    ("uniform_4096_G4", [(4096, 4096, 4096)] * 4),
+    ("mixed_small", [(128, 64, 256), (256, 128, 512), (64, 32, 128)]),
+    ("mixed_muon", [(1024, 1024, 1024), (1024, 1024, 2752), (1024, 2752, 1024)]),
+    ("nonsquare", [(32, 64, 128), (64, 128, 32)]),
+]
+
+
+class TestForeachMM(TestCase):
+    def _check(self, shapes, dtype, device):
+        A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
+        B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
+        ref = [torch.mm(a, b) for a, b in zip(A, B)]
+        out = torch._foreach_mm(A, B)
+        self.assertEqual(len(out), len(ref))
+        # Grouped GEMM backends may use different accumulation order than
+        # torch.mm, so fp32 needs relaxed tolerances.
+        kwargs = {"atol": 2e-4, "rtol": 2e-4} if dtype == torch.float32 else {}
+        for i, (r, o) in enumerate(zip(ref, out)):
+            self.assertEqual(o, r, msg=f"mismatch at group {i}", **kwargs)
+
+    @parametrize(
+        "label,shapes",
+        _FOREACH_MM_SHAPES,
+        name_fn=lambda label, shapes: label,
+    )
+    def test_foreach_mm_cpu(self, label, shapes):
+        self._check(shapes, torch.float32, "cpu")
+
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
+    @parametrize(
+        "label,shapes",
+        _FOREACH_MM_SHAPES,
+        name_fn=lambda label, shapes: label,
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float32])
+    def test_foreach_mm_cuda(self, label, shapes, dtype):
+        self._check(shapes, dtype, "cuda")
+
+    def test_foreach_mm_gradcheck(self):
+        G = 4
+        shapes = [(32, 32, 32)] * G
+        A = [
+            torch.randn(M, K, dtype=torch.float64, requires_grad=True)
+            for M, _, K in shapes
+        ]
+        B = [
+            torch.randn(K, N, dtype=torch.float64, requires_grad=True)
+            for _, N, K in shapes
+        ]
+
+        def fn(*tensors):
+            return torch._foreach_mm(list(tensors[:G]), list(tensors[G:]))
+
+        gradcheck(fn, (*A, *B))
+
+    @skipIfNoNvmath
+    @unittest.skipUnless(
+        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+    )
+    @parametrize(
+        "label,shapes",
+        [
+            # Large uniform
+            ("large_uniform", [(4096, 4096, 4096)] * 8),
+            # Non-square uniform (M is unaligned — ok for cublasLt)
+            ("nonsquare_uniform", [(1000, 2048, 512)] * 8),
+            # Mixed shapes — stresses per-group narrowing + max-padded buffer
+            (
+                "mixed_muon",
+                [
+                    (1024, 1024, 1024),
+                    (1024, 1024, 2752),
+                    (1024, 2752, 1024),
+                    (512, 512, 512),
+                ],
+            ),
+            # Many small groups
+            ("many_groups", [(128, 128, 128)] * 64),
+        ],
+        name_fn=lambda label, shapes: label,
+    )
+    def test_foreach_mm_nvmath(self, label, shapes):
+        self._check(shapes, torch.bfloat16, "cuda")
+
+
+instantiate_parametrized_tests(TestForeachMM)
 
 
 if __name__ == "__main__":
