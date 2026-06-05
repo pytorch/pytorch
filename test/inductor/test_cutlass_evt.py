@@ -373,19 +373,18 @@ return tmp_1, D""",
             reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
                 "buf0",
                 [MockSchedulerNode(buf1)],
-                OrderedSet([]),
+                OrderedSet(["buf0"]),
             )
         self.assertExpectedInline(reads, """[]""")
-        self.assertExpectedInline(writes, """['buf0', 'buf1']""")
+        self.assertExpectedInline(writes, """['buf1']""")
         self.assertExpectedInline(
             code,
             """\
 def fn(accum):
-    tmp_0 = accum
-    tmp_1 = 1.0
-    tmp_2 = (0.0 - tmp_0)
-    tmp_3 = exp(tmp_2)
-    D = tmp_1 + tmp_3
+    tmp_0 = 1.0
+    tmp_1 = (0.0 - accum)
+    tmp_2 = exp(tmp_1)
+    D = tmp_0 + tmp_2
 
 return D""",
         )
@@ -414,20 +413,19 @@ return D""",
             reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
                 "buf0",
                 [MockSchedulerNode(buf1)],
-                OrderedSet([]),
+                OrderedSet(["buf0"]),
             )
         self.assertExpectedInline(reads, """[]""")
-        self.assertExpectedInline(writes, """['buf0', 'buf1']""")
+        self.assertExpectedInline(writes, """['buf1']""")
         self.assertExpectedInline(
             code,
             """\
 def fn(accum):
-    tmp_0 = accum
-    tmp_1 = (0.0 - tmp_0)
-    tmp_2 = exp(tmp_1)
-    tmp_3 = 1.0
-    tmp_4 = tmp_3 + tmp_2
-    D = tmp_3 / tmp_4
+    tmp_0 = (0.0 - accum)
+    tmp_1 = exp(tmp_0)
+    tmp_2 = 1.0
+    tmp_3 = tmp_2 + tmp_1
+    D = tmp_2 / tmp_3
 
 return D""",
         )
