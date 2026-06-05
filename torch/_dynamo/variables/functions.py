@@ -1231,9 +1231,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L831
         return self
 
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return False
-
     # no nested graph breaks in generators
     def should_allow_nested_graph_breaks(self) -> Literal[False]:
         return False
@@ -2828,6 +2825,8 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
         if self.fn in (
             dist.all_reduce,
+            dist.reduce_scatter_single,
+            # pyrefly: ignore [deprecated]
             dist.reduce_scatter_tensor,
             # pyrefly: ignore [deprecated]
             dist._reduce_scatter_base,
@@ -3267,7 +3266,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
         self, configs: Any, tx: Optional["InstructionTranslatorBase"]
     ) -> list[Any]:
         # unpack the list of configs
-        configs = configs.unpack_var_sequence(tx)
+        if tx is None:
+            raise AssertionError("tx must not be None")
+        configs = unpack_iterable(tx, configs)
 
         # guard_as_python_constant inserts guards for Dynamo to check if the configs object changed.
         configs = [config.guard_as_python_constant() for config in configs]
