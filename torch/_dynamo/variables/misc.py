@@ -1474,6 +1474,15 @@ class GetAttrVariable(VariableTracker):
             )
         return hash(val), False
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "ConstantVariable":
+        if isinstance(self.obj, AutogradFunctionVariable) and self.name == "apply":
+            return variables.ConstantVariable.create(
+                hasattr(self.obj.fn_cls.apply, name)
+            )
+        return super().call_obj_hasattr(tx, name)
+
     def const_getattr(self, tx: "InstructionTranslatorBase", name: str) -> Any:
         if not isinstance(self.obj, variables.NNModuleVariable):
             raise NotImplementedError

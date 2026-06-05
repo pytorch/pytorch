@@ -2754,6 +2754,41 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
     See https://github.com/pytorch/pytorch/issues/174067
     """
 
+    def test_vmap_generate_rule_compiled(self):
+        class Double(torch.autograd.Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+        def fn(x):
+            return torch.vmap(Double.apply)(x)
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x1 = torch.randn(2, 3, requires_grad=True)
+        x2 = x1.detach().clone().requires_grad_(True)
+
+        expected = fn(x1)
+        expected.sum().backward()
+
+        actual = opt_fn(x2)
+        actual.sum().backward()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(x2.grad, x1.grad)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_new_style_autograd_function_with_grad_no_compile(self):
         """Baseline: new-style autograd.Function works with torch.func.grad."""
 
