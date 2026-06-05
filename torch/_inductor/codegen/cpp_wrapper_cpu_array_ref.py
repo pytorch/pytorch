@@ -97,7 +97,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
     @staticmethod
     def get_device_include_path_aot(device: str) -> str:
-        assert device == "cpu", "ArrayRef only supported on CPU!"
+        if device != "cpu":
+            raise AssertionError("ArrayRef only supported on CPU!")
         return "#include <torch/csrc/inductor/aoti_include/array_ref.h>"
 
     def codegen_input_numel_asserts(self, indented_buffer=None):

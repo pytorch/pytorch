@@ -136,7 +136,8 @@ def _normalize_view_op(
         raise AssertionError(f"unsupported view op {target}")
 
     unexpected_kwargs = [name for name in kwargs if name not in names]
-    assert not unexpected_kwargs, f"unexpected kwargs for {target}: {unexpected_kwargs}"
+    if unexpected_kwargs:
+        raise AssertionError(f"unexpected kwargs for {target}: {unexpected_kwargs}")
     normalized_args = tuple(
         _get_view_arg(target, args, kwargs, name, idx, default)
         for idx, (name, default) in enumerate(zip(names, defaults))
@@ -200,8 +201,16 @@ def _decode_view_op(target_code: int, flattened_args: Sequence[Any]) -> ViewOp:
 
 def _decode_view_ops(view_ops: EncodedViewOps) -> tuple[ViewOp, ...]:
     view_codes, view_args, view_arg_counts, view_arg_none = view_ops
-    assert len(view_codes) == len(view_arg_counts)
-    assert len(view_args) == len(view_arg_none)
+    if len(view_codes) != len(view_arg_counts):
+        raise AssertionError(
+            f"view_codes length {len(view_codes)} != "
+            f"view_arg_counts length {len(view_arg_counts)}"
+        )
+    if len(view_args) != len(view_arg_none):
+        raise AssertionError(
+            f"view_args length {len(view_args)} != "
+            f"view_arg_none length {len(view_arg_none)}"
+        )
 
     arg_offset = 0
     decoded_view_ops = []
@@ -213,7 +222,10 @@ def _decode_view_ops(view_ops: EncodedViewOps) -> tuple[ViewOp, ...]:
         decoded_view_ops.append(_decode_view_op(target_code, flattened_args))
         arg_offset += arg_count
 
-    assert arg_offset == len(view_args)
+    if arg_offset != len(view_args):
+        raise AssertionError(
+            f"consumed arg_offset {arg_offset} != view_args length {len(view_args)}"
+        )
     return tuple(decoded_view_ops)
 
 

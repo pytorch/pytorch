@@ -35,7 +35,10 @@ def _get_default_gpu_device_type() -> str:
         for device_type in GPU_BENCHMARK_DEVICE_TYPES
         if getattr(torch, device_type).is_available()
     ]
-    assert len(avail_gpus) <= 1
+    if len(avail_gpus) > 1:
+        raise AssertionError(
+            f"expected at most one available GPU type, got {avail_gpus}"
+        )
     return "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
 
 

@@ -521,7 +521,11 @@ def flatten_index(
     sizes: Sequence[sympy.Expr],
 ) -> sympy.Expr:
     """Row-major flatten: per-dimension indices -> flat index."""
-    assert len(indices) == len(sizes)
+    if len(indices) != len(sizes):
+        raise AssertionError(
+            f"indices and sizes must have equal length, got "
+            f"{len(indices)} and {len(sizes)}"
+        )
     flat = sympy.S.Zero
     for index, size in zip(indices, sizes):
         flat = flat * size + index

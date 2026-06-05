@@ -598,7 +598,8 @@ def convolution(
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
         bias = ir.ExternKernel.realize_input(bias)  # type: ignore[assignment]
-        assert bias is not None
+        if bias is None:
+            raise AssertionError("bias must not be None after realize_input")
         args = [x, weight, bias]
         bias.freeze_layout()
         V.graph.sizevars.guard_int_seq(bias.get_size())
@@ -1224,7 +1225,10 @@ def convolution_backward_lowering(
 
 
 def constrain_conv_bwd_to_fx_strides(fx_node, *args, **kwargs):
-    assert fx_node.target == torch.ops.aten.convolution_backward.default
+    if fx_node.target != torch.ops.aten.convolution_backward.default:
+        raise AssertionError(
+            f"expected convolution_backward target, got {fx_node.target}"
+        )
     if V.graph.layout_opt:
         return args, kwargs
     else:
