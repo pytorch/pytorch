@@ -236,6 +236,17 @@ def _extract_subgraphs_and_args(
 
     If the second yielded value is None, this function was unable to determine what args
     to pass to the subgraph."""
+
+    def get_subgraph_args(
+        subgraph: torch.fx.GraphModule,
+    ) -> tuple[torch.Tensor, ...]:
+        return tuple(
+            get_fake(n, subgraph) for n in subgraph.graph.find_nodes(op="placeholder")
+        )
+
+    def is_integer(d: torch.dtype) -> bool:
+        return not d.is_floating_point and not d.is_complex
+
     if node.target is torch.ops.higher_order.associative_scan:
         # Associative scan operates on slices of xs (see: scan), but multiple slices.
         # Use the same slice twice to account for cases where only a single slice is
@@ -254,17 +265,6 @@ def _extract_subgraphs_and_args(
         # assume this format here (adding some defensive assertions), which means that
         # the only inputs we may need to update are the optional additional tensors. See
         # torch._higher_order_ops.flex_attention._math_attention_inner for more details.
-
-        def get_subgraph_args(
-            subgraph: torch.fx.GraphModule,
-        ) -> tuple[torch.Tensor, ...]:
-            return tuple(
-                get_fake(n, subgraph)
-                for n in subgraph.graph.find_nodes(op="placeholder")
-            )
-
-        def is_integer(d: torch.dtype) -> bool:
-            return not d.is_floating_point and not d.is_complex
 
         score_subgraph: torch.fx.GraphModule = args[3]
         score_subgraph_args = get_subgraph_args(score_subgraph)
@@ -286,6 +286,43 @@ def _extract_subgraphs_and_args(
 
         yield score_subgraph, (*score_subgraph_args[:5], *args[7])
         yield args[4][-1], (*mask_subgraph_args[:4], *args[8])
+    elif node.target is torch.ops.higher_order.flex_attention_backward:
+        fw_subgraph = args[7]
+        fw_subgraph_args = get_subgraph_args(fw_subgraph)
+        joint_subgraph = args[8]
+        joint_subgraph_args = get_subgraph_args(joint_subgraph)
+        mask_subgraph = args[9][-1]
+        mask_subgraph_args = get_subgraph_args(mask_subgraph)
+
+        integer_arg_dtypes = OrderedSet[torch.dtype](
+            a.dtype
+            for a in chain(
+                fw_subgraph_args[1:5],
+                joint_subgraph_args[1:5],
+                mask_subgraph_args[:4],
+            )
+        )
+        assert (
+            fw_subgraph_args[0].dtype == args[0].dtype
+            and joint_subgraph_args[0].dtype == args[0].dtype
+            and len(integer_arg_dtypes) == 1
+            and is_integer(integer_arg_dtypes.pop())
+            and all(
+                len(a.size()) == 0
+                for a in chain(
+                    fw_subgraph_args[:5],
+                    joint_subgraph_args[:6],
+                    mask_subgraph_args[:4],
+                )
+            )
+        ), "flex_attention_backward subgraph arg format has changed!"
+
+        if fw_subgraph in valid_subgraphs:
+            yield fw_subgraph, (*fw_subgraph_args[:5], *args[12])
+        if joint_subgraph in valid_subgraphs:
+            yield joint_subgraph, (*joint_subgraph_args[:6], *args[12])
+        if mask_subgraph in valid_subgraphs:
+            yield mask_subgraph, (*mask_subgraph_args[:4], *args[13])
     elif node.target in (
         torch.ops.higher_order.foreach_map,
         torch.ops.higher_order.invoke_quant_packed,
@@ -313,7 +350,42 @@ def _extract_subgraphs_and_args(
             "Subgraph arguments can be renamed, so we cannot consistently "
             "handle kwargs at this point in the stack."
         )
-        yield args[1], tuple(args[2:])
+        control_deps_subgraph = args[1]
+        control_deps_args = tuple(args[2:])
+        if control_deps_subgraph in valid_subgraphs:
+            yield control_deps_subgraph, control_deps_args
+        if isinstance(
+            control_deps_subgraph, torch.fx.GraphModule
+        ) and pytree.tree_any_only(
+            torch.fx.GraphModule,
+            lambda subgraph: subgraph in valid_subgraphs,
+            control_deps_args,
+        ):
+            placeholder_to_arg = dict(
+                zip(
+                    control_deps_subgraph.graph.find_nodes(op="placeholder"),
+                    control_deps_args,
+                    strict=True,
+                )
+            )
+            wrapped_nodes = [
+                n for n in control_deps_subgraph.graph.nodes if n.op == "call_function"
+            ]
+            assert len(wrapped_nodes) == 1
+            wrapped_node = wrapped_nodes[0]
+
+            def replace_placeholder(item: Any) -> Any:
+                if isinstance(item, torch.fx.Node):
+                    return placeholder_to_arg.get(item, item)
+                return item
+
+            wrapped_args, wrapped_kwargs = pytree.tree_map(
+                replace_placeholder,
+                (wrapped_node.args, wrapped_node.kwargs),
+            )
+            yield from _extract_subgraphs_and_args(
+                wrapped_node, valid_subgraphs, *wrapped_args, **wrapped_kwargs
+            )
     else:
         warnings.warn(
             f"Please add support for subgraph args to function {node.target}!"
