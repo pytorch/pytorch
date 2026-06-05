@@ -210,11 +210,18 @@ class CUTLASSScheduling(BaseScheduling):
         # Try to merge consecutive node dims to reconstruct template dims
         t_idx = 0
         n_idx = 0
+
+        def _matches_template_dim(lhs: sympy.Expr, rhs: sympy.Expr) -> bool:
+            # Fast path for concrete/static equality before invoking simplify.
+            if lhs == rhs:
+                return True
+            return sympy.simplify(lhs - rhs) == 0
+
         while t_idx < len(template_size) and n_idx < len(node_size):
             product = node_size[n_idx]
             n_idx += 1
             # Try multiplying consecutive node dims until we match template dim
-            while sympy.simplify(product - template_size[t_idx]) != 0:
+            while not _matches_template_dim(product, template_size[t_idx]):
                 if n_idx >= len(node_size):
                     return False
                 product = product * node_size[n_idx]
