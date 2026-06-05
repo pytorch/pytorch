@@ -15,6 +15,28 @@ except ImportError:
 
 
 class TestDynamoBenchmark(unittest.TestCase):
+    def test_dashboard_performance_uses_warm_peak_memory(self) -> None:
+        args = parse_args(
+            [
+                "-dcuda",
+                "--inductor",
+                "--inference",
+                "--performance",
+                "--dashboard",
+            ]
+        )
+        self.assertTrue(args.use_warm_peak_memory)
+
+        args = parse_args(
+            [
+                "-dcuda",
+                "--inductor",
+                "--inference",
+                "--performance",
+            ]
+        )
+        self.assertFalse(args.use_warm_peak_memory)
+
     @unittest.skipIf(is_asan_or_tsan(), "ASAN/TSAN not supported")
     def test_benchmark_infra_runs(self) -> None:
         """

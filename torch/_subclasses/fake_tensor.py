@@ -15,7 +15,7 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict, Unpack
 from weakref import ReferenceType
 
 import torch
@@ -86,27 +86,30 @@ CONSTANT_NUMEL_LIMIT = 1
 
 RECURSION_COUNT = 0
 
+
+class _FakeTensorConstructorIgnoredState(TypedDict, total=False):
+    # Recompute memo descriptor state when reconstructing from
+    # FakeTensor.__dict__.
+    _nonzero_memo: object
+    _nonzero_memo_vc: object
+    _nonzero_memo_epoch: object
+    _item_memo: object
+    _item_memo_vc: object
+    _item_memo_epoch: object
+    _unique_memo: object
+    _unique_memo_vc: object
+    _unique_memo_epoch: object
+    _unique_consecutive_memo: object
+    _unique_consecutive_memo_vc: object
+    _unique_consecutive_memo_epoch: object
+    _nested_int_memo: object
+    _nested_int_memo_vc: object
+    _nested_int_memo_epoch: object
+    _debug_trace: object
+
+
 _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS = frozenset(
-    {
-        # Recompute memo descriptor state when reconstructing from
-        # FakeTensor.__dict__.
-        "_nonzero_memo",
-        "_nonzero_memo_vc",
-        "_nonzero_memo_epoch",
-        "_item_memo",
-        "_item_memo_vc",
-        "_item_memo_epoch",
-        "_unique_memo",
-        "_unique_memo_vc",
-        "_unique_memo_epoch",
-        "_unique_consecutive_memo",
-        "_unique_consecutive_memo_vc",
-        "_unique_consecutive_memo_epoch",
-        "_nested_int_memo",
-        "_nested_int_memo_vc",
-        "_nested_int_memo_epoch",
-        "_debug_trace",
-    }
+    _FakeTensorConstructorIgnoredState.__annotations__
 )
 
 
@@ -140,6 +143,22 @@ class IncrementRecursionCount:
 @dataclass
 class UnsupportedFakeTensorException(RuntimeError):
     reason: str
+
+
+class FakeTensorDeviceMismatchError(RuntimeError):
+    def __init__(
+        self,
+        func: OpOverload,
+        common_device: torch.device,
+        device: torch.device,
+    ) -> None:
+        self.func = func
+        self.common_device = common_device
+        self.device = device
+        super().__init__(
+            "Expected all tensors to be on the same device, but found "
+            f"at least two devices, {common_device} and {device}!"
+        )
 
 
 @dataclass
@@ -391,6 +410,27 @@ class FakeTensorConverter:
                 ten.constant = None
 
         del self.constant_storage_mapping[weak_st]
+
+    def clear_non_cpu_constants(self) -> None:
+        """Clear non-CPU constants while keeping cheap CPU constants for folding."""
+        for weak_st, weak_tensor_refs in list(self.constant_storage_mapping.items()):
+            live_tensor_refs: list[ReferenceType[FakeTensor]] = []
+            constant: Tensor | None = None
+            for weak_tensor_ref in weak_tensor_refs:
+                ten = weak_tensor_ref()
+                if ten is None or ten.constant is None:
+                    continue
+
+                live_tensor_refs.append(weak_tensor_ref)
+                if constant is None:
+                    constant = ten.constant
+
+            if constant is None:
+                del self.constant_storage_mapping[weak_st]
+            elif constant.device.type == "cpu":
+                self.constant_storage_mapping[weak_st] = live_tensor_refs
+            else:
+                self.invalidate_constant_aliases(constant)
 
     def _get_memo(self, t: Tensor) -> FakeTensor | None:
         tid = self.meta_converter.describer.lookup_tensor.get(t)
@@ -798,18 +838,6 @@ class FakeTensor(Tensor):
     # that have dispatch keys which are higher than the "meta" key:
     # https://github.com/pytorch/pytorch/blob/main/c10/core/DispatchKey.h#L189
 
-    # We don't support named tensors; graph break
-    @property
-    # pyrefly: ignore [bad-override]
-    def names(self) -> list[str]:
-        raise UnsupportedFakeTensorException(
-            "torch.compile doesn't support named tensors"
-        )
-
-    @names.setter
-    def names(self, _: list[str]) -> None:
-        raise NotImplementedError
-
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
         """Normalize device by initializing GPU context and setting device index."""
@@ -841,12 +869,13 @@ class FakeTensor(Tensor):
         _fake_device: torch.device | str | None = None,
         requires_grad: bool | None = None,
         _is_param: bool = False,
-        **state: object,
+        **state: Unpack[_FakeTensorConstructorIgnoredState],
     ) -> Self:
+        state_dict = cast(dict[str, object], state)
         for attr_name in _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS:
-            state.pop(attr_name, None)
-        if state:
-            unexpected = next(iter(state))
+            state_dict.pop(attr_name, None)
+        if state_dict:
+            unexpected = next(iter(state_dict))
             raise TypeError(
                 "FakeTensor.__new__() got an unexpected keyword argument "
                 f"{unexpected!r}"
@@ -882,7 +911,7 @@ class FakeTensor(Tensor):
             raise AssertionError("elem must use the same FakeTensorMode as fake_mode")
 
         specified_devices = [
-            (name, torch.device(value))
+            (name, FakeTensor._normalize_fake_device(torch.device(value)))
             for name, value in (
                 ("device", device),
                 ("fake_device", fake_device),
@@ -891,13 +920,14 @@ class FakeTensor(Tensor):
             if value is not None
         ]
         if specified_devices:
-            first_name, device = specified_devices[0]
+            first_name, resolved_device = specified_devices[0]
             for name, candidate_device in specified_devices[1:]:
-                if device != candidate_device:
+                if resolved_device != candidate_device:
                     raise ValueError(
                         "FakeTensor.__new__() got conflicting device values: "
-                        f"{first_name}={device}, {name}={candidate_device}"
+                        f"{first_name}={resolved_device}, {name}={candidate_device}"
                     )
+            device = resolved_device
         else:
             raise TypeError(
                 "FakeTensor.__new__() missing required argument: "
@@ -1162,9 +1192,7 @@ class FakeTensor(Tensor):
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
-            raise RuntimeError(
-                f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
-            )
+            raise FakeTensorDeviceMismatchError(func, common_device, t.device)
 
         for arg in flat_args:
             merge_devices(arg)
@@ -3528,12 +3556,27 @@ def _check_for_subclass(flat_args: Sequence[object]) -> bool:
 
 
 def _check_for_subclass_arg(x: object) -> bool:
-    return (
-        not isinstance(x, FakeTensor)
-        and isinstance(x, Tensor)
-        and type(x) is not Tensor
-        and type(x) is not torch.nn.Parameter
+    if isinstance(x, FakeTensor):
+        return False
+    if not isinstance(x, Tensor):
+        return False
+
+    x_type = type(x)
+    if x_type is Tensor:
+        return False
+
+    # Use the concrete type instead of isinstance because wrapper subclasses
+    # marked as Parameters (e.g. Parameter(TwoTensor(...))) still need subclass
+    # dispatch. Only metadata-only Parameter subclasses that inherit Tensor's
+    # disabled __torch_dispatch__ can follow the regular Parameter path.
+    is_metadata_only_parameter_subclass = (
+        issubclass(x_type, torch.nn.Parameter)
+        and x_type.__torch_dispatch__ is Tensor.__torch_dispatch__
     )
+    if is_metadata_only_parameter_subclass:
+        return False
+
+    return True
 
 
 _DISPATCH_META_HANDLERS = {
