@@ -3681,9 +3681,6 @@ make_fallback(aten.masked_scatter_backward)
 make_fallback(aten.view_as_complex, require_contiguous)
 make_fallback(aten.angle)  # needs complex
 
-# Needs efficentzerotensor
-make_fallback(aten._efficientzerotensor)
-
 # Needs Sparse
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
@@ -4340,6 +4337,17 @@ def copy_strided(x, stride):
 def full(size, fill_value, **kwargs):
     assert kwargs.get("dtype") is not None, "dtype should be handled by decomposition"
     return tensor_constructor(fill_value)(size, **kwargs)
+
+
+@register_lowering(aten._efficientzerotensor, type_promotion_kind=None)
+def _efficientzerotensor(
+    size, *, dtype=None, layout=None, device=None, pin_memory=False
+):
+    assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+    dtype = torch.get_default_dtype() if dtype is None else decode_dtype(dtype)
+    with torch.utils._python_dispatch._disable_current_modes():
+        scalar = torch.zeros((), dtype=dtype, device=decode_device(device))
+    return expand(V.graph.add_tensor_constant(scalar), size)
 
 
 @register_lowering(aten.gather, type_promotion_kind=None)

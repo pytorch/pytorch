@@ -827,6 +827,7 @@ if RUN_GPU:
         BaseTest("test_custom_op_1"),
         BaseTest("test_custom_op_2"),
         BaseTest("test_custom_op_3"),
+        BaseTest("test_efficient_zero_tensor_avoids_oom"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),
