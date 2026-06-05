@@ -537,6 +537,9 @@ class sherwood_v3_table : private EntryAlloc,
   uint64_t count(const FindKey& key) const {
     return find(key) == end() ? 0 : 1;
   }
+  bool contains(const FindKey& key) const {
+    return find(key) != end();
+  }
   std::pair<iterator, iterator> equal_range(const FindKey& key) {
     iterator found = find(key);
     if (found == end())
