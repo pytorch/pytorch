@@ -1201,10 +1201,10 @@ class GraphModule(torch.nn.Module):
             return ((y,), (l_weight_, l_x_))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, y: "f32[5, 4]", l_weight_: "f32[4, 3]", l_x_: "f32[5, 3]"):
+        def forward(self, grad_y: "f32[5, 4]", l_weight_: "f32[4, 3]", l_x_: "f32[5, 3]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
-            contiguous: "f32[5, 4]" = y.contiguous();  y = None
+            contiguous: "f32[5, 4]" = grad_y.contiguous();  grad_y = None
 
             grad_x: "f32[5, 3]" = contiguous.matmul(l_weight_);  l_weight_ = None
 
@@ -1215,6 +1215,36 @@ class GraphModule(torch.nn.Module):
             return (grad_weight, grad_x)
 """,
         )
+
+    def test_backward_graph_grad_input_names_have_grad_prefix(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                y = x.sin()
+                return y
+
+            @staticmethod
+            def backward(ctx, tangent):
+                assert tangent.is_contiguous()  # noqa: S101
+                (x,) = ctx.saved_tensors
+                return tangent * x
+
+        def fn(x):
+            return Foo.apply(x)
+
+        x = torch.randn(3, requires_grad=True)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        y = opt_fn(x)
+        y.backward(y.clone().detach().requires_grad_(True))
+
+        bwd_placeholders = [
+            node.name
+            for node in cnt.graphs[0].bwd_body_0.graph.nodes
+            if node.op == "placeholder"
+        ]
+        self.assertEqual(bwd_placeholders, ["grad_y", "l_x_"])
 
     def test_smuggle_symint_issue_111031(self):
         from torch.autograd import Function
@@ -2161,7 +2191,7 @@ class GraphModule(torch.nn.Module):
             return ((out, out_1), ())
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, grad_output: "f32[4, 4]", output_data: "f32[4, 4]"):
+        def forward(self, grad_output: "f32[4, 4]", grad_output_data: "f32[4, 4]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[4, 4]" = grad_output * 4;  mul = None

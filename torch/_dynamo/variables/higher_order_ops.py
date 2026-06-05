@@ -5451,13 +5451,23 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 fwd_vt_to_bwd_node[fwd_out] = bwd_input_nodes[bwd_idx]
                 bwd_idx += 1
 
+        # These placeholders are gradients flowing into backward. Preserve
+        # already-clear names, but mark ambiguous names as gradients.
+        def ensure_grad_name(name: str) -> str:
+            if name.startswith("grad"):
+                return name
+            return f"grad_{name}"
+
         rewired_bwd_graph_inputs = []
         for fwd_graph_vt in fwd_graph_body_outputs:
             # for tensor vts that were part of a user-defined object (like in
             # the above example), we just set None for now. Later, we will use
             # these None to insert a unused placeholder.
             # type: ignore[arg-type]
-            rewired_bwd_graph_inputs.append(fwd_vt_to_bwd_node.get(fwd_graph_vt))
+            bwd_node = fwd_vt_to_bwd_node.get(fwd_graph_vt)
+            rewired_bwd_graph_inputs.append(
+                (bwd_node, ensure_grad_name(bwd_node.name) if bwd_node else None)
+            )
 
         # To address Problem (2), we must incorporate any tensors that were saved
         # (or otherwise smuggled) from the forward pass into the backward graph.
@@ -5474,7 +5484,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         extra_fwd_output_nodes = []
         for fwd_proxy, bwd_inner_proxy in bwd_freevars.items():
             # For backward, its easy, just get the node from bwd_inner_proxy
-            rewired_bwd_graph_inputs.append(bwd_inner_proxy.node)
+            rewired_bwd_graph_inputs.append((bwd_inner_proxy.node, None))
 
             # For the fwd_proxy, it could be a proxy from the outer graph, or it
             # could be an intermediate.
@@ -5504,9 +5514,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         count = itertools.count()
 
-        for node in rewired_bwd_graph_inputs:
+        for node, new_name in rewired_bwd_graph_inputs:
             if node is None:
                 new_node = new_graph.placeholder(f"unused_{next(count)}")
+            elif new_name is not None:
+                new_node = new_graph.placeholder(new_name)
+                new_node.meta = copy.copy(node.meta)
             else:
                 new_node = new_graph.placeholder(node.name)
                 new_node.meta = copy.copy(node.meta)
