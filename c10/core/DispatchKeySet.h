@@ -166,9 +166,9 @@ C10_ALWAYS_INLINE static const std::
 // An undefined tensor is one with an empty tensor type set.
 class DispatchKeySet final {
  public:
-  enum Full { FULL };
-  enum FullAfter { FULL_AFTER };
-  enum Raw { RAW };
+  enum class Full { FULL };
+  enum class FullAfter { FULL_AFTER };
+  enum class Raw { RAW };
 
   // NB: default constructor representation as zero is MANDATORY as
   // use of DispatchKeySet in TLS requires this.
@@ -397,7 +397,7 @@ class DispatchKeySet final {
   }
 
   static DispatchKeySet from_raw_repr(uint64_t x) {
-    return DispatchKeySet(RAW, x);
+    return DispatchKeySet(Raw::RAW, x);
   }
 
   DispatchKey highestFunctionalityKey() const {
@@ -719,22 +719,22 @@ constexpr DispatchKeySet autogradother_backends =
     // Including the backend bits because this keyset is used during op
     // registration, which requires looping over all runtime autogradother
     // backend keys.
-    | DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+    | DispatchKeySet(DispatchKeySet::Raw::RAW, full_backend_mask);
 
 // The set of dispatch keys that come after autograd
 // n.b. this relies on the fact that AutogradOther is currently the lowest
 // Autograd key
 constexpr DispatchKeySet after_autograd_keyset =
-    DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
+    DispatchKeySet(DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::AutogradOther);
 
 // The set of dispatch keys that come after ADInplaceOrView
 constexpr DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
-    DispatchKeySet::FULL_AFTER,
+    DispatchKeySet::FullAfter::FULL_AFTER,
     c10::DispatchKey::ADInplaceOrView);
 
 // The set of dispatch keys that come after Functionalize
 constexpr DispatchKeySet after_func_keyset =
-    DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Functionalize)
+    DispatchKeySet(DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::Functionalize)
         .remove(
             // NOTE: we also need to remove ADInplaceOrView from the keyset when
             // redispatching after the func kernels. This is because we're not
@@ -750,7 +750,7 @@ constexpr DispatchKeySet after_func_keyset =
             c10::DispatchKey::ADInplaceOrView);
 
 constexpr DispatchKeySet backend_bitset_mask =
-    DispatchKeySet(DispatchKeySet::RAW, (1ULL << num_backends) - 1);
+    DispatchKeySet(DispatchKeySet::Raw::RAW, (1ULL << num_backends) - 1);
 
 constexpr auto inplace_or_view_ks =
     DispatchKeySet(DispatchKey::ADInplaceOrView);
@@ -796,7 +796,7 @@ constexpr DispatchKeySet backend_functionality_keys =
         DispatchKey::Sparse,
         DispatchKey::SparseCsr,
     }) |
-    DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+    DispatchKeySet(DispatchKeySet::Raw::RAW, full_backend_mask);
 
 struct OpTableOffsetAndMask {
   uint16_t offset;

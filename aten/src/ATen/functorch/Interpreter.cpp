@@ -13,8 +13,8 @@ static DispatchKeySet get_all_dynlayer_keyset() {
 
   // "all dispatch keys between DynamicLayer{Front, Back}Mode, inclusive"
   auto result =
-    DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::FuncTorchDynamicLayerFrontMode) -
-    DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::FuncTorchDynamicLayerBackMode);
+    DispatchKeySet(DispatchKeySet::FullAfter::FULL_AFTER, DispatchKey::FuncTorchDynamicLayerFrontMode) -
+    DispatchKeySet(DispatchKeySet::FullAfter::FULL_AFTER, DispatchKey::FuncTorchDynamicLayerBackMode);
   result = result | DispatchKeySet({DispatchKey::FuncTorchDynamicLayerFrontMode});
 
   // Hack: don't handle the autocast dispatch keys. Their interaction with functorch
