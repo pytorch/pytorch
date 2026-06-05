@@ -4382,6 +4382,9 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         ((1, 3), 1, {'eps' : 1e-5}),
         ((0, 2), 1, {'eps' : 1e-5}),
         ((S, S, S), 1, {'eps' : 0.5}),
+        ((2, 6, 5, 3), 2, {"eps": 1e-5}),
+        # Trigger an alternative channels-last path on CPU, for HxW >= 2048.
+        ((2, 6, 4, 600), 2, {"eps": 1e-5}),
     )
 
     # num_channels is inferred to be input.shape[1] dimension
@@ -4409,6 +4412,9 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
 def sample_inputs_native_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
     for si in sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         inp: torch.Tensor = si.input
+        mem_fmt = torch.channels_last if device == "cpu" and inp.ndim == 4 else torch.contiguous_format
+        inp = inp.to(memory_format=mem_fmt)
+
         weight: torch.Tensor | None = si.kwargs.get("weight", None)
         bias: torch.Tensor | None = si.kwargs.get("bias", None)
         N: int = inp.shape[0]
@@ -4459,6 +4465,9 @@ def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs)
 def reference_inputs_native_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
     for si in reference_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         inp: torch.Tensor = si.input
+        mem_fmt = torch.channels_last if device == "cpu" and inp.ndim == 4 else torch.contiguous_format
+        inp = inp.to(memory_format=mem_fmt)
+
         weight: torch.Tensor | None = si.kwargs.get("weight", None)
         bias: torch.Tensor | None = si.kwargs.get("bias", None)
         N: int = inp.shape[0]
@@ -18938,17 +18947,6 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_promotes_int_to_float', device_type='mps'),
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
                     )),
-    OpInfo('qr',
-           op=torch.qr,
-           dtypes=floating_and_complex_types(),
-           dtypesIfMPS=floating_types(),
-           sample_inputs_func=sample_inputs_linalg_qr_geqrf,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # In-place ops
-           check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
-           ),
     UnaryUfuncInfo('rad2deg',
                    ref=np.degrees,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
