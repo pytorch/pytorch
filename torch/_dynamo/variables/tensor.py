@@ -2365,6 +2365,24 @@ class TensorVariable(VariableTracker):
             ),
         )
 
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.xor, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
     def nb_multiply_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2635,6 +2653,22 @@ class SymNodeVariable(VariableTracker):
             tx,
             tx.output.create_proxy(
                 "call_function", operator.and_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.xor, *proxy_args_kwargs([self, other], {})
             ),
             sym_num=None,
         )

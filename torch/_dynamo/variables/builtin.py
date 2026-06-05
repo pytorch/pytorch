@@ -583,7 +583,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             operator.mod: (["__mod__", "__rmod__", "__imod__"], operator.imod),
             pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
             operator.pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
-            operator.xor: (["__xor__", "__rxor__", "__ixor__"], operator.xor),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
             # operator.matmul
@@ -2665,28 +2664,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_xor(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        # Rely on constant_handler
-        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
-            return None
-        if a.is_symnode_like() and b.is_symnode_like():
-            return SymNodeVariable.create(
-                tx,
-                tx.output.create_proxy(
-                    "call_function", operator.xor, *proxy_args_kwargs([a, b], {})
-                ),
-                sym_num=None,
-            )
-
-        if isinstance(a, _SET_LIKE_OP_SUPPORT):
-            return a.call_method(tx, "__xor__", [b], {})
-        return None
+        return binary_op(tx, a, b, "nb_xor", "^")
 
     def call_ixor(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        if isinstance(a, _SET_LIKE_OP_SUPPORT):
-            return a.call_method(tx, "__ixor__", [b], {})
-        return None
+        return binary_iop(tx, a, b, "nb_inplace_xor", "nb_xor", "^=")
 
     def call_mul(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
