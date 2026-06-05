@@ -215,6 +215,8 @@ class CUTLASSScheduling(BaseScheduling):
             # Fast path for concrete/static equality before invoking simplify.
             if lhs == rhs:
                 return True
+            if V.graph.sizevars.statically_known_equals(lhs, rhs):
+                return True
             return sympy.simplify(lhs - rhs) == 0
 
         while t_idx < len(template_size) and n_idx < len(node_size):

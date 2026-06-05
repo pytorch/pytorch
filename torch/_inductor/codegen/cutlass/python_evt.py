@@ -149,20 +149,26 @@ def _fuse_activations(code: str) -> str:
         ):
             assigns[stmt.targets[0].id] = stmt.value
 
-    def inline(node: ast.expr) -> ast.expr:
+    def inline(node: ast.expr, seen: frozenset[str] = frozenset()) -> ast.expr:
         # Fully inline temporary assignments so the expression tree only refers
         # to function parameters (accum / read buffers) and literal constants.
         if isinstance(node, ast.Name) and node.id in assigns:
-            return inline(assigns[node.id])
+            if node.id in seen:
+                return node
+            return inline(assigns[node.id], seen | OrderedSet([node.id]))
         if isinstance(node, ast.BinOp):
             return ast.BinOp(
-                left=inline(node.left), op=node.op, right=inline(node.right)
+                left=inline(node.left, seen),
+                op=node.op,
+                right=inline(node.right, seen),
             )
         if isinstance(node, ast.UnaryOp):
-            return ast.UnaryOp(op=node.op, operand=inline(node.operand))
+            return ast.UnaryOp(op=node.op, operand=inline(node.operand, seen))
         if isinstance(node, ast.Call):
             return ast.Call(
-                func=node.func, args=[inline(a) for a in node.args], keywords=[]
+                func=node.func,
+                args=[inline(a, seen) for a in node.args],
+                keywords=[],
             )
         return node
 
@@ -211,7 +217,19 @@ def _fuse_activations(code: str) -> str:
         kept.append(stmt)
     func.body = list(reversed(kept))
 
-    return ast.unparse(ast.fix_missing_locations(tree))
+    folded = ast.unparse(ast.fix_missing_locations(tree))
+
+    # After dead-code elimination, any activation primitive that served as a
+    # trigger (e.g. erf) should no longer appear in the live code -- it was
+    # consumed by the pattern match and eliminated.  If one still appears, the
+    # fold was incomplete (e.g. a standalone erf not part of a known pattern);
+    # bail out and return the original code so the CUTLASS frontend rejects the
+    # epilogue cleanly rather than emitting an unsupported functor.
+    for p in active:
+        if p.trigger in folded:
+            return code
+
+    return folded
 
 
 def scaled_mm_evt(
@@ -258,6 +276,11 @@ class CutlassEVTOpsMixIn:
 
     @staticmethod
     def constant(value: Any, dtype: Any) -> str:
+        # Return the constant as a Python float literal so the EVT python code
+        # string can embed it directly (e.g. for the 0.5 and 1/sqrt(2) factors
+        # in gelu).  The CUTLASS EVT frontend will render it as a C++ scalar.
+        # Only numeric constants appear here (Inductor does not lower non-numeric
+        # constants into pointwise epilogues).
         return str(float(value))
 
     @staticmethod
@@ -507,6 +530,14 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         def _provably_equal_or_zero(a: sympy.Expr, b: sympy.Expr) -> bool:
             # sympy.Eq can return an unevaluated Equality object; only accept
             # cases sympy can prove true.
+            if a == b:
+                return True
+            if V.graph.sizevars.statically_known_equals(a, b):
+                return True
+            if V.graph.sizevars.statically_known_equals(a, 0):
+                return True
+            if V.graph.sizevars.statically_known_equals(b, 0):
+                return True
             return (
                 sympy.Eq(a, b) is sympy.true
                 or sympy.Eq(a, 0) is sympy.true
