@@ -137,7 +137,7 @@ class CheckpointReader:
                 if tensor_offset is None:
                     raise AssertionError(
                         "checkpoint_offset for tensor in torch serialized file is not set. This could "
-                        "happen if the checkpoint was saved with a older version of Pytorch. "
+                        "happen if the checkpoint was saved with an older version of PyTorch. "
                         "Please make sure that the checkpoint was saved with Pytorch 2.7 or later."
                     )
 
