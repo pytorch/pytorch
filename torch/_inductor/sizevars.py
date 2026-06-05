@@ -318,7 +318,8 @@ class SizeVarAllocator:
             )
             for x in index_formulas
         ]
-        assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
+        if len(sizes) != len(strides[0]):
+            raise AssertionError((len(sizes), len(strides[0])))
 
         for i in range(len(sizes)):
             if sizes[i] == 1:
@@ -365,11 +366,15 @@ class SizeVarAllocator:
                     new_index.append(sympy.S.Zero)
                 else:
                     new_index.append(it.pop())
-            assert not it
+            if it:
+                raise AssertionError(f"expected all entries consumed, got {it}")
             return new_index
 
         def prune(index):
-            assert len(index) == len(sizes)
+            if len(index) != len(sizes):
+                raise AssertionError(
+                    f"expected len(index) == len(sizes), got {len(index)} != {len(sizes)}"
+                )
             return [i for i, s in zip(index, sizes) if s is not None]
 
         return [x for x in sizes if x is not None], reindex, prune
@@ -537,7 +542,8 @@ class SizeVarAllocator:
         check Note [expect_true].
         """
         expr = sympy_subs(expr, self.inv_precomputed_replacements)
-        assert self.expect_true(expr)
+        if not self.expect_true(expr):
+            raise AssertionError(f"expect_true failed for {expr}")
 
     def check_equals(self, left: Expr, right: Expr) -> None:
         """
@@ -597,7 +603,8 @@ class SizeVarAllocator:
         size_oblivious: bool = False,
         fallback_value: bool | None = None,
     ) -> bool:
-        assert isinstance(left, (Expr, sympy.logic.boolalg.Boolean)), type(left)
+        if not isinstance(left, (Expr, sympy.logic.boolalg.Boolean)):
+            raise AssertionError(type(left))
         return self.shape_env.evaluate_expr(
             sympy.sympify(left),
             size_oblivious=size_oblivious,
@@ -703,7 +710,8 @@ class SizeVarAllocator:
         # Substitute all hints into expr, but leave unbacked symints alone
         expr = self.simplify(expr)
         if not isinstance(expr, Expr):
-            assert isinstance(expr, int)
+            if not isinstance(expr, int):
+                raise AssertionError(f"expected int, got {type(expr)}")
             return expr
 
         expr = self.remove_precomputed_replacements(expr)
@@ -1147,7 +1155,8 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
 
     This type of pattern can come from view operations
     """
-    assert isinstance(expr, sympy.Add)
+    if not isinstance(expr, sympy.Add):
+        raise AssertionError(f"expected sympy.Add, got {type(expr)}")
 
     scale = sympy.Wild("scale", exclude=[0], integer=True)
     base = sympy.Wild("base", integer=True)

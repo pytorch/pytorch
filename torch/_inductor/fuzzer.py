@@ -300,7 +300,10 @@ class SamplingMethod(Enum):
         elif is_type(type_hint, Union) or is_type(type_hint, types.UnionType):
             # do whatever is not the type of default
             try:
-                assert len(type_hint.__args__) > 1
+                if len(type_hint.__args__) <= 1:
+                    raise AssertionError(
+                        f"expected Union with >1 args, got {len(type_hint.__args__)}"
+                    )
             except AttributeError as err:
                 raise ValueError("Union type with no args") from err
             if random_sample:
@@ -919,8 +922,10 @@ def visualize_results(
     Creates an HTML document representing the results of running the fuzzer with fuzz_n_tuple, with n = 2.
     """
     # TODO support more dimensions
-    assert n == 2
-    assert len(results) > 0
+    if n != 2:
+        raise AssertionError(f"expected n == 2, got {n}")
+    if len(results) <= 0:
+        raise AssertionError("expected non-empty results")
 
     input_set: OrderedSet[str] = OrderedSet({})
     for key in results.keys():  # noqa: SIM118

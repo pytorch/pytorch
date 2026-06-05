@@ -1085,11 +1085,12 @@ def decide_worker_start_method() -> str:
         start_method = os.environ["TORCHINDUCTOR_WORKER_START"]
     else:
         start_method = "subprocess"
-    assert start_method in (
+    if start_method not in (
         "subprocess",
         "fork",
         "spawn",
-    ), f"Invalid start method: {start_method}"
+    ):
+        raise AssertionError(f"Invalid start method: {start_method}")
     return start_method
 
 
@@ -1323,7 +1324,8 @@ def decide_compile_threads() -> int:
         log.info("compile_threads set to 1 in fbcode")
     else:
         cpu_count = torch._utils.cpu_count()
-        assert cpu_count
+        if not cpu_count:
+            raise AssertionError(f"expected nonzero cpu_count, got {cpu_count}")
         compile_threads = min(32, cpu_count)
         log.info("compile_threads set to %d", compile_threads)
 

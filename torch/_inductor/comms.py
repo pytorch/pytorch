@@ -840,7 +840,10 @@ def _format_and_log_reordering_stats(
         reorder_log_str += "\n".join(map(str, rows))
 
     new_snodes = _group_nodes_from_linked_list(head, None, next_dict)
-    assert len(new_snodes) == original_snodes_num
+    if len(new_snodes) != original_snodes_num:
+        raise AssertionError(
+            f"expected {original_snodes_num} nodes, got {len(new_snodes)}"
+        )
     new_peak_memory, _, _, _ = estimate_peak_memory_allocfree(
         new_snodes, name_to_freeable_input_buf, graph_outputs
     )
@@ -1331,7 +1334,8 @@ def _schedule_for_comm(
         to overlap with it. The strategy is described in the comment of
         `reorder_compute_for_overlap`.
         """
-        assert contains_collective(snode)
+        if not contains_collective(snode):
+            raise AssertionError("expected snode to contain a collective")
         schedule(snode)
 
         collective_cost = snode_to_cost[snode]
@@ -1354,9 +1358,10 @@ def _schedule_for_comm(
             schedule(snode)
 
     for deps in unmet_deps.values():
-        assert len(deps) == 0, (
-            f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
-        )
+        if len(deps) != 0:
+            raise AssertionError(
+                f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
+            )
     return scheduled
 
 
@@ -1690,7 +1695,10 @@ def _format_and_log_sink_waits_stats(
         log_str += "\n".join(map(str, rows))
     overlap_log.info(log_str)
     new_snodes = _group_nodes_from_linked_list(head, None, next_dict)
-    assert len(new_snodes) == original_snodes_num
+    if len(new_snodes) != original_snodes_num:
+        raise AssertionError(
+            f"expected {original_snodes_num} nodes, got {len(new_snodes)}"
+        )
     new_peak_memory, _, _, _ = estimate_peak_memory_allocfree(
         new_snodes, name_to_freeable_input_buf, graph_outputs
     )
@@ -2130,7 +2138,8 @@ def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
     if config.estimate_op_runtime == "default":
         runtime = snode.get_estimated_runtime()
     else:
-        assert callable(config.estimate_op_runtime)
+        if not callable(config.estimate_op_runtime):
+            raise AssertionError("expected config.estimate_op_runtime to be callable")
         runtime = config.estimate_op_runtime(snode)
     return runtime
 
@@ -2210,9 +2219,10 @@ def reorder_compute_and_comm_for_overlap(
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
-        assert callable(p), (
-            f"Invalid reorder_compute_and_comm_for_overlap pass: {p} is not callable"
-        )
+        if not callable(p):
+            raise AssertionError(
+                f"Invalid reorder_compute_and_comm_for_overlap pass: {p} is not callable"
+            )
         order = p(order)  # type: ignore[operator]
     # pyrefly: ignore [bad-return]
     return order

@@ -246,7 +246,7 @@ def validate_ir(node_or_nodes: _NodeOrNodes | None) -> None:
             for node in nodes.values():
                 _check_tensorbox(node)
         else:
-            assert isinstance(
+            if not isinstance(
                 nodes,
                 (
                     ExpandView,
@@ -260,16 +260,18 @@ def validate_ir(node_or_nodes: _NodeOrNodes | None) -> None:
                     ShapeAsConstantBuffer,
                     OpaqueMultiOutput,
                 ),
-            ), (
-                f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
-            )
+            ):
+                raise AssertionError(
+                    f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
+                )
 
     # Be picky about the accepted data structure (don't use pytree here)
     _check_tensorbox(node_or_nodes)
 
 
 def ops_wrapper(name: str) -> Callable[..., OpsValue]:
-    assert isinstance(name, str), type(name)
+    if not isinstance(name, str):
+        raise AssertionError(type(name))
 
     def fn(*args: object, **kwargs: object) -> OpsValue:
         return getattr(ops, name)(*args, **kwargs)
@@ -281,7 +283,8 @@ def inverse_reorder(order: Sequence[int]) -> Callable[[Sequence[_T]], Sequence[_
     inv_order = dict(zip(order, range(len(order))))
 
     def reindex(index: Sequence[_T]) -> Sequence[_T]:
-        assert len(index) == len(inv_order)
+        if len(index) != len(inv_order):
+            raise AssertionError("Expected len(index) == len(inv_order)")
         return [index[inv_order[i]] for i in range(len(index))]
 
     return reindex
@@ -289,7 +292,8 @@ def inverse_reorder(order: Sequence[int]) -> Callable[[Sequence[_T]], Sequence[_
 
 def same_reorder(order: Sequence[int]) -> Callable[[Sequence[_T]], Sequence[_T]]:
     def reindex(index: Sequence[_T]) -> Sequence[_T]:
-        assert len(index) == len(order)
+        if len(index) != len(order):
+            raise AssertionError("Expected len(index) == len(order)")
         return [index[order[i]] for i in range(len(index))]
 
     return reindex
@@ -431,7 +435,8 @@ def is_triton(x: IRNode | torch.device | None | str) -> bool:
         return False
     from .codegen.triton import TritonScheduling
 
-    assert isinstance(device_scheduling, type), type(device_scheduling)
+    if not isinstance(device_scheduling, type):
+        raise AssertionError(type(device_scheduling))
     return issubclass(device_scheduling, TritonScheduling)
 
 
@@ -468,7 +473,10 @@ def significant_strides_equal(
     """
     Returns true if the strides are equal, ignoring dimensions of size 1 .
     """
-    assert len(shape) == len(strides1) and len(strides1) == len(strides2)
+    if not (len(shape) == len(strides1) and len(strides1) == len(strides2)):
+        raise AssertionError(
+            "Expected len(shape) == len(strides1) and len(strides1) == len(strides2)"
+        )
     for dim, s1, s2 in zip(shape, strides1, strides2):
         if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
@@ -774,7 +782,8 @@ class IRNode:
 
     def get_device_or_error(self) -> torch.device:
         device = self.get_device()
-        assert device is not None
+        if device is None:
+            raise AssertionError("Expected device is not None")
         return device
 
     def has_exceeded_max_reads(self) -> bool:
@@ -898,19 +907,23 @@ class Operation:
         raise NotImplementedError
 
     def get_origin_node(self) -> torch.fx.Node | None:
-        assert hasattr(self, "origin_node")
+        if not hasattr(self, "origin_node"):
+            raise AssertionError('Expected hasattr(self, "origin_node")')
         return self.origin_node
 
     def get_origins(self) -> OrderedSet[Any]:
-        assert hasattr(self, "origins")
+        if not hasattr(self, "origins"):
+            raise AssertionError('Expected hasattr(self, "origins")')
         return self.origins
 
     def get_stream_idx(self) -> int | None:
-        assert hasattr(self, "stream_idx")
+        if not hasattr(self, "stream_idx"):
+            raise AssertionError('Expected hasattr(self, "stream_idx")')
         return self.stream_idx
 
     def get_operation_name(self) -> str:
-        assert self.operation_name is not None
+        if self.operation_name is None:
+            raise AssertionError("Expected self.operation_name is not None")
         return self.operation_name
 
     def get_config_patches(self) -> dict[str, Any]:
@@ -1461,7 +1474,8 @@ class Reduction(Loops):
 
         def get_read_indices(r: Reduction) -> tuple[Sequence[Expr], bool]:
             device = r.get_device()
-            assert device is not None
+            if device is None:
+                raise AssertionError("Expected device is not None")
             cb = ComputedBuffer(
                 name=None,
                 layout=FlexibleLayout(
@@ -1475,7 +1489,8 @@ class Reduction(Loops):
             # try finding the full size producer
             # TODO this will fail for something like ((1, N) * (N, 1)).sum()
             # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
-            assert read_writes.range_vars is not None
+            if read_writes.range_vars is None:
+                raise AssertionError("Expected read_writes.range_vars is not None")
             range_vars = [
                 r
                 for r in read_writes.range_vars
@@ -1600,10 +1615,12 @@ class Reduction(Loops):
                 if dst_dtype == torch.bool:
                     return bool(val)
                 elif dst_dtype.is_floating_point:
-                    assert isinstance(val, SupportsFloat), type(val)
+                    if not isinstance(val, SupportsFloat):
+                        raise AssertionError(type(val))
                     return float(val)
                 else:
-                    assert isinstance(val, SupportsInt), type(val)
+                    if not isinstance(val, SupportsInt):
+                        raise AssertionError(type(val))
                     return int(val)
 
             rtypes_to_inits = {
@@ -1614,9 +1631,10 @@ class Reduction(Loops):
                 # "all" is desugared to `!any(!val)`
             }
 
-            assert reduction_type in rtypes_to_inits, (
-                f"{reduction_type} not supported for zero-dimension tensors!"
-            )
+            if reduction_type not in rtypes_to_inits:
+                raise AssertionError(
+                    f"{reduction_type} not supported for zero-dimension tensors!"
+                )
 
             def const_fn(index: int) -> OpsValue:
                 return ops.constant(rtypes_to_inits[reduction_type], dst_dtype)
@@ -1694,13 +1712,16 @@ class Reduction(Loops):
         if reduction_hint == ReductionHint.DEFAULT:
             reduction_hint = hint
         if split == -1:
-            assert input_node is not None
+            if input_node is None:
+                raise AssertionError("Expected input_node is not None")
             with patch.object(FlexibleLayout, "allow_indexing", True):
                 new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
                     input_node
                 )
-            assert new_ranges is not None
-            assert new_reduction_ranges is not None
+            if new_ranges is None:
+                raise AssertionError("Expected new_ranges is not None")
+            if new_reduction_ranges is None:
+                raise AssertionError("Expected new_reduction_ranges is not None")
             return cls.create_multilayer_existing_ranges(
                 device,
                 dst_dtype,
@@ -1746,7 +1767,10 @@ class Reduction(Loops):
                     if not isinstance(buf, ComputedBuffer):
                         return None
 
-                    assert buf.data.get_reduction_type() is not None
+                    if buf.data.get_reduction_type() is None:
+                        raise AssertionError(
+                            "Expected buf.data.get_reduction_type() is not None"
+                        )
 
                     return buf
 
@@ -1759,9 +1783,8 @@ class Reduction(Loops):
                 # The setting on layer2 may be incorrect but it's fine
                 # since they are never get used.
                 # TODO: should we skip setting these fields for layer2
-                assert isinstance(split_reduction.data, Reduction), (
-                    f"{type(split_reduction.data)}"
-                )
+                if not isinstance(split_reduction.data, Reduction):
+                    raise AssertionError(f"{type(split_reduction.data)}")
                 split_reduction._split_size = split_reduction.data.reduction_ranges[0]
                 split_reduction._original_inner_fn = inner_fn
                 split_reduction._original_ranges = ranges
@@ -1923,9 +1946,10 @@ class Reduction(Loops):
         new_ranges: Sequence[Integer],
         new_reduction_ranges: Sequence[Integer],
     ) -> Callable[[Sequence[sympy.Expr], Sequence[sympy.Expr]], OpsValue]:
-        assert all(r == 1 for r in original_ranges), (
-            f"Only enabled for numel_hint == 1, found {original_ranges=}"
-        )
+        if not all(r == 1 for r in original_ranges):
+            raise AssertionError(
+                f"Only enabled for numel_hint == 1, found {original_ranges=}"
+            )
         reindex = View.dynamic_reshape_indexer(
             original_reduction_ranges, tuple(new_ranges) + tuple(new_reduction_ranges)
         )
@@ -1993,7 +2017,10 @@ class Reduction(Loops):
             split, numel_hint, reduction_hint
         )
 
-        assert original_ranges == new_ranges[: len(original_ranges)]
+        if original_ranges != new_ranges[: len(original_ranges)]:
+            raise AssertionError(
+                "Expected original_ranges == new_ranges[: len(original_ranges)]"
+            )
         return TensorBox.create(
             Reduction(
                 device=device,
@@ -2101,8 +2128,12 @@ def _fixed_indexer(
     """A closure containing math to read a given element"""
 
     def indexer(index: Sequence[int]) -> int:
-        assert stride is not None and len(index) == len(stride)
-        assert len(index) == len(size)
+        if not (stride is not None and len(index) == len(stride)):
+            raise AssertionError(
+                "Expected stride is not None and len(index) == len(stride)"
+            )
+        if len(index) != len(size):
+            raise AssertionError("Expected len(index) == len(size)")
         result = offset
         for idx, st, sz in zip(index, stride, size):
             if sz != 1:
@@ -2168,7 +2199,8 @@ class MultiOutputReduction(Reduction):
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
-        assert isinstance(values, (tuple, list)), type(values)
+        if not isinstance(values, (tuple, list)):
+            raise AssertionError(type(values))
         value = values[self.output_index]
         return ops.store_reduction(output_name or "unnamed", indexer(vars), value)
 
@@ -2223,10 +2255,14 @@ class WelfordReduction(MultiOutputReduction):
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ) -> Sequence[TensorBox]:
-        assert reduction_type in ("welford_reduce", "welford_combine")
-        assert not config.mtia.disable_welford_reduction, (
-            "welford reduction usage is explicitly disabled, please check you config"
-        )
+        if reduction_type not in ("welford_reduce", "welford_combine"):
+            raise AssertionError(
+                'Expected reduction_type in ("welford_reduce", "welford_combine")'
+            )
+        if config.mtia.disable_welford_reduction:
+            raise AssertionError(
+                "welford reduction usage is explicitly disabled, please check you config"
+            )
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
@@ -2468,7 +2504,10 @@ class Scan(Loops):
         )
 
     def __post_init__(self) -> None:
-        assert len(self.ranges) + len(self.scan_ranges) == len(self.size)
+        if len(self.ranges) + len(self.scan_ranges) != len(self.size):
+            raise AssertionError(
+                "Expected len(self.ranges) + len(self.scan_ranges) == len(self.size)"
+            )
         super().__post_init__()
 
     def store_reduction(
@@ -2542,7 +2581,8 @@ class Scan(Loops):
         sizevars = V.graph.sizevars
         scan_numel = sizevars.simplify(sympy_product(scan_ranges))
 
-        assert len(dtypes) == len(inner_fns)
+        if len(dtypes) != len(inner_fns):
+            raise AssertionError("Expected len(dtypes) == len(inner_fns)")
 
         # Scan with a single element is just a copy
         if sizevars.statically_known_true(sympy.Le(scan_numel, 1)):
@@ -2582,8 +2622,10 @@ class Scan(Loops):
                 scan_type = SplitScan
 
         def reindex(index: Sequence[Expr], scan_index: Sequence[Expr]) -> list[Expr]:
-            assert len(scan_index) == len(scan_ranges)
-            assert len(index) == len(pointwise_ranges)
+            if len(scan_index) != len(scan_ranges):
+                raise AssertionError("Expected len(scan_index) == len(scan_ranges)")
+            if len(index) != len(pointwise_ranges):
+                raise AssertionError("Expected len(index) == len(pointwise_ranges)")
             return [*index[:axis], *scan_index, *index[axis:]]
 
         results = [
@@ -2676,7 +2718,10 @@ class Sort(Loops):
         )
 
     def __post_init__(self) -> None:
-        assert len(self.ranges) + len(self.sort_ranges) == len(self.size)
+        if len(self.ranges) + len(self.sort_ranges) != len(self.size):
+            raise AssertionError(
+                "Expected len(self.ranges) + len(self.sort_ranges) == len(self.size)"
+            )
         super().__post_init__()
 
     def store_reduction(
@@ -2758,7 +2803,8 @@ class Sort(Loops):
             # We only support persistent triton kernels
             return [None] * len(dtypes)
 
-        assert len(dtypes) == len(inner_fns)
+        if len(dtypes) != len(inner_fns):
+            raise AssertionError("Expected len(dtypes) == len(inner_fns)")
 
         # Sort with a single element is just a copy
         if sizevars.statically_known_true(sympy.Le(sort_numel, 1)):
@@ -2773,8 +2819,10 @@ class Sort(Loops):
             ]
 
         def reindex(index: Sequence[Expr], sort_index: Sequence[Expr]) -> list[Expr]:
-            assert len(sort_index) == len(sort_ranges)
-            assert len(index) == len(pointwise_ranges)
+            if len(sort_index) != len(sort_ranges):
+                raise AssertionError("Expected len(sort_index) == len(sort_ranges)")
+            if len(index) != len(pointwise_ranges):
+                raise AssertionError("Expected len(index) == len(pointwise_ranges)")
             return [*index[:axis], *sort_index, *index[axis:]]
 
         results = [
@@ -2819,7 +2867,8 @@ def is_contiguous_storage_and_layout(x: IRNode) -> bool:
         # pad the stride here so we will NOT claim a tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
-            assert isinstance(layout, FlexibleLayout), type(layout)
+            if not isinstance(layout, FlexibleLayout):
+                raise AssertionError(type(layout))
             layout = FixedLayout(
                 layout.device,
                 layout.dtype,
@@ -2882,7 +2931,8 @@ def as_storage_and_layout(
         if freeze:
             if want_contiguous:
                 x.freeze_layout()
-                assert x.get_layout().is_contiguous()
+                if not x.get_layout().is_contiguous():
+                    raise AssertionError("Expected x.get_layout().is_contiguous()")
             elif stride_order is not None:
                 x.freeze_layout_with_stride_order(
                     stride_order, allow_padding=allow_padding
@@ -3000,7 +3050,8 @@ class BaseView(IRNode):
         return self.data.is_extern()
 
     def is_module_buffer(self) -> bool:
-        assert isinstance(self.data, BaseView), type(self.data)
+        if not isinstance(self.data, BaseView):
+            raise AssertionError(type(self.data))
         return self.data.is_module_buffer()
 
     def get_read_names(self) -> OrderedSet[str]:
@@ -3042,10 +3093,12 @@ class ExpandView(BaseView):
         new_size = [sympy.expand(s) for s in new_size]
         old_size = x.get_size()
         old_size = [None] * (len(new_size) - len(old_size)) + list(old_size)
-        assert len(new_size) == len(old_size)
+        if len(new_size) != len(old_size):
+            raise AssertionError("Expected len(new_size) == len(old_size)")
         for i in range(len(new_size)):
             if new_size[i] == -1:
-                assert old_size[i] is not None
+                if old_size[i] is None:
+                    raise AssertionError("Expected old_size[i] is not None")
                 new_size[i] = old_size[i]
             elif old_size[i] is None or V.graph.sizevars.is_size_one_or_false(
                 old_size[i]
@@ -3061,18 +3114,21 @@ class ExpandView(BaseView):
                 # us this equality.
                 v1 = new_size[i]
                 v2 = old_size[i]
-                assert v1 is not None
-                assert v2 is not None
+                if v1 is None:
+                    raise AssertionError("Expected v1 is not None")
+                if v2 is None:
+                    raise AssertionError("Expected v2 is not None")
                 diff = v1 - v2
-                assert (
+                if (
                     sizevars.optimization_hint(
                         diff,
                         fallback=0,
                     )
-                    == 0
-                ), (
-                    f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
-                )
+                    != 0
+                ):
+                    raise AssertionError(
+                        f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
+                    )
         return new_size
 
     @classmethod
@@ -3082,7 +3138,8 @@ class ExpandView(BaseView):
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             skip = len(new_size) - len(old_layout.size)
-            assert skip >= 0
+            if skip < 0:
+                raise AssertionError("Expected skip >= 0")
             new_stride = [sympy.S.Zero] * skip
             for stride, size in zip(old_layout.stride, old_layout.size):
                 new_stride.append(
@@ -3116,7 +3173,8 @@ class ExpandView(BaseView):
             index: Sequence[Expr],
         ) -> Sequence[Expr]:
             index = list(index[skip:])
-            assert len(index) == len(actual)
+            if len(index) != len(actual):
+                raise AssertionError("Expected len(index) == len(actual)")
             for i in range(len(actual)):
                 if actual[i] == 1:
                     # zero out broadcast dimension
@@ -3133,7 +3191,10 @@ class PermuteView(BaseView):
     @classmethod
     def create(cls, x: IRNode, dims: Sequence[int]) -> BaseView:
         dims = cls._map_neg_dims(dims)
-        assert OrderedSet(dims) == OrderedSet(range(len(dims)))
+        if OrderedSet(dims) != OrderedSet(range(len(dims))):
+            raise AssertionError(
+                "Expected OrderedSet(dims) == OrderedSet(range(len(dims)))"
+            )
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
@@ -3154,9 +3215,12 @@ class PermuteView(BaseView):
         return [dim if dim >= 0 else len(dims) + dim for dim in dims]
 
     def get_size(self) -> Sequence[Expr]:
-        assert OrderedSet(self._map_neg_dims(self.dims)) == OrderedSet(
+        if OrderedSet(self._map_neg_dims(self.dims)) != OrderedSet(
             range(len(self.dims))
-        )
+        ):
+            raise AssertionError(
+                "Expected OrderedSet(self._map_neg_dims(self.dims)) == OrderedSet( range(len(self.dims)) )"
+            )
         size = self.data.get_size()
         return [size[i] for i in self.dims]
 
@@ -3165,7 +3229,10 @@ class PermuteView(BaseView):
     ) -> Callable[[Sequence[Expr]], Sequence[Expr]]:
         inv = {j: i for i, j in enumerate(self.dims)}
         inv = [inv[i] for i in range(len(self.dims))]
-        assert OrderedSet(inv) == OrderedSet(range(len(self.dims)))
+        if OrderedSet(inv) != OrderedSet(range(len(self.dims))):
+            raise AssertionError(
+                "Expected OrderedSet(inv) == OrderedSet(range(len(self.dims)))"
+            )
 
         def reindex(
             index: Sequence[Expr],
@@ -3184,8 +3251,12 @@ class SqueezeView(BaseView):
             new_size = []
             new_stride = []
             if dim is not None:
-                assert isinstance(dim, int), type(dim)
-                assert 0 <= dim and dim < len(old_layout.size)
+                if not isinstance(dim, int):
+                    raise AssertionError(type(dim))
+                if not (0 <= dim and dim < len(old_layout.size)):
+                    raise AssertionError(
+                        "Expected 0 <= dim and dim < len(old_layout.size)"
+                    )
 
             for i, (size, stride) in enumerate(zip(old_layout.size, old_layout.stride)):
                 if dim is None:
@@ -3198,7 +3269,8 @@ class SqueezeView(BaseView):
                         new_size.append(size)
                         new_stride.append(stride)
                     else:
-                        assert size == 1, "expected squeezed size to be 1"
+                        if size != 1:
+                            raise AssertionError("expected squeezed size to be 1")
 
             new_layout = FixedLayout(
                 old_layout.device,
@@ -3220,7 +3292,8 @@ class SqueezeView(BaseView):
                 ],
             )
         else:
-            assert x.get_size()[dim] == 1
+            if x.get_size()[dim] != 1:
+                raise AssertionError("Expected x.get_size()[dim] == 1")
             return View.create(x, [s for i, s in enumerate(x.get_size()) if i != dim])
 
     @staticmethod
@@ -3232,7 +3305,8 @@ class SqueezeView(BaseView):
         length = len(size)
 
         def reindex(index: Sequence[Expr]) -> tuple[Expr, ...]:
-            assert len(index) == len(not_one), f"{index} {not_one}"
+            if len(index) != len(not_one):
+                raise AssertionError(f"{index} {not_one}")
             new_index: list[Expr] = [sympy.S.Zero] * length
             for idx, s in zip(not_one, index):
                 new_index[idx] = s
@@ -3300,7 +3374,8 @@ class View(GenericView):
     @classmethod
     @override
     def create(cls, x: IRNode, new_size: Sequence[Expr]) -> IRNode:  # type: ignore[override]
-        assert isinstance(new_size, Sequence), type(new_size)
+        if not isinstance(new_size, Sequence):
+            raise AssertionError(type(new_size))
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
         # Skip pointless views
@@ -3506,7 +3581,8 @@ class View(GenericView):
             and len(new_size) == 1
         )
         if reordering_dense_dim:
-            assert dense_dim is not None  # mypy
+            if dense_dim is None:  # mypy
+                raise AssertionError("Expected dense_dim is not None")
             old_dim = stack_old.pop(dense_dim)
             stack_old.append(old_dim)
 
@@ -3559,12 +3635,14 @@ class View(GenericView):
         else:
             view_expr.reverse()
 
-        assert len(view_expr) == len(old_size)
+        if len(view_expr) != len(old_size):
+            raise AssertionError("Expected len(view_expr) == len(old_size)")
 
         def reindex(
             index: Sequence[Expr],
         ) -> Sequence[Expr]:
-            assert len(index) == len(vars), (len(index), len(vars))
+            if len(index) != len(vars):
+                raise AssertionError((len(index), len(vars)))
             replacements = dict(zip(vars, index))
             return tuple(sympy_subs(x, replacements) for x in view_expr)
 
@@ -3767,7 +3845,8 @@ class SliceView(View):
         clamp: bool = True,
     ) -> IRNode:
         step = sympy.expand(step)
-        assert isinstance(step, Expr) or step > 0, step
+        if not (isinstance(step, Expr) or step > 0):
+            raise AssertionError(step)
         try:
             if start == 0 and end >= 2**63 - 1 and step == 1:
                 return x
@@ -3802,7 +3881,8 @@ class SliceView(View):
         def reindex(
             index: Sequence[Expr],
         ) -> Sequence[Expr]:
-            assert len(index) == len(new_size), f"wrong ndim {index} {new_size}"
+            if len(index) != len(new_size):
+                raise AssertionError(f"wrong ndim {index} {new_size}")
             index = list(index)
             index[dim] = index[dim] * step + start
             return index
@@ -3927,16 +4007,19 @@ class Layout(OutputSpec):
         # pyrefly: ignore [read-only]
         self.device = device
         self.dtype = dtype
-        assert len(size) == len(stride), f"size={size}, stride={stride}"
-        assert all(isinstance(s, (Expr, int)) for s in size)
+        if len(size) != len(stride):
+            raise AssertionError(f"size={size}, stride={stride}")
+        if not all(isinstance(s, (Expr, int)) for s in size):
+            raise AssertionError(
+                "Expected all(isinstance(s, (Expr, int)) for s in size)"
+            )
         self._size = size
         self._stride = stride
         self._offset = offset
         self.is_pinned = is_pinned
         # is_pinned implies cpu
-        assert (not self.is_pinned) or (self.device.type == "cpu"), (
-            "Only CPU tensors can be pinned"
-        )
+        if not ((not self.is_pinned) or (self.device.type == "cpu")):
+            raise AssertionError("Only CPU tensors can be pinned")
 
     @property
     def size(self) -> Sequence[Expr]:
@@ -4023,7 +4106,8 @@ class Layout(OutputSpec):
         return True
 
     def is_stride_ordered(self, order: Sequence[int]) -> bool:
-        assert len(self.stride) == len(order)
+        if len(self.stride) != len(order):
+            raise AssertionError("Expected len(self.stride) == len(order)")
 
         # ignore dimensions of size 1, they dont affect layout
         non_1_indices = [
@@ -4143,8 +4227,10 @@ class Layout(OutputSpec):
         return new_strides
 
     def pad_strides(self) -> None:
-        assert isinstance(self, FlexibleLayout), type(self)
-        assert self.stride is not None
+        if not isinstance(self, FlexibleLayout):
+            raise AssertionError(type(self))
+        if self.stride is None:
+            raise AssertionError("Expected self.stride is not None")
         self.stride = self._pad_strides(self.stride, self.size, self.dtype)
 
     def should_pad_strides(self) -> bool:
@@ -4166,9 +4252,8 @@ class Layout(OutputSpec):
         )
 
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
-        assert FlexibleLayout.allow_indexing, (
-            f"convert {type(self).__name__} to FixedLayout first"
-        )
+        if not FlexibleLayout.allow_indexing:
+            raise AssertionError(f"convert {type(self).__name__} to FixedLayout first")
         return self.as_fixed().make_indexer()
 
     def __eq__(self, other: object) -> bool:
@@ -4240,7 +4325,8 @@ class FlexibleLayout(Layout):
         In this format, channels last would be:
             [1, 3, 2, 0]
         """
-        assert OrderedSet(range(len(sizes))) == OrderedSet(order), (sizes, order)
+        if OrderedSet(range(len(sizes))) != OrderedSet(order):
+            raise AssertionError((sizes, order))
         next_stride = sympy.S.One
         strides = [None] * len(order)
 
@@ -4257,7 +4343,10 @@ class FlexibleLayout(Layout):
         In this format, channels last would be:
             [3, 0, 2, 1]
         """
-        assert OrderedSet(range(len(sizes))) == OrderedSet(order)
+        if OrderedSet(range(len(sizes))) != OrderedSet(order):
+            raise AssertionError(
+                "Expected OrderedSet(range(len(sizes))) == OrderedSet(order)"
+            )
         fill_order = stride_order2fill_order(order)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
@@ -4298,7 +4387,8 @@ class FlexibleLayout(Layout):
         For example, if given stride is [1000, 1, 100, 10],
         the fill order should be [1, 3, 2, 0]
         """
-        assert len(sizes) == len(stride)
+        if len(sizes) != len(stride):
+            raise AssertionError("Expected len(sizes) == len(stride)")
         stride = V.graph.sizevars.guarding_hints_or_throw(stride)
         fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
@@ -4403,9 +4493,10 @@ class FlexibleLayout(Layout):
         for unbacked_only in [True, False]:
             old_free_symbols = self.initial_free_symbols[(name, unbacked_only)]
             new_free_symbols = OrderedSet(get_free_symbols(value, unbacked_only))
-            assert new_free_symbols == old_free_symbols, (
-                f"Expected free symbols unchanged, but got {new_free_symbols} vs {old_free_symbols}"
-            )
+            if new_free_symbols != old_free_symbols:
+                raise AssertionError(
+                    f"Expected free symbols unchanged, but got {new_free_symbols} vs {old_free_symbols}"
+                )
 
     def __init__(
         self,
@@ -4454,11 +4545,14 @@ class NonOwningLayout(Layout):
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
-        assert isinstance(self.view, ReinterpretView)
+        if not isinstance(self.view, ReinterpretView):
+            raise AssertionError("Expected isinstance(self.view, ReinterpretView)")
         box = self.view.data
-        assert isinstance(box, StorageBox), type(box)
+        if not isinstance(box, StorageBox):
+            raise AssertionError(type(box))
         input_buffer = box.data
-        assert isinstance(input_buffer, Buffer), type(box)
+        if not isinstance(input_buffer, Buffer):
+            raise AssertionError(type(box))
         return input_buffer.layout.get_free_symbol_uses(unbacked_only)
 
 
@@ -4558,12 +4652,14 @@ class MutationLayoutSHOULDREMOVE(Layout):
             return target
 
         result = unwrap_views(self.target)
-        assert isinstance(result, Buffer), type(result)
+        if not isinstance(result, Buffer):
+            raise AssertionError(type(result))
         return result
 
     def real_layout(self) -> Layout:
         layout = self.get_buffer().layout
-        assert isinstance(layout, Layout)
+        if not isinstance(layout, Layout):
+            raise AssertionError("Expected isinstance(layout, Layout)")
         return layout
 
     @classmethod
@@ -4597,12 +4693,17 @@ class MutationLayoutSHOULDREMOVE(Layout):
                     for a, b in zip(src.get_size(), dst.get_size())
                 ],
             )
-            assert isinstance(node, (BaseView, MutableBox))
+            if not isinstance(node, (BaseView, MutableBox)):
+                raise AssertionError(
+                    "Expected isinstance(node, (BaseView, MutableBox))"
+                )
             src = node.data
 
         src.realize()
-        assert hasattr(src, "data"), src
-        assert isinstance(src.data.layout, FlexibleLayout), type(src.data.layout)
+        if not hasattr(src, "data"):
+            raise AssertionError(src)
+        if not isinstance(src.data.layout, FlexibleLayout):
+            raise AssertionError(type(src.data.layout))
         src.data.layout = MutationLayoutSHOULDREMOVE(dst)
         return src.data
 
@@ -4631,7 +4732,8 @@ class Buffer(IRNode, CodegenSymbol):
         return self.get_layout().make_indexer()
 
     def get_name(self) -> str:
-        assert self.name, self
+        if not self.name:
+            raise AssertionError(self)
         return self.name
 
     def get_example(self) -> torch.Tensor | torch.SymInt:
@@ -4681,21 +4783,25 @@ class Buffer(IRNode, CodegenSymbol):
     def freeze_layout_with_stride_order(
         self, order: Sequence[int], allow_padding: bool = False
     ) -> None:
-        assert isinstance(self.layout, FlexibleLayout), type(self.layout)
+        if not isinstance(self.layout, FlexibleLayout):
+            raise AssertionError(type(self.layout))
         self.layout = self.layout.as_stride_order(order, allow_padding=allow_padding)
 
     def freeze_layout_with_fill_order(self, order: Sequence[int]) -> None:
-        assert isinstance(self.layout, FlexibleLayout), type(self.layout)
+        if not isinstance(self.layout, FlexibleLayout):
+            raise AssertionError(type(self.layout))
         self.layout = self.layout.as_fill_order(order)
 
     def freeze_layout_with_same_order(self, stride: Sequence[int]) -> None:
-        assert isinstance(self.layout, FlexibleLayout), type(self.layout)
+        if not isinstance(self.layout, FlexibleLayout):
+            raise AssertionError(type(self.layout))
         self.layout = self.layout.as_same_order(stride)
 
     def freeze_layout_with_exact_strides(
         self, exact_strides: Sequence[int], allow_padding: bool = False
     ) -> None:
-        assert isinstance(self.layout, FlexibleLayout), type(self.layout)
+        if not isinstance(self.layout, FlexibleLayout):
+            raise AssertionError(type(self.layout))
         self.layout = self.layout.as_exact_strides(
             exact_strides, allow_padding=allow_padding
         )
@@ -4856,12 +4962,17 @@ class ComputedBuffer(OperationBuffer):
 
     @contextlib.contextmanager
     def with_original_inner_fn(self) -> Iterator[None]:
-        assert self._split_size is not None
-        assert self._original_inner_fn is not None
-        assert self._original_ranges is not None
-        assert self._original_reduction_ranges is not None
+        if self._split_size is None:
+            raise AssertionError("Expected self._split_size is not None")
+        if self._original_inner_fn is None:
+            raise AssertionError("Expected self._original_inner_fn is not None")
+        if self._original_ranges is None:
+            raise AssertionError("Expected self._original_ranges is not None")
+        if self._original_reduction_ranges is None:
+            raise AssertionError("Expected self._original_reduction_ranges is not None")
 
-        assert isinstance(self.data, Reduction), f"{type(self.data)}"
+        if not isinstance(self.data, Reduction):
+            raise AssertionError(f"{type(self.data)}")
         old_data = self.data
         old_layout = self.layout
         try:
@@ -4985,7 +5096,8 @@ class ComputedBuffer(OperationBuffer):
         if isinstance(self.data, (Reduction, Scan, Sort)):
             return partial(self.data.store_reduction, self.name, indexer)
         else:
-            assert isinstance(self.data, Pointwise), type(self.data)
+            if not isinstance(self.data, Pointwise):
+                raise AssertionError(type(self.data))
             return partial(self.data.store_output, self.name, indexer)
 
     def get_fill_order(self) -> list[int] | None:
@@ -5003,10 +5115,13 @@ class ComputedBuffer(OperationBuffer):
             reads = self.get_read_writes().reads
             # only consider reads to buffer of same size
             # ignore StarDeps because they don't contribute stride information
-            assert all(
+            if not all(
                 isinstance(r, (dependencies.StarDep, dependencies.MemoryDep))
                 for r in reads
-            )
+            ):
+                raise AssertionError(
+                    "Expected all( isinstance(r, (dependencies.StarDep, dependencies.MemoryDep)) for r in reads )"
+                )
             reads = [
                 sympy_subs(r.index, {v: sympy.S.Zero for v in reduction_vars if v != 0})
                 for r in reads
@@ -5059,11 +5174,13 @@ class ComputedBuffer(OperationBuffer):
         reduce_size = []
         for v, s in var_ranges.items():
             if v in args[0]:
-                assert not reduce_vars
+                if reduce_vars:
+                    raise AssertionError("Expected not reduce_vars")
                 index_vars.append(v)
                 index_size.append(s)
             else:
-                assert v in args[1]
+                if v not in args[1]:
+                    raise AssertionError("Expected v in args[1]")
                 reduce_vars.append(v)
                 reduce_size.append(s)
         return (index_size, reduce_size), body, (index_vars, reduce_vars)
@@ -5107,20 +5224,31 @@ class ComputedBuffer(OperationBuffer):
 
         index_formulas = [*body.indexing_exprs.values()]
         if extra_indexing_constraints is not None:
-            assert (
+            if not (
                 isinstance(extra_indexing_constraints, tuple)
                 and len(extra_indexing_constraints) == 2
-            )
+            ):
+                raise AssertionError(
+                    "Expected isinstance(extra_indexing_constraints, tuple) and len(extra_indexing_constraints) == 2"
+                )
             extra_indexing_ranges, extra_indexing_expr = extra_indexing_constraints
-            assert isinstance(extra_indexing_ranges, dict), type(extra_indexing_ranges)
-            assert isinstance(extra_indexing_expr, list), type(extra_indexing_expr)
-            assert all(isinstance(f, Expr) for f in extra_indexing_expr)
+            if not isinstance(extra_indexing_ranges, dict):
+                raise AssertionError(type(extra_indexing_ranges))
+            if not isinstance(extra_indexing_expr, list):
+                raise AssertionError(type(extra_indexing_expr))
+            if not all(isinstance(f, Expr) for f in extra_indexing_expr):
+                raise AssertionError(
+                    "Expected all(isinstance(f, Expr) for f in extra_indexing_expr)"
+                )
 
             expected_var_ranges = body.var_ranges
-            assert expected_var_ranges == extra_indexing_ranges, (
-                expected_var_ranges,
-                extra_indexing_ranges,
-            )
+            if expected_var_ranges != extra_indexing_ranges:
+                raise AssertionError(
+                    (
+                        expected_var_ranges,
+                        extra_indexing_ranges,
+                    )
+                )
             # remove already existing expressions
             extra_indexing_expr = [
                 e for e in extra_indexing_expr if e not in index_formulas
@@ -5244,9 +5372,12 @@ class ComputedBuffer(OperationBuffer):
                 V.graph.sizevars.stride_hints(expr, index_vars, support_vars)
                 for expr in memory_addrs
             ]
-            assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
-                index_vars
-            )
+            if not (
+                len(strides) == len(memory_addrs) and len(strides[0]) == len(index_vars)
+            ):
+                raise AssertionError(
+                    "Expected len(strides) == len(memory_addrs) and len(strides[0]) == len( index_vars )"
+                )
             order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:
             if config.debug:
@@ -5331,7 +5462,8 @@ class TemplateBuffer(OperationBuffer):
         self.mutation_outputs: list[MutationOutput] = []
         if mutated_inputs is not None:
             first_input = self.inputs[0]
-            assert isinstance(first_input, IRNode), type(first_input)
+            if not isinstance(first_input, IRNode):
+                raise AssertionError(type(first_input))
             device = first_input.get_device()
             self.mutation_outputs = [
                 MutationOutput(NoneLayout(device=device), buf, self)
@@ -5361,13 +5493,16 @@ class TemplateBuffer(OperationBuffer):
         """Build read dependencies from all inputs."""
         reads: OrderedSet[dependencies.Dep] = OrderedSet()
         for inp_raw in self.inputs:
-            assert isinstance(inp_raw, (ReinterpretView, Buffer)), type(inp_raw)
+            if not isinstance(inp_raw, (ReinterpretView, Buffer)):
+                raise AssertionError(type(inp_raw))
             inp: ReinterpretView | Buffer = inp_raw
-            assert isinstance(inp.layout, Layout), type(inp.layout)
+            if not isinstance(inp.layout, Layout):
+                raise AssertionError(type(inp.layout))
             inp_indexer = inp.layout.make_indexer()
 
             def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> Any:
-                assert len(rindex) == 0
+                if len(rindex) != 0:
+                    raise AssertionError("Expected len(rindex) == 0")
                 return ops.load(inp.get_name(), inp_indexer(index))
 
             reads |= dependencies.extract_read_writes(
@@ -5404,7 +5539,8 @@ class TemplateBuffer(OperationBuffer):
         indexer = self.get_layout().make_indexer()
 
         def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> Any:
-            assert len(rindex) == 0
+            if len(rindex) != 0:
+                raise AssertionError("Expected len(rindex) == 0")
             return ops.store(name, indexer(index), "fake")
 
         deps = dependencies.extract_read_writes(
@@ -5538,7 +5674,8 @@ class TritonTemplateBuffer(TemplateBuffer):
             mutated_inputs=mutated_inputs,
             allowed_prologue_inps=allowed_prologue_inps,
         )
-        assert self.name is not None
+        if self.name is None:
+            raise AssertionError("Expected self.name is not None")
         self.epilogue_fusable_outputs = {self.name: self.name}
 
         self.subgraph_inps: list[IRNode | sympy.Expr | None] | None = None
@@ -5558,13 +5695,15 @@ class TritonTemplateBuffer(TemplateBuffer):
             elif isinstance(inp, IRNode):
                 res.update(inp.get_free_symbol_uses(unbacked_only))
             else:
-                assert inp is None
+                if inp is not None:
+                    raise AssertionError("Expected inp is None")
 
         for out in subgraph_outs:
             if isinstance(out, IRNode):
                 res.update(out.get_free_symbol_uses(unbacked_only))
             else:
-                assert out is None
+                if out is not None:
+                    raise AssertionError("Expected out is None")
 
         return res
 
@@ -5720,10 +5859,12 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
 
     @contextlib.contextmanager
     def swap_as_triton_caller(self, caller: TritonTemplateCallerBase) -> Iterator[None]:
-        assert isinstance(
+        if not isinstance(
             caller, torch._inductor.select_algorithm.TritonTemplateCaller
-        ), type(caller)
-        assert self.layout == caller.layout
+        ):
+            raise AssertionError(type(caller))
+        if self.layout != caller.layout:
+            raise AssertionError("Expected self.layout == caller.layout")
 
         render = self.make_kernel_render
         self.make_kernel_render = caller.get_make_kernel_render()
@@ -5733,11 +5874,14 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
             self.make_kernel_render = render
 
     def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase) -> None:
-        assert isinstance(
+        if not isinstance(
             caller, torch._inductor.select_algorithm.TritonTemplateCaller
-        ), type(caller)
-        assert self.get_size() == caller.layout.size
-        assert self.get_stride() == caller.layout.stride
+        ):
+            raise AssertionError(type(caller))
+        if self.get_size() != caller.layout.size:
+            raise AssertionError("Expected self.get_size() == caller.layout.size")
+        if self.get_stride() != caller.layout.stride:
+            raise AssertionError("Expected self.get_stride() == caller.layout.stride")
         self.make_kernel_render = caller.get_make_kernel_render()
 
     def get_min_choice(
@@ -5798,12 +5942,15 @@ class CppTemplateBuffer(TemplateBuffer):
 
     def get_layout(self) -> Layout:
         if isinstance(self.layout, MultiOutputLayout):
-            assert isinstance(self.outputs, Iterable), type(self.outputs)
+            if not isinstance(self.outputs, Iterable):
+                raise AssertionError(type(self.outputs))
 
             first_output = self.outputs[0]
-            assert isinstance(first_output, Buffer), type(first_output)
+            if not isinstance(first_output, Buffer):
+                raise AssertionError(type(first_output))
             layout = first_output.layout
-            assert isinstance(layout, Layout), type(layout)
+            if not isinstance(layout, Layout):
+                raise AssertionError(type(layout))
             return layout
         else:
             return super().get_layout()
@@ -5829,7 +5976,8 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
         self.outputs: list[Buffer] = [self]
 
         if mutated_inputs is not None:
-            assert isinstance(self.inputs[0], IRNode), type(self.inputs[0])
+            if not isinstance(self.inputs[0], IRNode):
+                raise AssertionError(type(self.inputs[0]))
             device = self.inputs[0].get_device()
             self.outputs += [
                 MutationOutput(NoneLayout(device=device), buf, self)
@@ -5945,7 +6093,8 @@ class InputsKernel(OperationBuffer):
 
     def input_name(self, i: int) -> str:
         input = self.inputs[i]
-        assert isinstance(input, IRNode)
+        if not isinstance(input, IRNode):
+            raise AssertionError("Expected isinstance(input, IRNode)")
         return input.get_name()
 
     def get_read_writes(self) -> dependencies.ReadWrites:
@@ -5989,7 +6138,8 @@ class InputsKernel(OperationBuffer):
             return cls.unwrap_storage_for_input(x)
         if isinstance(x, TorchBindObject):
             return x
-        assert isinstance(x, (Buffer, ReinterpretView)), type(x)
+        if not isinstance(x, (Buffer, ReinterpretView)):
+            raise AssertionError(type(x))
         return x
 
     @staticmethod
@@ -6049,13 +6199,17 @@ class ConcatKernel(NopKernel):
         new_size = list(inputs[0].get_size())
         offsets_start = [0]
         offsets_end = [new_size[dim]]
-        assert 0 <= dim < len(new_size)
+        if not (0 <= dim < len(new_size)):
+            raise AssertionError("Expected 0 <= dim < len(new_size)")
         for i in range(1, len(inputs)):
             input_size = inputs[i].get_size()
             offsets_start.append(new_size[dim])
-            assert len(input_size) == len(new_size)
-            assert inputs[i].get_dtype() == dtype
-            assert inputs[i].get_device() == device
+            if len(input_size) != len(new_size):
+                raise AssertionError("Expected len(input_size) == len(new_size)")
+            if inputs[i].get_dtype() != dtype:
+                raise AssertionError("Expected inputs[i].get_dtype() == dtype")
+            if inputs[i].get_device() != device:
+                raise AssertionError("Expected inputs[i].get_device() == device")
             for j in range(len(new_size)):
                 if j == dim:
                     new_size[j] = new_size[j] + input_size[j]
@@ -6110,7 +6264,8 @@ class ConcatKernel(NopKernel):
             is_storage_and_layout(x) and x.get_layout().is_pinned for x in inputs
         )
 
-        assert device is not None
+        if device is None:
+            raise AssertionError("Expected device is not None")
         concat_kernel = ConcatKernel(
             name=None,
             layout=FixedLayout(
@@ -6125,15 +6280,18 @@ class ConcatKernel(NopKernel):
         kernel = StorageBox(concat_kernel)
         op_names = []
         for i, inp in enumerate(inputs):
-            assert isinstance(inp, (BaseView, MutableBox)), type(inp)
+            if not isinstance(inp, (BaseView, MutableBox)):
+                raise AssertionError(type(inp))
             input_buffer = cls.realize_into(
                 inp,
                 SliceView.create(
                     kernel, dim, offsets_start[i], offsets_end[i], clamp=False
                 ),
             )
-            assert isinstance(input_buffer, Buffer), type(input_buffer)
-            assert isinstance(concat_kernel.inputs, list), type(concat_kernel.inputs)
+            if not isinstance(input_buffer, Buffer):
+                raise AssertionError(type(input_buffer))
+            if not isinstance(concat_kernel.inputs, list):
+                raise AssertionError(type(concat_kernel.inputs))
             concat_kernel.inputs.append(input_buffer)
 
             if isinstance(inp.data, BaseView):
@@ -6167,7 +6325,8 @@ class ConcatKernel(NopKernel):
             # unwrap a TensorBox
             return cls.can_realize_into_without_copy(src.data, dst)
 
-        assert isinstance(src, (BaseView, StorageBox)), type(src)
+        if not isinstance(src, (BaseView, StorageBox)):
+            raise AssertionError(type(src))
         if isinstance(src.data, MultiTemplateBuffer):
             if (
                 not isinstance(src.data.layout, FixedLayout)
@@ -6210,7 +6369,8 @@ class ConcatKernel(NopKernel):
             if is_storage_and_layout(dst):
                 storage, layout = as_storage_and_layout(dst)
                 dst = ReinterpretView(data=storage, layout=layout)
-        assert isinstance(dst, ReinterpretView), type(dst)
+        if not isinstance(dst, ReinterpretView):
+            raise AssertionError(type(dst))
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
             return cls.realize_into(src.data, dst)
@@ -6218,7 +6378,8 @@ class ConcatKernel(NopKernel):
         if isinstance(src, StorageBox):
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
-            assert hasattr(src.data, "layout")
+            if not hasattr(src.data, "layout"):
+                raise AssertionError('Expected hasattr(src.data, "layout")')
             if cls.can_realize_into_without_copy(src, dst):
                 # pyrefly: ignore [missing-attribute]
                 src.data.layout = NonOwningLayout(dst)
@@ -6426,9 +6587,8 @@ class ExternKernel(InputsKernel):
         if V.graph.fx_wrapper:
             return self.python_kernel_name
         elif V.graph.cpp_wrapper:
-            assert isinstance(V.graph.wrapper_code, CppWrapperCpu), type(
-                V.graph.wrapper_code
-            )
+            if not isinstance(V.graph.wrapper_code, CppWrapperCpu):
+                raise AssertionError(type(V.graph.wrapper_code))
             if self.cpp_kernel_name is None:
                 return None
             return V.graph.wrapper_code.get_c_shim_func_name(
@@ -6439,7 +6599,8 @@ class ExternKernel(InputsKernel):
 
     def get_kernel_name(self) -> str:
         name = self.try_get_kernel_name()
-        assert name is not None
+        if name is None:
+            raise AssertionError("Expected name is not None")
         return name
 
     @staticmethod
@@ -6499,7 +6660,10 @@ class ExternKernel(InputsKernel):
                     args_flat_is_tensor.append(False)
                     non_tensor_args.append(arg)
                     device_index = arg.device.index
-                    assert arg.device.type == "cuda" and device_index is not None
+                    if not (arg.device.type == "cuda" and device_index is not None):
+                        raise AssertionError(
+                            'Expected arg.device.type == "cuda" and device_index is not None'
+                        )
                     real_non_tensor_args.append(
                         torch.cuda.default_generators[device_index].clone_state()
                     )
@@ -6566,7 +6730,10 @@ class ExternKernel(InputsKernel):
                 example_args.append(x.opaque_example_value)
             elif isinstance(x, torch._inductor.ir.GeneratorState):
                 device_index = x.device.index
-                assert x.device.type == "cuda" and device_index is not None
+                if not (x.device.type == "cuda" and device_index is not None):
+                    raise AssertionError(
+                        'Expected x.device.type == "cuda" and device_index is not None'
+                    )
                 example_args.append(
                     torch.cuda.default_generators[device_index].clone_state()
                 )
@@ -6623,7 +6790,8 @@ class ExternKernel(InputsKernel):
         ReinterpretView not a View.  This allows us to avoid some
         unneeded copies.
         """
-        assert isinstance(x, BaseView), type(x)
+        if not isinstance(x, BaseView):
+            raise AssertionError(type(x))
         if isinstance(x, ReinterpretView):
             return x
 
@@ -6631,7 +6799,8 @@ class ExternKernel(InputsKernel):
         # make_loader() inlines the computation
         x_unwrap_view = x.unwrap_view()
         buf = V.graph.get_buffer(x_unwrap_view.get_name())
-        assert buf is not None
+        if buf is None:
+            raise AssertionError("Expected buf is not None")
         x_unwrap_view_fx_node = buf.get_origin_node()
         # Prefer channels last format according to how the format is set from eager.
         if (
@@ -6743,7 +6912,10 @@ class ExternKernel(InputsKernel):
         allow_padding: bool = False,
     ) -> IRNode:
         """Ensure x has the requested stride order or exact strides, inserting a copy if needed."""
-        assert order is not None or exact_strides is not None
+        if not (order is not None or exact_strides is not None):
+            raise AssertionError(
+                "Expected order is not None or exact_strides is not None"
+            )
         # Layout generally doesn't matter, but some consuming external ops might have requirements
         if x.get_numel() in (0, 1) and not exact_strides:
             return x
@@ -6909,9 +7081,15 @@ class ExternKernel(InputsKernel):
             exact_strides=exact_strides,
         )
         if order:
-            assert is_stride_order_storage_and_layout(x, order)
+            if not is_stride_order_storage_and_layout(x, order):
+                raise AssertionError(
+                    "Expected is_stride_order_storage_and_layout(x, order)"
+                )
         elif expanded_dims:
-            assert orig_size is not None and exact_strides is not None
+            if not (orig_size is not None and exact_strides is not None):
+                raise AssertionError(
+                    "Expected orig_size is not None and exact_strides is not None"
+                )
             x = torch._inductor.lowering.expand(x, orig_size)
             # the expand will sometimes may change insignificant strides, so match them back
             return try_match_insignificant_strides(x, exact_strides)
@@ -6984,10 +7162,12 @@ class ExternKernel(InputsKernel):
         # part if we see real FC requirement. More details related to FC
         # can be found at:
         # https://docs.google.com/document/d/1FzWm-sHYwmRi3x_g036kOxd99KaYquUsA-L5JwOn8ys/edit?usp=sharing
-        assert isinstance(args, Sequence), type(args)
+        if not isinstance(args, Sequence):
+            raise AssertionError(type(args))
         if not isinstance(args, list):
             args = list(args)
-        assert self.arg_properties, "ExternKernel.arg_properties should not be empty"
+        if not self.arg_properties:
+            raise AssertionError("ExternKernel.arg_properties should not be empty")
 
         n_args = len(args)
         n_pos_args = len(self.arg_properties)
@@ -7018,16 +7198,18 @@ class ExternKernel(InputsKernel):
             # pass in a list of const arg names for arg_properties lookup.
             name_to_arg_properties = None
             if names and self.arg_properties:
-                assert len(self.constant_args) == len(names), (
-                    "names passed to codegen_const_args does not match self.constant_args"
-                )
+                if len(self.constant_args) != len(names):
+                    raise AssertionError(
+                        "names passed to codegen_const_args does not match self.constant_args"
+                    )
                 name_to_arg_properties = {
                     arg.get("name"): arg for arg in self.arg_properties
                 }
 
             for i, x in enumerate(self.constant_args):
                 if name_to_arg_properties is not None:
-                    assert names is not None
+                    if names is None:
+                        raise AssertionError("Expected names is not None")
                     prop = name_to_arg_properties.get(names[i])
                     type_ = prop.get("type") if prop else None
                 else:
@@ -7057,9 +7239,10 @@ class ExternKernel(InputsKernel):
         args = []
         for i, x in enumerate(inputs):
             if V.graph.cpp_wrapper:
-                assert self.arg_properties and i < len(self.arg_properties), (
-                    "Invalid access to ExternKernel.arg_properties"
-                )
+                if not (self.arg_properties and i < len(self.arg_properties)):
+                    raise AssertionError(
+                        "Invalid access to ExternKernel.arg_properties"
+                    )
                 type_ = self.arg_properties[i].get("type")
                 args.append(V.graph.wrapper_code.val_to_arg_str(x, type_))
             else:
@@ -7097,7 +7280,10 @@ class ExternKernel(InputsKernel):
                 if isinstance(v, Expr):
                     kwargs.append(v)
                 else:
-                    assert self.allarg_properties is not None
+                    if self.allarg_properties is None:
+                        raise AssertionError(
+                            "Expected self.allarg_properties is not None"
+                        )
                     type_ = self.allarg_properties.get(arg_name, {}).get("type")
                     kwargs.append(V.graph.wrapper_code.val_to_arg_str(v, type_))
         else:
@@ -7133,7 +7319,10 @@ class ExternKernel(InputsKernel):
             # output variable; assert on the mutated input instead.
             if isinstance(self.op_overload, torch._ops.OpOverload):
                 if torch.Tag.inplace_view in self.op_overload.tags:
-                    assert isinstance(self.inputs[0], IRNode)
+                    if not isinstance(self.inputs[0], IRNode):
+                        raise AssertionError(
+                            "Expected isinstance(self.inputs[0], IRNode)"
+                        )
                     name = self.inputs[0].get_name()
         wrapper.write_assert_size_stride(name, size, stride, op_name)
 
@@ -7253,7 +7442,8 @@ class ExternKernelOut(ExternKernel):
         op_overload: _OpOverloads | None = None,
     ) -> None:
         unwrapped_inputs = self.unwrap_storage(inputs)
-        assert isinstance(unwrapped_inputs, Sequence), type(unwrapped_inputs)
+        if not isinstance(unwrapped_inputs, Sequence):
+            raise AssertionError(type(unwrapped_inputs))
         super().__init__(
             None,
             layout,
@@ -7309,7 +7499,10 @@ class ExternKernelAlloc(ExternKernel):
         op_overload: _OpOverloads | None = None,
     ) -> None:
         unwrapped_inputs = self.unwrap_storage(inputs)
-        assert all(isinstance(i, IRNode) for i in unwrapped_inputs)
+        if not all(isinstance(i, IRNode) for i in unwrapped_inputs):
+            raise AssertionError(
+                "Expected all(isinstance(i, IRNode) for i in unwrapped_inputs)"
+            )
         super().__init__(
             None,
             layout,
@@ -7387,11 +7580,13 @@ class TMADescriptor(ExternKernel):
     def _create_impl(
         cls, tensor: IRNode, tma_meta: tuple[str, tuple[Any, ...]]
     ) -> TMADescriptor:
-        assert len(tma_meta) == 2
+        if len(tma_meta) != 2:
+            raise AssertionError("Expected len(tma_meta) == 2")
         if tma_meta[0] == "experimental":
             return TMADescriptorExperimental(tensor, *tma_meta[1])
         else:
-            assert tma_meta[0] == "stable"
+            if tma_meta[0] != "stable":
+                raise AssertionError('Expected tma_meta[0] == "stable"')
             return TMADescriptorStable(tensor, *tma_meta[1])
 
     @classmethod
@@ -7448,8 +7643,10 @@ class TMADescriptorExperimental(TMADescriptor):
         block_dims: list[int | torch.SymInt],
         element_size: int | None = None,
     ) -> None:
-        assert len(dims) in (1, 2)
-        assert len(dims) == len(block_dims)
+        if len(dims) not in (1, 2):
+            raise AssertionError("Expected len(dims) in (1, 2)")
+        if len(dims) != len(block_dims):
+            raise AssertionError("Expected len(dims) == len(block_dims)")
 
         if element_size is None:
             element_size = tensor.get_dtype().itemsize
@@ -7509,7 +7706,8 @@ class SubgraphBuffer(ExternKernel):
 
         self.subgraph = V.graph.make_subgraph(self.gm, example_inputs, subgraph_name)
 
-        assert is_node_sequence(self.inputs)
+        if not is_node_sequence(self.inputs):
+            raise AssertionError("Expected is_node_sequence(self.inputs)")
         sym_inputs = get_symbolic_inputs(self.inputs)
 
         for sym_inp in sym_inputs:
@@ -7544,7 +7742,8 @@ class SubgraphBuffer(ExternKernel):
                 self.graph = graph
                 self.name = graph.name
 
-        assert is_node_sequence(self.inputs)
+        if not is_node_sequence(self.inputs):
+            raise AssertionError("Expected is_node_sequence(self.inputs)")
         outer_inputs = [t.codegen_reference() for t in self.inputs]
 
         wrapper.codegen_subgraph_with_flattened_outputs(
@@ -7576,14 +7775,16 @@ class UserDefinedTritonKernel(ExternKernel):
                     kernel.fn.arg_names[i] for i in kernel.restore_idx
                 )
             else:
-                assert hasattr(kernel, "restore_value")
+                if not hasattr(kernel, "restore_value"):
+                    raise AssertionError('Expected hasattr(kernel, "restore_value")')
                 restore_value_args.extend(kernel.restore_value)
 
             if hasattr(kernel, "reset_idx"):
                 for i in kernel.reset_idx:
                     reset_to_zero_args.append(kernel.fn.arg_names[i])
             else:
-                assert hasattr(kernel, "reset_to_zero")
+                if not hasattr(kernel, "reset_to_zero"):
+                    raise AssertionError('Expected hasattr(kernel, "reset_to_zero")')
                 reset_to_zero_args.extend(kernel.reset_to_zero)
 
             configs = kernel.configs
@@ -7633,7 +7834,8 @@ class UserDefinedTritonKernel(ExternKernel):
         # If the kernel only writes to a subset of the tensor, then we only apply the epilogue to that subset.
         # In these edge cases, our fusion is only correct if the original tensor is empty,
         # where the semantics is that content values are UB, and we can rely on the fact that `epilogue(UB) == UB`.
-        assert len(self.mutable_args) == 1
+        if len(self.mutable_args) != 1:
+            raise AssertionError("Expected len(self.mutable_args) == 1")
         if not isinstance(self.mutable_args[0], TensorBox):
             return False
         if not isinstance(self.mutable_args[0].data, StorageBox):
@@ -7696,9 +7898,13 @@ class UserDefinedTritonKernel(ExternKernel):
         }
 
         if epilogue_fusion:
-            assert len(self.arg_accesses.read_writes.writes) == 1
+            if len(self.arg_accesses.read_writes.writes) != 1:
+                raise AssertionError(
+                    "Expected len(self.arg_accesses.read_writes.writes) == 1"
+                )
             mutable_arg_name = next(iter(self.arg_accesses.read_writes.writes)).name
-            assert mutable_arg_name in named_args
+            if mutable_arg_name not in named_args:
+                raise AssertionError("Expected mutable_arg_name in named_args")
             epilogue_computed_buffer, _ = epilogue_fusion
             named_args[mutable_arg_name] = epilogue_computed_buffer
 
@@ -7798,10 +8004,12 @@ class UserDefinedTritonKernel(ExternKernel):
                 constant_args.append(v)
                 kwargs[k] = v
 
-        assert len(inputs) != 0
+        if len(inputs) == 0:
+            raise AssertionError("Expected len(inputs) != 0")
         self.device = inputs[0].get_device()
 
-        assert isinstance(inputs, Sequence), type(inputs)
+        if not isinstance(inputs, Sequence):
+            raise AssertionError(type(inputs))
         super().__init__(
             None,
             NoneLayout(device=self.device),
@@ -7815,7 +8023,8 @@ class UserDefinedTritonKernel(ExternKernel):
         kernel, configs, _, _ = self.get_kernel_and_metadata()
 
         # If we are autotuning, not all arguments will be passed
-        assert hasattr(kernel, "arg_names")
+        if not hasattr(kernel, "arg_names"):
+            raise AssertionError('Expected hasattr(kernel, "arg_names")')
         self.ordered_kwargs_for_cpp_kernel = [
             arg for arg in kernel.arg_names if arg in kernel_args
         ]
@@ -7906,7 +8115,10 @@ class InplaceBernoulliFallback(ExternKernel):
     """
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        assert all(isinstance(t, IRNode) for t in self.inputs)
+        if not all(isinstance(t, IRNode) for t in self.inputs):
+            raise AssertionError(
+                "Expected all(isinstance(t, IRNode) for t in self.inputs)"
+            )
         (x,) = (cast(IRNode, t).codegen_reference() for t in self.inputs)
 
         if V.graph.cpp_wrapper:
@@ -8001,7 +8213,8 @@ class MutatingFirstArgExternKernel(ExternKernel):
     """
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        assert is_node_sequence(self.inputs)
+        if not is_node_sequence(self.inputs):
+            raise AssertionError("Expected is_node_sequence(self.inputs)")
         argrefs = [
             *(t.codegen_reference() for t in self.inputs),
             *map(repr, self.constant_args),
@@ -8025,7 +8238,8 @@ class MutatingFirstArgExternKernel(ExternKernel):
 
 class ResizeStorageBytes(MutatingFirstArgExternKernel):
     def __init__(self, variable: IRNode, new_size: int) -> None:
-        assert isinstance(new_size, int), "TODO: dynamic shapes"
+        if not isinstance(new_size, int):
+            raise AssertionError("TODO: dynamic shapes")
         super().__init__(
             None,
             NoneLayout(device=variable.get_device()),
@@ -8037,7 +8251,8 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         V.graph.register_operation(self)
         self.python_kernel_name = "inductor_ops.resize_storage_bytes_"
         self.cpp_kernel_name = "torch::inductor::resize_storage_bytes_"
-        assert isinstance(variable, (BaseView, StorageBox, TensorBox)), type(variable)
+        if not isinstance(variable, (BaseView, StorageBox, TensorBox)):
+            raise AssertionError(type(variable))
         V.graph.never_reuse_buffers.add(variable.data.get_name())
 
 
@@ -8050,9 +8265,8 @@ class SetSourceTensorKernel(ExternKernelAlloc):
             python_kernel_name="torch.ops.aten.set_.source_Tensor",
             op_overload=torch.ops.aten.set_.source_Tensor,
         )
-        assert isinstance(self_tensor, (BaseView, StorageBox, TensorBox)), type(
-            self_tensor
-        )
+        if not isinstance(self_tensor, (BaseView, StorageBox, TensorBox)):
+            raise AssertionError(type(self_tensor))
         V.graph.never_reuse_buffers.add(self_tensor.data.get_name())
         V.graph.never_reuse_buffers.add(storage_tensor.get_name())
         V.graph.never_reuse_buffers.add(self.get_name())
@@ -8081,7 +8295,8 @@ class ScatterFallback(ExternKernel):
 
     def get_mutation_names(self) -> list[str]:
         inp = self.inputs[0]
-        assert isinstance(inp, IRNode)
+        if not isinstance(inp, IRNode):
+            raise AssertionError("Expected isinstance(inp, IRNode)")
         return [inp.get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -8171,7 +8386,8 @@ class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> IRNode:
         x_device = x.get_device()
-        assert x_device is not None
+        if x_device is None:
+            raise AssertionError("Expected x_device is not None")
         if (
             not x.is_extern()
             # Can not apply this optimization if x has been mutated
@@ -8218,7 +8434,8 @@ class DeviceCopy(ExternKernelOut):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         args = self.codegen_args()
-        assert len(args) == 2
+        if len(args) != 2:
+            raise AssertionError("Expected len(args) == 2")
         if self.output_view:
             wrapper.codegen_device_copy(
                 args[0], self.output_view.codegen_reference(), args[1]
@@ -8460,13 +8677,17 @@ class FallbackKernel(ExternKernelAlloc):
         self.use_runtime_dispatch = False
         self.unbacked_bindings = unbacked_bindings or {}
 
-        assert isinstance(
+        if not isinstance(
             kernel, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
-        ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
+        ):
+            raise AssertionError(
+                f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
+            )
         self.op_overload = kernel
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
-        assert self.python_kernel_name is not None
+        if self.python_kernel_name is None:
+            raise AssertionError("Expected self.python_kernel_name is not None")
         V.graph.warn_fallback(self.python_kernel_name)
 
         # args that are aliased
@@ -8527,11 +8748,13 @@ class FallbackKernel(ExternKernelAlloc):
         def handle_aliasing_and_mutation(info: torch._C.Argument, arg: Any) -> None:
             # Assertions to make sure we didn't mismatch args
             if isinstance(info.type, torch.ListType):
-                assert isinstance(arg, (list, tuple)), type(arg)
+                if not isinstance(arg, (list, tuple)):
+                    raise AssertionError(type(arg))
             if library_utils.is_tensor_like_type(info.type):
                 # PyTorch also accepts None and scalar types for args marked as "Tensor".
                 # We're not going to check all of them here.
-                assert not isinstance(arg, (tuple, list))
+                if isinstance(arg, (tuple, list)):
+                    raise AssertionError("Expected not isinstance(arg, (tuple, list))")
 
             if arg is None:
                 return
@@ -8540,7 +8763,8 @@ class FallbackKernel(ExternKernelAlloc):
 
             def add_alias(t: IRNode) -> None:
                 self.alias_names.append(t.get_name())
-                assert info.alias_info is not None
+                if info.alias_info is None:
+                    raise AssertionError("Expected info.alias_info is not None")
                 if info.alias_info.is_write:
                     self.mutation_outputs.append(
                         MutationOutput(NoneLayout(device=t.get_device()), t, self)
@@ -8551,7 +8775,10 @@ class FallbackKernel(ExternKernelAlloc):
                     for optional_tensor_arg in arg:
                         add_alias(optional_tensor_arg)
             else:
-                assert library_utils.is_tensor_like_type(info.type)
+                if not library_utils.is_tensor_like_type(info.type):
+                    raise AssertionError(
+                        "Expected library_utils.is_tensor_like_type(info.type)"
+                    )
 
                 add_alias(arg)
 
@@ -8580,7 +8807,8 @@ class FallbackKernel(ExternKernelAlloc):
             resolved = resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, unbacked_bindings
             )
-            assert resolved is not None
+            if resolved is None:
+                raise AssertionError("Expected resolved is not None")
             return OrderedSet(resolved.keys())
         else:
             return OrderedSet()
@@ -8593,7 +8821,8 @@ class FallbackKernel(ExternKernelAlloc):
             def __repr__(self) -> str:
                 return self.ref
 
-        assert is_node_sequence(self.inputs)
+        if not is_node_sequence(self.inputs):
+            raise AssertionError("Expected is_node_sequence(self.inputs)")
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
@@ -8619,7 +8848,8 @@ class FallbackKernel(ExternKernelAlloc):
             else None
         )
         if non_torch_bind_tensor_args:
-            assert tensor_args
+            if not tensor_args:
+                raise AssertionError("Expected tensor_args")
             devices = [arg.get_device() for arg in tensor_args if arg.get_device()]
             return devices[0]
         if isinstance(example_output, torch.Tensor):
@@ -8641,7 +8871,8 @@ class FallbackKernel(ExternKernelAlloc):
             if not devices:
                 return None
             for device in devices:
-                assert isinstance(device, torch.device)
+                if not isinstance(device, torch.device):
+                    raise AssertionError("Expected isinstance(device, torch.device)")
                 if is_gpu(device.type):
                     return device
             return devices[0]
@@ -8655,12 +8886,13 @@ class FallbackKernel(ExternKernelAlloc):
         return is_impure(self.op_overload)  # pyrefly: ignore[bad-argument-type]
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
-        assert isinstance(
+        if not isinstance(
             self.op_overload, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
-        ), (
-            f"Fails to create FallbackKernel for {self.op_overload}: "
-            f"{type(self.op_overload)} not supported"
-        )
+        ):
+            raise AssertionError(
+                f"Fails to create FallbackKernel for {self.op_overload}: "
+                f"{type(self.op_overload)} not supported"
+            )
 
         # See [Note: FallbackKernel supported operators]: for a mutating
         # op that is auto-functionalizable, its outputs does NOT
@@ -8676,7 +8908,8 @@ class FallbackKernel(ExternKernelAlloc):
             return self.alias_names
 
     def get_mutation_names(self) -> Sequence[str]:
-        assert len(self.mutation_names) <= 1
+        if len(self.mutation_names) > 1:
+            raise AssertionError("Expected len(self.mutation_names) <= 1")
         return self.mutation_names
 
     def export_extern_kernel_node(self):  # type: ignore[no-untyped-def]
@@ -8694,7 +8927,8 @@ class FallbackKernel(ExternKernelAlloc):
             self.op_overload,
         )
 
-        assert isinstance(self, FallbackKernel), type(self)
+        if not isinstance(self, FallbackKernel):
+            raise AssertionError(type(self))
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         args = self.fill_non_provided_args(args, kwargs)
         ordered_kwargs = [
@@ -8719,20 +8953,24 @@ class FallbackKernel(ExternKernelAlloc):
                 # For single Tensor or None
                 out = output
                 if isinstance(output, (list, tuple)):
-                    assert len(output) == 1
+                    if len(output) != 1:
+                        raise AssertionError("Expected len(output) == 1")
                     out = output[0]
                 if isinstance(return_type, torch.TensorType):
-                    assert isinstance(out, IRNode)
+                    if not isinstance(out, IRNode):
+                        raise AssertionError("Expected isinstance(out, IRNode)")
                     return export_schema.Argument.create(
                         as_tensor=export_schema.TensorArgument(name=out.get_name())
                     )
                 else:  # NoneType
-                    assert out is None
+                    if out is not None:
+                        raise AssertionError("Expected out is None")
                     return export_schema.Argument.create(as_none=True)
             elif isinstance(return_type, torch.ListType) and isinstance(
                 return_type.getElementType(), torch.TensorType
             ):
-                assert isinstance(output, Sequence), type(output)
+                if not isinstance(output, Sequence):
+                    raise AssertionError(type(output))
                 # For single TensorList
                 return export_schema.Argument.create(
                     as_tensors=[
@@ -8751,7 +8989,8 @@ class FallbackKernel(ExternKernelAlloc):
                         )
                     )
                 else:
-                    assert isinstance(output, IRNode)
+                    if not isinstance(output, IRNode):
+                        raise AssertionError("Expected isinstance(output, IRNode)")
                     return export_schema.Argument.create(
                         as_optional_tensor=export_schema.OptionalTensorArgument.create(
                             as_tensor=export_schema.TensorArgument(
@@ -8785,7 +9024,8 @@ class FallbackKernel(ExternKernelAlloc):
                 for return_schema, output in zip(returns, self.outputs)
             ]
 
-        assert self.op_overload is not None
+        if self.op_overload is None:
+            raise AssertionError("Expected self.op_overload is not None")
         node = ExternKernelNode(
             name=self.get_name(),
             node=export_schema.Node(
@@ -8805,10 +9045,12 @@ class FallbackKernel(ExternKernelAlloc):
         """Overrides the parent member.
         See https://github.com/pytorch/pytorch/issues/151692"""
         kernel = self.op_overload
-        assert kernel is not None
+        if kernel is None:
+            raise AssertionError("Expected kernel is not None")
         if kernel.namespace == "aten":
             # Aten Fallback Ops
-            assert isinstance(kernel, torch._ops.OpOverload), type(kernel)
+            if not isinstance(kernel, torch._ops.OpOverload):
+                raise AssertionError(type(kernel))
             if V.graph.cpp_wrapper:
                 from torchgen.aoti.fallback_ops import inductor_fallback_ops
 
@@ -8822,7 +9064,8 @@ class FallbackKernel(ExternKernelAlloc):
                     self.use_runtime_dispatch = True
         elif kernel.namespace == "_quantized":
             # Internal Quantized Fallback Ops
-            assert isinstance(kernel, torch._ops.OpOverload), type(kernel)
+            if not isinstance(kernel, torch._ops.OpOverload):
+                raise AssertionError(type(kernel))
         elif V.graph.cpp_wrapper:
             # For non-aten OpOverload, i.e. custom ops
             # If the op is in custom_ops_to_c_shims, generate direct function call
@@ -8865,8 +9108,10 @@ class FallbackKernel(ExternKernelAlloc):
         self.codegen_comment(wrapper)
         if self.use_runtime_dispatch:
             exported_args = self.export_extern_kernel_node()
-            assert self.python_kernel_name is not None
-            assert self.op_overload is not None
+            if self.python_kernel_name is None:
+                raise AssertionError("Expected self.python_kernel_name is not None")
+            if self.op_overload is None:
+                raise AssertionError("Expected self.op_overload is not None")
 
             wrapper.generate_fallback_kernel_with_runtime_lookup(
                 self.get_name(),
@@ -9001,7 +9246,8 @@ class FallbackKernel(ExternKernelAlloc):
             )
 
         else:
-            assert device, "Not sure where to find device info"
+            if not device:
+                raise AssertionError("Not sure where to find device info")
             packed = cls(
                 MultiOutputLayout(device=device),
                 kernel,
@@ -9050,9 +9296,10 @@ class FallbackKernel(ExternKernelAlloc):
                     output,
                 )
             else:
-                assert output is None, (
-                    f"FallbackKernel output type {type(output)} is not supported"
-                )
+                if output is not None:
+                    raise AssertionError(
+                        f"FallbackKernel output type {type(output)} is not supported"
+                    )
                 return None
 
         outputs = generate_output(example_output, [])
@@ -9157,7 +9404,8 @@ class MultiOutput(ExternKernel):
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
         input_node = self.inputs[0]
-        assert isinstance(input_node, IRNode), input_node
+        if not isinstance(input_node, IRNode):
+            raise AssertionError(input_node)
         return input_node.get_free_symbol_uses(unbacked_only)
 
     def should_allocate(self) -> bool:
@@ -9189,7 +9437,8 @@ class MultiOutput(ExternKernel):
         indexer = self.get_layout().make_indexer()
 
         def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> Any:
-            assert len(rindex) == 0
+            if len(rindex) != 0:
+                raise AssertionError("Expected len(rindex) == 0")
             return ops.store(name, indexer(index), "fake")
 
         device = self.get_device()
@@ -9561,13 +9810,13 @@ class StorageBox(MutableBox):
         if IRNode.is_realized_node(self.data):
             return self.data.get_name()
 
-        assert isinstance(self.data, (Pointwise, Reduction, Scan, Sort)), type(
-            self.data
-        )
+        if not isinstance(self.data, (Pointwise, Reduction, Scan, Sort)):
+            raise AssertionError(type(self.data))
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
         device = self.data.get_device()
-        assert device is not None
+        if device is None:
+            raise AssertionError("Expected device is not None")
 
         self.data = ComputedBuffer(
             name=None,
@@ -9712,14 +9961,20 @@ class InvokeSubgraph(ExternKernel):
             offset = 2
             if current_node.target is torch.ops.higher_order.with_effects:
                 # Aruguments eagerly are (token, subgraph, identifier, *operands)
-                assert current_node.args[1] is torch.ops.higher_order.invoke_subgraph
+                if current_node.args[1] is not torch.ops.higher_order.invoke_subgraph:
+                    raise AssertionError(
+                        "Expected current_node.args[1] is torch.ops.higher_order.invoke_subgraph"
+                    )
                 offset = 3
             fake_operands = eager_input_vals[0][offset:]
         else:
             offset = 2
             if current_node.target is torch.ops.higher_order.with_effects:
                 # with_effects args: (token, invoke_subgraph, subgraph, identifier, *operands)
-                assert current_node.args[1] is torch.ops.higher_order.invoke_subgraph
+                if current_node.args[1] is not torch.ops.higher_order.invoke_subgraph:
+                    raise AssertionError(
+                        "Expected current_node.args[1] is torch.ops.higher_order.invoke_subgraph"
+                    )
                 offset = 4
 
             # For the partitioned backward graph, we do not have
@@ -9766,7 +10021,8 @@ class InvokeSubgraph(ExternKernel):
             if not isinstance(operand, ShapeAsConstantBuffer):
                 device = operand.get_device()
                 break
-        assert device is not None
+        if device is None:
+            raise AssertionError("Expected device is not None")
         invoke_subgraph = InvokeSubgraph(
             subgraph=subgraph,
             operands=operands,
@@ -9780,7 +10036,8 @@ class InvokeSubgraph(ExternKernel):
                 return output
             else:
                 device = output.get_device()
-                assert device is not None
+                if device is None:
+                    raise AssertionError("Expected device is not None")
 
                 return MultiOutput(
                     FixedLayout(
@@ -9880,7 +10137,8 @@ class Conditional(ExternKernel):
         operands = [cls.realize_input(x) for x in operands]
         fx_operands: Argument = V.graph.current_node.args[-1]
 
-        assert isinstance(fx_operands, Sequence), type(fx_operands)
+        if not isinstance(fx_operands, Sequence):
+            raise AssertionError(type(fx_operands))
         # Build fake_operands from FX nodes' metadata
         # For FX Nodes, get the fake tensor from meta["val"]
         # For non-Nodes (e.g., symbolic integers from sym_size lowering), pass directly
@@ -9928,8 +10186,10 @@ class Conditional(ExternKernel):
                         subgraph.graph.graph_outputs, fake_outputs
                     )
 
-        assert true_fn.graph is not None
-        assert false_fn.graph is not None
+        if true_fn.graph is None:
+            raise AssertionError("Expected true_fn.graph is not None")
+        if false_fn.graph is None:
+            raise AssertionError("Expected false_fn.graph is not None")
         true_outputs = true_fn.graph.graph_outputs
         false_outputs = false_fn.graph.graph_outputs
 
@@ -9941,11 +10201,15 @@ class Conditional(ExternKernel):
                 )
 
         # make sure true and false outputs are structurally equivalent
-        assert len(true_outputs) == len(false_outputs), (true_outputs, false_outputs)
+        if len(true_outputs) != len(false_outputs):
+            raise AssertionError((true_outputs, false_outputs))
         for i, (t_o, f_o) in enumerate(zip(true_outputs, false_outputs)):
-            assert t_o.get_device() == f_o.get_device(), (i, t_o, f_o)
-            assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
-            assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
+            if t_o.get_device() != f_o.get_device():
+                raise AssertionError((i, t_o, f_o))
+            if t_o.get_dtype() != f_o.get_dtype():
+                raise AssertionError((i, t_o, f_o))
+            if t_o.get_layout().offset != f_o.get_layout().offset:
+                raise AssertionError((i, t_o, f_o))
 
         # Determine device from operands and predicate
         # The predicate can be on a different device (e.g., CPU for control flow)
@@ -9960,7 +10224,8 @@ class Conditional(ExternKernel):
             V.graph.sizevars.shape_env,
             V.graph.current_node.meta.get("unbacked_bindings", None),
         )
-        assert device is not None, "cannot determine device"
+        if device is None:
+            raise AssertionError("cannot determine device")
         conditional = Conditional(
             predicate=predicate,
             operands=operands,
@@ -10031,7 +10296,8 @@ class Conditional(ExternKernel):
             resolved = resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, unbacked_bindings
             )
-            assert resolved is not None
+            if resolved is None:
+                raise AssertionError("Expected resolved is not None")
             return OrderedSet(resolved.keys())
         else:
             return OrderedSet()
@@ -10158,7 +10424,8 @@ class WhileLoop(ExternKernel):
             tensor_boxes: Sequence[IRNode],
             fake_tensors: list[int | torch.SymInt | torch.Tensor],
         ) -> list[IRNode]:
-            assert len(tensor_boxes) == len(fake_tensors)
+            if len(tensor_boxes) != len(fake_tensors):
+                raise AssertionError("Expected len(tensor_boxes) == len(fake_tensors)")
             ret = []
             for tb, fk in zip(tensor_boxes, fake_tensors):
                 if isinstance(fk, torch.Tensor):
@@ -10202,7 +10469,8 @@ class WhileLoop(ExternKernel):
         for subgraph in (cond_fn, body_fn):
             if subgraph.graph is None:
                 # create and lower subgraphs
-                assert isinstance(fx_all_inputs, Sequence), type(fx_all_inputs)
+                if not isinstance(fx_all_inputs, Sequence):
+                    raise AssertionError(type(fx_all_inputs))
                 subgraph.graph = V.graph.make_subgraph(
                     gm=subgraph.graph_module,
                     example_inputs=fx_all_inputs,  # type: ignore[arg-type]
@@ -10217,15 +10485,19 @@ class WhileLoop(ExternKernel):
                     # are not user-facing so the special handling for strides of user-facing output in graph
                     # lowering is not applicable.
                     if subgraph is body_fn:
-                        assert len(subgraph.graph.graph_outputs) == len(
+                        if len(subgraph.graph.graph_outputs) != len(
                             fake_carried_inputs
-                        )
+                        ):
+                            raise AssertionError(
+                                "Expected len(subgraph.graph.graph_outputs) == len( fake_carried_inputs )"
+                            )
                         subgraph.graph.graph_outputs = _require_exact_strides(  # type: ignore[assignment]
                             subgraph.graph.graph_outputs,
                             fake_carried_inputs,
                         )
 
-        assert cond_fn.graph and body_fn.graph
+        if not (cond_fn.graph and body_fn.graph):
+            raise AssertionError("Expected cond_fn.graph and body_fn.graph")
         cond_outputs = cond_fn.graph.graph_outputs
         body_outputs = body_fn.graph.graph_outputs
 
@@ -10236,31 +10508,40 @@ class WhileLoop(ExternKernel):
             )
 
         # make sure cond_fn returns a boolean scalar Tensor
-        assert len(cond_outputs) == 1, cond_outputs
+        if len(cond_outputs) != 1:
+            raise AssertionError(cond_outputs)
         p = cond_outputs[0]
         if not isinstance(p, ShapeAsConstantBuffer):
-            assert p.get_dtype() == torch.bool, p
-            assert len(p.get_size()) == 0, p
+            if p.get_dtype() != torch.bool:
+                raise AssertionError(p)
+            if len(p.get_size()) != 0:
+                raise AssertionError(p)
 
-        assert len(all_inputs) > 0, (
-            "torch.while_loop is assumed to have at least one operand."
-        )
+        if len(all_inputs) <= 0:
+            raise AssertionError(
+                "torch.while_loop is assumed to have at least one operand."
+            )
 
         device = all_inputs[0].get_device()
 
-        assert device is not None  # to make linter happy
+        if device is None:  # to make linter happy
+            raise AssertionError("Expected device is not None")
         # make sure carried_inputs_ and body outputs are structurally equivalent
-        assert len(carried_inputs_) == len(body_outputs), (
-            carried_inputs_,
-            body_outputs,
-        )
+        if len(carried_inputs_) != len(body_outputs):
+            raise AssertionError(
+                (
+                    carried_inputs_,
+                    body_outputs,
+                )
+            )
         for i, (op, bo) in enumerate(zip(carried_inputs_, body_outputs)):
 
             def _guard_list_equals(
                 lhs_exprs: Sequence[int | sympy.Expr],
                 rhs_exprs: Sequence[int | sympy.Expr],
             ) -> None:
-                assert len(lhs_exprs) == len(rhs_exprs)
+                if len(lhs_exprs) != len(rhs_exprs):
+                    raise AssertionError("Expected len(lhs_exprs) == len(rhs_exprs)")
                 for lhs, rhs in zip(lhs_exprs, rhs_exprs):
                     V.graph.sizevars.check_equals(lhs, rhs)
 
@@ -10268,10 +10549,13 @@ class WhileLoop(ExternKernel):
             _guard_list_equals(op.get_stride(), bo.get_stride())
             # assume all carried_inputs_ and outputs are on the same device
             # as the MultiOutputLayout below requires single device
-            assert op.get_device() == bo.get_device(), (i, op, bo, device)
-            assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
+            if op.get_device() != bo.get_device():
+                raise AssertionError((i, op, bo, device))
+            if op.get_dtype() != bo.get_dtype():
+                raise AssertionError((i, op, bo))
 
-        assert device is not None
+        if device is None:
+            raise AssertionError("Expected device is not None")
 
         unbacked_bindings = resolve_unbacked_bindings(
             V.graph.sizevars.shape_env,
@@ -10289,9 +10573,13 @@ class WhileLoop(ExternKernel):
             stack_output=stack_output,
         )
 
-        assert body_fn.graph is not None and isinstance(
-            body_fn.graph.module, torch.fx.GraphModule
-        )  # to make linter happy
+        if not (
+            body_fn.graph is not None
+            and isinstance(body_fn.graph.module, torch.fx.GraphModule)
+        ):  # to make linter happy
+            raise AssertionError(
+                "Expected body_fn.graph is not None and isinstance( body_fn.graph.module, torch.fx.GraphModule )"
+            )
 
         # Handling input mutations
         mutated_idxs = check_input_alias_and_mutation(
@@ -10306,9 +10594,8 @@ class WhileLoop(ExternKernel):
         while_loop.outputs = []
         while_loop.mutation_outputs = []
         if stack_output:
-            assert len(mutated_idx_set) == 0, (
-                "NYI: while_loop_stack_output input mutations."
-            )
+            if len(mutated_idx_set) != 0:
+                raise AssertionError("NYI: while_loop_stack_output input mutations.")
             for idx, output in enumerate(V.graph.current_node.meta["val"]):
                 # Create MultiOutput for regular outputs
                 multi_out = MultiOutput(
@@ -10326,7 +10613,8 @@ class WhileLoop(ExternKernel):
         else:
             for idx, output in enumerate(body_outputs):
                 if idx in mutated_idx_set:
-                    assert idx < len(carried_inputs), "only carries can be mutated."
+                    if idx >= len(carried_inputs):
+                        raise AssertionError("only carries can be mutated.")
                     # Create MutationOutput for mutated inputs
                     mutated_input = next(mutated_inputs_iter)
                     while_loop.mutation_outputs.append(
@@ -10369,7 +10657,8 @@ class WhileLoop(ExternKernel):
             resolved = resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, unbacked_bindings
             )
-            assert resolved is not None
+            if resolved is None:
+                raise AssertionError("Expected resolved is not None")
             return OrderedSet(resolved.keys())
         else:
             return OrderedSet()
@@ -10400,7 +10689,8 @@ class EffectfulKernel(FallbackKernel):
         from torch._higher_order_ops.effects import _get_effect
 
         effect_type = _get_effect(kernel)
-        assert effect_type is not None
+        if effect_type is None:
+            raise AssertionError("Expected effect_type is not None")
         self.effect_type = effect_type
         self.prev_effect_buffer = V.graph.effectful_ops.get(effect_type, None)
         V.graph.effectful_ops[effect_type] = self
@@ -10457,7 +10747,8 @@ class TorchBindObject(NonTensorObj):
         if is_opaque_value(real_script_obj):
             return 0
 
-        assert hasattr(real_script_obj, "__obj_flatten__")
+        if not hasattr(real_script_obj, "__obj_flatten__"):
+            raise AssertionError('Expected hasattr(real_script_obj, "__obj_flatten__")')
         flat_dict = dict(real_script_obj.__obj_flatten__())
         flat_elems = pytree.tree_flatten(flat_dict)[0]
         flat_sizes = [
@@ -10529,9 +10820,8 @@ class _CollectiveKernel(FallbackKernel):
     # This is identical to FallbackKernel.set_cpp_kernel(), minus the
     # part that checks against input aliasing and mutation.
     def set_cpp_kernel_name(self, cpp_kernel_name: str | None = None) -> None:
-        assert type(self.op_overload) is torch._ops.OpOverload, (
-            "Setting cpp kernel needs a valid op_overload"
-        )
+        if type(self.op_overload) is not torch._ops.OpOverload:
+            raise AssertionError("Setting cpp kernel needs a valid op_overload")
         kernel = self.op_overload
         if cpp_kernel_name is not None:
             self.cpp_kernel_name = cpp_kernel_name
@@ -10564,7 +10854,8 @@ class _CollectiveKernel(FallbackKernel):
                 unflatten_args,
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
-        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+        if unbacked_bindings:
+            raise AssertionError(f"{kernel} {unbacked_bindings}")
         device = None
         for tensor_arg in tensor_args:
             if isinstance(tensor_arg, NonTensorObj):
@@ -10573,10 +10864,11 @@ class _CollectiveKernel(FallbackKernel):
             V.graph.mark_buffer_mutated(tensor_arg.get_name())
             if device is None:
                 device = tensor_arg.get_device()
-        assert device is not None, (
-            f"In-place collective {kernel} requires at least one tensor "
-            f"argument; got only non-tensor IR nodes."
-        )
+        if device is None:
+            raise AssertionError(
+                f"In-place collective {kernel} requires at least one tensor "
+                f"argument; got only non-tensor IR nodes."
+            )
         packed = cls(
             NoneLayout(device=device),
             kernel,
@@ -10637,14 +10929,16 @@ class _CollectiveKernel(FallbackKernel):
                 unflatten_args,
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
-        assert not unbacked_bindings, f"{kernel}, {unbacked_bindings}"
+        if unbacked_bindings:
+            raise AssertionError(f"{kernel}, {unbacked_bindings}")
         for tensor_arg in tensor_args:
             if not isinstance(tensor_arg, TorchBindObject):
                 tensor_arg.realize()
 
         if isinstance(example_output, list):
             device = cls.find_device(tensor_args, example_output)
-            assert device is not None
+            if device is None:
+                raise AssertionError("Expected device is not None")
             packed = cls(
                 MultiOutputLayout(device=device),
                 kernel,
@@ -10776,11 +11070,13 @@ class _WaitKernel(_CollectiveKernel):
 
     def get_volatile_reads(self) -> Sequence[IRNode]:
         inp = self.inputs[0]
-        assert isinstance(inp, IRNode)
+        if not isinstance(inp, IRNode):
+            raise AssertionError("Expected isinstance(inp, IRNode)")
         if isinstance(inp, _CollectiveKernel):
             # Out-of-place single-output
             i = inp.inputs[0]
-            assert isinstance(i, IRNode), type(i)
+            if not isinstance(i, IRNode):
+                raise AssertionError(type(i))
             return [i]
         elif isinstance(inp, MultiOutput):
             # This can be two things:
@@ -10809,7 +11105,8 @@ class _WaitKernel(_CollectiveKernel):
                 unflatten_args,
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, inp)
-        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+        if unbacked_bindings:
+            raise AssertionError(f"{kernel} {unbacked_bindings}")
         packed = cls(
             NoneLayout(device=inp.get_device()),
             kernel,

@@ -249,7 +249,10 @@ class AsyncCompile:
     @staticmethod
     @functools.lru_cache(1)
     def pool() -> ThreadPoolExecutor:
-        assert get_compile_threads() > 1
+        if get_compile_threads() <= 1:
+            raise AssertionError(
+                f"expected get_compile_threads() > 1, got {get_compile_threads()}"
+            )
         return ThreadPoolExecutor(get_compile_threads())
 
     @staticmethod
@@ -260,7 +263,10 @@ class AsyncCompile:
     @staticmethod
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
-        assert get_compile_threads() > 1
+        if get_compile_threads() <= 1:
+            raise AssertionError(
+                f"expected get_compile_threads() > 1, got {get_compile_threads()}"
+            )
         AsyncCompile._ready_future = None
         log.info(
             "Creating '%s' pool with %d workers",

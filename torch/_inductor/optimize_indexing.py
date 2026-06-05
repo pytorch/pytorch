@@ -15,7 +15,8 @@ def val_expressable_in_32_bits(val: Any) -> bool:
         return True
 
     if isinstance(val, sympy.Expr):
-        assert val.is_number
+        if not val.is_number:
+            raise AssertionError(f"expected a number, got {val}")
         if val.is_Integer or val.is_Boolean:
             val = int(val)
         else:

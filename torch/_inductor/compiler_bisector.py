@@ -157,7 +157,10 @@ class CompilerBisector:
             cls.get_dir(), backend_name, f"{subsystem.name}_run_state.txt"
         )
         if isinstance(subsystem, ConfigChange):
-            assert run_state == "test_disable"
+            if run_state != "test_disable":
+                raise AssertionError(
+                    f"expected run_state == 'test_disable', got {run_state}"
+                )
             cls.set_config_values(
                 backend_name,
                 subsystem.name,
@@ -176,7 +179,10 @@ class CompilerBisector:
 
     @classmethod
     def update_bisect_status(cls, backend_name: str, subsystem_name: str) -> None:
-        assert isinstance(subsystem_name, str)
+        if not isinstance(subsystem_name, str):
+            raise AssertionError(
+                f"expected subsystem_name to be str, got {type(subsystem_name)}"
+            )
         file_path = os.path.join(cls.get_dir(), "bisect_status.txt")
         lines = [f"backend={backend_name}\n", f"subsystem={subsystem_name}\n"]
         cls.write_lines_to_file(file_path, lines)
@@ -185,7 +191,10 @@ class CompilerBisector:
     def update_bisect_range(
         cls, backend_name: str, subsystem_name: str, low: int, high: int
     ) -> None:
-        assert isinstance(subsystem_name, str)
+        if not isinstance(subsystem_name, str):
+            raise AssertionError(
+                f"expected subsystem_name to be str, got {type(subsystem_name)}"
+            )
         file_path = os.path.join(
             cls.get_dir(), backend_name, f"{subsystem_name}_bisect_range.txt"
         )
@@ -240,7 +249,11 @@ class CompilerBisector:
         lines = cls.read_lines_from_file(file_path)
         if lines:
             out = lines[0].strip()
-            assert out in ("test_disable", "find_max_bounds", "bisect")
+            if out not in ("test_disable", "find_max_bounds", "bisect"):
+                raise AssertionError(
+                    f"unexpected run_state {out!r}, expected one of "
+                    "'test_disable', 'find_max_bounds', 'bisect'"
+                )
             return out
         return None
 
@@ -354,7 +367,8 @@ class CompilerBisector:
             )
             return False
         else:
-            assert run_state == "bisect"
+            if run_state != "bisect":
+                raise AssertionError(f"expected run_state == 'bisect', got {run_state}")
             # If the environment variable is not set, use the bisection range midpoint
             low, high = cls.get_bisect_range(backend, subsystem)
             # if high - low <= 2:
@@ -427,7 +441,10 @@ class CompilerBisector:
         """
         Process the current subsystem. Returns True if the issue is found, False otherwise.
         """
-        assert isinstance(curr_subsystem, Subsystem)
+        if not isinstance(curr_subsystem, Subsystem):
+            raise AssertionError(
+                f"expected curr_subsystem to be Subsystem, got {type(curr_subsystem)}"
+            )
         while True:
             run_state = cls.get_run_state(curr_backend, curr_subsystem.name)
             reset_counters()
@@ -540,7 +557,10 @@ class CompilerBisector:
         if not curr_backend:
             cls.initialize_system()
             curr_backend = cls.get_backend()
-            assert curr_backend is not None
+            if curr_backend is None:
+                raise AssertionError(
+                    "expected curr_backend to be set after initialize_system"
+                )
             curr_subsystem_name = cls.get_subsystem()
 
         curr_subsystem = (
@@ -549,7 +569,8 @@ class CompilerBisector:
             else None
         )
         while True:
-            assert curr_backend is not None
+            if curr_backend is None:
+                raise AssertionError("expected curr_backend to be set")
             reset_counters()
             if curr_subsystem:
                 result = cls.process_subsystem(
@@ -582,7 +603,8 @@ class CompilerBisector:
                     print(
                         f"The issue is in the {curr_backend} system, but could not identify subsystem."
                     )
-                    assert curr_backend is not None
+                    if curr_backend is None:
+                        raise AssertionError("expected curr_backend to be set")
                     return BisectionResult(curr_backend)
 
                 curr_subsystem = next_subsystem
@@ -713,7 +735,8 @@ def command_line_usage() -> None:
                 env["TORCH_BISECT_BACKEND"] = backend
 
             if subsystem:
-                assert backend is not None  # subsystem requires a backend
+                if backend is None:  # subsystem requires a backend
+                    raise AssertionError("subsystem requires a backend")
                 env["TORCH_BISECT_SUBSYSTEM"] = subsystem
                 # Get run_state to determine TORCH_BISECT_MAX
                 run_state = bisection_manager.get_run_state(backend, subsystem)
