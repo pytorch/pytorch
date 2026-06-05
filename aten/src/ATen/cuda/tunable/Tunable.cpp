@@ -16,6 +16,14 @@
 #include <torch/version.h>
 
 
+#ifndef USE_ROCM
+#include <cuda.h>
+#include <cuda_runtime_api.h>
+#include <cublasLt.h>
+#include <cublas_v2.h>
+#endif
+
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -161,6 +169,11 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
   }
 }
 
+void TuningResultsManager::ClearUntuned() {
+  std::scoped_lock l{lock_};
+  untuned_results_.clear();
+}
+
 void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const std::unordered_map<std::string, std::string>& validators) {
   std::scoped_lock fl{realtime_file_mutex_};
 
@@ -301,7 +314,22 @@ TuningResultsValidator::TuningResultsValidator() {
       "PT_VERSION",
       []() { return GetPyTorchVersion(); },
       [this](auto&& k) { return ValidatePyTorchVersion(std::forward<decltype(k)>(k)); });
-#ifdef USE_ROCM
+#ifndef USE_ROCM
+  auto register_exact_validator = [this](const char* name, auto getter) {
+    RegisterValidator(name, getter, [name, getter](auto&& k) {
+      std::string value = getter();
+      TUNABLE_LOG1(name, " validation: expect ", k, " to match ", value);
+      return value == k ? OK : FAIL;
+    });
+  };
+
+  register_exact_validator(
+      "CUBLASLT_VERSION", []() { return c10::str(cublasLtGetVersion()); });
+  register_exact_validator("CUDA_DEVICE", []() {
+    const auto* prop = at::cuda::getCurrentDeviceProperties();
+    return c10::str(prop->major, ".", prop->minor, ":", prop->name);
+  });
+#else
   // hip
   {
     // HIP version is more accurate than ROCm version.  User's environment could be a stock
@@ -481,6 +509,7 @@ TuningContext::TuningContext() :
     numerics_check_enable_{false},
     max_tuning_duration_ms_{30},
     max_tuning_iterations_{100},
+    cublaslt_requested_algo_count_{8},
     max_warmup_duration_ms_{0},
     max_warmup_iterations_{0},
     icache_flush_{true},
@@ -542,6 +571,7 @@ void TuningContext::EnableRecordUntuned(bool value) {
     TUNABLE_LOG1("Disable Record Untuned for TunableOp");
     TUNABLE_LOG1("Closing Untuned GEMM Results File");
     untuned_file_.close();
+    manager_.ClearUntuned();
   }
 }
 
@@ -654,6 +684,26 @@ int TuningContext::GetMaxTuningIterations() const {
     return val < 0 ? 0 : val;
   }
   return max_tuning_iterations_;
+}
+
+void TuningContext::SetCublasLtRequestedAlgoCount(int count) {
+  cublaslt_requested_algo_count_ = std::max(1, count);
+}
+
+int TuningContext::GetCublasLtRequestedAlgoCount() const {
+  static const auto env = c10::utils::get_env(
+      "PYTORCH_TUNABLEOP_CUBLASLT_REQUESTED_ALGO_COUNT");
+  if (env.has_value()) {
+    try {
+      return std::max(1, std::stoi(env.value()));
+    } catch (const std::exception&) {
+      TORCH_WARN_ONCE(
+          "PYTORCH_TUNABLEOP_CUBLASLT_REQUESTED_ALGO_COUNT is not a valid "
+          "integer (got `", env.value(), "`). Falling back to the value set "
+          "via torch.cuda.tunable.set_cublaslt_requested_algo_count.");
+    }
+  }
+  return cublaslt_requested_algo_count_;
 }
 
 void TuningContext::SetMaxWarmupDurationMs(int max_duration_ms) {
