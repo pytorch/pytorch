@@ -6663,6 +6663,36 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         for _ in range(2):
             make_dist_and_execute(torch.randn(10), SubCateg)
 
+    # https://github.com/pytorch/pytorch/issues/141017
+    @parametrize("reduction", ["none", "mean", "sum"])
+    def test_multilabel_margin_loss_aot_eager_ignores_targets_after_negative(
+        self, reduction
+    ):
+        x = torch.tensor(
+            [
+                [0.1798, 0.5515, 0.3197, 0.8951, 0.9017, 0.3625],
+                [0.0736, 0.9311, 0.8952, 0.8994, 0.7971, 0.8615],
+            ]
+        )
+        target = torch.tensor([[4, 5, 0, 3, -1, 2], [5, -1, 1, 4, 0, 3]])
+
+        def fn(x, target):
+            return F.multilabel_margin_loss(x, target, reduction=reduction)
+
+        expected = fn(x, target)
+        actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, target)
+        self.assertEqual(expected, actual)
+
+        if reduction == "none":
+            unbatched_x = x[0]
+            unbatched_target = target[0]
+            expected = fn(unbatched_x, unbatched_target)
+            actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
+                unbatched_x, unbatched_target
+            )
+            self.assertEqual(expected, actual)
+            self.assertEqual(actual.shape, torch.Size([]))
+
     def test_bitwise_print_precedence(self):
         import math
 
