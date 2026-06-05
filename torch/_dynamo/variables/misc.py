@@ -52,6 +52,7 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
+    DefaultsSource,
     GenericAttrSource,
     GetItemSource,
     TypeMROSource,
@@ -897,7 +898,133 @@ class AutogradFunctionVariable(VariableTracker):
         self.fn_cls = fn_cls
 
     def python_type(self) -> type:
-        return type
+        return type(self.fn_cls)
+
+    def as_python_constant(self) -> type[torch.autograd.Function]:
+        return self.fn_cls
+
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        source = AttrSource(self.source, name) if self.source is not None else None
+        if name == "apply":
+            return variables.GetAttrVariable(self, name, source=source)
+        try:
+            value = getattr(self.fn_cls, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+        return VariableTracker.build(tx, value, source=source)
+
+    def _call_custom_function_call(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from torch._functorch.autograd_function import custom_function_call
+        from torch.autograd.function import _is_setup_context_defined
+
+        if not _is_setup_context_defined(self.fn_cls.setup_context):
+            raise_observed_exception(
+                RuntimeError,
+                tx,
+                args=[
+                    "In order to use an autograd.Function with functorch transforms "
+                    "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
+                    "staticmethod. For more details, please see "
+                    "https://pytorch.org/docs/main/notes/extending.func.html"
+                ],
+            )
+
+        custom_function_call_source = AttrSource(
+            tx.import_source("torch._functorch.autograd_function"),
+            "custom_function_call",
+        )
+        custom_function_call_vt = VariableTracker.build(
+            tx,
+            custom_function_call,
+            source=custom_function_call_source,
+        )
+        return custom_function_call_vt.call_function(tx, [self, *args], kwargs)
+
+    def _bind_default_args_for_setup_context(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> tuple[list[VariableTracker], dict[str, VariableTracker]]:
+        from torch.autograd.function import _is_setup_context_defined
+
+        if not _is_setup_context_defined(self.fn_cls.setup_context):
+            return args, kwargs
+
+        forward_source = (
+            AttrSource(self.source, "forward") if self.source is not None else None
+        )
+        signature = inspect.signature(self.fn_cls.forward)
+        explicitly_bound = signature.bind(*args, **kwargs)
+        explicit_names = set(explicitly_bound.arguments)
+        bound_args = signature.bind(*args, **kwargs)
+        bound_args.apply_defaults()
+
+        positional_params = [
+            param
+            for param in signature.parameters.values()
+            if param.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        ]
+        positional_names = [param.name for param in positional_params]
+        varargs_name = next(
+            (
+                param.name
+                for param in signature.parameters.values()
+                if param.kind is inspect.Parameter.VAR_POSITIONAL
+            ),
+            None,
+        )
+        positional_default_start = len(positional_params) - len(
+            self.fn_cls.forward.__defaults__ or ()
+        )
+        if forward_source is not None and self.fn_cls.forward.__defaults__:
+            install_guard(
+                AttrSource(forward_source, "__defaults__").make_guard(
+                    GuardBuilder.SEQUENCE_LENGTH
+                )
+            )
+        positional_default_sources = {
+            param.name: DefaultsSource(forward_source, idx)
+            for idx, param in enumerate(positional_params[positional_default_start:])
+            if forward_source is not None
+        }
+        kw_default_sources = {
+            name: DefaultsSource(forward_source, name, is_kw=True)
+            for name in (self.fn_cls.forward.__kwdefaults__ or ())
+            if forward_source is not None
+        }
+
+        def wrap(name: str, value: object) -> VariableTracker:
+            if isinstance(value, VariableTracker):
+                return value
+            source = None
+            if name not in explicit_names:
+                source = positional_default_sources.get(name) or kw_default_sources.get(
+                    name
+                )
+            return VariableTracker.build(tx, value, source=source)
+
+        arg_names = positional_names
+        if varargs_name is not None:
+            arg_names = [
+                *arg_names,
+                *([varargs_name] * (len(bound_args.args) - len(positional_names))),
+            ]
+        return (
+            [wrap(name, arg) for name, arg in zip(arg_names, bound_args.args)],
+            {name: wrap(name, arg) for name, arg in bound_args.kwargs.items()},
+        )
 
     def _resolve_kwargs(
         self,
@@ -946,6 +1073,8 @@ class AutogradFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        args, kwargs = self._bind_default_args_for_setup_context(tx, args, kwargs)
+        functorch_transforms_active = torch._C._are_functorch_transforms_active()
         if kwargs:
             resolved = self._resolve_kwargs(args, kwargs)
             if resolved is None:
@@ -1043,6 +1172,9 @@ class AutogradFunctionVariable(VariableTracker):
                 install_guard(setup_ctx_src.make_guard(GuardBuilder.CLOSURE_MATCH))
 
             return val
+
+        if functorch_transforms_active:
+            return self._call_custom_function_call(tx, args, kwargs)
 
         if self.source:
             source = AttrSource(self.source, "forward")
