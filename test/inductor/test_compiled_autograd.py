@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_S390X,
     IS_WINDOWS,
+    noncontiguous_like,
     parametrize,
     scoped_load_inline,
     skipIfWindows,
@@ -229,6 +230,38 @@ main()
         # Run it three times to catch bad dynamo state resets
         for _ in range(3):
             self.run_as_subprocess(script)
+
+    def test_index_fill_value_grad_noncontiguous(self):
+        def make_inputs():
+            inp = torch.arange(25, dtype=torch.float32).reshape(5, 5)
+            inp = noncontiguous_like(inp.requires_grad_())
+            index = torch.tensor([2, 1, 4, 2, 2])
+            value = torch.tensor(-1.7658, requires_grad=True)
+            grad_out = torch.arange(1, 26, dtype=torch.float32).reshape(5, 5)
+            grad_out = noncontiguous_like(grad_out)
+            return inp, index, value, grad_out
+
+        def fn(inp, index, value, grad_out):
+            out = inp.index_fill(-1, index, value)
+            return torch.autograd.grad(out, (inp, value), grad_out, allow_unused=True)[
+                1
+            ]
+
+        expected = fn(*make_inputs())
+        self.assertEqual(expected, torch.tensor(200.0))
+
+        counters["compiled_autograd"].clear()
+        with (
+            config.patch(capture_dynamic_output_shape_ops=True),
+            compiled_autograd._enable(make_compiler_fn(backend="inductor")),
+            torch.autograd.set_multithreading_enabled(False),
+        ):
+            actual = torch.compile(fn, backend="inductor")(*make_inputs())
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
+        self.assertFalse(any("_unique" in reason for reason in counters["graph_break"]))
 
     def gen_cache_miss_log_prefix(self):
         if IS_WINDOWS:

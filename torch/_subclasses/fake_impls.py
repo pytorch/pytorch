@@ -629,6 +629,20 @@ def unique2(
     return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
 
 
+@register_op_impl(aten._unique.default)
+def unique(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    arg: FakeTensor,
+    sorted: bool = True,
+    return_inverse: bool = False,
+) -> tuple[FakeTensor, FakeTensor]:
+    uniques, inverse, _counts = _unique(
+        fake_mode, func, arg, None, sorted, return_inverse, False
+    )
+    return uniques, inverse
+
+
 @register_op_impl(aten.select.int)
 def meta_select(
     fake_mode: FakeTensorMode,
