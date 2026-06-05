@@ -60,7 +60,7 @@ from ..utils import (
 )
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
-from .control_dependencies import preserve_node_ordering
+from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
@@ -875,7 +875,12 @@ def reorder_for_locality(graph: torch.fx.Graph):
 
 
 def register_lowering_pattern(
-    pattern, extra_check=_return_true, pass_number=1
+    pattern,
+    extra_check=_return_true,
+    pass_number=1,
+    *,
+    output_metadata_ignores_input_storage: bool = False,
+    output_metadata_is_input: int | str | None = None,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Register an aten to inductor IR replacement pattern
@@ -885,6 +890,8 @@ def register_lowering_pattern(
         extra_check,
         # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[pass_number],
+        output_metadata_ignores_input_storage=output_metadata_ignores_input_storage,
+        output_metadata_is_input=output_metadata_is_input,
     )
 
 
@@ -1313,6 +1320,29 @@ def apply_pass_to_subgraphs(pass_fn: Callable[[fx.Graph], None], graph: fx.Graph
             pass_fn(child_mod.graph)
 
 
+def apply_pass_to_control_deps_subgraphs(
+    pass_fn: Callable[[fx.Graph], None], graph: fx.Graph
+):
+    """Recursively apply a pass function to subgraphs referenced by control_deps."""
+    gm = graph.owning_module
+    if gm is None:
+        return
+
+    for node in graph.find_nodes(op="call_function", target=control_deps):
+        if len(node.args) < 2:
+            continue
+        subgraph_attr = node.args[1]
+        if (
+            not isinstance(subgraph_attr, torch.fx.Node)
+            or subgraph_attr.op != "get_attr"
+            or not isinstance(subgraph_attr.target, str)
+        ):
+            continue
+        subgraph = getattr(gm, subgraph_attr.target, None)
+        if isinstance(subgraph, torch.fx.GraphModule):
+            pass_fn(subgraph.graph)
+
+
 def _get_single_replacement_node(
     replacement_nodes: Sequence[torch.fx.Node], target: torch.fx.node.Target
 ) -> torch.fx.Node:
@@ -1402,6 +1432,8 @@ def decompose_auto_functionalized(graph):
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
+    apply_pass_to_control_deps_subgraphs(decompose_auto_functionalized, graph)
+
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
@@ -1412,9 +1444,9 @@ def decompose_auto_functionalized(graph):
     def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
-        only_clone_these_tensors = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
-        )
+        only_clone_these_tensors = match.nodes[0].meta.get("only_clone_these_tensors")
+        if only_clone_these_tensors is not None:
+            only_clone_these_tensors = tuple(only_clone_these_tensors)
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
@@ -1440,9 +1472,9 @@ def decompose_auto_functionalized(graph):
             auto_functionalized_v2_dense,
         )
 
-        only_clone_these_bases = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
-        )
+        only_clone_these_bases = match.nodes[0].meta.get("only_clone_these_tensors")
+        if only_clone_these_bases is not None:
+            only_clone_these_bases = tuple(only_clone_these_bases)
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
@@ -1550,6 +1582,7 @@ def decompose_auto_functionalized(graph):
     ),
     pass_number=2,
     extra_check=is_valid_splitwithsizes_cat,
+    output_metadata_is_input="input_",
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
@@ -1604,6 +1637,7 @@ def is_valid_cat_splitwithsizes(match):
     ),
     pass_number=2,
     extra_check=is_valid_cat_splitwithsizes,
+    output_metadata_is_input="input_",
 )
 def cat_splitwithsizes_replace(match, input_):
     return input_

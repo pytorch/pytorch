@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -2667,6 +2667,21 @@ def run_pre_grad_passes(
     return model_
 
 
+@dataclass(frozen=True)
+class _ConstantDecompTable(Generic[_P, _T]):
+    """
+    Picklable wrapper around a user-supplied decomposition dict.
+
+    This module-level class is addressable as (module, qualname), so pickle can
+    serialize an instance by reducing its single field.
+    """
+
+    table: dict[OpOverload, Callable[_P, _T]]
+
+    def __call__(self) -> dict[OpOverload, Callable[_P, _T]]:
+        return self.table
+
+
 _LSTM_OPS_TO_PRESERVE = (torch.ops.aten.lstm.input,)
 
 
@@ -2765,9 +2780,9 @@ def compile_fx(
     )
 
     if decompositions is not None:
-
-        def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
-            return decompositions  # pyrefly: ignore[bad-return]
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = (
+            _ConstantDecompTable(decompositions)
+        )
     else:
         get_decomp_fn = (
             _select_decomp_table_with_conditional_lstm
