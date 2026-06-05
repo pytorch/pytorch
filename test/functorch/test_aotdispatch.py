@@ -11694,11 +11694,6 @@ aot_autograd_module_failures = set(
         # of a tracing tensor with aten._local_scalar_dense.default -
         # erroring out! It's likely that this is caused by data-dependent
         # control flow or similar.
-        torch.nn.MultiLabelMarginLoss,  # AssertionError: The values for attribute 'shape' do not match:
-        # torch.Size([1]) != torch.Size([]). Outputs of the operator are different in
-        # eager-mode PyTorch vs AOTAutograd. This means the operator will have incorrect
-        # output underneath torch.compile. This could be because the operator's
-        # implementation not traceable or that there is a bug in AOTAutograd.
         torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.eq compares a mask input
         # to a causal mask tensor, to see if Boolean is_causal should be set
         # for TransformerEncoder layers, MHA and sdp custom kernels
