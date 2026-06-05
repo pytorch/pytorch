@@ -872,21 +872,28 @@ def scan_autograd(combine_fn, init, xs, additional_inputs):
         # If init was passed in with requires_grad=False, AOT joint creation drops it from
         # grad_primals and zero-fills, severing the carry chain and silently
         # zeroing gradients that should reach closed-over additional_inputs from
-        # earlier steps. Thus, we force the carry samples to require grad during tracing;
-        # this only affects the traced graphs, not the operands passed to apply.
-        sample_init = []
-        for t in init:
-            s = t.detach().clone()
-            if t.dtype.is_floating_point or t.dtype.is_complex:
-                s.requires_grad_(True)
-            sample_init.append(s)
-        hop_partitioned_graph: HopPartitionedGraph = (
-            HopGraphMinCutPartitioner.create_partitioned_graph(
-                combine_fn,
-                (*sample_init, *[x[0] for x in xs], *additional_inputs),
-                always_recompute_complex_exprs=True,
+        # earlier steps. Thus, we temporarily flip requires_grad on the init tensors
+        # during tracing and restore it afterwards; this only affects the traced
+        # graphs, not the operands passed to apply. init elements are leaves.
+        flipped = [
+            t
+            for t in init
+            if (t.dtype.is_floating_point or t.dtype.is_complex)
+            and not t.requires_grad
+        ]
+        try:
+            for t in flipped:
+                t.requires_grad_(True)
+            hop_partitioned_graph: HopPartitionedGraph = (
+                HopGraphMinCutPartitioner.create_partitioned_graph(
+                    combine_fn,
+                    (*init, *[x[0] for x in xs], *additional_inputs),
+                    always_recompute_complex_exprs=True,
+                )
             )
-        )
+        finally:
+            for t in flipped:
+                t.requires_grad_(False)
 
     return ScanAutogradOp.apply(
         hop_partitioned_graph,
