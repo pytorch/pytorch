@@ -1,7 +1,9 @@
 # Owner(s): ["module: dynamo"]
 import abc
 import functools
+import io
 import itertools
+import logging
 import unittest
 from functools import partial
 
@@ -1565,6 +1567,133 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
             ref = opt_f(t)
 
         self.assertEqual(res, ref)
+
+    def test_nontraceable_torch_dispatch_subclass_skips_dispatch_hooks(self):
+        calls = []
+
+        def helper():
+            calls.append("helper")
+            return torch.ones(1) + 2
+
+        class MySubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                calls.append("__torch_function__")
+                return super().__torch_function__(func, types, args, kwargs)
+
+            @classmethod
+            def __torch_dispatch__(cls, *args, **kwargs):
+                calls.append("__torch_dispatch__")
+                helper()
+                return super().__torch_dispatch__(*args, **kwargs)
+
+        def f(t):
+            return t + 1
+
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        logger = logging.getLogger("torch._dynamo")
+        logger.addHandler(handler)
+        torch._logging.set_logs(trace_source=True)
+        try:
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_f = torch.compile(f, backend=cnt, fullgraph=False)
+            opt_f(MySubclass([1, 2]))
+        finally:
+            torch._logging.set_logs()
+            logger.removeHandler(handler)
+
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertIn("__torch_dispatch__", calls)
+        self.assertIn("helper", calls)
+        self.assertNotIn("__torch_function__", buf.getvalue())
+        self.assertNotIn("__torch_dispatch__", buf.getvalue())
+        self.assertNotIn("helper", buf.getvalue())
+
+    def test_nontraceable_torch_dispatch_subclass_skips_assigned_hook(self):
+        calls = []
+
+        def helper():
+            calls.append("helper")
+            return torch.ones(1) + 2
+
+        class MySubclass(torch.Tensor):
+            pass
+
+        def dispatch_impl(cls, *args, **kwargs):
+            calls.append("dispatch_impl")
+            helper()
+            return super(MySubclass, cls).__torch_dispatch__(*args, **kwargs)
+
+        self.assertNotEqual(dispatch_impl.__name__, "__torch_dispatch__")
+        MySubclass.__torch_dispatch__ = classmethod(dispatch_impl)
+
+        def f(t):
+            return t + 1
+
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        logger = logging.getLogger("torch._dynamo")
+        logger.addHandler(handler)
+        torch._logging.set_logs(trace_source=True)
+        try:
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_f = torch.compile(f, backend=cnt, fullgraph=False)
+            opt_f(MySubclass([1, 2]))
+        finally:
+            torch._logging.set_logs()
+            logger.removeHandler(handler)
+
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertIn("dispatch_impl", calls)
+        self.assertIn("helper", calls)
+        self.assertNotIn("dispatch_impl", buf.getvalue())
+        self.assertNotIn("helper", buf.getvalue())
+
+    def test_nontraceable_torch_dispatch_subclass_skips_skipfile_hook(self):
+        from torch._dynamo import trace_rules
+
+        calls = []
+
+        def helper():
+            calls.append("helper")
+            return torch.ones(1) + 2
+
+        class MySubclass(torch.Tensor):
+            pass
+
+        def dispatch_impl(cls, *args, **kwargs):
+            calls.append("dispatch_impl")
+            helper()
+            return super(MySubclass, cls).__torch_dispatch__(*args, **kwargs)
+
+        dispatch_impl.__code__ = dispatch_impl.__code__.replace(
+            co_filename=torch.__file__
+        )
+        self.assertTrue(trace_rules.check(dispatch_impl.__code__))
+        MySubclass.__torch_dispatch__ = classmethod(dispatch_impl)
+
+        def f(t):
+            return t + 1
+
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        logger = logging.getLogger("torch._dynamo")
+        logger.addHandler(handler)
+        torch._logging.set_logs(trace_source=True)
+        try:
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_f = torch.compile(f, backend=cnt, fullgraph=False)
+            opt_f(MySubclass([1, 2]))
+        finally:
+            torch._logging.set_logs()
+            logger.removeHandler(handler)
+
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertIn("dispatch_impl", calls)
+        self.assertIn("helper", calls)
+        self.assertNotIn("dispatch_impl", buf.getvalue())
+        self.assertNotIn("helper", buf.getvalue())
 
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
