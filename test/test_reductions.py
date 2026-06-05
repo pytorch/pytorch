@@ -3674,8 +3674,8 @@ class TestReductions(TestCase):
 
         for contig, bins_contig, bin_ct, weighted, density, shape in \
                 product([True, False], [True, False], range(1, 10), [True, False], [True, False], shapes):
-            values = make_tensor(shape, dtype=dtype, low=-9, high=9, noncontiguous=not contig)
-            weights = make_tensor(shape, dtype=dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
+            values = make_tensor(shape, device="cpu", dtype=dtype, low=-9, high=9, noncontiguous=not contig)
+            weights = make_tensor(shape, device="cpu", dtype=dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
 
             self._test_histogram_numpy(values, bin_ct, None, weights, density)
 
@@ -3692,7 +3692,7 @@ class TestReductions(TestCase):
                 eq_func=partial(self.assertEqual, rtol=3e-5, atol=0.0),
             )
 
-            bin_edges = make_tensor(bin_ct + 1, dtype=dtype, low=-9, high=9).msort()
+            bin_edges = make_tensor(bin_ct + 1, device="cpu", dtype=dtype, low=-9, high=9).msort()
             if not bins_contig:
                 bin_edges_noncontig = make_tensor(bin_ct + 1, dtype=dtype, noncontiguous=not bins_contig)
                 bin_edges_noncontig.copy_(bin_edges)
@@ -3701,19 +3701,19 @@ class TestReductions(TestCase):
             self._test_histogram_numpy(values, bin_edges, None, weights, density)
 
             elt = random.uniform(-9, 9)
-            values = make_tensor(shape, dtype=dtype, low=elt, high=elt, noncontiguous=not contig)
+            values = make_tensor(shape, device="cpu", dtype=dtype, low=elt, high=elt, noncontiguous=not contig)
             self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
             self._test_histogram_numpy(values, bin_edges, None, weights, density)
 
             weights = (
-                make_tensor(bin_ct + 1, dtype=dtype, low=0, high=9, noncontiguous=not contig)
+                make_tensor(bin_ct + 1, device="cpu", dtype=dtype, low=0, high=9, noncontiguous=not contig)
                 if weighted
                 else None
             )
             self._test_histogram_numpy(bin_edges, bin_edges, None, weights, density)
 
         for bin_ct, shape in product(range(1, 10), shapes):
-            values = make_tensor(shape, dtype=dtype, low=-9, high=9)
+            values = make_tensor(shape, device="cpu", dtype=dtype, low=-9, high=9)
             (actual_hist, actual_bin_edges) = torch.histogram(values, bin_ct)
             (expected_hist, expected_bin_edges) = torch.histogram(
                 values, bin_ct, range=None, weight=None, density=False)
@@ -3787,9 +3787,9 @@ class TestReductions(TestCase):
                 product([True, False], [True, False], [True, False], [True, False], shapes):
             D = shape[-1]
 
-            values = make_tensor(shape, dtype=dtype, low=-9, high=9, noncontiguous=not contig)
+            values = make_tensor(shape, device="cpu", dtype=dtype, low=-9, high=9, noncontiguous=not contig)
             weights = (
-                make_tensor(shape[:-1], dtype=dtype, low=0, high=9, noncontiguous=not contig)
+                make_tensor(shape[:-1], device="cpu", dtype=dtype, low=0, high=9, noncontiguous=not contig)
                 if weighted
                 else None
             )
@@ -3808,10 +3808,10 @@ class TestReductions(TestCase):
                 bin_range[2 * dim + 1] = bin_range[2 * dim]
             self._test_histogramdd_numpy(values, bin_ct, bin_range, weights, density)
 
-            bin_edges = [make_tensor(ct + 1, dtype=dtype, low=-9, high=9).msort() for ct in bin_ct]
+            bin_edges = [make_tensor(ct + 1, device="cpu", dtype=dtype, low=-9, high=9).msort() for ct in bin_ct]
             if not bins_contig:
                 bin_edges_noncontig = [
-                    make_tensor(ct + 1, dtype=dtype, noncontiguous=not bins_contig)
+                    make_tensor(ct + 1, device="cpu", dtype=dtype, noncontiguous=not bins_contig)
                     for ct in bin_ct
                 ]
                 for dim in range(D):
@@ -3824,58 +3824,58 @@ class TestReductions(TestCase):
     def test_histogram_error_handling(self):
         dtype = torch.float32
         with self.assertRaisesRegex(RuntimeError, 'not implemented for'):
-            values = make_tensor((), dtype=torch.int32)
+            values = make_tensor((), device="cpu", dtype=torch.int32)
             torch.histogram(values, 1)
 
         inconsistent_dtype = torch.float64
 
         with self.assertRaisesRegex(RuntimeError, 'input tensor and bins tensors should have the same dtype'):
-            values = make_tensor((), dtype=dtype)
-            bins = make_tensor((), dtype=inconsistent_dtype)
+            values = make_tensor((), device="cpu", dtype=dtype)
+            bins = make_tensor((), device="cpu", dtype=inconsistent_dtype)
             torch.histogram(values, bins)
 
         with self.assertRaisesRegex(RuntimeError, 'input tensor and weight tensor should have the same dtype'):
-            values = make_tensor((), dtype=dtype)
-            weight = make_tensor((), dtype=inconsistent_dtype)
+            values = make_tensor((), device="cpu", dtype=dtype)
+            weight = make_tensor((), device="cpu", dtype=inconsistent_dtype)
             torch.histogram(values, 1, weight=weight)
 
         with self.assertRaisesRegex(RuntimeError, 'input tensor and hist tensor should have the same dtype'):
-            values = make_tensor((), dtype=dtype)
-            hist = make_tensor((), dtype=inconsistent_dtype)
-            bin_edges = make_tensor((), dtype=dtype)
+            values = make_tensor((), device="cpu", dtype=dtype)
+            hist = make_tensor((), device="cpu", dtype=inconsistent_dtype)
+            bin_edges = make_tensor((), device="cpu", dtype=dtype)
             torch.histogram(values, 1, out=(hist, bin_edges))
 
         with self.assertRaisesRegex(RuntimeError, 'input tensor and bin_edges tensor should have the same dtype'):
-            values = make_tensor((), dtype=dtype)
-            hist = make_tensor((), dtype=dtype)
-            bin_edges = make_tensor((), dtype=inconsistent_dtype)
+            values = make_tensor((), device="cpu", dtype=dtype)
+            hist = make_tensor((), device="cpu", dtype=dtype)
+            bin_edges = make_tensor((), device="cpu", dtype=inconsistent_dtype)
             torch.histogram(values, 1, out=(hist, bin_edges))
 
         with self.assertRaisesRegex(RuntimeError, 'bins tensor should have one dimension'):
-            t = make_tensor((2, 2), dtype=dtype)
+            t = make_tensor((2, 2), device="cpu", dtype=dtype)
             torch.histogram(t, t)
 
         with self.assertRaisesRegex(RuntimeError, 'bins tensor should have at least 1 element'):
-            t = make_tensor((0), dtype=dtype)
+            t = make_tensor((0), device="cpu", dtype=dtype)
             torch.histogram(t, t)
 
         with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
-            values = make_tensor((), dtype=dtype)
+            values = make_tensor((), device="cpu", dtype=dtype)
             torch.histogram(values, -1)
 
         with self.assertRaisesRegex(RuntimeError, 'if weight tensor is provided it should have the same shape \
 as the input tensor excluding its innermost dimension'):
-            values = make_tensor((2, 2), dtype=dtype)
-            weight = make_tensor((1), dtype=dtype)
+            values = make_tensor((2, 2), device="cpu", dtype=dtype)
+            weight = make_tensor((1), device="cpu", dtype=dtype)
             torch.histogram(values, 1, weight=weight)
 
         with self.assertRaisesRegex(TypeError, 'received an invalid combination of arguments'):
-            values = make_tensor((), dtype=dtype)
-            bin_edges = make_tensor((), dtype=dtype)
+            values = make_tensor((), device="cpu", dtype=dtype)
+            bin_edges = make_tensor((), device="cpu", dtype=dtype)
             torch.histogram(values, bin_edges, range=(0, 1))
 
         with self.assertRaisesRegex(RuntimeError, 'min should not exceed max'):
-            values = make_tensor((), dtype=dtype)
+            values = make_tensor((), device="cpu", dtype=dtype)
             torch.histogram(values, 2, range=(1, 0))
 
         with self.assertRaisesRegex(RuntimeError, r'range \[nan, nan\] is not finite'):
