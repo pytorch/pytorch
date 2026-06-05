@@ -41,6 +41,10 @@ def _check_nvmath_cublaslt() -> bool:
     return _unavailable_reason(_NVMATH_DEPS) is None
 
 
+def _k_n_16_byte_aligned(a: torch.Tensor, b: torch.Tensor, elem_size: int) -> bool:
+    return (a.size(1) * elem_size) % 16 == 0 and (b.size(1) * elem_size) % 16 == 0
+
+
 def _can_use_nvmath_cublaslt(
     self: list[torch.Tensor],
     mat2: list[torch.Tensor],
@@ -49,11 +53,7 @@ def _can_use_nvmath_cublaslt(
         return False
 
     elem_size = self[0].element_size()
-    alignment = 16 // elem_size
-    return all(
-        a.size(1) % alignment == 0 and b.size(1) % alignment == 0
-        for a, b in zip(self, mat2)
-    )
+    return all(_k_n_16_byte_aligned(a, b, elem_size) for a, b in zip(self, mat2))
 
 
 def _foreach_mm_cond(
@@ -82,7 +82,6 @@ def _foreach_mm_cond(
     first_b_rm = first_b.stride(-1) == 1
 
     elem_size = first_a.element_size()
-    alignment = 16 // elem_size
     nvmath_ok = first_a.dtype == torch.bfloat16 and _check_nvmath_cublaslt()
     max_dim = 0
 
@@ -103,11 +102,11 @@ def _foreach_mm_cond(
         if a.dtype != first_a.dtype or b.dtype != first_a.dtype:
             return False
         K_i, N_i = a.size(1), b.size(1)
-        if nvmath_ok and (N_i % alignment != 0 or K_i % alignment != 0):
+        aligned = _k_n_16_byte_aligned(a, b, elem_size)
+        if nvmath_ok and not aligned:
             nvmath_ok = False
-        if not nvmath_ok:
-            if (K_i * elem_size) % 16 != 0 or (N_i * elem_size) % 16 != 0:
-                return False
+        if not nvmath_ok and not aligned:
+            return False
         max_dim = max(max_dim, a.size(0), K_i, N_i)
         if i > 0:
             if (a.stride(-1) == 1) != first_a_rm or (b.stride(-1) == 1) != first_b_rm:
