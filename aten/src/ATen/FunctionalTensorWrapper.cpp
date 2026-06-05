@@ -12,6 +12,7 @@
 #else
 #include <ATen/ops/_propagate_xla_data.h>
 #include <ATen/ops/_to_copy.h>
+#include <ATen/ops/copy.h>
 #endif
 
 namespace at {
@@ -635,6 +636,45 @@ void replace_(const ITensorListRef functional_tensor, ITensorListRef other) {
   for ([[maybe_unused]] const auto i : c10::irange(functional_tensor.size())) {
     replace_(*functional_tensor_it++, *other_it++);
   }
+}
+
+Tensor maybe_preserve_strides(const Tensor& old_value, const Tensor& new_value) {
+  // In-place ops preserve size/stride/storage_offset, but their functional
+  // variants often allocate contiguous outputs.
+  if (!old_value.defined() || !new_value.defined()) {
+    return new_value;
+  }
+  if (old_value.layout() != c10::kStrided || new_value.layout() != c10::kStrided) {
+    return new_value;
+  }
+  if (!old_value.has_storage()) {
+    return new_value;
+  }
+  if (!old_value.sym_sizes().equals(new_value.sym_sizes())) {
+    return new_value;
+  }
+  if (old_value.sym_strides().equals(new_value.sym_strides()) &&
+      old_value.sym_storage_offset() == new_value.sym_storage_offset()) {
+    return new_value;
+  }
+  return at::_ops::copy::call(
+      old_value, new_value, /*non_blocking=*/false);
+}
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+std::vector<Tensor> maybe_preserve_strides(
+    ITensorListRef old_values,
+    ITensorListRef new_values) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(old_values.size() == new_values.size());
+  std::vector<Tensor> outputs;
+  outputs.reserve(old_values.size());
+  auto old_values_it = old_values.begin();
+  auto new_values_it = new_values.begin();
+  for ([[maybe_unused]] const auto i : c10::irange(old_values.size())) {
+    outputs.push_back(
+        maybe_preserve_strides(*old_values_it++, *new_values_it++));
+  }
+  return outputs;
 }
 
 void propagate_xla_data(const Tensor& functional_tensor, const Tensor& other) {

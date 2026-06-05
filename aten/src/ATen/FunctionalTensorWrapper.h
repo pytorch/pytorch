@@ -344,6 +344,11 @@ TORCH_API void replace_(const Tensor& functional_tensor, const Tensor& other);
 TORCH_API void replace_(
     const ITensorListRef functional_tensor,
     ITensorListRef other);
+TORCH_API Tensor
+maybe_preserve_strides(const Tensor& old_value, const Tensor& new_value);
+TORCH_API std::vector<Tensor> maybe_preserve_strides(
+    ITensorListRef old_values,
+    ITensorListRef new_values);
 
 TORCH_API void commit_update(const Tensor& functional_tensor);
 TORCH_API void commit_update(ITensorListRef functional_tensor);

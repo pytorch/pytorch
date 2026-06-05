@@ -193,6 +193,20 @@ class TestFunctionalization(TestCase):
         )
         self.assertEqual(r.stride(), (5, 1))
 
+    def test_inplace_on_strided_input_preserves_stride_for_as_strided(self):
+        def f(x):
+            x.add_(1)
+            return torch.as_strided_copy(x, (3,), (2,))
+
+        x_ref = torch.arange(10)[::2]
+        x_test = torch.arange(10)[::2]
+
+        out_ref = f(x_ref)
+        out_test = _functionalize(f, reapply_views=True, crossref=self.crossref)(x_test)
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x_ref, x_test)
+
     def test_set_(self):
         def f(x):
             y = torch.ones(2)
