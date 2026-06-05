@@ -480,7 +480,11 @@ class BlockDescriptorOptions:
         # Compute the final shape, adjusting for special kernel types.
         final_shape = [TritonSymbols.get_block_size(tree) for tree in range_trees]
         if V.kernel.no_x_dim:
-            assert range_trees[0].prefix == "x"
+            if range_trees[0].prefix != "x":
+                raise AssertionError(
+                    f"expected first range tree prefix to be 'x', got "
+                    f"{range_trees[0].prefix!r}"
+                )
             final_shape.pop(0)
 
         # Check to see which of the final shape dimensions are included in this parameter
@@ -4816,7 +4820,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
         result_var: Any
         if reduction_type in arg_with_value_reduction_types:
-            assert index_dtype is not None
+            if index_dtype is None:
+                raise AssertionError("index_dtype must be set for arg reductions")
             result_var = (
                 self.cse.newvar(dtype=torch_acc_type, shape=tuple(result_shape)),
                 self.cse.newvar(dtype=index_dtype, shape=tuple(result_shape)),
@@ -4824,7 +4829,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             for var in result_var:
                 var.mask_vars = result_mask_vars
         elif reduction_type in arg_index_reduction_types:
-            assert index_dtype is not None
+            if index_dtype is None:
+                raise AssertionError("index_dtype must be set for arg reductions")
             result_var = self.cse.newvar(dtype=index_dtype, shape=tuple(result_shape))
             result_var.mask_vars = result_mask_vars
         else:
@@ -4940,7 +4946,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
             elif reduction_type == "online_softmax_reduce":
                 if isinstance(value, tuple):
-                    assert isinstance(masked_value, Sequence)
+                    if not isinstance(masked_value, Sequence):
+                        raise AssertionError(
+                            f"expected masked_value to be a Sequence, got "
+                            f"{type(masked_value)}"
+                        )
                     result_sum = self.cse.newvar(
                         dtype=dtype, shape=cast(CSEVariable, result_var).shape
                     )
@@ -5003,7 +5013,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             if reduction_type in arg_reduction_types:
                 accumulator_index = f"_{result_prefix}_index"
-                assert index_dtype is not None
+                if index_dtype is None:
+                    raise AssertionError("index_dtype must be set for arg reductions")
                 self.body.writeline(
                     f"{accumulator_index} = tl.full({self.dense_size_str()}, "
                     f"{torch.iinfo(index_dtype).max}, {self.dtype_to_str(index_dtype)})"
@@ -6713,7 +6724,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             kernel_kwargs["override_cooperative_reduction"] = False
         # Cannot use persistent reduction with unknown dynamic rnumel.
         if not TritonKernel.has_persistent_RBLOCK(kernel_features.reduction_numel):
-            assert not kernel_kwargs.get("override_persistent_reduction")
+            if kernel_kwargs.get("override_persistent_reduction"):
+                raise AssertionError(
+                    "cannot override persistent reduction with unknown dynamic rnumel"
+                )
             kernel_kwargs["override_persistent_reduction"] = False
 
     def codegen_static_numels(self, code):
@@ -7064,11 +7078,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         code: IndentedBuffer,
     ) -> None:
         if entry.has_custom_codegen_header():
-            assert not (
+            if (
                 self.cooperative_reduction
                 and self.persistent_reduction
                 and entry.is_reduction
-            ), "derived reduction roots do not support cooperative reductions"
+            ):
+                raise AssertionError(
+                    "derived reduction roots do not support cooperative reductions"
+                )
             for sym, expr, constexpr in entry.named_constants():
                 annotation = ": tl.constexpr" if constexpr else ""
                 code.writeline(f"{sym}{annotation} = {self.index_to_str(expr)}")

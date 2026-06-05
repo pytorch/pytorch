@@ -139,7 +139,8 @@ _T = TypeVar(
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
 )
-assert get_args(_KernelType) == _T.__constraints__
+if get_args(_KernelType) != _T.__constraints__:
+    raise AssertionError("_KernelType args must match _T type constraints")
 
 log = logging.getLogger(__name__)
 
@@ -3240,9 +3241,10 @@ def _enforce_reduction_config_block_minimums(
         return configs
 
     for cfg in configs:
-        assert not (frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys()), (
-            f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
-        )
+        if frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys():
+            raise AssertionError(
+                f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
+            )
         has_xblock = "XBLOCK" in cfg.kwargs
         has_rblock = "R0_BLOCK" in cfg.kwargs
         if not (has_xblock or has_rblock):
