@@ -727,13 +727,54 @@ void initPythonBindings(PyObject* module) {
   m.def("_cupti_monitor_configure_buffers", [](size_t buffer_size) {
     CuptiMonitorBuffers::get().configure(buffer_size);
   });
-  m.def("_cupti_monitor_buffer_request_callback_address", []() {
-    return reinterpret_cast<uintptr_t>(
-        &torch::profiler::impl::cuptiMonitorBufferRequested);
-  });
-  m.def("_cupti_monitor_buffer_complete_callback_address", []() {
-    return reinterpret_cast<uintptr_t>(
-        &torch::profiler::impl::cuptiMonitorBufferCompleted);
+  // version selects the CUPTI Activity-API generation: 1 for
+  // cuptiActivityRegisterCallbacks, 2 for the subscriber-scoped
+  // cuptiActivityRegisterCallbacks_v2. Both feed the same native pool/queue.
+  m.def(
+      "_cupti_monitor_buffer_request_callback_address",
+      [](int version) -> uintptr_t {
+        TORCH_CHECK(
+            version == 1 || version == 2,
+            "cupti monitor callback version must be 1 or 2, got ",
+            version);
+        if (version == 1) {
+          return reinterpret_cast<uintptr_t>(
+              &torch::profiler::impl::cuptiMonitorBufferRequested);
+        }
+        return reinterpret_cast<uintptr_t>(
+            &torch::profiler::impl::cuptiMonitorBufferRequestedV2);
+      },
+      py::arg("version") = 1);
+  m.def(
+      "_cupti_monitor_buffer_complete_callback_address",
+      [](int version) -> uintptr_t {
+        TORCH_CHECK(
+            version == 1 || version == 2,
+            "cupti monitor callback version must be 1 or 2, got ",
+            version);
+        if (version == 1) {
+          return reinterpret_cast<uintptr_t>(
+              &torch::profiler::impl::cuptiMonitorBufferCompleted);
+        }
+        return reinterpret_cast<uintptr_t>(
+            &torch::profiler::impl::cuptiMonitorBufferCompletedV2);
+      },
+      py::arg("version") = 1);
+  // Returns the v2 user-defined record layouts snapshotted at buffer
+  // completion, as a list of (kind, record_size, [(field_id, offset, size)]).
+  // Empty until a v2 buffer has completed.
+  m.def("_cupti_monitor_record_layouts", []() {
+    py::list result;
+    for (const auto& layout :
+         torch::profiler::impl::CuptiMonitorBuffers::get().record_layouts()) {
+      py::list fields;
+      for (const auto& field : layout.fields) {
+        fields.append(py::make_tuple(field.field_id, field.offset, field.size));
+      }
+      result.append(
+          py::make_tuple(layout.kind, layout.record_size, std::move(fields)));
+    }
+    return result;
   });
   m.def("_cupti_monitor_get_completed", []() -> py::object {
     std::optional<torch::profiler::impl::CompletedCuptiBuffer> buf;
