@@ -482,7 +482,10 @@ def _broadcast_shapes(*_shapes):
                     f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
                     f"should be broadcastable to {common_shape}",
                 )
-                common_shape[idx] = torch.sym_max(common_shape[idx], shape[idx])
+                common_shape[idx] = torch.sym_min(
+                    common_shape[idx] * shape[idx],
+                    torch.sym_max(common_shape[idx], shape[idx]),
+                )
 
     return common_shape
 

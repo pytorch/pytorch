@@ -242,13 +242,18 @@ def expand(input_shape: Shape, shape: Shape) -> DimMap:
                 raise AssertionError(f"DimSpec not supported in expand: {p}")
             actual_s = input_shape[p.input_dim]
             if not guard_or_false(desired_s == -1):
-                torch._check(
-                    sym_or(actual_s == 1, desired_s == actual_s),
-                    lambda: (
+                valid_shape = sym_or(actual_s == 1, desired_s == actual_s)
+
+                def msg() -> str:
+                    return (
                         f"Expected actual_s == 1 or desired_s == -1 or "
                         f"desired_s == actual_s, got actual_s={actual_s}, desired_s={desired_s}"
-                    ),
-                )
+                    )
+
+                if isinstance(valid_shape, torch.SymBool):
+                    torch._check(valid_shape, msg)
+                elif not valid_shape:
+                    raise AssertionError(msg())
         mapping.append(
             p
             if (

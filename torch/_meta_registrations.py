@@ -109,9 +109,14 @@ def toRealValueType(dtype):
 def check_inplace_broadcast(self_shape, *args_shape):
     broadcasted_shape = tuple(_broadcast_shapes(self_shape, *args_shape))
     torch._check(
-        broadcasted_shape == self_shape,
+        len(broadcasted_shape) == len(self_shape),
         lambda: f"output with shape {self_shape} doesn't match the broadcast shape {broadcasted_shape}",
     )
+    for broadcasted_dim, self_dim in zip(broadcasted_shape, self_shape):
+        torch._check(
+            broadcasted_dim == self_dim,
+            lambda: f"output with shape {self_shape} doesn't match the broadcast shape {broadcasted_shape}",
+        )
 
 
 @register_meta([aten.linspace, aten.logspace])
@@ -2763,7 +2768,7 @@ def meta_miopen_batch_norm(
 def meta_conv(
     input_tensor: torch.Tensor,
     weight: torch.Tensor,
-    bias: torch.Tensor,
+    bias: torch.Tensor | None,
     stride: list[int],
     padding: list[int],
     dilation: list[int],
@@ -2796,6 +2801,35 @@ def meta_conv(
     # kernel and uses FakeTensor.fake_device for an accurate answer.
     out = input_tensor.new_empty(shape_out)
     return out
+
+
+@register_meta(aten._convolution.default)
+def meta__conv(
+    input_tensor: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None,
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
+    transposed: bool,
+    output_padding: list[int],
+    groups: int,
+    benchmark: bool,
+    deterministic: bool,
+    cudnn_enabled: bool,
+    allow_tf32: bool = True,
+):
+    return meta_conv(
+        input_tensor,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+    )
 
 
 if torch._C._has_mkldnn:
@@ -3021,6 +3055,31 @@ if torch._C._has_mkldnn:
         output_shape[-1] = w.shape[1]
         out = x.new_empty(output_shape)
         return out
+
+    @register_meta(torch.ops.onednn.qlinear_prepack.default)
+    def meta_qlinear_prepack(weight, x_shape):
+        # Mirror the real C++ kernel pack_weight_to_onednn_tensor in
+        # aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp
+        torch._check(
+            weight.dim() == 2,
+            lambda: f"qlinear_prepack expects a 2D weight, got {weight.dim()}D",
+        )
+        torch._check(
+            weight.dtype in (torch.int8, torch.float8_e4m3fn),
+            lambda: (
+                "qlinear_prepack expects int8 or float8_e4m3fn weight, "
+                f"got {weight.dtype}"
+            ),
+        )
+        N, K = weight.shape
+        torch._check(
+            x_shape is None or x_shape[-1] == K,
+            lambda: (
+                f"qlinear_prepack: x_shape[-1] ({x_shape[-1]}) must match "
+                f"weight in_features ({K})"
+            ),
+        )
+        return weight.new_empty((K, N))
 
     _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
         "quantized", "IMPL", "Meta"

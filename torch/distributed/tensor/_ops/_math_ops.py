@@ -1879,6 +1879,7 @@ def batch_norm_backward_strategy(
 @register_single_dim_strategy(
     [aten.native_group_norm.default],
     schema_info=RuntimeSchemaInfo(1),
+    allow_unbacked_sharding=True,
 )
 def group_norm_strategy(
     op: torch._ops.OpOverload,
