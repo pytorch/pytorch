@@ -1051,6 +1051,31 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     getDefaultBackend()->setUsePgForSymmMemRendezvous(value);
   }
 
+  // Fault Tolerance / Reconfigure API. Forwards to the default backend; see
+  // Backend.hpp for semantics.
+  virtual bool supportsReconfigure() const {
+    return getDefaultBackend()->supportsReconfigure();
+  }
+
+  virtual ReconfigureHandle get_reconfigure_handle() const {
+    return getDefaultBackend()->get_reconfigure_handle();
+  }
+
+  virtual c10::intrusive_ptr<Work> reconfigure(const ReconfigureOptions& opts) {
+    return getDefaultBackend()->reconfigure(opts);
+  }
+
+  // Window & One-sided (RMA) API. Forwards to the default backend; see
+  // Backend.hpp and Window.hpp for semantics.
+  virtual bool supportsWindow() const {
+    return getDefaultBackend()->supportsWindow();
+  }
+
+  virtual c10::intrusive_ptr<Window> new_window(
+      const std::optional<at::Tensor>& tensor = std::nullopt) {
+    return getDefaultBackend()->new_window(tensor);
+  }
+
   // This creates a new subgroup using the specified ranks.
   // The current rank must be included in the list of new_ranks.
   virtual c10::intrusive_ptr<ProcessGroup> splitGroup(

@@ -4,6 +4,12 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <variant>
+#include <vector>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/ivalue.h>
@@ -182,6 +188,49 @@ struct DistributedBackendOptions {
   std::chrono::duration<float> timeout;
   std::string group_id;
   std::vector<int64_t> global_ranks_in_group;
+};
+
+// Fault tolerance / reconfigure API. A ReconfigureHandle is an opaque,
+// backend-specific string that encodes the information peers need to
+// (re)initialize a communicator instance via Backend::reconfigure().
+using ReconfigureHandle = std::string;
+
+struct ReconfigureOptions {
+  // Uniquely identifies this instance of the communicator. Must not have been
+  // used previously on this communicator; pass a fresh value on every
+  // (re)initialization.
+  int64_t uuid = 0;
+
+  // Members participating in the communicator, one handle per rank. A vector
+  // assigns ranks by position (ordered); an unordered_set lets the backend
+  // choose the rank assignment.
+  std::variant<
+      std::unordered_set<ReconfigureHandle>,
+      std::vector<ReconfigureHandle>>
+      handles;
+
+  // How long to allow reconfiguration before failing. nullopt uses the
+  // backend's default timeout.
+  std::optional<std::chrono::milliseconds> timeout = std::nullopt;
+
+  // Backend-specific configuration key-value pairs.
+  std::unordered_map<std::string, std::string> hints;
+};
+
+// One-sided (RMA) window operation options. See Window.hpp.
+struct PutOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::unordered_map<std::string, std::string> hints;
+};
+
+struct SignalOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::unordered_map<std::string, std::string> hints;
+};
+
+struct WaitSignalOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::unordered_map<std::string, std::string> hints;
 };
 
 } // namespace c10d

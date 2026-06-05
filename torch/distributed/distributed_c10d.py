@@ -1674,6 +1674,7 @@ def init_process_group(
     pg_options: Any | None = None,
     device_id: torch.device | int | None = None,
     _ranks: list[int] | None = None,
+    enable_reconfigure: bool = False,
 ) -> None:
     """
     Initialize the default distributed process group.
@@ -1750,6 +1751,11 @@ def init_process_group(
             type at compile time will be used.
         _ranks: The ranks in the process group. If provided, the process
                group name will be the hash of all the ranks in the group.
+        enable_reconfigure (bool, optional): If ``True``, create the backend in
+            the reconfigure (fault tolerance) regime. The communicator is not
+            initialized until :meth:`ProcessGroup.reconfigure` is called.
+            Backends that do not support reconfigure ignore this flag. Default
+            is ``False``.
 
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.
@@ -1877,6 +1883,7 @@ def init_process_group(
             group_name,
             timeout=timeout,
             group_desc="default_pg",
+            enable_reconfigure=enable_reconfigure,
         )
     else:
         # backward compatible API
@@ -1907,6 +1914,7 @@ def init_process_group(
             timeout=timeout,
             device_id=device_id,
             group_desc="default_pg",
+            enable_reconfigure=enable_reconfigure,
         )
 
     _update_default_pg(default_pg)
@@ -1993,6 +2001,7 @@ def _new_process_group_helper(
     pg_tag=None,
     device_id=None,
     group_desc=None,
+    enable_reconfigure=False,
 ):
     """
     Create a new distributed process group.
@@ -2172,6 +2181,7 @@ def _new_process_group_helper(
                 group_size,
                 # pyrefly: ignore [bad-argument-type]
                 timeout=timeout,
+                enable_reconfigure=enable_reconfigure,
             )
             backend_class.options.global_ranks_in_group = global_ranks_in_group
             backend_class.options.group_name = group_name
@@ -2204,6 +2214,8 @@ def _new_process_group_helper(
                 )
             backend_options.global_ranks_in_group = global_ranks_in_group
             backend_options.group_name = group_name
+            if enable_reconfigure:
+                backend_options.enable_reconfigure = True
             backend_class = ProcessGroupNCCL(
                 backend_prefix_store, group_rank, group_size, backend_options
             )
@@ -2229,6 +2241,8 @@ def _new_process_group_helper(
             backend_options.group_name = group_name
             # pyrefly: ignore [bad-argument-type]
             backend_options._timeout = timeout
+            if enable_reconfigure:
+                backend_options.enable_reconfigure = True
             backend_class = ProcessGroupXCCL(
                 backend_prefix_store, group_rank, group_size, backend_options
             )

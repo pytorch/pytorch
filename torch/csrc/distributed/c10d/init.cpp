@@ -1140,6 +1140,81 @@ Example:
       .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout)
       .def_readwrite("asyncOp", &::c10d::AllToAllOptions::asyncOp);
 
+  py::class_<::c10d::ReconfigureOptions>(module, "ReconfigureOptions")
+      .def(py::init<>())
+      .def_readwrite("uuid", &::c10d::ReconfigureOptions::uuid)
+      .def_readwrite("handles", &::c10d::ReconfigureOptions::handles)
+      .def_readwrite("timeout", &::c10d::ReconfigureOptions::timeout)
+      .def_readwrite("hints", &::c10d::ReconfigureOptions::hints);
+
+  py::class_<::c10d::PutOptions>(module, "PutOptions")
+      .def(py::init<>())
+      .def_readwrite("timeout", &::c10d::PutOptions::timeout)
+      .def_readwrite("hints", &::c10d::PutOptions::hints);
+
+  py::class_<::c10d::SignalOptions>(module, "SignalOptions")
+      .def(py::init<>())
+      .def_readwrite("timeout", &::c10d::SignalOptions::timeout)
+      .def_readwrite("hints", &::c10d::SignalOptions::hints);
+
+  py::class_<::c10d::WaitSignalOptions>(module, "WaitSignalOptions")
+      .def(py::init<>())
+      .def_readwrite("timeout", &::c10d::WaitSignalOptions::timeout)
+      .def_readwrite("hints", &::c10d::WaitSignalOptions::hints);
+
+  py::enum_<::c10d::WindowAccessType>(module, "WindowAccessType")
+      .value("UNIFIED", ::c10d::WindowAccessType::UNIFIED)
+      .value("SEPARATE", ::c10d::WindowAccessType::SEPARATE);
+
+  py::class_<::c10d::WindowAttr>(module, "WindowAttr")
+      .def(py::init<>())
+      .def_readwrite("access_type", &::c10d::WindowAttr::access_type);
+
+  intrusive_ptr_class_<::c10d::Window>(module, "Window")
+      .def(
+          "tensor_register",
+          &::c10d::Window::tensor_register,
+          py::arg("tensor"),
+          py::arg("owning") = true,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "tensor_deregister",
+          &::c10d::Window::tensor_deregister,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "put",
+          &::c10d::Window::put,
+          py::arg("tensor"),
+          py::arg("dst_rank"),
+          py::arg("target_offset_nelems"),
+          py::arg("async_op"),
+          py::arg("opts") = ::c10d::PutOptions(),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "map_remote_tensor",
+          &::c10d::Window::map_remote_tensor,
+          py::arg("rank"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "signal",
+          &::c10d::Window::signal,
+          py::arg("peer_rank"),
+          py::arg("async_op"),
+          py::arg("opts") = ::c10d::SignalOptions(),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "wait_signal",
+          &::c10d::Window::wait_signal,
+          py::arg("peer_rank"),
+          py::arg("async_op"),
+          py::arg("opts") = ::c10d::WaitSignalOptions(),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_attr",
+          &::c10d::Window::get_attr,
+          py::arg("peer_rank"),
+          py::call_guard<py::gil_scoped_release>());
+
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
       .def(py::init<>())
@@ -2924,6 +2999,31 @@ Arguments:
               "use_pg_for_symm_mem_rendezvous",
               &::c10d::ProcessGroup::getUsePgForSymmMemRendezvous,
               &::c10d::ProcessGroup::setUsePgForSymmMemRendezvous)
+          .def_property_readonly(
+              "supports_reconfigure",
+              &::c10d::ProcessGroup::supportsReconfigure,
+              "(test whether the process group supports reconfigure for fault tolerance)")
+          .def(
+              "get_reconfigure_handle",
+              &::c10d::ProcessGroup::get_reconfigure_handle,
+              py::call_guard<py::gil_scoped_release>(),
+              "Get an opaque reconfigure handle used to (re)initialize peers for fault tolerance")
+          .def(
+              "reconfigure",
+              &::c10d::ProcessGroup::reconfigure,
+              py::arg("opts"),
+              py::call_guard<py::gil_scoped_release>(),
+              "Reconfigure the process group with a new set of peers for fault tolerance")
+          .def_property_readonly(
+              "supports_window",
+              &::c10d::ProcessGroup::supportsWindow,
+              "(test whether the process group supports one-sided window operations)")
+          .def(
+              "new_window",
+              &::c10d::ProcessGroup::new_window,
+              py::arg("tensor") = std::nullopt,
+              py::call_guard<py::gil_scoped_release>(),
+              "Create a new one-sided communication window")
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
             return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })
@@ -2996,6 +3096,10 @@ Arguments:
               "supports_shrinking",
               &::c10d::Backend::supportsShrinking,
               "(test whether the backend supports communicator shrinking)")
+          .def_property_readonly(
+              "supports_reconfigure",
+              &::c10d::Backend::supportsReconfigure,
+              "(test whether the backend supports reconfigure for fault tolerance)")
           .def(
               "set_timeout",
               &::c10d::Backend::setTimeout,
@@ -3009,6 +3113,27 @@ Arguments:
               py::arg("shrink_flags") = 0,
               py::arg("opts_override") = nullptr,
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_reconfigure_handle",
+              &::c10d::Backend::get_reconfigure_handle,
+              py::call_guard<py::gil_scoped_release>(),
+              "Get an opaque reconfigure handle used to (re)initialize peers for fault tolerance")
+          .def(
+              "reconfigure",
+              &::c10d::Backend::reconfigure,
+              py::arg("opts"),
+              py::call_guard<py::gil_scoped_release>(),
+              "Reconfigure the backend with a new set of peers for fault tolerance")
+          .def_property_readonly(
+              "supports_window",
+              &::c10d::Backend::supportsWindow,
+              "(test whether the backend supports one-sided window operations)")
+          .def(
+              "new_window",
+              &::c10d::Backend::new_window,
+              py::arg("tensor") = std::nullopt,
+              py::call_guard<py::gil_scoped_release>(),
+              "Create a new one-sided communication window")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -3384,7 +3509,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def_readwrite(
               "global_ranks_in_group",
               &::c10d::Backend::Options::global_ranks_in_group)
-          .def_readwrite("group_name", &::c10d::Backend::Options::group_name);
+          .def_readwrite("group_name", &::c10d::Backend::Options::group_name)
+          .def_readwrite(
+              "enable_reconfigure",
+              &::c10d::Backend::Options::enable_reconfigure);
 
 #ifdef USE_C10D_GLOO
   auto processGroupGloo =
@@ -3458,21 +3586,23 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       int rank,
                       int size,
-                      std::chrono::milliseconds timeout) {
+                      std::chrono::milliseconds timeout,
+                      bool enable_reconfigure) {
             // gil_scoped_release is not safe as a call_guard in init.
             // https://github.com/pybind/pybind11/issues/5473
             py::gil_scoped_release nogil{};
 
+            auto options =
+                ::c10d::ProcessGroupGloo::Options::create_default(timeout);
+            options->enable_reconfigure = enable_reconfigure;
             return c10::make_intrusive<::c10d::ProcessGroupGloo>(
-                store,
-                rank,
-                size,
-                ::c10d::ProcessGroupGloo::Options::create_default(timeout));
+                store, rank, size, options);
           }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
           py::arg("timeout") = kProcessGroupDefaultTimeout,
+          py::arg("enable_reconfigure") = false,
           R"(Create a new ProcessGroupGloo instance.)")
       .def(
           "_set_default_timeout",

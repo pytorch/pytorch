@@ -203,6 +203,57 @@ class AllToAllOptions:
     timeout: timedelta
     asyncOp: bool
 
+class ReconfigureOptions:
+    uuid: int
+    handles: set[str] | list[str]
+    timeout: timedelta | None
+    hints: dict[str, str]
+
+class PutOptions:
+    timeout: timedelta
+    hints: dict[str, str]
+
+class SignalOptions:
+    timeout: timedelta
+    hints: dict[str, str]
+
+class WaitSignalOptions:
+    timeout: timedelta
+    hints: dict[str, str]
+
+class WindowAccessType(Enum):
+    UNIFIED = ...
+    SEPARATE = ...
+
+class WindowAttr:
+    access_type: WindowAccessType
+
+class Window:
+    def tensor_register(self, tensor: Tensor, owning: bool = ...) -> None: ...
+    def tensor_deregister(self) -> None: ...
+    def put(
+        self,
+        tensor: Tensor,
+        dst_rank: int,
+        target_offset_nelems: int,
+        async_op: bool,
+        opts: PutOptions = ...,
+    ) -> Work: ...
+    def map_remote_tensor(self, rank: int) -> Tensor: ...
+    def signal(
+        self,
+        peer_rank: int,
+        async_op: bool,
+        opts: SignalOptions = ...,
+    ) -> Work: ...
+    def wait_signal(
+        self,
+        peer_rank: int,
+        async_op: bool,
+        opts: WaitSignalOptions = ...,
+    ) -> Work: ...
+    def get_attr(self, peer_rank: int) -> WindowAttr: ...
+
 class Store:
     def set(self, key: str, value: str) -> None: ...
     def get(self, key: str) -> bytes: ...
@@ -324,6 +375,7 @@ class Backend:
         global_ranks_in_group: list[int]
         group_name: GroupName
         use_pg_for_symm_mem_rendezvous: bool
+        enable_reconfigure: bool
 
     def __init__(
         self,
@@ -336,6 +388,13 @@ class Backend:
     def supports_coalescing(self) -> bool: ...
     @property
     def supports_time_estimate(self) -> bool: ...
+    @property
+    def supports_reconfigure(self) -> bool: ...
+    def get_reconfigure_handle(self) -> str: ...
+    def reconfigure(self, opts: ReconfigureOptions) -> Work: ...
+    @property
+    def supports_window(self) -> bool: ...
+    def new_window(self, tensor: Tensor | None = None) -> Window: ...
     def set_timeout(self, timeout: timedelta) -> None: ...
     @property
     def options(self) -> Options: ...
@@ -398,6 +457,13 @@ class ProcessGroup:
     def abort(self) -> None: ...
     def set_timeout(self, timeout: timedelta) -> None: ...
     def shutdown(self) -> None: ...
+    @property
+    def supports_reconfigure(self) -> bool: ...
+    def get_reconfigure_handle(self) -> str: ...
+    def reconfigure(self, opts: ReconfigureOptions) -> Work: ...
+    @property
+    def supports_window(self) -> bool: ...
+    def new_window(self, tensor: Tensor | None = None) -> Window: ...
     @overload
     def broadcast(
         self,
@@ -711,6 +777,7 @@ class ProcessGroupGloo(Backend):
         rank: int,
         size: int,
         timeout: timedelta,
+        enable_reconfigure: bool = ...,
     ) -> None: ...
     @staticmethod
     def create_device(hostname="", interface="", lazy_init=None) -> Device: ...
