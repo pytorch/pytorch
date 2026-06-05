@@ -816,19 +816,23 @@ def forward(self, x_1, output_1):
         torch_add = call_triton(t1, t2, o1)
         metrics.reset()
         o2 = torch.zeros_like(t1, requires_grad=grad)
-        test, (code,) = run_and_get_code(
+        test, codes = run_and_get_code(
             torch.compile(call_triton, dynamic=dynamic), t1, t2, o2
         )
+        code = next((code for code in codes if "add_kernel" in code), codes[0])
+        all_code = "\n".join(codes)
         if not grad:
             self.assertEqual(metrics.generated_kernel_count, 1)
         self.assertEqual(torch_add, test)
         # These two asserts are not optimal since it requires original aten
         # to be in the metadata, so there might be false negatives
         self.assertNotIn(
-            "aoti_torch_copy_" if inductor_config.cpp_wrapper else "aten.copy", code
+            "aoti_torch_copy_" if inductor_config.cpp_wrapper else "aten.copy",
+            all_code,
         )
         self.assertNotIn(
-            "aoti_torch_clone" if inductor_config.cpp_wrapper else "aten.clone", code
+            "aoti_torch_clone" if inductor_config.cpp_wrapper else "aten.clone",
+            all_code,
         )
         # The following checks that there are only the tensor output is in
         # the compiled graph

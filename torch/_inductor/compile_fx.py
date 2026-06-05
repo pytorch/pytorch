@@ -16,7 +16,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
@@ -773,6 +773,7 @@ class _CompileFxKwargs(TypedDict, total=False):
     boxed_forward_device_index: BoxedDeviceIndex | None
     fx_wrapper: bool
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]]
+    aot_autograd_needs_fx_graph_cache_key: bool
 
 
 class _CompileFxCallable(Protocol):
@@ -801,6 +802,7 @@ def compile_fx_inner(
     kwargs.setdefault("boxed_forward_device_index", None)
     kwargs.setdefault("layout_opt", None)
     kwargs.setdefault("extern_node_serializer", None)
+    kwargs.setdefault("aot_autograd_needs_fx_graph_cache_key", False)
 
     # Need with_fresh_cache_if_config for compile_fx_inner even if we already have one for
     # compile_fx. The reason is the compilation for backward graph may happen after
@@ -873,6 +875,10 @@ def _compile_fx_inner(
     if (
         dynamo_utils.count_calls(gm.graph) == 0
         and not aot_mode
+        # AOTAutogradCache entries refer to FXGraphCache keys for both the
+        # forward and backward graphs. Preserve those keys only when an
+        # AOTAutograd cache miss is actively preparing an entry.
+        and not graph_kwargs.get("aot_autograd_needs_fx_graph_cache_key", False)
         and not torch._functorch.config.bundled_autograd_cache
     ):
         # trigger the real recompilation for _LazyGraphModule before returning
@@ -2357,6 +2363,9 @@ class CompilerConfigExtra:
     forward_device: BoxedDeviceIndex
     forward_is_partitioned: BoxedBool
     cudagraphs_bwd_override: bool | None = None
+    aot_autograd_needs_fx_graph_cache_key: BoxedBool = field(
+        default_factory=lambda: BoxedBool(False)
+    )
 
 
 def create_compiler_config_extra(
@@ -2542,6 +2551,9 @@ def compile_fx_forward(
             graph_id=compiler_config_extra.graph_id,
             is_inference=is_inference,
             boxed_forward_device_index=compiler_config_extra.forward_device,
+            aot_autograd_needs_fx_graph_cache_key=(
+                compiler_config_extra.aot_autograd_needs_fx_graph_cache_key.value
+            ),
         )
 
         if (
@@ -2614,6 +2626,9 @@ def compile_fx_backward(
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
                 boxed_forward_device_index=compiler_config_extra.forward_device,
+                aot_autograd_needs_fx_graph_cache_key=(
+                    compiler_config_extra.aot_autograd_needs_fx_graph_cache_key.value
+                ),
             )
 
 
