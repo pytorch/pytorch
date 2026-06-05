@@ -8681,6 +8681,53 @@ torch._inductor.aoti_load_package("{model_path}")
                 f"Failed to load package in subprocess: {result.stdout + result.stderr}",
             )
 
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
+    def test_python_custom_op_load_package_error_in_fresh_subprocess(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("Only needs one no-Python custom op coverage")
+
+        @torch.library.custom_op("aoti_python_custom_ops::custom_add", mutates_args=())
+        def custom_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + y
+
+        @custom_add.register_fake
+        def _(x, y):
+            return x + y
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_python_custom_ops.custom_add(x, y)
+
+        example_inputs = (torch.randn(2, 3), torch.randn(2, 3))
+        exported = torch.export.export(Model(), example_inputs)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = pathlib.Path(tmpdir) / "model.pt2"
+            torch._inductor.aoti_compile_and_package(
+                exported, package_path=str(model_path)
+            )
+
+            script = f"""
+import torch
+
+torch._inductor.aoti_load_package("{model_path}")
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", script], capture_output=True, text=True
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Could not find schema for aoti_python_custom_ops::custom_add. "
+                "Custom operators created via torch.library.custom_op cannot be run "
+                "via AOTI without Python environment. Consider using C++ "
+                "TORCH_LIBRARY APIs. See the Custom Operators Landing Page "
+                "https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
+                "for more details.",
+                result.stdout + result.stderr,
+            )
+
     @unittest.skip(
         "Skip this test, only for local test. SIGFPE is produced when viewing "
         "empty tensor with dim=0. See D86125095 for model-side workaround."
