@@ -685,25 +685,61 @@ class ConfigModule(ModuleType):
         # additional imports required
         imports = set()
 
-        def get_module_name(func: Callable, add_dot: bool) -> str:
-            module_name = func.__module__
-            if module_name == "builtins":
-                module_name = ""
-            if add_dot and module_name != "":
-                module_name += "."
-            return module_name
+        def is_valid_python_expr(value: str) -> bool:
+            try:
+                compile(value, "<config>", "eval")
+            except SyntaxError:
+                return False
+            return True
 
-        def add_import(func: Callable) -> None:
-            module_name = get_module_name(func, False)
-            if module_name:
+        def callable_reference(v: Any) -> str | None:
+            # functools.partial has no attributes below but is a callable.
+            if not callable(v):
+                return None
+
+            module_name = getattr(v, "__module__", None)
+            qualname = getattr(v, "__qualname__", getattr(v, "__name__", None))
+            if not isinstance(module_name, str) or not isinstance(qualname, str):
+                return None
+            if not qualname or "<" in qualname or ">" in qualname:
+                return None
+
+            if module_name == "builtins":
+                ref = qualname
+            else:
+                if not module_name or module_name == "__main__":
+                    return None
+                try:
+                    resolved: Any = importlib.import_module(module_name)
+                    for attr in qualname.split("."):
+                        resolved = getattr(resolved, attr)
+                except Exception:
+                    return None
+                if resolved is not v:
+                    return None
+                ref = f"{module_name}.{qualname}"
                 imports.add(module_name)
 
-        def list_of_callables_to_string(v: list | set) -> list[str]:
-            return [f"{get_module_name(item, True)}{item.__name__}" for item in v]
+            if not is_valid_python_expr(ref):
+                return None
+            return ref
 
-        def importable_callable(v: Any) -> bool:
-            # functools.partial has no attributes below but is a callable
-            return callable(v) and hasattr(v, "__module__") and hasattr(v, "__name__")
+        def callable_references(values: list | set) -> list[str] | None:
+            refs = []
+            for item in values:
+                ref = callable_reference(item)
+                if ref is None:
+                    return None
+                refs.append(ref)
+            return refs
+
+        def skipped_config_line(mod: str, k: str, v: Any) -> str:
+            value_type = type(v)
+            return (
+                f"# {mod}.{k} omitted because its value of type "
+                f"{value_type.__module__}.{value_type.__qualname__} "
+                "is not representable as Python source"
+            )
 
         def get_config_line(mod, k, v) -> str:  # type: ignore[no-untyped-def]
             """
@@ -716,21 +752,22 @@ class ConfigModule(ModuleType):
                 import _warnings
                 torch._dynamo.config.reorderable_logging_functions = { _warnings.warn, logging.warn, print }
             """
-            if importable_callable(v):
-                add_import(v)
-                return f"{mod}.{k} = {get_module_name(v, True)}{v.__name__}"
-            elif isinstance(v, (list, set)) and all(
-                importable_callable(item) for item in v
-            ):
-                for item in v:
-                    add_import(item)
-                v_list = list_of_callables_to_string(v)
+            ref = callable_reference(v)
+            if ref is not None:
+                return f"{mod}.{k} = {ref}"
+            elif isinstance(v, (list, set)) and v and all(callable(item) for item in v):
+                v_list = callable_references(v)
+                if v_list is None:
+                    return skipped_config_line(mod, k, v)
                 if isinstance(v, list):
                     return f"{mod}.{k} = {v_list}"
                 else:
-                    return f"{mod}.{k} = {{ {', '.join(v_list)} }}"
+                    return f"{mod}.{k} = {{ {', '.join(sorted(v_list))} }}"
             else:
-                return f"{mod}.{k} = {v!r}"
+                value = repr(v)
+                if not is_valid_python_expr(value):
+                    return skipped_config_line(mod, k, v)
+                return f"{mod}.{k} = {value}"
 
         lines = []
         mod = self.__name__

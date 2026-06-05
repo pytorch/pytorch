@@ -590,6 +590,41 @@ class FxGraphRunnableTest(TestCase):
         self.assertNotIn("# Fixup: ensure sum(repeats) == output_size", payload)
 
 
+class TestStandaloneAotRepro(TestCase):
+    def test_non_importable_callable_config_is_not_emitted_as_source(self):
+        from torch._dynamo.repro.after_aot import generate_standalone_repro
+
+        gm = torch.fx.symbolic_trace(lambda x: x.sin())
+        with torch._dynamo.config.patch(
+            "reorderable_logging_functions", {lambda _: None}
+        ):
+            repro = generate_standalone_repro(gm, [torch.randn(2)])
+
+        self.assertIn("reorderable_logging_functions omitted", repro)
+        self.assertNotIn("__main__.<lambda>", repro)
+        compile(repro, "<repro>", "exec")
+
+    def test_nested_graph_module_child_is_valid_source(self):
+        from torch._dynamo.repro.after_aot import generate_standalone_repro
+
+        root = torch.nn.Module()
+        root.fw_graph = torch.fx.symbolic_trace(lambda x: x.sin())
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_module("fw_graph", (x,))
+        graph.output(y)
+        gm = torch.fx.GraphModule(root, graph)
+
+        repro = generate_standalone_repro(gm, [torch.randn(2)])
+
+        self.assertIn("self.fw_graph = Repro_0_fw_graph()", repro)
+        self.assertNotIn("self.fw_graph = <lambda>()", repro)
+        namespace = {"__name__": "__test__"}
+        exec(compile(repro, "<repro>", "exec"), namespace)
+        self.assertEqual(namespace["mod"](torch.randn(2)).shape, (2,))
+
+
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
 class TestFxGraphRunnableMultiProcessGroup(TestCase):
     @unittest.skipIf(
