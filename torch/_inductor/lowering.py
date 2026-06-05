@@ -1819,10 +1819,7 @@ def _assert_async(cond, msg):
     # on Halide -- this matches the backend's effective behavior (no runtime
     # bounds checks) and prevents decomps that emit _assert_async
     # (e.g. index_add) from breaking Halide compilation.
-    if (
-        ir.get_device_type(cond) == "cpu"
-        and config.cpu_backend == "halide"
-    ):
+    if ir.get_device_type(cond) == "cpu" and config.cpu_backend == "halide":
         return None
     cond.realize()
     cond = to_dtype(cond, torch.bool)
