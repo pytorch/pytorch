@@ -349,9 +349,6 @@ select = [
     "LOG015" # please fix
 ]
 
-# torch/ folders still needing S101 migration
-"torch/_inductor/**" = ["S101"]
-
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
 
