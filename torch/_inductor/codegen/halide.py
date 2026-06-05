@@ -18,7 +18,7 @@ import torch._logging
 from ..._prims_common import is_integer_dtype
 from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, Max, Min, ModularIndexing
-from ...utils._sympy.symbol import symbol_is_type, SymT
+from ...utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import HalideCodeCache
@@ -1502,6 +1502,18 @@ class HalideKernel(SIMDKernel):
         """
         return V.graph.get_buffer(name).get_layout().storage_size()
 
+    def halide_scalar_type(self, arg: SizeArg) -> str:
+        if arg.expr.is_integer is False or free_symbol_is_type(
+            arg.expr, SymT.UNBACKED_FLOAT
+        ):
+            return "float"
+        return "long"
+
+    def halide_input_scalar_type(self, arg: SizeArg) -> str:
+        if self.halide_scalar_type(arg) == "float":
+            return halide_type(torch.float32)
+        return self.index_dtype
+
     def halide_argdefs(self):
         """
         Halide requires scalar inputs before outputs, so need to reorder args.
@@ -1546,7 +1558,7 @@ class HalideKernel(SIMDKernel):
                 shape = None
                 stride = None
                 offset = None
-                dtype = "long"
+                dtype = self.halide_scalar_type(arg)
             else:
                 shape = [
                     cexpr(self.rename_indexing(x.size))
@@ -1641,7 +1653,9 @@ class HalideKernel(SIMDKernel):
         code.do_indent()
         for _, arg in self.halide_argdefs():
             if isinstance(arg, SizeArg):
-                code.writeline(f"{arg.name} = hl.InputScalar({self.index_dtype})")
+                code.writeline(
+                    f"{arg.name} = hl.InputScalar({self.halide_input_scalar_type(arg)})"
+                )
             else:
                 assert arg.buffer, arg
                 argcls = "hl.OutputBuffer" if "out" in arg.name else "hl.InputBuffer"
