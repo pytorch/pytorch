@@ -1317,6 +1317,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             # at their natural positions (identity mapping for new entries)
             if input_reorder is not None:
                 base_len = len(input_reorder)
+                assert base_len <= len(inputs), (
+                    "input_reorder must be a prefix mapping for the current input list"
+                )
                 num_new = len(inputs) - base_len
                 if num_new > 0:
                     input_reorder = input_reorder + list(
