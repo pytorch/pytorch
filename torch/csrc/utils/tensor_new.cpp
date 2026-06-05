@@ -430,19 +430,20 @@ Tensor internal_new_from_data(
 
         // If the device is Meta, take the shortcut. We don't want to allocate
         // an empty CPU tensor which would break our contract for meta tensors.
-        if (device == at::kMeta) {
-          return at::empty(sizes, opts.device(device));
-        }
-        tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
-        if (c10::multiply_integers(tensor.sizes()) != 0) {
-          recursive_store(
-              (char*)tensor.data_ptr(),
-              tensor.sizes(),
-              tensor.strides(),
-              0,
-              inferred_scalar_type,
-              tensor.dtype().itemsize(),
-              data);
+        if (device.type() == DeviceType::Meta) {
+          tensor = at::empty(sizes, opts.device(device));
+        } else {
+          tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
+          if (c10::multiply_integers(tensor.sizes()) != 0) {
+            recursive_store(
+                (char*)tensor.data_ptr(),
+                tensor.sizes(),
+                tensor.strides(),
+                0,
+                inferred_scalar_type,
+                tensor.dtype().itemsize(),
+                data);
+          }
         }
       }
     }
@@ -476,7 +477,9 @@ Tensor internal_new_from_data(
     at::AutoDispatchBelowADInplaceOrView guard;
     tensor = at::lift_fresh(tensor);
   }
-  if (only_lift_cpu_tensors() && device.type() != DeviceType::CPU) {
+  // Meta has no current device to infer.
+  if (only_lift_cpu_tensors() && device.type() != DeviceType::CPU &&
+      device.type() != DeviceType::Meta) {
     if (!device.has_index() &&
         !torch::utils::is_device_initialized(device.type())) {
       // Infer device 0 to avoid device init
