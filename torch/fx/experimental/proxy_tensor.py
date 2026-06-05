@@ -2084,31 +2084,55 @@ def _sym_register(
         set_proxy_slot(out, tracer, p_out_thunk)
 
 
+def _sym_op_arg_node(tracer: _ProxyTracer, a: object) -> object:
+    # Prefer the proxy node; fold to a literal only when the sym value has no
+    # proxy slot, so a tracked symbol with a constant replacement keeps its node
+    # while an untracked constant doesn't hit "is not tracked with proxy".
+    if not isinstance(a, py_sym_types):
+        return a
+
+    import sympy
+
+    def _as_literal(expr: sympy.Basic | int) -> object:
+        if isinstance(a, SymBool):
+            return bool(expr)
+        if isinstance(a, SymInt):
+            return int(expr)
+        return float(expr)
+
+    def _is_constant(expr: sympy.Basic | int) -> bool:
+        # int covers Python bool; BooleanAtom covers sympy.true/false, whose
+        # is_number is False. A non-constant SymBool (e.g. a relational like
+        # Eq(s0, 4)) is neither, so it is not folded and keeps its proxy/guard.
+        return (
+            isinstance(expr, (int, sympy.logic.boolalg.BooleanAtom))
+            or expr.is_number
+        )
+
+    unreplaced = a.node._expr
+    if _is_constant(unreplaced):
+        return _as_literal(unreplaced)
+
+    slot = get_proxy_slot(a, tracer, default=None)
+    if slot is not None:
+        return slot.force().node
+
+    replaced = a.node.expr
+    if _is_constant(replaced):
+        return _as_literal(replaced)
+
+    return get_proxy_slot(a, tracer).force().node
+
+
 def _compute_proxy(
     tracer: _ProxyTracer, func: OpOverload, args: tuple[object, ...], out: PySymType
 ) -> Proxy:
     # Handle torch.sym_sum
     n_args: tuple[object, ...]
     if len(args) == 1 and isinstance(args[0], (list, tuple)):
-        n_args = (
-            tuple(
-                (
-                    get_proxy_slot(a, tracer).force().node
-                    if isinstance(a, py_sym_types)
-                    else a
-                )
-                for a in args[0]
-            ),
-        )
+        n_args = (tuple(_sym_op_arg_node(tracer, a) for a in args[0]),)
     else:
-        n_args = tuple(
-            (
-                get_proxy_slot(a, tracer).force().node
-                if isinstance(a, py_sym_types)
-                else a
-            )
-            for a in args
-        )
+        n_args = tuple(_sym_op_arg_node(tracer, a) for a in args)
 
     # func doesn't have a __torch_function__ that Proxy can interpose, so
     # we gotta do it manually
