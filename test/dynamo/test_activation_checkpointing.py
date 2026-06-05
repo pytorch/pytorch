@@ -33,9 +33,11 @@ from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
+    AutoNamingMode,
     checkpoint,
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
+    name as checkpoint_name,
 )
 
 
@@ -160,6 +162,28 @@ def op_count(gm):
         if "call" in node.op:
             result += 1
     return result
+
+
+def _make_auto_naming_model():
+    class Block(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.lin = torch.nn.Linear(4, 4, bias=False)
+
+        def forward(self, x):
+            return torch.relu(self.lin(x))
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layers = torch.nn.ModuleList([Block(), Block()])
+
+        def forward(self, x):
+            for layer in self.layers:
+                x = layer(x)
+            return x
+
+    return Model()
 
 
 def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
@@ -956,6 +980,182 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
         self.assertEqual(len(wrap_node.args), 3)
 
+    @parametrize(
+        "policy_val", [CheckpointPolicy.MUST_SAVE, CheckpointPolicy.MUST_RECOMPUTE]
+    )
+    def test_checkpoint_name_eager(self, policy_val):
+        def gn(x):
+            y = torch.matmul(x, x)
+            y = checkpoint_name(y, "attn")
+            return torch.relu(y)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        ref = gn(x_ref)
+        ref.sum().backward()
+
+        out = torch.utils.checkpoint.checkpoint(
+            gn, x, use_reentrant=False, policy={"attn": policy_val}
+        )
+        out.sum().backward()
+        self.assertEqual(out, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    def test_checkpoint_name_never_clones_in_eager(self):
+        from torch.utils.checkpoint import _checkpoint_policy_context_fn
+
+        # Outside selective checkpointing, name() is a no-op.
+        y = torch.randn(3, 3)
+        self.assertIs(checkpoint_name(y, "x"), y)
+
+        # Inside the forward (caching) mode, name() returns the tensor unchanged
+        # (no copy) regardless of policy -- saving is done by referencing the
+        # producer's existing storage slot, not by inserting an op.
+        fwd_mode, _ = _checkpoint_policy_context_fn(
+            {
+                "keep": CheckpointPolicy.MUST_SAVE,
+                "drop": CheckpointPolicy.MUST_RECOMPUTE,
+            }
+        )()
+        with fwd_mode:
+            y = torch.matmul(torch.randn(3, 3), torch.randn(3, 3))
+            self.assertIs(checkpoint_name(y, "keep"), y)
+            self.assertIs(checkpoint_name(y, "drop"), y)
+            self.assertIs(checkpoint_name(y, "not_in_policy"), y)
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    def test_compile_checkpoint_name(self):
+        def gn(x):
+            y = torch.matmul(x, x)
+            y = checkpoint_name(y, "attn")
+            return torch.relu(y)
+
+        def make_fn(policy):
+            def fn(x):
+                return torch.utils.checkpoint.checkpoint(
+                    gn, x, use_reentrant=False, policy=policy
+                )
+
+            return fn
+
+        def _test(policy_val, bw_freq):
+            x = torch.randn(4, 4, requires_grad=True)
+            backend = aot_autograd(
+                fw_compiler=functools.partial(
+                    count_ops, freq=1, op=torch.ops.aten.mm.default
+                ),
+                bw_compiler=functools.partial(
+                    count_ops, freq=bw_freq, op=torch.ops.aten.mm.default
+                ),
+                partition_fn=min_cut_rematerialization_partition,
+            )
+            self._validate(make_fn({"attn": policy_val}), backend, x)
+
+        # MUST_SAVE: named tensor saved, so the producing matmul is not
+        # recomputed -> only the 2 bwd mm for the matmul grad.
+        torch._dynamo.reset()
+        _test(CheckpointPolicy.MUST_SAVE, bw_freq=2)
+        # MUST_RECOMPUTE: producing matmul recomputed -> 1 recompute + 2 grad.
+        torch._dynamo.reset()
+        _test(CheckpointPolicy.MUST_RECOMPUTE, bw_freq=3)
+
+    def test_auto_naming_names_match_eager_and_compile(self):
+        # The module-qualified names of stable ops should agree between eager
+        # (ModuleTracker) and compile (nn_module_stack).
+        def collect(compiled):
+            mod = _make_auto_naming_model()
+            naming = AutoNamingMode()
+            names = set()
+
+            def policy_fn(ctx, op, *args, **kwargs):
+                if isinstance(ctx.op_output, torch.Tensor):
+                    nm = naming.names.get(ctx.op_output)
+                    if nm is not None:
+                        names.add(nm)
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+            def fn(x):
+                with naming:
+                    return checkpoint(
+                        mod,
+                        x,
+                        use_reentrant=False,
+                        context_fn=functools.partial(
+                            create_selective_checkpoint_contexts, policy_fn
+                        ),
+                    ).sum()
+
+            x = torch.randn(4, 4, requires_grad=True)
+            if compiled:
+                torch._dynamo.reset()
+                fn = torch.compile(
+                    fn, backend="aot_eager_decomp_partition", fullgraph=True
+                )
+            fn(x).backward()
+            return names
+
+        eager_names = collect(compiled=False)
+        compile_names = collect(compiled=True)
+        expected = {
+            "layers.0.lin_mm.default_0",
+            "layers.0_relu.default_0",
+            "layers.1.lin_mm.default_0",
+            "layers.1_relu.default_0",
+        }
+        self.assertTrue(expected.issubset(eager_names), eager_names)
+        self.assertTrue(expected.issubset(compile_names), compile_names)
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    def test_compile_auto_naming_policy(self):
+        # `with AutoNamingMode()` must trace (no graph break), and a policy
+        # selecting by module-qualified auto-name must control save/recompute.
+        def make_fn(save_set):
+            mod = _make_auto_naming_model()
+            naming = AutoNamingMode()
+
+            def policy_fn(ctx, op, *args, **kwargs):
+                if isinstance(ctx.op_output, torch.Tensor):
+                    if naming.names.get(ctx.op_output) in save_set:
+                        return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+            def fn(x):
+                with naming:
+                    return checkpoint(
+                        mod,
+                        x,
+                        use_reentrant=False,
+                        context_fn=functools.partial(
+                            create_selective_checkpoint_contexts, policy_fn
+                        ),
+                    )
+
+            return fn
+
+        def _test(save_set, bw_freq):
+            x = torch.randn(4, 4, requires_grad=True)
+            backend = aot_autograd(
+                fw_compiler=functools.partial(
+                    count_ops, freq=2, op=torch.ops.aten.mm.default
+                ),
+                bw_compiler=functools.partial(
+                    count_ops, freq=bw_freq, op=torch.ops.aten.mm.default
+                ),
+                partition_fn=min_cut_rematerialization_partition,
+            )
+            self._validate(make_fn(save_set), backend, x)
+
+        # Save both matmuls (exact name + module-prefix) -> no recompute: 2 grad
+        # mm per matmul = 4.
+        torch._dynamo.reset()
+        _test(
+            {"layers.0.lin_mm.default_0", "layers.1.lin_mm.default_0"},
+            bw_freq=4,
+        )
+        # Save nothing -> both matmuls recomputed: 2 recompute + 4 grad = 6.
+        torch._dynamo.reset()
+        _test(set(), bw_freq=6)
+
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
@@ -1063,6 +1263,107 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         expected = fn(a, b)
         result = opt_fn(a, b)
         self.assertEqual(result, expected)
+
+    @parametrize(
+        "policy_key",
+        [
+            torch.ops.aten.mm.default,  # OpOverload key
+            "aten.mm.default",  # str(op)
+            "aten::mm",  # op.name()
+            "aten.mm",  # packet, matches all overloads
+        ],
+    )
+    def test_checkpoint_policy_eager(self, policy_key):
+        def gn(x):
+            return torch.cos(torch.sin(torch.matmul(x, x) @ x))
+
+        x = torch.randn(4, 4, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        ref = gn(x_ref)
+        ref.sum().backward()
+
+        for policy_val in (
+            CheckpointPolicy.MUST_SAVE,
+            CheckpointPolicy.MUST_RECOMPUTE,
+        ):
+            xi = x.detach().clone().requires_grad_(True)
+            out = torch.utils.checkpoint.checkpoint(
+                gn, xi, use_reentrant=False, policy={policy_key: policy_val}
+            )
+            out.sum().backward()
+            self.assertEqual(out, ref)
+            self.assertEqual(xi.grad, x_ref.grad)
+
+    def test_checkpoint_policy_errors(self):
+        def gn(x):
+            return torch.matmul(x, x)
+
+        x = torch.randn(4, 4, requires_grad=True)
+
+        # CPU offload not yet supported.
+        with self.assertRaisesRegex(NotImplementedError, "CPU offloading"):
+            torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                use_reentrant=False,
+                policy={torch.ops.aten.mm.default: CheckpointPolicy.MUST_CPU_OFFLOAD},
+            )
+
+        # policy and context_fn are mutually exclusive.
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts, [torch.ops.aten.mm.default]
+        )
+        with self.assertRaisesRegex(ValueError, "Only one of"):
+            torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                use_reentrant=False,
+                policy={torch.ops.aten.mm.default: CheckpointPolicy.MUST_SAVE},
+                context_fn=context_fn,
+            )
+
+        # policy requires use_reentrant=False.
+        with self.assertRaisesRegex(ValueError, "use_reentrant=False"):
+            torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                use_reentrant=True,
+                policy={torch.ops.aten.mm.default: CheckpointPolicy.MUST_SAVE},
+            )
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @parametrize("policy_key", [torch.ops.aten.mm.default, "aten.mm"])
+    def test_compile_checkpoint_policy(self, policy_key):
+        def gn(x):
+            return torch.cos(torch.sin(torch.matmul(x, x) @ x))
+
+        def make_fn(policy):
+            def fn(x):
+                return torch.utils.checkpoint.checkpoint(
+                    gn, x, use_reentrant=False, policy=policy
+                )
+
+            return fn
+
+        def _test(policy_val, bw_freq):
+            x = torch.randn(4, 4, requires_grad=True)
+            backend = aot_autograd(
+                fw_compiler=functools.partial(
+                    count_ops, freq=2, op=torch.ops.aten.mm.default
+                ),
+                bw_compiler=functools.partial(
+                    count_ops, freq=bw_freq, op=torch.ops.aten.mm.default
+                ),
+                partition_fn=min_cut_rematerialization_partition,
+            )
+            self._validate(make_fn({policy_key: policy_val}), backend, x)
+
+        # MUST_RECOMPUTE: 1 fwd matmul recompute + 2 bwd mm per fwd matmul = 6.
+        torch._dynamo.reset()
+        _test(CheckpointPolicy.MUST_RECOMPUTE, bw_freq=6)
+        # MUST_SAVE: saved, so only the 2 bwd mm per fwd matmul = 4.
+        torch._dynamo.reset()
+        _test(CheckpointPolicy.MUST_SAVE, bw_freq=4)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")

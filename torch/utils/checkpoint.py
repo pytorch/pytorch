@@ -18,6 +18,7 @@ import torch.fx.traceback as fx_traceback
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.weak import WeakTensorKeyDictionary
 from torch._C._autograd import _make_saved_tensor, SavedTensor
 from typing import NoReturn
 
@@ -39,6 +40,8 @@ __all__ = [
     "create_selective_checkpoint_contexts",
     "SAC_IGNORED_OPS",
     "GraphExecGroup",
+    "name",
+    "AutoNamingMode",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
@@ -360,6 +363,7 @@ def checkpoint(
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     early_stop: bool = True,
+    policy: Optional[Dict[Any, CheckpointPolicy]] = None,
     **kwargs
 ):
     r"""Checkpoint a model or part of the model.
@@ -479,6 +483,21 @@ def checkpoint(
             argument is ignored if ``use_reentrant=True``. Can be overridden
             globally using :func:`set_checkpoint_early_stop` context manager.
             Default: ``True``.
+        policy(Dict, optional): A dict mapping operators to
+            :class:`CheckpointPolicy` values, providing a convenient form of
+            selective activation checkpointing. Keys may be ``OpOverload``\\ s
+            (e.g. ``torch.ops.aten.mm.default``) or strings naming an op
+            (``"aten.mm.default"``, ``"aten::mm"``, or the packet ``"aten.mm"``
+            which matches all overloads). Operators not present in the dict
+            default to recompute. ``MUST_SAVE`` saves the op's output instead of
+            recomputing it; ``MUST_RECOMPUTE`` forces recompute even under
+            subsystems like ``torch.compile`` that might otherwise save it (in
+            eager it is a no-op since recompute is already the default). CPU
+            offload policies are not yet supported. This argument is only
+            supported when ``use_reentrant=False`` and is mutually exclusive
+            with ``context_fn``. For more advanced control (e.g. inspecting op
+            args/outputs), use ``context_fn`` with
+            :func:`create_selective_checkpoint_contexts` instead.
 
     Returns:
         Output of running :attr:`function` on :attr:`*args`
@@ -501,6 +520,15 @@ def checkpoint(
         raise ValueError(
             "Unexpected keyword arguments: " + ",".join(arg for arg in kwargs)
         )
+
+    if policy is not None:
+        if use_reentrant:
+            raise ValueError(
+                "Passing `policy` is only supported when use_reentrant=False."
+            )
+        if context_fn is not noop_context_fn:
+            raise ValueError("Only one of `policy` and `context_fn` can be passed.")
+        context_fn = _checkpoint_policy_context_fn(policy)
 
     if use_reentrant:
         if context_fn is not noop_context_fn or debug is not False:
@@ -1363,6 +1391,13 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         self.storage = storage
         self.ac_graph_id = ac_graph_id
         self.func_counter: Dict[Any, int] = defaultdict(int)
+        # eager-only: maps a single-tensor op output back to its storage slot so
+        # that a later `name` call can retroactively mark it to be saved without
+        # inserting any op. Populated in the forward pass.
+        self.tensor_to_slot: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
+        # The policy dict (when built from the `policy` kwarg), consulted by
+        # `name`. None when constructed from a raw policy_fn.
+        self._name_policy: Optional[Dict[Any, CheckpointPolicy]] = None
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = {} if kwargs is None else kwargs
@@ -1405,6 +1440,8 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
             self.storage[key][idx] = tree_map(lambda x: _VersionWrapper(_detach_helper(x)), out)
         else:
             self.storage[key][idx] = _RECOMPUTE
+        if not is_compiling and isinstance(out, torch.Tensor):
+            self.tensor_to_slot[out] = (key, idx)
         return out
 
 _RECOMPUTE = object()
@@ -1551,6 +1588,311 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
         _CachingTorchDispatchMode(policy_fn, storage),
         _CachedTorchDispatchMode(None, storage, allow_cache_entry_mutation),
     )
+
+
+def _active_caching_mode():
+    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+
+    for mode in reversed(_get_current_dispatch_mode_stack()):
+        if isinstance(mode, _CachingTorchDispatchMode):
+            return mode
+    return None
+
+
+def _is_getitem_of_multi_output(node):
+    import operator
+
+    return (
+        node.op == "call_function"
+        and node.target is operator.getitem
+        and isinstance(node.args[0], torch.fx.Node)
+    )
+
+
+def _set_name_policy_for_partitioner(tensor, name):
+    # Under tracing, tag the node that produced `tensor` so the partitioner saves
+    # or recomputes it. No op is inserted; we look the node up from the tensor.
+    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    mode = get_proxy_mode()
+    if mode is None:
+        # No proxy graph on this trace (e.g. the first AOTAutograd pass). The
+        # annotation only matters on the trace that builds the partitioned graph.
+        return
+    caching_mode = _active_caching_mode()
+    if caching_mode is None or caching_mode._name_policy is None:
+        return
+    policy = caching_mode._name_policy.get(name)
+    if policy is None:
+        return
+    # ProxyMode sees tensors after FunctionalTensor is unwrapped.
+    proxy_tensor = mode.tracer.tensor_tracker.get(mb_unwrap_functional_tensor(tensor))
+    if proxy_tensor is None:
+        return
+    node = proxy_tensor.proxy.node
+    node.meta["recompute"] = policy
+    if _is_getitem_of_multi_output(node) and policy not in (
+        CheckpointPolicy.MUST_SAVE,
+        CheckpointPolicy.PREFER_SAVE,
+    ):
+        # Recomputing one output of a multi-output op requires recomputing the
+        # producing op as a whole.
+        parent = node.args[0]
+        if isinstance(parent, torch.fx.Node):
+            parent.meta["recompute"] = policy
+
+
+def name(tensor, name):
+    """Assign a name to ``tensor`` for use with the ``policy`` argument of
+    :func:`checkpoint`.
+
+    Returns ``tensor`` unchanged (no copy is made)::
+
+        def fn(x, w):
+            y = torch.matmul(x, w)
+            y = torch.utils.checkpoint.name(y, "attn")
+            return torch.relu(y)
+
+        out = torch.utils.checkpoint.checkpoint(
+            fn, x, w, use_reentrant=False,
+            policy={"attn": CheckpointPolicy.MUST_SAVE},
+        )
+
+    A ``policy`` entry keyed by the name then controls the op that produced the
+    named tensor: ``MUST_SAVE`` keeps it (so it is not recomputed in backward),
+    ``MUST_RECOMPUTE`` recomputes it. Names not present in the policy are left at
+    the default (recompute). Name-based entries take precedence over op-based
+    entries. Works in eager and under :func:`torch.compile`.
+    """
+    if _is_compiling(None, (tensor,), None):
+        _set_name_policy_for_partitioner(tensor, name)
+        return tensor
+
+    # Eager: the named tensor's producer already ran and recorded its storage
+    # slot. Overwrite that slot to save (a detached view -- no copy) or recompute
+    # per the policy. The decision is read off the forward (caching) dispatch
+    # mode, and the indexed storage reproduces it during backward recomputation.
+    caching_mode = _active_caching_mode()
+    if caching_mode is None or caching_mode._name_policy is None:
+        return tensor
+    policy = caching_mode._name_policy.get(name)
+    if policy is None:
+        return tensor
+    slot = caching_mode.tensor_to_slot.get(tensor)
+    if slot is None:
+        raise RuntimeError(
+            f"torch.utils.checkpoint.name: could not find the op that produced "
+            f"the tensor named {name!r}. `name` supports tensors that are the "
+            f"sole output of an op run inside the checkpointed region."
+        )
+    key, idx = slot
+    if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE):
+        caching_mode.storage[key][idx] = _VersionWrapper(_detach_helper(tensor))
+    else:
+        caching_mode.storage[key][idx] = _RECOMPUTE
+    return tensor
+
+
+def _normalize_fqn(fqn):
+    # Drop the leading source/root component so that the eager naming source
+    # (ModuleTracker, e.g. "Model.layers.0.lin") and the compile naming source
+    # (nn_module_stack, e.g. "G['mod'].layers.0.lin") agree on a root-relative
+    # path ("layers.0.lin").
+    if not fqn:
+        return ""
+    _, _, rest = fqn.partition(".")
+    return rest
+
+
+def _node_fqn(node):
+    stack = node.meta.get("nn_module_stack")
+    if not stack:
+        return ""
+    return _normalize_fqn(next(reversed(stack.values()))[0])
+
+
+def _auto_name_for_node(node):
+    # The auto-name of an op node is fully determined by the node: its module
+    # FQN (nn_module_stack), its op, and its index among same-(fqn, op) nodes.
+    fqn = _node_fqn(node)
+    op_name = getattr(node.target, "__name__", str(node.target))
+    count = 0
+    for n in node.graph.nodes:
+        if n is node:
+            break
+        if (
+            n.op == node.op
+            and getattr(n.target, "__name__", str(n.target)) == op_name
+            and _node_fqn(n) == fqn
+        ):
+            count += 1
+    return f"{fqn}_{op_name}_{count}"
+
+
+def _auto_name_from_proxy(tensor):
+    if not isinstance(tensor, torch.Tensor):
+        return None
+    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    mode = get_proxy_mode()
+    if mode is None:
+        return None
+    proxy_tensor = mode.tracer.tensor_tracker.get(mb_unwrap_functional_tensor(tensor))
+    if proxy_tensor is None:
+        return None
+    return _auto_name_for_node(proxy_tensor.proxy.node)
+
+
+class _AutoNames:
+    """Tensor -> auto-name mapping used by :class:`AutoNamingMode`.
+
+    Eager entries are filled by ``AutoNamingMode.__torch_dispatch__``. Under
+    compile there is no eager dispatch, so a name is derived on demand from the
+    tensor's fx node (``nn_module_stack`` + op + index)."""
+
+    def __init__(self) -> None:
+        self._eager: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
+
+    def __setitem__(self, tensor, name) -> None:
+        self._eager[tensor] = name
+
+    def get(self, tensor, default=None):
+        if isinstance(tensor, torch.Tensor) and tensor in self._eager:
+            return self._eager[tensor]
+        name = _auto_name_from_proxy(tensor)
+        return name if name is not None else default
+
+    def __contains__(self, tensor) -> bool:
+        return self.get(tensor) is not None
+
+
+class AutoNamingMode(TorchDispatchMode):
+    """Automatically name op outputs by module-qualified op name.
+
+    Each op output tensor is named ``{fqn}_{op}_{count}`` where ``fqn`` is the
+    module path (root-relative), ``op`` is the op name, and ``count``
+    disambiguates repeated ``(fqn, op)`` pairs. Names are exposed via the
+    ``names`` mapping (tensor -> name) so a checkpoint policy can select
+    activations by name::
+
+        naming = AutoNamingMode()
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            name = naming.names.get(ctx.op_output)
+            return (CheckpointPolicy.MUST_SAVE if name in to_save
+                    else CheckpointPolicy.PREFER_RECOMPUTE)
+
+        with naming:
+            out = checkpoint(
+                model, x, use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts, policy_fn),
+            )
+
+    Works in eager and under :func:`torch.compile`. In eager the names come from
+    :class:`~torch.utils.module_tracker.ModuleTracker`; under compile they are
+    derived from each node's ``nn_module_stack`` (the FQNs are normalized so the
+    same names appear in both).
+    """
+
+    def __init__(self) -> None:
+        from torch.utils.module_tracker import ModuleTracker
+
+        self._tracker = ModuleTracker()
+        self._func_counter: Dict[Any, int] = defaultdict(int)
+        self.names = _AutoNames()
+
+    def __enter__(self):
+        # Under tracing there is no eager dispatch; names are derived from the fx
+        # graph on demand (see _AutoNames), so the dispatch mode is a no-op.
+        if torch.compiler.is_compiling():
+            return self
+        self._tracker.__enter__()
+        return super().__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if torch.compiler.is_compiling():
+            return False
+        self._tracker.__exit__(exc_type, exc_val, exc_tb)
+        return super().__exit__(exc_type, exc_val, exc_tb)
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        out = func(*args, **(kwargs or {}))
+        parents = self._tracker.parents - {"Global"}
+        fqn = _normalize_fqn(max(parents, key=len)) if parents else ""
+        op_name = getattr(func, "__name__", str(func))
+        key = (fqn, func)
+        count = self._func_counter[key]
+        self._func_counter[key] += 1
+        if isinstance(out, torch.Tensor):
+            self.names[out] = f"{fqn}_{op_name}_{count}"
+        elif isinstance(out, (tuple, list)):
+            multi_output = sum(isinstance(o, torch.Tensor) for o in out) > 1
+            for i, o in enumerate(out):
+                if isinstance(o, torch.Tensor):
+                    name = f"{fqn}_{op_name}_{count}"
+                    if multi_output:
+                        name += f"_{i}"
+                    self.names[o] = name
+        return out
+
+
+def _checkpoint_policy_from_dict(policy):
+    """Build a SAC ``policy_fn`` from a dict mapping ops to ``CheckpointPolicy``.
+
+    Used to implement the ``policy`` argument of :func:`checkpoint`. Keys may be
+    ``OpOverload``\\ s or strings naming an op (``str(op)`` e.g.
+    ``"aten.mm.default"``, ``op.name()`` e.g. ``"aten::mm"``, or the packet
+    ``"aten.mm"``). Ops not present default to ``PREFER_RECOMPUTE``, matching
+    vanilla (non-selective) activation checkpointing.
+    """
+    if not isinstance(policy, dict):
+        raise TypeError(f"checkpoint `policy` must be a dict, but got {type(policy)}.")
+    for op_key, p in policy.items():
+        if not isinstance(p, CheckpointPolicy):
+            raise TypeError(
+                f"checkpoint `policy` values must be CheckpointPolicy, but got "
+                f"{p!r} for key {op_key!r}."
+            )
+        if p in (CheckpointPolicy.MUST_CPU_OFFLOAD, CheckpointPolicy.PREFER_CPU_OFFLOAD):
+            raise NotImplementedError(
+                "CPU offloading is not yet supported via the checkpoint `policy` "
+                "argument."
+            )
+
+    def policy_fn(ctx, func, *args, **kwargs):
+        # Per-tensor names (set via `name`) are applied directly by `name` itself,
+        # not here; this only resolves op-based keys.
+        if func in policy:
+            return policy[func]
+        candidates = [str(func)]
+        name_method = getattr(func, "name", None)
+        if callable(name_method):
+            candidates.append(str(name_method()))
+        packet = getattr(func, "overloadpacket", None)
+        if packet is not None:
+            candidates.append(str(packet))
+        for cand in candidates:
+            if cand in policy:
+                return policy[cand]
+        return CheckpointPolicy.PREFER_RECOMPUTE
+
+    return policy_fn
+
+
+def _checkpoint_policy_context_fn(policy):
+    policy_fn = _checkpoint_policy_from_dict(policy)
+
+    def context_fn():
+        caching_mode, cached_mode = create_selective_checkpoint_contexts(policy_fn)
+        # Stash the dict so `name` can resolve a name to its policy.
+        caching_mode._name_policy = policy
+        cached_mode._name_policy = policy
+        return caching_mode, cached_mode
+
+    return context_fn
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
 #     saving/restoring of global state is handled here.
