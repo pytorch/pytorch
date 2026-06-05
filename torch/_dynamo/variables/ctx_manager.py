@@ -1642,7 +1642,7 @@ class AutoNamingModeVariable(ContextWrappingVariable):
         )
 
     def enter(
-        self, tx: "InstructionTranslator", *args: VariableTracker
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         self.set_cleanup_hook(tx, lambda: None)
         return variables.ConstantVariable.create(None)
