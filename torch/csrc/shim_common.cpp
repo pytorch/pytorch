@@ -117,6 +117,12 @@ static StableIValue from_ivalue(
       return torch::stable::detail::_from(
           ivalue.toMemoryFormat(), extension_build_version);
     }
+    case c10::TypeKind::GeneratorType: {
+      AtenGeneratorHandle generator =
+          torch::aot_inductor::generator_pointer_to_generator_handle(
+              new at::Generator(ivalue.toGenerator()));
+      return torch::stable::detail::_from(generator, extension_build_version);
+    }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
 
@@ -229,6 +235,15 @@ static c10::IValue to_ivalue(
     case c10::TypeKind::MemoryFormatType: {
       return c10::IValue(torch::stable::detail::_to<c10::MemoryFormat>(
           stable_ivalue, extension_build_version));
+    }
+    case c10::TypeKind::GeneratorType: {
+      // unique_ptr frees the owning handle after the IValue copies the
+      // generator (which bumps the underlying GeneratorImpl refcount).
+      std::unique_ptr<at::Generator> generator(
+          torch::aot_inductor::generator_handle_to_generator_pointer(
+              torch::stable::detail::_to<AtenGeneratorHandle>(
+                  stable_ivalue, extension_build_version)));
+      return c10::IValue(*generator);
     }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
@@ -786,6 +801,38 @@ AOTITorchError torch_stream_native_handle(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::Stream* stream_ptr = reinterpret_cast<c10::Stream*>(stream);
     *ret_native_handle = stream_ptr->native_handle();
+  });
+}
+
+AOTITorchError torch_new_generator_handle(
+    AtenGeneratorHandle self,
+    AtenGeneratorHandle* ret_new_generator) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Generator* generator =
+        torch::aot_inductor::generator_handle_to_generator_pointer(self);
+    *ret_new_generator =
+        torch::aot_inductor::generator_pointer_to_generator_handle(
+            new at::Generator(*generator));
+  });
+}
+
+AOTITorchError torch_delete_generator(AtenGeneratorHandle generator) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    delete torch::aot_inductor::generator_handle_to_generator_pointer(
+        generator);
+  });
+}
+
+AOTITorchError torch_generator_get_device(
+    AtenGeneratorHandle generator,
+    int32_t* ret_device_type,
+    int32_t* ret_device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::Device device =
+        torch::aot_inductor::generator_handle_to_generator_pointer(generator)
+            ->device();
+    *ret_device_type = static_cast<int32_t>(device.type());
+    *ret_device_index = static_cast<int16_t>(device.index());
   });
 }
 
