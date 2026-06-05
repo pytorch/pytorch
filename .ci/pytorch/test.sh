@@ -436,6 +436,7 @@ test_python_smoke_b200() {
       nn/attention/test_open_registry \
       inductor/test_flex_flash \
       inductor/test_torchinductor \
+      inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
       inductor/test_fused_attention \
       test_varlen_attention \
@@ -1550,6 +1551,9 @@ test_libtorch_profiler() {
 
   # Run all other tests
   python test/run_test.py --cpp --verbose -i cpp/test_privateuse1_profiler -k "not EndToEndProfiling"
+
+  # Tests for torch/csrc/profiler/collection.cpp.
+  python test/run_test.py --cpp --verbose -i cpp/test_profiler_collection
 }
 
 test_libtorch_api() {
@@ -2225,6 +2229,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchcomms
+  install_spmd_types
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
@@ -2406,6 +2411,7 @@ elif [[ "${TEST_CONFIG}" == smoke_b200 ]]; then
 elif [[ "${TEST_CONFIG}" == smoke_xpu ]]; then
   test_python_smoke_xpu
 elif [[ "${TEST_CONFIG}" == dtensor ]]; then
+  install_spmd_types
   test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   install_torchcomms

@@ -25,6 +25,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    make_channels_last_strides_for,
     make_contiguous_strides_for,
     Number,
     NumberType,
@@ -2023,17 +2024,19 @@ def _padding_check_valid_input(input, padding, *, dim):
     valid_batch_mode = is_batch_mode
     valid_non_batch_mode = not is_batch_mode
 
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
     if is_batch_mode:
         # allow batch size of 0-dim.
         for d in range(1, input_dim):
-            valid_batch_mode = valid_batch_mode and input.size(d) != 0
+            valid_batch_mode = sym_and(valid_batch_mode, input.size(d) != 0)
     else:
         for d in range(input_dim):
-            valid_non_batch_mode = valid_non_batch_mode and input.size(d) != 0
+            valid_non_batch_mode = sym_and(valid_non_batch_mode, input.size(d) != 0)
 
     # allow empty batch size but not other dimensions.
     torch._check(
-        valid_batch_mode or valid_non_batch_mode,
+        sym_or(valid_batch_mode, valid_non_batch_mode),
         lambda: (
             f"Expected {dim + 1}D or {dim + 2}D (batch mode) tensor with possibly 0 batch size "
             f"and other non-zero dimensions for input, but got: {input.shape}"
@@ -2042,6 +2045,8 @@ def _padding_check_valid_input(input, padding, *, dim):
 
 
 def _pad1d_common(input, padding, *, is_reflection):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     dim_plane = 0
     dim_w = 1
     nbatch = 1
@@ -2061,7 +2066,7 @@ def _pad1d_common(input, padding, *, is_reflection):
 
     if is_reflection:
         torch._check(
-            pad_l < input_w and pad_r < input_w,
+            sym_and(pad_l < input_w, pad_r < input_w),
             lambda: (
                 f"Argument #4: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_l}, {pad_r}) at dimension {dim_w} of input {input.shape}"
@@ -2096,6 +2101,8 @@ def meta_replication_pad1d(input, padding):
 
 
 def _pad1d_backward_common(grad_output, input, padding, *, is_reflection):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     dim_w = 1
     if not is_reflection:
         torch._check(len(padding) == 2, lambda: "padding size is expected to be 2")
@@ -2110,7 +2117,7 @@ def _pad1d_backward_common(grad_output, input, padding, *, is_reflection):
 
     if is_reflection:
         torch._check(
-            pad_l < input_w and pad_r < input_w,
+            sym_and(pad_l < input_w, pad_r < input_w),
             lambda: (
                 f"Argument #4: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_l}, {pad_r}) at dimension {dim_w} of input {input.shape}"
@@ -2138,6 +2145,8 @@ def meta_replication_pad1d_backward(grad_output, input, padding):
 
 
 def _pad2d_common(input, padding, *, is_reflection):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     dim_w = 2
     dim_h = 1
     dim_slices = 0
@@ -2162,14 +2171,14 @@ def _pad2d_common(input, padding, *, is_reflection):
 
     if is_reflection:
         torch._check(
-            pad_l < input_w and pad_r < input_w,
+            sym_and(pad_l < input_w, pad_r < input_w),
             lambda: (
                 f"Argument #4: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_l}, {pad_r}) at dimension {dim_w} of input {input.shape}"
             ),
         )
         torch._check(
-            pad_t < input_h and pad_b < input_h,
+            sym_and(pad_t < input_h, pad_b < input_h),
             lambda: (
                 f"Argument #6: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_t}, {pad_b}) at dimension {dim_h} of input {input.shape}"
@@ -2262,6 +2271,8 @@ def meta_pad2d_backward(grad_output, self, padding):
 
 
 def _pad3d_common(input, padding, *, is_reflection):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     dim_w = 3
     dim_h = 2
     dim_d = 1
@@ -2289,29 +2300,31 @@ def _pad3d_common(input, padding, *, is_reflection):
 
     if is_reflection:
         torch._check(
-            pad_l < input_w and pad_r < input_w,
+            sym_and(pad_l < input_w, pad_r < input_w),
             lambda: (
                 f"Argument #4: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_l}, {pad_r}) at dimension {dim_w} of input {input.shape}"
             ),
         )
         torch._check(
-            pad_t < input_h and pad_b < input_h,
+            sym_and(pad_t < input_h, pad_b < input_h),
             lambda: (
                 f"Argument #6: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_t}, {pad_b}) at dimension {dim_h} of input {input.shape}"
             ),
         )
         torch._check(
-            pad_f < input_d and pad_bk < input_d,
+            sym_and(pad_f < input_d, pad_bk < input_d),
             lambda: (
                 f"Argument #8: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_f}, {pad_bk}) at dimension {dim_d} of input {input.shape}"
             ),
         )
 
+    from torch.fx.experimental.symbolic_shapes import sym_or
+
     torch._check(
-        output_w >= 1 or output_h >= 1 or output_d >= 1,
+        sym_or(output_w >= 1, output_h >= 1, output_d >= 1),
         lambda: (
             f"input (D: {input_d} H: {input_h} W: {input_w}) is too small. "
             f"Calculated output D: {output_d} H: {output_h} W: {output_w}"
@@ -2399,12 +2412,9 @@ def meta__pdist_forward(self: Tensor, p: float = 2) -> Tensor:
         self.is_contiguous(), lambda: "_pdist_forward requires contiguous input"
     )
     n = self.size(0)
-    if n <= 1:
-        return self.new_empty([0]).to(memory_format=torch.legacy_contiguous_format)  # type: ignore[call-overload]
-    else:
-        return self.new_empty((n * (n - 1) // 2,)).to(
-            memory_format=torch.legacy_contiguous_format
-        )  # type: ignore[call-overload]
+    return self.new_empty((n * (n - 1) // 2,)).to(
+        memory_format=torch.legacy_contiguous_format
+    )  # type: ignore[call-overload]
 
 
 @register_meta(aten._pdist_backward)
@@ -2720,22 +2730,24 @@ def meta_miopen_batch_norm(
     exponential_average_factor: float,
     epsilon: float,
 ):
-    # In batch norm the output is of the same shape as the input
-    out_shape = input_tensor.shape
-
     # If tensor is provided for running_mean and running_var then use this. If these are not
     # provided then we return the shape of weight tensor. Similar to how this is handled in the decomposition
     save_mean_shape = running_mean.shape if running_mean is not None else weight.shape
     save_var_shape = running_var.shape if running_var is not None else weight.shape
 
-    def pick_memory_format():
-        if is_channels_last(input_tensor):
-            return torch.channels_last
-        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
-            return torch.contiguous_format
-        return torch.contiguous_format
+    # Pick the output memory format the same way eager does (suggest_memory_format),
+    # but in a DDE-safe way for unbacked symbolic strides: if we can't decide whether
+    # the input is channels_last contiguous, fall back to plain contiguous.
+    fmt = suggest_memory_format(input_tensor)
 
-    out = input_tensor.new_empty(out_shape).to(memory_format=pick_memory_format())
+    # Mirror eager's TORCH_CHECK so the compiled graph fails fast at runtime
+    # instead of silently producing an output with the wrong strides.
+    torch._check(
+        torch.ops.aten.sym_is_contiguous.default(input_tensor, memory_format=fmt),
+        lambda: f"miopen_batch_norm: input must be contiguous in {fmt}",
+    )
+
+    out = torch.empty_like(input_tensor, memory_format=fmt)
 
     if training:
         save_mean = weight.new_empty(save_mean_shape)
@@ -2751,7 +2763,7 @@ def meta_miopen_batch_norm(
 def meta_conv(
     input_tensor: torch.Tensor,
     weight: torch.Tensor,
-    bias: torch.Tensor,
+    bias: torch.Tensor | None,
     stride: list[int],
     padding: list[int],
     dilation: list[int],
@@ -2784,6 +2796,35 @@ def meta_conv(
     # kernel and uses FakeTensor.fake_device for an accurate answer.
     out = input_tensor.new_empty(shape_out)
     return out
+
+
+@register_meta(aten._convolution.default)
+def meta__conv(
+    input_tensor: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None,
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
+    transposed: bool,
+    output_padding: list[int],
+    groups: int,
+    benchmark: bool,
+    deterministic: bool,
+    cudnn_enabled: bool,
+    allow_tf32: bool = True,
+):
+    return meta_conv(
+        input_tensor,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+    )
 
 
 if torch._C._has_mkldnn:
@@ -4850,13 +4891,9 @@ def meta_bmm_dtype(self, mat2, out_dtype):
 
 
 def div_rtn(x, y):
-    q = x // y
-    r = x % y
-    # WARNING: explicit bool conversion here is necessary;
-    # would be fixed by SymBool
-    if r != 0 and (bool(r < 0) != bool(y < 0)):
-        q -= 1
-    return q
+    # Python // already floors toward negative infinity, so the
+    # remainder-sign adjustment from the original C++ port is unnecessary.
+    return x // y
 
 
 def pooling_output_shape_pad_lr(
@@ -4918,6 +4955,8 @@ def pool2d_shape_check(
     outputWidth,
     memory_format,
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
     ndim = input.dim()
     nOutputPlane = nInputPlane
 
@@ -4934,29 +4973,31 @@ def pool2d_shape_check(
         lambda: f"dilation should be greater than zero, but got dilationH: {dilationH}, dilationW: {dilationW}",
     )
 
-    valid_dims = input.size(1) != 0 and input.size(2) != 0
+    valid_dims = sym_and(input.size(1) != 0, input.size(2) != 0)
 
     if memory_format == torch.channels_last:
         torch._check(
-            ndim == 4 and valid_dims and input.size(3) != 0,
+            ndim == 4 and sym_and(valid_dims, input.size(3) != 0),
             lambda: "Expected 4D (batch mode) tensor expected for input with channels_last layout"
             f" with optional 0 dim batch size for input, but got: {input.size()}",
         )
     else:
         torch._check(
-            (ndim == 3 and input.size(0) != 0 and valid_dims)
-            or (ndim == 4 and valid_dims and input.size(3) != 0),
+            sym_or(
+                ndim == 3 and sym_and(input.size(0) != 0, valid_dims),
+                ndim == 4 and sym_and(valid_dims, input.size(3) != 0),
+            ),
             lambda: f"Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got: {input.size()}",
         )
 
     torch._check(
-        kW // 2 >= padW and kH // 2 >= padH,
+        sym_and(kW // 2 >= padW, kH // 2 >= padH),
         lambda: "pad should be smaller than or equal to half of kernel size, but got "
         f"padW = {padW}, padH = {padH}, kW = {kW}, kH = {kH}",
     )
 
     torch._check(
-        outputWidth >= 1 and outputHeight >= 1,
+        sym_and(outputWidth >= 1, outputHeight >= 1),
         lambda: f"Given input size: ({nInputPlane}x{inputHeight}x{inputWidth}). "
         f"Calculated output size: ({nOutputPlane}x{outputHeight}x{outputWidth}). "
         "Output size is too small",
@@ -5028,9 +5069,11 @@ def pool3d_shape_check(
             ),
         )
 
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     if check_input_size:  # AveragePool3d
         torch._check(
-            itime >= kT and iheight >= kH and iwidth >= kW,
+            sym_and(itime >= kT, iheight >= kH, iwidth >= kW),
             lambda: (
                 f"input image (T: {itime} H: {iheight} W: {iwidth}) smaller than "
                 f"kernel size (kT: {kT} kH: {kH} kW: {kW})"
@@ -5038,7 +5081,7 @@ def pool3d_shape_check(
         )
 
     torch._check(
-        kT / 2 >= pT and kW / 2 >= pW and kH / 2 >= pH,
+        sym_and(kT / 2 >= pT, kW / 2 >= pW, kH / 2 >= pH),
         lambda: (
             f"pad should be smaller than or equal to half of kernel size, but got "
             f"kT: {kT} kW: {kW} kH: {kH} padT: {pT} padW: {pW} padH: {pH}"
@@ -5046,7 +5089,7 @@ def pool3d_shape_check(
     )
 
     torch._check(
-        otime >= 1 and owidth >= 1 and oheight >= 1,
+        sym_and(otime >= 1, owidth >= 1, oheight >= 1),
         lambda: (
             f"Given input size: ({nslices}x{itime}x{iheight}x{iwidth}). "
             f"Calculated output size: ({nslices}x{otime}x{oheight}x{owidth}). "
@@ -5849,6 +5892,11 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return _scatter_meta_output(self)
 
 
+@register_meta(aten.diagonal_scatter.default)
+def meta_diagonal_scatter(self, src, offset=0, dim1=0, dim2=1):
+    return _scatter_meta_output(self)
+
+
 def _scatter_meta_output(self):
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
@@ -6345,7 +6393,7 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
             max_seqlen_batch_q,
             num_heads,
         ),
-        dtype=torch.float,
+        dtype=utils.get_computation_dtype(query.dtype),
         device=query.device,
     ).transpose(1, 2)
     return (
@@ -7269,25 +7317,43 @@ def _check_scaled_mm_sizes_v2(
         # Given scaling types, check input dimensions
 
         if is_tensorwise(scale_recipe_a, scale_recipe_b):
-            # TensorWise
-            torch._check(
-                scale_a[0].numel() == 1
-                and scale_b[0].numel() == 1
-                and scale_a[0].dtype == torch.float32
-                and scale_b[0].dtype == torch.float32,
-                lambda: "For Tensorwise scaling, both scale_a and scale_b must be single element float (fp32) tensors",
+            # TensorWise: mirror the C++ CPU impl's per-tensor checks so the
+            # exception types and messages match eager (ValueError).
+            torch._check_value(
+                scale_a[0].numel() == 1 and scale_a[0].dtype == torch.float32,
+                lambda: "scale_a must have 1 Float element",
+            )
+            torch._check_value(
+                scale_b[0].numel() == 1 and scale_b[0].dtype == torch.float32,
+                lambda: "scale_b must have 1 Float element",
             )
         elif is_rowwise(scale_recipe_a, scale_recipe_b):
-            torch._check(
-                scale_a[0].shape[0] == M
-                and scale_a[0].numel() == M
-                and scale_a[0].dtype == torch.float32
-                and scale_b[0].numel() == N
-                and scale_b[0].dtype == torch.float32,
+            # RowWise: mirror the C++ CPU impl's per-tensor checks.
+            torch._check_value(
+                scale_a[0].size(0) == M and scale_a[0].size(1) == 1,
                 lambda: (
-                    f"For Rowwise scaling, scale_a must have {self.shape[0]} elements (got: {scale_a[0].numel()})"
-                    f", and scale_b must have {mat2.shape[1]} elements (got: {scale_b[0].numel()})"
+                    f"scale_a must have shape [{M}, 1], got {list(scale_a[0].size())}"
                 ),
+            )
+            torch._check_value(
+                scale_a[0].numel() == M and scale_a[0].dtype == torch.float32,
+                lambda: (
+                    f"scale_a must have {M} Float elements, got {scale_a[0].numel()}"
+                ),
+            )
+            torch._check_value(
+                scale_b[0].numel() == N and scale_b[0].dtype == torch.float32,
+                lambda: (
+                    f"scale_b must have {N} Float elements, got {scale_b[0].numel()}"
+                ),
+            )
+            torch._check_value(
+                scale_a[0].stride(1) == 1,
+                lambda: f"expected scale_a.stride(1) to be 1, but got {scale_a[0].stride(1)}",
+            )
+            torch._check_value(
+                scale_b[0].stride(1) == 1,
+                lambda: f"expected scale_b.stride(1) to be 1, but got {scale_b[0].stride(1)}",
             )
         elif is_1x128_1x128(scale_recipe_a, scale_recipe_b):
             # A, B are fp8, scales are fp32
@@ -8013,35 +8079,49 @@ def linear_backward(input_, grad_output_, weight_, output_mask):
 
 @register_meta(aten.pixel_shuffle.default)
 def meta_pixel_shuffle(self, upscale_factor):
-    if not (
-        len(self.shape) > 2 and self.shape[-3] % (upscale_factor * upscale_factor) == 0
-    ):
-        raise AssertionError(
-            f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}"
-        )
-
-    def is_channels_last(ten):
-        return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
+    torch._check(
+        len(self.shape) > 2,
+        lambda: f"Invalid input shape for pixel_shuffle: {self.shape}",
+    )
+    torch._check(
+        self.shape[-3] % (upscale_factor * upscale_factor) == 0,
+        lambda: f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}",
+    )
 
     def pick_memory_format():
-        if is_channels_last(self):
-            if device_hint(self) == "cuda":
-                return torch.contiguous_format
-            else:
-                return torch.channels_last
-        elif self.is_contiguous(memory_format=torch.contiguous_format):
-            return torch.contiguous_format
-        elif self.is_contiguous(memory_format=torch.preserve_format):
-            return torch.preserve_format
+        # DDE-safe variant of the original eager-style picker.
+        # Eager dispatch for pixel_shuffle (native_functions.yaml:4720):
+        #   CPU  -> pixel_shuffle_cpu: at::empty({0}, self.options()).resize_(
+        #           out_sizes, self.suggest_memory_format())  -> preserves NHWC/NDHWC
+        #   MPS  -> pixel_shuffle_mps: at::empty(out_shape, self.options())
+        #           self.options() does NOT carry a memory_format, so this is
+        #           always plain contiguous regardless of input layout.
+        #   else -> math_pixel_shuffle: clone(MemoryFormat::Contiguous) -> contiguous
+        # So only CPU preserves channels_last; everything else is contiguous.
+        fmt = suggest_memory_format(self)
+        if (
+            fmt is torch.channels_last or fmt is torch.channels_last_3d
+        ) and device_hint(self) == "cpu":
+            return fmt
+        return torch.contiguous_format
 
     C = self.shape[-3] // (upscale_factor * upscale_factor)
     Hr = self.shape[-2] * upscale_factor
     Wr = self.shape[-1] * upscale_factor
     out_shape = (*self.shape[:-3], C, Hr, Wr)
 
-    out = self.new_empty(out_shape)
-    out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
-    return out
+    # Build the output tensor with the right strides directly. We avoid
+    # `new_empty(...).to(memory_format=...)` because `Tensor.to(memory_format=...)`
+    # internally calls the eager `is_contiguous(memory_format=...)` predicate to
+    # decide whether to no-op, and that predicate can DDE on unbacked sizes.
+    fmt = pick_memory_format()
+    if fmt is torch.channels_last or fmt is torch.channels_last_3d:
+        out_strides = make_channels_last_strides_for(out_shape)
+    else:
+        out_strides = make_contiguous_strides_for(out_shape)
+    return torch.empty_strided(
+        out_shape, out_strides, dtype=self.dtype, device=self.device
+    )
 
 
 @register_meta(aten.mkldnn_rnn_layer_backward.default)
