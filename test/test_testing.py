@@ -2650,6 +2650,87 @@ class TestOpInfoSampleFunctions(TestCase):
         samples = op.error_inputs(device)
         self.assertIsInstance(samples, Iterator)
 
+# Tests hardware requirement classification.
+class TestHardwareRequirements(TestCase):
+    def setUp(self):
+        super().setUp()
+        import torch.testing._internal.common_utils as _cu
+
+        self._cu = _cu
+
+    def _suite_test_names(self, suite) -> set[str]:
+        return {test_case.id().split(".")[-1] for test_case in self._cu._iter_test_cases_recursively(suite)}
+
+    def test_filter_suite(self):
+        requirement = self._cu.TestHardwareRequirement
+
+        class GenericTest(TestCase):
+            hardware_requirement = requirement.GENERIC
+
+            def test_generic(self):
+                pass
+
+        class DeviceSpecificTest(TestCase):
+            hardware_requirement = requirement.DEVICE_SPECIFIC
+
+            def test_device_specific(self):
+                pass
+
+        class MultiDeviceGenericTest(TestCase):
+            hardware_requirement = requirement.MULTI_DEVICE_GENERIC
+
+            def test_multi_device_generic(self):
+                pass
+
+        class MissingRequirementTest(TestCase):
+            def test_missing_requirement(self):
+                pass
+
+        suite = unittest.TestSuite(
+            [
+                unittest.defaultTestLoader.loadTestsFromTestCase(GenericTest),
+                unittest.defaultTestLoader.loadTestsFromTestCase(DeviceSpecificTest),
+                unittest.defaultTestLoader.loadTestsFromTestCase(MultiDeviceGenericTest),
+                unittest.defaultTestLoader.loadTestsFromTestCase(MissingRequirementTest),
+            ]
+        )
+
+        with unittest.mock.patch.object(
+            self._cu,
+            "HARDWARE_REQUIREMENT",
+            {self._cu.TestHardwareRequirement.GENERIC,
+             self._cu.TestHardwareRequirement.MULTI_DEVICE_GENERIC},
+        ):
+            filtered_suite = self._cu._filter_suite_by_hardware_requirement(suite)
+
+        self.assertEqual(
+            self._suite_test_names(filtered_suite),
+            {"test_generic", "test_multi_device_generic"},
+        )
+
+    def test_filter_suite_uses_inherited_metadata(self):
+        requirement = self._cu.TestHardwareRequirement
+
+        class DeviceGenericBase(TestCase):
+            hardware_requirement = requirement.DEVICE_GENERIC
+
+        class DeviceGenericChild(DeviceGenericBase):
+            def test_inherited_requirement(self):
+                pass
+
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(DeviceGenericChild)
+        with unittest.mock.patch.object(
+            self._cu,
+            "HARDWARE_REQUIREMENT",
+            {self._cu.TestHardwareRequirement.DEVICE_GENERIC},
+        ):
+            filtered_suite = self._cu._filter_suite_by_hardware_requirement(suite)
+
+        self.assertEqual(
+            self._suite_test_names(filtered_suite),
+            {"test_inherited_requirement"},
+        )
+
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
 instantiate_parametrized_tests(TestImports)

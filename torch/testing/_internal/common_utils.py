@@ -114,6 +114,14 @@ class ProfilingMode(Enum):
     SIMPLE = 2
     PROFILING = 3
 
+class TestHardwareRequirement(Enum):
+    # Class-level metadata describing the hardware requirements of a test.
+    GENERIC = "generic"
+    DEVICE_GENERIC = "device_generic"
+    DEVICE_SPECIFIC = "device_specific"
+    MULTI_DEVICE_GENERIC = "multi_device_generic"
+    MULTI_DEVICE_SPECIFIC = "multi_device_specific"
+
 # Set by parse_cmd_line_args() if called
 DISABLED_TESTS_FILE = ""
 GRAPH_EXECUTOR : ProfilingMode | None = None
@@ -130,6 +138,50 @@ TEST_IN_SUBPROCESS = False
 TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
+HARDWARE_REQUIREMENT : list[TestHardwareRequirement] | None = None
+
+
+def _iter_test_cases_recursively(
+    suite_or_case: unittest.TestSuite | unittest.TestCase,
+) -> Iterator[unittest.TestCase]:
+    if isinstance(suite_or_case, unittest.TestCase):
+        yield suite_or_case
+        return
+
+    for element in suite_or_case:
+        yield from _iter_test_cases_recursively(element)
+
+
+def _get_hardware_requirement(
+    test_case_cls: type[unittest.TestCase],
+) -> TestHardwareRequirement | None:
+    requirement = getattr(test_case_cls, "hardware_requirement", None)
+    if requirement is None:
+        return None
+
+    if not isinstance(requirement, TestHardwareRequirement):
+        raise TypeError(
+            f"{test_case_cls.__module__}.{test_case_cls.__name__}."
+            "hardware_requirement must be a TestHardwareRequirement"
+        )
+
+    return requirement
+
+
+def _filter_suite_by_hardware_requirement(tests: unittest.TestSuite) -> unittest.TestSuite:
+    if HARDWARE_REQUIREMENT is None:
+        return tests
+
+    filtered_suite = unittest.TestSuite()
+
+    for test_case in _iter_test_cases_recursively(tests):
+        requirement = _get_hardware_requirement(test_case.__class__)
+
+        if requirement is not None and requirement in HARDWARE_REQUIREMENT:
+            filtered_suite.addTest(test_case)
+
+    return filtered_suite
+
 
 def is_navi3_arch():
     if torch.cuda.is_available():
@@ -1006,6 +1058,7 @@ def parse_cmd_line_args():
     global TEST_SAVE_XML
     global UNITTEST_ARGS
     global USE_PYTEST
+    global HARDWARE_REQUIREMENT
 
     is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
     parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
@@ -1027,6 +1080,7 @@ def parse_cmd_line_args():
     parser.add_argument('--rerun-disabled-tests', action='store_true')
     parser.add_argument('--pytest-single-test', type=str, nargs=1)
     parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--hardware-requirement', action='append', type=TestHardwareRequirement, choices=list(TestHardwareRequirement), default=None)
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
     def run_unittest_help(argv):
@@ -1062,6 +1116,11 @@ def parse_cmd_line_args():
     TEST_SAVE_XML = args.save_xml
     REPEAT_COUNT = args.repeat
     SHOWLOCALS = args.showlocals
+    HARDWARE_REQUIREMENT = (
+        set(args.hardware_requirement)
+        if args.hardware_requirement is not None
+        else None
+    )
     if not getattr(expecttest, "ACCEPT", False):
         expecttest.ACCEPT = args.accept
     UNITTEST_ARGS = [sys.argv[0]] + remaining
@@ -1268,6 +1327,14 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
     return test_collector_plugin.tests
 
 
+class HardwareRequirementTestLoader(unittest.TestLoader):
+    def loadTestsFromModule(self, module, *args, pattern=None, **kwargs):
+        suite = super().loadTestsFromModule(
+            module, *args, pattern=pattern, **kwargs
+        )
+        return _filter_suite_by_hardware_requirement(suite)
+
+
 def run_tests(argv=None):
     parse_cmd_line_args()
     if argv is None:
@@ -1430,7 +1497,10 @@ def run_tests(argv=None):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
                 sys.exit(-1)
     else:
-        unittest.main(argv=argv)
+        if HARDWARE_REQUIREMENT is not None:
+            unittest.main(argv=argv, testLoader=HardwareRequirementTestLoader())
+        else:
+            unittest.main(argv=argv)
 
 IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
