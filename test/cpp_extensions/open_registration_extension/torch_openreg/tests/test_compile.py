@@ -59,6 +59,28 @@ class TestFakeTensor(TestCase):
                 if isinstance(fake, torch.Tensor):
                     self.assertEqual(fake.device.type, "openreg")
 
+    def test_backend_metadata_propagation(self):
+        captured = []
+
+        def capture_backend(gm, example_inputs):
+            for node in gm.graph.nodes:
+                if node.op == "placeholder":
+                    fake = node.meta.get("example_value")
+                    if isinstance(fake, torch.Tensor):
+                        captured.append(torch._utils.get_tensor_metadata(fake))
+            return gm.forward
+
+        @torch.compile(backend=capture_backend, fullgraph=True)
+        def fn(x):
+            return x + 1
+
+        x = torch.empty(3, 3, device="openreg")
+        metadata = {"version_number": True, "format_number": True}
+        torch._utils.set_tensor_metadata(x, metadata)
+        fn(x)
+
+        self.assertEqual(captured, [metadata])
+
     def test_fake_tensor_mode(self):
         with torch._subclasses.fake_tensor.FakeTensorMode():
             x = torch.empty(3, 3, device="openreg")
