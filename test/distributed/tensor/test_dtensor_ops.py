@@ -139,7 +139,6 @@ dtensor_fails = {
     xfail("quantile"),
     xfail("svd_lowrank"),
     # dynamic output shape: output shape depends on data values
-    xfail("combinations"),
     xfail("linalg.lstsq"),
     xfail("linalg.lstsq", "grad_oriented"),
     xfail("masked_select"),
