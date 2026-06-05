@@ -2126,6 +2126,30 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaisesRegex(RuntimeError, "Shape is not greater than 3"):
             f(x)
 
+    def test_check_raises_at_runtime_when_recompile_predicate_false_constant(self):
+        graphs = []
+
+        def backend(gm, example_inputs):
+            graphs.append(gm)
+            return gm.forward
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x):
+            torch._check(x.numel() > 0, lambda: "x must have non-zero elements")
+            return x
+
+        self.assertEqual(f(torch.randn(4)).numel(), 4)
+        self.assertEqual(f(torch.randn(5)).numel(), 5)
+
+        prior_graph_count = len(graphs)
+        with self.assertRaisesRegex(
+            RuntimeError, "x must have non-zero elements"
+        ) as cm:
+            f(torch.randn(0))
+
+        self.assertIs(type(cm.exception), RuntimeError)
+        self.assertEqual(len(graphs), prior_graph_count + 1)
+
     def test_check_assert_error_at_runtime_when_predicate_false_and_message_has_closure(
         self,
     ):
