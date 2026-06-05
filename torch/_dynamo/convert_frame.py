@@ -80,6 +80,7 @@ from torch.utils._python_dispatch import (
     any_torch_dispatch_mode_on_stack,
     is_in_any_mode_without_ignore_compile_internals,
     is_traceable_wrapper_subclass,
+    is_traceable_wrapper_subclass_type,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
@@ -2488,6 +2489,58 @@ def first_real_inst_idx(code: CodeType) -> int:
     raise RuntimeError("RESUME instruction not found in code")
 
 
+def _is_non_traceable_torch_dispatch_subclass_hook_frame(
+    frame: DynamoFrameType,
+) -> bool:
+    def hook_code(hook: object) -> CodeType | None:
+        if isinstance(hook, (classmethod, staticmethod)):
+            hook = hook.__func__
+        elif isinstance(hook, types.MethodType):
+            hook = hook.__func__
+        return getattr(hook, "__code__", None)
+
+    def hook_code_matches(receiver_type: type[torch.Tensor]) -> bool:
+        for hook_name in ("__torch_dispatch__", "__torch_function__"):
+            for hook in (
+                inspect.getattr_static(receiver_type, hook_name, None),
+                getattr(receiver_type, hook_name, None),
+            ):
+                if hook_code(hook) is frame.f_code:
+                    return True
+        return False
+
+    def receiver_type(value: object) -> type[torch.Tensor] | None:
+        typ = value if isinstance(value, type) else type(value)
+        if (
+            isinstance(typ, type)
+            and issubclass(typ, torch.Tensor)
+            and typ is not torch.Tensor
+            and typ.__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
+            and not is_traceable_wrapper_subclass_type(typ)
+        ):
+            return typ
+        return None
+
+    seen: set[type[torch.Tensor]] = set()
+
+    def check_value(value: object) -> bool:
+        typ = receiver_type(value)
+        if typ is None or typ in seen:
+            return False
+        seen.add(typ)
+        return hook_code_matches(typ)
+
+    for value in frame.f_locals.values():
+        if check_value(value):
+            return True
+        if isinstance(value, tuple):
+            for item in value:
+                if check_value(item):
+                    return True
+
+    return False
+
+
 class ConvertFrameProtocol(typing.Protocol):
     def __call__(
         self,
@@ -2544,6 +2597,21 @@ class CatchErrorsWrapper:
         else:
             should_skip_for_dispatch_mode = (
                 is_in_any_mode_without_ignore_compile_internals()
+            )
+
+        if _is_non_traceable_torch_dispatch_subclass_hook_frame(frame):
+            return self._handle_skip(
+                ConvertFrameReturn(
+                    frame_exec_strategy=FrameExecStrategy(
+                        FrameAction.SKIP, FrameAction.SKIP
+                    ),
+                    apply_to_code=False,
+                    skip_reason=(
+                        "dispatch hook of a non-traceable tensor subclass cannot be "
+                        "traced"
+                    ),
+                ),
+                frame,
             )
 
         if (
