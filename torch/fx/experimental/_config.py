@@ -86,7 +86,7 @@ validate_shape_env_version_key = False
 symbol_guard_limit_before_specialize: int | None = None
 
 # This flag changes whether we should use the same symbolic variable to represent input sizes that are the same.
-use_duck_shape = True
+use_duck_shape = False
 
 # Controls the registration of torch.nonzero() on the meta device.
 # When True, nonzero returns a tensor with shape (self.numel(), self.dim())
