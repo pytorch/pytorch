@@ -56,6 +56,7 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/TensorIterator.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
@@ -488,8 +489,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
         Py_TYPE(obj)->tp_name);
   }
 
-  Py_INCREF(obj);
-  return obj;
+  return Py_NewRef(obj);
 }
 
 static PyObject* THPModule_inferSize(PyObject* _unused, PyObject* args) {
@@ -778,20 +778,21 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     }
   }
 
-  // Get current CUDA/ROCm work stream
+  // Get current CUDA/ROCm or XPU work stream
   static int CurrentWorkStream(
       DLDeviceType device_type,
       int32_t device_id,
       void** out_stream) {
     try {
-#ifdef USE_CUDA
-      if (device_type == kDLCUDA || device_type == kDLROCM) {
-        *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
+      *out_stream = nullptr;
+      const auto acc_type = at::accelerator::getAccelerator(false);
+      if (!acc_type) {
         return 0;
       }
-#endif
-      // For CPU and other devices, return NULL (no stream concept)
-      *out_stream = nullptr;
+      if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
+        *out_stream =
+            at::accelerator::getCurrentStream(device_id).native_handle();
+      }
       return 0;
     } catch (const std::exception& e) {
       PyErr_SetString(PyExc_RuntimeError, e.what());
@@ -1854,7 +1855,7 @@ static PyObject* THPModule_set_override_stale_capture_stream(
       "enabled must be a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setOverrideStaleCaptureStream(arg == Py_True);
+  at::globalContext().setOverrideStaleCaptureStream(Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -2243,6 +2244,18 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_disable_torch_dispatch,
      METH_VARARGS,
      nullptr},
+    {"_skip_one_hop_torch_function",
+     THPModule_skip_one_hop_torch_function,
+     METH_VARARGS,
+     nullptr},
+    {"_peek_should_skip_torch_function",
+     THPModule_peek_should_skip_torch_function,
+     METH_NOARGS,
+     nullptr},
+    {"_set_skip_next_torch_function",
+     THPModule_set_skip_next_torch_function,
+     METH_O,
+     nullptr},
     {"_has_torch_function", THPModule_has_torch_function, METH_O, nullptr},
     {"_has_torch_function_unary",
      THPModule_has_torch_function_unary,
@@ -2515,6 +2528,8 @@ PyObject* initModule() {
 #endif
 
   torch::distributed::initPlacementBindings(module);
+
+  torch::initTensorIteratorBindings(module);
 
   auto set_module_attr =
       [&](const char* name, PyObject* v, bool incref = true) {
@@ -2887,7 +2902,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "SWIZZLE_32_4_4",
           at::blas::SwizzleType::SWIZZLE_32_4_4,
-          "Blackwell-stype 32x4x4 swizzle");
+          "Blackwell-style 32x4x4 swizzle");
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)
@@ -2963,6 +2978,10 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_key_in_tls", [](const std::string& key) -> bool {
     return at::impl::ThreadLocalPythonObjects::get_state().contains(key);
+  });
+
+  py_module.def("_remove_obj_from_tls", [](const std::string& key) {
+    at::impl::ThreadLocalPythonObjects::erase(key);
   });
 
   py_module.def("_accelerator_hooks_device_count", []() {

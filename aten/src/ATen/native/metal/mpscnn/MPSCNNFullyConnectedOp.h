@@ -1,7 +1,9 @@
 #import <ATen/native/metal/MetalConvParams.h>
 #import <ATen/native/metal/MetalNeuronType.h>
 #import <ATen/native/metal/mpscnn/MPSCNNConvOp.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #import <Foundation/Foundation.h>
+C10_DIAGNOSTIC_POP()
 
 API_AVAILABLE(ios(11.0), macos(10.13))
 @interface MPSCNNFullyConnectedOp : NSObject<MPSCNNOp>

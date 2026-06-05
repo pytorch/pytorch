@@ -182,7 +182,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     return _maybe_wrap_tensor(tensor)
 
 
-def all_gather_tensor(
+def all_gather_single(
     self: torch.Tensor,
     gather_dim: int,
     group: RANK_TYPES,
@@ -224,7 +224,7 @@ def all_gather_tensor(
     return res
 
 
-def all_gather_tensor_autograd(
+def all_gather_single_autograd(
     self: torch.Tensor,
     gather_dim: int,
     group: RANK_TYPES,
@@ -235,10 +235,10 @@ def all_gather_tensor_autograd(
 
     Note that it currently only supports gather_dim = 0.
 
-    This function is the same as all_gather_tensor but will propagate the
+    This function is the same as all_gather_single but will propagate the
     backwards gradient across workers.
 
-    See all_gather_tensor for more details on usage.
+    See all_gather_single for more details on usage.
     """
     group = _resolve_group(group, tag)
     group_size = c10d._get_group_size_by_name(group)
@@ -261,7 +261,7 @@ def all_gather_tensor_autograd(
     return res
 
 
-def reduce_scatter_tensor(
+def reduce_scatter_single(
     self: torch.Tensor,
     reduceOp: str,
     scatter_dim: int,
@@ -303,7 +303,7 @@ def reduce_scatter_tensor(
     return res
 
 
-def reduce_scatter_tensor_autograd(
+def reduce_scatter_single_autograd(
     self: torch.Tensor,
     reduceOp: str,
     scatter_dim: int,
@@ -314,12 +314,12 @@ def reduce_scatter_tensor_autograd(
     Reduces the tensor data across all machines in such a way that all get
     the final result, then scatter the results to corresponding ranks.
 
-    This function is the same as reduce_scatter_tensor but will propagate the
+    This function is the same as reduce_scatter_single but will propagate the
     backwards gradient across workers.
 
     Currently only the "sum" reduceOp is supported.
 
-    See reduce_scatter_tensor for more details on usage.
+    See reduce_scatter_single for more details on usage.
     """
 
     group = _resolve_group(group, tag)
@@ -340,6 +340,78 @@ def reduce_scatter_tensor_autograd(
     )
     res = _FromTorchTensor.apply(tensor)
     return res
+
+
+# The deprecated *_tensor aliases warn only outside compile: the
+# typing_extensions @deprecated wrapper lives in a Dynamo-skipped module, and a
+# raw warnings.warn is an untraceable builtin, either of which breaks
+# fullgraph=True tracing of these still-supported entry points. Guarding on
+# is_compiling() keeps the eager-time deprecation while letting Dynamo trace
+# straight through to the _single implementation.
+def all_gather_tensor(
+    self: torch.Tensor,
+    gather_dim: int,
+    group: RANK_TYPES,
+    tag: str = "",
+) -> torch.Tensor:
+    if not torch.compiler.is_compiling():
+        warnings.warn(
+            "`torch.distributed._functional_collectives.all_gather_tensor` is deprecated. "
+            "Please use `torch.distributed._functional_collectives.all_gather_single` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+    return all_gather_single(self, gather_dim, group, tag)
+
+
+def all_gather_tensor_autograd(
+    self: torch.Tensor,
+    gather_dim: int,
+    group: RANK_TYPES,
+    tag: str = "",
+):
+    if not torch.compiler.is_compiling():
+        warnings.warn(
+            "`torch.distributed._functional_collectives.all_gather_tensor_autograd` is deprecated. "
+            "Please use `torch.distributed._functional_collectives.all_gather_single_autograd` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+    return all_gather_single_autograd(self, gather_dim, group, tag)
+
+
+def reduce_scatter_tensor(
+    self: torch.Tensor,
+    reduceOp: str,
+    scatter_dim: int,
+    group: RANK_TYPES,
+    tag: str = "",
+):
+    if not torch.compiler.is_compiling():
+        warnings.warn(
+            "`torch.distributed._functional_collectives.reduce_scatter_tensor` is deprecated. "
+            "Please use `torch.distributed._functional_collectives.reduce_scatter_single` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+    return reduce_scatter_single(self, reduceOp, scatter_dim, group, tag)
+
+
+def reduce_scatter_tensor_autograd(
+    self: torch.Tensor,
+    reduceOp: str,
+    scatter_dim: int,
+    group: RANK_TYPES,
+    tag: str = "",
+):
+    if not torch.compiler.is_compiling():
+        warnings.warn(
+            "`torch.distributed._functional_collectives.reduce_scatter_tensor_autograd` is deprecated. "
+            "Please use `torch.distributed._functional_collectives.reduce_scatter_single_autograd` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+    return reduce_scatter_single_autograd(self, reduceOp, scatter_dim, group, tag)
 
 
 def all_reduce_coalesced(
@@ -370,7 +442,7 @@ def all_reduce_coalesced(
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
-def all_gather_into_tensor_coalesced(
+def all_gather_single_coalesced(
     self: list[torch.Tensor], group: RANK_TYPES, tag: str = ""
 ) -> list[torch.Tensor]:
     """
@@ -399,7 +471,7 @@ def all_gather_into_tensor_coalesced(
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
-def reduce_scatter_tensor_coalesced(
+def reduce_scatter_single_coalesced(
     inputs: list[torch.Tensor],
     reduceOp: str,
     scatter_dim: list[int],
@@ -445,6 +517,39 @@ def reduce_scatter_tensor_coalesced(
     )
 
     return list(map(_maybe_wrap_tensor, tensor_list))
+
+
+# Guarded warning rather than the @deprecated wrapper so Dynamo can trace
+# through to the _single_coalesced implementation; see the non-coalesced
+# aliases above for the rationale.
+def all_gather_into_tensor_coalesced(
+    self: list[torch.Tensor], group: RANK_TYPES, tag: str = ""
+) -> list[torch.Tensor]:
+    if not torch.compiler.is_compiling():
+        warnings.warn(
+            "`torch.distributed._functional_collectives.all_gather_into_tensor_coalesced` is deprecated. "
+            "Please use `torch.distributed._functional_collectives.all_gather_single_coalesced` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+    return all_gather_single_coalesced(self, group, tag)
+
+
+def reduce_scatter_tensor_coalesced(
+    inputs: list[torch.Tensor],
+    reduceOp: str,
+    scatter_dim: list[int],
+    group: RANK_TYPES,
+    tag: str = "",
+) -> list[torch.Tensor]:
+    if not torch.compiler.is_compiling():
+        warnings.warn(
+            "`torch.distributed._functional_collectives.reduce_scatter_tensor_coalesced` is deprecated. "
+            "Please use `torch.distributed._functional_collectives.reduce_scatter_single_coalesced` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+    return reduce_scatter_single_coalesced(inputs, reduceOp, scatter_dim, group, tag)
 
 
 # This is a bit unsafe: it checks if the first argument in the schema reports as a non-mutable alias.
@@ -561,7 +666,7 @@ def all_to_all_single_autograd(
 
 
 # ============================================================================
-# Collecive Autograd Functions / Custom Ops
+# Collective Autograd Functions / Custom Ops
 # ============================================================================
 
 
@@ -1633,7 +1738,7 @@ def all_gather_tensor_inplace(
     if group is None:
         raise AssertionError("group cannot be None")
 
-    return output_tensor.copy_(all_gather_tensor(input_tensor, gather_dim, group, tag))
+    return output_tensor.copy_(all_gather_single(input_tensor, gather_dim, group, tag))
 
 
 def reduce_scatter_tensor_inplace(
@@ -1654,7 +1759,7 @@ def reduce_scatter_tensor_inplace(
     if group is None:
         raise AssertionError("group cannot be None")
 
-    return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
+    return output.copy_(reduce_scatter_single(input, op, scatter_dim, group, tag))
 
 
 REDUCE_OP_TO_STR = {
@@ -1735,7 +1840,7 @@ def all_gather_inplace(
     if group is None:
         raise AssertionError("group cannot be None")
 
-    output = all_gather_tensor(tensor, 0, group, tag)
+    output = all_gather_single(tensor, 0, group, tag)
 
     # Use aten.slice instead of aten.split because the latter causes
     # tensor.shape(0) to be unnecessarily baked in when it's a SymInt.
@@ -1845,11 +1950,13 @@ from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecate
     _reduce_scatter_base as legacy_reduce_scatter_base,
     all_gather as legacy_all_gather,
     all_gather_into_tensor as legacy_allgather,
+    all_gather_single as legacy_allgather_single,
     all_reduce as legacy_allreduce,
     all_to_all_single as legacy_all_to_all_single,
     batch_isend_irecv as legacy_batch_p2p_ops,
     irecv as legacy_irecv,
     isend as legacy_isend,
+    reduce_scatter_single as legacy_reducescatter_single,
     reduce_scatter_tensor as legacy_reducescatter,
 )
 
@@ -1922,7 +2029,9 @@ def _remapped_batch_p2p_ops(*args, **kwargs):
 # Functions in this set should accept the same args/kwargs 1:1 as their mapping.
 traceable_collective_remaps = {
     legacy_allgather: _remapped_allgather,
+    legacy_allgather_single: _remapped_allgather,
     legacy_reducescatter: _remapped_reducescatter,
+    legacy_reducescatter_single: _remapped_reducescatter,
     legacy_allreduce: _remapped_allreduce,
     legacy_all_to_all_single: _remapped_all_to_all_single,
     legacy_all_gather: _remapped_all_gather,

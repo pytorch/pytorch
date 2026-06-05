@@ -272,7 +272,6 @@ if sys.version_info < python_min_version:
 
 import importlib
 import itertools
-import json
 import shutil
 import subprocess
 import sysconfig
@@ -285,7 +284,6 @@ from typing import Any, ClassVar, IO
 
 import setuptools.command.bdist_wheel
 import setuptools.command.build_ext
-import setuptools.command.sdist
 import setuptools.errors
 from setuptools import Command, Extension, find_packages, setup
 from setuptools.dist import Distribution
@@ -315,13 +313,7 @@ from tools.build_pytorch_libs import build_pytorch
 from tools.clean import clean as _clean
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake, CMakeValue
-from tools.setup_helpers.env import (
-    BUILD_DIR,
-    build_type,
-    IS_DARWIN,
-    IS_LINUX,
-    IS_WINDOWS,
-)
+from tools.setup_helpers.env import IS_DARWIN, IS_LINUX, IS_WINDOWS
 
 
 def str2bool(value: str | None) -> bool:
@@ -908,160 +900,6 @@ def check_pydep(importname: str, module: str) -> None:
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
-    def _wrap_headers_with_macro(self, include_dir: Path) -> None:
-        """Wrap all header files with #if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION).
-
-        Excludes:
-        - torch/headeronly/*
-        - torch/csrc/stable/*
-        - torch/csrc/inductor/aoti_torch/c/ (only shim headers)
-        - torch/csrc/inductor/aoti_torch/generated/
-
-        This method is idempotent - it will not wrap headers that are already wrapped.
-        """
-        header_extensions = (".h", ".hpp", ".cuh")
-        header_files = [
-            f for ext in header_extensions for f in include_dir.rglob(f"*{ext}")
-        ]
-
-        # Paths to exclude from wrapping (relative to include_dir)
-        exclude_dir_patterns = [
-            "torch/headeronly/",
-            "torch/csrc/stable/",
-            "torch/csrc/inductor/aoti_torch/c/",
-            "torch/csrc/inductor/aoti_torch/generated/",
-        ]
-
-        # Marker to detect if a header is already wrapped
-        wrap_start_marker = (
-            "#if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
-        )
-
-        for header_file in header_files:
-            rel_path = header_file.relative_to(include_dir).as_posix()
-
-            if any(rel_path.startswith(pattern) for pattern in exclude_dir_patterns):
-                report(f"Skipping header: {rel_path}")
-                continue
-
-            original_content = header_file.read_text(encoding="utf-8")
-
-            # Check if already wrapped (idempotency check)
-            if original_content.startswith(wrap_start_marker):
-                report(f"Already wrapped, skipping: {rel_path}")
-                continue
-
-            wrapped_content = (
-                wrap_start_marker
-                + f"{original_content}"
-                + "\n#else\n"
-                + '#error "This file should not be included when either TORCH_STABLE_ONLY or TORCH_TARGET_VERSION is defined."\n'
-                + "#endif  // !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
-            )
-
-            header_file.write_text(wrapped_content, encoding="utf-8")
-            report(f"Wrapped header: {rel_path}")
-
-    def _embed_libomp(self) -> None:
-        # Copy libiomp5.dylib/libomp.dylib inside the wheel package on MacOS
-        build_lib = Path(self.build_lib)
-        build_torch_lib_dir = build_lib / "torch" / "lib"
-        build_torch_include_dir = build_lib / "torch" / "include"
-        libtorch_cpu_path = build_torch_lib_dir / "libtorch_cpu.dylib"
-        if not libtorch_cpu_path.exists():
-            return
-        # Parse libtorch_cpu load commands
-        otool_cmds = (
-            subprocess.check_output(["otool", "-l", str(libtorch_cpu_path)])
-            .decode("utf-8")
-            .split("\n")
-        )
-        rpaths: list[str] = []
-        libs: list[str] = []
-        for idx, line in enumerate(otool_cmds):
-            if line.strip() == "cmd LC_LOAD_DYLIB":
-                lib_name = otool_cmds[idx + 2].strip()
-                if not lib_name.startswith("name "):
-                    raise AssertionError(
-                        f"Expected lib_name to start with 'name ', got: {lib_name}"
-                    )
-                libs.append(lib_name.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
-
-            if line.strip() == "cmd LC_RPATH":
-                rpath = otool_cmds[idx + 2].strip()
-                if not rpath.startswith("path "):
-                    raise AssertionError(
-                        f"Expected rpath to start with 'path ', got: {rpath}"
-                    )
-                rpaths.append(rpath.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
-
-        omplib_path: str = get_cmake_cache_vars()["OpenMP_libomp_LIBRARY"]  # type: ignore[assignment]
-        omplib_name: str = get_cmake_cache_vars()["OpenMP_C_LIB_NAMES"]  # type: ignore[assignment]
-        omplib_name += ".dylib"
-        omplib_rpath_path = os.path.join("@rpath", omplib_name)
-
-        # This logic is fragile and checks only two cases:
-        # - libtorch_cpu depends on `@rpath/libomp.dylib`e (happens when built inside miniconda environment)
-        # - libtorch_cpu depends on `/abs/path/to/libomp.dylib` (happens when built with libomp from homebrew)
-        if not any(c in libs for c in [omplib_path, omplib_rpath_path]):
-            return
-
-        # Copy libomp/libiomp5 from rpath locations
-        target_lib = build_torch_lib_dir / omplib_name
-        libomp_relocated = False
-        install_name_tool_args: list[str] = []
-        for rpath in rpaths:
-            source_lib = os.path.join(rpath, omplib_name)
-            if not os.path.exists(source_lib):
-                continue
-            self.copy_file(source_lib, target_lib)
-            # Delete old rpath and add @loader_lib to the rpath
-            # This should prevent deallocate from attempting to package another instance
-            # of OpenMP library in torch wheel as well as loading two libomp.dylib into
-            # the address space, as libraries are cached by their unresolved names
-            install_name_tool_args = [
-                "-rpath",
-                rpath,
-                "@loader_path",
-            ]
-            libomp_relocated = True
-            break
-        if not libomp_relocated and os.path.exists(omplib_path):
-            self.copy_file(omplib_path, target_lib)
-            install_name_tool_args = [
-                "-change",
-                omplib_path,
-                omplib_rpath_path,
-            ]
-            if "@loader_path" not in rpaths:
-                install_name_tool_args += [
-                    "-add_rpath",
-                    "@loader_path",
-                ]
-            libomp_relocated = True
-        if libomp_relocated:
-            install_name_tool_args = [
-                "install_name_tool",
-                *install_name_tool_args,
-                str(libtorch_cpu_path),
-            ]
-            subprocess.check_call(install_name_tool_args)
-        # Copy omp.h from OpenMP_C_FLAGS and copy it into include folder
-        omp_cflags: str = get_cmake_cache_vars()["OpenMP_C_FLAGS"]  # type: ignore[assignment]
-        if not omp_cflags:
-            return
-        for include_dir in [
-            Path(f.removeprefix("-I"))
-            for f in omp_cflags.split(" ")
-            if f.startswith("-I")
-        ]:
-            omp_h = include_dir / "omp.h"
-            if not omp_h.exists():
-                continue
-            target_omp_h = build_torch_include_dir / "omp.h"
-            self.copy_file(omp_h, target_omp_h)
-            break
-
     def run(self) -> None:
         # Report build options. This is run after the build completes so # `CMakeCache.txt` exists
         # and we can get an accurate report on what is used and what is not.
@@ -1135,121 +973,14 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
         super().run()
 
-        # Wrap headers with TORCH_STABLE_ONLY and TORCH_TARGET_VERSION guards
-        build_lib = Path(self.build_lib)
-        build_torch_include_dir = build_lib / "torch" / "include"
-        if build_torch_include_dir.exists():
-            report(
-                "-- Wrapping header files with if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)"
-            )
-            self._wrap_headers_with_macro(build_torch_include_dir)
-
-        if IS_DARWIN:
-            self._embed_libomp()
-
-        # Copy the essential export library to compile C++ extensions.
-        if IS_WINDOWS:
-            build_temp = Path(self.build_temp)
-            build_lib = Path(self.build_lib)
-
-            ext_filename = self.get_ext_filename("_C")
-            lib_filename = ".".join(ext_filename.split(".")[:-1]) + ".lib"
-
-            export_lib = build_temp / "torch" / "csrc" / lib_filename
-            target_lib = build_lib / "torch" / "lib" / "_C.lib"
-
-            # Create "torch/lib" directory if not exists.
-            # (It is not created yet in "develop" mode.)
-            target_dir = target_lib.parent
-            target_dir.mkdir(parents=True, exist_ok=True)
-            self.copy_file(export_lib, target_lib)
-
-    def build_extensions(self) -> None:
-        self.create_compile_commands()
-
-        super().build_extensions()
-
     def get_outputs(self) -> list[str]:
         outputs = super().get_outputs()
         outputs.append(os.path.join(self.build_lib, "caffe2"))
         report(f"setup.py::get_outputs returning {outputs}")
         return outputs
 
-    def create_compile_commands(self) -> None:
-        def load(file: Path) -> list[dict[str, Any]]:
-            return json.loads(file.read_text(encoding="utf-8"))
 
-        ninja_files = (CWD / BUILD_DIR).glob("*compile_commands.json")
-        cmake_files = (CWD / "torch" / "lib" / "build").glob("*/compile_commands.json")
-        all_commands = [
-            entry
-            for f in itertools.chain(ninja_files, cmake_files)
-            for entry in load(f)
-        ]
-
-        # cquery does not like c++ compiles that start with gcc.
-        # It forgets to include the c++ header directories.
-        # We can work around this by replacing the gcc calls that python
-        # setup.py generates with g++ calls instead
-        for command in all_commands:
-            if command["command"].startswith("gcc "):
-                command["command"] = "g++ " + command["command"][4:]
-
-        new_contents = json.dumps(all_commands, indent=2)
-        contents = ""
-        compile_commands_json = CWD / "compile_commands.json"
-        if compile_commands_json.exists():
-            contents = compile_commands_json.read_text(encoding="utf-8")
-        if contents != new_contents:
-            compile_commands_json.write_text(new_contents, encoding="utf-8")
-
-
-class concat_license_files:
-    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
-
-    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
-    from all the licenses found in ./third_party/. We concatenate them so there
-    is a single license file in the sdist and wheels with all of the necessary
-    licensing info.
-    """
-
-    def __init__(self, include_files: bool = False) -> None:
-        self.f1 = CWD / "LICENSE"
-        self.f2 = THIRD_PARTY_DIR / "LICENSES_BUNDLED.txt"
-        self.include_files = include_files
-        self.bsd_text = ""
-
-    def __enter__(self) -> None:
-        """Concatenate files"""
-
-        old_path = sys.path
-        sys.path.append(str(THIRD_PARTY_DIR))
-        try:
-            from build_bundled import create_bundled  # type: ignore[import-not-found]
-        finally:
-            sys.path = old_path
-
-        self.bsd_text = self.f1.read_text(encoding="utf-8")
-
-        with self.f1.open(mode="a", encoding="utf-8") as f1:
-            f1.write("\n\n")
-            create_bundled(
-                str(THIRD_PARTY_DIR.resolve()),
-                f1,
-                include_files=self.include_files,
-            )
-
-    def __exit__(self, *exc_info: object) -> None:
-        """Restore content of f1"""
-        self.f1.write_text(self.bsd_text, encoding="utf-8")
-
-
-# Need to create the proper LICENSE.txt for the wheel
 class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
-    def run(self) -> None:
-        with concat_license_files(include_files=True):
-            super().run()
-
     def write_wheelfile(self, *args: Any, **kwargs: Any) -> None:
         super().write_wheelfile(*args, **kwargs)
 
@@ -1283,11 +1014,15 @@ class clean(Command):
         _clean()
 
 
-# Need to dump submodule hashes and create the proper LICENSE.txt for the sdist
-class sdist(setuptools.command.sdist.sdist):
-    def run(self) -> None:
-        with concat_license_files():
-            super().run()
+class BinaryDistribution(Distribution):
+    # torch._C is built by CMake (torch/CMakeLists.txt), so setuptools has
+    # no ext_modules. Force the wheel to be tagged as a binary distribution
+    # so bdist_wheel uses the binary layout (only files listed via
+    # package_data / data_files are packaged) rather than the purelib
+    # layout, which would dump the entire build/lib/ tree -- including
+    # CMake's test artifacts -- into the wheel at site-packages root.
+    def has_ext_modules(self) -> bool:
+        return True
 
 
 def get_cmake_cache_vars() -> defaultdict[str, CMakeValue]:
@@ -1318,57 +1053,7 @@ def configure_extension_build() -> tuple[
     # Configure compile flags
     ################################################################################
 
-    library_dirs: list[str] = [str(TORCH_LIB_DIR)]
     extra_install_requires: list[str] = []
-
-    if IS_WINDOWS:
-        # /NODEFAULTLIB makes sure we only link to DLL runtime
-        # and matches the flags set for protobuf and ONNX
-        extra_link_args: list[str] = ["/NODEFAULTLIB:LIBCMT.LIB"]
-        # /MD links against DLL runtime
-        # and matches the flags set for protobuf and ONNX
-        # /EHsc is about standard C++ exception handling
-        extra_compile_args: list[str] = ["/MD", "/FS", "/EHsc"]
-    else:
-        extra_link_args = []
-        extra_compile_args = [
-            "-Wall",
-            "-Wextra",
-            "-Wno-strict-overflow",
-            "-Wno-unused-parameter",
-            "-Wno-missing-field-initializers",
-            "-Wno-unknown-pragmas",
-            # Python 2.6 requires -fno-strict-aliasing, see
-            # http://legacy.python.org/dev/peps/pep-3123/
-            # We also depend on it in our code (even Python 3).
-            "-fno-strict-aliasing",
-        ]
-
-    main_compile_args: list[str] = []
-    main_libraries: list[str] = ["torch_python"]
-
-    main_link_args: list[str] = []
-    main_sources: list[str] = ["torch/csrc/stub.c"]
-
-    if BUILD_LIBTORCH_WHL:
-        main_libraries = ["torch"]
-        main_sources = []
-
-    if build_type.is_debug():
-        if IS_WINDOWS:
-            extra_compile_args += ["/Z7"]
-            extra_link_args += ["/DEBUG:FULL"]
-        else:
-            extra_compile_args += ["-O0", "-g"]
-            extra_link_args += ["-O0", "-g"]
-
-    if build_type.is_rel_with_deb_info():
-        if IS_WINDOWS:
-            extra_compile_args += ["/Z7"]
-            extra_link_args += ["/DEBUG:FULL"]
-        else:
-            extra_compile_args += ["-g"]
-            extra_link_args += ["-g"]
 
     # pypi cuda package that requires installation of cuda runtime, cudnn and cublas
     # should be included in all wheels uploaded to pypi
@@ -1379,39 +1064,12 @@ def configure_extension_build() -> tuple[
             map(str.strip, pytorch_extra_install_requires.split("|"))
         )
 
-    # Cross-compile for M1
-    if IS_DARWIN:
-        macos_target_arch = os.getenv("CMAKE_OSX_ARCHITECTURES", "")
-        if macos_target_arch in ["arm64", "x86_64"]:
-            macos_sysroot_path = os.getenv("CMAKE_OSX_SYSROOT")
-            if macos_sysroot_path is None:
-                macos_sysroot_path = (
-                    subprocess.check_output(
-                        ["xcrun", "--show-sdk-path", "--sdk", "macosx"]
-                    )
-                    .decode("utf-8")
-                    .strip()
-                )
-            extra_compile_args += [
-                "-arch",
-                macos_target_arch,
-                "-isysroot",
-                macos_sysroot_path,
-            ]
-            extra_link_args += ["-arch", macos_target_arch]
-
-    def make_relative_rpath_args(path: str) -> list[str]:
-        if IS_DARWIN:
-            return ["-Wl,-rpath,@loader_path/" + path]
-        elif IS_WINDOWS:
-            return []
-        else:
-            return ["-Wl,-rpath,$ORIGIN/" + path]
-
     ################################################################################
     # Declare extensions and package
     ################################################################################
 
+    # torch._C is now built by CMake (torch/CMakeLists.txt) and installed
+    # into the cmake install prefix, which maps to torch/ in the source tree.
     ext_modules: list[Extension] = []
     # packages that we want to install into site-packages and include them in wheels
     includes = ["torch", "torch.*", "torchgen", "torchgen.*"]
@@ -1422,30 +1080,11 @@ def configure_extension_build() -> tuple[
     else:
         excludes.extend(["functorch", "functorch.*"])
     packages = find_packages(include=includes, exclude=excludes)
-    C = Extension(
-        "torch._C",
-        libraries=main_libraries,
-        sources=main_sources,
-        language="c",
-        extra_compile_args=[
-            *main_compile_args,
-            *extra_compile_args,
-        ],
-        include_dirs=[],
-        library_dirs=library_dirs,
-        extra_link_args=[
-            *extra_link_args,
-            *main_link_args,
-            *make_relative_rpath_args("lib"),
-        ],
-    )
-    ext_modules.append(C)
 
     cmdclass = {
         "bdist_wheel": bdist_wheel,
         "build_ext": build_ext,
         "clean": clean,
-        "sdist": sdist,
     }
 
     entry_points = {
@@ -1532,6 +1171,11 @@ def main() -> None:
 
     torch_package_data = [
         "py.typed",
+        # torch._C is built by CMake (torch/CMakeLists.txt) and installed into
+        # torch/.  Match this interpreter's exact extension suffix, not a glob:
+        # build_all.sh reuses one build/ dir across Python versions, so a glob
+        # would also pick up other ABIs' _C modules left behind in the tree.
+        f"_C{sysconfig.get_config_var('EXT_SUFFIX')}",
         "bin/*",
         "bin/**/*",
         "test/*",
@@ -1638,6 +1282,7 @@ def main() -> None:
     setup(
         name=TORCH_PACKAGE_NAME,
         version=TORCH_VERSION,
+        distclass=BinaryDistribution,
         ext_modules=ext_modules,
         cmdclass=cmdclass,
         packages=packages,
