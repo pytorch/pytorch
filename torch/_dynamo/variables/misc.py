@@ -2191,12 +2191,17 @@ class LoggingLoggerVariable(VariableTracker):
         if method in ignore_set or function in ignore_set:
             return variables.ConstantVariable.create(None)
 
+        logger_cls = type(self.value)
+        logger_cls_name = f"{logger_cls.__module__}.{logger_cls.__qualname__}"
         unimplemented(
             gb_type="logging.Logger method not supported for non-export cases",
             context=f"method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
             explanation="logging.Logger methods are not supported for non-export cases.",
             hints=[
-                "Add the logging method to `torch._dynamo.config.ignore_logging_functions`.",
+                "If you do not need this logging side effect, add the exact method being called to `torch._dynamo.config.ignore_logging_functions` (`torch._dynamo.config.ignore_logger_methods` is an alias). Dynamo will skip the call and return `None`.",
+                f"For example, for `logger.{name}(...)`, use `torch._dynamo.config.ignore_logging_functions.add(logger.{name})`. If `{name}` is defined on the logger class, add the class method `{logger_cls_name}.{name}` to ignore this method for all instances of that class.",
+                f"Adding a different method, such as an underlying method called by `{name}`, will not ignore the `{name}` call.",
+                "If you need the log side effect to run, move the logging call outside the compiled region.",
             ],
         )
 

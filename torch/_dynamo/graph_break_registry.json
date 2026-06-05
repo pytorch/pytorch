@@ -4245,6 +4245,17 @@
       "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
       "Explanation": "logging.Logger methods are not supported for non-export cases.",
       "Hints": [
+        "If you do not need this logging side effect, add the exact method being called to `torch._dynamo.config.ignore_logging_functions` (`torch._dynamo.config.ignore_logger_methods` is an alias). Dynamo will skip the call and return `None`.",
+        "For example, for `logger.{name}(...)`, use `torch._dynamo.config.ignore_logging_functions.add(logger.{name})`. If `{name}` is defined on the logger class, add the class method `{logger_cls_name}.{name}` to ignore this method for all instances of that class.",
+        "Adding a different method, such as an underlying method called by `{name}`, will not ignore the `{name}` call.",
+        "If you need the log side effect to run, move the logging call outside the compiled region."
+      ]
+    },
+    {
+      "Gb_type": "logging.Logger method not supported for non-export cases",
+      "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "logging.Logger methods are not supported for non-export cases.",
+      "Hints": [
         "Add the logging method to `torch._dynamo.config.ignore_logging_functions`."
       ]
     },
