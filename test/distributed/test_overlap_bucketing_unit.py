@@ -40,7 +40,7 @@ aten = torch.ops.aten
 from torch.testing._internal.common_fsdp import get_devtype
 
 
-device_type = str(get_devtype())
+device_type = get_devtype().type
 
 
 import torch
@@ -1225,6 +1225,81 @@ class TestCrossPGOverlap(InductorTestCase):
         self.assertTrue(
             any(p < last_mm for p in rs_starts),
             f"Off-path reduce_scatters drifted to end: rs={rs_starts}, mm={mm_positions}, names={node_names}",
+        )
+
+    @torch._inductor.config.patch(
+        {"test_configs.assume_bucketing_reduces_latency": False}
+    )
+    def test_prefetch_prioritizes_larger_hidden_time(self):
+        """
+        When multiple future collectives have the same semantic priority, choose
+        the one that can consume more of the current overlap window first.
+        """
+        group_name = self.pg1_name
+
+        def func(a, b, c):
+            group_size = 1
+            mm = torch.mm(a, a)
+
+            ag_small = torch.ops._c10d_functional.all_gather_into_tensor(
+                b, group_size, group_name
+            )
+            ag_large = torch.ops._c10d_functional.all_gather_into_tensor(
+                c, group_size, group_name
+            )
+
+            wait_small = torch.ops._c10d_functional.wait_tensor(ag_small)
+            wait_large = torch.ops._c10d_functional.wait_tensor(ag_large)
+            return mm.sum() + wait_small.sum() + wait_large.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b, c)
+
+        ag_small, ag_large = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        (mm,) = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mm.default
+        )
+
+        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
+            if node is ag_small:
+                return 1.0
+            if node is ag_large:
+                return 8.0
+            if node.target == torch.ops.aten.mm.default:
+                return 8.0
+            return 0.0
+
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        scheduler = OverlapScheduler(
+            traced,
+            # Each all_gather has a 128B footprint in this graph.  Limit in-flight
+            # collectives to one so picking the larger hidden-time candidate
+            # reduces total exposed time, rather than only changing order.
+            max_in_flight_gb=0.0000002,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=custom_runtime,
+            collective_estimator="analytical",
+        )
+        scheduler.run()
+
+        self.assertIn(mm, scheduler.collective_info[ag_large].hiding_nodes)
+        self.assertNotIn(mm, scheduler.collective_info[ag_small].hiding_nodes)
+        self.assertEqual(scheduler.collective_info[ag_large].exposed_time_ms, 0.0)
+        self.assertEqual(scheduler.collective_info[ag_small].exposed_time_ms, 1.0)
+        self.assertEqual(
+            sum(info.exposed_time_ms for info in scheduler.collective_info.values()),
+            1.0,
         )
 
 
