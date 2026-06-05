@@ -17,7 +17,7 @@ import torch._logging
 
 from ..._prims_common import is_integer_dtype
 from ...utils._ordered_set import OrderedSet
-from ...utils._sympy.functions import FloorDiv, ModularIndexing
+from ...utils._sympy.functions import FloorDiv, Max, Min, ModularIndexing
 from ...utils._sympy.symbol import symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
@@ -134,9 +134,9 @@ class HalidePrinter(PythonPrinter):  # noqa: docstring_linter
 
         mid = len(expr.args) // 2
         # pyrefly: ignore [missing-attribute]
-        a = self._print(sympy.Min(*expr.args[:mid]))
+        a = self._print(Min(*expr.args[:mid]))
         # pyrefly: ignore [missing-attribute]
-        b = self._print(sympy.Min(*expr.args[mid:]))
+        b = self._print(Min(*expr.args[mid:]))
         return f"hl.min({a}, {b})"
 
     def _print_Max(self, expr):
@@ -146,9 +146,9 @@ class HalidePrinter(PythonPrinter):  # noqa: docstring_linter
 
         mid = len(expr.args) // 2
         # pyrefly: ignore [missing-attribute]
-        a = self._print(sympy.Max(*expr.args[:mid]))
+        a = self._print(Max(*expr.args[:mid]))
         # pyrefly: ignore [missing-attribute]
-        b = self._print(sympy.Max(*expr.args[mid:]))
+        b = self._print(Max(*expr.args[mid:]))
 
         return f"hl.max({a}, {b})"
 
@@ -612,6 +612,16 @@ class HalideOverrides(OpOverrides):
         if dtype not in (torch.int32, torch.int64):
             return ops.to_dtype(var, dtype)
         return var
+
+    @classmethod
+    def value_expr(cls, expr, dtype):
+        index = V.kernel.prepare_indexing(expr)
+        var = V.kernel.genfunc(
+            V.kernel.index_to_str(index),
+            V.kernel.used_dims_from_index(index),
+            bounds=get_bounds_index_expr(expr),
+        )
+        return ops.to_dtype(var, dtype)
 
     @classmethod
     def indirect_indexing(cls, index_var, size, check=True, wrap_neg=True):

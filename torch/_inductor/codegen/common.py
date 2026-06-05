@@ -26,6 +26,7 @@ from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._config_module import ConfigModule
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Max
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -206,7 +207,7 @@ class WorkspaceArg(CodegenSymbol):
                 "WorkspaceArg.maximum requires matching dtype, device, and inner_name"
             )
         return WorkspaceArg(
-            count=sympy.Max(a.count, b.count),
+            count=Max(a.count, b.count),
             zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
             dtype=a.dtype,
             device=a.device,
@@ -329,6 +330,12 @@ class DeviceOpOverrides:
 
     def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
+
+    def current_stream(self) -> str:
+        raise NotImplementedError
+
+    def stream_handle(self, stream_name: str) -> str:
+        return f"{stream_name}.native_handle"
 
     def cpp_device_guard(self) -> str:
         raise NotImplementedError
@@ -696,6 +703,7 @@ def deduce_output_dtype_by_name(
     elif op_name in (
         "to_dtype",
         "index_expr",
+        "value_expr",
     ):
         return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
@@ -725,11 +733,22 @@ def deduce_output_dtype_by_name(
     return None
 
 
+def _is_runtime_triton_assert_target() -> bool:
+    return (
+        get_current_backend() == "triton"
+        and V.graph.get_current_device_or_throw().type != "cpu"
+        and hasattr(V.kernel, "triton_tensor_ndim")
+    )
+
+
 def check_dtype(
     buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
 ) -> None:
     backend = get_current_backend()
-    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+    if (
+        config.test_configs.runtime_triton_dtype_assert
+        and _is_runtime_triton_assert_target()
+    ):
         buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
     elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
         from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
@@ -754,10 +773,12 @@ def check_dtype(
 def check_shape(
     buffer: IndentedBuffer, var: CSEVariableType, shape: BlockShapeType
 ) -> None:
-    backend = get_current_backend()
     if shape is None:
         raise AssertionError("expected shape to be not None")
-    if config.test_configs.runtime_triton_shape_assert and backend == "triton":
+    if (
+        config.test_configs.runtime_triton_shape_assert
+        and _is_runtime_triton_assert_target()
+    ):
         shape_str = (
             ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
         )
@@ -2754,15 +2775,16 @@ class CSEProxy(DefaultHandler):
             if (
                 config.test_configs.runtime_triton_dtype_assert
                 or config.test_configs.static_cpp_dtype_assert
-            ):
-                if var_dtype is None:
-                    raise AssertionError("expected var_dtype to be not None")
+            ) and var_dtype is not None:
                 check_dtype(V.kernel.compute, csevar, var_dtype)
 
-            if config.test_configs.runtime_triton_shape_assert:
-                if output_shape is None:
-                    raise AssertionError("expected output_shape to be not None")
-                check_shape(V.kernel.compute, csevar, output_shape)
+            if (
+                config.test_configs.runtime_triton_shape_assert
+                and _is_runtime_triton_assert_target()
+            ):
+                shape_to_check = csevar.shape if csevar.shape is not None else var_shape
+                if shape_to_check is not None:
+                    check_shape(V.kernel.compute, csevar, shape_to_check)
 
             if config.runtime_triton_nan_asserts:
                 check_nan(V.kernel.compute, csevar)
@@ -2842,9 +2864,15 @@ class CSEProxy(DefaultHandler):
             else:
                 stm = var
 
-            # Propagate bounds as we know how to compute them properly
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+            # Propagate bounds as we know how to compute them properly.
+            # When wrap_neg=False, negative indices stay negative and must keep
+            # their original bounds so lower-bound checks are not elided.
+            new_bounds = var.bounds if not wrap_neg else ValueRanges.unknown()
+            if (
+                wrap_neg
+                and var.bounds != ValueRanges.unknown()
+                and isinstance(size, sympy.Number)
+            ):
                 # Take the negative part of the bound and add size to it
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the cond

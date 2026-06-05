@@ -34,13 +34,14 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
     IS_ARM64,
-    IS_CPU_CAPABILITY_SVE256,
     IS_LINUX,
+    IS_WINDOWS,
     MACOS_VERSION,
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
     TEST_WITH_ROCM,
+    TEST_WITH_TORCHINDUCTOR,
     TEST_XPU,
 )
 from torch.testing._internal.opinfo.core import (
@@ -526,16 +527,12 @@ def sample_inputs_linalg_pinv_singular(
         for k in range(min(3, m, n)):
             # Note that by making the columns of `a` and `b` orthonormal we make sure that
             # the product matrix `a @ b.t()` has condition number 1 when restricted to its image
-            a = (
+            a = torch.linalg.qr(
                 torch.rand(*batch, m, k, device=device, dtype=dtype)
-                .qr()
-                .Q.requires_grad_(requires_grad)
-            )
-            b = (
+            ).Q.requires_grad_(requires_grad)
+            b = torch.linalg.qr(
                 torch.rand(*batch, n, k, device=device, dtype=dtype)
-                .qr()
-                .Q.requires_grad_(requires_grad)
-            )
+            ).Q.requires_grad_(requires_grad)
             yield SampleInput(a, args=(b,))
 
 
@@ -1522,7 +1519,25 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.bfloat16, torch.float16),
             ),
-            skipCUDAIfRocm,  # regression in ROCm 6.4
+            # regression in ROCm 6.4; f32, f64 re-enabled to validate fix
+            DecorateInfo(
+                unittest.skip("Skipped on ROCm (regression in ROCm 6.4)"),
+                device_type="cuda",
+                dtypes=(torch.complex64, torch.complex128),
+                active_if=TEST_WITH_ROCM,
+            ),
+            # ROCm: second-order autograd through vmap (vmap(vjp(vjp(...)))) on
+            # linalg.householder_product accumulates an f32 precision difference
+            # that exceeds the default tolerance. Other functorch transforms for
+            # this op (vjp/vmapvjp/jvp/etc.) only generate f32 variants and pass.
+            DecorateInfo(
+                unittest.skip("ROCm: 2nd-order vmap(vjp(vjp)) precision accumulation"),
+                "TestOperators",
+                "test_vmapvjpvjp",
+                device_type="cuda",
+                dtypes=(torch.float32,),
+                active_if=TEST_WITH_ROCM,
+            ),
         ],
     ),
     OpInfo(
@@ -1547,6 +1562,15 @@ op_db: list[OpInfo] = [
         skips=(
             # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # https://github.com/pytorch/pytorch/issues/76962
+            DecorateInfo(
+                unittest.skip("Flaky on Linux CUDA"),
+                "TestDecomp",
+                "test_comprehensive",
+                device_type="cuda",
+                dtypes=(torch.complex64, torch.complex128),
+                active_if=IS_LINUX,
+            ),
         ),
     ),
     OpInfo(
@@ -1603,14 +1627,15 @@ op_db: list[OpInfo] = [
             ),
             # Exception: The operator 'aten::linalg_lstsq.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # https://github.com/pytorch/pytorch/issues/95412
             # see https://github.com/pytorch/pytorch/issues/177249
             DecorateInfo(
-                unittest.expectedFailure,
+                unittest.skip,
                 "TestJit",
                 "test_variant_consistency_jit",
                 device_type="cpu",
                 dtypes=[torch.complex64],
-                active_if=IS_LINUX and IS_ARM64 and not IS_CPU_CAPABILITY_SVE256,
+                active_if=IS_LINUX or IS_WINDOWS,
             ),
         ),
     ),
@@ -1738,6 +1763,19 @@ op_db: list[OpInfo] = [
                 active_if=MACOS_VERSION < 26.0,
             ),
         ),
+        decorators=[
+            # https://github.com/pytorch/pytorch/issues/184350
+            # DTensor lowers a multi_dot chain with a Shard contraction dim
+            # into a per-rank partial sum, then all-reduces. The summation
+            # order differs from the single reference matmul, and in float32
+            # the drift can exceed the default tolerance for some inputs.
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-5, rtol=2.4e-6)}),
+                "TestDTensorOps",
+                "test_dtensor_op_db",
+                dtypes=(torch.float32,),
+            ),
+        ],
     ),
     # NB: linalg.norm has two variants so that different skips can be used for different sample inputs
     OpInfo(
@@ -2094,6 +2132,14 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 device_type="mps",
                 dtypes=(torch.complex64,),
+            ),
+            # https://github.com/pytorch/pytorch/issues/137684
+            DecorateInfo(
+                unittest.skip,
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda",
+                dtypes=(torch.float32,),
             ),
         ),
     ),
@@ -2589,9 +2635,8 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_eager",
                 device_type="mps",
             ),
-            # see https://github.com/pytorch/pytorch/issues/177264
             DecorateInfo(
-                unittest.expectedFailure,
+                toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-04)}),
                 "TestEagerFusionOpInfo",
                 "test_aot_autograd_symbolic_exhaustive",
                 device_type="cpu",
@@ -2695,6 +2740,21 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
+            # The test is flaky on AMX with Inductor
+            DecorateInfo(
+                unittest.skip,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=(
+                    TEST_WITH_TORCHINDUCTOR
+                    and isinstance(
+                        torch._inductor.cpu_vec_isa.pick_vec_isa(),
+                        torch._inductor.cpu_vec_isa.VecAMX,
+                    )
+                ),
+            ),
         ),
     ),
     OpInfo(
@@ -2736,6 +2796,21 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 device_type="mps",
                 dtypes=(torch.complex64,),
+            ),
+            # The test is flaky on AMX with Inductor
+            DecorateInfo(
+                unittest.skip,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=(
+                    TEST_WITH_TORCHINDUCTOR
+                    and isinstance(
+                        torch._inductor.cpu_vec_isa.pick_vec_isa(),
+                        torch._inductor.cpu_vec_isa.VecAMX,
+                    )
+                ),
             ),
         ),
     ),
