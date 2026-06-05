@@ -970,6 +970,10 @@ class CachingAutotuner(KernelInterface):
         that we don't need to store in the cache(since TritonBundler handles the collection for us),
         this behavior is gated by keep_static_cubin_raw config.
         """
+        # Only cubin_raw must be retained: __getstate__ already nulls cubin_path
+        # on every serialize, so a cold-container load rehydrates the cubin from
+        # cubin_raw (reload_cubin_path calls reload_cubin_from_raw) instead of
+        # pointing at a missing file.
         if torch._inductor.config.keep_static_cubin_raw:
             return
         for result in self.compile_results:
