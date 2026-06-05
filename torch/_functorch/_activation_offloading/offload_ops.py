@@ -175,8 +175,10 @@ def reload(
     transfer_stream = _get_or_create_transfer_stream(device)
     current_stream = torch.accelerator.current_stream(device)
 
-    # Allocate on compute stream so the allocator tracks ownership correctly
-    result = torch.empty_like(tensor, device=device)
+    # Allocate on compute stream so the allocator tracks ownership correctly.
+    # Use empty (not empty_like) to get a contiguous tensor matching the
+    # contiguous CPU buffer produced by offload.
+    result = torch.empty(tensor.shape, dtype=tensor.dtype, device=device)
     completion_event = _register_wait(result, device)
 
     transfer_stream.wait_stream(current_stream)
@@ -194,7 +196,7 @@ def _(
     tensor: torch.Tensor,
     device: torch.device,
 ) -> torch.Tensor:
-    return torch.empty_like(tensor, device=device)
+    return torch.empty(tensor.shape, dtype=tensor.dtype, device=device)
 
 
 # ao::wait_tensor is defined via torch.library with an aliasing schema so the
