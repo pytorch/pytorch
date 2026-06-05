@@ -424,7 +424,8 @@ class CachingAutotuner(KernelInterface):
     ):
         super().__init__()
 
-        assert len(configs) > 0, "Non-empty TritonConfig list required for compiling"
+        if len(configs) == 0:
+            raise AssertionError("Non-empty TritonConfig list required for compiling")
         # makes sure there are no pre-hooks on any of the triton configs
         for cfg in configs:
             validate_triton_config(cfg)
@@ -556,7 +557,8 @@ class CachingAutotuner(KernelInterface):
         On cache load on static autotuner, we need to recheck the autotune cache, since
         a best config could have been found from a previous run
         """
-        assert self.is_statically_launchable()
+        if not self.is_statically_launchable():
+            raise AssertionError("Expected statically launchable kernel")
 
         configs = [result.config for result in self.compile_results]
 
@@ -627,7 +629,8 @@ class CachingAutotuner(KernelInterface):
                     self.triton_meta.get("device", 0),
                 )
             return
-        assert not self.launchers
+        if self.launchers:
+            raise AssertionError("launchers already populated before precompile")
         if not self.configs:
             raise NoTritonConfigsError("No triton configs are available")
 
@@ -672,15 +675,23 @@ class CachingAutotuner(KernelInterface):
         # TODO(jansel): we should find a way to move this extra compile into the worker process
         # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg.
         device_prop = self.device_props
-        assert device_prop.regs_per_multiprocessor
-        assert device_prop.max_threads_per_multi_processor
-        assert device_prop.multi_processor_count
+        if not device_prop.regs_per_multiprocessor:
+            raise AssertionError("device_prop.regs_per_multiprocessor is not set")
+        if not device_prop.max_threads_per_multi_processor:
+            raise AssertionError(
+                "device_prop.max_threads_per_multi_processor is not set"
+            )
+        if not device_prop.multi_processor_count:
+            raise AssertionError("device_prop.multi_processor_count is not set")
         seen_config_hashes: OrderedSet[Hashable] | None = None
         warp_size = device_prop.warp_size or 32
         for result in self.compile_results:
             triton_config = result.config
             compiled_binary = result.kernel
-            assert len(self.size_hints) >= 2
+            if len(self.size_hints) < 2:
+                raise AssertionError(
+                    f"Expected at least 2 size_hints, got {len(self.size_hints)}"
+                )
             xblock = triton_config.kwargs.get("XBLOCK", 1)
             reduction_kwargs = [
                 kwarg for kwarg in triton_config.kwargs if kwarg.startswith("R")
@@ -840,8 +851,10 @@ class CachingAutotuner(KernelInterface):
         callback. No-op when the function is already present.
         """
         if self.fn.fn is None:
-            assert hasattr(self, "_reload_kernel")
-            assert callable(self._reload_kernel)
+            if not hasattr(self, "_reload_kernel"):
+                raise AssertionError("_reload_kernel attribute not set")
+            if not callable(self._reload_kernel):
+                raise AssertionError("_reload_kernel must be callable")
             self.fn = self._reload_kernel().fn
 
     def prepare_for_pickle(self) -> tuple[Any, ...]:
@@ -896,9 +909,8 @@ class CachingAutotuner(KernelInterface):
                 result.kernel.cubin_raw = None
 
     def __getstate__(self) -> dict[str, Any]:
-        assert not self.launchers, (
-            "pickle should not be called with after make_launchers()"
-        )
+        if self.launchers:
+            raise AssertionError("pickle should not be called after make_launchers()")
         return {
             **self.__dict__,
             "lock": None,
@@ -1257,7 +1269,10 @@ class CachingAutotuner(KernelInterface):
                 "xpu",
             ):
                 nonlocal budget
-                assert isinstance(arg, torch.Tensor)
+                if not isinstance(arg, torch.Tensor):
+                    raise AssertionError(
+                        f"Expected torch.Tensor for mutated arg, got {type(arg)}"
+                    )
                 required_storage_length = compute_required_storage_length(
                     arg.size(),
                     arg.stride(),
@@ -1305,22 +1320,18 @@ class CachingAutotuner(KernelInterface):
             return
         for i, arg in enumerate(args):
             if self.fn.arg_names[i] in self.reset_to_zero_arg_names:
-                assert isinstance(
-                    arg,
-                    torch.Tensor,
-                ), (
-                    "self.reset_to_zero_arg_names should only contain valid argument names"
-                )
+                if not isinstance(arg, torch.Tensor):
+                    raise AssertionError(
+                        "self.reset_to_zero_arg_names should only contain valid argument names"
+                    )
                 arg.zero_()
 
         for name, arg in kwargs.items():
             if name in self.reset_to_zero_arg_names:
-                assert isinstance(
-                    arg,
-                    torch.Tensor,
-                ), (
-                    "self.reset_to_zero_arg_names should only contain valid argument names"
-                )
+                if not isinstance(arg, torch.Tensor):
+                    raise AssertionError(
+                        "self.reset_to_zero_arg_names should only contain valid argument names"
+                    )
                 arg.zero_()
 
     def maybe_clone_args(
@@ -1336,7 +1347,10 @@ class CachingAutotuner(KernelInterface):
 
         def prepare_arg(name, arg):
             if name in self.mutated_arg_names and name not in exclude:
-                assert isinstance(arg, torch.Tensor)
+                if not isinstance(arg, torch.Tensor):
+                    raise AssertionError(
+                        f"Expected torch.Tensor for mutated arg '{name}', got {type(arg)}"
+                    )
                 return clone_preserve_strides(arg)
             else:
                 return arg
@@ -1629,7 +1643,8 @@ class CachingAutotuner(KernelInterface):
 
     def save_gpu_kernel(self, stream, launcher):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
-        assert key is not None, "kernel_name can not be None"
+        if key is None:
+            raise AssertionError("kernel_name can not be None")
         params = {
             "mangled_name": (
                 launcher.bin.metadata.name
@@ -1703,7 +1718,8 @@ class CachingAutotuner(KernelInterface):
         from torch._inductor.codecache import CpuTritonKernelCache
 
         key = self.inductor_meta.get("kernel_name")
-        assert key is not None, "kernel_name can not be None"
+        if key is None:
+            raise AssertionError("kernel_name can not be None")
 
         compiled = launcher.bin
         kernel_bytes = compiled.asm.get("so")
@@ -1798,12 +1814,13 @@ class CachingAutotuner(KernelInterface):
             )
             return out
 
-        assert not (
+        if (
             self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
             and "R0_BLOCK" in launcher.config.kwargs
-        ), (
-            "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have R0_BLOCK"
-        )
+        ):
+            raise AssertionError(
+                "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have R0_BLOCK"
+            )
         start_time = time.time_ns()
         best_config = self.coordesc_tuner.autotune(
             benchmark_one_config, launcher.config, None
@@ -2847,7 +2864,8 @@ def cached_autotune(
     has additional debugging, error handling, and on-disk caching.
     """
     configs = unique_configs(configs)
-    assert len(configs) == 1 or filename
+    if len(configs) != 1 and not filename:
+        raise AssertionError("filename required when multiple configs are provided")
     inductor_meta = {} if inductor_meta is None else inductor_meta
 
     configs, autotune_cache, autotune_cache_info = check_autotune_cache(
@@ -2873,7 +2891,10 @@ def cached_autotune(
         if "XBLOCK" not in inspect.signature(fn.fn).parameters:
             for tconfig in configs:
                 if "XBLOCK" in tconfig.kwargs:
-                    assert tconfig.kwargs["XBLOCK"] == 1
+                    if tconfig.kwargs["XBLOCK"] != 1:
+                        raise AssertionError(
+                            f"Expected XBLOCK == 1 when not in fn params, got {tconfig.kwargs['XBLOCK']}"
+                        )
                     tconfig.kwargs.pop("XBLOCK")
 
         if inductor_meta.get("profile_bandwidth"):
@@ -2934,16 +2955,18 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
             continue
         block = cfg[f"{label}BLOCK"]
         if numel == 1:
-            assert block == 1, (
-                f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
-                f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
-            )
+            if block != 1:
+                raise AssertionError(
+                    f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
+                    f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
+                )
         max_block = TRITON_MAX_BLOCK[label]
         max_block_str = f'config.triton.max_block["{label}"]'
-        assert max_block % block == 0, (
-            f"TritonKernel.indexing assumes {label}BLOCK divides {max_block_str}"
-            f" but {label}BLOCK={block} and {max_block_str}={max_block} (cfg={cfg})."
-        )
+        if max_block % block != 0:
+            raise AssertionError(
+                f"TritonKernel.indexing assumes {label}BLOCK divides {max_block_str}"
+                f" but {label}BLOCK={block} and {max_block_str}={max_block} (cfg={cfg})."
+            )
 
 
 def check_max_block(cfg: dict[str, int]):
@@ -2955,9 +2978,10 @@ def check_max_block(cfg: dict[str, int]):
         if block_suffix in var:
             prefix = var.removesuffix(block_suffix)
             max_block = TRITON_MAX_BLOCK[prefix]
-            assert val <= max_block, (
-                f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
-            )
+            if val > max_block:
+                raise AssertionError(
+                    f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
+                )
 
 
 def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
@@ -3138,20 +3162,21 @@ def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, in
         prefix = f"r{idx}_"
         max_size = min(size_hints[prefix], TRITON_MAX_BLOCK[prefix.upper()])
         dim = min(max_size, remaining)
-        assert remaining % dim == 0, (
-            f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
-        )
+        if remaining % dim != 0:
+            raise AssertionError(
+                f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
+            )
         rnumels[prefix] = dim
         remaining //= dim
 
     # Sanity check the results.
     final_numel = conditional_product(*rnumels.values())
-    assert r == final_numel, (
-        f"Expected ND reduction size ({rnumels}) to have {r} elements."
-    )
-    assert all(rnumels[prefix] <= size_hints[prefix] for prefix in rnumels), (
-        f"rnumels exceed size_hints. {rnumels} > {size_hints}"
-    )
+    if r != final_numel:
+        raise AssertionError(
+            f"Expected ND reduction size ({rnumels}) to have {r} elements."
+        )
+    if not all(rnumels[prefix] <= size_hints[prefix] for prefix in rnumels):
+        raise AssertionError(f"rnumels exceed size_hints. {rnumels} > {size_hints}")
 
     return rnumels
 
@@ -3508,9 +3533,13 @@ def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Conf
                 if not prefix_is_reduction(block_type.lower())
             }
 
-        assert all(
+        if not all(
             block_type in configs[0].kwargs for block_type in tma_min_block_sizes
-        )
+        ):
+            raise AssertionError(
+                f"Not all TMA block types found in config kwargs: "
+                f"missing {set(tma_min_block_sizes) - set(configs[0].kwargs)}"
+            )
 
         # Add a config that is guaranteed to compile
         example_config = configs[0]
@@ -3574,7 +3603,8 @@ def pointwise(
             filename=filename,
         )
 
-    assert not inductor_meta.get("no_x_dim")
+    if inductor_meta.get("no_x_dim"):
+        raise AssertionError("no_x_dim should not be set for this heuristic")
 
     numel = functools.reduce(operator.mul, size_hints.values())
     bs = max(256, min(numel // 128, 1024))
@@ -4088,7 +4118,10 @@ def adapt_config_for_tiling(
     Create an adapted configuration based on tiling scores,
     redistributing the same total block size (x * r) according to tiling scores.
     """
-    assert all(s in tiling_scores for s in size_hints)
+    if not all(s in tiling_scores for s in size_hints):
+        raise AssertionError(
+            f"Missing size_hints in tiling_scores: {set(size_hints) - set(tiling_scores)}"
+        )
     target_block_product = original_x * original_r
     block_sizes = match_target_block_product(
         size_hints, tiling_scores, target_block_product
@@ -4119,7 +4152,8 @@ def filter_reduction_configs_for_determinism(
     - if there is still a tie, pick the config with second largest XBLOCK
     """
     configs = unique_configs(configs)
-    assert len(configs) > 0
+    if len(configs) == 0:
+        raise AssertionError("No configs remaining after deduplication")
 
     def _do_filter_due_to_inductor_config():
         return (
@@ -4158,7 +4192,8 @@ def filter_reduction_configs_for_determinism(
     if len(newconfigs) > 0:
         configs = newconfigs
 
-    assert len(configs) > 0
+    if len(configs) == 0:
+        raise AssertionError("No configs remaining after filtering")
 
     def _r0_block(c):
         return c.kwargs.get("R0_BLOCK", -1)
@@ -4181,7 +4216,8 @@ def filter_reduction_configs_for_determinism(
 
     def _pick_config():
         nonlocal configs
-        assert len(configs) > 0
+        if len(configs) == 0:
+            raise AssertionError("No configs available for selection")
         if len(configs) == 1:
             return configs[0]
 
@@ -4242,7 +4278,8 @@ def reduction(
             filename=filename,
         )
 
-    assert triton_meta is not None
+    if triton_meta is None:
+        raise AssertionError("triton_meta must not be None")
 
     num_dynamic = 0
     for k in triton_meta["signature"]:
@@ -4285,9 +4322,10 @@ def cooperative_reduction(
         size_hints["x"] = 1
 
     # Cooperative reductions currently only support a single reduction dimension.
-    assert len(size_hints) == 2, (
-        "Cooperative reductions don't support tiling reduction dims"
-    )
+    if len(size_hints) != 2:
+        raise AssertionError(
+            "Cooperative reductions don't support tiling reduction dims"
+        )
     xnumel, rnumel = size_hints["x"], size_hints["r0_"]
 
     # Note that we must never create more CTAs than there are SMs, because we
@@ -4596,7 +4634,8 @@ def split_scan(
     if inductor_meta.get("no_x_dim"):
         size_hints["x"] = 1
 
-    assert triton_meta is not None
+    if triton_meta is None:
+        raise AssertionError("triton_meta must not be None")
     if len(size_hints) != 2:
         raise NotImplementedError(f"size_hints: {size_hints}")
 
@@ -4776,7 +4815,8 @@ class GridExpr:
     z_grid: str | int = 1
 
     def __post_init__(self) -> None:
-        assert self.mode in ("python", "cpp")
+        if self.mode not in ("python", "cpp"):
+            raise AssertionError(f"mode must be 'python' or 'cpp', got {self.mode!r}")
 
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         raise NotImplementedError
@@ -4843,7 +4883,8 @@ class GridExpr:
         mode: Literal["python", "cpp"] = "python",
     ) -> GridExpr:
         grid_cls = globals()[inductor_meta["grid_type"]]
-        assert issubclass(grid_cls, GridExpr)
+        if not issubclass(grid_cls, GridExpr):
+            raise AssertionError(f"Expected GridExpr subclass, got {grid_cls}")
         grid = grid_cls(inductor_meta=inductor_meta, mode=mode)
         if isinstance(cfg, Config):
             cfg = config_to_dict(cfg)
@@ -4882,13 +4923,14 @@ class GridExpr:
         kernel_name: str,
     ) -> GridExpr:
         """Factory method for lazy compile mode."""
-        assert inductor_meta is not None, (
-            "inductor_meta must be specified for lazy compile"
-        )
+        if inductor_meta is None:
+            raise AssertionError("inductor_meta must be specified for lazy compile")
         grid_type = inductor_meta.get("grid_type", None)
-        assert grid_type is not None, "grid_type must be specified for lazy compile"
+        if grid_type is None:
+            raise AssertionError("grid_type must be specified for lazy compile")
         grid_cls = globals()[grid_type]
-        assert issubclass(grid_cls, GridExpr)
+        if not issubclass(grid_cls, GridExpr):
+            raise AssertionError(f"Expected GridExpr subclass, got {grid_cls}")
         grid = grid_cls(inductor_meta=inductor_meta, mode="cpp")
         grid.generate_lazy(kernel_name)
         return grid
@@ -4945,9 +4987,12 @@ class MixOrderReductionGrid(GridExpr):
         split_size = meta.get("RSPLIT_SIZE")
         xblock = meta.get("XBLOCK")
         if not is_lazy:
-            assert split_size, "Missing RSPLIT_SIZE"
-            assert xblock, "Missing XBLOCK"
-            assert split_size % xblock == 0, f"{split_size=}, {xblock=}"
+            if not split_size:
+                raise AssertionError("Missing RSPLIT_SIZE")
+            if not xblock:
+                raise AssertionError("Missing XBLOCK")
+            if split_size % xblock != 0:
+                raise AssertionError(f"{split_size=}, {xblock=}")
         self.x_grid = self.ceildiv("xnumel", split_size)
 
 
@@ -4960,7 +5005,10 @@ class CooperativeReductionGrid(GridExpr):
 class SplitScanGrid(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         if not is_lazy:
-            assert meta.get("XBLOCK", 1) == 1
+            if meta.get("XBLOCK", 1) != 1:
+                raise AssertionError(
+                    f"Expected XBLOCK == 1 for SplitScanGrid, got {meta.get('XBLOCK', 1)}"
+                )
         self.x_grid = self.ceildiv("r0_numel", meta.get("R0_BLOCK"))
         self.y_grid = "xnumel"
 
@@ -5000,9 +5048,13 @@ class ComboKernelGrid(GridExpr):
         ynumels = []
 
         for num in range(combo_meta["num_kernels"]):
-            assert (
-                combo_meta[f"xnumel_{num}"] is None or combo_meta[f"xnumel_{num}"] > 0
-            )
+            if (
+                combo_meta[f"xnumel_{num}"] is not None
+                and combo_meta[f"xnumel_{num}"] <= 0
+            ):
+                raise AssertionError(
+                    f"xnumel_{num} must be None or positive, got {combo_meta[f'xnumel_{num}']}"
+                )
             no_x_dims.append(combo_meta[f"no_x_dim_{num}"])
             xnumels.append(combo_meta[f"xnumel_{num}"] or f"xnumel_{num}")
             if f"ynumel_{num}" in combo_meta:
@@ -5046,7 +5098,10 @@ class SequentialComboKernelGrid(ComboKernelGrid):
         no_x_dims: list[bool],
         meta: dict[str, int],
     ) -> str | int:
-        assert len(xnumels) == len(no_x_dims)
+        if len(xnumels) != len(no_x_dims):
+            raise AssertionError(
+                f"xnumels and no_x_dims length mismatch: {len(xnumels)} != {len(no_x_dims)}"
+            )
         return self.summation(
             [
                 self.ceildiv(x, 1 if no_x_dim else meta.get("XBLOCK"))
@@ -5075,7 +5130,10 @@ class SequentialFlattenComboKernelGrid(GridExpr):
         total_blocks_list = []
         for num in range(combo_meta["num_kernels"]):
             xnumel = combo_meta[f"xnumel_{num}"]
-            assert xnumel is None or xnumel > 0
+            if xnumel is not None and xnumel <= 0:
+                raise AssertionError(
+                    f"xnumel_{num} must be None or positive, got {xnumel}"
+                )
             xnumel = xnumel or f"xnumel_{num}"
             x_blocks = self.ceildiv(
                 xnumel,
@@ -5105,7 +5163,10 @@ class RoundRobinComboKernelGrid(ComboKernelGrid):
         no_x_dims: list[bool],
         meta: dict[str, int],
     ) -> str:
-        assert len(xnumels) == len(no_x_dims)
+        if len(xnumels) != len(no_x_dims):
+            raise AssertionError(
+                f"xnumels and no_x_dims length mismatch: {len(xnumels)} != {len(no_x_dims)}"
+            )
         num_kernels = self.inductor_meta["combo_grid_meta"]["num_kernels"]
         exprs = [x for x, no_x_dim in zip(xnumels, no_x_dims) if no_x_dim]
         xnumels_x_dim = [x for x, no_x_dim in zip(xnumels, no_x_dims) if not no_x_dim]

@@ -74,7 +74,8 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
             return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
 
         distort_method = config.test_configs.distort_benchmarking_result
-        assert isinstance(ms, float)
+        if not isinstance(ms, float):
+            raise AssertionError(f"Expected float, got {type(ms)}")
         if distort_method == "inverse":
             return 1.0 / ms if ms else 0.0
         elif distort_method == "random":
@@ -216,7 +217,8 @@ class Benchmarker:
             fn_kwargs = fn_kwargs or {}
             inferred_device = self.infer_device(*fn_args, **fn_kwargs)
 
-        assert isinstance(inferred_device, torch.device)
+        if not isinstance(inferred_device, torch.device):
+            raise AssertionError(f"Expected torch.device, got {type(inferred_device)}")
 
         fn_args = fn_args or tuple()
         fn_kwargs = fn_kwargs or {}

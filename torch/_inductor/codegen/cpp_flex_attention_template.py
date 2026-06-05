@@ -701,7 +701,8 @@ class CppFlexAttentionTemplate(CppTemplate):
         kernel_input_name_to_buffer,
         block_vars,
     ) -> None:
-        assert layout.dtype in [torch.float, torch.bfloat16, torch.float16]
+        if layout.dtype not in [torch.float, torch.bfloat16, torch.float16]:
+            raise AssertionError(f"unsupported layout dtype: {layout.dtype}")
         super().__init__("flex_attention", input_nodes, layout, parallel_num_threads())
         self.scale = scale
         self.score_mod = score_mod
@@ -715,7 +716,8 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         def get_idx(buf_name):
             match = re.search(r"\d+", buf_name)
-            assert match, f"incorrect score buf name: {buf_name}"
+            if not match:
+                raise AssertionError(f"incorrect score buf name: {buf_name}")
             return match.group()
 
         self.score_buf_idx = (
@@ -808,7 +810,10 @@ class CppFlexAttentionTemplate(CppTemplate):
         )
 
     def modification(self, subgraph_buffer, output_name, output_idx):
-        assert isinstance(subgraph_buffer, ir.ComputedBuffer)
+        if not isinstance(subgraph_buffer, ir.ComputedBuffer):
+            raise AssertionError(
+                f"expected ir.ComputedBuffer, got {type(subgraph_buffer)}"
+            )
         subgraph_buffer_data = subgraph_buffer.data
         from ..loop_body import LoopBody
         from ..utils import sympy_index_symbol_with_prefix, SymT
@@ -871,12 +876,13 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         from ..loop_body import MemoryUsageType
 
-        assert all(
+        if not all(
             mem.buffer_name in kernel_group.args.input_buffers
             for mem in body.memory_usage[MemoryUsageType.LOAD]
-        ), (
-            "All the buffers in the score and mask subgraph should be in kernel_group.args.input_buffers"
-        )
+        ):
+            raise AssertionError(
+                "All the buffers in the score and mask subgraph should be in kernel_group.args.input_buffers"
+            )
 
         bodies.append(body)
         var_sizes_list.append((var_sizes, ()))
@@ -984,7 +990,8 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.input_dtype = query.layout.dtype
 
         num_threads = parallel_num_threads()
-        assert isinstance(self.output_node, ir.IRNode)
+        if not isinstance(self.output_node, ir.IRNode):
+            raise AssertionError(f"expected ir.IRNode, got {type(self.output_node)}")
         buf_out = TensorBox.create(self.output_node)
         if template_buffer_node is not None:
             buf_out = template_buffer_node
