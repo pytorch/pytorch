@@ -122,7 +122,7 @@ def current_accelerator(check_available: bool = False) -> torch.device | None:
         >>>     model.to(current_device)
     """
     if (acc := torch._C._accelerator_getAccelerator()) is not None:
-        if (not check_available) or (check_available and is_available()):
+        if not check_available or is_available():
             return acc
     return None
 
