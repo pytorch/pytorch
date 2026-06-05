@@ -4123,8 +4123,14 @@ class ShapeEnv:
         self.trace_asserts = trace_asserts
         self._branch_local_shape_refinement_stack: list[
             tuple[
-                dict[sympy.Expr, sympy.Expr | None],
-                dict[sympy.Symbol, sympy.Expr | None],
+                dict[sympy.Expr, sympy.Expr],
+                dict[sympy.Symbol, sympy.Expr],
+                dict[sympy.Symbol, ValueRanges[sympy.Expr]],
+                dict[sympy.Symbol, ValueRangesSLoc],
+                int,
+                dict[sympy.Symbol | None, int],
+                int,
+                Counter[sympy.Symbol],
             ]
         ] = []
 
@@ -4251,28 +4257,61 @@ class ShapeEnv:
     @contextmanager
     def branch_local_shape_refinement(self) -> Generator[None, None, None]:
         """Temporarily add counterfactual shape facts while tracing a HOP branch."""
-        local_axioms: dict[sympy.Expr, sympy.Expr | None] = {}
-        local_replacements: dict[sympy.Symbol, sympy.Expr | None] = {}
         self._branch_local_shape_refinement_stack.append(
-            (local_axioms, local_replacements)
+            (
+                self.axioms.copy(),
+                self.replacements.copy(),
+                self.var_to_range.copy(),
+                {
+                    k: ValueRangesSLoc(v.lower, v.upper)
+                    for k, v in self.var_to_range_sloc.items()
+                },
+                len(self.guards),
+                {k: len(v) for k, v in self.deferred_runtime_asserts.items()},
+                self.num_deferred_runtime_asserts,
+                self.symbol_guard_counter.copy(),
+            )
         )
         try:
             yield
         finally:
-            self._branch_local_shape_refinement_stack.pop()
-            changed = False
-            for k, old in local_axioms.items():
-                if old is None:
-                    changed = self.axioms.pop(k, None) is not None or changed
-                else:
-                    changed = self.axioms.get(k) != old or changed
-                    self.axioms[k] = old
-            for k, old in local_replacements.items():
-                if old is None:
-                    changed = self.replacements.pop(k, None) is not None or changed
-                else:
-                    changed = self.replacements.get(k) != old or changed
-                    self.replacements[k] = old
+            (
+                old_axioms,
+                old_replacements,
+                old_var_to_range,
+                old_var_to_range_sloc,
+                old_guard_len,
+                old_deferred_runtime_assert_lens,
+                old_num_deferred_runtime_asserts,
+                old_symbol_guard_counter,
+            ) = self._branch_local_shape_refinement_stack.pop()
+            changed = (
+                self.axioms != old_axioms
+                or self.replacements != old_replacements
+                or self.var_to_range != old_var_to_range
+                or self.var_to_range_sloc != old_var_to_range_sloc
+            )
+            self.axioms = old_axioms
+            self.replacements = old_replacements
+            self.var_to_range = old_var_to_range
+            self.var_to_range_sloc = old_var_to_range_sloc
+            if len(self.guards) != old_guard_len:
+                del self.guards[old_guard_len:]
+                changed = True
+            for k in list(self.deferred_runtime_asserts):
+                old_len = old_deferred_runtime_assert_lens.get(k)
+                if old_len is None:
+                    self.deferred_runtime_asserts.pop(k)
+                    changed = True
+                elif len(self.deferred_runtime_asserts[k]) != old_len:
+                    del self.deferred_runtime_asserts[k][old_len:]
+                    changed = True
+            if self.num_deferred_runtime_asserts != old_num_deferred_runtime_asserts:
+                self.num_deferred_runtime_asserts = old_num_deferred_runtime_asserts
+                changed = True
+            if self.symbol_guard_counter != old_symbol_guard_counter:
+                self.symbol_guard_counter = old_symbol_guard_counter
+                changed = True
             if changed:
                 self._replacements_version_counter += 1
                 self._update_version_counter()
@@ -4290,12 +4329,9 @@ class ShapeEnv:
         if expr is sympy.false:
             return False
 
-        local_axioms, local_replacements = self._branch_local_shape_refinement_stack[-1]
         changed = False
 
         for k, v in self.get_implications(expr):
-            if k not in local_axioms:
-                local_axioms[k] = self.axioms.get(k)
             if self.axioms.get(k) != v:
                 self.axioms[k] = v
                 changed = True
@@ -4310,13 +4346,8 @@ class ShapeEnv:
                     and isinstance(replacement, sympy.Expr)
                     and symbol not in replacement.free_symbols
                 ):
-                    if symbol not in local_replacements:
-                        local_replacements[symbol] = self.replacements.get(symbol)
                     if self.replacements.get(symbol) != replacement:
                         self.replacements[symbol] = replacement
-                        self._add_target_expr(
-                            sympy.Eq(symbol, replacement, evaluate=False)
-                        )
                         changed = True
                     break
 

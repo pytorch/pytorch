@@ -1719,6 +1719,13 @@ def _check_with(
 
     from torch.fx.experimental.symbolic_shapes import expect_true
 
+    if (
+        isinstance(cond, SymBool)
+        and cond.node.shape_env.has_branch_local_shape_refinement()
+    ):
+        cond.node.shape_env.assume_branch_local_shape_expr(cond.node.expr)
+        return
+
     if expect_true(cond):
         return
 

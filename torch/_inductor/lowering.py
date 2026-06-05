@@ -1035,7 +1035,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
-        return fallback_handler(aten.view.dtype)(x, dtype)
+        x_cont = ir.ExternKernel.require_contiguous_strides(x)
+        return fallback_handler(aten.view.dtype)(x_cont, dtype)
     else:
         return TensorBox(DtypeView.create(x, dtype))
 
@@ -2922,7 +2923,7 @@ def randn(*args, **kwargs):
 
 @register_lowering(inductor_prims.force_stride_order, type_promotion_kind=None)
 def inductor_force_stride_order(input_tensor, stride):
-    stride_order = ir.get_stride_order(stride, V.graph.sizevars.shape_env)
+    stride_order = ir.get_stride_order(stride)
     return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
 
 
@@ -3048,8 +3049,8 @@ def inductor_randint(
         return ops.randint64(
             seed_loader([]),
             ops.index_expr(random_pos(index), torch.int32),
-            ops.index_expr(low, torch.int64),
-            ops.index_expr(high, torch.int64),
+            ops.value_expr(low, torch.int64),
+            ops.value_expr(high, torch.int64),
         )
 
     return Pointwise.create(
@@ -3689,9 +3690,6 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
 
-# Needs dimname support
-make_fallback(aten.zeros.names)
-
 # 6) Pattern-matched
 make_fallback(
     aten._scaled_dot_product_efficient_attention.default,
@@ -3780,7 +3778,9 @@ def copy(self, src, non_blocking=False):
 
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=None):
-    # TODO(jansel): memory format
+    # Don't materialize the layout here based on memory_format,
+    # as we want to give the scheduler opportunity to perform layout optimization.
+    # Let the downstream op handle the input stride as needed.
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
@@ -4093,6 +4093,15 @@ def _local_scalar_dense(data):
 
 @register_lowering(aten._assert_scalar)
 def _assert_scalar(data, msg):
+    if V.graph.sizevars.shape_env.has_branch_local_shape_refinement():
+        arg = V.graph.current_node.args[0]
+        if isinstance(arg, torch.fx.Node):
+            val = arg.meta.get("val")
+            if isinstance(val, torch.SymBool):
+                data = val.node.expr
+            elif isinstance(val, (torch.SymInt, torch.SymFloat)):
+                data = sympy.Ne(val.node.expr, 0)
+
     if isinstance(data, torch.SymBool):
         data = data.node.expr
     elif isinstance(data, (torch.SymInt, torch.SymFloat)):
@@ -4107,10 +4116,11 @@ def _assert_scalar(data, msg):
     if isinstance(data, sympy.logic.boolalg.Boolean):
         if data is sympy.true:
             return None
-        assert_op = ir.AssertScalar(data, msg)
-        V.graph.register_buffer(assert_op, set_name=True)
-        V.graph.register_operation(assert_op)
-        V.graph.sizevars.shape_env.assume_branch_local_shape_expr(data)
+        if V.graph.sizevars.shape_env.has_branch_local_shape_refinement():
+            assert_op = ir.AssertScalar(data, msg)
+            V.graph.register_buffer(assert_op, set_name=True)
+            V.graph.register_operation(assert_op)
+            V.graph.sizevars.shape_env.assume_branch_local_shape_expr(data)
     return None
 
 
@@ -4159,14 +4169,12 @@ def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
     def inner(
         *size,
-        names=None,
         dtype=None,
         device=None,
         layout=None,
         pin_memory=False,
         memory_format=None,
     ):
-        assert_nyi(names is None, "named tensors")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         assert_nyi(not memory_format, "memory_format")
         device = decode_device(device)
@@ -4193,14 +4201,12 @@ def tensor_constructor(fill_value):
 @register_lowering([torch.empty, aten.empty])
 def empty(
     *size,
-    names=None,
     dtype=None,
     layout=None,
     device=None,
     pin_memory=None,
     memory_format=None,
 ):
-    assert_nyi(names is None, "named tensors")
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
@@ -8179,7 +8185,21 @@ reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
 sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
-register_pointwise(aten.signbit, override_return_dtype=torch.bool)
+
+
+@register_lowering(aten.signbit)
+def signbit(x):
+    if x.get_dtype() in (
+        torch.bool,
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+    ):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("signbit")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
 
 register_lowering(aten._neg_view)(neg)
 

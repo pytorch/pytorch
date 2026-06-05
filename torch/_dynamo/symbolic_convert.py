@@ -881,23 +881,23 @@ def generic_jump(
                 # temporary refinement for the rest of the branch.
                 assert_value = value
                 sym_expr = value.sym_num
-                if not isinstance(sym_expr, torch.SymBool):
-                    if self.output.shape_env.has_branch_local_shape_refinement():
+                if self.output.shape_env.has_branch_local_shape_refinement():
+                    if not isinstance(sym_expr, torch.SymBool):
                         assert_value = cast(SymNodeVariable, value.bool_impl(self))
                         sym_expr = assert_value.sym_num
-                    else:
-                        sym_expr = sym_expr != 0
-
-                if self.output.shape_env.assume_branch_local_shape_expr(
-                    sym_expr.node.expr
-                ):
                     self.output.create_proxy(
                         "call_function",
                         torch.ops.aten._assert_scalar.default,
                         *proxy_args_kwargs((assert_value, error_msg), {}),
                     )
+                    self.output.shape_env.assume_branch_local_shape_expr(
+                        sym_expr.node.expr
+                    )
                     self.jump(inst)
                     return
+
+                if not isinstance(sym_expr, torch.SymBool):
+                    sym_expr = sym_expr != 0
 
                 result = torch.fx.experimental.symbolic_shapes.expect_true(sym_expr)
                 if not result:

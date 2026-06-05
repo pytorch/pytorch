@@ -7,8 +7,6 @@ import warnings
 from collections.abc import Callable
 from typing import Any
 
-import sympy
-
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
@@ -47,6 +45,8 @@ def _branch_refinement_context(pred, branch):
 
     @contextlib.contextmanager
     def ctx():
+        import sympy
+
         with pred.node.shape_env.branch_local_shape_refinement():
             expr = pred.node.expr if branch else sympy.Not(pred.node.expr)
             pred.node.shape_env.assume_branch_local_shape_expr(expr)

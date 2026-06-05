@@ -18,7 +18,7 @@ from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch._inductor.utils import fresh_cache
-from torch.fx.experimental import sym_node
+from torch.fx.experimental import _config as fx_config, sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
 from torch.fx.experimental.symbolic_shapes import (
@@ -54,6 +54,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
     TEST_XPU,
+    TEST_Z3,
     TestCase,
 )
 from torch.testing._internal.logging_utils import logs_to_string
@@ -309,6 +310,23 @@ class TestPySymInt(TestCase):
         self.assertEqual(shape_env.replacements[a], b)
         self.assertNotIn(b, shape_env.replacements)
         self.assertEqual(shape_env.simplify(a), b)
+
+    @unittest.skipIf(not TEST_Z3, "requires z3")
+    def test_branch_local_shape_refinement_skips_target_expr(self):
+        with fx_config.patch(translation_validation=True):
+            shape_env = ShapeEnv()
+        a = sympy.Symbol("a", integer=True)
+        b = sympy.Symbol("b", integer=True)
+        shape_env._add_z3var(a, int)
+        shape_env._add_z3var(b, int)
+        shape_env._set_replacement(a, b, "test")
+        target_exprs = set(shape_env.validator._target_exprs)
+
+        with shape_env.branch_local_shape_refinement():
+            self.assertTrue(shape_env.assume_branch_local_shape_expr(sympy.Eq(b, 1)))
+            self.assertEqual(shape_env.simplify(a), sympy.Integer(1))
+
+        self.assertEqual(shape_env.validator._target_exprs, target_exprs)
 
     def test_roundtrip(self):
         shape_env = ShapeEnv()
