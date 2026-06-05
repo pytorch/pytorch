@@ -1215,6 +1215,38 @@ Example:
           py::arg("peer_rank"),
           py::call_guard<py::gil_scoped_release>());
 
+  py::enum_<::c10d::HookOpName>(module, "HookOpName")
+      .value("SEND", ::c10d::HookOpName::SEND)
+      .value("RECV", ::c10d::HookOpName::RECV)
+      .value("BROADCAST", ::c10d::HookOpName::BROADCAST)
+      .value("ALLREDUCE", ::c10d::HookOpName::ALLREDUCE)
+      .value("REDUCE", ::c10d::HookOpName::REDUCE)
+      .value("ALLGATHER", ::c10d::HookOpName::ALLGATHER)
+      .value("REDUCE_SCATTER", ::c10d::HookOpName::REDUCE_SCATTER)
+      .value("ALLTOALL", ::c10d::HookOpName::ALLTOALL)
+      .value("BARRIER", ::c10d::HookOpName::BARRIER)
+      .value("SCATTER", ::c10d::HookOpName::SCATTER)
+      .value("GATHER", ::c10d::HookOpName::GATHER)
+      .value("SPLIT", ::c10d::HookOpName::SPLIT)
+      .value("NEW_WINDOW", ::c10d::HookOpName::NEW_WINDOW)
+      .value("UNKNOWN", ::c10d::HookOpName::UNKNOWN);
+
+  py::class_<::c10d::PreHookArgs>(module, "PreHookArgs")
+      .def(py::init<>())
+      .def_readwrite("name", &::c10d::PreHookArgs::name)
+      .def_readwrite("async_op", &::c10d::PreHookArgs::async_op)
+      .def_readwrite("input_tensors", &::c10d::PreHookArgs::input_tensors)
+      .def_readwrite("output_tensors", &::c10d::PreHookArgs::output_tensors)
+      .def_readwrite("root", &::c10d::PreHookArgs::root)
+      .def_readwrite("op_id", &::c10d::PreHookArgs::op_id);
+
+  py::class_<::c10d::PostHookArgs>(module, "PostHookArgs")
+      .def(py::init<>())
+      .def_readwrite("name", &::c10d::PostHookArgs::name)
+      .def_readwrite("async_op", &::c10d::PostHookArgs::async_op)
+      .def_readwrite("work", &::c10d::PostHookArgs::work)
+      .def_readwrite("op_id", &::c10d::PostHookArgs::op_id);
+
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
       .def(py::init<>())
@@ -3024,6 +3056,36 @@ Arguments:
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
               "Create a new one-sided communication window")
+          .def(
+              "register_abort_hook",
+              &::c10d::ProcessGroup::registerAbortHook,
+              py::arg("hook_id"),
+              py::arg("hook"),
+              "Register an abort hook, called before abort on timeout/error")
+          .def(
+              "unregister_abort_hook",
+              &::c10d::ProcessGroup::unregisterAbortHook,
+              py::arg("hook_id"))
+          .def(
+              "register_pre_hook",
+              &::c10d::ProcessGroup::registerPreHook,
+              py::arg("hook_id"),
+              py::arg("hook"),
+              "Register a pre-hook, called before each collective is issued")
+          .def(
+              "unregister_pre_hook",
+              &::c10d::ProcessGroup::unregisterPreHook,
+              py::arg("hook_id"))
+          .def(
+              "register_post_hook",
+              &::c10d::ProcessGroup::registerPostHook,
+              py::arg("hook_id"),
+              py::arg("hook"),
+              "Register a post-hook, called after each collective is issued")
+          .def(
+              "unregister_post_hook",
+              &::c10d::ProcessGroup::unregisterPostHook,
+              py::arg("hook_id"))
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
             return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })
@@ -3134,6 +3196,16 @@ Arguments:
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
               "Create a new one-sided communication window")
+          .def(
+              "register_abort_hook",
+              &::c10d::Backend::registerAbortHook,
+              py::arg("hook_id"),
+              py::arg("hook"),
+              "Register an abort hook, called before abort on timeout/error")
+          .def(
+              "unregister_abort_hook",
+              &::c10d::Backend::unregisterAbortHook,
+              py::arg("hook_id"))
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,

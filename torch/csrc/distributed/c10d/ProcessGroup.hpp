@@ -1076,6 +1076,53 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return getDefaultBackend()->new_window(tensor);
   }
 
+  // Hook API. Abort hooks forward to the default backend; pre/post collective
+  // hooks are registered on the process group. Hooks are keyed by an opaque
+  // hook_id so they can be individually unregistered. See Hooks.hpp.
+  virtual void registerAbortHook(int64_t hook_id, AbortHook hook) {
+    getDefaultBackend()->registerAbortHook(hook_id, std::move(hook));
+  }
+
+  virtual void unregisterAbortHook(int64_t hook_id) {
+    getDefaultBackend()->unregisterAbortHook(hook_id);
+  }
+
+  virtual void registerPreHook(int64_t /* hook_id */, PreHook /* hook */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            getBackendName(),
+            " does not support registerPreHook"));
+  }
+
+  virtual void unregisterPreHook(int64_t /* hook_id */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            getBackendName(),
+            " does not support unregisterPreHook"));
+  }
+
+  virtual void registerPostHook(int64_t /* hook_id */, PostHook /* hook */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            getBackendName(),
+            " does not support registerPostHook"));
+  }
+
+  virtual void unregisterPostHook(int64_t /* hook_id */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            getBackendName(),
+            " does not support unregisterPostHook"));
+  }
+
   // This creates a new subgroup using the specified ranks.
   // The current rank must be included in the list of new_ranks.
   virtual c10::intrusive_ptr<ProcessGroup> splitGroup(
