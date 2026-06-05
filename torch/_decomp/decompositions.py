@@ -4136,7 +4136,7 @@ def select_one_layer_lstm_function(input, hx, params):
         * ``torch._C._get_mkldnn_enabled()`` returns ``True``.
         * All the input args are on CPU.
         * The dtypes of args are either torch.float or torch.bfloat16.
-        * Inference.
+        * Grad mode is disabled or no inputs require gradients.
         * ``has_projections`` returns ``False``.
 
     Args:
@@ -4163,7 +4163,7 @@ def select_one_layer_lstm_function(input, hx, params):
             if dtype not in [torch.float, torch.bfloat16]:
                 return False
 
-        if input.requires_grad:
+        if torch.is_grad_enabled() and any(t.requires_grad for t in tensors):
             return False
 
         has_projections = hx[0].size(2) != hx[1].size(2)
