@@ -31,6 +31,58 @@ Tensors to a new device ("new" meaning not belonging to the set of
 output compared to non-checkpointed passes is never guaranteed.
 ```
 
+## Activation Memory Budget with `torch.compile`
+
+`torch.compile` uses AOTAutograd to trace the forward and backward pass
+ahead of time. For training graphs, AOTAutograd's partitioner decides which
+forward intermediates to save for backward and which intermediates to
+recompute. Use `torch._functorch.config.activation_memory_budget` to control
+that memory/runtime tradeoff for compiled regions:
+
+```python
+import torch
+import torch._functorch.config
+
+with torch._functorch.config.patch(activation_memory_budget=0.5):
+    compiled_step = torch.compile(train_step)
+    # The first call triggers compilation with the patched budget.
+    loss = compiled_step(*args)
+    loss.backward()
+```
+
+The option is in the `torch._functorch.config` namespace, not
+`torch._dynamo.config`, because it is consumed by AOTAutograd after TorchDynamo
+captures the graph. Set it before the relevant compile trace, or use
+`torch._functorch.config.patch(...)` around the `torch.compile` call and first
+invocation that triggers compilation.
+
+Valid values are floats in the inclusive range `0.0` to `1.0`. Values outside
+that range raise an error. The default is `1.0`, which chooses the
+runtime-optimized partitioning strategy. `0.0` corresponds to applying
+activation checkpointing to the full compiled region, saving the minimum
+eligible activation state and recomputing more during backward. Intermediate
+values ask the partitioner to choose the fastest plan that fits within the
+normalized activation memory budget. Lower budgets can reduce saved activation
+memory, but may increase backward compute.
+
+Use `torch.autograd.graph.region_activation_memory_budget(...)` to override the
+global budget for a compiled region.
+
+Related advanced knobs live in the same namespace:
+
+- `torch._functorch.config.activation_memory_budget_solver` selects the
+  knapsack solver used by the partitioner. The default is `"dp"`; other
+  built-in choices include `"greedy"`, `"ilp"` (requires SciPy), and
+  `"dp_knapsack_sliding_hirschberg"`.
+- `torch._functorch.config.activation_memory_budget_runtime_estimator` controls
+  how recomputation cost is estimated. The default is `"flops"`; `"profile"`
+  benchmarks operators, and `"testing"` is intended for tests.
+- Setting `torch._functorch.config.visualize_memory_budget_pareto` to `True`
+  causes the partitioner to write an SVG Pareto frontier for memory budget
+  versus recomputation runtime. Use
+  `torch._functorch.config.memory_budget_pareto_dir` to choose the output
+  directory.
+
 ```{eval-rst}
 .. currentmodule:: torch.utils.checkpoint
 .. autofunction:: checkpoint
