@@ -2923,9 +2923,7 @@ def _coalescing_manager(
                 outputs.append(not_none(op.dst_tensor))
             all_gather_opts = AllgatherOptions()
             all_gather_opts.asyncOp = async_ops
-            work = group.allgather_into_tensor_coalesced(
-                outputs, inputs, all_gather_opts
-            )
+            work = group.all_gather_single_coalesced(outputs, inputs, all_gather_opts)
         elif op0 is reduce_scatter_single:
             inputs = []
             outputs = []
@@ -2935,7 +2933,7 @@ def _coalescing_manager(
             reduce_opts = ReduceScatterOptions()
             reduce_opts.reduceOp = not_none(op_list[0].redop)
             reduce_opts.asyncOp = async_ops
-            work = group.reduce_scatter_tensor_coalesced(outputs, inputs, reduce_opts)
+            work = group.reduce_scatter_single_coalesced(outputs, inputs, reduce_opts)
         else:
             raise AssertionError(
                 f"Coalescing manager does not support fast-path coalescing of {op0}, "
@@ -4403,7 +4401,7 @@ def all_gather_single(output_tensor, input_tensor, group=None, async_op=False):
         else:
             return None
 
-    work = group._allgather_base(output_tensor, input_tensor, opts)
+    work = group.all_gather_single(output_tensor, input_tensor, opts)
 
     if async_op:
         return work
@@ -4952,7 +4950,7 @@ def reduce_scatter_single(output, input, op=ReduceOp.SUM, group=None, async_op=F
         else:
             return None
 
-    work = group._reduce_scatter_base(output, input, opts)
+    work = group.reduce_scatter_single(output, input, opts)
 
     if async_op:
         return work
@@ -5147,7 +5145,7 @@ def all_to_all_single(
     input_split_sizes = [] if input_split_sizes is None else input_split_sizes
 
     group = group or _get_default_group()
-    work = group.alltoall_base(
+    work = group.all_to_all_single(
         output, input, output_split_sizes, input_split_sizes, opts
     )
 
