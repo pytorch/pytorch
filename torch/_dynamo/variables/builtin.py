@@ -572,7 +572,6 @@ class BuiltinVariable(BaseBuiltinVariable):
     ]:
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
-            operator.mod: (["__mod__", "__rmod__", "__imod__"], operator.imod),
             pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
             operator.pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
             # NB: The follow binary operators are not supported for now, since the
@@ -2752,6 +2751,16 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_iop(tx, a, b, "nb_inplace_true_divide", "nb_true_divide", "/=")
+
+    def call_mod(
+        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return binary_op(tx, a, b, "nb_remainder", "%")
+
+    def call_imod(
+        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return binary_iop(tx, a, b, "nb_inplace_remainder", "nb_remainder", "%=")
 
     def call_not_(
         self, tx: "InstructionTranslatorBase", a: VariableTracker
