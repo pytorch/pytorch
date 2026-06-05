@@ -840,6 +840,7 @@ class OutputGraph(OutputGraphCommon):
         self.compile_subgraph_reason = GraphCompileReason(
             "output graph has not been compiled", [], graph_break=False
         )
+        self.compile_context_weakrefs_cleared = False
         self.unspec_variable_map: dict[str, UnspecializedPythonVariable] = {}
 
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty

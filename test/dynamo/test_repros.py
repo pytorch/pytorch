@@ -1128,6 +1128,34 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x.dtype, torch.bfloat16)
         self.assertEqual(len(weakref.getweakrefs(x)), 0)
 
+    def test_swap_tensors_after_custom_backend_graph_break_free_threaded_gc(self):
+        def backend(gm, example_inputs):
+            return gm.forward
+
+        x = torch.randn(5, requires_grad=True)
+
+        @torch.compile(backend=backend)
+        def f(x):
+            y = x.to(dtype=torch.bfloat16)
+            torch.utils.swap_tensors(x, y)
+            return x.dtype
+
+        with (
+            torch._dynamo.config.patch(
+                invalidate_compile_context_weakrefs=None,
+                run_gc_after_compile=False,
+            ),
+            mock.patch(
+                "torch._dynamo.convert_frame.sysconfig.get_config_var",
+                return_value=1,
+            ),
+            mock.patch(
+                "torch._dynamo.convert_frame.gc.collect", wraps=gc.collect
+            ) as collect,
+        ):
+            self.assertEqual(f(x), torch.bfloat16)
+        self.assertEqual(collect.call_count, 1)
+
     def test_swap_module_params_on_conversion_after_custom_backend_graph_break(self):
         def backend(gm, example_inputs):
             return gm.forward

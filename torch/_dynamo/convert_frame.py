@@ -39,6 +39,7 @@ import pstats
 import random  # noqa: F401 -- eval_frame_cpp.cpp imports random at runtime; torch.package needs this to detect the dependency
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import threading
 import time
@@ -229,15 +230,16 @@ def clear_compile_context_weakrefs(
 ) -> None:
     """Clear WeakIdRef entries that can block swap_tensors after compile."""
     should_clear = config.invalidate_compile_context_weakrefs
+    output_graph = tracer_output.output_graph_for_cleanup if tracer_output else None
+    is_graph_break = bool(
+        output_graph and output_graph.compile_subgraph_reason.graph_break
+    )
     if should_clear is None:
         should_clear = _is_registered_backend(innermost_backend(compiler_fn))
-        if not should_clear and tracer_output:
+        if not should_clear:
             # Graph breaks resume in Python, where stale compile-time weakrefs
             # can make torch.utils.swap_tensors fail before Dynamo runs again.
-            output_graph = tracer_output.output_graph_for_cleanup
-            should_clear = bool(
-                output_graph and output_graph.compile_subgraph_reason.graph_break
-            )
+            should_clear = is_graph_break
     if not should_clear or not tracer_output:
         return
     # Use output_graph_for_cleanup which is set even on error paths
@@ -245,11 +247,23 @@ def clear_compile_context_weakrefs(
     output_graph = tracer_output.output_graph_for_cleanup
     if output_graph is None:
         return
+    if output_graph.compile_context_weakrefs_cleared:
+        return
     tc = output_graph.tracing_context
     tc.tensor_to_context.clear()
     _clear_fake_mode_weakrefs(tc.fake_mode)
     if hasattr(output_graph, "_old_fake_mode"):
         _clear_fake_mode_weakrefs(output_graph._old_fake_mode)
+    output_graph.compile_context_weakrefs_cleared = True
+    if (
+        is_graph_break
+        and sysconfig.get_config_var("Py_GIL_DISABLED") == 1
+        and not config.run_gc_after_compile
+    ):
+        # Free-threaded Python can defer destruction of cleared WeakIdRef
+        # objects. Force collection before eager graph-break code resumes and
+        # potentially calls swap_tensors, which rejects any live weakrefs.
+        gc.collect()
 
 
 class Tracker:
