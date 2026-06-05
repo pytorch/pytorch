@@ -8,9 +8,24 @@ import torch
 # the module-level __getattr__. For example:
 #     libtorch_agn_2_13.ops.sgd_out_of_place(...)  # from 2.9
 #     libtorch_agn_2_13.ops.my_sum(...)            # from 2.10
+#
+# Ops defined in this package's csrc/ (e.g. test_stream_native_handle) are
+# registered on ``torch.ops.libtorch_agn_2_13`` and wrapped explicitly below.
 # =============================================================================
 
 _NAMESPACE = "libtorch_agn_2_13"
+
+
+def test_stream_native_handle(device_index) -> int:
+    """Stable ``Stream::nativeHandle`` vs ``torch.accelerator`` (2.13+)."""
+    return torch.ops.libtorch_agn_2_13.test_stream_native_handle.default(device_index)
+
+
+def test_kernel_launch_on_stream(input, fill_value: int):
+    """Launch CUDA kernel using stream from nativeHandle()."""
+    return torch.ops.libtorch_agn_2_13.test_kernel_launch_on_stream.default(
+        input, fill_value
+    )
 
 
 def __getattr__(name):
