@@ -1044,7 +1044,7 @@ class CachingAutotuner(KernelInterface):
 
         compile_meta["debug"] = self.inductor_meta.get(
             "assert_indirect_indexing", True
-        ) and not self.inductor_meta.get("is_hip", False)
+        )
 
         # device type will be "hip" rather than "cuda" here
         compile_meta["device_type"] = self.device_props.type
