@@ -17,6 +17,7 @@ from typing import Any, cast, Literal, NamedTuple, overload, TypeAlias, TypeVar
 from typing_extensions import deprecated, Never, NotRequired, Self, TypedDict
 
 import torch
+import torch.distributed as dist
 from torch import Tensor
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import setup_compilation_env
@@ -33,6 +34,12 @@ from torch.utils._pytree import (
 if typing.TYPE_CHECKING:
     from torch._prims_common import DeviceLikeType
     from torch.fx.node import BaseArgumentTypes
+
+
+if dist._is_spmd_types_available():
+    import spmd_types as spmd
+    from spmd_types.runtime import get_partition_spec
+    from spmd_types.types import PartitionSpec
 
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
@@ -54,6 +61,104 @@ if typing.TYPE_CHECKING:
 _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = False
 
 _WARNINGS_SHOWN: set[str] = set()
+
+
+def _spmd_type_flex_inputs(query: Tensor, key: Tensor, value: Tensor) -> None:
+    """
+    Simple Q/K/V typechecking on FlexAttention inputs.
+
+    This mirrors the conservative DTensor SDPA strategy: q/k/v may all be
+    replicated, or they may all be sharded on the same batch/head mesh axes.
+    Reject Partial inputs and any q/k/v sharding on sequence or embedding dimensions.
+    The later FlexAttention call is not typechecked internally.
+    """
+    if not dist._is_spmd_types_available() or not spmd.is_type_checking():
+        return
+
+    tensors = (("query", query), ("key", key), ("value", value))
+
+    # reject Partial inputs
+    for name, tensor in tensors:
+        partial_axes = [
+            axis
+            for axis, axis_type in spmd.get_local_type(tensor).items()
+            if axis_type is spmd.P
+        ]
+        if partial_axes:
+            raise spmd.SpmdTypeError(
+                f"FlexAttention does not support Partial SPMD inputs; "
+                f"{name} is Partial on axes {partial_axes}."
+            )
+
+    # Map MeshAxis -> [query/key/value -> sharding dim]
+    dims_by_axis: dict[Any, dict[str, int]] = {}
+    for name, tensor in tensors:
+        spec = get_partition_spec(tensor)
+        if spec is None:
+            continue
+        for dim, entry in enumerate(spec):
+            if entry is None:
+                continue
+            axes = entry if isinstance(entry, tuple) else (entry,)
+            for axis in axes:
+                dims_by_axis.setdefault(axis, {})[name] = dim
+
+    # Match the DTensor SDPA strategy:
+    # each mesh axis must shard same dim, and only on batch/head dims are allowed.
+    for axis, dims_by_name in dims_by_axis.items():
+        if set(dims_by_name) != {"query", "key", "value"}:
+            raise spmd.SpmdTypeError(
+                f"FlexAttention requires q/k/v to have matching SPMD sharding; "
+                f"axis {axis} appears on {dims_by_name}."
+            )
+        dims = set(dims_by_name.values())
+        if len(dims) != 1:
+            raise spmd.SpmdTypeError(
+                f"FlexAttention requires q/k/v to shard the same tensor dim; "
+                f"axis {axis} appears on {dims_by_name}."
+            )
+        dim = next(iter(dims))
+        if dim not in (0, 1):
+            raise spmd.SpmdTypeError(
+                f"FlexAttention only supports q/k/v sharding on batch or "
+                f"head dimensions; axis {axis} shards dim {dim}."
+            )
+
+
+def _spmd_type_flex_outputs(
+    query: Tensor,
+    out: Tensor,
+    lse: Tensor,
+    max_scores: Tensor,
+) -> None:
+    """
+    SPMD typechecking for FlexAttention outputs.
+
+    The attention output follows query's q/k/v-supported sharding. Auxiliary
+    stats follow query after dropping the last embedding dim.
+    """
+    if not dist._is_spmd_types_available() or not spmd.is_type_checking():
+        return
+
+    # out follows query.
+    query_type = spmd.get_local_type(query)
+    query_spec = get_partition_spec(query)
+    spmd.assert_type(out, query_type, partition_spec=query_spec)
+
+    # Stats have shape [B, H, Q], derive PartitionSpec by dropping query's last dim.
+    if query_spec is None:
+        stats_spec = None
+    else:
+        stats_spec = PartitionSpec(*query_spec[:-1])
+
+    # skip lse, max_scores when not requested/computed.
+    with spmd.no_typecheck():
+        has_lse = lse.numel() > 0
+        has_max_scores = max_scores.numel() > 0
+    if has_lse:
+        spmd.assert_type(lse, query_type, partition_spec=stats_spec)
+    if has_max_scores:
+        spmd.assert_type(max_scores, query_type, partition_spec=stats_spec)
 
 
 def _warn_once(
@@ -2420,6 +2525,7 @@ def flex_attention(
         kernel_options,
         return_aux,
     )
+    _spmd_type_flex_inputs(query, key, value)
 
     def _finalize_outputs(
         out,
@@ -2459,15 +2565,17 @@ def flex_attention(
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
 
-        out, lse, max_scores = flex_attention_hop(
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask.as_tuple(),
-            scale,
-            kernel_options,  # type: ignore[union-attr]
-        )
+        with dist.spmd_no_typecheck():
+            out, lse, max_scores = flex_attention_hop(
+                query,
+                key,
+                value,
+                score_mod,
+                block_mask.as_tuple(),
+                scale,
+                kernel_options,  # type: ignore[union-attr]
+            )
+        _spmd_type_flex_outputs(query, out, lse, max_scores)
         return _finalize_outputs(
             out,
             lse,
@@ -2505,15 +2613,17 @@ def flex_attention(
                 _flex_attention_hop_wrapper, backend=backend, fullgraph=True
             )
 
-        out, lse, max_scores = flex_fn(
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask.as_tuple(),
-            scale,
-            kernel_options,
-        )
+        with dist.spmd_no_typecheck():
+            out, lse, max_scores = flex_fn(
+                query,
+                key,
+                value,
+                score_mod,
+                block_mask.as_tuple(),
+                scale,
+                kernel_options,
+            )
+    _spmd_type_flex_outputs(query, out, lse, max_scores)
     return _finalize_outputs(
         out,
         lse,
