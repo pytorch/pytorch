@@ -34,9 +34,13 @@ class TestUnittest(torch._dynamo.test_case.TestCase):
         env = os.environ.copy()
         env["PYTORCH_TEST_WITH_DYNAMO"] = "1"
         env["PYTORCH_PRINT_REPRO_ON_FAILURE"] = "0"
+        torch_root = os.path.dirname(os.path.dirname(torch.__file__))
+        env["PYTHONPATH"] = os.pathsep.join(
+            filter(None, [torch_root, env.get("PYTHONPATH", "")])
+        )
         return subprocess.run(
             [sys.executable, "-c", textwrap.dedent(code)],
-            cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
+            cwd=torch_root,
             env=env,
             stderr=subprocess.STDOUT,
             stdout=subprocess.PIPE,
