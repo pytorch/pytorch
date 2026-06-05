@@ -1644,6 +1644,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch({"fx_graph_cache": True})
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"strict_autograd_cache": True})
+    @torch._dynamo.config.patch({"trace_autograd_ops": True})
     def test_autograd_no_dynamo_trace_backward(self):
         """
         Test that dynamo does not trace into the backward compiled function,
