@@ -1,4 +1,5 @@
 #include <c10/core/AllocatorConfig.h>
+#include <c10/core/CachingDeviceAllocator.h>
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/device_lazy_init.h>
@@ -96,7 +97,21 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_isAllocatorInitialized", []() {
     const auto device_type = at::accelerator::getAccelerator(true).value();
-    return at::getDeviceAllocator(device_type)->initialized();
+    // Some accelerator backends (e.g. MPS) are registered as accelerators but
+    // do not yet expose their allocator through the unified
+    // c10::DeviceAllocator interface. For those, at::getDeviceAllocator() would
+    // hit a TORCH_INTERNAL_ASSERT ("Allocator for <device> is not a
+    // DeviceAllocator."). Probe the allocator directly and report "not
+    // initialized" when it is not a DeviceAllocator, so that the public
+    // torch.accelerator.empty_cache() stays a documented no-op instead of
+    // raising an internal assert. See pytorch/pytorch#156805 for the tracking
+    // RFC on extending the unified allocator API to MPS and other backends.
+    auto* device_allocator =
+        dynamic_cast<c10::DeviceAllocator*>(c10::GetAllocator(device_type));
+    if (device_allocator == nullptr) {
+      return false;
+    }
+    return device_allocator->initialized();
   });
 
   m.def("_accelerator_emptyCache", []() { at::accelerator::emptyCache(); });
