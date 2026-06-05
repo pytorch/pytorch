@@ -3286,7 +3286,8 @@ class CppVecKernel(CppKernel):
 
         use_acc_helper = self.need_use_acc_helper(reduction_type, dtype, False)
         if use_acc_helper:
-            assert logical_index is None, logical_index
+            if logical_index is not None:
+                raise AssertionError(logical_index)
             # use masked acc_vec for tail vec kernel
             self.reduction_prefix_generators.append(
                 self._gen_reduction_prefix(
@@ -3714,7 +3715,9 @@ class CppVecKernel(CppKernel):
                         arg_extra = f", {index}"
                 else:
                     if horizontal_reduction is None:
-                        raise AssertionError("expected horizontal_reduction is not None")
+                        raise AssertionError(
+                            "expected horizontal_reduction is not None"
+                        )
                     t_extra = f", {str(horizontal_reduction).lower()}"
                     arg_extra = f", {self._adjust_argreduce_index(index)}"
             if self.tail_size:
@@ -5573,13 +5576,17 @@ class CppScheduling(BaseScheduling):
             _, split_body, _ = loop_split(*sizes_body)
             if extra_indexing_ranges is None:
                 extra_indexing_ranges = split_body.var_ranges
-            assert extra_indexing_ranges == split_body.var_ranges, (
-                extra_indexing_ranges,
-                split_body.var_ranges,
-            )
+            if extra_indexing_ranges != split_body.var_ranges:
+                raise AssertionError(
+                    (
+                        extra_indexing_ranges,
+                        split_body.var_ranges,
+                    )
+                )
             extra_indexing_exprs.update(split_body.indexing_exprs.values())
 
-        assert extra_indexing_ranges is not None
+        if extra_indexing_ranges is None:
+            raise AssertionError("extra_indexing_ranges is None")
         extra_indexing_constraints = (
             extra_indexing_ranges,
             list(extra_indexing_exprs),

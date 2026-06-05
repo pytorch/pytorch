@@ -954,7 +954,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 dtype = may_get_constant_buffer_dtype(
                     V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
                 )
-                assert dtype is not None, "Fails to get the dtype of the sympy.Expr"
+                if dtype is None:
+                    raise AssertionError("Fails to get the dtype of the sympy.Expr")
                 self.codegen_tensor_item(
                     dtype, f"inputs[{idx}]", input_key, self.prefix
                 )
@@ -973,9 +974,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def _write_constants_unpacking(self):
         """Emit code to unpack constants — from constants_ (AOTI) or inputs (JIT)."""
         inputs_len = len(V.graph.graph_inputs.keys())
-        assert all(
+        if not all(
             isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
-        ), "Expect all constants to be Tensor"
+        ):
+            raise AssertionError("Expect all constants to be Tensor")
         for idx, constants_key in enumerate(V.graph.constants.keys()):
             # AOTI: weights live in constants_ owned by ConstantHandle; never std::move.
             # JIT: weights are appended as inputs to the graph.
@@ -2546,7 +2548,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         def resolve_mutation_output_name(name):
             seen = OrderedSet()
             while name in mutation_output_names:
-                assert name not in seen, "while_loop mutation outputs contain a cycle"
+                if name in seen:
+                    raise AssertionError("while_loop mutation outputs contain a cycle")
                 seen.add(name)
                 name = mutation_output_names[name]
             return name
@@ -2560,15 +2563,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 output_names.append(mutation_output_name)
                 continue
 
-            assert output_idx < len(while_loop.outputs), (
-                "while_loop has fewer non-mutated outputs than carried inputs"
-            )
+            if output_idx >= len(while_loop.outputs):
+                raise AssertionError(
+                    "while_loop has fewer non-mutated outputs than carried inputs"
+                )
             output_names.append(while_loop.outputs[output_idx].get_name())
             output_idx += 1
 
-        assert output_idx == len(while_loop.outputs), (
-            "while_loop has unused non-mutated outputs"
-        )
+        if output_idx != len(while_loop.outputs):
+            raise AssertionError("while_loop has unused non-mutated outputs")
 
         return output_names
 
@@ -3469,9 +3472,10 @@ if (!custom_op_wrapper) {
                     return codegen_ivalue(raw_arg, arg_type.getElementType())
 
                 if isinstance(raw_arg, torch.device):
-                    assert raw_arg.type in DEVICE_TO_ATEN, (
-                        raw_arg.type + " not found in DEVICE_TO_ATEN"
-                    )
+                    if raw_arg.type not in DEVICE_TO_ATEN:
+                        raise AssertionError(
+                            raw_arg.type + " not found in DEVICE_TO_ATEN"
+                        )
                     return (
                         "c10::IValue(c10::Device("
                         f"{DEVICE_TO_ATEN[raw_arg.type]}, "
@@ -3488,7 +3492,8 @@ if (!custom_op_wrapper) {
                     return codegen_tensor_ivalue(raw_arg, arg_type)
 
                 if isinstance(arg_type, torch.ListType):
-                    assert isinstance(raw_arg, (list, tuple)), type(raw_arg)
+                    if not isinstance(raw_arg, (list, tuple)):
+                        raise AssertionError(type(raw_arg))
                     list_var = next_tmp("tmp_list")
                     elem_type = arg_type.getElementType()
                     dispatch_lines.writeline(
@@ -3502,7 +3507,8 @@ if (!custom_op_wrapper) {
                     return f"c10::IValue(std::move({list_var}))"
 
                 if isinstance(arg_type, torch.TupleType):
-                    assert isinstance(raw_arg, (list, tuple)), type(raw_arg)
+                    if not isinstance(raw_arg, (list, tuple)):
+                        raise AssertionError(type(raw_arg))
                     tuple_var = next_tmp("tmp_tuple")
                     dispatch_lines.writeline(f"std::vector<c10::IValue> {tuple_var};")
                     dispatch_lines.writeline(f"{tuple_var}.reserve({len(raw_arg)});")
@@ -3550,13 +3556,16 @@ if (!custom_op_wrapper) {
 
                 arg_type_repr = repr(arg_type)
                 if arg_type_repr == "Layout":
-                    assert isinstance(raw_arg, torch.layout), type(raw_arg)
+                    if not isinstance(raw_arg, torch.layout):
+                        raise AssertionError(type(raw_arg))
                     return f"c10::IValue({LAYOUT_TO_ATEN[raw_arg]})"
                 if arg_type_repr == "MemoryFormat":
-                    assert isinstance(raw_arg, torch.memory_format), type(raw_arg)
+                    if not isinstance(raw_arg, torch.memory_format):
+                        raise AssertionError(type(raw_arg))
                     return f"c10::IValue({codegen_memory_format(raw_arg)})"
                 if arg_type_repr == "ScalarType":
-                    assert isinstance(raw_arg, torch.dtype), type(raw_arg)
+                    if not isinstance(raw_arg, torch.dtype):
+                        raise AssertionError(type(raw_arg))
                     return f"c10::IValue({DTYPE_TO_ATEN[raw_arg]})"
                 if arg_type_repr == "SymFloat":
                     return (
