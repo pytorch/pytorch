@@ -1,6 +1,5 @@
-# WARNING: the contents of this file must BOTH be valid Starlark (for Buck and
-
-# Bazel) as well as valid Python (for our cmake build).  This means that
+# WARNING: the contents of this file must BOTH be valid Starlark (for Buck)
+# as well as valid Python (for our cmake build).  This means that
 # load() directives are not allowed (as they are not recognized by Python).
 # If you want to fix this, figure out how run this file from cmake with a proper
 # Starlark interpreter as part of the default OSS build process.  If you need
@@ -496,6 +495,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/inductor_ops.cpp",
     "torch/csrc/jit/serialization/pickle.cpp",
     "torch/csrc/shim_common.cpp",
+    "torch/csrc/shim_exception_state.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -924,13 +924,13 @@ libtorch_python_core_sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/PyInterpreter.cpp",
     "torch/csrc/PyInterpreterHooks.cpp",
-    "torch/csrc/python_dimname.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/StorageMethods.cpp",
     "torch/csrc/StorageSharing.cpp",
     "torch/csrc/Stream.cpp",
     "torch/csrc/Event.cpp",
+    "torch/csrc/TensorIterator.cpp",
     "torch/csrc/TypeInfo.cpp",
     "torch/csrc/acc/Module.cpp",
     "torch/csrc/api/src/python/init.cpp",
@@ -1151,7 +1151,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/FunctionalizeFallbackKernel.cpp",
     "aten/src/ATen/MemoryOverlap.cpp",
     "aten/src/ATen/MapAllocator.cpp",
-    "aten/src/ATen/NamedTensorUtils.cpp",
     "aten/src/ATen/NestedTensorImpl.cpp",
     "aten/src/ATen/ParallelCommon.cpp",
     "aten/src/ATen/ParallelNative.cpp",
@@ -1165,7 +1164,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/TensorGeometry.cpp",
     "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorMeta.cpp",
-    "aten/src/ATen/TensorNames.cpp",
     "aten/src/ATen/TensorUtils.cpp",
     "aten/src/ATen/ThreadLocalState.cpp",
     "aten/src/ATen/FuncTorchTLS.cpp",
@@ -1178,13 +1176,11 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/DeprecatedTypeProperties.cpp",
     "aten/src/ATen/core/DeprecatedTypePropertiesRegistry.cpp",
     "aten/src/ATen/core/Dict.cpp",
-    "aten/src/ATen/core/Dimname.cpp",
     "aten/src/ATen/core/Formatting.cpp",
     "aten/src/ATen/core/function_schema.cpp",
     "aten/src/ATen/core/Generator.cpp",
     "aten/src/ATen/core/PythonOpRegistrationTrampoline.cpp",
     "aten/src/ATen/core/List.cpp",
-    "aten/src/ATen/core/NamedTensor.cpp",
     "aten/src/ATen/core/Tensor.cpp",
     "aten/src/ATen/core/VariableFallbackKernel.cpp",
     "aten/src/ATen/core/VariableHooksInterface.cpp",
@@ -1469,7 +1465,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/NaiveConvolutionTranspose2d.cpp",
     "aten/src/ATen/native/NaiveConvolutionTranspose3d.cpp",
     "aten/src/ATen/native/NaiveDilatedConvolution.cpp",
-    "aten/src/ATen/native/NamedTensor.cpp",
     "aten/src/ATen/native/Normalization.cpp",
     "aten/src/ATen/native/Onehot.cpp",
     "aten/src/ATen/native/PackedSequence.cpp",

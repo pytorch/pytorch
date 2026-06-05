@@ -39,6 +39,7 @@ _DEVICE_ID_TO_CODENAME = {
     0xE20C: XPUCodename.BMG,
     0xE20D: XPUCodename.BMG,
     0xE210: XPUCodename.BMG,
+    0xE211: XPUCodename.BMG,
     0xE212: XPUCodename.BMG,
     0xE215: XPUCodename.BMG,
     0xE216: XPUCodename.BMG,

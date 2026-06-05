@@ -14,6 +14,7 @@ from typing_extensions import ParamSpec
 import torch
 import torch.utils._pytree as pytree
 from torch._opaque_base import OpaqueBase
+from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -33,7 +34,13 @@ from .external_utils import (
     get_nonrecursive_disable_wrapper,
     wrap_dunder_call_ctx_manager,
 )
-from .utils import _get_error_on_graph_break, _set_error_on_graph_break, is_function
+from .utils import (
+    _get_error_on_graph_break,
+    _set_error_on_graph_break,
+    allow_lru_cache_wrapper_trace_without_warning,
+    is_function,
+    is_lru_cache_wrapped_function,
+)
 
 
 justknobs_check._dynamo_marked_constant = True  # type: ignore[attr-defined]
@@ -114,7 +121,7 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
         return wrap(fn)
 
 
-_nonrecursive_disable_wrapper_code = disable(lambda: None, recursive=False).__code__
+_nonrecursive_disable_wrapper_code = disable(lambda: None, recursive=False).__code__  # type: ignore[attr-defined]
 skip_code(_nonrecursive_disable_wrapper_code)
 
 
@@ -178,7 +185,7 @@ class set_stance(_DecoratorContextManager):
 
 
 def assume_constant_result(fn):  # type: ignore[no-untyped-def]
-    fn._dynamo_marked_constant = True
+    fn._dynamo_marked_constant = True  # type: ignore[attr-defined]
     return fn
 
 
@@ -754,13 +761,13 @@ def leaf_function(
             mutates_args=inner._torchdynamo_leaf_mutates_args,  # pyrefly: ignore [missing-attribute]
             hook_fn=inner._torchdynamo_leaf_hook_fn,  # type: ignore[attr-defined]
             hook_fake_fn=inner._torchdynamo_leaf_hook_fake_fn,  # type: ignore[attr-defined]
-        )
+        )  # type: ignore[attr-defined]
 
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_fake_fn = None  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_mutates_args = (  # pyrefly: ignore [missing-attribute]
         frozenset(mutates_args) if mutates_args else frozenset()
-    )
+    )  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_hook_fn = None  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_hook_fake_fn = None  # type: ignore[attr-defined]
 
@@ -1073,7 +1080,7 @@ def substitute_in_graph(
         wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
         wrapped.__torch_dynamo_can_constant_fold_through__ = can_constant_fold_through  # type: ignore[attr-defined]
 
-        return wrapped
+        return wrapped  # type: ignore[return-value]
 
     return wrapper
 
@@ -1174,7 +1181,7 @@ def mark_unbacked(
                 t._dynamo_strict_unbacked_indices = set()
 
             t._dynamo_strict_unbacked_indices.add(index)
-            t._has_dynamo_dim_marking = True
+            t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
             return
 
         if not hasattr(t, "_specialized_on"):
@@ -1210,7 +1217,7 @@ def mark_unbacked(
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
         t._dynamo_unbacked_indices.add(index)
-        t._has_dynamo_dim_marking = True
+        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
     if not isinstance(index, (list, tuple)):
@@ -1299,7 +1306,7 @@ def mark_dynamic(
 
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
-        t._has_dynamo_dim_marking = True
+        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
@@ -1334,7 +1341,7 @@ def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
         # TODO(voz): Should we bounds check?
 
         t._dynamo_weak_dynamic_indices.add(index)
-        t._has_dynamo_dim_marking = True
+        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
     if not isinstance(index, (list, tuple)):
@@ -1451,21 +1458,58 @@ def _patch_einops_symint_compat(einops_mod: Any) -> None:
         setattr(einops_mod, name, make_wrapper(cached, uncached))
 
 
-# One day, Dynamo will support tracing into einops directly (no allow_in_graph needed)
-# Note that PyTorch supports multiple versions of einops, so when that day comes,
-# we still need to be really careful about version matches.
+_EINOPS_DYNAMO_TRACING_MIN_VERSION = Version("0.8.2")
+# Known pure parser/shape helpers in einops 0.8.2. Keep this explicit so
+# unrelated or future lru_cache wrappers continue through the normal warning path.
+_EINOPS_LRU_CACHE_WRAPPER_ALLOWLIST = (
+    (
+        "einops.einops",
+        (
+            "_reconstruct_from_shape",
+            "_prepare_transformation_recipe",
+            "_compactify_pattern_for_einsum",
+        ),
+    ),
+    ("einops.packing", ("analyze_pattern",)),
+)
+
+
+def _einops_supports_dynamo_tracing(einops_mod: Any) -> bool:
+    try:
+        return Version(einops_mod.__version__) >= _EINOPS_DYNAMO_TRACING_MIN_VERSION
+    except InvalidVersion:
+        return False
+
+
+def _allow_lru_cache_trace_without_warning_for_einops() -> None:
+    import importlib
+
+    for module_name, attr_names in _EINOPS_LRU_CACHE_WRAPPER_ALLOWLIST:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+
+        for attr_name in attr_names:
+            obj = getattr(module, attr_name, None)
+            if is_lru_cache_wrapped_function(obj):
+                allow_lru_cache_wrapper_trace_without_warning(obj)
+
+
+# Dynamo can trace through einops 0.8.2+ directly (no allow_in_graph needed).
+# Older versions still need the allow_in_graph registration below.
 def _allow_in_graph_einops() -> None:
     import einops
 
-    # There is a lru_cache logspam issue with einops when allow_in_graph is not
-    # used. Disabling this for now until the lru_cache issue is resolved.
-    # if einops.__version__ >= "0.8.2":
-    #     if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
-    #         # trigger backend registration up front to avoid a later guard failure
-    #         # that would otherwise cause a recompilation
-    #         einops.rearrange(torch.randn(1), "i -> i")
-    #     # einops 0.8.2+ don't need explicit allow_in_graph calls
-    #     return
+    if _einops_supports_dynamo_tracing(einops):
+        if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
+            # trigger backend registration up front to avoid a later guard failure
+            # that would otherwise cause a recompilation
+            einops.rearrange(torch.empty(1), "i -> i")
+        # einops uses lru_cache for pure library-internal recipe helpers. Mark
+        # only those wrappers so general lru_cache warnings are unchanged.
+        _allow_lru_cache_trace_without_warning_for_einops()
+        return
 
     try:
         # requires einops > 0.6.1, torch >= 2.0
@@ -1478,7 +1522,7 @@ def _allow_in_graph_einops() -> None:
         # einops <= 0.6.1 doesn't handle unhashable SymInt in its lru_cache'd
         # helpers. Backport the try/except TypeError fallback from einops 0.7.0+
         # so allow_in_graph works during fake tensor validation.
-        _patch_einops_symint_compat(einops.einops)
+        _patch_einops_symint_compat(einops.einops)  # type: ignore[attr-defined]
         allow_in_graph(einops.rearrange)
         allow_in_graph(einops.reduce)
         if hasattr(einops, "repeat"):
@@ -1639,12 +1683,17 @@ def disable_nested_graph_breaks(fn: Any | None = None) -> Any:
 class ErrorOnGraphBreakDecoratorContextManager:
     def __init__(self, error_on_graph_break: bool) -> None:
         self.error_on_graph_break = error_on_graph_break
+        self.prev_error_on_graph_break: list[bool | None] = []
 
     __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self) -> None:
-        self.prev_error_on_graph_break = _get_error_on_graph_break()
-        _set_error_on_graph_break(self.error_on_graph_break)
+        current_error_on_graph_break = _get_error_on_graph_break()
+        if current_error_on_graph_break != self.error_on_graph_break:
+            self.prev_error_on_graph_break.append(current_error_on_graph_break)
+            _set_error_on_graph_break(self.error_on_graph_break)
+        else:
+            self.prev_error_on_graph_break.append(None)
 
     def __exit__(
         self,
@@ -1652,7 +1701,9 @@ class ErrorOnGraphBreakDecoratorContextManager:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        _set_error_on_graph_break(self.prev_error_on_graph_break)
+        prev_error_on_graph_break = self.prev_error_on_graph_break.pop()
+        if prev_error_on_graph_break is not None:
+            _set_error_on_graph_break(prev_error_on_graph_break)
 
 
 def error_on_graph_break(
@@ -1801,31 +1852,40 @@ def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:
     return getattr(method, "_torchdynamo_disable_recursive", None)
 
 
-def allow_c_hash(tp: type) -> type:
-    """Register a C extension type's ``__hash__`` as safe to call at trace time.
+_HASH_SLOTS = ("__hash__",)
+_RICHCOMPARE_SLOTS = ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
+
+
+def allow_c_slot(
+    tp: type,
+    *,
+    tp_hash: bool = True,
+    tp_richcompare: bool = True,
+) -> type:
+    """Register a C extension type's slots as safe to call at trace time.
 
     By default, ``torch.compile`` graph-breaks when it encounters ``hash()``
-    on a C extension type with a custom ``tp_hash`` slot (e.g., types defined
-    in C extension modules).  This function tells Dynamo that the type's
-    ``__hash__`` is safe to evaluate during tracing, avoiding the graph break.
+    or comparison operators on a C extension type with custom C slots (e.g.,
+    types defined in C extension modules).  This function tells Dynamo that the
+    type's C slots are safe to evaluate during tracing, avoiding graph breaks.
 
-    The hash function must satisfy these requirements:
+    The slot functions must satisfy these requirements:
 
     - **Pure**: depends only on the object's value, with no observable side
       effects (no I/O, no mutation of global state).
     - **Deterministic**: returns the same result for the same object across
       calls within a process.
-    - **Immutable objects**: the object's hash-relevant state must not change
-      after construction — if the object is mutated in a way that changes its
-      hash, Dynamo's cached hash value will be stale.
+    - **Immutable objects**: the object's state must not change after
+      construction in a way that affects the slot's return value.
 
-    Builtin types (``int``, ``str``, etc.) and Python-level ``__hash__``
-    methods are already handled and do not need registration.  This API is
-    only needed for C extension types whose ``tp_hash`` slot Dynamo cannot
-    trace into.
+    Builtin types (``int``, ``str``, etc.) and Python-level dunder methods
+    are already handled and do not need registration.  This API is only needed
+    for C extension types whose C slots Dynamo cannot trace into.
 
     Args:
-        tp: The C extension type whose ``__hash__`` should be allowed.
+        tp: The C extension type whose C slots should be allowed.
+        tp_hash: Register ``__hash__`` as safe (default True).
+        tp_richcompare: Register comparison dunders as safe (default True).
 
     Returns:
         The type, unchanged (so it can be used as a decorator).
@@ -1835,16 +1895,27 @@ def allow_c_hash(tp: type) -> type:
         import torch._dynamo
         from my_extension import MyType
 
-        torch._dynamo.allow_c_hash(MyType)
+        # Register all slots (hash + comparison)
+        torch._dynamo.allow_c_slot(MyType)
+
+        # Register only hash
+        torch._dynamo.allow_c_slot(MyType, tp_richcompare=False)
+
+        # Register only comparison
+        torch._dynamo.allow_c_slot(MyType, tp_hash=False)
     """
-    from .variables.user_defined import _safe_c_tp_hash_funcs
+    from .variables.user_defined import _safe_c_slots
 
     if not isinstance(tp, type):
-        raise TypeError(f"allow_c_hash expects a type, got {type(tp).__name__}")
-    hash_fn = tp.__hash__
-    if hash_fn is object.__hash__:
-        raise ValueError(
-            f"{tp.__name__} uses the default object.__hash__ and does not need registration"
-        )
-    _safe_c_tp_hash_funcs().add(hash_fn)
+        raise TypeError(f"allow_c_slot expects a type, got {type(tp).__name__}")
+    safe = _safe_c_slots()
+    dunders = ()
+    if tp_hash:
+        dunders += _HASH_SLOTS
+    if tp_richcompare:
+        dunders += _RICHCOMPARE_SLOTS
+    for dunder in dunders:
+        fn = getattr(tp, dunder, None)
+        if fn is not None and fn is not getattr(object, dunder, None):
+            safe.add(fn)
     return tp

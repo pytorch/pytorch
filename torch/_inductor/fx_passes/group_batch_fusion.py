@@ -139,12 +139,12 @@ def decompose_stack(graph: torch.fx.GraphModule, input_tensors: list[Any]) -> An
             aten.unsqueeze, args=(input_tensor,), kwargs={"dim": 0}
         )
         unsqueezed_inputs.append(unsqueezed_input)
-        unsqueezed_input.meta["val"] = aten.unsqueeze(input_tensor.meta["val"], dim=0)
+        unsqueezed_input.meta["val"] = aten.unsqueeze(input_tensor.meta["val"], dim=0)  # type: ignore[assignment]
         unsqueezed_inputs_meta.append(unsqueezed_input.meta["val"])
     stacked_inputs = graph.call_function(  # type: ignore[operator]
         aten.cat, args=(unsqueezed_inputs,), kwargs={"dim": 0}
     )
-    stacked_inputs.meta["val"] = aten.cat(unsqueezed_inputs_meta, dim=0)
+    stacked_inputs.meta["val"] = aten.cat(unsqueezed_inputs_meta, dim=0)  # type: ignore[assignment]
     return stacked_inputs
 
 
@@ -233,7 +233,7 @@ class PostGradBatchLinearFusion(BatchFusion):
             batch_biases.append(bias)  # type: ignore[possibly-undefined]
             batch_inputs_meta.append(input.meta)  # type: ignore[possibly-undefined, union-attr]
             batch_weights_meta.append(weight.meta)  # type: ignore[possibly-undefined, union-attr]
-            if bias is not None:
+            if bias is not None:  # type: ignore[possibly-undefined]
                 batch_biases_meta.append(bias.meta)  # type: ignore[possibly-undefined, union-attr]
             else:
                 batch_biases_meta.append(None)
@@ -275,7 +275,7 @@ class PostGradBatchLinearFusion(BatchFusion):
                         )
                         broadcast_bias.meta["val"] = aten.broadcast_to(
                             batch_biases_meta[i]["val"], broadcast_shape
-                        )
+                        )  # type: ignore[assignment]
                         new_bias_add = graph.call_function(  # type: ignore[operator]
                             aten.add.Tensor, args=((broadcast_bias, new_mm))
                         )
@@ -612,7 +612,7 @@ def is_linear_node_can_be_fused(node: torch.fx.Node):
 class PreGradBatchLinearFusion(BatchFusion):
     """
     Batch linear fusion in pre grad pass.
-    Fuse linear with same size with torch.baddmm
+    Fuse linear with same size with torch.baddbmm
     """
 
     def _getitem_args(self, getitem_node: torch.fx.Node):
@@ -717,7 +717,7 @@ class PreGradBatchLinearFusion(BatchFusion):
                     bmm_meta = bmm.meta["example_value"]
                 except Exception as e:
                     log.debug(
-                        f" exception when update bmm meta data with stack error tracekey {e}"  # noqa: G004
+                        f" exception when update bmm meta data with stack error traceback {e}"  # noqa: G004
                     )
                     bmm_meta = None
 

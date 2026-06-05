@@ -27,7 +27,10 @@ from torch._C._functorch import (
     _vmap_decrement_nesting as _vmap_decrement_nesting_impl,
     _vmap_increment_nesting as _vmap_increment_nesting_impl,
 )
-from torch._VF import _make_dual as _make_dual_impl, _unpack_dual as _unpack_dual_impl
+from torch._VF import (  # type: ignore[attr-defined]
+    _make_dual as _make_dual_impl,
+    _unpack_dual as _unpack_dual_impl,
+)
 
 
 if TYPE_CHECKING:
