@@ -111,6 +111,23 @@ bool is_blockwise_128x128_scaling(
       (scale.is_contiguous() || scale.t().is_contiguous()));
 }
 
+// 1x32 blocks for microscaled fp8 data and fp8_e8m0fnu scales
+bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  bool is_fp8_path =
+      (isFloat8Type(t.scalar_type()) &&
+       scale.scalar_type() == at::kFloat8_e8m0fnu && scale.dim() == 2 &&
+       scale.size(0) == t.size(0) &&
+       scale.size(1) == ceil_div<int64_t>(t.size(1), 32) &&
+       (scale.is_contiguous() || scale.t().is_contiguous()));
+  bool is_packed_fp4_path =
+      (t.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2 &&
+       scale.scalar_type() == at::kFloat8_e8m0fnu && scale.dim() == 2 &&
+       scale.size(0) == t.size(0) &&
+       scale.size(1) == ceil_div<int64_t>(t.size(1) * 2, 32) &&
+       (scale.is_contiguous() || scale.t().is_contiguous()));
+  return (is_fp8_path || is_packed_fp4_path);
+}
+
 bool is_desired_scaling(
     const at::Tensor& t,
     const at::Tensor& scale,
@@ -124,6 +141,8 @@ bool is_desired_scaling(
       return is_blockwise_1x128_scaling(t, scale);
     case ScalingType::BlockWise128x128:
       return is_blockwise_128x128_scaling(t, scale);
+    case ScalingType::BlockWise1x32:
+      return is_blockwise_1x32_scaling(t, scale);
     default:
       return false;
   }
@@ -172,6 +191,24 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       ceil_div<int64_t>(b.size(0), 128),
       ", ",
       ceil_div<int64_t>(b.size(1), 128),
+      ").\n"
+      "- For MXFP8 1x32 scaling, a and b should be float8, scales should be float8_e8m0fnu, scale_a should be (",
+      a.size(0),
+      ", ",
+      ceil_div<int64_t>(a.size(1), 32),
+      ") and scale_b should be (",
+      ceil_div<int64_t>(b.size(0), 32),
+      ", ",
+      b.size(1),
+      ").\n"
+      "- For MXFP4 1x32 scaling, a and b should be float4_e2m1fn_x2, scales should be float8_e8m0fnu, scale_a should be (",
+      a.size(0),
+      ", ",
+      ceil_div<int64_t>(a.size(1) * 2, 32),
+      ") and scale_b should be (",
+      ceil_div<int64_t>(b.size(0) * 2, 32),
+      ", ",
+      b.size(1),
       ").\n"
       "Got a.dtype()=",
       a.scalar_type(),
@@ -304,6 +341,8 @@ Tensor& _scaled_mm_out_xpu(
               ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
           std::make_pair(
               ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
+          std::make_pair(
+              ScalingType::BlockWise1x32, ScalingType::BlockWise1x32),
       },
       mat1,
       mat2,
@@ -339,12 +378,14 @@ Tensor& _scaled_mm_out_xpu(
       !out_dtype || *out_dtype == out.scalar_type(),
       "out_dtype must match output matrix type");
   TORCH_CHECK(
-      at::isFloat8Type(mat1.scalar_type()),
-      "Expected mat1 to be Float8 matrix got ",
+      at::isFloat8Type(mat1.scalar_type()) ||
+          mat1.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2,
+      "Expected mat1 to be Float8 or Float4_e2m1fn_x2 matrix got ",
       mat1.scalar_type());
   TORCH_CHECK(
-      at::isFloat8Type(mat2.scalar_type()),
-      "Expected mat2 to be Float8 matrix got ",
+      at::isFloat8Type(mat2.scalar_type()) ||
+          mat2.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2,
+      "Expected mat2 to be Float8 or Float4_e2m1fn_x2 matrix got ",
       mat2.scalar_type());
   // TODO: oneDNN Currently only supports e4m3 with group scales on BMG. Not
   // support 2D scales, only 1D. Needs to add more checks there.
@@ -394,21 +435,23 @@ Tensor& _scaled_mm_out_xpu(
 
   // TODO: Scale_result is not supported by now!!
   // API shapes match CUDA v1. oneDNN needs row-major contiguous.
-  // scale_a: [M, K//128] or [M//128, K//128]
-  // scale_b: [K//128, N] or [K//128, N//128]
+  // scale_a: [M, K//128] or [M//128, K//128] or [M, K//32]
+  // scale_b: [K//128, N] or [K//128, N//128] or [K//32, N]
   // Because the user might passed in the CUDA's stride (col-major because of
   // swizzling)
   // call a contiguous() to ensure row-major for oneDNN
   Tensor scale_a_internal = scale_a;
   Tensor scale_b_internal = scale_b;
   if (scaling_choice_a == ScalingType::BlockWise128x128 ||
-      scaling_choice_a == ScalingType::BlockWise1x128) {
+      scaling_choice_a == ScalingType::BlockWise1x128 ||
+      scaling_choice_a == ScalingType::BlockWise1x32) {
     scale_a_internal = scale_a.is_contiguous() ? scale_a : scale_a.contiguous();
   }
   if (scaling_choice_b == ScalingType::BlockWise1x128 ||
-      scaling_choice_b == ScalingType::BlockWise128x128) {
-    // CUDA v1 shapes [K//128, N] and [K//128, N//128] already match oneDNN's
-    // expected row-major layout. Just ensure contiguous.
+      scaling_choice_b == ScalingType::BlockWise128x128 ||
+      scaling_choice_b == ScalingType::BlockWise1x32) {
+    // CUDA v1 shapes [K//128, N], [K//128, N//128], or [K//32, N] already
+    // match oneDNN's expected row-major layout. Just ensure contiguous.
     scale_b_internal = scale_b.is_contiguous() ? scale_b : scale_b.contiguous();
   }
   return _scaled_gemm(
