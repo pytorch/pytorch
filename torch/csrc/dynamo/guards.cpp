@@ -9,6 +9,8 @@
 #include <c10/util/Synchronized.h>
 #include <c10/util/flat_hash_map.h>
 #include <fmt/format.h>
+#include <torch/csrc/Device.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/guards.h>
@@ -20,6 +22,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/extension.h>
 #include <cstdint>
 
@@ -331,13 +334,7 @@ static PyObject* TensorGuards_new(
 
 static std::vector<std::optional<c10::SymInt>> wrapIntegersInOptional(
     const c10::SymIntArrayRef& intArray) {
-  std::vector<std::optional<c10::SymInt>> optVec(intArray.size());
-  std::transform(
-      intArray.begin(),
-      intArray.end(),
-      optVec.begin(),
-      [](const c10::SymInt& value) { return value; });
-  return optVec;
+  return {intArray.begin(), intArray.end()};
 }
 
 static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
@@ -1084,8 +1081,7 @@ static PyObject* copy_if_misaligned(PyObject* dummy, PyObject* item) {
 
   if (reinterpret_cast<uintptr_t>(tensor.data_ptr()) % kAlignment == 0) {
     // Already aligned – return the original tensor.
-    Py_INCREF(item);
-    return item;
+    return Py_NewRef(item);
   }
 
   // Misaligned – clone while preserving strides.
@@ -1579,11 +1575,10 @@ class StorageOverlapChecker {
       size_t size) {
     std::vector<Tensor> tensors;
     tensors.reserve(size);
-    std::transform(
-        objects.begin(),
-        objects.end(),
-        std::back_inserter(tensors),
-        [=](PyObject* obj) { return THPVariable_Unpack(obj); });
+    std::ranges::transform(
+        objects, std::back_inserter(tensors), [](PyObject* obj) {
+          return THPVariable_Unpack(obj);
+        });
     return tensors;
   }
 
@@ -3786,25 +3781,45 @@ class GuardManager {
   }
 
   // Caller must hold dict_to_guard_managers lock.
+  //
+  // This function does two things; they must be gated differently.
+  //
+  // 1) Map cleanup: remove `this` from `map[dict]` for every dict this
+  //    manager watched. Must always run -- including when
+  //    `_disable_dict_tag_matching` is already true -- otherwise a later
+  //    watch callback on a still-live dict would dereference the freed
+  //    manager (heap-use-after-free at the `_disable_dict_tag_matching`
+  //    read in this function).
+  //
+  // 2) PyDict_Unwatch + erase of the dict-keyed map entry: only safe
+  //    when the dict pointer is still alive. The watch callback sets
+  //    `_disable_dict_tag_matching = true` on every event, including
+  //    `PyDict_EVENT_DEALLOCATED`. Once the flag is set, dict pointers
+  //    in our map may have been freed, so PyDict_Unwatch on them would
+  //    crash. When the flag is true, the dict's eventual deallocation
+  //    will tear down the watch automatically; skipping PyDict_Unwatch
+  //    here only loses an early-cleanup optimisation.
   void unwatch_all_saved_dict_pointers(DictToGuardManagersMap& map) {
 #if IS_PYTHON_3_12_PLUS
-    if (!_disable_dict_tag_matching) {
-      for (auto& value_stashed_pointers : _dict_pointers) {
-        auto stashed_pointers = value_stashed_pointers.second;
+    for (auto& value_stashed_pointers : _dict_pointers) {
+      auto stashed_pointers = value_stashed_pointers.second;
 
-        for (auto& stashed_pointer : stashed_pointers) {
-          PyObject* dict_pointer = stashed_pointer.first;
+      for (auto& stashed_pointer : stashed_pointers) {
+        PyObject* dict_pointer = stashed_pointer.first;
+        auto& managers = map[dict_pointer];
 
-          auto it = std::find(
-              map[dict_pointer].begin(), map[dict_pointer].end(), this);
-          if (it != map[dict_pointer].end()) {
-            map[dict_pointer].erase(it);
-          }
+        // (1) Always: remove this manager from the per-dict list.
+        auto it = std::find(managers.begin(), managers.end(), this);
+        if (it != managers.end()) {
+          managers.erase(it);
+        }
 
-          if (map[dict_pointer].empty()) {
-            PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
-            map.erase(dict_pointer);
-          }
+        // (2) Only when the dict is still guaranteed alive: unwatch and
+        // erase the now-empty map entry. The map.erase below invalidates
+        // the `managers` reference, so it must be the last use.
+        if (!_disable_dict_tag_matching && managers.empty()) {
+          PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
+          map.erase(dict_pointer);
         }
       }
     }
@@ -3946,7 +3961,11 @@ class GuardManager {
     return GuardDebugInfo(true, num_guards_executed);
   }
 
-  bool has_no_accessors() {
+  bool has_no_leaf_guards() const {
+    return _leaf_guards.empty();
+  }
+
+  bool has_no_accessors() const {
     return _accessors.empty();
   }
 
@@ -4267,18 +4286,25 @@ class RootGuardManager : public GuardManager {
     _epilogue_lambda_guards.emplace_back(std::move(leaf_guard));
   }
 
+  bool has_no_guards() const {
+    return has_no_leaf_guards() && has_no_accessors() &&
+        _epilogue_lambda_guards.empty();
+  }
+
   void set_init_local_state_flag() {
     _init_local_state = true;
   }
 
   // See note on [Ownership with cloning]
-  RootGuardManager* clone_manager(const py::function& clone_filter_fn) {
+  std::unique_ptr<RootGuardManager> clone_manager(
+      const py::function& clone_filter_fn) {
     // Use clone_filter_fn
     if (!py::cast<bool>(clone_filter_fn(this))) {
       return nullptr;
     }
-    RootGuardManager* cloned_root = new RootGuardManager();
-    clone_common(cloned_root, cloned_root, clone_filter_fn);
+    std::unique_ptr<RootGuardManager> cloned_root =
+        std::make_unique<RootGuardManager>();
+    clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
     }
@@ -5462,9 +5488,10 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "FrameLocalsGuardAccessor(key=" +
-        py::repr(_key).cast<std::string>() +
-        ", framelocals_idx=" + std::to_string(_framelocals_idx) + ")";
+    return fmt::format(
+        "FrameLocalsGuardAccessor(key={}, framelocals_idx={})",
+        py::repr(_key).cast<std::string>(),
+        _framelocals_idx);
   }
 
  public: // cloning functions
@@ -5631,7 +5658,7 @@ class ListGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "ListGetItemGuardAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("ListGetItemGuardAccessor({})", _index);
   }
 
  public: // cloning functions
@@ -5778,7 +5805,7 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "TupleGetItemGuardAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("TupleGetItemGuardAccessor({})", _index);
   }
 
  public: // cloning functions
@@ -5923,8 +5950,8 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
 
   std::string repr() const override {
     // Helpful when printing GuardManager tree structure.
-    return "TensorPropertyGuardAccessor<" + to_string(_prop) + +">(" +
-        std::to_string(_index) + ")";
+    return fmt::format(
+        "TensorPropertyGuardAccessor<{}>({})", to_string(_prop), _index);
   }
 
  public: // cloning functions
@@ -6539,7 +6566,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "TupleIteratorGetItemAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("TupleIteratorGetItemAccessor({})", _index);
   }
 
  public: // cloning functions
@@ -7249,11 +7276,34 @@ double profile_guard_manager(
 
 } // namespace
 
+// These helpers are exported to Python as raw function pointers on the
+// torch._C._dynamo.guards module; see the grouped PyModule_AddObject calls in
+// torch_c_dynamo_guards_init below for the rationale.
 static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
   TORCH_CHECK(
       obj != nullptr && (THPVariable_CheckExact(obj) || THPVariable_Check(obj)),
       "_torchinductor_pyobject_tensor_data_ptr: non-tensor input");
   return THPVariable_Unpack(obj).data_ptr();
+}
+
+static PyObject* _torchinductor_thp_device_new(
+    int device_type,
+    int device_index) {
+  return THPDevice_New(
+      c10::Device(static_cast<c10::DeviceType>(device_type), device_index));
+}
+
+static PyObject* _torchinductor_get_thp_dtype(int dtype) {
+  return Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>(dtype)));
+}
+
+static PyObject* _torchinductor_get_thp_layout(int layout) {
+  return Py_NewRef(torch::getTHPLayout(static_cast<c10::Layout>(layout)));
+}
+
+static PyObject* _torchinductor_get_thp_memory_format(int memory_format) {
+  return Py_NewRef(torch::utils::getTHPMemoryFormat(
+      static_cast<c10::MemoryFormat>(memory_format)));
 }
 
 void* convert_to_root_guard_manager(py::object root) {
@@ -7278,6 +7328,13 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
 #endif
 
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
+}
+
+bool root_guard_manager_has_no_guards(void* root) {
+  if (root == nullptr) {
+    return false;
+  }
+  return ((RootGuardManager*)root)->has_no_guards();
 }
 
 PyObject* torch_c_dynamo_guards_init() {
@@ -7330,40 +7387,37 @@ PyObject* torch_c_dynamo_guards_init() {
     return nullptr;
   }
 
-  // We expose the address of _torchinductor_pyobject_tensor_data_ptr in order
-  // to allow manual linking in our generated TorchInductor Python bindings.
-  // While regular linking works in most cases, it does not work properly in
-  // fbcode due to janky build setup there.
-  if (PyModule_AddObject(
-          m,
+  // Expose helper function pointers on the torch._C._dynamo.guards module so
+  // TorchInductor cpp_wrapper generated code can resolve these libtorch_python
+  // helpers at runtime instead of at link time. This is required in fbcode,
+  // where libtorch_python symbols are absent from the executable's dynamic
+  // symbol table, so the generated JIT .so cannot link them directly; it reads
+  // the pointers back via PyLong_AsVoidPtr (see the torch_python_* wrappers in
+  // torch/csrc/inductor/cpp_wrapper/common.h).
+  const auto expose_inductor_symbol = [&](const char* name, auto fn) {
+    return PyModule_AddObject(
+               m, name, PyLong_FromVoidPtr(reinterpret_cast<void*>(fn))) >= 0;
+  };
+  if (!expose_inductor_symbol(
           "_torchinductor_pyobject_tensor_data_ptr",
-          PyLong_FromVoidPtr(reinterpret_cast<void*>(
-              &_torchinductor_pyobject_tensor_data_ptr))) < 0) {
+          &_torchinductor_pyobject_tensor_data_ptr) ||
+      !expose_inductor_symbol(
+          "_torchinductor_thp_device_new", &_torchinductor_thp_device_new) ||
+      !expose_inductor_symbol(
+          "_torchinductor_get_thp_dtype", &_torchinductor_get_thp_dtype) ||
+      !expose_inductor_symbol(
+          "_torchinductor_get_thp_layout", &_torchinductor_get_thp_layout) ||
+      !expose_inductor_symbol(
+          "_torchinductor_get_thp_memory_format",
+          &_torchinductor_get_thp_memory_format) ||
+      !expose_inductor_symbol(
+          "_torchinductor_thp_variable_wrap",
+          static_cast<PyObject* (*)(const at::TensorBase&)>(
+              &THPVariable_Wrap)) ||
+      !expose_inductor_symbol(
+          "_torchinductor_thputils_unpack_int",
+          static_cast<int32_t (*)(PyObject*)>(&THPUtils_unpackInt))) {
     return nullptr;
-  }
-
-  // Expose THPVariable_Wrap for cpp_wrapper inductor, for fbcode
-  {
-    using WrapFn = PyObject* (*)(const at::TensorBase&);
-    WrapFn fn = &THPVariable_Wrap;
-    if (PyModule_AddObject(
-            m,
-            "_torchinductor_thp_variable_wrap",
-            PyLong_FromVoidPtr(reinterpret_cast<void*>(fn))) < 0) {
-      return nullptr;
-    }
-  }
-
-  // Expose THPUtils_unpackInt for cpp_wrapper inductor, for fbcode
-  {
-    using UnpackFn = int32_t (*)(PyObject*);
-    UnpackFn fn = &THPUtils_unpackInt;
-    if (PyModule_AddObject(
-            m,
-            "_torchinductor_thputils_unpack_int",
-            PyLong_FromVoidPtr(reinterpret_cast<void*>(fn))) < 0) {
-      return nullptr;
-    }
   }
 
   auto py_m = py::handle(m).cast<py::module>();
@@ -8463,10 +8517,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("check", &RootGuardManager::check)
       .def("check_verbose", &RootGuardManager::check_verbose)
       .def("attach_compile_id", &RootGuardManager::attach_compile_id)
-      .def(
-          "clone_manager",
-          &RootGuardManager::clone_manager,
-          py::return_value_policy::reference)
+      .def("clone_manager", &RootGuardManager::clone_manager)
       // return by reference because GuardManager has the ownership of leaf
       // guards
       .def(

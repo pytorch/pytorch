@@ -498,6 +498,8 @@ class AutogradCompilerInstance:
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         aot_id = CompiledFunction._aot_id
+        bw_prologue_fn = CompiledFunction._bw_prologue_fn
+        bw_epilogue_fn = CompiledFunction._bw_epilogue_fn
         del CompiledFunction
 
         if torch.is_grad_enabled():
@@ -514,15 +516,12 @@ class AutogradCompilerInstance:
             ctx_opaque_objs: Sequence[Any],
             flat_args: Sequence[Any],
         ) -> Any:
-            out = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(
+            return bw_prologue_fn(
                 ctx_saved_tensors,
                 ctx_symints,
                 ctx_opaque_objs,
-                metadata,
-                maybe_subclass_metadata,
                 flat_args,
             )
-            return out
 
         pgrads = self.fx_tracer.create_proxy(
             kind="call_function",
@@ -653,33 +652,39 @@ class AutogradCompilerInstance:
 
         outputs = copy_paste_aot_backward_graph()
 
-        def proxy_subclass_constructor(
-            subclass_meta: Any, is_runtime: bool, unwrapped_args: Sequence[Any]
-        ) -> torch.Tensor:
-            @torch._dynamo.allow_in_graph  # type: ignore[misc]
-            def make_subclass(*unwrapped_args: Any) -> Any:
-                return subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
+        if maybe_subclass_metadata is not None:
 
-            punwrapped_args = pytree.tree_map(self.to_proxy, unwrapped_args)
+            def proxy_subclass_constructor(
+                subclass_meta: Any,
+                is_runtime: bool,
+                unwrapped_args: Sequence[Any],
+            ) -> torch.Tensor:
+                @torch._dynamo.allow_in_graph  # type: ignore[misc]
+                def make_subclass(*unwrapped_args: Any) -> Any:
+                    return subclass_meta.creation_fn(
+                        unwrapped_args, is_runtime=is_runtime
+                    )
 
-            poutput = self.fx_tracer.create_proxy(
-                kind="call_function",
-                # pyrefly: ignore [bad-argument-type]
-                target=make_subclass,
-                args=tuple(punwrapped_args),
-                kwargs={},
+                punwrapped_args = pytree.tree_map(self.to_proxy, unwrapped_args)
+
+                poutput = self.fx_tracer.create_proxy(
+                    kind="call_function",
+                    # pyrefly: ignore [bad-argument-type]
+                    target=make_subclass,
+                    args=tuple(punwrapped_args),
+                    kwargs={},
+                )
+
+                output = self.allocate_dummy()
+                self.bind_objects_to_proxies([output], [poutput])
+                return output
+
+            results = bw_epilogue_fn(
+                outputs, make_subclass_override=proxy_subclass_constructor
             )
+        else:
+            results = bw_epilogue_fn(outputs)
 
-            output = self.allocate_dummy()
-            self.bind_objects_to_proxies([output], [poutput])
-            return output
-
-        results = torch._functorch._aot_autograd.runtime_wrappers._backward_epilogue_functional(
-            metadata,
-            maybe_subclass_metadata,
-            outputs,
-            make_subclass_override=proxy_subclass_constructor,
-        )
         presults = pytree.tree_map(self.to_proxy, results)
         return presults
 
@@ -782,6 +787,10 @@ class AutogradCompilerInstance:
             # Weird quantity so it's easy to grep
             return torch.zeros([0, 123456789])
 
+    def allocate_dummy_like(self, x: torch.Tensor) -> torch.Tensor:
+        with disable_proxy_modes_tracing():
+            return torch.empty_like(x)
+
     def bind_function(
         self,
         fn_name: str,
@@ -842,18 +851,37 @@ class AutogradCompilerInstance:
         return result
 
     def accumulate_grad(
-        self, variable: torch.Tensor, grad: torch.Tensor, has_post_hooks: bool
-    ) -> None:
-        self.fx_tracer.create_proxy(
+        self,
+        variable: torch.Tensor,
+        variable_grad: torch.Tensor | None,
+        grad: torch.Tensor | bool,
+        has_post_hooks: bool | None = None,
+    ) -> torch.Tensor | None:
+        old_call = has_post_hooks is None
+        if has_post_hooks is None:
+            # Backward compatibility for extensions built before current grad
+            # became an explicit capture argument.
+            has_post_hooks = bool(grad)
+            grad = variable_grad  # type: ignore[assignment]
+            variable_grad = variable.grad
+
+        proxy_out = self.fx_tracer.create_proxy(
             "call_function",
             call_accumulate_grad,
             args=(
                 self.to_proxy(variable),
+                self.to_proxy(variable_grad),
                 self.to_proxy(grad),
                 has_post_hooks,
             ),
             kwargs={},
         )
+        result = self.allocate_dummy_like(variable)
+        self.bind_objects_to_proxies([result], [proxy_out])
+        variable.grad = result
+        if old_call:
+            return None
+        return result
 
     def proxy_call_hook(
         self, hook: Callable[..., Any], *args: Any, **kwargs: Any
@@ -1255,13 +1283,22 @@ class AutogradCompilerInstance:
         for node in self.fx_tracer.graph.find_nodes(
             op="call_function", target=call_accumulate_grad
         ):
-            param_node, grad_node = node.args[0], node.args[1]
+            param_node, variable_grad_node, grad_node = (
+                node.args[0],
+                node.args[1],
+                node.args[2],
+            )
             getitem_node = None
-            if grad_node.target is operator.getitem:
+            if (
+                isinstance(grad_node, torch.fx.Node)
+                and grad_node.target is operator.getitem
+            ):
                 getitem_node = grad_node
                 grad_node = getitem_node.args[0]
 
-            arg = max([param_node, grad_node])  # last arg
+            arg = max(
+                self.get_all_nodes([param_node, variable_grad_node, grad_node])
+            )  # last arg
             if arg is not node.prev and not self.is_placeholder(arg):
                 arg.append(node)
                 if getitem_node is not None:

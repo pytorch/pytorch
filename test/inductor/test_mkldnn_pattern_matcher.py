@@ -25,9 +25,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    requires_mkl,
     skipIfXpu,
     TEST_ACL,
-    TEST_MKL,
     xfailIfACL,
 )
 from torch.testing._internal.inductor_utils import (
@@ -794,7 +794,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     @reduced_f32_on_and_off()
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_linear_fp32(self, device="cpu"):
         self.device = device
 
@@ -818,7 +818,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             self._test_common(mod, (v,), matcher_check_fn)
 
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_linear_input_non_contiguous_3D_wo_bias(self, device="cpu"):
         self.device = device
 
@@ -938,6 +938,44 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
             # 1 kernel for "to_lowp", 2 kernels for unary ops
             self.assertEqual(metrics.generated_kernel_count, 3)
+
+    @skipIfXpu
+    def test_linear_add_bias_float_constant(self, device="cpu"):
+        # Regression test: is_linear_add_bias should not crash when
+        # add_node.args[1] is a Python float (e.g., from `1.0 + linear_output`).
+        # See https://github.com/pytorch/pytorch/pull/183514
+        self.device = device
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.adaLN_modulation = torch.nn.Sequential(
+                    torch.nn.SiLU(),
+                    torch.nn.Linear(64, 64, bias=True),
+                )
+
+            def forward(self, c):
+                return 1.0 + self.adaLN_modulation(c)
+
+        dtypes = []
+        if is_mkldnn_bf16_supported(self.device):
+            dtypes.append(torch.bfloat16)
+        if is_mkldnn_fp16_supported(self.device):
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            mod = M().eval()
+            v = torch.randn(2, 64)
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 1
+                )
+                # The float constant should NOT be folded as bias
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_linear_bias_matcher_count"], 0
+                )
+
+            self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
 
     @reduced_f32_on_and_off()
     def test_linear_binary(self, device="cpu"):
@@ -1532,7 +1570,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
             om(*example_inputs)
 
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @xfailIfACL
     def test_reproduce_121253_issue_addmm_fusion_check(self):
         class Mod(torch.nn.Module):
