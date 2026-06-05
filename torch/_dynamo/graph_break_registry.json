@@ -1331,6 +1331,12 @@
   "GB0094": [
     {
       "Gb_type": "SEND with bad type",
+      "Context": "TOS type: {typestr(receiver)}",
+      "Explanation": "Attempted to SEND with unsupported type {typestr(receiver)}.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "SEND with bad type",
       "Context": "TOS type: {typestr(tos)}",
       "Explanation": "Attempted to SEND with unsupported type {typestr(tos)}.",
       "Hints": []
@@ -1599,6 +1605,16 @@
       "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo cannot reconstruct the function.",
       "Hints": [
         "Define the function at module scope instead of inside another function"
+      ]
+    }
+  ],
+  "GB1752": [
+    {
+      "Gb_type": "Missing tp_iteritem",
+      "Context": "_tp_iteritem on {self.python_type_name()}",
+      "Explanation": "Dynamo does not support virtual iteration on {self.python_type_name()}. Add tp_iteritem_impl to this VariableTracker subclass.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -4518,6 +4534,14 @@
     }
   ],
   "GB4608": [
+    {
+      "Gb_type": "richcompare identity fallback undetermined",
+      "Context": "generic_richcompare({v}, {w}, {op})",
+      "Explanation": "Cannot determine object identity for comparison fallback.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "richcompare identity fallback undetermined",
       "Context": "generic_richcompare({lhs}, {rhs}, {op})",

@@ -6,7 +6,9 @@ import contextlib
 import functools
 import logging
 import os
+import subprocess
 import sys
+import unittest
 from unittest import mock
 
 import numpy as np
@@ -4656,6 +4658,96 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         z = add(x, y)
         self.assertEqual(status[-1], False)
         self.assertEqual(z, (x + y) * 2)
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    def test_wrap_triton_triton_interpret_eager(self):
+        script = """
+import os
+os.environ["TRITON_INTERPRET"] = "1"
+
+import torch
+import triton
+import triton.language as tl
+from torch.library import wrap_triton
+
+
+@triton.jit
+def add_kernel(
+    in_ptr0,
+    in_ptr1,
+    out_ptr,
+    n_elements,
+    BLOCK_SIZE: "tl.constexpr",
+):
+    pid = tl.program_id(axis=0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    x = tl.load(in_ptr0 + offsets, mask=mask)
+    y = tl.load(in_ptr1 + offsets, mask=mask)
+    output = x + y
+    tl.store(out_ptr + offsets, output, mask=mask)
+
+
+@triton.autotune(configs=[triton.Config({"BLOCK_SIZE": 16})], key=[])
+@triton.jit
+def autotuned_add_kernel(
+    in_ptr0,
+    in_ptr1,
+    out_ptr,
+    n_elements,
+    BLOCK_SIZE: "tl.constexpr",
+):
+    pid = tl.program_id(axis=0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    x = tl.load(in_ptr0 + offsets, mask=mask)
+    y = tl.load(in_ptr1 + offsets, mask=mask)
+    output = x + y
+    tl.store(out_ptr + offsets, output, mask=mask)
+
+
+def add(x, y):
+    output = torch.empty_like(x)
+    n_elements = output.numel()
+
+    def grid(meta):
+        return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+    wrap_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+    return output
+
+
+def autotuned_add(x, y):
+    output = torch.empty_like(x)
+    n_elements = output.numel()
+
+    def grid(meta):
+        return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+    wrap_triton(autotuned_add_kernel)[grid](x, y, output, n_elements)
+    return output
+
+
+x = torch.randn(1024, device="cuda")
+torch.testing.assert_close(add(x, x), x + x)
+torch.testing.assert_close(autotuned_add(x, x), x + x)
+
+
+class Wrapper:
+    fn = add_kernel
+
+
+try:
+    wrap_triton(Wrapper())
+except RuntimeError as exc:
+    assert "wrap_triton only works" in str(exc)
+else:
+    raise AssertionError("wrap_triton accepted an arbitrary .fn wrapper")
+"""
+
+        subprocess.run([sys.executable, "-c", script], check=True)
 
     @requires_gpu
     @common_utils.parametrize(

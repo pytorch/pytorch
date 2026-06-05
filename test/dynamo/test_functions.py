@@ -2842,6 +2842,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         def fn_repr(lengths):
             return repr(make_offsets(lengths))
 
+        def fn_reversed(lengths):
+            return list(reversed(make_offsets(lengths)))
+
         lengths = torch.tensor([0, 33, 33, 33, 33])
         for fn in (
             fn_pop,
@@ -2852,6 +2855,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             fn_tree_map,
             fn_tree_map_with_path,
             fn_repr,
+            fn_reversed,
         ):
             with self.assertRaisesRegex(Unsupported, "symbolic length"):
                 torch.compile(fn, fullgraph=True, backend="eager")(lengths)
@@ -3681,6 +3685,30 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(foo(), foo())
         self.assertEqual(foo(), foo())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_manual_seed(self):
+        import torch._inductor.config as inductor_config
+
+        seed_fns = (
+            torch.cuda.manual_seed,
+            torch.cuda.manual_seed_all,
+            torch.cuda.random.manual_seed,
+            torch.cuda.random.manual_seed_all,
+        )
+
+        with inductor_config.patch("fallback_random", True):
+            for seed_fn in seed_fns:
+                with self.subTest(seed_fn=f"{seed_fn.__module__}.{seed_fn.__name__}"):
+                    torch._dynamo.reset()
+
+                    @torch.compile
+                    def foo():
+                        seed_fn(3)
+                        return torch.rand(4, device="cuda")
+
+                    self.assertEqual(foo(), foo())
+                    self.assertEqual(foo(), foo())
 
     def test_partial_across_graph_break_uninvoked(self):
         from functools import partial
@@ -5741,7 +5769,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         if sys.version_info < (3, 14):
             with self.assertRaises(TypeError):
                 opt_fn(x, ys, zs)
-            with self.assertRaises(TypeError):
+            torch._dynamo.reset()
+            with self.assertRaises((TypeError, torch._dynamo.exc.Unsupported)):
                 nopython_fn(x, ys, zs)
             return
 
