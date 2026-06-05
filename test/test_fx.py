@@ -33,6 +33,7 @@ from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Trac
 from torch.fx.node import Target, Argument, ArgumentT, _format_arg
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+import torch.fx.experimental.optimization as optimization
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
@@ -1167,6 +1168,115 @@ class TestFX(JitTestCase):
         traced.graph.lint()
         x = torch.rand(3, 4)
         self.assertEqual(traced(x), seq(x))
+
+    def test_symbolic_trace_preserves_ordered_dict_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return (
+                    x,
+                    (
+                        torch.nn.functional.relu(x),
+                        torch.nn.functional.relu(x) + 1,
+                    ),
+                    collections.OrderedDict(
+                        [
+                            ("out1", torch.nn.functional.relu(x) + 2),
+                            ("out2", torch.nn.functional.relu(x) + 3),
+                        ]
+                    ),
+                )
+
+        x = torch.randn(1, 3, 224)
+
+        traced = symbolic_trace(M().eval())
+        traced.graph.lint()
+        self.assertFalse(
+            any(
+                node.op == "call_function"
+                and node.target is collections.OrderedDict
+                for node in traced.graph.nodes
+            )
+        )
+        traced_output = traced(x)
+        self.assertIsInstance(traced_output[2], collections.OrderedDict)
+        self.assertEqual(list(traced_output[2].keys()), ["out1", "out2"])
+
+        optimized = optimization.optimize_for_inference(
+            M().eval(),
+            {
+                "conv_bn_fuse": True,
+                "remove_dropout": True,
+                "mkldnn_layout_optimize": False,
+            },
+        )
+        self.assertFalse(
+            any(
+                node.op == "call_function"
+                and node.target is collections.OrderedDict
+                for node in optimized.graph.nodes
+            )
+        )
+        optimized_output = optimized(x)
+        self.assertIsInstance(optimized_output[2], collections.OrderedDict)
+        self.assertEqual(list(optimized_output[2].keys()), ["out1", "out2"])
+
+        for strict in (False, True):
+            ep = torch.export.export(optimized, (x,), strict=strict)
+            self.assertIs(ep.call_spec.out_spec.child(2).type, collections.OrderedDict)
+
+    def test_symbolic_trace_ordered_dict_default(self):
+        def f(x, od=collections.OrderedDict([("a", 1)])):  # noqa: B006
+            return x + 1
+
+        traced = symbolic_trace(f)
+        self.assertEqual(traced(torch.tensor(2)), torch.tensor(3))
+
+    def test_symbolic_trace_preserves_nested_ordered_dict_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return {
+                    "outer": collections.OrderedDict(
+                        [
+                            ("out1", x + 1),
+                            ("out2", x + 2),
+                        ]
+                    )
+                }
+
+        x = torch.randn(3)
+        traced = symbolic_trace(M())
+        traced.graph.lint()
+        self.assertFalse(
+            any(
+                node.op == "call_function"
+                and node.target is collections.OrderedDict
+                for node in traced.graph.nodes
+            )
+        )
+        traced_output = traced(x)
+        self.assertIsInstance(traced_output["outer"], collections.OrderedDict)
+        self.assertEqual(list(traced_output["outer"].keys()), ["out1", "out2"])
+
+    def test_symbolic_trace_ordered_dict_tuple_key_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return collections.OrderedDict([((1, 2), x + 1)])
+
+        x = torch.randn(3)
+        traced = symbolic_trace(M())
+        traced.graph.lint()
+        traced_output = traced(x)
+        self.assertIsInstance(traced_output, collections.OrderedDict)
+        self.assertEqual(list(traced_output.keys()), [(1, 2)])
+        self.assertEqual(traced_output[(1, 2)], x + 1)
+
+        deepcopy_output = copy.deepcopy(traced)(x)
+        self.assertIsInstance(deepcopy_output, collections.OrderedDict)
+        self.assertEqual(list(deepcopy_output.keys()), [(1, 2)])
+
+        loaded_output = pickle.loads(pickle.dumps(traced))(x)
+        self.assertIsInstance(loaded_output, collections.OrderedDict)
+        self.assertEqual(list(loaded_output.keys()), [(1, 2)])
 
     def test_tensor_constant(self):
         class ConstTensor(torch.nn.Module):

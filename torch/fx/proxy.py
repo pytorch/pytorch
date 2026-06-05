@@ -24,7 +24,11 @@ from torch.utils._traceback import CapturedTraceback
 
 from ._compatibility import compatibility
 from .graph import Graph, magic_methods, reflectable_magic_methods
-from .immutable_collections import immutable_dict, immutable_list
+from .immutable_collections import (
+    _immutable_ordered_dict,
+    immutable_dict,
+    immutable_list,
+)
 from .node import Argument, base_types, Node, Target
 from .operator_schemas import check_for_mutable_operation
 
@@ -448,6 +452,8 @@ class TracerBase:
             return type(a)([self.create_arg(elem) for elem in a])
         elif isinstance(a, list):
             return [self.create_arg(elem) for elem in a]
+        elif isinstance(a, OrderedDict):
+            return _create_arg_ordered_dict(self, a)
         elif isinstance(a, dict):
             return _create_arg_dict(self, a)
         elif isinstance(a, slice):
@@ -956,17 +962,29 @@ def _no_nodes_error(arg: Argument) -> Never:
     )
 
 
+def _create_arg_dict_key(self: TracerBase, k: Any) -> Any:
+    if not isinstance(k, str):
+        # Check for invalid dict keys. We do not want a Proxy to appear
+        # anywhere within the key. Since keys can be collection types,
+        # we iterate through the key with map_arg
+        k = self.create_arg(k)
+        map_arg(k, _no_nodes_error)
+    return k
+
+
 def _create_arg_dict(self: TracerBase, a: dict[Any, Any]) -> dict[Any, Argument]:
     r: dict[Any, Argument] = {}
     for k, v in a.items():
-        if not isinstance(k, str):
-            # Check for invalid dict keys. We do not want a Proxy to appear
-            # anywhere within the key. Since keys can be collection types,
-            # we iterate through the key with map_arg
-            k = self.create_arg(k)
-            map_arg(k, _no_nodes_error)
-        r[k] = self.create_arg(v)
+        r[_create_arg_dict_key(self, k)] = self.create_arg(v)
     return r
+
+
+def _create_arg_ordered_dict(
+    self: TracerBase, a: OrderedDict[Any, Any]
+) -> _immutable_ordered_dict[Any, Argument]:
+    return _immutable_ordered_dict(
+        *((_create_arg_dict_key(self, k), self.create_arg(v)) for k, v in a.items())
+    )
 
 
 _create_arg_bypass = {
@@ -983,5 +1001,6 @@ _create_arg_bypass[Proxy] = lambda self, a: a.node
 _create_arg_bypass[tuple] = lambda self, a: tuple(self.create_arg(elem) for elem in a)
 _create_arg_bypass[list] = lambda self, a: [self.create_arg(elem) for elem in a]
 _create_arg_bypass[dict] = _create_arg_dict
+_create_arg_bypass[OrderedDict] = _create_arg_ordered_dict
 _create_arg_bypass[immutable_list] = _create_arg_bypass[list]
 _create_arg_bypass[immutable_dict] = _create_arg_bypass[dict]
