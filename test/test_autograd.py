@@ -13939,9 +13939,14 @@ class TestAutogradDeviceType(TestCase):
         a.grad = None
 
         # --- as a decorator ---
+        torch._C._set_grad_layout_enforcement_enabled(True)
+
         @torch.autograd.enforce_grad_layout_policy(False)
         def do_backward():
             ContiguousGrad.apply(a).backward()
+
+        # Check that the flag doesn't leak during function decoration.
+        self.assertTrue(torch._C._is_grad_layout_enforcement_enabled())
 
         do_backward()
         self.assertTrue(a.grad.is_contiguous())
