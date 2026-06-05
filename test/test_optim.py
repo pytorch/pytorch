@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -967,7 +968,7 @@ class TestOptimRenewed(TestCase):
                     actual = new_p_state[k]
                     self.assertEqual(og_p_state[k], actual, rtol=rtol, atol=atol)
 
-    @onlyCUDA
+    @onlyAccelerator
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
         dtypes=[torch.float64],
@@ -1181,13 +1182,13 @@ class TestOptimRenewed(TestCase):
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
 
-    @onlyCUDA
+    @onlyAccelerator
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=[torch.float32],
     )
     def test_fused_does_not_step_if_foundinf(self, device, dtype, optim_info):
-        if device not in optim_info.supports_fused_on:
+        if _get_device_type(device) not in optim_info.supports_fused_on:
             self.skipTest(
                 f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
             )
@@ -1812,13 +1813,13 @@ class TestOptimRenewed(TestCase):
             optimizer.load_state_dict(state_dict)
             optimizer.step(closure)
 
-    @onlyCUDA
+    @onlyAccelerator
     @optims(optim_db, dtypes=[torch.float32])
-    def test_state_dict_with_cuda_params(self, device, dtype, optim_info):
+    def test_state_dict_cross_device(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
-        # We limit our configs to CPU only, because we will be moving them to CUDA later
+        # We limit our configs to CPU only, because we will be moving them to the target device later
         cpu_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             "cpu", dtype, optim_info, skip=("differentiable",)
         )
@@ -1832,10 +1833,10 @@ class TestOptimRenewed(TestCase):
         for optim_input in cpu_optim_inputs:
             if (
                 "fused" in optim_input.kwargs
-                and "cuda" not in optim_info.supports_fused_on
+                and _get_device_type(device) not in optim_info.supports_fused_on
             ):
                 self.skipTest(
-                    f"cuda is not supported for fused on {optim_cls.__name__}"
+                    f"{_get_device_type(device)} is not supported for fused on {optim_cls.__name__}"
                 )
             params = [
                 Parameter(torch.randn(2, 3, device="cpu", dtype=dtype))
@@ -1854,36 +1855,36 @@ class TestOptimRenewed(TestCase):
                 optimizer.step(closure)
 
             with torch.no_grad():
-                params_cuda = [p.to(device="cuda") for p in params]
-                for i, p in enumerate(params_cuda):
-                    p.grad = params[i].grad.to(device="cuda")
-            optimizer_cuda = optim_cls(params_cuda, **optim_input.kwargs)
+                params_device = [p.to(device=device) for p in params]
+                for i, p in enumerate(params_device):
+                    p.grad = params[i].grad.to(device=device)
+            optimizer_device = optim_cls(params_device, **optim_input.kwargs)
 
             state_dict_cpu = deepcopy(optimizer.state_dict())
-            state_dict_cuda = deepcopy(optimizer.state_dict())
-            optimizer_cuda.load_state_dict(state_dict_cuda)
+            state_dict_device = deepcopy(optimizer.state_dict())
+            optimizer_device.load_state_dict(state_dict_device)
 
-            # Make sure state_dict_cuda isn't modified by merely calling load_state_dict
-            self.assertEqual(state_dict_cpu, state_dict_cuda)
+            # Make sure state_dict_device isn't modified by merely calling load_state_dict
+            self.assertEqual(state_dict_cpu, state_dict_device)
 
             # Make sure that device of state['step'] is still CPU _unless_ torch.compile() added a capturable!
             capturable = state_dict_cpu["param_groups"][0].get("capturable", False)
             fused = state_dict_cpu["param_groups"][0].get("fused", False)
-            new_state_dict = optimizer_cuda.state_dict()
-            for state_cpu, state_cuda in zip(
+            new_state_dict = optimizer_device.state_dict()
+            for state_cpu, state_device in zip(
                 state_dict_cpu["state"].values(), new_state_dict["state"].values()
             ):
                 if "step" in state_cpu and torch.is_tensor(state_cpu["step"]):
                     self.assertEqual(
-                        state_cuda["step"].device.type,
-                        "cuda" if capturable or fused else "cpu",
+                        state_device["step"].device.type,
+                        _get_device_type(device) if capturable or fused else "cpu",
                     )
 
             for _ in range(5):
                 optimizer.step(closure)
-                optimizer_cuda.step(closure)
-                self.assertEqual(params, params_cuda)
-                self.assertEqual(optimizer.state_dict(), optimizer_cuda.state_dict())
+                optimizer_device.step(closure)
+                self.assertEqual(params, params_device)
+                self.assertEqual(optimizer.state_dict(), optimizer_device.state_dict())
 
     @staticmethod
     def _state_dict_pre_hook(optimizer: Optimizer) -> None:
@@ -2232,24 +2233,24 @@ class TestOptimRenewed(TestCase):
             res2 = optim_neg_inf.step(closure)
             self.assertEqual(type(res1), type(res2))
 
-    @onlyCUDA
+    @onlyAccelerator
     @optims(
-        [
-            optim
-            for optim in optim_db
-            if "cpu" in optim.supports_fused_on and "cuda" in optim.supports_fused_on
-        ],
+        [optim for optim in optim_db if "cpu" in optim.supports_fused_on],
         dtypes=floating_types_and(
             torch.bfloat16,
             torch.float16,
         ),
     )
-    def test_fused_cpu_matches_cuda(self, device, dtype, optim_info):
+    def test_fused_cpu_matches_device(self, device, dtype, optim_info):
+        if _get_device_type(device) not in optim_info.supports_fused_on:
+            self.skipTest(
+                f"{_get_device_type(device)} is not supported for fused on {optim_info.optim_cls.__name__}"
+            )
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func(device="cpu")
         for optim_input in optim_inputs:
             inpts, models, optimizers = [], [], []
-            for dev in ("cpu", "cuda"):
+            for dev in ("cpu", _get_device_type(device)):
                 kwargs = optim_input.kwargs
                 kwargs["fused"] = True
                 inpt = torch.tensor(
