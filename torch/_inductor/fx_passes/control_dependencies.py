@@ -19,6 +19,9 @@ from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.utils._ordered_set import OrderedSet
 
 
+CONTROL_DEPS_META_KEY = "inductor_control_deps"
+
+
 class ControlDeps(HigherOrderOperator):
     """
     Higher-order operator that enforces ordering by making dependencies explicit.
@@ -206,6 +209,30 @@ def preserve_node_ordering(
 
         # Track the replacement for future dependencies
         replacements[dependent_node] = ordered_node
+
+
+def record_node_ordering_metadata(
+    graph: fx.Graph,
+    additional_deps_map: dict[fx.Node, OrderedSet[fx.Node]],
+) -> None:
+    """
+    Record extra ordering constraints in FX node metadata for Inductor lowering.
+
+    Unlike preserve_node_ordering(), this does not wrap the target operation in a
+    higher-order op. Inductor's scheduler consumes this metadata after lowering
+    and applies weak buffer dependencies between the generated scheduler nodes.
+    That preserves ordering constraints without hiding fusible compute from
+    Inductor's normal fusion machinery.
+    """
+    if not additional_deps_map:
+        return
+
+    for dependent_node, dep_nodes in additional_deps_map.items():
+        assert dependent_node.op == "call_function", dependent_node.op
+        existing = dependent_node.meta.get(CONTROL_DEPS_META_KEY)
+        deps = OrderedSet(existing) if existing is not None else OrderedSet()
+        deps.update(dep_nodes)
+        dependent_node.meta[CONTROL_DEPS_META_KEY] = tuple(deps)
 
 
 def _create_subgraph_for_node(

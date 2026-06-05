@@ -920,14 +920,9 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             compiled = torch.compile(func_c)
             test_out, (code,) = run_and_get_code(compiled, a, b, c, d)
 
-            # Check that right deps are added
-            f = FileCheck()
-            for _ in range(2):
-                f.check("control_deps").check_same("all_gather").check_same(
-                    "subgraph_mm"
-                )
-                f.check("control_deps").check_same("mm").check_same("subgraph_wait")
-            f.run(li[0])
+            # Overlap deps are now carried as Inductor scheduler metadata rather
+            # than opaque FX HOPs, so the ATen graph remains transparent to fusion.
+            FileCheck().check_not("control_deps").run(li[0])
 
             f = FileCheck()
             for _ in range(2):

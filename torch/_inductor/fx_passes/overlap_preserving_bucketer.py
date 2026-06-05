@@ -347,17 +347,20 @@ class OverlapPreservingBucketer:
             for node, deps in additional_deps.items():
                 filtered_node_deps: OrderedSet[fx.Node] = OrderedSet()
                 for dep in deps:
-                    if not (is_collective_or_wait(node) and is_collective_or_wait(dep)):
-                        filtered_node_deps.add(dep)
+                    node_is_collective_or_wait = is_collective_or_wait(node)
+                    dep_is_collective_or_wait = is_collective_or_wait(dep)
+                    if node_is_collective_or_wait and dep_is_collective_or_wait:
+                        continue
+                    filtered_node_deps.add(dep)
                 if filtered_node_deps:
                     filtered_deps[node] = filtered_node_deps
 
             if filtered_deps:
                 from torch._inductor.fx_passes.control_dependencies import (
-                    preserve_node_ordering,
+                    record_node_ordering_metadata,
                 )
 
-                preserve_node_ordering(self.graph, filtered_deps)
+                record_node_ordering_metadata(self.graph, filtered_deps)
 
     def bucket_collectives(self) -> None:
         """Run the full bucketing and dep application flow."""
