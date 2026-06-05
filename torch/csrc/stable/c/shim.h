@@ -265,6 +265,25 @@ torch_delete_stable_ivalue(StableIValue* value);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_stream_native_handle(StreamHandle stream, void** ret_native_handle);
 
+// Returns a new owning AtenGeneratorHandle that shares the underlying RNG state
+// with `self` (the copy bumps the GeneratorImpl refcount). The callee owns the
+// result and must free it with torch_delete_generator.
+AOTI_TORCH_EXPORT AOTITorchError torch_new_generator_handle(
+    AtenGeneratorHandle self,
+    AtenGeneratorHandle* ret_new_generator);
+
+// Frees an owning AtenGeneratorHandle previously returned by
+// torch_new_generator_handle (or otherwise handed off with ownership).
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_generator(AtenGeneratorHandle generator);
+
+// Returns the generator's device as (device_type, device_index). device_type
+// uses the same encoding as the aoti_torch_device_type_*() getters.
+AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
+    AtenGeneratorHandle generator,
+    int32_t* ret_device_type,
+    int32_t* ret_device_index);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 #ifdef __cplusplus
