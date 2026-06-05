@@ -27,7 +27,6 @@ import inspect
 import logging
 import textwrap
 import traceback
-import warnings
 import weakref
 from collections.abc import Generator, MutableMapping
 from types import CellType
@@ -646,11 +645,7 @@ class SideEffects:
         variable_cls: Any,
         options: dict[str, Any],
     ) -> VariableTracker:
-        if user_cls is torch.autograd.function.FunctionCtx:
-            with warnings.catch_warnings(record=True):
-                obj = torch.autograd.Function()
-        else:
-            obj = object_new(user_cls)
+        obj = object_new(user_cls)
         variable = variable_cls(
             obj,
             mutation_type=AttributeMutationNew(cls_source),
