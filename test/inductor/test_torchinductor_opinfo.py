@@ -37,6 +37,8 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
+    MI200_ARCH,
+    isRocmArchAnyOf,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1318,6 +1320,28 @@ class TestInductorOpInfo(TestCase):
         overridden_kwargs.update(
             inductor_override_kwargs.get(device_type, {}).get((op_name, dtype), {})
         )
+        if (
+            TEST_WITH_ROCM
+            and device_type == GPU_TYPE
+            and op_name == "addmm"
+            and dtype is f16
+            and isRocmArchAnyOf(MI200_ARCH)
+        ):
+            # On AMD Instinct MI200, FP16 matrix instructions may flush denormal
+            # values to zero. PyTorch uses rocBLAS alternate FP16 implementations
+            # during backward to preserve these values. See:
+            # https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html#reduced-precision-fp16-and-bf16-gemms-and-convolutions-on-amd-instinct-mi200-devices
+            #
+            # Keep the FP32 eager reference, but allow FP16-scale differences:
+            # tiny is the smallest normal FP16 value, so it covers
+            # subnormal-scale absolute differences; eps is FP16 relative
+            # precision near 1.0. The observed relative difference for this
+            # test on MI200 is about 9 * eps, so use 10 * eps as a
+            # small round-number margin.
+            f16_info = torch.finfo(f16)
+            overridden_kwargs.update(
+                {"atol": f16_info.tiny, "rtol": 10 * f16_info.eps}
+            )
         func = op.get_op()
 
         def fn(*args, **kwargs):
