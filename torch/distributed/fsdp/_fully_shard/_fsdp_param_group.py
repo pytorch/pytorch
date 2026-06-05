@@ -1016,23 +1016,23 @@ class FSDPParamGroup:
             )
 
     def _validate_reduce_scatter_max_input_buffers(self):
-        # Retaining >1 input buffers relies on the allocator handing out a fresh
-        # buffer while prior ones are ref-held; the symmetric-memory pool instead
-        # reuses a single buffer, so retaining K would force K symmetric segments
-        # and can exhaust symmetric memory. Check the resolved shared cap (which
-        # post_backward drains every group to), so a symm-mem group is caught
-        # even if a different group set the larger cap.
-        max_input_buffers = self.comm_ctx.reduce_scatter_max_input_buffers
-        if max_input_buffers > 1 and isinstance(
+        # Reject max_input_buffers > 1 with the symmetric-memory reduce-scatter
+        # comm: retaining >1 input buffers relies on the allocator handing out a
+        # fresh buffer while prior ones are ref-held, but the symmetric-memory
+        # pool reuses a single buffer, so retaining K would force K symmetric
+        # segments and can exhaust symmetric memory. Read the per-group cap (set
+        # in __init__) so this is safe to call before the comm context is lazily
+        # initialized (e.g. unshard before the first forward).
+        if self.reduce_scatter_max_input_buffers > 1 and isinstance(
             self._reduce_scatter_comm, SymmMemReduceScatter
         ):
             raise ValueError(
-                "reduce-scatter input-buffer cap > 1 is not supported with the "
-                "symmetric-memory reduce-scatter comm, but the effective cap is "
-                f"{max_input_buffers} and module '{self._module_fqn}' uses "
-                f"{self._reduce_scatter_comm.__class__.__name__}. Set "
-                "max_input_buffers=1 on all FSDP modules sharing the reduce-scatter "
-                "pipeline when any uses symmetric memory, or use the default "
+                "set_reduce_scatter_max_input_buffers(>1) is not supported with "
+                "the symmetric-memory reduce-scatter comm, but got "
+                f"{self.reduce_scatter_max_input_buffers} for module "
+                f"'{self._module_fqn}' using "
+                f"{self._reduce_scatter_comm.__class__.__name__}. Keep "
+                "max_input_buffers=1 with symmetric memory, or use the default "
                 "reduce-scatter comm."
             )
 
