@@ -91,6 +91,8 @@ from torch._inductor.custom_graph_pass import (
     CustomGraphPassCallable,
     CustomPartitionerFn,
     CustomPartitionerFnType,
+    CustomPassBase,
+    CustomSchedulerPass,
     get_custom_graph_passes,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
@@ -553,38 +555,79 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     return meta
 
 
+_STORAGE_METADATA_TARGETS = OrderedSet(
+    [
+        torch.as_strided,
+        torch.as_strided_scatter,
+        torch.diagonal_scatter,
+        torch.select_scatter,
+        torch.slice_scatter,
+        torch.ops.aten.as_strided.default,
+        torch.ops.aten.as_strided_scatter.default,
+        torch.ops.aten.diagonal_scatter.default,
+        torch.ops.aten.select_scatter.default,
+        torch.ops.aten.slice_scatter.default,
+    ]
+)
+
+_VIEW_SCATTER_TARGETS = OrderedSet(
+    [
+        torch.as_strided_scatter,
+        torch.diagonal_scatter,
+        torch.select_scatter,
+        torch.slice_scatter,
+        torch.ops.aten.as_strided_scatter.default,
+        torch.ops.aten.diagonal_scatter.default,
+        torch.ops.aten.select_scatter.default,
+        torch.ops.aten.slice_scatter.default,
+    ]
+)
+
+
+def _is_copyback_only_scatter(node: torch.fx.Node) -> bool:
+    def is_copyback(user: torch.fx.Node) -> bool:
+        return (
+            user.op == "call_function"
+            and user.target == torch.ops.aten.copy_.default
+            and len(user.users) == 0
+        )
+
+    def visit(user: torch.fx.Node, seen: OrderedSet[torch.fx.Node]) -> bool:
+        if user in seen:
+            return True
+        seen.add(user)
+        if is_copyback(user):
+            return True
+        if (
+            user.op == "call_function"
+            and user.target in _VIEW_SCATTER_TARGETS
+            and all(visit(next_user, seen) for next_user in user.users)
+        ):
+            return True
+        return False
+
+    return bool(node.users) and all(visit(user, OrderedSet()) for user in node.users)
+
+
 def _needs_storage_metadata_for_cache_key(gm: torch.fx.GraphModule) -> bool:
-    storage_metadata_targets = OrderedSet(
-        [
-            torch.as_strided,
-            torch.as_strided_scatter,
-            torch.diagonal_scatter,
-            torch.select_scatter,
-            torch.slice_scatter,
-            torch.ops.aten.as_strided.default,
-            torch.ops.aten.as_strided_scatter.default,
-            torch.ops.aten.diagonal_scatter.default,
-            torch.ops.aten.select_scatter.default,
-            torch.ops.aten.slice_scatter.default,
-        ]
+    method_targets = (
+        "as_strided",
+        "as_strided_scatter",
+        "diagonal_scatter",
+        "select_scatter",
+        "slice_scatter",
     )
     for module in gm.modules():
         if not isinstance(module, torch.fx.GraphModule):
             continue
         for node in module.graph.nodes:
-            if (
-                node.op == "call_method"
-                and node.target
-                in (
-                    "as_strided",
-                    "as_strided_scatter",
-                    "diagonal_scatter",
-                    "select_scatter",
-                    "slice_scatter",
-                )
-            ) or (
-                node.op == "call_function" and node.target in storage_metadata_targets
-            ):
+            if node.op == "call_method" and node.target in method_targets:
+                return True
+            if node.op == "call_function" and node.target in _STORAGE_METADATA_TARGETS:
+                if node.target in _VIEW_SCATTER_TARGETS and _is_copyback_only_scatter(
+                    node
+                ):
+                    continue
                 return True
     return False
 
@@ -1104,7 +1147,7 @@ class CacheabilityValidator:
         # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
         # and ensure they are not passing us raw callables
         if config._pre_fusion_custom_pass is not None:
-            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
+            if not isinstance(config._pre_fusion_custom_pass, CustomSchedulerPass):
                 self.bypass("Unsupported _pre_fusion_custom_pass")
         for p in config._fuse_ddp_communication_passes:
             if callable(p) and not isinstance(p, CustomGraphPass):
@@ -1470,7 +1513,7 @@ class FxGraphHashDetails:
             return tuple(self._get_custom_pass_detail_unsafe(x) for x in custom_pass)
         if isinstance(custom_pass, str):
             return custom_pass
-        if isinstance(custom_pass, CustomGraphPass):
+        if isinstance(custom_pass, CustomPassBase):
             return custom_pass.uuid()
         if callable(custom_pass):
             # Returning None is safe here because we raise an explicit bypass error
@@ -4442,6 +4485,8 @@ def touch(filename: str) -> None:
 
 @clear_on_fresh_cache
 class PyCodeCache:
+    """Caches generated Python modules and their source mappings."""
+
     # Track the loaded modules so we can remove the on-disk artifacts when
     # clearing the cache. Note also that we may load the same path more
     # than once, but attach different attributes, i.e., due to different
@@ -4459,9 +4504,15 @@ class PyCodeCache:
         return write(source_code, "py", extra=extra)
 
     @classmethod
-    def load(cls, source_code: str, extra: str = "") -> ModuleType:
+    def load(
+        cls,
+        source_code: str,
+        extra: str = "",
+        *,
+        set_sys_modules: bool | None = None,
+    ) -> ModuleType:
         key, path = write(source_code, "py", extra=extra)
-        return cls.load_by_key_path(key, path)
+        return cls.load_by_key_path(key, path, set_sys_modules=set_sys_modules)
 
     @classmethod
     def load_by_key_path(
@@ -4470,19 +4521,26 @@ class PyCodeCache:
         path: str,
         linemap: list[tuple[int, str]] | None = None,
         attrs: dict[str, Any] | None = None,
+        *,
+        set_sys_modules: bool | None = None,
     ) -> ModuleType:
         if linemap is None:
             linemap = []
 
+        in_toplevel = in_toplevel_process()
+        set_sys_modules = in_toplevel if set_sys_modules is None else set_sys_modules
+
         # we only cache when attrs is None
         if attrs is None and path in cls.modules_no_attr:
-            return cls.modules_no_attr[path]
+            mod = cls.modules_no_attr[path]
+            if set_sys_modules:
+                sys.modules.setdefault(mod.__name__, mod)
+            return mod
 
-        in_toplevel = in_toplevel_process()
-        mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
+        mod = _reload_python_module(key, path, set_sys_modules=set_sys_modules)
 
         # unzip into separate lines/nodes lists
-        if in_toplevel:
+        if set_sys_modules:
             cls.linemaps[path] = list(zip(*linemap))
 
         if attrs is not None:

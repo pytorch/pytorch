@@ -86,13 +86,16 @@ torch_function_passthrough = {
     torch.Tensor.size,
     torch.Tensor.storage_offset,
     torch.Tensor.stride,
+    torch.Tensor.untyped_storage,
     torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.element_size,
     torch.Tensor.is_sparse.__get__,  # type: ignore[attr-defined]
     torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
     torch.Tensor.device.__get__,  # type: ignore[attr-defined]
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
     torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
     torch.Tensor.is_contiguous,
+    torch._debug_has_internal_overlap,
     # For TorchRefsMode only
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
@@ -1994,7 +1997,21 @@ def compute_required_storage_length(
 
 
 def compute_storage_length(t: TensorLikeType):
-    return t.untyped_storage().nbytes() // t.element_size()
+    storage_nbytes = t.untyped_storage().nbytes()
+    try:
+        return storage_nbytes // t.element_size()
+    except (RuntimeError, TypeError) as e:
+        if "is not tracked with proxy" not in str(
+            e
+        ) and "expected 2 arguments" not in str(e):
+            raise
+
+    # During make_fx tracing, storage nbytes can be a SymInt that was not created
+    # by the proxy tracer. The old logical formula is traceable and is equivalent
+    # for dense inputs, which is the case hit by auto-functionalization tracing.
+    return compute_required_storage_length(
+        t.size(), t.stride(), cast(int, t.storage_offset())
+    )
 
 
 def clone_preserve_strides_storage_length(t: TensorLikeType):

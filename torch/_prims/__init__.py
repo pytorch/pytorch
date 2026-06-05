@@ -2389,7 +2389,7 @@ def _prod_aten(
             inp = torch.prod(inp, d, dtype=dtype)
         return inp
     else:
-        return torch.prod(inp, dims, dtype=dtype)
+        return torch.prod(inp, dtype=dtype)
 
 
 prod = _make_reduction_prim(

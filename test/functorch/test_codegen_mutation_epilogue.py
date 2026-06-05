@@ -144,7 +144,10 @@ class TestCodegenMutationEpilogue(TestCase):
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
-        self.assertIn("detach().copy_", captured[0])
+        self.assertIn(
+            "copy_mutated_input(orig_inputs[0].detach(), updated_inputs[0])",
+            captured[0],
+        )
 
     @skipIfTorchDynamo(
         "aot_function uses FX tracing which conflicts with dynamo wrapping"

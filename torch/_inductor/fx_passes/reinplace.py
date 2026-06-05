@@ -512,7 +512,7 @@ def _decompose_scatter_mutating(
     assert not node.kwargs
 
     if node.target is _generalized_scatter:
-        inp = _clone_for_scatter_decomposition(graph, inp, view_ops)
+        inp = _clone_for_scatter_decomposition(graph, inp)
 
     tmp = inp
     for view in _decode_view_ops(cast(EncodedViewOps, tuple(view_ops))):
@@ -529,9 +529,7 @@ def _decompose_scatter_mutating(
     return inp  # type: ignore[return-value]
 
 
-def _clone_for_scatter_decomposition(
-    graph: torch.fx.Graph, inp: Any, view_ops: Sequence[Any]
-) -> torch.fx.Node:
+def _clone_for_scatter_decomposition(graph: torch.fx.Graph, inp: Any) -> torch.fx.Node:
     if not isinstance(inp, torch.fx.Node):
         return graph_call_function(graph, aten.clone, inp)
 
@@ -1005,9 +1003,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             return all(can_inplace(node, arg) for arg in mutated_arg)
 
         if get_node_storage(mutated_arg) is None:
-            return False
-
-        if torch._debug_has_internal_overlap(mutated_arg.meta["val"]) == 1:
             return False
 
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]

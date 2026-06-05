@@ -3005,9 +3005,19 @@ class VariableBuilder:
             try:
                 tensor_value = _util._try_convert_to_tensor(value)
                 if readonly:
-                    from torch._prims_common import clone_preserve_strides
+                    from torch._prims_common import compute_required_storage_length
 
-                    tensor_value = clone_preserve_strides(tensor_value)
+                    needed_size = compute_required_storage_length(
+                        tensor_value.size(),
+                        tensor_value.stride(),
+                        tensor_value.storage_offset(),
+                    )
+                    tensor_value = torch.as_strided(
+                        torch.as_strided(tensor_value, (needed_size,), (1,), 0).clone(),
+                        tensor_value.size(),
+                        tensor_value.stride(),
+                        tensor_value.storage_offset(),
+                    )
             except NotImplementedError as e:
                 # failed to convert to tensor, graph break
                 unimplemented(
