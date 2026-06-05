@@ -3830,6 +3830,16 @@
       ]
     }
   ],
+  "GB2173": [
+    {
+      "Gb_type": "Fake RuntimeError inspection",
+      "Context": "inspect {self}",
+      "Explanation": "Dynamo observed a RuntimeError while running a fake tensor kernel, but fake tensor exception messages and args may differ from eager execution.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0265": [
     {
       "Gb_type": "FakeScriptObject missing method implementation",
@@ -4494,6 +4504,14 @@
     }
   ],
   "GB4608": [
+    {
+      "Gb_type": "richcompare identity fallback undetermined",
+      "Context": "generic_richcompare({v}, {w}, {op})",
+      "Explanation": "Cannot determine object identity for comparison fallback.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "richcompare identity fallback undetermined",
       "Context": "generic_richcompare({lhs}, {rhs}, {op})",

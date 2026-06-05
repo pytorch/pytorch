@@ -3269,9 +3269,16 @@ def iter_contains(
     from .variables import ConstantVariable
 
     if search.is_python_constant():
+        search_val = search.as_python_constant()
+        # CPython's list_contains/set_contains use PyObject_RichCompareBool
+        # which has an identity shortcut: if v is w, return True for eq.
+        # Check identity first (matters for NaN).
         found_const = any(
             x.is_python_constant()
-            and x.as_python_constant() == search.as_python_constant()
+            and (
+                x.as_python_constant() is search_val
+                or x.as_python_constant() == search_val
+            )
             for x in items
         )
         return ConstantVariable.create(found_const)
@@ -3990,15 +3997,6 @@ def _has_active_exception_handler(tx: InstructionTranslatorBase) -> bool:
     return False
 
 
-def _observed_exception_args(
-    e: BaseException, fake_mode: FakeTensorMode | None
-) -> list[Any]:
-    return [
-        get_concrete_sizes_from_symints(arg, fake_mode) if isinstance(arg, str) else arg
-        for arg in e.args
-    ]
-
-
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4217,7 +4215,7 @@ def _get_fake_value_impl(
             raise_observed_exception(
                 type(cause),
                 tx,
-                args=_observed_exception_args(cause, fake_mode),
+                unsafe_to_inspect=True,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         _wrap_graph_break_with_torch_runtime_err(

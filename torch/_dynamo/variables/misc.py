@@ -591,6 +591,21 @@ class ExceptionVariable(VariableTracker):
         # The user stack at the time this exception was first raised.
         # Used to preserve the original exception location when re-raising.
         self.python_stack: traceback.StackSummary | None = None
+        self.unsafe_to_inspect: bool = False
+
+    def mark_unsafe_to_inspect(self) -> None:
+        self.unsafe_to_inspect = True
+
+    def check_safe_to_inspect(self) -> None:
+        if self.unsafe_to_inspect:
+            unimplemented(
+                gb_type="Fake RuntimeError inspection",
+                context=f"inspect {self}",
+                explanation="Dynamo observed a RuntimeError while running a fake tensor "
+                "kernel, but fake tensor exception messages and args may differ "
+                "from eager execution.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
     def set_context(self, context: VariableTracker) -> None:
         self.__context__ = context
@@ -716,6 +731,7 @@ class ExceptionVariable(VariableTracker):
         elif name == "__traceback__":
             return self.__traceback__
         elif name == "args":
+            self.check_safe_to_inspect()
             return VariableTracker.build(
                 tx,
                 tuple(self.args),
@@ -741,7 +757,26 @@ class ExceptionVariable(VariableTracker):
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
+        self.check_safe_to_inspect()
         return VariableTracker.build(tx, self.debug_repr())
+
+
+def check_no_unsafe_exception_inspection(value: VariableTracker) -> None:
+    if isinstance(
+        value,
+        (variables.ExceptionVariable, variables.UserDefinedExceptionObjectVariable),
+    ):
+        value.check_safe_to_inspect()
+    elif isinstance(value, variables.BaseListVariable):
+        for item in value.items:
+            check_no_unsafe_exception_inspection(item)
+    elif isinstance(value, variables.ConstDictVariable):
+        for key, item in value.items.items():
+            check_no_unsafe_exception_inspection(key.vt)
+            check_no_unsafe_exception_inspection(item)
+    elif isinstance(value, variables.SetVariable):
+        for item in value.set_items:
+            check_no_unsafe_exception_inspection(item.vt)
 
 
 class UnknownVariable(VariableTracker):
@@ -1972,6 +2007,8 @@ class StringFormatVariable(VariableTracker):
         sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        for arg in itertools.chain(sym_args, sym_kwargs.values()):
+            check_no_unsafe_exception_inspection(arg)
         if all(
             x.is_python_constant()
             for x in itertools.chain(sym_args, sym_kwargs.values())

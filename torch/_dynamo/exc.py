@@ -433,23 +433,31 @@ def raise_observed_exception(
     *,
     args: list[VariableTracker] | list[str] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
+    unsafe_to_inspect: bool = False,
 ) -> NoReturn:
     from .symbolic_convert import ExceptionVals
+    from .variables import ExceptionVariable
     from .variables.builder import SourcelessBuilder
 
-    if args:
+    if unsafe_to_inspect:
+        args_: list[VariableTracker] = []
+        exception_vt = ExceptionVariable(exc_type, [])
+        exception_vt.mark_unsafe_to_inspect()
+    elif args:
         args_ = [
             SourcelessBuilder.create(tx, arg) if isinstance(arg, str) else arg
             for arg in args
         ]
+        # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
+        # stack and raise the exception.
+        exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
+            tx, args_, kwargs or {}
+        )
     else:
         args_: list[VariableTracker] = []
-
-    # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
-    # stack and raise the exception.
-    exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
-        tx, args_, kwargs or {}
-    )
+        exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
+            tx, args_, kwargs or {}
+        )
     if not isinstance(exception_vt, ExceptionVals):
         raise AssertionError(f"expected ExceptionVals, got {type(exception_vt)}")
     tx._attach_traceback_to_exception(exception_vt)
