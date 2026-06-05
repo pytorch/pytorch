@@ -72,6 +72,31 @@ class TestIndexingSimplification(InductorTestCase):
         result2 = stride_at_vec_range(index, i, 16)
         self.assertIsNotNone(result2)
 
+    def test_simplify_index_in_vec_range_skips_full_simplify(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/133734"""
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        s1 = sympy.Symbol("s1", integer=True, positive=True)
+        base = 2 * s0 + 3 * s1
+        deep_expr = base
+        for k in range(1, 5):
+            deep_expr = FloorDiv((k + 3) * deep_expr * (base + k), k + 5)
+
+        index = deep_expr + ModularIndexing(i, 1, 16)
+        expected = deep_expr + i + sympy.Symbol("i_mod_c0")
+        original_simplify = sympy.simplify
+
+        def fail_simplify(expr):
+            raise AssertionError(f"unexpected sympy.simplify({expr})")
+
+        simplify_index_in_vec_range.cache_clear()
+        try:
+            sympy.simplify = fail_simplify
+            self.assertEqual(simplify_index_in_vec_range(index, i, 16), expected)
+        finally:
+            sympy.simplify = original_simplify
+            simplify_index_in_vec_range.cache_clear()
+
     def test_analyze_lane_contiguity(self):
         sizevars = SizeVarAllocator()
         i = sympy.Symbol("i", integer=True, nonnegative=True)
