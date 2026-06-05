@@ -1066,8 +1066,9 @@ static void index_fill_mps_kernel(TensorIterator& iter,
 
     c10::SmallVector<int64_t> slice_sizes, slice_out_strides;
     if (!is_dense) {
-      slice_sizes.reserve(self.dim());
-      slice_out_strides.reserve(self.dim());
+      const auto slice_dim = self.dim() > 0 ? self.dim() - 1 : 0;
+      slice_sizes.reserve(slice_dim);
+      slice_out_strides.reserve(slice_dim);
       for (int64_t d = 0; d < self.dim(); d++) {
         if (d != dim) {
           slice_sizes.push_back(self.size(d));
