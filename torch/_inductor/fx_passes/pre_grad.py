@@ -436,7 +436,10 @@ def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for module_name, module in gm.named_modules():
         if type(module) is nn.Identity:
             for node in list(graph.find_nodes(op="call_module", target=module_name)):
-                assert len(node.args) == 1
+                if len(node.args) != 1:
+                    raise AssertionError(
+                        f"expected 1 arg for identity node, got {len(node.args)}"
+                    )
                 input_node = node.args[0]
                 node.replace_all_uses_with(input_node)
                 graph.erase_node(node)
@@ -638,8 +641,12 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
 
 class NormalizedLinearNode:
     def __init__(self, node: torch.fx.Node) -> None:
-        assert node.op == "call_function"
-        assert node.target is torch.nn.functional.linear
+        if node.op != "call_function":
+            raise AssertionError(f"expected call_function node, got {node.op}")
+        if node.target is not torch.nn.functional.linear:
+            raise AssertionError(
+                f"expected torch.nn.functional.linear target, got {node.target}"
+            )
         self.node: torch.fx.Node = node
 
     def get_input(self) -> torch.fx.Node:
@@ -663,8 +670,12 @@ class NormalizedLinearNode:
 
 class NormalizedMatmulNode:
     def __init__(self, node: torch.fx.Node) -> None:
-        assert node.op == "call_function"
-        assert node.target in [torch.bmm, torch.matmul]
+        if node.op != "call_function":
+            raise AssertionError(f"expected call_function node, got {node.op}")
+        if node.target not in [torch.bmm, torch.matmul]:
+            raise AssertionError(
+                f"expected torch.bmm or torch.matmul target, got {node.target}"
+            )
         self.node: torch.fx.Node = node
 
     def get_input(self) -> torch.fx.Node:

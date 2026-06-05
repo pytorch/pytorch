@@ -205,7 +205,10 @@ class NumpyCompatNormalization:
         self.inverse_mapping = {}
         for actual_kwarg, numpy_kwargs in self.numpy_compat.items():
             for numpy_kwarg in numpy_kwargs:
-                assert numpy_kwarg not in self.inverse_mapping
+                if numpy_kwarg in self.inverse_mapping:
+                    raise AssertionError(
+                        f"duplicate numpy kwarg mapping for {numpy_kwarg}"
+                    )
                 self.inverse_mapping[numpy_kwarg] = actual_kwarg
 
     def __call__(self, graph: torch.fx.Graph):

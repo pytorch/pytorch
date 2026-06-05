@@ -267,9 +267,10 @@ def collapse_fusion_regions(
 
         # Find the call_module node
         module_nodes = list(gm.graph.find_nodes(op="call_module", target=subgraph_name))
-        assert len(module_nodes) == 1, (
-            f"Expected 1 call_module for {subgraph_name}, got {len(module_nodes)}"
-        )
+        if len(module_nodes) != 1:
+            raise AssertionError(
+                f"Expected 1 call_module for {subgraph_name}, got {len(module_nodes)}"
+            )
         module_node = module_nodes[0]
 
         subgraph_module = getattr(gm, subgraph_name)
@@ -307,10 +308,12 @@ def expand_fusion_regions(
             continue
 
         subgraph_name = module_node.target
-        assert isinstance(subgraph_name, str)
-        assert hasattr(gm, subgraph_name), (
-            f"Expected submodule {subgraph_name} to exist"
-        )
+        if not isinstance(subgraph_name, str):
+            raise AssertionError(
+                f"Expected subgraph_name to be str, got {type(subgraph_name)}"
+            )
+        if not hasattr(gm, subgraph_name):
+            raise AssertionError(f"Expected submodule {subgraph_name} to exist")
 
         # Users of module_node are get_items that will be removed from the graph
         for user in module_node.users:
@@ -330,7 +333,10 @@ def expand_fusion_regions(
         if isinstance(output_arg, (list, tuple)):
             if output_arg:
                 last_arg = output_arg[-1]
-                assert isinstance(last_arg, fx.Node)
+                if not isinstance(last_arg, fx.Node):
+                    raise AssertionError(
+                        f"Expected last output arg to be fx.Node, got {type(last_arg)}"
+                    )
                 result[module_node] = subgraph_to_new[last_arg]
         elif isinstance(output_arg, fx.Node) and output_arg in subgraph_to_new:
             result[module_node] = subgraph_to_new[output_arg]
