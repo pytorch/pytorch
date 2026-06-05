@@ -317,16 +317,77 @@ def common_reduction_strategy(
     return reduction_strategy
 
 
+def _reduction_single_dim_strategy(
+    args_schema: tuple[Any, ...],
+    reduction_dims: list[int] | None,
+    keep_dim: bool,
+    reduction_linear: bool,
+    reduction_op: ReductionOpType,
+    extra_partial_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Build single-dim strategies for reduction ops.
+
+    For non-reduction dims: shard input and output on that dim (with dim remapping).
+    For reduction dims (if reduction_linear): shard input on reduction dim, output is
+    Partial. Also adds partial propagation rules for linear reductions.
+
+    "avg" reductions do not shard reduced dims because averaging uneven local
+    averages does not produce the global average.
+    """
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+
+    reduce_dims = list(range(ndim)) if reduction_dims is None else reduction_dims
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+
+    for d in range(ndim):
+        if d in reduce_dims:
+            if reduction_linear and reduction_op != "avg":
+                # Shard on reduction dim -> Partial output.
+                strategies.append(
+                    [
+                        get_placement_from_reduction_op(reduction_op),
+                        _ShardingPlaceholder(d),
+                    ]
+                )
+        else:
+            # Shard on non-reduction dim -> shard output (with dim remapping)
+            if keep_dim:
+                out_d = d
+            else:
+                out_d = d - sum(1 for rd in reduce_dims if rd < d)
+            strategies.append([_ShardingPlaceholder(out_d), _ShardingPlaceholder(d)])
+
+    # Partial propagation: Partial(reduction_op) input -> Partial(reduction_op) output.
+    # Skip for NormReduction: the old common_reduction_strategy doesn't propagate
+    # _NormPartial through (it replicates instead), so we match that behavior.
+    if reduction_linear and not isinstance(reduction_op, NormReduction):
+        partial_placement = get_placement_from_reduction_op(reduction_op)
+        strategies.append([partial_placement, partial_placement])
+
+    if extra_partial_rules:
+        strategies.extend(extra_partial_rules)
+
+    return strategies
+
+
+# Category C: Linear reductions
+# NOTE: all/any are listed here for backward compat with the old register_op_strategy
+# registration below. When the new single_dim_strategy is enabled, they will be
+# registered separately via NON_LINEAR_BOOL_REDUCTION_OPS with reduction_linear=False.
 LINEAR_REDUCTION_OP_MAP = {
     aten.all.default: "product",
     aten.all.dim: "product",
-    aten.sum.default: "sum",
-    aten.sum.dim_IntList: "sum",
-    prims.sum.default: "sum",
     aten.any.default: "sum",
     aten.any.dim: "sum",
     aten.any.dims: "sum",
     aten.any.out: "sum",
+    aten.sum.default: "sum",
+    aten.sum.dim_IntList: "sum",
+    prims.sum.default: "sum",
     # These are only valid when there is no padding
     aten.prod.default: "product",
     aten.prod.dim_int: "product",
@@ -353,6 +414,83 @@ ARGMAX_ARGMIN_OPS = {
     aten.argmax.default: "max",
     aten.argmin.default: "min",
 }
+
+
+# all/any are NOT linear reductions: validation showed S(reduction_dim)->P(...)
+# produces incorrect results. They only support sharding on non-reduction dims.
+NON_LINEAR_BOOL_REDUCTION_OPS = [
+    aten.all.default,
+    aten.all.dim,
+    aten.any.default,
+    aten.any.dim,
+    aten.any.dims,
+    aten.any.out,
+]
+
+
+# @register_single_dim_strategy(
+#     list(LINEAR_REDUCTION_OP_MAP.keys()), schema_info=RuntimeSchemaInfo(1),
+#     allow_uneven_sharding=True,
+# )
+def linear_reduction_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+
+    dims = None
+    if len(args_schema) > 1:
+        dims = _infer_reduction_dims(args_schema[1], ndim)
+
+    keep_dim = len(args_schema) > 2 and bool(args_schema[2])
+    reduction_op = LINEAR_REDUCTION_OP_MAP[op]
+    return _reduction_single_dim_strategy(
+        args_schema,
+        reduction_dims=dims,
+        keep_dim=keep_dim,
+        reduction_linear=True,
+        reduction_op=reduction_op,
+    )
+
+
+# register_single_dim_strategy(
+#     [aten._foreach_max.default],
+#     schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
+#     allow_uneven_sharding=True,
+# )(linear_reduction_single_dim_strategy)
+
+
+# @register_single_dim_strategy(
+#     NON_LINEAR_BOOL_REDUCTION_OPS, schema_info=RuntimeSchemaInfo(1),
+#     allow_uneven_sharding=True,
+# )
+def bool_reduction_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """all/any: only shard on non-reduction dims (no partial propagation)."""
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+
+    dims = None
+    if len(args_schema) > 1:
+        dims = _infer_reduction_dims(args_schema[1], ndim)
+
+    keep_dim = len(args_schema) > 2 and bool(args_schema[2])
+    return _reduction_single_dim_strategy(
+        args_schema,
+        reduction_dims=dims,
+        keep_dim=keep_dim,
+        reduction_linear=False,
+        reduction_op="sum",
+    )
 
 
 @register_op_strategy(
@@ -585,6 +723,21 @@ def scan_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
+# Category J: Global reductions (reduce all dims to scalar)
+# @register_single_dim_strategy(
+#     [aten.median.default, aten.nanmedian.default],
+#     schema_info=RuntimeSchemaInfo(1),
+#     allow_uneven_sharding=True,
+# )
+def global_median_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Global median reduces all dims — only Replicate is valid."""
+    return []
+
+
 @register_op_strategy(
     [aten.median.default, aten.nanmedian.default],
     schema_info=RuntimeSchemaInfo(1),
@@ -652,16 +805,49 @@ def cummax_cummin_strategy(op_schema: OpSchema) -> OpStrategy:
     return sort_strategy(op_schema, dim)
 
 
+_STD_VAR_OPS = [
+    aten.std.correction,
+    aten.std.correction_out,
+    aten.var.correction,
+    aten.var.correction_out,
+    aten.var_mean.correction,
+    aten.var_mean.correction_out,
+    prims.var.default,
+]
+
+
+# Category D: Non-linear reductions
+# @register_single_dim_strategy(
+#     _STD_VAR_OPS,
+#     schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
+#     allow_uneven_sharding=True,
+# )
+def std_var_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+
+    dims = None
+    if len(args_schema) > 1:
+        dims = _infer_reduction_dims(args_schema[1], ndim)
+
+    keep_dim = cast(bool, kwargs_schema.get("keepdim", False))
+    return _reduction_single_dim_strategy(
+        args_schema,
+        reduction_dims=dims,
+        keep_dim=keep_dim,
+        reduction_linear=False,
+        reduction_op="sum",
+    )
+
+
 @register_op_strategy(
-    [
-        aten.std.correction,
-        aten.std.correction_out,
-        aten.var.correction,
-        aten.var.correction_out,
-        aten.var_mean.correction,
-        aten.var_mean.correction_out,
-        prims.var.default,
-    ],
+    _STD_VAR_OPS,
     schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
 )
 def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
@@ -696,6 +882,53 @@ def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
         if not isinstance(norm_type, (int, float)):
             raise AssertionError
         return NormReduction(norm_type)
+
+
+# Category E: Norm reductions
+# @register_single_dim_strategy(
+#     [aten.linalg_vector_norm.default, aten.norm.Scalar],
+#     schema_info=RuntimeSchemaInfo(1),
+#     allow_uneven_sharding=True,
+# )
+def vector_norm_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Vector norm: linear reduction with NormPartial.
+
+    S(reduction_dim)->_NormPartial(ord) rules appear as false positives in
+    strategy_validation because the validator doesn't enumerate _NormPartial
+    as an output placement. The rules are correct at runtime.
+    TODO: remove this comment when _NormPartial is deprecated.
+    """
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+
+    norm_type = args_schema[1] if len(args_schema) > 1 else 2
+    if not isinstance(norm_type, (int, float, str)):
+        raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
+    dim = args_schema[2] if len(args_schema) > 2 else None
+    keepdim = args_schema[3] if len(args_schema) > 3 else False
+    dims = _infer_reduction_dims(dim, ndim)
+
+    return _reduction_single_dim_strategy(
+        args_schema,
+        reduction_dims=dims,
+        keep_dim=cast(bool, keepdim),
+        reduction_linear=True,
+        reduction_op=_get_norm_reduction_op(norm_type),
+    )
+
+
+# Foreach variant reuses the same strategy; infra handles per-element dispatch.
+# register_single_dim_strategy(
+#     [aten._foreach_norm.Scalar],
+#     schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
+#     allow_uneven_sharding=True,
+# )(vector_norm_single_dim_strategy)
 
 
 @register_op_strategy(
@@ -748,6 +981,41 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
         )
         output_tuple_strategy_children.append(output_strategy)
     return TupleStrategy(output_tuple_strategy_children)
+
+
+# @register_single_dim_strategy(
+#     [aten.linalg__powsum.default], schema_info=RuntimeSchemaInfo(1),
+#     allow_uneven_sharding=True,
+# )
+def powsum_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """linalg__powsum: computes sum(|x|^ord), always reducible with Partial("sum")."""
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+
+    dim = args_schema[2] if len(args_schema) > 2 else None
+    keepdim = args_schema[3] if len(args_schema) > 3 else False
+    dims = _infer_reduction_dims(dim, ndim)
+
+    return _reduction_single_dim_strategy(
+        args_schema,
+        reduction_dims=dims,
+        keep_dim=cast(bool, keepdim),
+        reduction_linear=True,
+        reduction_op="sum",
+    )
+
+
+# register_single_dim_strategy(
+#     [aten._foreach_powsum.Scalar],
+#     schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
+#     allow_uneven_sharding=True,
+# )(powsum_single_dim_strategy)
 
 
 @register_op_strategy([aten.linalg__powsum.default], schema_info=RuntimeSchemaInfo(1))
@@ -1615,13 +1883,39 @@ def histc_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
+# @register_single_dim_strategy(
+#     [aten.logsumexp.default],
+#     schema_info=RuntimeSchemaInfo(
+#         static_argnum=1,
+#         static_kwargkey=["keepdim"],
+#     ),
+#     allow_uneven_sharding=True,
+# )
+def logsumexp_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+
+    dims = _infer_reduction_dims(args_schema[1], ndim)
+    keep_dim = cast(bool, kwargs_schema.get("keepdim", False))
+    return _reduction_single_dim_strategy(
+        args_schema,
+        reduction_dims=dims,
+        keep_dim=keep_dim,
+        reduction_linear=False,
+        reduction_op="sum",
+    )
+
+
 @register_op_strategy(
     [aten.logsumexp.default],
     schema_info=RuntimeSchemaInfo(
-        # static_argnum is the position where non-Tensor args beings.
         static_argnum=1,
-        # static_kwargkey is the name of kwargs to hash (which determines
-        # whether sharding prop can be cached).
         static_kwargkey=["keepdim"],
     ),
 )
