@@ -101,23 +101,24 @@ def {{ kernel_name }}_main({{ params_str }}):
     kernel.run(args, artifact, stream=stream, workspace={{ workspace_arg }}, assume_supported_args=True)
 
 
-def {{ kernel_name }}_precompile(precompile_shapes, precompile_strides, precompile_dtypes, device_index=0):
+def {{ kernel_name }}_precompile(precompile_shapes, precompile_strides, precompile_dtypes, device_index=0, device_capability=None):
     global _compiled_cache
-    torch.cuda.set_device(device_index)
-    device = f"cuda:{device_index}"
+    from torch._subclasses.fake_tensor import FakeTensorMode
 
+    device = f"cuda:{device_index}"
+    with FakeTensorMode():
 {% for ptr_name in input_ptrs %}
-    {{ ptr_name }} = torch.empty_strided(
-        tuple(precompile_shapes["{{ ptr_name }}"]),
-        tuple(precompile_strides["{{ ptr_name }}"]),
-        device=device,
-        dtype=getattr(torch, precompile_dtypes["{{ ptr_name }}"]))
+        {{ ptr_name }} = torch.empty_strided(
+            tuple(precompile_shapes["{{ ptr_name }}"]),
+            tuple(precompile_strides["{{ ptr_name }}"]),
+            device=device,
+            dtype=getattr(torch, precompile_dtypes["{{ ptr_name }}"]))
 {% endfor %}
-    out_ptr0 = torch.empty_strided(
-        tuple(precompile_shapes["output"]),
-        tuple(precompile_strides["output"]),
-        device=device,
-        dtype=getattr(torch, precompile_dtypes["output"]))
+        out_ptr0 = torch.empty_strided(
+            tuple(precompile_shapes["output"]),
+            tuple(precompile_strides["output"]),
+            device=device,
+            dtype=getattr(torch, precompile_dtypes["output"]))
 
     kernel = get_kernel_by_name(_KERNEL_NAME)
     if kernel is None:
@@ -131,5 +132,6 @@ def {{ kernel_name }}_precompile(precompile_shapes, precompile_strides, precompi
         disk_cache_set(
             _disk_fn_cache, __file__, _DISK_CACHE_CONFIG_KEY,
             cache_key, artifact.compiled_obj, device_index,
+            device_capability=device_capability,
         )
         _compiled_cache[mem_key] = artifact
