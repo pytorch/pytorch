@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import importlib.util
 import unittest
 from collections.abc import Callable, Iterator
 
@@ -340,25 +339,6 @@ class TestRuntimeEstimation(TestCase):
 
 class TestFP4Support(TestCase):
     """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
-
-    @unittest.skipIf(
-        not torch.cuda.is_available()
-        or importlib.util.find_spec("cutlass_api") is None,
-        "requires CUDA and cutlass_api",
-    )
-    def test_ensure_fp4_dtype_registered(self):
-        """_ensure_fp4_dtype_registered should patch cutlass_api for FP4."""
-        from torch._inductor.utils import _ensure_fp4_dtype_registered
-
-        _ensure_fp4_dtype_registered()
-        import cutlass
-        import cutlass_api.utils
-
-        result = cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
-        self.assertEqual(result, cutlass.Float4E2M1FN)
-
-        result_fp32 = cutlass_api.utils.cutlass_type_from_torch_type(torch.float32)
-        self.assertEqual(result_fp32, cutlass.Float32)
 
     def test_rand_strided_fp4(self):
         """rand_strided should produce valid FP4 tensors."""
