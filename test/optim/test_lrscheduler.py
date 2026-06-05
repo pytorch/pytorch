@@ -854,6 +854,20 @@ class TestLRScheduler(TestCase):
         self._test(scheduler, targets, epochs)
         self.opt = old_opt
 
+    def test_sequentiallr_skips_preceding_schedulers_with_zero_milestone(self):
+        old_opt = self.opt
+        self.opt = SGD(self.net.parameters(), lr=1.0)
+        schedulers = [
+            LinearLR(self.opt, start_factor=0.1, end_factor=0.1, total_iters=10),
+            LinearLR(self.opt, start_factor=0.2, end_factor=0.2, total_iters=10),
+            LinearLR(self.opt, start_factor=0.3, end_factor=0.3, total_iters=10),
+            LinearLR(self.opt, start_factor=0.4, end_factor=0.4, total_iters=10),
+        ]
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=[0, 0, 1])
+        targets = [[0.3, 0.4]]
+        self._test(scheduler, targets, epochs=2)
+        self.opt = old_opt
+
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
             LinearLR(self.opt, start_factor=0.4, total_iters=3),
