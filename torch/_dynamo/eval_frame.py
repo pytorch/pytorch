@@ -58,8 +58,8 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     get_eval_frame_isolate_recompiles_id,
-    reset_code,
-    set_code_exec_strategy,
+    reset_code as _reset_code,
+    set_code_exec_strategy as _set_code_exec_strategy,
     set_eval_frame,
     set_eval_frame_isolate_recompiles_id,
     set_fullgraph_compiled_frame_count,
@@ -381,6 +381,32 @@ DONT_WRAP_FILES = {
     join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
 
+_skipped_code_objects: weakref.WeakSet[types.CodeType] = weakref.WeakSet()
+_get_code_exec_strategy = getattr(
+    torch._C._dynamo.eval_frame, "get_code_exec_strategy", None
+)
+
+
+def reset_code(code: types.CodeType) -> None:
+    _skipped_code_objects.discard(code)
+    _reset_code(code)
+
+
+def set_code_exec_strategy(code: types.CodeType, strategy: FrameExecStrategy) -> None:
+    if strategy.cur_action == FrameAction.SKIP:
+        _skipped_code_objects.add(code)
+    else:
+        _skipped_code_objects.discard(code)
+    _set_code_exec_strategy(code, strategy)
+
+
+def _is_code_skipped(code: types.CodeType | None) -> bool:
+    if code is None:
+        return False
+    if _get_code_exec_strategy is not None:
+        return _get_code_exec_strategy(code).cur_action == FrameAction.SKIP
+    return code in _skipped_code_objects
+
 
 def _debug_get_cache_entry_list(
     code: types.CodeType | Callable[..., Any],
@@ -482,7 +508,10 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
         elif config.wrap_top_frame or (
             isinstance(self._orig_mod.forward, types.MethodType)
-            and (trace_rules.check(self._orig_mod.forward))
+            and (
+                trace_rules.check(self._orig_mod.forward)
+                or _is_code_skipped(self._orig_mod.forward.__code__)
+            )
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
@@ -1038,6 +1067,7 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
+        fn_code = getattr(fn, "__code__", None)
         if config.debug_force_nested_calls and filename not in DONT_WRAP_FILES:
             fn = external_utils.wrap_inline(fn)
             # Create a new code object for `fn` so that functions have different
@@ -1051,6 +1081,7 @@ class _TorchDynamoContext:
                 # wrap_inline's shared `inner` code (#124269).
                 (filename is None and not inspect.isfunction(fn))
                 or trace_rules.check(fn)
+                or _is_code_skipped(fn_code)
                 or top_level_in_graph
                 or has_polyfill
             )

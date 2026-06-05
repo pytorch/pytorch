@@ -30,14 +30,16 @@ std::unordered_set<PyCodeObject*> breakpoint_code_objects;
 struct DebugContextGuard {
   py::object ctx;
 
-  explicit DebugContextGuard(py::object c) : ctx(std::move(c)) {
+  explicit DebugContextGuard(const py::object& c) : ctx(c) {
     ctx.attr("__enter__")();
   }
 
   ~DebugContextGuard() {
     // Save any pending Python exception (e.g. KeyboardInterrupt from the
     // debugger's 'q' command) so calling __exit__ doesn't clobber it.
-    PyObject *exc_type, *exc_value, *exc_tb;
+    PyObject* exc_type = nullptr;
+    PyObject* exc_value = nullptr;
+    PyObject* exc_tb = nullptr;
     PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
     try {
       ctx.attr("__exit__")(py::none(), py::none(), py::none());
@@ -52,11 +54,13 @@ struct DebugContextGuard {
 
   DebugContextGuard(const DebugContextGuard&) = delete;
   DebugContextGuard& operator=(const DebugContextGuard&) = delete;
+  DebugContextGuard(DebugContextGuard&&) = delete;
+  DebugContextGuard& operator=(DebugContextGuard&&) = delete;
 };
 
 } // namespace
 
-void set_bytecode_debugger_callback(py::object callback) {
+void set_bytecode_debugger_callback(const py::object& callback) {
   if (callback.is_none()) {
     Py_XSETREF(bytecode_debugger_callback_obj, nullptr);
   } else {
@@ -72,7 +76,7 @@ py::object get_bytecode_debugger_callback() {
       py::handle(bytecode_debugger_callback_obj));
 }
 
-void register_breakpoint_code(py::object code) {
+void register_breakpoint_code(const py::object& code) {
   breakpoint_code_objects.insert((PyCodeObject*)code.ptr());
 }
 
@@ -328,6 +332,10 @@ struct CRecursionLimitRAII {
   ~CRecursionLimitRAII() {
     this->tstate->c_recursion_remaining = this->old_recursion_remaining;
   }
+  CRecursionLimitRAII(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII& operator=(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII(CRecursionLimitRAII&&) = delete;
+  CRecursionLimitRAII& operator=(CRecursionLimitRAII&&) = delete;
 };
 
 #else
@@ -681,6 +689,20 @@ PyObject* dynamo__custom_eval_frame(
     eval_default();
   }
   return eval_result;
+}
+
+PyObject* dynamo_get_code_exec_strategy(PyObject* dummy, PyObject* arg) {
+  if (!PyCode_Check(arg)) {
+    PyErr_SetString(PyExc_TypeError, "expected a code object");
+    return nullptr;
+  }
+
+  PyCodeObject* code = (PyCodeObject*)arg;
+  ExtraState* extra = get_extra_state(code);
+  FrameExecStrategy strategy = extra == nullptr
+      ? FrameExecStrategy{FrameAction::DEFAULT, FrameAction::DEFAULT}
+      : extra_state_get_exec_strategy(extra);
+  return py::cast(strategy).release().ptr();
 }
 
 PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
