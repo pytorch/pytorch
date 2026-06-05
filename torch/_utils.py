@@ -214,6 +214,16 @@ def set_tensor_metadata(tensor, metadata):
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
 
 
+def copy_backend_meta(src, dst):
+    # Copy the backend-specific metadata (``c10::BackendMeta``) from ``src`` to
+    # ``dst``. See `get_tensor_metadata` / `set_tensor_metadata` above.
+    if not isinstance(src, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(src).__name__}")
+    if not isinstance(dst, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(dst).__name__}")
+    torch._C._copy_backend_meta(src, dst)  # type: ignore[attr-defined]
+
+
 def _restore_device_fake_mode(tensor):
     if torch._guards.detect_fake_mode(None) is not None:
         if tensor.untyped_storage()._fake_device is not None:
