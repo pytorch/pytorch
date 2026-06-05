@@ -363,6 +363,19 @@ class LocalCache(RemoteCache[JsonDataTy]):
         serde = RemoteCacheJsonSerde()
         super().__init__(backend, serde)
 
+    @override
+    def _get(self, key: str, sample: Sample | None) -> JsonDataTy | None:
+        try:
+            return super()._get(key, sample)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            log.warning(
+                "Ignoring corrupt local cache entry %s: %s: %s",
+                key,
+                type(exc).__name__,
+                exc,
+            )
+            return None
+
 
 class LocalAutotuneCache(LocalCache):
     # Keep a distinct cache type for cache stats and test backend overrides.

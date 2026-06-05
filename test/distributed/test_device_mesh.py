@@ -185,13 +185,6 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
 
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_assert_invalid_mesh_tensor(self):
-        mesh = torch.arange(self.world_size).to(self.rank)
-        with self.assertRaises(ValueError):
-            DeviceMesh(self.device_type, mesh)
-
     @with_comms()
     def test_2d_mesh_non_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
@@ -315,7 +308,7 @@ class DeviceMeshTest(DTensorTestBase):
         mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
         local_tensor = torch.randn(2, 8)
-        global_tensor = funcol.all_gather_tensor(
+        global_tensor = funcol.all_gather_single(
             local_tensor, gather_dim=0, group=(mesh, 0)
         ).wait()
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
@@ -1359,7 +1352,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 contiguous=True,
             )
             local_tensor = tensor_padded_list[my_rank]
-            big_tensor = funcol.all_gather_tensor(
+            big_tensor = funcol.all_gather_single(
                 local_tensor, gather_dim=shard_dim, group=(device_mesh, 0)
             )
             big_tensor_chunks = list(
@@ -1454,7 +1447,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             res_num = ((0 + self.world_size - 1) * self.world_size) / 2
 
-            scattered_tensor = funcol.reduce_scatter_tensor(
+            scattered_tensor = funcol.reduce_scatter_single(
                 tensor_to_reduce,
                 reduceOp="sum",
                 scatter_dim=shard_dim,

@@ -193,10 +193,12 @@ class CppTemplateKernel(CppKernel):
             raise AssertionError(f"expected ir.ReinterpretView, got {type(permuted)}")
         return permuted
 
-    def maybe_codegen_profile(self) -> str:
+    def maybe_codegen_profile(self, prefix_kernel_name: str | None = None) -> str:
         if config.cpp.enable_kernel_profile:
             graph_id = V.graph.graph_id
             prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
+            if prefix and prefix_kernel_name:
+                prefix += prefix_kernel_name + "_"
             handle_str = (
                 "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
                 f'record_{prefix}{self.kernel_name}_("{prefix}{self.kernel_name}", nullptr);'
