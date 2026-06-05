@@ -65,7 +65,8 @@ class CUTLASSScheduling(BaseScheduling):
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         if self.is_cutlass_template(node1) and isinstance(node2, BaseSchedulerNode):
-            assert node1.node, "node1.node should not be None"
+            if not node1.node:
+                raise AssertionError("node1.node should not be None")
             return self._can_fuse_epilogue_impl(
                 cast(CUTLASSTemplateBuffer, node1.node),
                 [],
@@ -74,8 +75,10 @@ class CUTLASSScheduling(BaseScheduling):
         elif self.is_cutlass_fused_template(node1) and isinstance(
             node2, BaseSchedulerNode
         ):
-            assert node1.node, "node1.node should not be None"
-            assert node2.node, "node2.node should not be None"
+            if not node1.node:
+                raise AssertionError("node1.node should not be None")
+            if not node2.node:
+                raise AssertionError("node2.node should not be None")
             fnode1 = cast(FusedSchedulerNode, node1)
             return self._can_fuse_epilogue_impl(
                 fnode1.get_template_node(),  # type: ignore[arg-type]
@@ -133,16 +136,19 @@ class CUTLASSScheduling(BaseScheduling):
         Codegen a cutlass template, possibly with fused epilogues
         """
         counters["inductor"]["cutlass_epilogue_fusion_counter"] += len(epilogue_nodes)
-        assert self.is_cutlass_template(template_node), (
-            "Template node passed to CUTLASSScheduling.codegen_template must be a SchedulerNode that wraps a CUTLASSTemplateBuffer"
-        )
+        if not self.is_cutlass_template(template_node):
+            raise AssertionError(
+                "Template node passed to CUTLASSScheduling.codegen_template must be a SchedulerNode that wraps a CUTLASSTemplateBuffer"
+            )
         _, (_numel, rnumel) = template_node.group
-        assert rnumel == 1
+        if rnumel != 1:
+            raise AssertionError(f"expected rnumel == 1, got {rnumel}")
         ctb: CUTLASSTemplateBuffer = cast(CUTLASSTemplateBuffer, template_node.node)
         epilogue_ir_nodes: list[Buffer] = [n.node for n in epilogue_nodes]  # type: ignore[misc]
-        assert all(isinstance(n, ComputedBuffer) for n in epilogue_ir_nodes), (
-            "Epilogue nodes must all be instances of ir.ComputedBuffer"
-        )
+        if not all(isinstance(n, ComputedBuffer) for n in epilogue_ir_nodes):
+            raise AssertionError(
+                "Epilogue nodes must all be instances of ir.ComputedBuffer"
+            )
         kernel, render = ctb.make_kernel_render(  # type: ignore[misc]
             ctb, epilogue_nodes=epilogue_nodes
         )
@@ -157,9 +163,11 @@ class CUTLASSScheduling(BaseScheduling):
             ctb.emulate_store_fn()
             for node in epilogue_ir_nodes:
                 with V.set_ops_handler(MockCutlassHandler(V.get_ops_handler())):
-                    assert isinstance(
-                        node, ComputedBuffer
-                    )  # Not sure why we need to do this again
+                    # Not sure why we need to do this again
+                    if not isinstance(node, ComputedBuffer):
+                        raise AssertionError(
+                            f"expected ComputedBuffer, got {type(node)}"
+                        )
                     node.get_store_function()(CutlassEVTCodegen.get_index_vars(node))
 
         with V.set_kernel_handler(kernel):
@@ -186,9 +194,8 @@ class CUTLASSScheduling(BaseScheduling):
     ) -> list[BaseSchedulerNode]:
         nodes = fused_node.get_nodes()
         template_node = fused_node.get_template_node()
-        assert all(n.node is not None for n in nodes), (
-            "All epilogue nodes should have an IRNode"
-        )
+        if not all(n.node is not None for n in nodes):
+            raise AssertionError("All epilogue nodes should have an IRNode")
         # pyrefly: ignore [redundant-cast]
         return cast(
             list[BaseSchedulerNode], [n for n in nodes if n.node is not template_node]
@@ -218,7 +225,10 @@ class CUTLASSScheduling(BaseScheduling):
 
         scheduler_nodes_to_fuse = node_to_fuse.get_nodes()
 
-        assert isinstance(cutlass_template_buffer, CUTLASSTemplateBuffer)
+        if not isinstance(cutlass_template_buffer, CUTLASSTemplateBuffer):
+            raise AssertionError(
+                f"expected CUTLASSTemplateBuffer, got {type(cutlass_template_buffer)}"
+            )
 
         # Checks on constituent nodes
         for s_node in scheduler_nodes_to_fuse:
@@ -243,11 +253,14 @@ size: {cutlass_template_buffer.get_size()}"
                 )
                 return False
 
-        assert len(
-            existing_epilogue_nodes
-        ) or cutlass_template_buffer.get_name() in OrderedSet(
-            [rd.name for rd in node_to_fuse.read_writes.reads]
-        ), "First epilogue node must read from cutlass template buffer"
+        if not (
+            len(existing_epilogue_nodes)
+            or cutlass_template_buffer.get_name()
+            in OrderedSet([rd.name for rd in node_to_fuse.read_writes.reads])
+        ):
+            raise AssertionError(
+                "First epilogue node must read from cutlass template buffer"
+            )
 
         if node_to_fuse.has_aliasing_or_mutation():
             why(f"{node_to_fuse.get_name()} has aliasing or mutation")

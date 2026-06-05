@@ -78,9 +78,11 @@ class CppWrapperMps(CppWrapperGpu):
                 inductor_meta=inductor_meta,
             )
 
-        assert device.type == "mps"
+        if device.type != "mps":
+            raise AssertionError(f"expected device.type == 'mps', got {device.type}")
 
-        assert arg_types is not None
+        if arg_types is None:
+            raise AssertionError("expected arg_types to not be None")
 
         new_args = []
         for idx, (arg, arg_type) in enumerate(zip(call_args[:-2], arg_types[:-2])):
@@ -220,7 +222,8 @@ class CppWrapperMps(CppWrapperGpu):
 
     @staticmethod
     def get_device_include_path(device: str) -> str:
-        assert V.graph.aot_mode
+        if not V.graph.aot_mode:
+            raise AssertionError("expected V.graph.aot_mode to be set")
         return (
             "#include <torch/csrc/inductor/aoti_include/mps.h>\n"
             "#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>"
