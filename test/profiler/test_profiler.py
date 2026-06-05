@@ -476,6 +476,13 @@ _cupti_monitor.enable_hes_early()
             stats = _cupti_monitor.stop_collection()
             self.assertIsNotNone(stats)
             self.assertIsNone(_cupti_monitor.get_monitor())
+            # The native C++ pool must actually have been exercised: catches a
+            # silent regression to a no-op (e.g. broken callback registration or
+            # symbol export) that would still produce passing file-existence
+            # checks if the worker never saw a buffer.
+            self.assertGreater(stats["buffers_allocated"], 0)
+            self.assertGreater(stats["buffers_completed"], 0)
+            self.assertEqual(stats["buffers_pending"], 0)
             self.assertTrue(
                 os.path.exists(os.path.join(out_dir, _cupti_monitor._META_FILE))
             )
@@ -744,6 +751,66 @@ class TestProfilerITT(TestCase):
 
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
+    def test_cupti_monitor_buffer_pool_reuse(self):
+        # The CUPTI monitor's buffer pool is pure C++ (no CUDA/cupti-python), so
+        # drive its native buffer-requested / buffer-completed callbacks directly
+        # via ctypes to verify returned buffers are recycled rather than
+        # reallocated.
+        import ctypes
+
+        pyprof = torch._C._profiler
+        pyprof._cupti_monitor_reset_buffers()
+        self.addCleanup(pyprof._cupti_monitor_reset_buffers)
+        buffer_size = 64 * 1024
+        pyprof._cupti_monitor_configure_buffers(buffer_size)
+
+        request_t = ctypes.CFUNCTYPE(
+            None,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+        )
+        complete_t = ctypes.CFUNCTYPE(
+            None,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+        )
+        request = request_t(pyprof._cupti_monitor_buffer_request_callback_address())
+        complete = complete_t(pyprof._cupti_monitor_buffer_complete_callback_address())
+
+        def do_request():
+            buf = ctypes.c_void_p()
+            size = ctypes.c_size_t()
+            max_records = ctypes.c_size_t()
+            request(ctypes.byref(buf), ctypes.byref(size), ctypes.byref(max_records))
+            return buf.value, size.value
+
+        # First request has an empty free list, so it allocates.
+        ptr_a, size_a = do_request()
+        self.assertEqual(size_a, buffer_size)
+        self.assertEqual(pyprof._cupti_monitor_allocated_buffers(), 1)
+
+        # Complete it, drain it, and return it to the pool.
+        complete(ctypes.c_void_p(0xABCD), 7, ctypes.c_void_p(ptr_a), buffer_size, 4096)
+        self.assertEqual(pyprof._cupti_monitor_pending_buffers(), 1)
+        item = pyprof._cupti_monitor_get_completed()
+        self.assertEqual(item, (ptr_a, 4096, 0xABCD, 7))
+        self.assertEqual(pyprof._cupti_monitor_pending_buffers(), 0)
+        pyprof._cupti_monitor_return_buffer(ptr_a)
+
+        # The next request reuses the freed buffer: same pointer, no new alloc.
+        ptr_b, _ = do_request()
+        self.assertEqual(ptr_b, ptr_a)
+        self.assertEqual(pyprof._cupti_monitor_allocated_buffers(), 1)
+
+        # A second concurrently-outstanding buffer forces a fresh allocation.
+        ptr_c, _ = do_request()
+        self.assertNotEqual(ptr_c, ptr_b)
+        self.assertEqual(pyprof._cupti_monitor_allocated_buffers(), 2)
+
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
