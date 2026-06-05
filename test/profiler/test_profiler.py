@@ -4,6 +4,7 @@
 import collections
 import copy
 import gc
+import gzip
 import json
 import mmap
 import os
@@ -521,6 +522,196 @@ _cupti_monitor.enable_hes_early()
                     ),
                     0,
                 )
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_multithread_runtime_thread_assignment(self):
+        x1 = torch.randn(256, 256, device="cuda")
+        x2 = torch.randn(256, 256, device="cuda")
+        y1 = torch.randn(256, 256, device="cuda")
+        y2 = torch.randn(256, 256, device="cuda")
+
+        # Warm up kernel/runtime state so the profiled region is dominated by the
+        # launches from the two worker threads.
+        _ = torch.relu(x1 + y1)
+        _ = torch.relu(x2 + y2)
+        torch.cuda.synchronize()
+
+        start_evt = threading.Event()
+
+        def worker(name, x, y):
+            start_evt.wait()
+            with record_function(name):
+                z = torch.relu(x + y)
+                z.sum().item()
+                torch.cuda.synchronize()
+
+        cfg = _ExperimentalConfig(
+            profile_all_threads=True,
+            custom_profiler_config='{"backend":"cupti_monitor"}',
+        )
+
+        with TemporaryFileName(mode="w+") as trace_path:
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                experimental_config=cfg,
+            ) as prof:
+                threads = [
+                    threading.Thread(target=worker, args=("worker_a", x1, y1)),
+                    threading.Thread(target=worker, args=("worker_b", x2, y2)),
+                ]
+                for thread in threads:
+                    thread.start()
+                start_evt.set()
+                for thread in threads:
+                    thread.join()
+
+            prof.export_chrome_trace(trace_path)
+
+            opener = gzip.open if trace_path.endswith(".gz") else open
+            with opener(trace_path, "rt") as f:
+                data = json.load(f)
+
+        events = data["traceEvents"]
+        worker_tids = sorted(
+            {
+                e["tid"]
+                for e in events
+                if e.get("ph") == "X"
+                and e.get("cat") == "user_annotation"
+                and e.get("name") in {"worker_a", "worker_b"}
+                and isinstance(e.get("tid"), int)
+            }
+        )
+        launch_tids = sorted(
+            {
+                e["tid"]
+                for e in events
+                if e.get("ph") == "X"
+                and e.get("cat") == "cuda_runtime"
+                and e.get("name") == "cudaLaunchKernel"
+                and isinstance(e.get("tid"), int)
+            }
+        )
+
+        self.assertEqual(len(worker_tids), 2)
+        self.assertGreater(len(launch_tids), 0)
+        self.assertTrue(set(launch_tids).issubset(set(worker_tids)))
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_trace_has_expected_events(self):
+        cfg = _ExperimentalConfig(
+            custom_profiler_config='{"backend":"cupti_monitor"}',
+        )
+        with TemporaryFileName(mode="w+") as trace_path:
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                experimental_config=cfg,
+            ) as prof:
+                with record_function("monitor_region"):
+                    a = torch.randn(128, 128, device="cuda")
+                    b = torch.randn(128, 128, device="cuda")
+                    c = (a @ b).relu()
+                    _ = c.cpu()
+                    torch.cuda.synchronize()
+            prof.export_chrome_trace(trace_path)
+            with open(trace_path) as f:
+                events = json.load(f)["traceEvents"]
+
+        cats = {e.get("cat") for e in events if e.get("ph") == "X"}
+        for expected in (
+            "kernel",
+            "cuda_runtime",
+            "gpu_memcpy",
+            "cpu_op",
+            "user_annotation",
+        ):
+            self.assertIn(
+                expected,
+                cats,
+                f"missing {expected}; got {sorted(c for c in cats if c)}",
+            )
+
+        kernels = [e for e in events if e.get("cat") == "kernel" and e.get("ph") == "X"]
+        self.assertGreater(len(kernels), 0)
+        self.assertTrue(all(e["dur"] > 0 for e in kernels))
+
+        runtime_names = {
+            e.get("name") for e in events if e.get("cat") == "cuda_runtime"
+        }
+        self.assertIn("cudaLaunchKernel", runtime_names)
+
+        user_names = {
+            e["name"]
+            for e in events
+            if e.get("cat") == "user_annotation" and e.get("ph") == "X"
+        }
+        self.assertIn("monitor_region", user_names)
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_record_shapes(self):
+        cfg = _ExperimentalConfig(
+            custom_profiler_config='{"backend":"cupti_monitor"}',
+        )
+
+        def shaped_cpu_ops(record_shapes):
+            with TemporaryFileName(mode="w+") as trace_path:
+                with profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    record_shapes=record_shapes,
+                    experimental_config=cfg,
+                ) as prof:
+                    a = torch.randn(64, 64, device="cuda")
+                    (a @ a).relu()
+                    torch.cuda.synchronize()
+                prof.export_chrome_trace(trace_path)
+                with open(trace_path) as f:
+                    events = json.load(f)["traceEvents"]
+            return [
+                e
+                for e in events
+                if e.get("cat") == "cpu_op" and "Input Dims" in e.get("args", {})
+            ]
+
+        # record_shapes is a CPU-side setting, so it must flow through the monitor
+        # backend just like the stock profiler.
+        self.assertEqual(shaped_cpu_ops(record_shapes=False), [])
+        self.assertGreater(len(shaped_cpu_ops(record_shapes=True)), 0)
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_matches_stock_op_and_kernel_names(self):
+        def trace_summary(use_monitor):
+            cfg = _ExperimentalConfig(
+                custom_profiler_config='{"backend":"cupti_monitor"}'
+                if use_monitor
+                else ""
+            )
+            with TemporaryFileName(mode="w+") as trace_path:
+                with profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    experimental_config=cfg,
+                ) as prof:
+                    a = torch.randn(128, 128, device="cuda")
+                    b = torch.randn(128, 128, device="cuda")
+                    (a @ b).relu().sum()
+                    torch.cuda.synchronize()
+                prof.export_chrome_trace(trace_path)
+                with open(trace_path) as f:
+                    events = json.load(f)["traceEvents"]
+            aten_ops = {
+                e["name"]
+                for e in events
+                if e.get("cat") == "cpu_op" and e.get("name", "").startswith("aten::")
+            }
+            n_kernels = sum(
+                1 for e in events if e.get("cat") == "kernel" and e.get("ph") == "X"
+            )
+            return aten_ops, n_kernels
+
+        stock_ops, stock_kernels = trace_summary(use_monitor=False)
+        monitor_ops, monitor_kernels = trace_summary(use_monitor=True)
+        self.assertGreater(stock_kernels, 0)
+        self.assertGreater(monitor_kernels, 0)
+        self.assertEqual(monitor_ops, stock_ops)
 
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
