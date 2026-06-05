@@ -571,6 +571,8 @@ def _track_auto_functionalized_proxy_output(
     public_result = track_tensor_tree(
         public_out, out_proxy, constant=None, tracer=tracer
     )
+    if len(public_result) != len(public_out):
+        raise AssertionError("proxy output arity must match public output arity")
     return (*public_result, *storage_changed)
 
 
@@ -856,18 +858,21 @@ def _do_auto_functionalize_v2_for_inplace_operator(
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
     all_bases_unwrapped = ctx.unwrap_tensors([base])
     auto_func_kwargs = dict(unwrapped_kwargs, _all_bases=all_bases_unwrapped)
+    auto_func_kwargs["_return_storage_changed"] = True
 
     with ctx.redispatch_to_next():
-        unwrapped_outs = auto_functionalized_v2(
+        unwrapped_outs: Any = auto_functionalized_v2(
             op,
             **auto_func_kwargs,  # type: ignore[arg-type]
         )
 
-    # HOP returns (op_result, mutated_self_base).
+    # HOP returns (op_result, mutated_self_base, storage_changed).
     # op_result aliases mutated_self_base (inplace semantics).
     unwrapped_result = unwrapped_outs[0]
     unwrapped_mutated_base = unwrapped_outs[1]
+    unwrapped_storage_changed = unwrapped_outs[2]
 
+    _mark_storage_mutation_if_necessary(base, unwrapped_storage_changed)
     ctx.replace(base, unwrapped_mutated_base)
     ctx.commit_update(base)
     ctx.sync(base)
