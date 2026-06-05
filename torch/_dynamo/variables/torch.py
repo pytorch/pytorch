@@ -2754,6 +2754,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .tensor import TensorVariable
 
             if not config.trace_autograd_ops:
+                # AOTAutograd does not preserve differentiable relationships
+                # between multiple outputs of a compiled prefix. If
+                # autograd.grad runs eagerly after a graph break, that can turn
+                # a valid grad edge between prefix outputs into allow_unused
+                # None. Skip the frame instead of resuming around this call.
                 unimplemented(
                     gb_type="using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
                     context=f"trace_autograd_ops={config.trace_autograd_ops}",
@@ -2764,6 +2769,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     hints=[
                         "Change `torch._dynamo.config.trace_autograd_ops` to `True`.",
                     ],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
                 )
 
             # Graph break if we detected on a previous attempt that autograd.grad

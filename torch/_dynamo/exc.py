@@ -217,6 +217,7 @@ class Unsupported(TorchDynamoException):
         *,
         case_name: str | None = None,
         real_stack: StackSummary | None = None,
+        preserve_skip_frame_after_inline: bool = False,
     ) -> None:
         super().__init__(msg)
         if not real_stack:
@@ -224,6 +225,7 @@ class Unsupported(TorchDynamoException):
         self.real_stack = real_stack
         self.msg = msg
         self.skip_frame = skip_frame
+        self.preserve_skip_frame_after_inline = preserve_skip_frame_after_inline
         self.category: str | None = None
         self.add_to_stats()
         self.gb_type: str | None = gb_type
@@ -294,6 +296,7 @@ class UserError(TorchDynamoException):
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.skip_frame = False
+        self.preserve_skip_frame_after_inline = False
         self.logged = False
         self.error_type = error_type
         self.msg = msg
@@ -636,6 +639,7 @@ def unimplemented(
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
     skip_frame: bool = False,
+    preserve_skip_frame_after_inline: bool = False,
 ) -> NoReturn:
     """
     Called within dynamo to cause a graph break.
@@ -645,6 +649,8 @@ def unimplemented(
         context: Developer context for the graph break. It can contain tracing context/dynamic strings.
         explanation: User-facing context-dependent explanation for the graph break. Can be dynamic.
         hints: List of user-facing hints for the graph break.
+        preserve_skip_frame_after_inline: Keep skip_frame=True if this graph break
+                 is raised from an inlined function and bubbles to the parent frame.
     """
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
@@ -658,13 +664,28 @@ def unimplemented(
         if isinstance(from_exc, Unsupported):
             msg = f"{from_exc.msg}\n\n*** While handling this graph break, another graph break occurred: ***\n\n{msg}"
             # noqa: GB_REGISTRY
-            raise Unsupported(msg, gb_type, skip_frame, real_stack=past_real_stack)
+            raise Unsupported(
+                msg,
+                gb_type,
+                skip_frame,
+                real_stack=past_real_stack,
+                preserve_skip_frame_after_inline=preserve_skip_frame_after_inline,
+            )
         # noqa: GB_REGISTRY
         raise Unsupported(
-            msg, gb_type, skip_frame, real_stack=past_real_stack
+            msg,
+            gb_type,
+            skip_frame,
+            real_stack=past_real_stack,
+            preserve_skip_frame_after_inline=preserve_skip_frame_after_inline,
         ) from from_exc
     # noqa: GB_REGISTRY
-    raise Unsupported(msg, gb_type, skip_frame)
+    raise Unsupported(
+        msg,
+        gb_type,
+        skip_frame,
+        preserve_skip_frame_after_inline=preserve_skip_frame_after_inline,
+    )
 
 
 # KeyError has special handling for its args
