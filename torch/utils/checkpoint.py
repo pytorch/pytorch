@@ -492,10 +492,9 @@ def checkpoint(
             - an :class:`AutoNamingMode` auto-name
               (``"layers.0.lin_mm.default_0"``) to target a specific op by its
               module-qualified name, or a module-FQN prefix (``"layers.1"``) to
-              match every op under that submodule. These resolve under
-              :func:`torch.compile` automatically; in eager they only take effect
-              if you have an :class:`AutoNamingMode` active around the call (it is
-              not enabled implicitly).
+              match every op under that submodule. These only take effect if you
+              have an :class:`AutoNamingMode` active around the call (it is not
+              enabled implicitly).
 
             Selectors are resolved most-specific first (exact auto-name, then
             longest module-FQN prefix, then op). Operators not matched default to
@@ -1705,62 +1704,19 @@ def name(tensor, name):
 
 
 def _normalize_fqn(fqn):
-    # Drop the leading source/root component so that the eager naming source
-    # (ModuleTracker, e.g. "Model.layers.0.lin") and the compile naming source
-    # (nn_module_stack, e.g. "G['mod'].layers.0.lin") agree on a root-relative
-    # path ("layers.0.lin").
+    # Drop the leading root component (the model class name added by
+    # ModuleTracker, e.g. "Model.layers.0.lin") to get a root-relative path
+    # ("layers.0.lin").
     if not fqn:
         return ""
     _, _, rest = fqn.partition(".")
     return rest
 
 
-def _node_fqn(node):
-    stack = node.meta.get("nn_module_stack")
-    if not stack:
-        return ""
-    return _normalize_fqn(next(reversed(stack.values()))[0])
-
-
-def _auto_name_for_node(node):
-    # The auto-name of an op node is fully determined by the node: its module
-    # FQN (nn_module_stack), its op, and its index among same-(fqn, op) nodes.
-    fqn = _node_fqn(node)
-    op_name = getattr(node.target, "__name__", str(node.target))
-    count = 0
-    for n in node.graph.nodes:
-        if n is node:
-            break
-        if (
-            n.op == node.op
-            and getattr(n.target, "__name__", str(n.target)) == op_name
-            and _node_fqn(n) == fqn
-        ):
-            count += 1
-    return f"{fqn}_{op_name}_{count}"
-
-
-def _node_from_proxy(tensor):
-    if not isinstance(tensor, torch.Tensor):
-        return None
-    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
-    from torch.fx.experimental.proxy_tensor import get_proxy_mode
-
-    mode = get_proxy_mode()
-    if mode is None:
-        return None
-    proxy_tensor = mode.tracer.tensor_tracker.get(mb_unwrap_functional_tensor(tensor))
-    if proxy_tensor is None:
-        return None
-    return proxy_tensor.proxy.node
-
-
 class _AutoNames:
     """Tensor -> auto-name mapping used by :class:`AutoNamingMode`.
 
-    Eager entries are filled by ``AutoNamingMode.__torch_dispatch__``. Under
-    compile there is no eager dispatch, so the name (and module FQN) are derived
-    on demand from the tensor's fx node (``nn_module_stack`` + op + index)."""
+    Entries are filled by ``AutoNamingMode.__torch_dispatch__``."""
 
     def __init__(self) -> None:
         self._eager_names: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
@@ -1776,17 +1732,72 @@ class _AutoNames:
     def get(self, tensor, default=None):
         if isinstance(tensor, torch.Tensor) and tensor in self._eager_names:
             return self._eager_names[tensor]
-        node = _node_from_proxy(tensor)
-        return _auto_name_for_node(node) if node is not None else default
+        return default
 
     def get_fqn(self, tensor, default=None):
         if isinstance(tensor, torch.Tensor) and tensor in self._eager_fqns:
             return self._eager_fqns[tensor]
-        node = _node_from_proxy(tensor)
-        return _node_fqn(node) if node is not None else default
+        return default
 
     def __contains__(self, tensor) -> bool:
         return self.get(tensor) is not None
+
+
+_ACTIVE_AUTO_NAMING: list = []
+
+
+class _ModuleFqnTracker:
+    """Forward-only module-FQN tracker for :class:`AutoNamingMode`.
+
+    Like :class:`~torch.utils.module_tracker.ModuleTracker` but only forward
+    pre/post hooks (naming is forward-only, so no backward grad hooks).
+    ``parents`` holds the FQNs of modules whose forward is currently running.
+    """
+
+    def __init__(self) -> None:
+        import weakref
+
+        self.parents = {"Global"}
+        self._known: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+        self._seen: weakref.WeakSet = weakref.WeakSet()
+        self._handles: list = []
+
+    def _name(self, mod):
+        if mod not in self._known:
+            self._known[mod] = type(mod).__name__
+        name = self._known[mod]
+        if mod not in self._seen:
+            self._seen.add(mod)
+            for child_name, submod in mod.named_children():
+                self._known[submod] = f"{name}.{child_name}"
+                self._name(submod)
+        return name
+
+    def _register(self):
+        from torch.nn.modules.module import (
+            register_module_forward_hook,
+            register_module_forward_pre_hook,
+        )
+
+        def pre(mod, args):
+            self.parents.add(self._name(mod))
+
+        def post(mod, args, out):
+            self.parents.discard(self._name(mod))
+
+        self._handles = [
+            register_module_forward_pre_hook(pre),
+            register_module_forward_hook(post),
+        ]
+
+    def __enter__(self):
+        self._register()
+        return self
+
+    def __exit__(self, *args):
+        for h in self._handles:
+            h.remove()
+        self._handles = []
 
 
 class AutoNamingMode(TorchDispatchMode):
@@ -1812,30 +1823,24 @@ class AutoNamingMode(TorchDispatchMode):
                     create_selective_checkpoint_contexts, policy_fn),
             )
 
-    Works in eager and under :func:`torch.compile`. In eager the names come from
-    :class:`~torch.utils.module_tracker.ModuleTracker`; under compile they are
-    derived from each node's ``nn_module_stack`` (the FQNs are normalized so the
-    same names appear in both).
+    The names come from :class:`~torch.utils.module_tracker.ModuleTracker`.
     """
 
     def __init__(self) -> None:
-        from torch.utils.module_tracker import ModuleTracker
-
-        self._tracker = ModuleTracker()
+        self._tracker = _ModuleFqnTracker()
         self._func_counter: Dict[Any, int] = defaultdict(int)
         self.names = _AutoNames()
 
     def __enter__(self):
-        # Under tracing there is no eager dispatch; names are derived from the fx
-        # graph on demand (see _AutoNames), so the dispatch mode is a no-op.
-        if torch.compiler.is_compiling():
-            return self
+        # Registered globally so the checkpoint name resolver can find the
+        # active mode.
+        _ACTIVE_AUTO_NAMING.append(self)
         self._tracker.__enter__()
         return super().__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if torch.compiler.is_compiling():
-            return False
+        if _ACTIVE_AUTO_NAMING and _ACTIVE_AUTO_NAMING[-1] is self:
+            _ACTIVE_AUTO_NAMING.pop()
         self._tracker.__exit__(exc_type, exc_val, exc_tb)
         return super().__exit__(exc_type, exc_val, exc_tb)
 
@@ -1861,12 +1866,8 @@ class AutoNamingMode(TorchDispatchMode):
 
 
 def _active_auto_naming_mode():
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
-
-    for mode in reversed(_get_current_dispatch_mode_stack()):
-        if isinstance(mode, AutoNamingMode):
-            return mode
-    return None
+    # Read from the global registry (set in AutoNamingMode.__enter__).
+    return _ACTIVE_AUTO_NAMING[-1] if _ACTIVE_AUTO_NAMING else None
 
 
 def _checkpoint_policy_from_dict(policy):
@@ -1878,12 +1879,11 @@ def _checkpoint_policy_from_dict(policy):
     - an :class:`AutoNamingMode` auto-name (``"layers.0.lin_mm.default_0"``) or a
       module-FQN prefix (``"layers.1"``, matching every op under that submodule).
 
-    Auto-name / module-FQN keys are only resolvable when module naming is
-    available: in eager that means the user has an :class:`AutoNamingMode` active
-    around the call; under :func:`torch.compile` they are always derivable from
-    each op's fx node. They are resolved most-specific first (exact auto-name,
-    then longest module-FQN prefix), then op identity. Ops not matched default to
-    ``PREFER_RECOMPUTE``, matching vanilla activation checkpointing.
+    Auto-name / module-FQN keys are only resolvable when the user has an
+    :class:`AutoNamingMode` active around the call. They are resolved
+    most-specific first (exact auto-name, then longest module-FQN prefix), then
+    op identity. Ops not matched default to ``PREFER_RECOMPUTE``, matching
+    vanilla activation checkpointing.
 
     Ops are selected by ``OpOverload`` identity only; string keys are reserved
     for names.
@@ -1909,17 +1909,13 @@ def _checkpoint_policy_from_dict(policy):
     def policy_fn(ctx, func, *args, **kwargs):
         # Per-tensor names (set via `name`) are applied directly by `name` itself,
         # not here. Auto-name / module-FQN keys (most specific first) win over
-        # op-based keys, but only when naming is available: an AutoNamingMode the
-        # user activated (eager), or the fx node under compile.
+        # op-based keys, but only when an AutoNamingMode the user activated is
+        # available.
         out = ctx.op_output
         if has_str_keys and isinstance(out, torch.Tensor):
             mode = _active_auto_naming_mode()
             if mode is not None:
                 auto_name, fqn = mode.names.get(out), mode.names.get_fqn(out)
-            elif _is_compiling(func, args, kwargs):
-                node = _node_from_proxy(out)
-                auto_name = _auto_name_for_node(node) if node is not None else None
-                fqn = _node_fqn(node) if node is not None else None
             else:
                 auto_name = fqn = None
             if auto_name is not None and auto_name in policy:

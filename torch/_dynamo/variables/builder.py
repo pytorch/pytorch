@@ -44,7 +44,6 @@ from typing import Any, cast, NamedTuple, NoReturn, overload, TYPE_CHECKING, Uni
 import sympy
 
 import torch
-import torch.utils.checkpoint
 from torch import SymInt
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.graph_bytecode_inputs import (
@@ -208,7 +207,6 @@ from .builtin import BuiltinVariable
 from .constant import ConstantVariable
 from .ctx_manager import (
     AutocastModeVariable,
-    AutoNamingModeVariable,
     CudagraphOverrideVariable,
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
@@ -1668,9 +1666,6 @@ class VariableBuilder:
                     ],
                     source=self.source,
                 )
-        elif isinstance(value, torch.utils.checkpoint.AutoNamingMode):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            return AutoNamingModeVariable(source=self.source)
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
             if inspect.isclass(value):
                 self.install_guards(GuardBuilder.CLASS_MATCH)

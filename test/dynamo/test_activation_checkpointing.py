@@ -1059,150 +1059,38 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         torch._dynamo.reset()
         _test(CheckpointPolicy.MUST_RECOMPUTE, bw_freq=3)
 
-    def test_auto_naming_names_match_eager_and_compile(self):
-        # The module-qualified names of stable ops should agree between eager
-        # (ModuleTracker) and compile (nn_module_stack).
-        def collect(compiled):
-            mod = _make_auto_naming_model()
-            naming = AutoNamingMode()
-            names = set()
+    def test_auto_naming_eager(self):
+        # AutoNamingMode names op output tensors by module-qualified op name.
+        # Run the model under the mode in eager and assert the names assigned to
+        # the stable matmul/relu outputs.
+        from torch.utils._python_dispatch import TorchDispatchMode
 
-            def policy_fn(ctx, op, *args, **kwargs):
-                if isinstance(ctx.op_output, torch.Tensor):
-                    nm = naming.names.get(ctx.op_output)
-                    if nm is not None:
-                        names.add(nm)
-                return CheckpointPolicy.PREFER_RECOMPUTE
+        collected = []
 
-            def fn(x):
-                with naming:
-                    return checkpoint(
-                        mod,
-                        x,
-                        use_reentrant=False,
-                        context_fn=functools.partial(
-                            create_selective_checkpoint_contexts, policy_fn
-                        ),
-                    ).sum()
+        class Collect(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = func(*args, **(kwargs or {}))
+                if isinstance(out, torch.Tensor):
+                    collected.append(out)
+                return out
 
-            x = torch.randn(4, 4, requires_grad=True)
-            if compiled:
-                torch._dynamo.reset()
-                fn = torch.compile(
-                    fn, backend="aot_eager_decomp_partition", fullgraph=True
-                )
-            fn(x).backward()
-            return names
+        mod = _make_auto_naming_model()
+        naming = AutoNamingMode()
+        x = torch.randn(4, 4)
+        # Collect sits above naming so it captures each tensor after naming has
+        # assigned it a name; holding references keeps the weak name map alive.
+        with naming, Collect():
+            mod(x)
 
-        eager_names = collect(compiled=False)
-        compile_names = collect(compiled=True)
+        names = {naming.names.get(t) for t in collected}
+        names.discard(None)
         expected = {
             "layers.0.lin_mm.default_0",
             "layers.0_relu.default_0",
             "layers.1.lin_mm.default_0",
             "layers.1_relu.default_0",
         }
-        self.assertTrue(expected.issubset(eager_names), eager_names)
-        self.assertTrue(expected.issubset(compile_names), compile_names)
-
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_auto_naming_policy(self):
-        # `with AutoNamingMode()` must trace (no graph break), and a policy
-        # selecting by module-qualified auto-name must control save/recompute.
-        def make_fn(save_set):
-            mod = _make_auto_naming_model()
-            naming = AutoNamingMode()
-
-            def policy_fn(ctx, op, *args, **kwargs):
-                if isinstance(ctx.op_output, torch.Tensor):
-                    if naming.names.get(ctx.op_output) in save_set:
-                        return CheckpointPolicy.MUST_SAVE
-                return CheckpointPolicy.PREFER_RECOMPUTE
-
-            def fn(x):
-                with naming:
-                    return checkpoint(
-                        mod,
-                        x,
-                        use_reentrant=False,
-                        context_fn=functools.partial(
-                            create_selective_checkpoint_contexts, policy_fn
-                        ),
-                    )
-
-            return fn
-
-        def _test(save_set, bw_freq):
-            x = torch.randn(4, 4, requires_grad=True)
-            backend = aot_autograd(
-                fw_compiler=functools.partial(
-                    count_ops, freq=2, op=torch.ops.aten.mm.default
-                ),
-                bw_compiler=functools.partial(
-                    count_ops, freq=bw_freq, op=torch.ops.aten.mm.default
-                ),
-                partition_fn=min_cut_rematerialization_partition,
-            )
-            self._validate(make_fn(save_set), backend, x)
-
-        # Save both matmuls (exact name + module-prefix) -> no recompute: 2 grad
-        # mm per matmul = 4.
-        torch._dynamo.reset()
-        _test(
-            {"layers.0.lin_mm.default_0", "layers.1.lin_mm.default_0"},
-            bw_freq=4,
-        )
-        # Save nothing -> both matmuls recomputed: 2 recompute + 4 grad = 6.
-        torch._dynamo.reset()
-        _test(set(), bw_freq=6)
-
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @parametrize(
-        "policy",
-        [
-            # exact auto-names
-            {
-                "layers.0.lin_mm.default_0": CheckpointPolicy.MUST_SAVE,
-                "layers.1.lin_mm.default_0": CheckpointPolicy.MUST_SAVE,
-            },
-            # module-FQN prefixes
-            {
-                "layers.0": CheckpointPolicy.MUST_SAVE,
-                "layers.1": CheckpointPolicy.MUST_SAVE,
-            },
-        ],
-    )
-    def test_compile_policy_kwarg_auto_name(self, policy):
-        # Auto-names / module-FQN prefixes work directly via the policy= kwarg,
-        # with no context_fn. Saving both matmuls -> no recompute (4 bwd mm);
-        # the empty policy recomputes both (6).
-        def make_fn(pol):
-            mod = _make_auto_naming_model()
-
-            def fn(x):
-                return torch.utils.checkpoint.checkpoint(
-                    mod, x, use_reentrant=False, policy=pol
-                )
-
-            return fn
-
-        def _test(pol, bw_freq):
-            x = torch.randn(4, 4, requires_grad=True)
-            backend = aot_autograd(
-                fw_compiler=functools.partial(
-                    count_ops, freq=2, op=torch.ops.aten.mm.default
-                ),
-                bw_compiler=functools.partial(
-                    count_ops, freq=bw_freq, op=torch.ops.aten.mm.default
-                ),
-                partition_fn=min_cut_rematerialization_partition,
-            )
-            self._validate(make_fn(pol), backend, x)
-
-        torch._dynamo.reset()
-        _test(policy, bw_freq=4)
-        torch._dynamo.reset()
-        _test({}, bw_freq=6)
+        self.assertTrue(expected.issubset(names), names)
 
     def test_policy_kwarg_auto_name_eager_requires_mode(self):
         # In eager, an auto-name policy key only resolves when the user has an
