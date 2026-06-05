@@ -126,9 +126,8 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         **kwargs: dict[str, Any],
     ) -> tuple[str, str, str, EVTArgRenames]:
         arch = int(cutlass_arch(device_type))
-        assert device_type != "cuda" or arch >= 90, (
-            "For CUDA, only SM90+ is supported for EVT"
-        )
+        if not (device_type != "cuda" or arch >= 90):
+            raise AssertionError("For CUDA, only SM90+ is supported for EVT")
         epilogue_functor = _trace(fn_src, example_tensors, arch, **kwargs)
         visitor = EpilogueFunctorVisitor(arch, epilogue_functor)
         fusion_callbacks = FusionCallbacks(visitor.graph, arch, emit_CD=False)
@@ -269,7 +268,11 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
             == "<class 'cutlass_cppgen.backend.c_types.tuple_factory_.<locals>.TupleType'>"
         ):
             DEFAULT_STRIDE_LEN = 3
-            assert len(node.get_layout().stride) <= DEFAULT_STRIDE_LEN
+            if len(node.get_layout().stride) > DEFAULT_STRIDE_LEN:
+                raise AssertionError(
+                    f"expected stride length <= {DEFAULT_STRIDE_LEN}, "
+                    f"got {len(node.get_layout().stride)}"
+                )
             stride = [size_hint_fn(x) for x in node.get_layout().stride]
             for _ in range(DEFAULT_STRIDE_LEN - len(stride)):
                 stride.append(0)

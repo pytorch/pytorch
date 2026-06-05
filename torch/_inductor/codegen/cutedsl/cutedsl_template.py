@@ -37,7 +37,8 @@ class CuteDSLTemplate(KernelTemplate):
         self.subgraph_fn = subgraph_fn
         self.mask_fn = mask_fn
         self.template = CuteDSLTemplate._template_from_string(source)
-        assert name not in self.all_templates, f"duplicate template name, {name}"
+        if name in self.all_templates:
+            raise AssertionError(f"duplicate template name, {name}")
         CuteDSLTemplate.all_templates[name] = self
 
     @staticmethod

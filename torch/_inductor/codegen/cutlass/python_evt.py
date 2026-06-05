@@ -194,7 +194,10 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         with virtualized.V.set_ops_handler(handler):
             for s_node in epilogue_nodes:
                 node = s_node.node
-                assert isinstance(node, ComputedBuffer)
+                if not isinstance(node, ComputedBuffer):
+                    raise AssertionError(
+                        f"expected node to be a ComputedBuffer, got {type(node)}"
+                    )
                 with codegen.set_cur_node(node):
                     index_vars = CutlassEVTCodegen.get_index_vars(node)
                     node.get_store_function()(index_vars)
@@ -263,23 +266,24 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         if name not in self.removed_buffers:
             if index:
                 self._check_indexing(name, index)
-            assert value.value != _ACCUMULATOR_ARG_NAME, (
-                "Cannot store accumulator arg name"
-            )
+            if value.value == _ACCUMULATOR_ARG_NAME:
+                raise AssertionError("Cannot store accumulator arg name")
             self.var_name_to_buffer_name[value.value] = name
             self.store_name_to_value[name] = value
             self.last_stored_var_name = value.value
         return None
 
     def _get_cur_node(self) -> ComputedBuffer:
-        assert self.cur_node
+        if not self.cur_node:
+            raise AssertionError("expected cur_node to be set")
         return self.cur_node
 
     @staticmethod
     def get_index_vars(node: ComputedBuffer) -> Sequence[sympy.Expr]:
         data = node.data
         # TODO mlazos: relax this, cutlass supports reductions and other ops
-        assert isinstance(data, Pointwise)
+        if not isinstance(data, Pointwise):
+            raise AssertionError(f"expected data to be Pointwise, got {type(data)}")
         return data._index(data.ranges)
 
     def _get_current_index_vars(self) -> Sequence[sympy.Expr]:
@@ -320,7 +324,8 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         return_vars = OrderedSet(
             op_v.value for op_v in self.store_name_to_value.values()
         )
-        assert "D" in return_vars
+        if "D" not in return_vars:
+            raise AssertionError(f"expected 'D' in return_vars, got {return_vars}")
         return f"return {', '.join(return_vars)}"
 
     def _tmp_var(self) -> str:
