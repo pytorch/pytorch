@@ -1697,10 +1697,9 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     return out + beta * self
 
 
-@register_decomposition(aten.native_group_norm_backward.default)
-@pw_cast_for_opmath
+@register_decomposition(aten.native_group_norm_backward)
 def native_group_norm_backward(
-    grad_output: Tensor,
+    grad_output: Tensor | None,
     input: Tensor,
     mean: Tensor,
     rstd: Tensor,
@@ -1710,11 +1709,23 @@ def native_group_norm_backward(
     HxW: int,
     group: int,
     output_mask: list[bool],
+    *,
+    grad_mean: Tensor | None = None,
+    grad_rstd: Tensor | None = None,
+    out0: Tensor | None = None,
+    out1: Tensor | None = None,
+    out2: Tensor | None = None,
 ) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
-    utils.check_same_device(
-        grad_output, input, mean, rstd, allow_cpu_scalar_tensors=False
+    optional_tensors_present = tuple(
+        t
+        for t in (grad_output, gamma, grad_mean, grad_rstd, out0, out1, out2)
+        if t is not None
     )
-    utils.check_same_shape(input, grad_output, allow_cpu_scalar_tensors=False)
+    utils.check_same_device(
+        input, mean, rstd, *optional_tensors_present, allow_cpu_scalar_tensors=False
+    )
+    if grad_output is not None:
+        utils.check_same_shape(input, grad_output, allow_cpu_scalar_tensors=False)
     utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
     torch._check(
         input.numel() == N * C * HxW,
@@ -1728,6 +1739,17 @@ def native_group_norm_backward(
         gamma is None or gamma.numel() == C,
         lambda: f"Expect gamma to have {C} elements but got {gamma.numel() if gamma is not None else -1}",
     )
+    if grad_mean is not None:
+        utils.check_same_shape(mean, grad_mean, allow_cpu_scalar_tensors=False)
+    if grad_rstd is not None:
+        utils.check_same_shape(rstd, grad_rstd, allow_cpu_scalar_tensors=False)
+
+    possible_outputs = (out0, out1, out2)
+    if do_output := any(o is not None for o in possible_outputs):
+        torch._check(
+            all(o is not None for o in possible_outputs),
+            lambda: "Please supply arguments for all output tensors or none!",
+        )
 
     cpg = C // group
     torch._check(
@@ -1735,84 +1757,125 @@ def native_group_norm_backward(
         lambda: f"Expect number of channels {C} to be evenly-divisible by number of groups {group}",
     )
 
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    grad_output_cast = (
+        _maybe_convert_to_dtype(grad_output, computation_dtype)
+        if grad_output is not None
+        else None
+    )
+    input_cast = _maybe_convert_to_dtype(input, computation_dtype)
+    mean_cast = _maybe_convert_to_dtype(mean, computation_dtype)
+    rstd_cast = _maybe_convert_to_dtype(rstd, computation_dtype)
+    gamma_cast = (
+        _maybe_convert_to_dtype(gamma, computation_dtype) if gamma is not None else None
+    )
+    grad_mean_cast = (
+        _maybe_convert_to_dtype(grad_mean, computation_dtype)
+        if grad_mean is not None
+        else None
+    )
+    grad_rstd_cast = (
+        _maybe_convert_to_dtype(grad_rstd, computation_dtype)
+        if grad_rstd is not None
+        else None
+    )
+
     # Compute Internal gradients
-    ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
-    db = grad_output.view(N, C, HxW).sum(dim=[2])
+    ds: Tensor | None = None
+    db: Tensor | None = None
+    if grad_output_cast is not None:
+        ds = torch.mul(grad_output_cast, input_cast).reshape(N, C, HxW).sum(2)
+        db = grad_output_cast.reshape(N, C, HxW).sum(2)
 
     d_input: Tensor | None = None
     d_gamma: Tensor | None = None
     d_bias: Tensor | None = None
+
+    param_output_dtype = gamma.dtype if gamma is not None else input.dtype
+    param_device = gamma.device if gamma is not None else input.device
+
     if output_mask[0]:
         s = 1.0 / (HxW * cpg)
-        if gamma is not None:
-            ds_val = torch.mul(ds, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
-            db_val = torch.mul(db, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
+        if ds is None or db is None:
+            ds_val: Tensor | int = 0
+            db_val: Tensor | int = 0
+            c1: Tensor | int = 0
+        elif gamma_cast is not None:
+            ds_val = torch.mul(ds, gamma_cast.unsqueeze(0)).view(N, group, cpg).sum(2)
+            db_val = torch.mul(db, gamma_cast.unsqueeze(0)).view(N, group, cpg).sum(2)
             c1 = torch.mul(
-                rstd.unsqueeze(-1),
-                gamma.reshape(1, group, cpg),
+                rstd_cast.unsqueeze(-1),
+                gamma_cast.reshape(1, group, cpg),
             )
         else:
-            ds_val = ds.reshape(N, group, cpg).sum(2)
-            db_val = db.reshape(N, group, cpg).sum(2)
-            c1 = torch.mul(
-                rstd.unsqueeze(-1),
-                torch.ones((1, group, cpg), device=rstd.device),
-            )
-        c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
-        c3 = -c2 * mean - db_val * rstd * s
+            ds_val = ds.view(N, group, cpg).sum(2)
+            db_val = db.view(N, group, cpg).sum(2)
+            c1 = rstd_cast.unsqueeze(-1)
 
-        c1 = c1.unsqueeze(-1)
+        grad_mean_val = grad_mean_cast if grad_mean_cast is not None else 0
+        grad_rstd_val = grad_rstd_cast if grad_rstd_cast is not None else 0
+        c2 = (
+            (db_val * mean_cast - ds_val - grad_rstd_val)
+            * rstd_cast
+            * rstd_cast
+            * rstd_cast
+            * s
+        )
+        c3 = -c2 * mean_cast - (db_val * rstd_cast - grad_mean_val) * s
+
+        c1 = c1.unsqueeze(-1) if isinstance(c1, torch.Tensor) else c1
         c2 = _unsqueeze_to_dim(c2, 4)
         c3 = _unsqueeze_to_dim(c3, 4)
-        d_input = (
-            torch.mul(grad_output.reshape(N, group, cpg, HxW), c1)
-            + torch.mul(input.reshape(N, group, cpg, HxW), c2)
-            + c3
-        )
-        d_input = d_input.reshape(input.shape).to(input.dtype)
-    if output_mask[1]:
-        d_gamma = (
-            (
-                (ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.unsqueeze(-1))
-                * rstd.unsqueeze(-1)
+
+        if grad_output_cast is not None:
+            d_input = (
+                c1 * grad_output_cast.reshape(N, group, cpg, HxW)
+                + c2 * input_cast.reshape(N, group, cpg, HxW)
+                + c3
             )
-            .sum(dim=[0])
-            .reshape(C)
-        )
+        else:
+            d_input = c2 * input_cast.reshape(N, group, cpg, HxW) + c3
+        d_input = d_input.reshape(input.shape)
+
+    if output_mask[1]:
+        if ds is not None and db is not None:
+            d_gamma = (
+                (
+                    (
+                        ds.view(N, group, cpg)
+                        - db.view(N, group, cpg) * mean_cast.unsqueeze(-1)
+                    )
+                    * rstd_cast.unsqueeze(-1)
+                )
+                .sum(0)
+                .reshape(C)
+            )
+        else:
+            d_gamma = torch.zeros((C,), dtype=param_output_dtype, device=param_device)
+
     if output_mask[2]:
-        d_bias = db.sum(dim=[0])
+        if db is not None:
+            d_bias = db.sum(0)
+        else:
+            d_bias = torch.zeros((C,), dtype=param_output_dtype, device=param_device)
 
-    return (d_input, d_gamma, d_bias)
+    d_input = _maybe_convert_to_dtype(d_input, input.dtype)
+    d_gamma = _maybe_convert_to_dtype(d_gamma, param_output_dtype)
+    d_bias = _maybe_convert_to_dtype(d_bias, param_output_dtype)
 
+    # This can't handle the outputs via out_wrapper, because it can return None.
+    # Normally we would have a separate decomp for this, but due to forwards compat for
+    # the multiple_grads overload they're combined into one.
+    if do_output:
+        for d, o in zip((d_input, d_gamma, d_bias), possible_outputs):
+            # we've already checked that o is not None, but this silences typing
+            if d is not None and o is not None:
+                _maybe_resize_out(o, d.shape)
+                _safe_copy_out(copy_from=d, copy_to=o, exact_dtype=True)
 
-# out_wrapper currently does not allow optional outputs
-@register_decomposition(aten.native_group_norm_backward.out)
-def native_group_norm_backward_out(
-    grad_output: Tensor,
-    input: Tensor,
-    mean: Tensor,
-    rstd: Tensor,
-    gamma: Tensor | None,
-    N: int,
-    C: int,
-    HxW: int,
-    group: int,
-    output_mask: list[bool],
-    *,
-    out0: torch.Tensor,
-    out1: torch.Tensor,
-    out2: torch.Tensor,
-) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
-    result = native_group_norm_backward(
-        grad_output, input, mean, rstd, gamma, N, C, HxW, group, output_mask
-    )
-    grad_input = (out0, out1, out2)
-    for i, r in enumerate(result):
-        if r is not None:
-            _maybe_resize_out(grad_input[i], r.shape)
-            _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
+        return possible_outputs
 
-    return grad_input
+    return d_input, d_gamma, d_bias
 
 
 def _maybe_cast(x: Tensor | None, dtype) -> Tensor | None:
