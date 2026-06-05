@@ -4748,7 +4748,7 @@ def meta_lshifts(self, other):
 
 @register_meta(aten.zero.default)
 def meta_zero(self):
-    return self.new_empty(self.shape)
+    return torch.empty_like(self)
 
 
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
