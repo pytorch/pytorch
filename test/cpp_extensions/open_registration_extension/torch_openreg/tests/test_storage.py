@@ -65,6 +65,19 @@ class TestSerialization(TestCase):
             self.assertFalse(tensor_cpu.is_openreg)
             self.assertEqual(torch._utils.get_tensor_metadata(tensor_cpu), {})
 
+    def test_copy_backend_meta(self):
+        """Test copying backend metadata from one tensor to another"""
+        src = torch.empty(3, 3, device="openreg")
+        self.assertEqual(torch._utils.get_tensor_metadata(src), {})
+        metadata = {"version_number": True, "format_number": True}
+        torch._utils.set_tensor_metadata(src, metadata)
+        self.assertEqual(torch._utils.get_tensor_metadata(src), metadata)
+
+        dst = torch.empty(3, 3, device="openreg")
+        self.assertEqual(torch._utils.get_tensor_metadata(dst), {})
+        torch._C._copy_backend_meta(src, dst)
+        self.assertEqual(torch._utils.get_tensor_metadata(dst), metadata)
+
     @skipIfTorchDynamo()
     @unittest.skipIf(
         numpy.__version__ < "1.25",
