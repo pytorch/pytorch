@@ -805,11 +805,10 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const std::optional<Tensor>& gamma,
-    c10::SymInt N,
+    const c10::SymInt& N,
     const c10::SymInt& C,
-    c10::SymInt HxW,
+    const c10::SymInt& HxW,
     int64_t group,
-    double eps,
     std::array<bool, 3> grad_input_mask);
 Tensor gelu_double_backward(
     const Tensor& ggI,

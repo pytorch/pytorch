@@ -35,8 +35,25 @@ using backward_fn = void (*)(
     Tensor& /* dgamma */,
     Tensor& /* dbeta */);
 
+using backward_multiple_grads_fn = void (*)(
+    const Tensor& /* dY */,
+    const Tensor& /* X */,
+    const Tensor& /* mean */,
+    const Tensor& /* rstd */,
+    const Tensor& /* gamma */,
+    int64_t /* N */,
+    int64_t /* C */,
+    int64_t /* HxW */,
+    int64_t /* group */,
+    const Tensor& /* dmean */,
+    const Tensor& /* drstd */,
+    Tensor& /* dX */,
+    Tensor& /* dgamma */,
+    Tensor& /* dbeta */);
+
 DECLARE_DISPATCH(forward_fn, GroupNormKernel)
 DECLARE_DISPATCH(backward_fn, GroupNormBackwardKernel)
+DECLARE_DISPATCH(backward_multiple_grads_fn, GroupNormBackwardMultipleGradsKernel)
 
 } // namespace native
 } // namespace at
