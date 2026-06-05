@@ -118,9 +118,14 @@ static StableIValue from_ivalue(
           ivalue.toMemoryFormat(), extension_build_version);
     }
     case c10::TypeKind::GeneratorType: {
+      // Steal the Generator out of the IValue (an about-to-be-destroyed
+      // temporary at every call site) to avoid a refcount bump, mirroring the
+      // TensorType case above.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      c10::IValue& mutable_ivalue = const_cast<c10::IValue&>(ivalue);
       AtenGeneratorHandle generator =
           torch::aot_inductor::generator_pointer_to_generator_handle(
-              new at::Generator(ivalue.toGenerator()));
+              new at::Generator(std::move(mutable_ivalue).toGenerator()));
       return torch::stable::detail::_from(generator, extension_build_version);
     }
     case c10::TypeKind::OptionalType: {
@@ -237,13 +242,13 @@ static c10::IValue to_ivalue(
           stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::GeneratorType: {
-      // unique_ptr frees the owning handle after the IValue copies the
-      // generator (which bumps the underlying GeneratorImpl refcount).
+      // unique_ptr frees the owning handle; we move the Generator into the
+      // IValue (stealing its GeneratorImpl ref) instead of copying it.
       std::unique_ptr<at::Generator> generator(
           torch::aot_inductor::generator_handle_to_generator_pointer(
               torch::stable::detail::_to<AtenGeneratorHandle>(
                   stable_ivalue, extension_build_version)));
-      return c10::IValue(*generator);
+      return c10::IValue(std::move(*generator));
     }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
