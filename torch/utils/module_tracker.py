@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+import sys
 import weakref
 from typing import TYPE_CHECKING
 
@@ -98,6 +99,23 @@ class ModuleTracker:
             self._seen_modules.add(mod)
         return mod_name
 
+    def _is_dynamo_runtime_module(self, mod):
+        eval_frame = sys.modules.get("torch._dynamo.eval_frame")
+        optimized_module_cls = getattr(eval_frame, "OptimizedModule", None)
+        if optimized_module_cls is not None and isinstance(mod, optimized_module_cls):
+            return True
+
+        if isinstance(mod, torch.fx.GraphModule):
+            # User-owned FX GraphModules can run inside OptimizedModule too.
+            # Only skip GraphModules that Dynamo marked as compiler runtime.
+            if getattr(mod, "_is_torch_compile", False):
+                return True
+
+            meta = getattr(mod, "meta", {})
+            return isinstance(meta, dict) and "dynamo_compile_id" in meta
+
+        return False
+
     def _get_append_fn(self, name, is_bw):
         def fn(*args) -> None:
             if is_bw:
@@ -126,6 +144,9 @@ class ModuleTracker:
         return fn
 
     def _fw_pre_hook(self, mod, input) -> None:
+        if self._is_dynamo_runtime_module(mod):
+            return
+
         name = self._get_mod_name(mod)
         self._get_append_fn(name, False)()
 
@@ -137,6 +158,9 @@ class ModuleTracker:
             )
 
     def _fw_post_hook(self, mod, input, output) -> None:
+        if self._is_dynamo_runtime_module(mod):
+            return
+
         name = self._get_mod_name(mod)
         self._get_pop_fn(name, False)()
 

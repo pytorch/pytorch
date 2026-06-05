@@ -4,19 +4,12 @@ from copy import copy
 
 import torch
 from torch import nn
-from torch.testing._internal.common_utils import (
-    run_tests,
-    skipIfTorchDynamo,
-    TestCase,
-    xfailIfTorchDynamo,
-)
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 from torch.utils.checkpoint import checkpoint
 from torch.utils.module_tracker import ModuleTracker
 
 
 class TestModuleTracker(TestCase):
-    # "https://github.com/pytorch/pytorch/issues/127112
-    @xfailIfTorchDynamo
     def test_module_hierarchy(self):
         seen_fw = []
         seen_bw = []
@@ -74,6 +67,33 @@ class TestModuleTracker(TestCase):
                 ({"Global", "Mod", "Mod.c.0"}, True),
             ],
         )
+
+    def test_user_graph_module_hierarchy_with_dynamo(self):
+        seen = []
+
+        class Leaf(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        class Outer(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.gm = torch.fx.symbolic_trace(Leaf())
+                self.gm.register_forward_pre_hook(
+                    lambda mod, args: seen.append(
+                        (copy(tracker.parents), tracker.is_bw)
+                    )
+                )
+
+            def forward(self, x):
+                return self.gm(x).cos()
+
+        mod = torch.compile(Outer(), backend="eager")
+
+        with ModuleTracker() as tracker:
+            mod(torch.randn(2, 2))
+
+        self.assertEqual(seen, [({"Global", "Outer", "Outer.gm"}, False)])
 
     @skipIfTorchDynamo("unexplained 3.13+ recursion error")
     def test_confused_hierarchy(self):
