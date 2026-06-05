@@ -3937,12 +3937,13 @@ class TestConvolutionNNDeviceType(NNTestCase):
         and (91000 < _get_cudnn_version() < 91500)
     )
     def test_depthwise_conv_64bit_indexing(self, device):
-        x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
+        dt = torch.half if self.device_type == "cuda" else torch.float
+        x = torch.randn(1, 2, 32800, 32800, dtype=dt).to(
             memory_format=torch.channels_last
         )
-        c = nn.Conv2d(
-            2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=torch.half
-        ).to(memory_format=torch.channels_last)
+        c = nn.Conv2d(2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=dt).to(
+            memory_format=torch.channels_last
+        )
         yref = c(x)
         y = c.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
