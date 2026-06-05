@@ -1182,6 +1182,22 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_addmm_unrealized_view_bias(self, dynamic):
+        """
+        Make sure autotuning addmm with an unrealized view-class bias
+        (here a PermuteView over a fused Pointwise) works without crashes.
+        """
+
+        def fn(x, a, b):
+            return torch.addmm((x * 2.0).transpose(0, 1), a, b)
+
+        x = torch.randn(8, 8).to(GPU_TYPE)
+        a = torch.randn(8, 16).to(GPU_TYPE)
+        b = torch.randn(16, 8).to(GPU_TYPE)
+        with config.patch({"max_autotune": True}):
+            torch.compile(fn, dynamic=dynamic)(x, a, b)
+
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_autotune_conv1x1(self, search_space):
         # Assuming input has 3 channels and we want to produce 16 channels as output
@@ -1314,6 +1330,31 @@ class TestMaxAutotune(TestCase):
                 patch(
                     "torch._inductor.kernel.conv._use_cutlass_for_op",
                     return_value=False,
+                ),
+            ):
+                check_uses_convolution()
+
+        with self.subTest("cutlass_filters_remove_all_addmm_choices"):
+            with (
+                config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_conv_backends": "ATEN",
+                        "max_autotune_gemm_backends": "ATEN,CUTLASS",
+                    }
+                ),
+                patch(
+                    "torch._inductor.kernel.conv.use_cutlass_template",
+                    return_value=True,
+                ),
+                patch(
+                    "torch._inductor.kernel.conv._use_cutlass_for_op",
+                    return_value=True,
+                ),
+                patch(
+                    "torch._inductor.kernel.conv.CUTLASS3xGemmTemplate."
+                    "add_cutlass_gemm_choices",
+                    return_value=None,
                 ),
             ):
                 check_uses_convolution()

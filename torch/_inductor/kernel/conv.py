@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING, TypedDict
 
 import torch
+from torch._inductor.codegen.cutlass.gemm_template import CUTLASS3xGemmTemplate
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
@@ -559,19 +560,55 @@ def convolution(
         n = out_chan
         k = in_chan
         mm_layout = ir.FixedLayout(x.get_device_or_error(), x.get_dtype(), [m, n])
+        cutlass_op_name = "addmm" if bias is not None else "mm"
+        cutlass_has_template = False
+        if use_cutlass_template(mm_layout, m, n, k) and _use_cutlass_for_op(
+            cutlass_op_name
+        ):
+            mat1 = ir.InputBuffer(
+                name="_conv1x1_mm_mat1",
+                layout=ir.FixedLayout(
+                    x.get_device_or_error(), x.get_dtype(), [m, k], [k, 1]
+                ),
+            )
+            mat2 = ir.InputBuffer(
+                name="_conv1x1_mm_mat2",
+                layout=ir.FixedLayout(
+                    weight.get_device_or_error(), weight.get_dtype(), [k, n], [1, k]
+                ),
+            )
+            cutlass_choices = []
+            if bias is not None:
+                bias_expanded = ir.InputBuffer(
+                    name="_conv1x1_mm_bias",
+                    layout=ir.FixedLayout(
+                        bias.get_device_or_error(), bias.get_dtype(), [m, n], [0, 1]
+                    ),
+                )
+                CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+                    cutlass_choices,
+                    mm_layout,
+                    [mat1, mat2, bias_expanded],
+                    alpha=1,
+                    beta=1,
+                    input_reorder=[2, 0, 1],
+                )
+            else:
+                CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+                    cutlass_choices, mm_layout, [mat1, mat2]
+                )
+            cutlass_has_template = len(cutlass_choices) > 0
+
         if bias is not None:
             return (
                 use_triton_template(mm_layout, check_max_autotune=False)
-                or (
-                    use_cutlass_template(mm_layout, m, n, k)
-                    and _use_cutlass_for_op("addmm")
-                )
+                or cutlass_has_template
                 or use_ck_gemm_template(mm_layout, m, n, k)
             )
 
         return (
             use_triton_template(mm_layout)
-            or (use_cutlass_template(mm_layout, m, n, k) and _use_cutlass_for_op("mm"))
+            or cutlass_has_template
             or use_ck_gemm_template(mm_layout, m, n, k)
             or use_ck_tile_gemm_template(mm_layout, m, n, k)
             or use_nv_universal_gemm_template(mm_layout, m, n, k, x, weight)
