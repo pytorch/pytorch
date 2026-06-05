@@ -1105,12 +1105,6 @@ class ExactWeakKeyDictionary:
 def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]: ...
 
 
-@overload
-def istype(
-    obj: object, allowed_types: tuple[type[list[T]], type[tuple[T, ...]]]
-) -> TypeIs[T]: ...
-
-
 # This can be simplified once TypeVarTuple objects can be expanded into TypeIs.
 @overload
 def istype(
