@@ -736,6 +736,12 @@ def create_fw_bw_graph(
             args = [score, b, h, m, n] + list(other_buffers)
             optional_grad = [example_grad] if example_grad.requires_grad else []
             _, grads = joint(args, optional_grad)
+            if grads[0] is None:
+                raise RuntimeError(
+                    "flex_attention backward requires the output of score_mod to "
+                    "depend on score. Got a score_mod whose output does not "
+                    "require gradients with respect to score."
+                )
 
             return grads
 
