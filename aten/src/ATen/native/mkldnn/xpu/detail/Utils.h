@@ -13,10 +13,11 @@
 #include <oneapi/dnnl/dnnl_sycl.hpp>
 #include <oneapi/dnnl/dnnl_version.h>
 
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
-#define ONEDNN_SUPPORT_DETERMINISTIC \
-  (DNNL_VERSION_MAJOR >= 3 && DNNL_VERSION_MINOR >= 4)
+// Use the shared packed-version helper so oneDNN 4.x+ still satisfies >= 3.4.
+#define ONEDNN_SUPPORT_DETERMINISTIC DNNL_PREREQ(3, 4, 0)
 
 namespace at::native::onednn {
 

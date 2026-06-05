@@ -880,6 +880,26 @@ class TestBasicGEMM(TestCase):
             for _ in range(10):
                 self.assertEqual(first, torch.matmul(inp, inp), atol=0.0, rtol=0.0)
 
+    @dtypes(torch.float)
+    def test_matmul_mkldnn_deterministic_flag(self, device, dtype):
+        original_mkldnn_deterministic = torch.backends.mkldnn.deterministic
+
+        with DeterministicGuard(False):
+            self.assertFalse(torch.are_deterministic_algorithms_enabled())
+
+            with torch.backends.mkldnn.flags(
+                enabled=None, deterministic=True, allow_tf32=False
+            ):
+                self.assertTrue(torch.backends.mkldnn.deterministic)
+                inp = torch.randn(513, 513, device=device, dtype=dtype)
+                first = torch.matmul(inp, inp)
+                for _ in range(10):
+                    self.assertEqual(first, torch.matmul(inp, inp), atol=0.0, rtol=0.0)
+
+            self.assertEqual(
+                torch.backends.mkldnn.deterministic, original_mkldnn_deterministic
+            )
+
     @dtypes(
         torch.int16,
         torch.int32,
