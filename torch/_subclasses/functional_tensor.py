@@ -12,7 +12,7 @@ from typing_extensions import Self
 
 if TYPE_CHECKING:
     import builtins
-    from collections.abc import Callable, Generator, Sequence
+    from collections.abc import Callable, Generator, Mapping, Sequence
     from types import TracebackType
 
     from torch._functorch.pyfunctorch import FunctionalizeInterpreter
@@ -399,6 +399,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         pre_dispatch: bool = False,
         export: bool = False,
         _allow_token_discovery: bool = False,
+        decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None = None,
     ) -> None:
         super().__init__()
         self.export = export
@@ -425,6 +426,13 @@ class FunctionalTensorMode(TorchDispatchMode):
         # side-effectful ops. In the second stage there should be no token
         # discovery. This flag distinguishes between the two stages.
         self._allow_token_discovery = _allow_token_discovery
+        self.decomposition_table: Mapping[OpOverload, Callable[..., Any]] = (
+            decomposition_table or {}
+        )
+        self._use_proxy_decomposition_table = decomposition_table is None
+        self._decomposition_table_stack: list[
+            tuple[Mapping[OpOverload, Callable[..., Any]], bool]
+        ] = []
 
         self._storage_to_base: weakref.WeakKeyDictionary[
             torch.storage.UntypedStorage, FunctionalTensor | None
@@ -458,6 +466,69 @@ class FunctionalTensorMode(TorchDispatchMode):
         if is_on_stack:
             super().__exit__(exc_type, exc_val, exc_tb)
 
+    @contextlib.contextmanager
+    def enable_decompositions(
+        self,
+        decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None,
+    ) -> Generator[Mapping[OpOverload, Callable[..., Any]], None, None]:
+        table = decomposition_table or {}
+        self._decomposition_table_stack.append(
+            (self.decomposition_table, self._use_proxy_decomposition_table)
+        )
+        self.decomposition_table = table
+        self._use_proxy_decomposition_table = False
+        try:
+            yield table
+        finally:
+            (
+                self.decomposition_table,
+                self._use_proxy_decomposition_table,
+            ) = self._decomposition_table_stack.pop()
+
+    def _maybe_decompose(
+        self,
+        func: OpOverload,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> Any:
+        if func in FunctionalTensor.metadata_fns:
+            return NotImplemented
+
+        decomp_table = self.decomposition_table
+        proxy_mode = _detect_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
+        if proxy_mode is not None:
+            proxy_decomp_table = proxy_mode.decomposition_table
+            # Reuse the proxy table for ordinary make_fx(..., decomposition_table=...)
+            # unless the functional mode was given its own explicit table.
+            if (
+                self._use_proxy_decomposition_table
+                and func not in decomp_table
+                and func in proxy_decomp_table
+            ):
+                decomp_table = proxy_decomp_table
+            if func not in decomp_table:
+                return NotImplemented
+
+            # Local import avoids a circular import: proxy_tensor imports FunctionalTensor.
+            from torch.fx.experimental.proxy_tensor import maybe_handle_decomp
+
+            with self:
+                return maybe_handle_decomp(
+                    proxy_mode,
+                    func,
+                    args,
+                    kwargs,
+                    decomposition_table=decomp_table,
+                    record_pointwise_barrier=True,
+                )
+
+        decomp_fn = decomp_table.get(func)
+        if decomp_fn is None:
+            return NotImplemented
+
+        with self:
+            return decomp_fn(*args, **kwargs)
+
     def __torch_dispatch__(
         self,
         func: OpOverload,
@@ -470,6 +541,10 @@ class FunctionalTensorMode(TorchDispatchMode):
 
         if _has_unrecognized_tensor_types(types):
             return NotImplemented
+
+        r = self._maybe_decompose(func, args, kwargs)
+        if r is not NotImplemented:
+            return r
 
         if (
             func not in FunctionalTensor.metadata_fns

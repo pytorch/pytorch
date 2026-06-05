@@ -9599,6 +9599,40 @@ class TestAOTDispatch(AOTTestCase):
     # - metadata mutation? (TBD)
     # - guard tests (fw guards *and* bw guards)
     # - subclass test involving _indices_of_inps_to_detach
+    def test_decomposition_mutation_runs_under_functionalization(self):
+        fw_graphs = []
+
+        def fw_compiler(gm, _):
+            fw_graphs.append(gm)
+            return gm.forward
+
+        def f(x):
+            return torch.neg(x)
+
+        def neg_decomp(x):
+            out = torch.zeros_like(x)
+            out.sub_(x)
+            return out
+
+        inp = torch.randn(4)
+        compiled_f = aot_function(
+            f,
+            fw_compiler=fw_compiler,
+            decompositions={torch.ops.aten.neg.default: neg_decomp},
+        )
+
+        self.assertEqual(compiled_f(inp), f(inp))
+        self.assertEqual(len(fw_graphs), 1)
+
+        ops = {
+            node.target
+            for node in fw_graphs[0].graph.nodes
+            if node.op == "call_function"
+        }
+        self.assertNotIn(torch.ops.aten.neg.default, ops)
+        self.assertIn(torch.ops.aten.sub.Tensor, ops)
+        self.assertNotIn(torch.ops.aten.sub_.Tensor, ops)
+
     def test_aot_dispatch_simple(self):
         # a is a subclass, b is not
         def f(a, b):

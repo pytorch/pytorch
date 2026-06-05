@@ -71,6 +71,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn import Module
 from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import (
+    _detect_infra_mode,
     _disable_infra_mode,
     _push_mode,
     _unset_infra_mode,
@@ -164,8 +165,13 @@ def decompose(
     mode = get_proxy_mode()
     if mode is None:
         raise AssertionError("Expected proxy mode to be set")
+    functional_mode = _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
     with mode.enable_decompositions(decomposition_table) as table:
-        yield table
+        if functional_mode is None:
+            yield table
+        else:
+            with functional_mode.enable_decompositions(table):
+                yield table
 
 
 # ensure we cannot collide with other properties
@@ -1177,9 +1183,10 @@ def proxy_call(
         )
         return NotImplemented
 
-    r = maybe_handle_decomp(proxy_mode, func, args, kwargs)
+    r = maybe_handle_decomp(
+        proxy_mode, func, args, kwargs, record_pointwise_barrier=True
+    )
     if r is not NotImplemented:
-        _maybe_record_pointwise_barrier(func, proxy_mode)
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
@@ -3119,10 +3126,17 @@ def maybe_handle_decomp(
     op: OpOverload,
     args: tuple[object, ...],
     kwargs: dict[str, object],
+    decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None = None,
+    *,
+    record_pointwise_barrier: bool = False,
 ) -> object:
     from torch._inductor.compiler_bisector import CompilerBisector
 
-    decomp_table = proxy_mode.decomposition_table
+    decomp_table = (
+        proxy_mode.decomposition_table
+        if decomposition_table is None
+        else decomposition_table
+    )
     if op in decomp_table:
         if CompilerBisector.disable_subsystem(
             "aot_eager_decomp_partition", "decomposition", lambda: repr(op)
@@ -3131,9 +3145,14 @@ def maybe_handle_decomp(
 
         with proxy_mode:
             proxy_mode.decomp_layers += 1
-            out = decomp_table[op](*args, **kwargs)
-            proxy_mode.decomp_layers -= 1
-            return out
+            try:
+                out = decomp_table[op](*args, **kwargs)
+            finally:
+                proxy_mode.decomp_layers -= 1
+
+        if out is not NotImplemented and record_pointwise_barrier:
+            _maybe_record_pointwise_barrier(op, proxy_mode)
+        return out
 
     return NotImplemented
 

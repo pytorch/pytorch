@@ -14,7 +14,7 @@ from torch._subclasses.functional_tensor import (
     FunctionalTensor,
     FunctionalTensorMode,
 )
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import get_proxy_mode, make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_utils import (
@@ -2161,6 +2161,34 @@ def forward(self, x_1):
             )
         )(x)
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
+
+    def test_python_functionalization_proxy_decomposition_table(self):
+        def f(x):
+            return torch.neg(x)
+
+        decomp_layers_seen = []
+
+        def neg_decomp(x):
+            proxy_mode = get_proxy_mode()
+            if proxy_mode is None:
+                raise AssertionError("Expected proxy mode")
+            decomp_layers_seen.append(proxy_mode.decomp_layers)
+            out = torch.zeros_like(x)
+            out.sub_(x)
+            return out
+
+        x = torch.randn(4)
+        fx_g = make_fx(
+            dispatch_functionalize(f),
+            decomposition_table={torch.ops.aten.neg.default: neg_decomp},
+        )(x)
+
+        self.assertEqual(fx_g(x), f(x))
+        self.assertEqual(decomp_layers_seen, [1])
+        ops = {node.target for node in fx_g.graph.nodes if node.op == "call_function"}
+        self.assertNotIn(torch.ops.aten.neg.default, ops)
+        self.assertIn(torch.ops.aten.sub.Tensor, ops)
+        self.assertNotIn(torch.ops.aten.sub_.Tensor, ops)
 
     def test_python_functionalization_is_conj(self):
         def f(x):
