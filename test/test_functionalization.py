@@ -2270,6 +2270,20 @@ def forward(self, arg0_1):
 
         self.assertNotEqual(unlifted.untyped_storage(), lifted.untyped_storage())
 
+    def test_python_functionalization_lift_functional_tensor(self):
+        def f(x):
+            tmp = x + 1
+            return torch.ops.aten.lift.default(tmp)
+
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(
+            f, reapply_views=True, crossref=False, skip_input_mutations=True
+        )(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test_cpp)
+
     def test_python_functionalization_lift_fresh(self):
         def f(x):
             tmp = torch.tensor([0.0])
