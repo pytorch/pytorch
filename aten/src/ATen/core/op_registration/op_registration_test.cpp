@@ -1942,7 +1942,7 @@ TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
   bool cpu_called = false;
   bool backend_generic_called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
-  auto after_backend_select = c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::BackendSelect);
+  auto after_backend_select = c10::DispatchKeySet(c10::DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::BackendSelect);
   m.def("fn(Tensor self) -> Tensor");
   m.impl("fn", c10::kCPU, [&](const Tensor& x) { cpu_called = true; return x; });
   m.impl("fn", c10::DispatchKey::BackendSelect, [&](c10::DispatchKeySet ks, const Tensor& x) {
@@ -2047,7 +2047,7 @@ void cpu_kernel(Tensor) {
 void autograd_kernel_redispatching_with_DispatchKeySet(c10::DispatchKeySet ks, Tensor a) {
   called_kernel_autograd = true;
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
-  auto updatedDispatchKeySet = ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
+  auto updatedDispatchKeySet = ks & c10::DispatchKeySet(c10::DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::AutogradOther);
   callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, updatedDispatchKeySet, a);
 }
 
@@ -2055,7 +2055,7 @@ void autograd_kernel_redispatching_with_DispatchKeySet(c10::DispatchKeySet ks, T
 void autograd_kernel_redispatching_without_DispatchKeySet(c10::DispatchKeySet ks, Tensor a) {
   called_kernel_autograd = true;
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
-  auto updatedDispatchKeySet = ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
+  auto updatedDispatchKeySet = ks & c10::DispatchKeySet(c10::DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::AutogradOther);
   callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, updatedDispatchKeySet, a);
 }
 
@@ -2063,7 +2063,7 @@ void autograd_kernel_redispatching_without_DispatchKeySet(c10::DispatchKeySet ks
 void tracing_kernel_redispatching_with_DispatchKeySet(c10::DispatchKeySet ks, Tensor a) {
   called_kernel_tracing = true;
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
-  auto updatedDispatchKeySet = ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Tracer);
+  auto updatedDispatchKeySet = ks & c10::DispatchKeySet(c10::DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::Tracer);
   callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, updatedDispatchKeySet, a);
 }
 

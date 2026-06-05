@@ -81,7 +81,7 @@ struct MathOpFallback {
       // We assume that view operators automatically handle the math bit
       // correctly by propagating the dispatch key in key_set.
       // This is not necessarily always right, so you should test these cases.
-      op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, key), stack);
+      op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FullAfter::FULL_AFTER, key), stack);
       return;
     }
 
@@ -127,7 +127,7 @@ struct MathOpFallback {
       }
     }
 
-    op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, key), stack);
+    op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FullAfter::FULL_AFTER, key), stack);
 
     TORCH_INTERNAL_ASSERT(mutable_inputs_with_their_clones.size() <= 1);
 

@@ -291,7 +291,7 @@ TEST(DispatchKeySet, DoubletonPerBackend) {
 }
 
 TEST(DispatchKeySet, Full) {
-  DispatchKeySet full(DispatchKeySet::FULL);
+  DispatchKeySet full(DispatchKeySet::Full::FULL);
   for (const auto i : c10::irange(1, num_functionality_keys)) {
     auto tid = static_cast<DispatchKey>(i);
     ASSERT_TRUE(full.has(tid));
@@ -301,7 +301,7 @@ TEST(DispatchKeySet, Full) {
 
 TEST(DispatchKeySet, IteratorBasicOps) {
   DispatchKeySet empty_set;
-  DispatchKeySet full_set(DispatchKeySet::FULL);
+  DispatchKeySet full_set(DispatchKeySet::Full::FULL);
   DispatchKeySet mutated_set = empty_set.add(DispatchKey::CPU);
 
   // Constructor + Comparison
@@ -376,7 +376,7 @@ TEST(DispatchKeySet, IteratorCrossProduct) {
 }
 
 TEST(DispatchKeySet, IteratorFull) {
-  DispatchKeySet full_set(DispatchKeySet::FULL);
+  DispatchKeySet full_set(DispatchKeySet::Full::FULL);
   std::ptrdiff_t count = std::distance(full_set.begin(), full_set.end());
 
   // Total # of runtime entries includes an entry for DispatchKey::Undefined,
@@ -384,7 +384,7 @@ TEST(DispatchKeySet, IteratorFull) {
   ASSERT_EQ(count, std::ptrdiff_t{num_runtime_entries} - 1);
 }
 TEST(DispatchKeySet, FailAtEndIterator) {
-  DispatchKeySet full_set(DispatchKeySet::FULL);
+  DispatchKeySet full_set(DispatchKeySet::Full::FULL);
   uint64_t raw_repr = full_set.raw_repr();
 
   // doesn't throw
@@ -446,9 +446,9 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
 
 TEST(DispatchKeySet, TestGetRuntimeDispatchKeySet) {
   // Check if getRuntimeDispatchKeySet and runtimeDispatchKeySetHas agree.
-  for (auto dk1 : DispatchKeySet(DispatchKeySet::FULL)) {
+  for (auto dk1 : DispatchKeySet(DispatchKeySet::Full::FULL)) {
     auto dks = getRuntimeDispatchKeySet(dk1);
-    for (auto dk2 : DispatchKeySet(DispatchKeySet::FULL)) {
+    for (auto dk2 : DispatchKeySet(DispatchKeySet::Full::FULL)) {
       ASSERT_EQ(dks.has(dk2), runtimeDispatchKeySetHas(dk1, dk2));
     }
   }
