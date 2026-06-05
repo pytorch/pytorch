@@ -7023,14 +7023,24 @@ def _check_scaled_mm_sizes(
                 scale_a.numel() == expected_a_size
                 and scale_b.numel() == expected_b_size
             ):
-                torch._check(
-                    scale_a.is_contiguous(),
-                    lambda: "scale_a must be contiguous",
-                )
-                torch._check(
-                    scale_b.is_contiguous(),
-                    lambda: "scale_b must be contiguous",
-                )
+                if device_hint(self) == "xpu":
+                    torch._check(
+                        scale_a.is_contiguous() or scale_a.t().is_contiguous(),
+                        lambda: "scale_a must be contiguous or column-major contiguous",
+                    )
+                    torch._check(
+                        scale_b.is_contiguous() or scale_b.t().is_contiguous(),
+                        lambda: "scale_b must be contiguous or column-major contiguous",
+                    )
+                else:
+                    torch._check(
+                        scale_a.is_contiguous(),
+                        lambda: "scale_a must be contiguous",
+                    )
+                    torch._check(
+                        scale_b.is_contiguous(),
+                        lambda: "scale_b must be contiguous",
+                    )
             else:
                 torch._check(
                     False,
@@ -7423,6 +7433,10 @@ def _check_scaled_mm_sizes_v2(
                 # Note(slayton58): These mirror ROCm in ScaledBlas.cpp, but I think they're wrong..
                 expected_scale_a_elems = ceil_div(self.shape[0], 32) * self.shape[1]
                 expected_scale_b_elems = ceil_div(self.shape[1], 32) * self.shape[0]
+                expected_swizzle = SwizzleType.NO_SWIZZLE
+            elif device_hint(self) == "xpu":
+                expected_scale_a_elems = M * ceil_div(K, 32)
+                expected_scale_b_elems = N * ceil_div(K, 32)
                 expected_swizzle = SwizzleType.NO_SWIZZLE
             else:
                 expected_scale_a_elems = round_up(self.shape[0], 128) * round_up(
