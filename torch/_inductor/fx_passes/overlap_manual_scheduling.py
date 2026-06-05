@@ -60,7 +60,8 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         self.bucketed_node_types: dict[fx.Node, str] = {}
 
     def _bucket_group(self, coll_nodes: list[fx.Node]) -> None:
-        assert len(coll_nodes) > 0, "bucketed coll_nodes should have nonzero node"
+        if len(coll_nodes) <= 0:
+            raise AssertionError("bucketed coll_nodes should have nonzero node")
 
         waits = [self.collective_info[n].wait_node for n in coll_nodes]
         # Use earliest wait insertion point
@@ -100,9 +101,10 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
             for n in new_nodes
             if (start := _get_collective_node_from_wait(n)) is not None
         }
-        assert len(wait_to_start) >= 1, (
-            f"Expected at least one new wait, got none in {new_nodes}"
-        )
+        if len(wait_to_start) < 1:
+            raise AssertionError(
+                f"Expected at least one new wait, got none in {new_nodes}"
+            )
         new_waits = list(wait_to_start)
         new_start: fx.Node = wait_to_start[new_waits[0]]
         # Use last wait as the canonical wait for scheduling (same node when len == 1)
@@ -340,8 +342,10 @@ class ManualOverlapScheduler(OverlapScheduler):
 
     def _schedule(self, node: fx.Node) -> None:
         """Schedule a node."""
-        assert node not in self.scheduled
-        assert all(n in self.scheduled for n in node.all_input_nodes)
+        if node in self.scheduled:
+            raise AssertionError(f"node already scheduled: {node}")
+        if not all(n in self.scheduled for n in node.all_input_nodes):
+            raise AssertionError(f"all input nodes must be scheduled before {node}")
         self.scheduled.add(node)
         for user in node.users:
             self.in_degree[user] -= 1
@@ -364,11 +368,12 @@ class ManualOverlapScheduler(OverlapScheduler):
             node for sublist in self.nodes_in_subgraph for node in sublist
         ]
         unique_subgraph_nodes = list(OrderedSet(all_subgraph_nodes))
-        assert len(all_subgraph_nodes) <= len(unique_subgraph_nodes), (
-            f"Overlapping FX nodes detected across subgraphs in `module_bucket_plans`. "
-            f"Expected disjoint node sets but found "
-            f"{len(all_subgraph_nodes) - len(unique_subgraph_nodes)} duplicated node(s)."
-        )
+        if len(all_subgraph_nodes) > len(unique_subgraph_nodes):
+            raise AssertionError(
+                f"Overlapping FX nodes detected across subgraphs in `module_bucket_plans`. "
+                f"Expected disjoint node sets but found "
+                f"{len(all_subgraph_nodes) - len(unique_subgraph_nodes)} duplicated node(s)."
+            )
 
 
 def manual_overlap_bucketing(

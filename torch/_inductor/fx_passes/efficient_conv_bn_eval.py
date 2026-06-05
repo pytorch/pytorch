@@ -32,8 +32,10 @@ def efficient_conv_bn_eval(
         x (torch.Tensor): Input feature map.
     """
 
-    assert bn.running_var is not None
-    assert bn.running_mean is not None
+    if bn.running_var is None:
+        raise AssertionError("expected bn.running_var to not be None")
+    if bn.running_mean is None:
+        raise AssertionError("expected bn.running_mean to not be None")
 
     # These lines of code are designed to deal with various cases
     # like bn without affine transform, and conv without bias
@@ -98,7 +100,8 @@ def efficient_conv_bn_eval_decomposed(
      reduced numerical stability.
     Args:
     """
-    assert bn_running_var is not None
+    if bn_running_var is None:
+        raise AssertionError("expected bn_running_var to not be None")
 
     # These lines of code are designed to deal with various cases
     # like bn without affine transform, and conv without bias
@@ -148,7 +151,8 @@ def efficient_conv_bn_eval_decomposed(
 def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs):
     bn_node = match.nodes[0]
     graph = match.graph
-    assert len(bn_node.args) == 8
+    if len(bn_node.args) != 8:
+        raise AssertionError(f"expected 8 bn_node args, got {len(bn_node.args)}")
 
     # We can only use efficient conv-bn for eval mode with track_running_stats
     # bn_node.args is `training`
@@ -189,7 +193,10 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
         bn_weight = bn_node.args[3]
         bn_bias = bn_node.args[4]
         bn_eps = bn_node.args[7]
-        assert len(conv_node.args) >= 2  # type: ignore[union-attr]
+        if len(conv_node.args) < 2:  # type: ignore[union-attr]
+            raise AssertionError(
+                f"expected at least 2 conv_node args, got {len(conv_node.args)}"  # type: ignore[union-attr]
+            )
         conv_input = conv_node.args[0]  # type: ignore[union-attr]
         conv_weight = conv_node.args[1]  # type: ignore[union-attr]
         conv_bias = conv_node.args[2] if len(conv_node.args) >= 3 else None  # type: ignore[union-attr]
@@ -240,7 +247,8 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
 def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwargs):
     bn_node = match.nodes[0]
     graph = match.graph
-    assert len(bn_node.args) == 9
+    if len(bn_node.args) != 9:
+        raise AssertionError(f"expected 9 bn_node args, got {len(bn_node.args)}")
 
     # We can only use efficient conv-bn for eval mode with track_running_stats
     # bn_node.args is `training`
@@ -281,7 +289,10 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
         bn_running_mean = bn_node.args[3]
         bn_running_var = bn_node.args[4]
         bn_eps = bn_node.args[7]
-        assert len(conv_node.args) >= 2  # type: ignore[union-attr]
+        if len(conv_node.args) < 2:  # type: ignore[union-attr]
+            raise AssertionError(
+                f"expected at least 2 conv_node args, got {len(conv_node.args)}"  # type: ignore[union-attr]
+            )
         conv_input = conv_node.args[0]  # type: ignore[union-attr]
         conv_weight = conv_node.args[1]  # type: ignore[union-attr]
         conv_bias = conv_node.args[2] if len(conv_node.args) >= 3 else None  # type: ignore[union-attr]

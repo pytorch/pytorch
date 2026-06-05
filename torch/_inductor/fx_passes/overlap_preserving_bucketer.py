@@ -735,7 +735,8 @@ class OverlapPreservingBucketer:
     def remove_from_event(self, node: fx.Node) -> tuple[PGEvent | None, PGEvent | None]:
         """Remove node from timeline and return (prev_event, next_event)."""
         event = self.node_to_event[node]
-        assert not event.is_compute, "Cannot remove compute events from timeline"
+        if event.is_compute:
+            raise AssertionError("Cannot remove compute events from timeline")
 
         prev_event, next_event = event.unlink()
 
@@ -797,7 +798,10 @@ class OverlapPreservingBucketer:
         if start_pos == existing_coll:
             start_to_move = candidate
         else:
-            assert start_pos == candidate
+            if start_pos != candidate:
+                raise AssertionError(
+                    f"expected start_pos == candidate, got {start_pos}"
+                )
             start_to_move = existing_coll
 
         # Remove start from timeline
@@ -1015,7 +1019,8 @@ class OverlapPreservingBucketer:
                 insert_before=next_node,
             )
         else:
-            assert is_reduce_scatter(bucket[0])
+            if not is_reduce_scatter(bucket[0]):
+                raise AssertionError(f"expected reduce_scatter, got {bucket[0]}")
             new_nodes, replacements = merge_reduce_scatter_bucket(
                 self.graph,
                 bucket,
@@ -1043,7 +1048,11 @@ class OverlapPreservingBucketer:
                 erased_to_new[old_wait] = new_wait
         else:
             # Coalesced bucketing: single start + N waits (one per original tensor)
-            assert len(new_waits) == len(old_waits)
+            if len(new_waits) != len(old_waits):
+                raise AssertionError(
+                    f"expected len(new_waits) == len(old_waits), "
+                    f"got {len(new_waits)} != {len(old_waits)}"
+                )
             for old_start in old_starts:
                 erased_to_new[old_start] = new_start
             erased_to_new.update(dict(zip(old_waits, new_waits)))

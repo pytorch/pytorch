@@ -483,16 +483,23 @@ def build_subgraph_buffer(
                     return None
                 output_node = output
                 output_buffer = env[output_node]
-                assert isinstance(output_buffer, TensorBox), (
-                    "The output node for B2B-GEMM's subgraph must be a TensorBox, but got: ",
-                    type(output_buffer),
-                )
-                assert isinstance(output_buffer.data, StorageBox), (
-                    "The output node for B2B-GEMM's subgraph must be a StorageBox, but got: ",
-                    type(output_buffer),
-                )
+                if not isinstance(output_buffer, TensorBox):
+                    raise AssertionError(
+                        (
+                            "The output node for B2B-GEMM's subgraph must be a TensorBox, but got: ",
+                            type(output_buffer),
+                        )
+                    )
+                if not isinstance(output_buffer.data, StorageBox):
+                    raise AssertionError(
+                        (
+                            "The output node for B2B-GEMM's subgraph must be a StorageBox, but got: ",
+                            type(output_buffer),
+                        )
+                    )
                 device = output_buffer.data.get_device()
-                assert device is not None
+                if device is None:
+                    raise AssertionError("expected output buffer to have a device")
                 subgraph_buffer = ComputedBuffer(
                     name=None,
                     layout=FlexibleLayout(

@@ -65,7 +65,8 @@ def _find_ancestors(node: torch.fx.Node) -> OrderedSet[torch.fx.Node]:
 
 def _get_tensor(node: torch.fx.Node) -> torch.Tensor:
     val = node.meta["val"]
-    assert isinstance(val, torch.Tensor)
+    if not isinstance(val, torch.Tensor):
+        raise AssertionError(f"expected node val to be a Tensor, got {type(val)}")
     return val
 
 
@@ -183,9 +184,14 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
                 if not match:
                     continue
 
-                assert isinstance(match, Match)
+                if not isinstance(match, Match):
+                    raise AssertionError(f"expected a Match, got {type(match)}")
                 ag_node = match.nodes[ag_node_idx]
-                assert ag_node.target == c10d.all_gather_into_tensor.default
+                if ag_node.target != c10d.all_gather_into_tensor.default:
+                    raise AssertionError(
+                        "expected ag_node target to be "
+                        f"all_gather_into_tensor, got {ag_node.target}"
+                    )
 
                 if ag_node in visited_ag_nodes:
                     continue
@@ -236,9 +242,10 @@ class _ReduceScatterMatch:
 
             # Assert that now the reduce scatter node has only one user (the wait_tensor) and it's not
             # saved for backward anymore.
-            assert len(self.reduce_scatter_node.users) == 1, (
-                "Reduce scatter node has multiple users, this is not expected"
-            )
+            if len(self.reduce_scatter_node.users) != 1:
+                raise AssertionError(
+                    "Reduce scatter node has multiple users, this is not expected"
+                )
 
     def erase(self) -> None:
         for node in reversed(self.match.nodes):
@@ -318,7 +325,8 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
     for node in reversed(graph.nodes):
         if node.target == c10d.wait_tensor.default:
             if match := non_zero_dim_reduce_scatter_pattern_single_user.match(node):
-                assert isinstance(match, Match)
+                if not isinstance(match, Match):
+                    raise AssertionError(f"expected a Match, got {type(match)}")
                 reduce_scatters.append(
                     _ReduceScatterMatch(
                         match=match,
@@ -331,7 +339,8 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                     )
                 )
             elif match := zero_dim_reduce_scatter_pattern_single_user.match(node):
-                assert isinstance(match, Match)
+                if not isinstance(match, Match):
+                    raise AssertionError(f"expected a Match, got {type(match)}")
                 reduce_scatters.append(
                     _ReduceScatterMatch(
                         match=match,
@@ -344,7 +353,8 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                     )
                 )
             elif match := non_zero_dim_reduce_scatter_pattern_multi_user.match(node):
-                assert isinstance(match, Match)
+                if not isinstance(match, Match):
+                    raise AssertionError(f"expected a Match, got {type(match)}")
                 reduce_scatters.append(
                     _ReduceScatterMatch(
                         match=match,
@@ -357,7 +367,8 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                     )
                 )
             elif match := zero_dim_reduce_scatter_pattern_multi_user.match(node):
-                assert isinstance(match, Match)
+                if not isinstance(match, Match):
+                    raise AssertionError(f"expected a Match, got {type(match)}")
                 reduce_scatters.append(
                     _ReduceScatterMatch(
                         match=match,
@@ -382,13 +393,22 @@ class _Matmul:
     post_mm_reshape: torch.fx.Node | None
 
     def __post_init__(self):
-        assert len(self.nodes) in (1, 3)
+        if len(self.nodes) not in (1, 3):
+            raise AssertionError(f"expected 1 or 3 nodes, got {len(self.nodes)}")
         if len(self.nodes) == 1:
-            assert self.nodes[0].target in (aten.mm.default, aten._scaled_mm.default)
+            if self.nodes[0].target not in (aten.mm.default, aten._scaled_mm.default):
+                raise AssertionError(
+                    f"expected mm or _scaled_mm, got {self.nodes[0].target}"
+                )
         else:
-            assert self.nodes[0].target is aten.reshape.default
-            assert self.nodes[1].target in (aten.mm.default, aten._scaled_mm.default)
-            assert self.nodes[2].target is aten.reshape.default
+            if self.nodes[0].target is not aten.reshape.default:
+                raise AssertionError(f"expected reshape, got {self.nodes[0].target}")
+            if self.nodes[1].target not in (aten.mm.default, aten._scaled_mm.default):
+                raise AssertionError(
+                    f"expected mm or _scaled_mm, got {self.nodes[1].target}"
+                )
+            if self.nodes[2].target is not aten.reshape.default:
+                raise AssertionError(f"expected reshape, got {self.nodes[2].target}")
         self.arg_ancestor_nodes = _find_ancestors(self.B_node)
 
     def replace_with(self, new_node: torch.fx.Node) -> None:
@@ -400,7 +420,8 @@ class _Matmul:
         # For 2D-matmuls, we simply replace the mm node with `new_node`.
         if len(self.nodes) == 1:
             mm_node = self.nodes[0]
-            assert mm_node.target in (aten.mm.default, aten._scaled_mm.default)
+            if mm_node.target not in (aten.mm.default, aten._scaled_mm.default):
+                raise AssertionError(f"expected mm or _scaled_mm, got {mm_node.target}")
             mm_node.replace_all_uses_with(new_node)
             graph.erase_node(mm_node)
             return
@@ -410,12 +431,15 @@ class _Matmul:
         # original mm node in the sequence ends up with zero users by replacing
         # it with a reverse reshape of `new_node`.
         graph = new_node.graph
-        assert len(self.nodes) == 3
+        if len(self.nodes) != 3:
+            raise AssertionError(f"expected 3 nodes, got {len(self.nodes)}")
         mm_node = self.nodes[1]
         output_reshape_node = self.nodes[2]
 
-        assert mm_node.target in (aten.mm.default, aten._scaled_mm.default)
-        assert output_reshape_node.target is aten.reshape.default
+        if mm_node.target not in (aten.mm.default, aten._scaled_mm.default):
+            raise AssertionError(f"expected mm or _scaled_mm, got {mm_node.target}")
+        if output_reshape_node.target is not aten.reshape.default:
+            raise AssertionError(f"expected reshape, got {output_reshape_node.target}")
 
         output_reshape_node.replace_all_uses_with(new_node)
         if len(mm_node.users) > 1:
@@ -433,11 +457,13 @@ class _Matmul:
 
     @classmethod
     def from_match(cls, match: list[torch.fx.Node]) -> "_Matmul":
-        assert len(match) in (1, 3)
-        assert match[0].target in (
+        if len(match) not in (1, 3):
+            raise AssertionError(f"expected 1 or 3 nodes, got {len(match)}")
+        if match[0].target not in (
             aten.mm.default,
             aten.reshape.default,
-        )
+        ):
+            raise AssertionError(f"expected mm or reshape, got {match[0].target}")
         mm_node = match[0] if len(match) == 1 else match[1]
         return _Matmul(
             nodes=match,
@@ -468,11 +494,15 @@ class _ScaledMatmul(_Matmul):
 
     @classmethod
     def from_match(cls, match: list[torch.fx.Node]) -> "_ScaledMatmul":
-        assert len(match) in (1, 3)
-        assert match[0].target in (
+        if len(match) not in (1, 3):
+            raise AssertionError(f"expected 1 or 3 nodes, got {len(match)}")
+        if match[0].target not in (
             aten._scaled_mm.default,
             aten.reshape.default,
-        )
+        ):
+            raise AssertionError(
+                f"expected _scaled_mm or reshape, got {match[0].target}"
+            )
 
         def get_arg(node: torch.fx.Node, idx: int, default: Any) -> Any:
             if idx >= len(node.args):
@@ -581,7 +611,8 @@ def _insert_fused_all_gather_matmul(
     group_name: "torch.distributed.distributed_c10d.GroupName",
 ) -> torch.fx.Node:
     mm_types = OrderedSet(map(type, matmuls))
-    assert len(mm_types) == 1
+    if len(mm_types) != 1:
+        raise AssertionError(f"expected exactly one matmul type, got {len(mm_types)}")
     mm_type = next(iter(mm_types))
     if mm_type == _Matmul:
         B_nodes = [matmul.B_node for matmul in matmuls]
@@ -753,16 +784,15 @@ def _scatter_dim_after_reshape(
         return orig_scatter_dim
 
     reshape_op_output_tensor = _get_tensor(reshape_node)
-    assert reshape_op_output_tensor.ndim == 2, (
-        "reshape must produce 2D tensor for scaled_mm"
-    )
+    if reshape_op_output_tensor.ndim != 2:
+        raise AssertionError("reshape must produce 2D tensor for scaled_mm")
 
-    assert len(reshape_node.args) >= 1, "reshape node must have at least 1 arg"
+    if len(reshape_node.args) < 1:
+        raise AssertionError("reshape node must have at least 1 arg")
     input_tensor_node = cast(torch.fx.Node, reshape_node.args[0])
     reshape_op_input_tensor = _get_tensor(input_tensor_node)
-    assert reshape_op_input_tensor.ndim > reshape_op_output_tensor.ndim, (
-        "reshape must be from 3D+ to 2D"
-    )
+    if reshape_op_input_tensor.ndim <= reshape_op_output_tensor.ndim:
+        raise AssertionError("reshape must be from 3D+ to 2D")
 
     # Note: for a N-D tensor to be reshaped into 2D, either the leading dims or ending dims must
     # be collapsed to a single dim. First determine which of these happened.
@@ -798,12 +828,14 @@ def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
         reshape_node_1 = node
 
         mm_node = reshape_node_1.args[0]
-        assert isinstance(mm_node, torch.fx.Node)
+        if not isinstance(mm_node, torch.fx.Node):
+            raise AssertionError(f"expected an fx Node, got {type(mm_node)}")
         if mm_node.target not in (aten.mm.default, aten._scaled_mm.default):
             return None
 
         reshape_node_0 = mm_node.args[0]
-        assert isinstance(reshape_node_0, torch.fx.Node)
+        if not isinstance(reshape_node_0, torch.fx.Node):
+            raise AssertionError(f"expected an fx Node, got {type(reshape_node_0)}")
         if reshape_node_0.target != aten.reshape.default:
             return None
 
