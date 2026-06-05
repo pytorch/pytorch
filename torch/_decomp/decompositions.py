@@ -1784,8 +1784,8 @@ def native_group_norm_backward(
     ds: Tensor | None = None
     db: Tensor | None = None
     if grad_output_cast is not None:
-        ds = torch.mul(grad_output_cast, input_cast).view(N, C, HxW).sum(2)
-        db = grad_output_cast.view(N, C, HxW).sum(2)
+        ds = torch.mul(grad_output_cast, input_cast).reshape(N, C, HxW).sum(2)
+        db = grad_output_cast.reshape(N, C, HxW).sum(2)
 
     d_input: Tensor | None = None
     d_gamma: Tensor | None = None
@@ -1801,19 +1801,15 @@ def native_group_norm_backward(
             db_val: Tensor | int = 0
             c1: Tensor | int = 0
         elif gamma_cast is not None:
-            ds_val = (
-                torch.mul(ds, gamma_cast.unsqueeze(0)).reshape(N, group, cpg).sum(2)
-            )
-            db_val = (
-                torch.mul(db, gamma_cast.unsqueeze(0)).reshape(N, group, cpg).sum(2)
-            )
+            ds_val = torch.mul(ds, gamma_cast.unsqueeze(0)).view(N, group, cpg).sum(2)
+            db_val = torch.mul(db, gamma_cast.unsqueeze(0)).view(N, group, cpg).sum(2)
             c1 = torch.mul(
                 rstd_cast.unsqueeze(-1),
                 gamma_cast.reshape(1, group, cpg),
             )
         else:
-            ds_val = ds.reshape(N, group, cpg).sum(2)
-            db_val = db.reshape(N, group, cpg).sum(2)
+            ds_val = ds.view(N, group, cpg).sum(2)
+            db_val = db.view(N, group, cpg).sum(2)
             c1 = rstd_cast.unsqueeze(-1)
 
         grad_mean_val = grad_mean_cast if grad_mean_cast is not None else 0
@@ -3300,12 +3296,32 @@ def _index_add(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
+    torch._check(
+        dim == 0 or dim < tensor.ndim,
+        lambda: (
+            f"index_add_(): Indexing dim {dim} is out of bounds of the source tensor "
+            f"with dim {tensor.ndim}"
+        ),
+    )
     index_size = index.size(0) if index.ndim == 1 else 1
     tensor_size = tensor.size(dim) if tensor.ndim > 0 else 1
     torch._check(
         tensor_size == index_size,
         lambda: f"Number of indices ({index_size}) should be equal to tensor.size(dim) ({tensor_size}), for {dim=}",
     )
+
+    def source_shape_error() -> str:
+        return (
+            "source tensor shape must match self tensor shape, excluding the specified "
+            f"dimension. Got self.shape = {list(x.shape)} source.shape = {list(tensor.shape)}"
+        )
+
+    torch._check(x.ndim == tensor.ndim, source_shape_error)
+    if x.ndim != 0:
+        for i in range(x.ndim):
+            if i != dim:
+                torch._check(x.size(i) == tensor.size(i), source_shape_error)
+
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         torch._check(
@@ -4110,7 +4126,7 @@ def one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
 
     out = torch.cat(step_output, 0)
 
-    return out, (hx.squeeze(1), cx.squeeze(1))
+    return out, (hx.squeeze(0), cx.squeeze(0))
 
 
 def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=False):

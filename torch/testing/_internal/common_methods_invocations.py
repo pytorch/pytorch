@@ -2563,7 +2563,7 @@ def error_inputs_cat(op_info, device, **kwargs):
     d = make_tensor((2, 3), device=device, dtype=torch.double if not device.startswith("mps") else torch.float16)
     x = make_tensor((2, 3), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(x, kwargs={'out': d}), error_type=TypeError,
-                     error_regex='invalid combination of arguments')
+                     error_regex='must be tuple of Tensors')
 
 def reference_inputs_cat(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_cat_concat(op, device, dtype, requires_grad, **kwargs)
@@ -12765,10 +12765,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: Composite compliance check failed with the above error.
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               # Booleans mismatch: AssertionError: False is not true
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
-               # Booleans mismatch: AssertionError: False is not true
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),
            )),
     OpInfo('arange',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
@@ -14630,7 +14626,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
                # RuntimeError: Sparse CSR tensors do not have strides.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
                # RuntimeError: sampled_addmm: Expected result to have sparse csr layout, but got Strided
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning'),
                # RuntimeError: Sparse CSR tensors do not have strides
@@ -14664,7 +14659,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'),
                # NotImplementedError: The operator 'aten::_to_sparse_csr' is not currently implemented for the MPS device
                DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
            )),
@@ -14680,9 +14674,6 @@ op_db: list[OpInfo] = [
            skips=(
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
-               # RuntimeError: Sparse CSR tensors do not have strides.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
-               # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
                # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_operator'),
@@ -16238,9 +16229,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # https://github.com/pytorch/pytorch/issues/85960
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
-               # AssertionError: Booleans mismatch: True is not False
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
                             "TestCompositeCompliance", "test_forward_ad"),
                # AssertionError: The values for attribute 'shape' do not match: torch.Size([5, 5, 5]) != torch.Size([0]).
@@ -17520,10 +17508,6 @@ op_db: list[OpInfo] = [
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.bfloat16,)),
-               # RuntimeError: The tensor has a non-zero number of elements, but its data is not allocated yet.
-               # Caffe2 uses a lazy allocation, so you will need to call mutable_data() or raw_mutable_data()
-               # to actually allocate memory
-               DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
            ),
            error_inputs_func=error_inputs_max_pool1d,
            sample_inputs_func=sample_inputs_max_pool),
@@ -19366,9 +19350,12 @@ op_db: list[OpInfo] = [
            )),
     BinaryUfuncInfo('__rmod__',
                     op=torch.Tensor.__rmod__,
-                    dtypes=floating_types_and(torch.bfloat16, torch.half,),
-                    dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half),
+                    dtypes=all_types_and(torch.bfloat16, torch.half,),
                     dtypesIfMPS=all_types_and(torch.bfloat16, torch.half, torch.bool),
+                    dtypesIfHpu=floating_types_and(torch.bfloat16, torch.half,),
+                    # __rmod__ computes other % self, so self (lhs) is the divisor;
+                    # exclude zero to avoid undefined behavior for integer types.
+                    lhs_make_tensor_kwargs={'exclude_zero': True},
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_out=False,
@@ -19378,10 +19365,10 @@ op_db: list[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
-                        # NotImplementedError: "remainder_cpu" not implemented for *
+                        # MTIA does not support integer remainder
                         DecorateInfo(
-                            unittest.expectedFailure, 'TestConsistency', device_type='mps',
-                            dtypes=(torch.bool, torch.int16, torch.uint8, torch.int8, torch.int32, torch.int64)
+                            unittest.skip("MTIA does not support integer remainder"),
+                            None, None, dtypes=integral_types(), device_type='mtia',
                         ),
                     ),
                     # Support autograd after torch.remainder(Tensor, Tensor) supports
@@ -20280,12 +20267,6 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           skips=(
-               # RuntimeError: Mismatch on aten._unique.default: Shapes torch.Size([2]) and torch.Size([1]) are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'),
-               # RuntimeError: Mismatch on aten._unique.default: Shapes torch.Size([2]) and torch.Size([1]) are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_amp'),
-           ),
            sample_inputs_func=sample_inputs_index,
            reference_inputs_func=partial(sample_inputs_index, reference=True)),
     OpInfo('index_copy',
@@ -21984,7 +21965,6 @@ op_db: list[OpInfo] = [
                # Allowed exception: sparse tensors don't have strides
                DecorateInfo(unittest.skip("Allowed exception"), 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip("Allowed exception"), 'TestCompositeCompliance', 'test_backward'),
-               DecorateInfo(unittest.skip("Allowed exception"), 'TestTags', 'test_tags'),
                # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
                DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
                             'TestSparseCSR', 'test_sparse_csr_consistency'),
@@ -23873,10 +23853,6 @@ dsl_ops_by_dsl.setdefault('triton', []).append(
             # subclasses (CompositeCompliantTensor, CrossRefFakeMode, etc.).
             DecorateInfo(unittest.skip("Triton kernel incompatible with tensor subclasses"),
                          "TestCompositeCompliance"),
-            DecorateInfo(unittest.skip("Triton kernel incompatible with FakeTensor"),
-                         "TestFakeTensor"),
-            DecorateInfo(unittest.skip("Triton kernel not introspectable for tag inference"),
-                         "TestTags"),
             DecorateInfo(unittest.skip("Triton kernel not introspectable for conjugate/negate views"),
                          "TestMathBits"),
             # Sample generator only targets the primary CUDA device.
@@ -27609,7 +27585,6 @@ python_ref_db = [
         skips=(
             # no _refs support for Tensor.__setitem__
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     PythonRefInfo(
