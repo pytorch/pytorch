@@ -118,6 +118,17 @@ how a given function should be treated on the callee side.
 .. autofunction:: torch.distributed.rpc.functions.async_execution
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.distributed.rpc.backend_registry
+
+.. autofunction:: backend_registered
+.. autofunction:: register_backend
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.rpc
+```
+
 (rpc-backends)=
 ### Backends
 

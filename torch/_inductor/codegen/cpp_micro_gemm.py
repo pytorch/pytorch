@@ -1039,7 +1039,7 @@ class CppMicroGemmAVX512VNNI(CppMicroGemm):
                 break;
 {%- endfor %}
             default:
-                {{kernel.assert_function}}(false, "Unsupported M_TAIL: {}", M_TAIL);
+                {{kernel.assert_function}}(false, "Unsupported M_TAIL");
         } // switch M_TAIL
     } // if M_TAIL
 }
@@ -1699,7 +1699,7 @@ class CppMicroGemmWoQInt4Avx512(CppMicroGemmFP32Vec):
                     break;
                 {%- endfor %}
                 default:
-                    {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
+                    {{kernel.assert_function}}(false, "Unsupported block_m");
                 }
             }
         }
