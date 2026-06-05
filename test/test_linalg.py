@@ -1230,6 +1230,35 @@ class TestLinalg(TestCase):
         shapes = [(4,), (2, 2), (1, 2, 3), (1, 2, 3, 3)]
         for a_shape, b_shape in itertools.product(shapes, reversed(shapes)):
             run_test_case(a_shape, b_shape)
+    @dtypes(*floating_and_complex_types())
+    def test_kron_non_contiguous(self, device, dtype):
+        a = torch.rand(3, 4, dtype=dtype, device=device)
+        b = torch.rand(4, 3, dtype=dtype, device=device)
+
+        # transposed (non-contiguous) inputs
+        result = torch.kron(a, b.t())
+        expected = torch.kron(a, b.t().contiguous())
+        self.assertEqual(result, expected)
+
+        result = torch.kron(a.t(), b)
+        expected = torch.kron(a.t().contiguous(), b)
+        self.assertEqual(result, expected)
+
+        # both non-contiguous
+        result = torch.kron(a.t(), b.t())
+        expected = torch.kron(a.t().contiguous(), b.t().contiguous())
+        self.assertEqual(result, expected)
+
+        # sliced (non-contiguous) inputs
+        c = torch.rand(6, 4, dtype=dtype, device=device)
+        result = torch.kron(c[::2], b)
+        expected = torch.kron(c[::2].contiguous(), b)
+        self.assertEqual(result, expected)
+
+        # out= variant with non-contiguous inputs
+        out = torch.empty_like(expected)
+        torch.kron(c[::2], b, out=out)
+        self.assertEqual(out, expected)
 
     @dtypes(*floating_and_complex_types())
     def test_kron_empty(self, device, dtype):
