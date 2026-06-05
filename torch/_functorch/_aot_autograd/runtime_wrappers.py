@@ -60,7 +60,11 @@ from .descriptors import (
     SyntheticBaseAOTInput,
     ViewBaseAOTInput,
 )
-from .functional_utils import gen_alias_from_base, resolve_input_view_bits
+from .functional_utils import (
+    gen_alias_from_base,
+    resolve_input_view_bits,
+    resolve_input_view_bits_in_place,
+)
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
     compute_overlapping_inputs,
@@ -518,10 +522,6 @@ class _RuntimeCompiledFnInvoker:
     # code from _create_runtime_wrapper(). Keep both in sync.
     # See Note [RuntimeWrapper codegen specification methods]
     def run(self, args: list[Any], *, on_before_call: Callable[[], None]) -> list[Any]:
-        args = [
-            resolve_input_view_bits(arg) if isinstance(arg, torch.Tensor) else arg
-            for arg in args
-        ]
         with self.first_invocation_ctx():
             if self.trace_joint:
                 args_ = list(args)
@@ -538,6 +538,7 @@ class _RuntimeCompiledFnInvoker:
                     if not prev_view_replay_enabled:
                         torch._C._set_view_replay_enabled(True)
                     with torch.enable_grad():
+                        args_ = resolve_input_view_bits_in_place(args_)
                         on_before_call()
                         return call_func_at_runtime_with_args(
                             self.compiled_fn,
@@ -558,6 +559,7 @@ class _RuntimeCompiledFnInvoker:
             try:
                 if grad_enabled:
                     torch._C._set_grad_enabled(False)
+                args = resolve_input_view_bits_in_place(args)
                 on_before_call()
                 return call_func_at_runtime_with_args(
                     self.compiled_fn,
@@ -811,11 +813,7 @@ def _codegen_compiled_fn_invocation(
     indices_of_inps_to_detach: list[int],
     disable_amp: bool,
 ) -> None:
-    rw_globals["_resolve_input_view_bits_"] = resolve_input_view_bits
-    rw_lines.append(
-        "    args = [_resolve_input_view_bits_(arg) "
-        "if isinstance(arg, torch.Tensor) else arg for arg in args]"
-    )
+    rw_globals["_resolve_input_view_bits_in_place_"] = resolve_input_view_bits_in_place
     rw_lines.append("    with _first_ctx_():")
     # trace_joint is known at codegen time. Only the joint/training path needs
     # forced view replay; inference wrappers should not touch this TLS state.
@@ -833,6 +831,9 @@ def _codegen_compiled_fn_invocation(
         rw_lines.append("            if not prev_view_replay_enabled:")
         rw_lines.append("                torch._C._set_view_replay_enabled(True)")
         rw_lines.append("            with torch.enable_grad():")
+        rw_lines.append(
+            "                args_ = _resolve_input_view_bits_in_place_(args_)"
+        )
         rw_lines.append("                _on_before_call_()")
         if disable_amp:
             rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
@@ -855,6 +856,7 @@ def _codegen_compiled_fn_invocation(
         rw_lines.append(
             "            if grad_enabled: torch._C._set_grad_enabled(False)"
         )
+        rw_lines.append("            args = _resolve_input_view_bits_in_place_(args)")
         rw_lines.append("            _on_before_call_()")
         if disable_amp:
             rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
@@ -3225,6 +3227,7 @@ def _codegen_compiled_forward(
 def _codegen_compiled_backward(
     num_rng: int,
     num_tensors_no_vc_check: int | None,
+    inputs_require_grad: bool,
 ) -> Callable[..., Any]:
     from .subclass_codegen import _compile_and_exec_source
 
@@ -3272,11 +3275,14 @@ def _codegen_compiled_backward(
     )
     lines.append("        impl_fn = functools.partial(_cc.run, impl_fn)")
 
-    lines.append("    _ng = torch.is_grad_enabled() and any(")
-    lines.append(
-        "        t.requires_grad for t in all_args if isinstance(t, torch.Tensor))"
-    )
-    lines.append("    if _ng:")
+    if inputs_require_grad:
+        lines.append("    if torch.is_grad_enabled():")
+    else:
+        lines.append("    _ng = torch.is_grad_enabled() and any(")
+        lines.append(
+            "        t.requires_grad for t in all_args if isinstance(t, torch.Tensor))"
+        )
+        lines.append("    if _ng:")
     lines.append("        return _double_bw_(_ctx_, impl_fn, all_args)")
     lines.append("    return impl_fn()")
 
@@ -3353,6 +3359,7 @@ class _AOTDispatchAutogradFunctionFactory:
         _codegen_bwd = _codegen_compiled_backward(
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
+            any(inp.requires_grad for inp in fw_metadata.input_info),
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
@@ -3525,6 +3532,14 @@ class _AOTDispatchAutogradFunctionFactory:
                     CompiledFunction._compiled_autograd_key
                 )
 
+                # Saved tensors are detached (forward runs under no-grad), so no
+                # real arg requires grad.  Prepend a dummy requires_grad=True
+                # input so CompiledFunctionBackward.apply attaches a grad_fn and
+                # gradient outputs report requires_grad=True for create_graph=True.
+                if not any(
+                    t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
+                ):
+                    all_args = [torch.empty(0, requires_grad=True)] + all_args
                 return CompiledFunctionBackward.apply(*all_args)
 
             @staticmethod
@@ -3561,12 +3576,7 @@ class _AOTDispatchAutogradFunctionFactory:
 
                 return call_func_at_runtime_with_args(
                     compiled_bw,
-                    [
-                        resolve_input_view_bits(arg)
-                        if isinstance(arg, torch.Tensor)
-                        else arg
-                        for arg in all_args
-                    ],
+                    resolve_input_view_bits_in_place(all_args),
                     steal_args=True,
                     disable_amp=disable_amp,
                 )

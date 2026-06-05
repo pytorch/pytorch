@@ -71,6 +71,13 @@ def resolve_input_view_bits(t: torch.Tensor) -> torch.Tensor:
     return t
 
 
+def resolve_input_view_bits_in_place(args: list[Any]) -> list[Any]:
+    for i, arg in enumerate(args):
+        if isinstance(arg, torch.Tensor):
+            args[i] = resolve_input_view_bits(arg)
+    return args
+
+
 # When subclasses are involved, t here will usually look something like:
 # SubclassA(SubclassB(FunctionalTensor(_to_fun_tensor(FakeTensor))))
 def from_fun(t: object) -> object:
