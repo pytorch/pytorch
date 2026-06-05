@@ -5751,5 +5751,61 @@ instantiate_device_type_tests(
     TestGradTrackingTensorToList, globals(), only_for=only_for
 )
 
+
+class TestAutocastVmapGrad(TestCase):
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize(
+        "norm_cls_and_kwargs",
+        [
+            subtest((nn.BatchNorm1d, {"num_features": 4}), name="BatchNorm1d"),
+            subtest((nn.InstanceNorm1d, {"num_features": 4}), name="InstanceNorm1d"),
+            subtest((nn.LayerNorm, {"normalized_shape": [4]}), name="LayerNorm"),
+            subtest((nn.GroupNorm, {"num_groups": 2, "num_channels": 4}), name="GroupNorm"),
+        ],
+    )
+    def test_vmap_grad_autocast_norm(self, device, dtype, norm_cls_and_kwargs):
+        # Tests the case where vmap is called inside the autocast block (issue #184890).
+        # _vjp_with_argnums captures the active autocast state at call time and
+        # restores it in the backward closure, so the functorch batched-autograd
+        # interpreter sees the correct dtype context even though it does not
+        # propagate autocast C++ thread-local state on its own.
+        NormCls, kwargs = norm_cls_and_kwargs
+        model = nn.Sequential(
+            nn.Linear(4, 4),
+            NormCls(**kwargs),
+            nn.Linear(4, 1),
+        ).to(device)
+        model.eval()
+
+        x = torch.randn(8, 4, device=device)
+        device_type = torch.device(device).type
+        if (
+            device_type == "cuda"
+            and dtype is torch.bfloat16
+            and not torch.cuda.is_bf16_supported()
+        ):
+            self.skipTest("bfloat16 not supported on this CUDA device")
+        with torch.autocast(device_type=device_type, dtype=dtype):
+            output = model(x)
+
+            params = list(model.parameters())
+
+            def get_vjp(v):
+                return torch.autograd.grad(output, params, grad_outputs=v)[0]
+
+            cotangents = torch.eye(
+                output.numel(), dtype=output.dtype, device=device
+            ).reshape(-1, *output.shape)
+
+            res_vmap = vmap(get_vjp)(cotangents)
+            res_batch = torch.autograd.grad(
+                output, params, grad_outputs=cotangents, is_grads_batched=True
+            )[0]
+        self.assertEqual(res_vmap, res_batch)
+
+instantiate_device_type_tests(
+    TestAutocastVmapGrad, globals(), only_for=only_for
+)
+
 if __name__ == "__main__":
     run_tests()

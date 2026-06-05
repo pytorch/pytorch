@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import contextlib
 from functools import partial, wraps
-from typing import Any, overload, TYPE_CHECKING
+from typing import Any, NamedTuple, overload, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -354,6 +354,41 @@ def _disable_inference_mode() -> Generator[None, None, None]:
         yield
 
 
+class _AutocastState(NamedTuple):
+    """Captures a single active autocast scope (device type + dtype)."""
+
+    device_type: str
+    dtype: torch.dtype
+
+
+@contextlib.contextmanager
+def _restore_autocast_state(
+    autocast_states: list[_AutocastState],
+) -> Generator[None, None, None]:
+    """Context manager that re-enables autocast for any device types that were
+    active when the state was captured.
+
+    This is used by ``_vjp_with_argnums`` (and transitively by ``vmap`` +
+    ``grad`` / ``vjp``) to propagate the autocast context from the forward pass
+    into the backward pass.  Without this, the functorch batched autograd
+    interpreter would execute backward nodes without autocast enabled, causing
+    dtype mismatches when normalization layers have float32 running stats but
+    float16 activations (issue #184890).
+    """
+    if not autocast_states:
+        yield
+        return
+    with contextlib.ExitStack() as stack:
+        for state in autocast_states:
+            stack.enter_context(
+                torch.amp.autocast(
+                    device_type=state.device_type,
+                    dtype=state.dtype,
+                )
+            )
+        yield
+
+
 @contextlib.contextmanager
 def grad_increment_nesting() -> Generator[int, None, None]:
     try:
@@ -403,6 +438,25 @@ def _vjp_with_argnums(
     #
     # Returns the same two elements as :func:`vjp` but the function returned, vjp_fn, returns a tuple of VJPs
     # for only the primal elements given by argnums.
+    #
+    # NOTE [autocast state capture for vjp / vmap+grad]
+    # Capture the active autocast state (enabled device types + dtypes) at the
+    # point where the VJP is set up (i.e. during the forward pass).  The
+    # ``wrapper`` closure below runs the backward, potentially inside a vmap
+    # batched-autograd interpreter that does NOT inherit thread-local C++ state
+    # such as the autocast dtype.  We therefore restore those states explicitly
+    # inside the wrapper (see issue #184890).
+    autocast_states: list[_AutocastState] = []
+    if not torch.compiler.is_compiling():
+        for device_type in torch._C._autocast_supported_devices():
+            if torch.is_autocast_enabled(device_type):
+                autocast_states.append(
+                    _AutocastState(
+                        device_type=device_type,
+                        dtype=torch.get_autocast_dtype(device_type),
+                    )
+                )
+
     with grad_increment_nesting() as level:
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
@@ -461,12 +515,20 @@ def _vjp_with_argnums(
             # inference_mode may have been restored. Disable it for autograd.
             # Skip under Dynamo — tracing through the generator CM emits
             # spurious _enter_inference_mode nodes.
-            ctx = (
+            inference_ctx = (
                 contextlib.nullcontext()
                 if torch.compiler.is_compiling()
                 else _disable_inference_mode()
             )
-            with ctx:
+            # Restore the autocast state that was active during the forward
+            # pass.  The functorch batched-autograd interpreter (used by vmap)
+            # does not propagate autocast C++ thread-local state, so without
+            # this, backward nodes that depend on mixed-precision semantics
+            # (e.g. NativeBatchNormBackward with float32 running stats and
+            # float16 grad_output) would crash with a dtype mismatch.
+            # See issue #184890.
+            autocast_ctx = _restore_autocast_state(autocast_states)
+            with inference_ctx, autocast_ctx:
                 result = _autograd_grad(
                     flat_primals_out,
                     flat_diff_primals,
