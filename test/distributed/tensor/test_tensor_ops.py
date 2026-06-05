@@ -1485,6 +1485,58 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
                     self.assertEqual(x.full_tensor(), y)
 
     @with_comms
+    def test_slice_scatter(self):
+        device_mesh = self.build_device_mesh()
+        inp = torch.randn(8, 4, 6, device=self.device_type)
+        src = torch.randn(8, 4, 6, device=self.device_type)
+
+        for dim in range(inp.ndim):
+            expected = inp.slice_scatter(src, dim=dim, start=0, end=inp.shape[dim])
+            dt_inp = distribute_tensor(inp, device_mesh, [Shard(dim)])
+            dt_src = distribute_tensor(src, device_mesh, [Shard(dim)])
+            result = dt_inp.slice_scatter(dt_src, dim=dim, start=0, end=inp.shape[dim])
+            self.assertEqual(result.full_tensor(), expected)
+            self.assertTrue(result.placements[0].is_shard(dim))
+
+    @with_comms
+    def test_slice_scatter_partial(self):
+        device_mesh = self.build_device_mesh()
+        inp = torch.randn(8, 4, 6, device=self.device_type)
+
+        src = torch.randn(8, 2, 6, device=self.device_type)
+        partial_inp = DTensor.from_local(inp, device_mesh, [Partial()])
+        partial_src = DTensor.from_local(src, device_mesh, [Partial()])
+        result = partial_inp.slice_scatter(partial_src, dim=1, start=1, end=3)
+        expected = partial_inp.full_tensor().slice_scatter(
+            partial_src.full_tensor(), dim=1, start=1, end=3
+        )
+        self.assertEqual(result.placements, (Partial(),))
+        self.assertEqual(result.full_tensor(), expected)
+
+        partial_inp = DTensor.from_local(inp, device_mesh, [Partial("avg")])
+        replicate_src = distribute_tensor(src, device_mesh, [Replicate()])
+        result = partial_inp.slice_scatter(replicate_src, dim=1, start=1, end=3)
+        expected = partial_inp.full_tensor().slice_scatter(src, dim=1, start=1, end=3)
+        self.assertEqual(result.placements, (Partial("avg"),))
+        self.assertEqual(result.full_tensor(), expected)
+
+        replicate_inp = distribute_tensor(inp, device_mesh, [Replicate()])
+        partial_src = DTensor.from_local(src, device_mesh, [Partial("max")])
+        result = replicate_inp.slice_scatter(partial_src, dim=1, start=1, end=3)
+        expected = inp.slice_scatter(partial_src.full_tensor(), dim=1, start=1, end=3)
+        self.assertEqual(result.placements, (Partial("max"),))
+        self.assertEqual(result.full_tensor(), expected)
+
+        full_src = torch.randn(8, 4, 6, device=self.device_type)
+        partial_self = DTensor.from_local(inp, device_mesh, [Partial("avg")])
+        partial_src = DTensor.from_local(full_src, device_mesh, [Partial("max")])
+        result = partial_self.slice_scatter(
+            partial_src, dim=0, start=0, end=inp.shape[0]
+        )
+        self.assertEqual(result.placements, (Partial("max"),))
+        self.assertEqual(result.full_tensor(), partial_src.full_tensor())
+
+    @with_comms
     def test_select_scatter(self):
         device_mesh = self.build_device_mesh()
         inp = torch.randn(8, 4, 6, device=self.device_type)

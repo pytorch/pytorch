@@ -75,6 +75,9 @@ class _SingleDimStrategyInfo:
     func: _SingleDimStrategyFunc
     allow_unbacked_sharding: bool | None = field(default=None)
     allow_uneven_sharding: bool = field(default=False)
+    include_default_replication: bool = field(default=True)
+    allow_input_redistribution: bool = field(default=True)
+    allow_replicate_to_partial_redistribution: bool = field(default=True)
     # Positions (in args_schema) of args that may live on a different mesh
     # than the op's compute mesh.  These args must be Replicate.
     # See Note [Multi-mesh args] in expand_to_full_mesh_op_strategy.
@@ -259,6 +262,21 @@ def _build_output_specs(
         return spec
 
 
+def _get_num_tensor_outputs(
+    op: OpOverload,
+    output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
+) -> int:
+    schema_num_outputs = sum(1 for r in op._schema.returns if "Tensor" in str(r.type))
+    if (
+        schema_num_outputs == 1
+        and len(op._schema.returns) == 1
+        and str(op._schema.returns[0].type).startswith("List[Tensor")
+        and isinstance(output_tensor_meta, Sequence)
+    ):
+        return len(output_tensor_meta)
+    return schema_num_outputs
+
+
 class _PreparedSingleDimStrategy:
     """A single-dim strategy materialized for a specific op.
 
@@ -280,6 +298,9 @@ class _PreparedSingleDimStrategy:
     allowed_sharding_per_input: dict[int, set[Shard | _StridedShard]]
     allowed_partial_per_input: dict[int, set[Placement]]
     allow_unbacked_sharding: bool | None
+    include_default_replication: bool
+    allow_input_redistribution: bool
+    allow_replicate_to_partial_redistribution: bool
 
     # many, but not all ops are able to support unevenly sharded tensors
     # there are existing BC expectations even if we wanted to ban for
@@ -302,16 +323,25 @@ class _PreparedSingleDimStrategy:
         # Note: circular import
         from torch.distributed.tensor.placement_types import Partial
 
+        include_default_replication = True
         if isinstance(strategy_fn, _SingleDimStrategyInfo):
             self.allow_unbacked_sharding = strategy_fn.allow_unbacked_sharding
             self.allow_uneven_sharding = strategy_fn.allow_uneven_sharding
+            include_default_replication = strategy_fn.include_default_replication
+            self.allow_input_redistribution = strategy_fn.allow_input_redistribution
+            self.allow_replicate_to_partial_redistribution = (
+                strategy_fn.allow_replicate_to_partial_redistribution
+            )
             different_mesh_args = strategy_fn.different_mesh_args
             func = strategy_fn.func
         else:
             self.allow_unbacked_sharding = None
             self.allow_uneven_sharding = False
+            self.allow_input_redistribution = True
+            self.allow_replicate_to_partial_redistribution = True
             different_mesh_args = None
             func = strategy_fn
+        self.include_default_replication = include_default_replication
 
         # Determine element_mesh from the first OpStrategy arg.  For foreach
         # per-element schemas the element's inputs may live on a smaller
@@ -370,8 +400,8 @@ class _PreparedSingleDimStrategy:
         # A mismatch means the strategy is missing kwargs placements or has
         # extra entries.
         if len(strategies_with_placeholders) > 0:
-            schema_num_outputs = sum(
-                1 for r in op_schema.op._schema.returns if "Tensor" in str(r.type)
+            schema_num_outputs = _get_num_tensor_outputs(
+                op_schema.op, output_tensor_meta
             )
             expected_len = schema_num_outputs + num_inputs
             actual_len = len(strategies_with_placeholders[0])
@@ -394,12 +424,13 @@ class _PreparedSingleDimStrategy:
             num_outputs = len(output_tensor_meta)
         self.num_outputs = num_outputs
 
-        strategies_with_placeholders = _insert_single_dim_replication_strategy(
-            strategies_with_placeholders,
-            num_outputs,
-            num_inputs,
-            output_tensor_meta,
-        )
+        if include_default_replication:
+            strategies_with_placeholders = _insert_single_dim_replication_strategy(
+                strategies_with_placeholders,
+                num_outputs,
+                num_inputs,
+                output_tensor_meta,
+            )
 
         unique_input_placements = _get_unique_placements(op_schema)
         self.expanded_strategies = _fill_single_dim_strategy_placeholders(
@@ -664,6 +695,20 @@ def _expand_single_dim_strategy_to_mesh(
 
             element_mesh = prepared_strategy.element_mesh or mesh
 
+            if not prepared_strategy.allow_input_redistribution:
+                input_specs: list[DTensorSpec] = []
+                for arg in op_schema.args_schema:
+                    if isinstance(arg, OpStrategy):
+                        if len(arg.strategies) != 1:
+                            raise AssertionError
+                        input_specs.append(arg.strategies[0].output_spec)
+                    elif isinstance(arg, TupleStrategy):
+                        return OpStrategy([])
+                initial_placements = tuple(spec.placements for spec in input_specs)
+                return prepared_strategy.try_propagate(
+                    element_mesh, initial_placements, input_specs
+                ) or OpStrategy([])
+
             return expand_to_full_mesh_op_strategy(
                 element_mesh,
                 op_schema,
@@ -780,6 +825,9 @@ def register_single_dim_strategy(
     schema_info: RuntimeSchemaInfo | None = None,
     allow_unbacked_sharding: bool | None = None,
     allow_uneven_sharding: bool = False,
+    include_default_replication: bool = True,
+    allow_input_redistribution: bool = True,
+    allow_replicate_to_partial_redistribution: bool = True,
     different_mesh_args: list[int] | None = None,
 ) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
@@ -829,6 +877,9 @@ def register_single_dim_strategy(
             func=impl,
             allow_unbacked_sharding=allow_unbacked_sharding,
             allow_uneven_sharding=allow_uneven_sharding,
+            include_default_replication=include_default_replication,
+            allow_input_redistribution=allow_input_redistribution,
+            allow_replicate_to_partial_redistribution=allow_replicate_to_partial_redistribution,
             different_mesh_args=different_mesh_args,
         )
         registration_wrapper(info)
@@ -865,6 +916,8 @@ def _get_neighbor_placements(
     current: Placement,
     input_placements: tuple[Placement, ...],
     mesh_dim: int,
+    include_default_replication: bool,
+    allow_replicate_to_partial_redistribution: bool,
 ) -> list[Placement]:
     """Return valid one-shot placement transitions for one input on one mesh dim.
 
@@ -897,18 +950,20 @@ def _get_neighbor_placements(
 
     if isinstance(current, Replicate):
         neighbors.extend(s for s in allowed_sharding if s.dim not in right_shard_dims)
-        neighbors.extend(allowed_partial)
+        if allow_replicate_to_partial_redistribution:
+            neighbors.extend(allowed_partial)
 
     elif _is_sharding(current):
         cur_dim_ok = current.dim not in right_shard_dims
-        if cur_dim_ok:
+        if include_default_replication and cur_dim_ok:
             neighbors.append(Replicate())
         for s in allowed_sharding:
             if s != current and cur_dim_ok and s.dim not in right_shard_dims:
                 neighbors.append(s)
 
     elif isinstance(current, Partial):
-        neighbors.append(Replicate())
+        if include_default_replication:
+            neighbors.append(Replicate())
         neighbors.extend(s for s in allowed_sharding if s.dim not in right_shard_dims)
 
     return neighbors
@@ -1152,6 +1207,8 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
                     current_p,
                     candidate.placements[input_idx],
                     mesh_dim,
+                    prepared_strategy.include_default_replication,
+                    prepared_strategy.allow_replicate_to_partial_redistribution,
                 ):
                     _push_neighbor(input_idx, mesh_dim, neighbor_p, candidate)
 

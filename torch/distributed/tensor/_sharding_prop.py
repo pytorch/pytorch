@@ -769,7 +769,10 @@ class ShardingPropagator:
             strategy_schema = self._wrap_with_op_strategy(op_schema)
 
             if single_dim_strategy_info is not None:
-                mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
+                mesh = try_find_mesh_from_args(
+                    op_schema.op,
+                    op_schema.args_schema + tuple(op_schema.kwargs_schema.values()),
+                )
                 if not isinstance(mesh, DeviceMesh):
                     raise AssertionError("Expected to find a valid mesh")
                 # expand to generate the full set of strategy combinations, each one
