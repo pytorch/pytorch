@@ -59,6 +59,7 @@ decltype(auto) init(Func&& f) {
 /// a pointer to the Foo class's `myMethod()` method. `lambdaMethod()`
 /// is registered with a C++ lambda expression.
 template <class CurClass>
+// NOLINTBEGIN(performance-unnecessary-value-param)
 class class_ : public ::torch::detail::class_base {
   static_assert(
       std::is_base_of_v<CustomClassHolder, CurClass>,
@@ -162,6 +163,19 @@ class class_ : public ::torch::detail::class_base {
         std::move(wrapped_f),
         std::move(doc_string),
         default_args);
+    return *this;
+  }
+
+  /// Method registration API with an explicitly provided schema. Use this
+  /// overload when the inferred schema cannot express required annotations,
+  /// such as Tensor aliasing or mutation.
+  template <typename Func>
+  class_& def(
+      c10::FunctionSchema schema,
+      Func f,
+      std::string doc_string = "") {
+    auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
+    defineMethod(std::move(schema), std::move(wrapped_f), std::move(doc_string));
     return *this;
   }
 
@@ -395,6 +409,45 @@ class class_ : public ::torch::detail::class_base {
  private:
   template <typename Func>
   torch::jit::Function* defineMethod(
+      c10::FunctionSchema schema,
+      Func func,
+      std::string doc_string = "") {
+    TORCH_CHECK(
+        !schema.getNamespace().has_value(),
+        "Custom class method schemas must use an unqualified method name, got ",
+        schema.name());
+
+    auto inferred_schema = c10::inferFunctionSchemaSingleReturn<Func>(
+        std::string(schema.name()), std::string(schema.overload_name()));
+    auto schema_diff = c10::findSchemaDifferences(inferred_schema, schema);
+    TORCH_CHECK(
+        !schema_diff.has_value(),
+        "Provided schema for custom class method ",
+        schema.name(),
+        " is incompatible with the inferred schema. ",
+        *schema_diff);
+
+    auto qualMethodName = qualClassName + "." + schema.name();
+    auto wrapped_func =
+        [func = std::move(func)](jit::Stack& stack) mutable -> void {
+      using RetType =
+          typename c10::guts::infer_function_traits_t<Func>::return_type;
+      detail::BoxedProxy<RetType, Func>()(stack, func);
+    };
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
+        qualMethodName,
+        std::move(schema),
+        std::move(wrapped_func),
+        std::move(doc_string));
+
+    auto method_val = method.get();
+    classTypePtr->addMethod(method_val);
+    registerCustomClassMethod(std::move(method));
+    return method_val;
+  }
+
+  template <typename Func>
+  torch::jit::Function* defineMethod(
       std::string name,
       Func func,
       std::string doc_string = "",
@@ -445,6 +498,7 @@ class class_ : public ::torch::detail::class_base {
     return method_val;
   }
 };
+// NOLINTEND(performance-unnecessary-value-param)
 
 /// make_custom_class() is a convenient way to create an instance of a
 /// registered custom class and wrap it in an IValue, for example when you want
