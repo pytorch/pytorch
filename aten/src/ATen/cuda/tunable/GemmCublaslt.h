@@ -3,6 +3,7 @@
 #ifndef USE_ROCM
 
 #include <ATen/cuda/CUDAContextLight.h>
+#include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/detail/BLASConstants.h>
 #include <ATen/cuda/detail/CublasLtUtils.h>
 #include <ATen/cuda/Exceptions.h>
@@ -472,6 +473,216 @@ auto MakeCublasltStandardGemmProblem(
       false /* set_epilogue_attribute */);
 }
 
+template <typename CT>
+class CublasltScaledGemmProblem {
+ public:
+  explicit CublasltScaledGemmProblem(const ScaledGemmParams<CT>* params)
+      : params_(params),
+        a_type_(ScalarTypeToCudaDataType(params->a_dtype)),
+        b_type_(ScalarTypeToCudaDataType(params->b_dtype)),
+        c_type_(ScalarTypeToCudaDataType(params->bias_dtype)),
+        d_type_(ScalarTypeToCudaDataType(params->c_dtype)),
+        compute_desc_(compute_type_, scale_type_) {
+    initialize();
+  }
+
+  cublasComputeType_t compute_type() const {
+    return compute_type_;
+  }
+
+  cudaDataType_t scale_type() const {
+    return scale_type_;
+  }
+
+  cudaDataType_t a_type() const {
+    return a_type_;
+  }
+
+  cudaDataType_t b_type() const {
+    return b_type_;
+  }
+
+  cudaDataType_t c_type() const {
+    return c_type_;
+  }
+
+  cudaDataType_t d_type() const {
+    return d_type_;
+  }
+
+  cublasLtMatmulDesc_t compute_desc() const {
+    return compute_desc_.descriptor();
+  }
+
+  cublasLtMatrixLayout_t adesc() const {
+    return adesc_->descriptor();
+  }
+
+  cublasLtMatrixLayout_t bdesc() const {
+    return bdesc_->descriptor();
+  }
+
+  cublasLtMatrixLayout_t cdesc() const {
+    return cdesc_->descriptor();
+  }
+
+  cublasLtMatrixLayout_t ddesc() const {
+    return ddesc_->descriptor();
+  }
+
+  cublasLtMatrixLayout_t heuristic_bdesc() const {
+    return bdesc();
+  }
+
+  cublasLtMatrixLayout_t heuristic_cdesc() const {
+    return cdesc();
+  }
+
+  cublasLtMatrixLayout_t heuristic_ddesc() const {
+    return ddesc();
+  }
+
+  cublasLtMatmulPreference_t preference() const {
+    return preference_.descriptor();
+  }
+
+  void* alpha_ptr() const {
+    return alpha_ptr_;
+  }
+
+  void* beta_ptr() const {
+    return beta_ptr_;
+  }
+
+  const void* a() const {
+    return params_->a;
+  }
+
+  const void* b() const {
+    return params_->b;
+  }
+
+  // cuBLASLt requires a non-null C pointer even when beta is zero. Match the
+  // non-tunable scaled_gemm path by passing an input pointer; beta = 0 means
+  // C is never read.
+  const void* c() const {
+    return params_->a;
+  }
+
+  void* d() const {
+    return params_->c;
+  }
+
+  void* workspace() const {
+    return workspace_.ptr;
+  }
+
+  size_t workspace_size() const {
+    return workspace_.size;
+  }
+
+ private:
+  void initialize() {
+    compute_desc_.setAttribute(
+        CUBLASLT_MATMUL_DESC_TRANSA,
+        at::cuda::blas::detail::cublasOpFromChar(params_->transa));
+    compute_desc_.setAttribute(
+        CUBLASLT_MATMUL_DESC_TRANSB,
+        at::cuda::blas::detail::cublasOpFromChar(params_->transb));
+    compute_desc_.setAttribute(
+        CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, params_->a_scale_ptr);
+    compute_desc_.setAttribute(
+        CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, params_->b_scale_ptr);
+    if (params_->c_scale_ptr != nullptr) {
+      compute_desc_.setAttribute(
+          CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, params_->c_scale_ptr);
+    }
+
+    const int8_t fast_accum = params_->use_fast_accum ? 1 : 0;
+    compute_desc_.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fast_accum);
+
+    if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+      compute_desc_.setAttribute<int32_t>(
+          CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+          at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
+              at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+    }
+
+    if (params_->bias_ptr != nullptr) {
+      compute_desc_.setAttribute(
+          CUBLASLT_MATMUL_DESC_BIAS_POINTER, params_->bias_ptr);
+      compute_desc_.setAttribute(
+          CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_BIAS);
+      compute_desc_.setAttribute(
+          CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, c_type_);
+    }
+
+    alpha_ptr_ = &alpha_val_;
+    beta_ptr_ = &beta_val_;
+    if (params_->alpha.has_value()) {
+      const auto& alpha = params_->alpha.value();
+      if (alpha.is_cuda()) {
+        float* user_alpha_ptr = at::cuda::detail::get_user_alpha_ptr();
+        at::Tensor user_alpha = at::from_blob(
+            user_alpha_ptr, {1}, TensorOptions().device(kCUDA).dtype(kFloat));
+        user_alpha.copy_(alpha);
+        auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
+        compute_desc_.setAttribute(
+            CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
+        alpha_ptr_ = user_alpha.data_ptr<float>();
+        beta_ptr_ = at::cuda::detail::get_cublas_device_zero();
+      } else {
+        alpha_val_ = alpha.template item<float>();
+      }
+    }
+
+    int a_scale_mode = at::cuda::blas::detail::cublasLtMatmulScaleMode(
+        params_->a_scaling_type,
+        params_->a_scale_dtype,
+        params_->use_fast_accum);
+    int b_scale_mode = at::cuda::blas::detail::cublasLtMatmulScaleMode(
+        params_->b_scaling_type,
+        params_->b_scale_dtype,
+        params_->use_fast_accum);
+#if CUDA_VERSION >= 12080
+    compute_desc_.setAttribute(
+        CUBLASLT_MATMUL_DESC_A_SCALE_MODE, a_scale_mode);
+    compute_desc_.setAttribute(
+        CUBLASLT_MATMUL_DESC_B_SCALE_MODE, b_scale_mode);
+#endif
+
+    adesc_ = std::make_unique<at::cuda::blas::detail::CuBlasLtMatrixLayout>(
+        a_type_, params_->m, params_->k, params_->lda, params_->transa == 't');
+    bdesc_ = std::make_unique<at::cuda::blas::detail::CuBlasLtMatrixLayout>(
+        b_type_, params_->k, params_->n, params_->ldb, params_->transb == 't');
+    cdesc_ = std::make_unique<at::cuda::blas::detail::CuBlasLtMatrixLayout>(
+        c_type_, params_->m, params_->n, params_->ldc);
+    ddesc_ = std::make_unique<at::cuda::blas::detail::CuBlasLtMatrixLayout>(
+        d_type_, params_->m, params_->n, params_->ldc);
+
+    preference_.setAttribute(
+        CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspace_.size);
+  }
+
+  const ScaledGemmParams<CT>* params_;
+  cudaDataType_t a_type_;
+  cudaDataType_t b_type_;
+  cudaDataType_t c_type_;
+  cudaDataType_t d_type_;
+  cublasComputeType_t compute_type_ = CUBLAS_COMPUTE_32F;
+  cudaDataType_t scale_type_ = CUDA_R_32F;
+  at::cuda::blas::detail::CuBlasLtMatmulDescriptor compute_desc_;
+  at::cuda::blas::detail::CuBlasLtMatmulPreference preference_;
+  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> adesc_;
+  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> bdesc_;
+  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> cdesc_;
+  std::unique_ptr<at::cuda::blas::detail::CuBlasLtMatrixLayout> ddesc_;
+  at::cuda::blas::detail::CublasLtWorkspace workspace_;
+  float alpha_val_ = 1.0f;
+  float beta_val_ = 0.0f;
+  void* alpha_ptr_ = nullptr;
+  void* beta_ptr_ = nullptr;
+};
 
 struct CublasltAlgoConfig {
   int32_t id = 0;
@@ -659,6 +870,12 @@ struct CublasltStandardGemmProblemFactory {
   }
 };
 
+template <typename CT>
+struct CublasltScaledGemmProblemFactory {
+  auto operator()(const ScaledGemmParams<CT>* params) const {
+    return CublasltScaledGemmProblem<CT>(params);
+  }
+};
 
 template <typename ParamsT, typename ProblemFactory>
 class CublasltMatmulOp : public Callable<ParamsT> {
@@ -822,6 +1039,11 @@ class CublasltGemmTunableOp
           ParamsT,
           CublasltStandardGemmProblemFactory<T>> {};
 
+template <typename AT, typename BT, typename CT, typename ParamsT>
+class CublasltScaledGemmTunableOp
+    : public CublasltMatmulTunableOp<
+          ParamsT,
+          CublasltScaledGemmProblemFactory<CT>> {};
 
 } // namespace at::cuda::tunable
 

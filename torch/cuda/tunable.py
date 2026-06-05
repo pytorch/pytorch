@@ -194,6 +194,7 @@ import multiprocessing as mp
 import os
 import shutil
 import warnings
+from typing import NamedTuple
 
 import torch
 
@@ -572,6 +573,129 @@ def _create_batch_matrices(
         return matA, matB
 
 
+def _get_dtype_from_string(
+    dtype_string: str, dtype_dict: dict[str, torch.dtype], field_name: str
+) -> torch.dtype:
+    dtype = dtype_dict.get(dtype_string)
+    if dtype is None:
+        raise TypeError(f"{field_name} must be a torch.dtype, but got {dtype_string}")
+    return dtype
+
+
+class _ScaledGemmOptions(NamedTuple):
+    dtypeA: torch.dtype
+    dtypeB: torch.dtype
+    dtypeC: torch.dtype
+    rowwise: bool
+    bias_dtype: torch.dtype | None
+    use_fast_accum: bool
+
+
+def _parse_cuda_scaled_gemm_fields(tokens: list[str]) -> dict[str, str]:
+    labels = ("a", "b", "c", "as", "bs", "ast", "bst", "dscale", "fast", "bias")
+    label_set = set(labels)
+    fields: dict[str, str] = {}
+
+    i = 8
+    for label in labels:
+        if i >= len(tokens) or tokens[i] != label:
+            got = tokens[i] if i < len(tokens) else None
+            raise AssertionError(f"expected {label!r} at index {i}, got {got!r}")
+        i += 1
+
+        value_start = i
+        while i < len(tokens) and tokens[i] not in label_set:
+            i += 1
+        if i == value_start:
+            raise AssertionError(f"expected value for {label!r}")
+        fields[label] = "_".join(tokens[value_start:i])
+
+    if i != len(tokens):
+        raise AssertionError(f"unexpected CUDA scaled GEMM fields: {tokens[i:]}")
+
+    return fields
+
+
+def _parse_rocm_scaled_gemm_options(
+    tokens: list[str],
+    dtype_dict: dict[str, torch.dtype],
+    dtypeA: torch.dtype | None,
+    dtypeB: torch.dtype | None,
+    dtypeC: torch.dtype | None,
+) -> _ScaledGemmOptions:
+    if tokens[8] != "rw":
+        raise AssertionError(f"expected 'rw' at index 8, got {tokens[8]!r}")
+
+    if tokens[10] != "bias":
+        raise AssertionError(f"expected 'bias' at index 10, got {tokens[10]!r}")
+
+    if dtypeA is None or not isinstance(dtypeA, torch.dtype):
+        raise TypeError(f"dtype must be a torch.dtype, but got {dtypeA}")
+    if dtypeB is None or not isinstance(dtypeB, torch.dtype):
+        raise TypeError(f"dtype must be a torch.dtype, but got {dtypeB}")
+    if dtypeC is None or not isinstance(dtypeC, torch.dtype):
+        raise TypeError(f"dtype must be a torch.dtype, but got {dtypeC}")
+
+    bias_dtype = (
+        None
+        if tokens[11] == "None"
+        else _get_dtype_from_string(tokens[11], dtype_dict, "bias_dtype")
+    )
+    return _ScaledGemmOptions(
+        dtypeA, dtypeB, dtypeC, tokens[9] == "1", bias_dtype, False
+    )
+
+
+def _parse_cuda_scaled_gemm_options(
+    tokens: list[str], dtype_dict: dict[str, torch.dtype]
+) -> _ScaledGemmOptions:
+    fields = _parse_cuda_scaled_gemm_fields(tokens)
+
+    if fields["dscale"] != "0":
+        raise AssertionError(
+            "offline tuning for CUDA scaled GEMM with dscale is not supported"
+        )
+
+    if fields["ast"] != fields["bst"]:
+        raise AssertionError(
+            "offline tuning only supports matching CUDA scaled GEMM scaling types"
+        )
+    if fields["ast"] not in ("0", "1"):
+        raise AssertionError(
+            "offline tuning only supports CUDA tensorwise and rowwise scaled GEMM"
+        )
+    if fields["fast"] not in ("0", "1"):
+        raise AssertionError("expected CUDA scaled GEMM fast field to be 0 or 1")
+
+    bias_dtype = (
+        None
+        if fields["bias"] == "None"
+        else _get_dtype_from_string(fields["bias"], dtype_dict, "bias_dtype")
+    )
+    return _ScaledGemmOptions(
+        dtypeA=_get_dtype_from_string(fields["a"], dtype_dict, "dtypeA"),
+        dtypeB=_get_dtype_from_string(fields["b"], dtype_dict, "dtypeB"),
+        dtypeC=_get_dtype_from_string(fields["c"], dtype_dict, "dtypeC"),
+        rowwise=fields["ast"] == "1",
+        bias_dtype=bias_dtype,
+        use_fast_accum=fields["fast"] == "1",
+    )
+
+
+def _parse_scaled_gemm_options(
+    tokens: list[str],
+    dtype_dict: dict[str, torch.dtype],
+    dtypeA: torch.dtype | None,
+    dtypeB: torch.dtype | None,
+    dtypeC: torch.dtype | None,
+) -> _ScaledGemmOptions:
+    if torch.version.hip:
+        return _parse_rocm_scaled_gemm_options(
+            tokens, dtype_dict, dtypeA, dtypeB, dtypeC
+        )
+    return _parse_cuda_scaled_gemm_options(tokens, dtype_dict)
+
+
 def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     r"""Process a single untuned GEMM."""
 
@@ -721,9 +845,9 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
                 f"transA must be False for ScaledGemmTunableOp, got {transA}"
             )
 
-        # Resolve linter issue
-        if dtypeA is None or not isinstance(dtypeA, torch.dtype):
-            raise TypeError(f"dtype must be a torch.dtype, but got {dtypeA}")
+        scaled_gemm_options = _parse_scaled_gemm_options(
+            untuned_gemm_temp, dtype_dict, dtypeA, dtypeB, dtypeC
+        )
 
         matA, matB = _create_matrices(
             m,
@@ -734,22 +858,14 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             ldc,
             transA,
             transB,
-            dtypeA,
+            scaled_gemm_options.dtypeA,
             deviceid,
-            dtypeB=dtypeB,
+            dtypeB=scaled_gemm_options.dtypeB,
             randn=False,
             subMatrix=subMatrix,
         )
 
-        if untuned_gemm_temp[8] != "rw":
-            raise AssertionError(
-                f"expected 'rw' at index 8, got {untuned_gemm_temp[8]!r}"
-            )
-        if untuned_gemm_temp[9] == "1":
-            rowwise = True
-        else:
-            rowwise = False
-        if rowwise:
+        if scaled_gemm_options.rowwise:
             scaleA = (
                 torch.ones((1, m), device=deviceid)
                 if transA
@@ -764,25 +880,30 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             scaleA = torch.tensor(0.8, device=deviceid)
             scaleB = torch.tensor(0.9, device=deviceid)
 
-        if untuned_gemm_temp[10] != "bias":
-            raise AssertionError(
-                f"expected 'bias' at index 10, got {untuned_gemm_temp[10]!r}"
-            )
-        if untuned_gemm_temp[11] == "None":  # no bias vector
-            torch._scaled_mm(
-                matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC
-            )
-        else:  # bias vector present
+        kwargs = {
+            "scale_a": scaleA,
+            "scale_b": scaleB,
+            "out_dtype": scaled_gemm_options.dtypeC,
+            "use_fast_accum": scaled_gemm_options.use_fast_accum,
+        }
+        if scaled_gemm_options.bias_dtype is not None:
             fillbias = 0.10
-            bias_dtype = dtype_dict.get(untuned_gemm_temp[11])
-            bias = (
-                torch.full((n,), fillbias, dtype=bias_dtype, device=deviceid)
+            kwargs["bias"] = (
+                torch.full(
+                    (n,),
+                    fillbias,
+                    dtype=scaled_gemm_options.bias_dtype,
+                    device=deviceid,
+                )
                 if transB
-                else torch.full((m,), fillbias, dtype=bias_dtype, device=deviceid)
+                else torch.full(
+                    (m,),
+                    fillbias,
+                    dtype=scaled_gemm_options.bias_dtype,
+                    device=deviceid,
+                )
             )
-            torch._scaled_mm(
-                matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC, bias=bias
-            )
+        torch._scaled_mm(matA, matB, **kwargs)
 
     elif op_sig == "GemmAndBiasTunableOp":
         # y = x*A^T + b

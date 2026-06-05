@@ -239,7 +239,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
 }
 
 Tensor&
-_tunable_scaled_gemm_rocm(
+_tunable_scaled_gemm(
           cublasCommonArgs& args,
           const Tensor& mat1, const Tensor& mat2,
           const Tensor& scale_a, const Tensor& scale_b,
@@ -247,8 +247,10 @@ _tunable_scaled_gemm_rocm(
           const std::optional<Tensor>& bias,
           const bool use_fast_accum,
           const at::ScalarType out_dtype,
-          Tensor& out) {
+          Tensor& out,
+          const std::optional<Tensor>& alpha) {
 #ifdef USE_ROCM
+  (void)alpha;
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
       if (mat1.scalar_type() == ScalarType::Float8_e4m3fnuz) {        \
         if (mat2.scalar_type() == ScalarType::Float8_e4m3fnuz) {      \
@@ -306,6 +308,15 @@ _tunable_scaled_gemm_rocm(
           scaledgemm(&params);                                        \
         }                                                             \
       }
+#else
+      // CUDA cuBLASLt dispatches on runtime dtypes in ScaledGemmParams, whose
+      // signature also keys the tuning cache by dtype. AT/BT are placeholders.
+#define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                         \
+      static at::cuda::tunable::ScaledGemmTunableOp<                 \
+          at::Float8_e4m3fn, at::Float8_e4m3fn, scalar_t,            \
+          BLASOP_A, BLASOP_B> scaledgemm{};                          \
+      scaledgemm(&params);
+#endif
   AT_DISPATCH_V2(out_dtype, "_tunable_scaled_gemm", AT_WRAP([&] {
     bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
     bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
@@ -317,14 +328,12 @@ _tunable_scaled_gemm_rocm(
     params.k = args.k;
     params.a = args.mata->data_ptr();
     params.a_scale_ptr = args.scale_mata_ptr;
-    params.a_scale_dtype = args.scale_mata_dtype.value();
     params.lda = args.lda;
     params.a_dtype = args.mata->scalar_type();
     params.a_scale_dtype = args.scale_mata_dtype.value();
     params.a_scaling_type = args.scaling_mata_type.value();
     params.b = args.matb->data_ptr();
     params.b_scale_ptr = args.scale_matb_ptr;
-    params.b_scale_dtype = args.scale_matb_dtype.value();
     params.ldb = args.ldb;
     params.b_dtype = args.matb->scalar_type();
     params.b_scale_dtype = args.scale_matb_dtype.value();
@@ -336,6 +345,9 @@ _tunable_scaled_gemm_rocm(
     params.ldc = args.result_ld;
     params.c_dtype = out_dtype;
     params.use_fast_accum = use_fast_accum;
+#ifndef USE_ROCM
+    params.alpha = alpha;
+#endif
     if (transa_ && transb_) {
       TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T)
     }
@@ -352,12 +364,13 @@ _tunable_scaled_gemm_rocm(
       TORCH_CHECK(false, "unreachable");
     }
   }),
+#ifdef USE_ROCM
   kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_FLOATING_TYPES));
+#else
+  kHalf, kBFloat16, kFloat, AT_EXPAND(AT_FLOAT8_TYPES));
+#endif
 #undef TUNABLE_DISPATCH
   return out;
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_gemm_rocm only callable on ROCM devices");
-#endif
 }
 
 Tensor&
@@ -375,17 +388,10 @@ _scaled_gemm(
   if (_scaled_mm_allowed_device(true, false)) {
     TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
   }
-// ROCM enables the TunableOp path only
-// but can fallback to at::cuda::blas::scaled_gemm
-#ifdef USE_ROCM
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   bool tunable_op_enabled = tuning_ctx->IsTunableOpEnabled();
-#else
-  bool tunable_op_enabled = false;
-#endif
   if (tunable_op_enabled) {
-      // Only available on ROCM
-      return _tunable_scaled_gemm_rocm(
+      return _tunable_scaled_gemm(
           args,
           mat1, mat2,
           scale_a, scale_b,
@@ -393,7 +399,8 @@ _scaled_gemm(
           bias,
           use_fast_accum,
           out_dtype_,
-          out);
+          out,
+          alpha);
   }
   else
   {
