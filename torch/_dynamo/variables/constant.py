@@ -563,6 +563,27 @@ class ConstantVariable(VariableTracker):
             tx, other, operator.rshift, type_implements_nb_rshift, reverse
         )
 
+    def nb_floor_divide_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int and float define nb_floor_divide; bool inherits int's.
+        # complex does NOT (complex floor division raises TypeError).
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4057 (long_floor_div)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L660 (float_floor_div)
+        if not isinstance(self.value, (int, float)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        try:
+            return VariableTracker.build(tx, v // w)
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
     def nb_or_impl(
         self,
         tx: Any,
