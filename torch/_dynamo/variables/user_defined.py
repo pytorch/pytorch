@@ -2514,6 +2514,29 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         return self.call_method(tx, "__imul__", [other], {})
 
+    def nb_floor_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10323-L10326
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__floordiv__",
+            "__rfloordiv__",
+            nb_slot=PyNumberSlots.NB_FLOOR_DIVIDE,
+            reverse=reverse,
+        )
+
+    def nb_inplace_floor_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__ifloordiv__", [other], {})
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
