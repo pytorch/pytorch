@@ -441,6 +441,11 @@ class BackendFeature(Enum):
     PREFER_STORE_LOOP_ORDER = auto()
     TRITON_TEMPLATES = auto()
     REDUCE_TO_SINGLE_ELEMENT = auto()
+    # Set on backends whose kernel class overrides device_assert_async
+    # with a real implementation. Backends that inherit the abstract
+    # NotImplementedError stub leave this unset so _assert_async
+    # lowering can skip emitting the assert Pointwise for them.
+    RUNTIME_DEVICE_ASSERT = auto()
 
 
 def get_backend_features(

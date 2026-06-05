@@ -1814,12 +1814,11 @@ def quantized_decomposed_quantize_per_channel(
 
 
 def _assert_async(cond, msg):
-    # The Halide backend cannot codegen runtime asserts (HalideKernel has no
-    # device_assert_async implementation). Skip lowering the assert entirely
-    # on Halide -- this matches the backend's effective behavior (no runtime
-    # bounds checks) and prevents decomps that emit _assert_async
-    # (e.g. index_add) from breaking Halide compilation.
-    if ir.get_device_type(cond) == "cpu" and config.cpu_backend == "halide":
+    # Skip the assert on backends that do not implement device_assert_async
+    # in their kernel codegen (e.g. Halide inherits a NotImplementedError stub).
+    # Backends declare runtime-assert support via
+    # BackendFeature.RUNTIME_DEVICE_ASSERT on their scheduling class.
+    if not V.graph.has_feature(cond.get_device(), BackendFeature.RUNTIME_DEVICE_ASSERT):
         return None
     cond.realize()
     cond = to_dtype(cond, torch.bool)
