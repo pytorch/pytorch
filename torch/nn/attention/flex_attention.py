@@ -21,6 +21,7 @@ import torch.distributed as dist
 from torch import Tensor
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import setup_compilation_env
+from torch.distributed import distributed_c10d
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import (
     GetAttrKey,
@@ -2565,7 +2566,7 @@ def flex_attention(
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
 
-        with dist.spmd_no_typecheck():
+        with distributed_c10d._spmd_no_typecheck():
             out, lse, max_scores = flex_attention_hop(
                 query,
                 key,
@@ -2613,7 +2614,7 @@ def flex_attention(
                 _flex_attention_hop_wrapper, backend=backend, fullgraph=True
             )
 
-        with dist.spmd_no_typecheck():
+        with distributed_c10d._spmd_no_typecheck():
             out, lse, max_scores = flex_fn(
                 query,
                 key,
