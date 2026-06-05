@@ -2563,7 +2563,7 @@ def error_inputs_cat(op_info, device, **kwargs):
     d = make_tensor((2, 3), device=device, dtype=torch.double if not device.startswith("mps") else torch.float16)
     x = make_tensor((2, 3), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(x, kwargs={'out': d}), error_type=TypeError,
-                     error_regex='invalid combination of arguments')
+                     error_regex='must be tuple of Tensors')
 
 def reference_inputs_cat(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_cat_concat(op, device, dtype, requires_grad, **kwargs)
@@ -6953,37 +6953,59 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 
         yield SampleInput(input, target, **kwargs)
 
-def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **kwargs_unused):
+def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *, chunked=False, **kwargs_unused):
+    # ``chunked=True`` filters to chunked-path samples (surfaced by the
+    # ``variant_test_name="chunked"`` OpInfo); default emits only the
+    # unchunked (``options=None``) samples.
     if not dtype.is_floating_point:
         raise ValueError(f"linear_cross_entropy requires floating point type inputs, got {dtype}")
     reductions = ("mean", "sum", "none")
     chunked_reductions = ("mean", "sum")
 
-    LinearCrossEntropyOptions = torch.nn.LinearCrossEntropyOptions
+    LCEO = torch.nn.LinearCrossEntropyOptions
     # Samples with non-zero label_smoothing are not generated because
     # linear_cross_entropy relies on cross_entropy that fails on
     # composite-compliance tests (cross_entropy calls `masked_fill_`
     # internally).
-    kwargs_list: list[dict[str, Any]] = [
-        {},
-        *[dict(reduction=reduction) for reduction in reductions if reduction != "mean"],
-        *[dict(weight="<to be initialized>", reduction=reduction) for reduction in reductions],
-        dict(ignore_index=1),
-        *[dict(reduction=reduction, options=LinearCrossEntropyOptions(batch_chunk_size=2,
-                                                                      allow_retain_graph=True)) for reduction in chunked_reductions],
-        *[dict(reduction=reduction, options=LinearCrossEntropyOptions(batch_chunk_size=3,
-                                                                      allow_retain_graph=True)) for reduction in chunked_reductions],
-        *[dict(weight="<to be initialized>", reduction=reduction,
-               options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True))
-          for reduction in chunked_reductions],
-        dict(ignore_index=1, options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True)),
-        dict(weight="<to be initialized>", ignore_index=1, options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True)),
-    ]
-    if dtype in {torch.float16, torch.bfloat16}:
-        kwargs_list.extend([
-            dict(reduction=reduction, options=LinearCrossEntropyOptions(acc_dtype=torch.float32,
-                                                                        allow_retain_graph=True)) for reduction in chunked_reductions
-        ])
+    if chunked:
+        kwargs_list: list[dict[str, Any]] = [
+            *[dict(reduction=r, options=LCEO(batch_chunk_size=2, allow_retain_graph=True)) for r in chunked_reductions],
+            *[dict(reduction=r, options=LCEO(batch_chunk_size=3, allow_retain_graph=True)) for r in chunked_reductions],
+            *[dict(weight="<to be initialized>", reduction=r,
+                   options=LCEO(batch_chunk_size=2, allow_retain_graph=True)) for r in chunked_reductions],
+            dict(ignore_index=1, options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
+            dict(weight="<to be initialized>", ignore_index=1,
+                 options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
+            # Chunked path exercising linear_bias; tensor built below.
+            dict(linear_bias="<to be initialized>",
+                 options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
+            dict(linear_bias="<to be initialized>",
+                 weight="<to be initialized>", reduction="sum",
+                 options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
+            # ignore_index + linear_bias: weight_chunk[n]==0 on masked
+            # rows must zero out both the logits.sum contribution and
+            # the index_add correction.
+            dict(linear_bias="<to be initialized>", ignore_index=1,
+                 options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
+        ]
+        if dtype in {torch.float16, torch.bfloat16}:
+            kwargs_list.extend([
+                dict(reduction=r, options=LCEO(acc_dtype=torch.float32, allow_retain_graph=True))
+                for r in chunked_reductions
+            ])
+    else:
+        kwargs_list = [
+            {},
+            *[dict(reduction=r) for r in reductions if r != "mean"],
+            *[dict(weight="<to be initialized>", reduction=r) for r in reductions],
+            dict(ignore_index=1),
+            # Reference path exercising the linear_bias kwarg; shape
+            # depends on linear_weight, so the actual tensor is
+            # constructed below.
+            dict(linear_bias="<to be initialized>"),
+            dict(linear_bias="<to be initialized>",
+                 weight="<to be initialized>", reduction="sum"),
+        ]
 
     for kwargs, probabilities_target in itertools.product(kwargs_list, (False, True)):
         for linear_sample in sample_inputs_linear(op_info, device, dtype, requires_grad):
@@ -7023,7 +7045,22 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **
                 continue
 
             if "weight" in kwargs:
-                kwargs["weight"] = make_tensor((num_classes,), device=device, dtype=dtype)
+                # Strictly positive class weights only. Real-world
+                # class-balancing weights are always > 0 anyway. The
+                # narrow [0.5, 2) range keeps the weighted-CE output
+                # magnitude similar to the unweighted case so
+                # kernels-level tolerances (e.g. CUDA matmul contig vs
+                # non-contig drift) stay within bounds.
+                kwargs["weight"] = make_tensor((num_classes,), device=device, dtype=dtype, low=0.5, high=2)
+            if "linear_bias" in kwargs:
+                # Logical shape matches the logits-per-batch slice:
+                # (num_classes, *out_features). Derived from
+                # linear_weight.shape[:-1] so it covers both the 2-D
+                # and K-dim swapped cases above.
+                kwargs["linear_bias"] = make_tensor(
+                    linear_weight.shape[:-1],
+                    device=device, dtype=dtype, requires_grad=requires_grad,
+                )
             if probabilities_target:
                 # ignore_index is not supported for probabilities target
                 if "ignore_index" in kwargs:
@@ -7057,6 +7094,11 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **
 
             yield SampleInput(linear_input, linear_weight, target, **kwargs)
 
+
+def sample_inputs_linear_cross_entropy_chunked(op_info, device, dtype, requires_grad, **kw):
+    yield from sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, chunked=True, **kw)
+
+
 def error_inputs_linear_cross_entropy(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float)
 
@@ -7075,6 +7117,10 @@ def error_inputs_linear_cross_entropy(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(make_arg(3), make_arg(2, 4, 3), make_arg(2, 4)),
                      error_regex=("K-dimensional loss defined by linear_weight shape [(]2, 4, 3[)]"
                                   " requires batched input, [(]N, 3[)], got unbatched input with shape [(]3,[)]"))
+
+    yield ErrorInput(SampleInput(make_arg(2, 3), make_arg(2, 3), make_arg(2,),
+                                 linear_bias=make_arg(3)),
+                     error_regex=r"expected linear_bias shape \(2,\), got \(3,\)")
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
@@ -12684,7 +12730,7 @@ op_db: list[OpInfo] = [
                     decorators=(
                         DecorateInfo(
                             toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
-                            'TestBinaryUfuncs', 'test_reference_numerics'),
+                            'TestBinaryUfuncsDevice', 'test_reference_numerics'),
                     ),
                     skips=(
                         # boolean alpha not handled properly
@@ -12697,7 +12743,7 @@ op_db: list[OpInfo] = [
                                      'test_numpy_refs',
                                      dtypes=(torch.complex128,)),
                         DecorateInfo(unittest.skip("Skipped!"),
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_reference_numerics_extremal_values',
                                      dtypes=(torch.complex64, torch.complex128)),
                     )),
@@ -12719,10 +12765,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: Composite compliance check failed with the above error.
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               # Booleans mismatch: AssertionError: False is not true
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
-               # Booleans mismatch: AssertionError: False is not true
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),
            )),
     OpInfo('arange',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
@@ -12953,7 +12995,7 @@ op_db: list[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
                         DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_type_promotion',
                                      device_type='xpu'),
                         # dispatch to lazy test failed
@@ -12971,7 +13013,7 @@ op_db: list[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
                         DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_type_promotion',
                                      device_type='xpu'),
                         # dispatch to lazy test failed
@@ -13013,7 +13055,7 @@ op_db: list[OpInfo] = [
                             toleranceOverride({torch.float16: tol(atol=1e-2, rtol=0),
                                                torch.bfloat16: tol(atol=1e-5, rtol=5e-3),
                                                torch.complex32: tol(atol=1e-5, rtol=1e-3)}),
-                            'TestBinaryUfuncs', 'test_reference_numerics'),
+                            'TestBinaryUfuncsDevice', 'test_reference_numerics'),
                         DecorateInfo(
                             toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
                             'TestCommon', 'test_complex_half_reference_testing', device_type='cpu'),
@@ -13026,11 +13068,11 @@ op_db: list[OpInfo] = [
                     ),
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"),
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_reference_numerics',
                                      dtypes=(torch.uint8,)),
                         DecorateInfo(unittest.skip("Skipped!"),
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_reference_numerics_small_values',
                                      dtypes=(torch.uint8,)),
                         # https://github.com/pytorch/pytorch/issues/147047
@@ -13248,6 +13290,19 @@ op_db: list[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           decorators=[
+               # https://github.com/pytorch/pytorch/issues/184350
+               # DTensor lowers mv with a Shard(0) vector into a per-rank
+               # partial sum that is all-reduced, changing the order of
+               # additions vs the reference gemv. In float32 the drift
+               # can exceed the default tolerance for some inputs.
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-5, rtol=2.4e-6)}),
+                   "TestDTensorOps",
+                   "test_dtensor_op_db",
+                   dtypes=(torch.float32,),
+               ),
+           ],
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -13571,7 +13626,7 @@ op_db: list[OpInfo] = [
                     supports_one_python_scalar=True,
                     rhs_make_tensor_kwargs=dict(low=0),
                     skips=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                         # https://github.com/pytorch/pytorch/issues/70904
                         DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
                         # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
@@ -13588,7 +13643,7 @@ op_db: list[OpInfo] = [
                     supports_one_python_scalar=True,
                     rhs_make_tensor_kwargs=dict(low=0),
                     skips=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                         # https://github.com/pytorch/pytorch/issues/70904
                         DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
                         # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
@@ -13927,7 +13982,7 @@ op_db: list[OpInfo] = [
                     error_inputs_func=error_inputs_complex,
                     skips=(
                         # Tests don't account for complex's type promotion semantics
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type='mps'),
                         DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),)),
     BinaryUfuncInfo('copysign',
@@ -14164,7 +14219,7 @@ op_db: list[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(exclude_zero=True),
                     decorators=(
                         # See https://github.com/pytorch/pytorch/issues/111126
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                     ),
                     skips=(
                         # RuntimeError: MALFORMED INPUT: Unhandled node kind (in computeValue): aten::div
@@ -14196,7 +14251,7 @@ op_db: list[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(exclude_zero=True),
                     decorators=(
                         # See https://github.com/pytorch/pytorch/issues/111126
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                     ),
                     skips=(
                         # RuntimeError: MALFORMED INPUT: Unhandled node kind (in computeValue): aten::div
@@ -14354,7 +14409,7 @@ op_db: list[OpInfo] = [
                     supports_rhs_python_scalar=False,
                     skips=(
                         # RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                     )),
     BinaryUfuncInfo('fmin',
                     op=torch.fmin,
@@ -14365,7 +14420,7 @@ op_db: list[OpInfo] = [
                     supports_rhs_python_scalar=False,
                     skips=(
                         # RuntimeError: "min_elementwise_cuda" not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                     )),
     BinaryUfuncInfo('fmod',
                     ref=np.fmod,
@@ -14380,16 +14435,16 @@ op_db: list[OpInfo] = [
                     assert_autodiffed=None,
                     rhs_make_tensor_kwargs={'exclude_zero': True},
                     decorators=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                                      'test_contig_vs_every_other',
                                      dtypes=(torch.bfloat16,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                                      'test_non_contig',
                                      dtypes=(torch.bfloat16,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                                      'test_reference_numerics',
                                      dtypes=(torch.bfloat16,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                                      'test_reference_numerics_small_values',
                                      dtypes=(torch.uint8,)),
                         # FIXME:
@@ -14418,16 +14473,16 @@ op_db: list[OpInfo] = [
                     supports_one_python_scalar=True,
                     rhs_make_tensor_kwargs={'exclude_zero': True},
                     decorators=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                                      'test_contig_vs_every_other',
                                      dtypes=(torch.bfloat16,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                                      'test_non_contig',
                                      dtypes=(torch.bfloat16,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                                      'test_reference_numerics',
                                      dtypes=(torch.bfloat16,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                                      'test_reference_numerics_small_values',
                                      dtypes=(torch.uint8,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo',
@@ -14571,7 +14626,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
                # RuntimeError: Sparse CSR tensors do not have strides.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
                # RuntimeError: sampled_addmm: Expected result to have sparse csr layout, but got Strided
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning'),
                # RuntimeError: Sparse CSR tensors do not have strides
@@ -14605,7 +14659,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'),
                # NotImplementedError: The operator 'aten::_to_sparse_csr' is not currently implemented for the MPS device
                DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
            )),
@@ -14621,9 +14674,6 @@ op_db: list[OpInfo] = [
            skips=(
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
-               # RuntimeError: Sparse CSR tensors do not have strides.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
-               # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
                # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_operator'),
@@ -14682,16 +14732,16 @@ op_db: list[OpInfo] = [
                         # AssertionError: Results of original model and exported/imported version of model differed
                         DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
                         # bfloat16 floor_divide compared with a float32 reference works inconsistently
-                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs',
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncsDevice',
                                      dtypes=(torch.bfloat16,)),
                         # int8 floor divide has different results for -128 // -1 vs. NumPy
-                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncsDevice', 'test_reference_numerics_small_values',
                                      dtypes=(torch.int8,)),
                         # The following tests fails on some jobs
-                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_reference_numerics_extremal_values',
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncsDevice', 'test_reference_numerics_extremal_values',
                                      dtypes=(torch.float16,)),
                         DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
-                                     'TestBinaryUfuncs', 'test_reference_numerics'),
+                                     'TestBinaryUfuncsDevice', 'test_reference_numerics'),
                     )),
     UnaryUfuncInfo('frexp',
                    op=torch.frexp,
@@ -15074,7 +15124,7 @@ op_db: list[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False,
                     skips=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_type_promotion',
                                      device_type='xpu'),
                     )),
     OpInfo('logaddexp2',
@@ -15513,7 +15563,7 @@ op_db: list[OpInfo] = [
         skips=(
             # Incorrectly attempts to use a scalar for the second argument
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='xpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_type_promotion', device_type='xpu'),
         )),
     BinaryUfuncInfo(
         'maximum',
@@ -15524,7 +15574,7 @@ op_db: list[OpInfo] = [
         ref=np.maximum,
         supports_rhs_python_scalar=False,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='xpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_type_promotion', device_type='xpu'),
         )),
     BinaryUfuncInfo(
         'min',
@@ -15541,7 +15591,7 @@ op_db: list[OpInfo] = [
             # Incorrectly attempts to use a scalar for the second argument
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
             DecorateInfo(unittest.expectedFailure,
-                         'TestBinaryUfuncs',
+                         'TestBinaryUfuncsDevice',
                          'test_type_promotion',
                          device_type='xpu'),
         )),
@@ -15555,7 +15605,7 @@ op_db: list[OpInfo] = [
         supports_rhs_python_scalar=False,
         skips=(
             DecorateInfo(unittest.expectedFailure,
-                         'TestBinaryUfuncs',
+                         'TestBinaryUfuncsDevice',
                          'test_type_promotion',
                          device_type='xpu'),
         ),
@@ -15612,9 +15662,9 @@ op_db: list[OpInfo] = [
                     supports_one_python_scalar=True,
                     skips=(
                         # RuntimeError: "bitwise_and_cuda" not implemented for 'Half'
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice',
                                      'test_type_promotion', device_type='cuda'),
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice',
                                      'test_type_promotion', device_type='xpu'),
                     )),
     BinaryUfuncInfo('bitwise_or',
@@ -15628,11 +15678,11 @@ op_db: list[OpInfo] = [
                     skips=(
                         # TODO: FIXME: RuntimeError: "bitwise_or_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_type_promotion',
                                      device_type='cuda'),
                         DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_type_promotion',
                                      device_type='xpu'),
                     )),
@@ -15647,11 +15697,11 @@ op_db: list[OpInfo] = [
                     skips=(
                         # TODO: FIXME: RuntimeError: "bitwise_xor_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_type_promotion',
                                      device_type='cuda'),
                         DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_type_promotion',
                                      device_type='xpu'),
                     )),
@@ -15667,12 +15717,12 @@ op_db: list[OpInfo] = [
                     skips=(
                         # RuntimeError: heaviside is not yet implemented for tensors with different dtypes.
                         DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_type_promotion'),
                         DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
                         # PyTorch's heaviside does not appear to propagate NaNs
                         DecorateInfo(unittest.skip("Skipped!"),
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_reference_numerics_extremal_values'),
                         # NotImplementedError: The operator 'aten::heaviside.out' is not currently implemented for the MPS device
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
@@ -15700,7 +15750,7 @@ op_db: list[OpInfo] = [
                     supports_rhs_python_scalar=False,
                     skips=(
                         DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_reference_numerics_small_values',
                                      dtypes=(torch.int8,)),
                     )),
@@ -15718,11 +15768,11 @@ op_db: list[OpInfo] = [
                                      'test_numpy_refs', dtypes=(torch.complex128,)),
                         # RuntimeError: Short did not match Int
                         DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_type_promotion'),
                         DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
                         DecorateInfo(unittest.skip("Skipped!"),
-                                     'TestBinaryUfuncs',
+                                     'TestBinaryUfuncsDevice',
                                      'test_reference_numerics_extremal_values'),
                     )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
@@ -15836,8 +15886,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linear_cross_entropy,
         error_inputs_func=error_inputs_linear_cross_entropy,
         supports_out=False,
-        # Flags are True for the unchunked fallback path (options=None);
-        # chunked-op samples expectedFailure on Forward AD tests below.
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -15910,35 +15958,78 @@ op_db: list[OpInfo] = [
                 "TestCompositeCompliance", "test_cow_input",
                 device_type="cuda",
                 active_if=TEST_WITH_ROCM or IS_LINUX or TEST_WITH_TORCHINDUCTOR),
-            # No Inductor lowering for the chunked op. Unchunked samples
-            # (options=None) would lower, but OpInfo can't gate per-sample.
-            DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
-                         'TestInductorOpInfo', 'test_comprehensive'),
-            # Chunked op: no jvp / no second derivatives. Keep in sync with
-            # F.linear_cross_entropy limitations notes (unexpectedSuccess => sync).
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_grad'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvpvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjpvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjpvmap'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjpvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
-            # Exception: Jacobian mismatch for output 0 with respect to input 0
-            # numerical:0.21544406078673195 analytical:0.0
-            # Jacobian mismatch -- analytical=0 because the chunked op precomputes
-            # only first derivatives.
-            DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_gradgrad',),
-            # No jvp; see header comment for the path forward.
-            DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD',),
-            DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad',),
-            # JIT type inference doesn't recognise the LinearCrossEntropyOptions
-            # dataclass; any sample with options=... fails inferred_arg_type.
-            # Benign -- the wrapper unpacks options before any JIT-visible op.
-            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
         )
+    ),
+    # Chunked variant: no jvp / vmap / second derivatives, no Inductor
+    # lowering, options dataclass not JIT-scriptable.
+    OpInfo(
+        "nn.functional.linear_cross_entropy",
+        variant_test_name="chunked",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_linear_cross_entropy_chunked,
+        error_inputs_func=error_inputs_linear_cross_entropy,
+        supports_out=False,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+        # ``target`` (arg 2) is materialized the same way as on the
+        # unchunked path; mirror the allow-lists so test_cow_input passes.
+        allow_cow_input_materialize_forward=[2],
+        allow_cow_input_materialize_backward=[2, 'output grad 0'],
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.bfloat16: tol(atol=4e-3, rtol=2e-2)}),
+                "TestConsistency", "test_output_match", device_type="mps",
+            ),
+        ),
+        skips=(
+            # No Inductor lowering for the chunked custom op.
+            DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
+                         "TestInductorOpInfo", "test_comprehensive"),
+            DecorateInfo(unittest.skip("chunked op falls back to reference under "
+                                       "torch.jit.trace; covered by unchunked variant"),
+                         "TestNNCOpInfo", "test_nnc_correctness"),
+            # nll_loss2d decomposition mismatch (chunked path also dispatches
+            # through nll_loss2d for the per-row reduction).
+            DecorateInfo(
+                unittest.skip("nll_loss2d_forward decomposition mismatch on total_weight"),
+                "TestDecomp", "test_comprehensive", device_type="cuda"),
+            # LinearCrossEntropyOptions is a Python dataclass; JIT scripting
+            # cannot infer it. Every chunked sample carries options=..., so
+            # all dtypes hit this -- not just float32.
+            DecorateInfo(unittest.skip("LinearCrossEntropyOptions not JIT-scriptable"),
+                         "TestJit", "test_variant_consistency_jit"),
+            # MPS fp16/bf16 accuracy mismatch (same as unchunked variant).
+            DecorateInfo(unittest.skip("Inconsistent accuracy"),
+                         "TestConsistency", "test_output_match",
+                         dtypes=(torch.float16, torch.bfloat16),
+                         device_type="mps"),
+            DecorateInfo(unittest.skip("Inconsistent accuracy"),
+                         "TestConsistency", "test_output_grad_match",
+                         dtypes=(torch.float16, torch.bfloat16, torch.float32),
+                         device_type="mps"),
+            # ROCm: unspecified launch failure on test_cow_input.
+            DecorateInfo(unittest.skip("unspecified launch failure"),
+                         "TestCompositeCompliance", "test_cow_input",
+                         device_type="cuda",
+                         active_if=TEST_WITH_ROCM or IS_LINUX or TEST_WITH_TORCHINDUCTOR),
+            # Chunked op: no jvp / vmap / second derivatives.
+            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad"),
+            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvpvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvmap"),
+            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapjvpvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjpvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp_has_batch_rule"),
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"),
+            DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"),
+            DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"),
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators",
+                         "test_normalize_operator_exhaustive"),
+        ),
     ),
     OpInfo('nn.functional.normalize',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -16141,9 +16232,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # https://github.com/pytorch/pytorch/issues/85960
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
-               # AssertionError: Booleans mismatch: True is not False
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
                             "TestCompositeCompliance", "test_forward_ad"),
                # AssertionError: The values for attribute 'shape' do not match: torch.Size([5, 5, 5]) != torch.Size([0]).
@@ -17423,10 +17511,6 @@ op_db: list[OpInfo] = [
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.bfloat16,)),
-               # RuntimeError: The tensor has a non-zero number of elements, but its data is not allocated yet.
-               # Caffe2 uses a lazy allocation, so you will need to call mutable_data() or raw_mutable_data()
-               # to actually allocate memory
-               DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
            ),
            error_inputs_func=error_inputs_max_pool1d,
            sample_inputs_func=sample_inputs_max_pool),
@@ -18456,7 +18540,7 @@ op_db: list[OpInfo] = [
     #                     # but not for inplace or method.
     #                     DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
     #                     # TypeError: igamma(): argument 'input' (position 1) must be Tensor, not float
-    #                     DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+    #                     DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncsDevice'),
     #                 )),
     BinaryUfuncInfo('igammac',
                     dtypes=floating_types_and(torch.bfloat16, torch.float16),
@@ -18498,7 +18582,7 @@ op_db: list[OpInfo] = [
     #                     # but not for inplace or method.
     #                     DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
     #                     # TypeError: igammac(): argument 'input' (position 1) must be Tensor, not float
-    #                     DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+    #                     DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncsDevice'),
     #                 )),
     UnaryUfuncInfo('nn.functional.softshrink',
                    aten_name="softshrink",
@@ -18775,16 +18859,16 @@ op_db: list[OpInfo] = [
                     lhs_make_tensor_kwargs=dict(low=0),
                     decorators=(
                         DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05)}),
-                                     'TestBinaryUfuncs', 'test_reference_numerics'),
+                                     'TestBinaryUfuncsDevice', 'test_reference_numerics'),
                         DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05),
                                                         torch.complex128: tol(atol=1e-4, rtol=1.3e-05)}),
-                                     'TestBinaryUfuncs', 'test_scalar_support'),
+                                     'TestBinaryUfuncsDevice', 'test_scalar_support'),
                     ),
                     skips=(
                         # Skipping integers because they are being raised to negative powers causing an error
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_reference_numerics_small_values',
                                      dtypes=[torch.int8, torch.int16, torch.int32, torch.int64]),
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_reference_numerics_large_values',
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_reference_numerics_large_values',
                                      dtypes=[torch.int16, torch.int32, torch.int64]),
                         # FIXME Complex values error with: Greatest absolute difference: nan at index
                         # Ref: https://github.com/pytorch/pytorch/issues/76853
@@ -18801,17 +18885,17 @@ op_db: list[OpInfo] = [
                                      dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing',
                                      dtypes=(torch.complex32,), active_if=TEST_WITH_ROCM),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_batch_vs_slicing',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_batch_vs_slicing',
                                      dtypes=(torch.complex32,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_non_contig',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_non_contig',
                                      dtypes=(torch.complex32,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_reference_numerics',
                                      dtypes=(torch.complex32,)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_reference_numerics_small_values',
                                      dtypes=(torch.complex32, torch.complex64, torch.complex128)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_large_values',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_reference_numerics_large_values',
                                      dtypes=(torch.complex32, torch.complex64, torch.complex128)),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_extremal_values',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_reference_numerics_extremal_values',
                                      dtypes=(torch.complex32, torch.complex64, torch.complex128)),
                     )),
     BinaryUfuncInfo('float_power',
@@ -18830,20 +18914,20 @@ op_db: list[OpInfo] = [
                     decorators=(
                         DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05),
                                                         torch.complex128: tol(atol=1e-4, rtol=1.3e-05)}),
-                                     'TestBinaryUfuncs', 'test_scalar_support'),
+                                     'TestBinaryUfuncsDevice', 'test_scalar_support'),
                     ),
                     skips=(
                         # FIXME
                         # AssertionError: Object comparison failed: torch.float64 != torch.float32
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                         # -3.43399e+38 is outside the range of representable values of type 'float'
                         DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                         # Complex values error with: Greatest absolute difference: nan at index
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_reference_numerics_small_values',
                                      dtypes=[torch.complex64, torch.complex128]),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_large_values',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_reference_numerics_large_values',
                                      dtypes=[torch.complex64, torch.complex128]),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_extremal_values',
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_reference_numerics_extremal_values',
                                      dtypes=[torch.complex64, torch.complex128]),
                         # Inplace always promotes to double and thus other floating dtypes are not supported
                         DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_inplace',
@@ -18857,17 +18941,6 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_promotes_int_to_float', device_type='mps'),
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
                     )),
-    OpInfo('qr',
-           op=torch.qr,
-           dtypes=floating_and_complex_types(),
-           dtypesIfMPS=floating_types(),
-           sample_inputs_func=sample_inputs_linalg_qr_geqrf,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # In-place ops
-           check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
-           ),
     UnaryUfuncInfo('rad2deg',
                    ref=np.degrees,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -19181,7 +19254,7 @@ op_db: list[OpInfo] = [
                     supports_out=False,
                     skips=(
                         # https://github.com/pytorch/pytorch/issues/76806
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
                     ),
@@ -19269,9 +19342,12 @@ op_db: list[OpInfo] = [
            )),
     BinaryUfuncInfo('__rmod__',
                     op=torch.Tensor.__rmod__,
-                    dtypes=floating_types_and(torch.bfloat16, torch.half,),
-                    dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half),
+                    dtypes=all_types_and(torch.bfloat16, torch.half,),
                     dtypesIfMPS=all_types_and(torch.bfloat16, torch.half, torch.bool),
+                    dtypesIfHpu=floating_types_and(torch.bfloat16, torch.half,),
+                    # __rmod__ computes other % self, so self (lhs) is the divisor;
+                    # exclude zero to avoid undefined behavior for integer types.
+                    lhs_make_tensor_kwargs={'exclude_zero': True},
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_out=False,
@@ -19281,10 +19357,10 @@ op_db: list[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
-                        # NotImplementedError: "remainder_cpu" not implemented for *
+                        # MTIA does not support integer remainder
                         DecorateInfo(
-                            unittest.expectedFailure, 'TestConsistency', device_type='mps',
-                            dtypes=(torch.bool, torch.int16, torch.uint8, torch.int8, torch.int32, torch.int64)
+                            unittest.skip("MTIA does not support integer remainder"),
+                            None, None, dtypes=integral_types(), device_type='mtia',
                         ),
                     ),
                     # Support autograd after torch.remainder(Tensor, Tensor) supports
@@ -19938,7 +20014,7 @@ op_db: list[OpInfo] = [
                     supports_rhs_python_scalar=False,
                     skips=(
                         # RuntimeError: Expected object of scalar type Float but got scalar type Double for second argument
-                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                         DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
                         # GradcheckError: Jacobian computed with forward mode mismatch for output 0 with respect to input 0
                         # Numerical:
@@ -20183,12 +20259,6 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           skips=(
-               # RuntimeError: Mismatch on aten._unique.default: Shapes torch.Size([2]) and torch.Size([1]) are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'),
-               # RuntimeError: Mismatch on aten._unique.default: Shapes torch.Size([2]) and torch.Size([1]) are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_amp'),
-           ),
            sample_inputs_func=sample_inputs_index,
            reference_inputs_func=partial(sample_inputs_index, reference=True)),
     OpInfo('index_copy',
@@ -20251,6 +20321,7 @@ op_db: list[OpInfo] = [
              ),
              supports_out=True,
              sample_inputs_func=sample_inputs_index_reduce,
+             gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if reduction_type in ('mean', 'prod') else 0.0,
              ) for reduction_type in ('mean', 'prod', 'amin', 'amax')),
     OpInfo('_unsafe_masked_index',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
@@ -21886,7 +21957,6 @@ op_db: list[OpInfo] = [
                # Allowed exception: sparse tensors don't have strides
                DecorateInfo(unittest.skip("Allowed exception"), 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip("Allowed exception"), 'TestCompositeCompliance', 'test_backward'),
-               DecorateInfo(unittest.skip("Allowed exception"), 'TestTags', 'test_tags'),
                # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
                DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
                             'TestSparseCSR', 'test_sparse_csr_consistency'),
@@ -23775,10 +23845,6 @@ dsl_ops_by_dsl.setdefault('triton', []).append(
             # subclasses (CompositeCompliantTensor, CrossRefFakeMode, etc.).
             DecorateInfo(unittest.skip("Triton kernel incompatible with tensor subclasses"),
                          "TestCompositeCompliance"),
-            DecorateInfo(unittest.skip("Triton kernel incompatible with FakeTensor"),
-                         "TestFakeTensor"),
-            DecorateInfo(unittest.skip("Triton kernel not introspectable for tag inference"),
-                         "TestTags"),
             DecorateInfo(unittest.skip("Triton kernel not introspectable for conjugate/negate views"),
                          "TestMathBits"),
             # Sample generator only targets the primary CUDA device.
@@ -25717,11 +25783,11 @@ python_ref_db = [
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
-                'TestBinaryUfuncs', 'test_reference_numerics'),
+                'TestBinaryUfuncsDevice', 'test_reference_numerics'),
         ),
         skips=(
             DecorateInfo(unittest.skip("Skipped!"),
-                         'TestBinaryUfuncs',
+                         'TestBinaryUfuncsDevice',
                          'test_reference_numerics_extremal_values',
                          dtypes=(torch.complex64, torch.complex128)),
         ),
@@ -25763,7 +25829,7 @@ python_ref_db = [
         torch_opinfo_name="copysign",
         skips=(
             # RuntimeError: Expected divisor (b) to be on the same device (cuda:0) as dividend (a), but it is found on cpu!
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_type_promotion'),
             # FIXME output 0: meta disagrees with real impl
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
         )
@@ -25804,7 +25870,7 @@ python_ref_db = [
         supports_one_python_scalar=True,
         decorators=(
             # See https://github.com/pytorch/pytorch/issues/111126
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_type_promotion'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -25816,7 +25882,7 @@ python_ref_db = [
         supports_one_python_scalar=True,
         decorators=(
             # See https://github.com/pytorch/pytorch/issues/111126
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_type_promotion'),
             # MPS div(rounding_mode='floor') can disagree with the reference by
             # 1 ULP near division boundaries due to fp32 rounding before floor.
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=2.0, rtol=2e-4)}),
@@ -25832,15 +25898,15 @@ python_ref_db = [
         torch_opinfo_name="float_power",
         skips=(
             # Test doesn't account for float -> double type promotion
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_type_promotion'),
             # Complex values error with: Greatest absolute difference: nan at index
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics_small_values',
                          dtypes=[torch.complex64, torch.complex128]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics_large_values',
                          dtypes=[torch.complex64, torch.complex128]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics_extremal_values',
                          dtypes=[torch.complex64, torch.complex128]),
             # TypeError: Cannot convert a MPS Tensor to float64 dtype
@@ -25883,18 +25949,18 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.bfloat16,)),
             # bfloat16 floor_divide compared with a float32 reference works inconsistently
-            DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncsDevice',
                          dtypes=(torch.bfloat16,)),
             # int8 floor divide has different results for -128 // -1 vs. NumPy
-            DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics_small_values',
                          dtypes=(torch.int8,)),
             # The following tests fails on some jobs
-            DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics_extremal_values',
                          dtypes=(torch.float16,)),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
-                         'TestBinaryUfuncs', 'test_reference_numerics'),
+                         'TestBinaryUfuncsDevice', 'test_reference_numerics'),
             # MPS floor_divide can disagree with the reference by 1 ULP near
             # division boundaries due to fp32 rounding before floor.
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=2.0, rtol=2e-4)}),
@@ -25927,16 +25993,16 @@ python_ref_db = [
                          dtypes=(torch.bfloat16,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_contig_vs_every_other',
                          dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_non_contig',
                          dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics',
                          dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics_small_values',
                          dtypes=(torch.uint8,)),
         ),
@@ -25946,7 +26012,7 @@ python_ref_db = [
         torch_opinfo_name="gcd",
         skips=(
             DecorateInfo(unittest.expectedFailure,
-                         'TestBinaryUfuncs',
+                         'TestBinaryUfuncsDevice',
                          'test_reference_numerics_small_values',
                          dtypes=(torch.int8,)),
         ),
@@ -25966,7 +26032,7 @@ python_ref_db = [
         skips=(
             # PyTorch's heaviside does not appear to propagate NaNs
             DecorateInfo(unittest.skip("Skipped!"),
-                         'TestBinaryUfuncs',
+                         'TestBinaryUfuncsDevice',
                          'test_reference_numerics_extremal_values'),
             # NotImplementedError: The operator 'aten::heaviside.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
@@ -25991,10 +26057,10 @@ python_ref_db = [
         torch_opinfo_name="isclose",
         skips=(
             # Intentional xfail -- isclose does not type promote
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_type_promotion'),
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
             DecorateInfo(unittest.skip("Skipped!"),
-                         'TestBinaryUfuncs',
+                         'TestBinaryUfuncsDevice',
                          'test_reference_numerics_extremal_values'),
         ),
     ),
@@ -26018,14 +26084,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.logical_not",
         torch_opinfo_name="logical_not",
-        skips=(
-            # _refs.logical_not precision divergence on MPS for non-contiguous
-            # complex inputs; pre-existing edge case in the decomposition.
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_or",
@@ -26094,11 +26152,11 @@ python_ref_db = [
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05)}),
-                'TestBinaryUfuncs', 'test_reference_numerics'),
+                'TestBinaryUfuncsDevice', 'test_reference_numerics'),
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05),
                                    torch.complex128: tol(atol=1e-4, rtol=1.3e-05)}),
-                'TestBinaryUfuncs', 'test_scalar_support'),
+                'TestBinaryUfuncsDevice', 'test_scalar_support'),
         ),
         skips=(
             # Reference result was farther (inf) from the precise
@@ -26120,22 +26178,22 @@ python_ref_db = [
                 dtypes=(torch.complex32,), device_type="cuda"
             ),
             # Skipping integers because they are being raised to negative powers causing an error
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice',
                          'test_reference_numerics_small_values',
                          dtypes=[torch.int8, torch.int16, torch.int32, torch.int64]),
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice',
                          'test_reference_numerics_large_values',
                          dtypes=[torch.int16, torch.int32, torch.int64]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics',
                          dtypes=(torch.complex32,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics_small_values',
                          dtypes=(torch.complex32, torch.complex64, torch.complex128)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics_large_values',
                          dtypes=(torch.complex32, torch.complex64, torch.complex128)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics_extremal_values',
                          dtypes=(torch.complex32, torch.complex64, torch.complex128)),
             # torch._subclasses.fake_tensor.MetadataMismatchError: Dtypes torch.int64 and torch.bool are not equal!
@@ -26157,10 +26215,10 @@ python_ref_db = [
                          dtypes=(torch.bfloat16,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics',
                          dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice',
                          'test_reference_numerics_small_values',
                          dtypes=(torch.uint8,)),
         ),
@@ -26191,7 +26249,7 @@ python_ref_db = [
                 toleranceOverride({torch.float16: tol(atol=1e-2, rtol=0),
                                    torch.bfloat16: tol(atol=1e-5, rtol=5e-3),
                                    torch.complex32: tol(atol=1e-5, rtol=1e-3)}),
-                'TestBinaryUfuncs', 'test_reference_numerics'),
+                'TestBinaryUfuncsDevice', 'test_reference_numerics'),
             DecorateInfo(
                 toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
                 'TestCommon', 'test_complex_half_reference_testing', device_type='cpu'),
@@ -26204,11 +26262,11 @@ python_ref_db = [
         ),
         skips=(
             DecorateInfo(unittest.skip("Skipped!"),
-                         'TestBinaryUfuncs',
+                         'TestBinaryUfuncsDevice',
                          'test_reference_numerics',
                          dtypes=(torch.uint8,)),
             DecorateInfo(unittest.skip("Skipped!"),
-                         'TestBinaryUfuncs',
+                         'TestBinaryUfuncsDevice',
                          'test_reference_numerics_small_values',
                          dtypes=(torch.uint8,)),
         ),
@@ -26367,7 +26425,7 @@ python_ref_db = [
         error_inputs_func=partial(error_inputs_complex, is_ref=True),
         skips=(
             # Tests don't account for complex's type promotion semantics
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_type_promotion'),
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
             # RuntimeError: Expected object of scalar type torch.float32 but got scalar type torch.float16 for second argument
             DecorateInfo(
@@ -26380,7 +26438,7 @@ python_ref_db = [
         torch_opinfo_name="polar",
         skips=(
             # Tests don't account for complex's type promotion semantics
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncsDevice', 'test_type_promotion'),
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
             # Seems to fail on M2 but not M4:
             # Exception: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
@@ -27519,7 +27577,6 @@ python_ref_db = [
         skips=(
             # no _refs support for Tensor.__setitem__
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     PythonRefInfo(
