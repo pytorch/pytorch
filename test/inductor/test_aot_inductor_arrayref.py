@@ -300,6 +300,8 @@ CPU_TEST_FAILURES = {
     "test_cond_unbacked_symint_closure_dynamic_False": fail_stack_allocation(
         is_skip=True
     ),
+    # TODO: no match for operator= between RAIIAtenTensorHandle and ArrayRefTensor
+    "test_cond_unbacked_symint_predicate": fail_stack_allocation(is_skip=True),
     "test_empty_cat_dtype_promotion": fail_stack_allocation(is_skip=True),
     "test_pad_fallback": fail_stack_allocation(is_skip=True),
     "test_simple_embed_kernel_binary_False_max_autotune_True": fail_stack_allocation(

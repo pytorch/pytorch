@@ -2792,6 +2792,42 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_cond_unbacked_symint_predicate(self):
+        class M(torch.nn.Module):
+            def forward(self, x, flag):
+                flag = flag.item()
+
+                def true_fn(x):
+                    return x.clone()
+
+                def false_fn(x):
+                    return x + 1
+
+                return torch.cond(flag > 0, true_fn, false_fn, (x,))
+
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                    "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+                }
+            ),
+        ):
+            model = M().to(self.device)
+            x = torch.randn((28, 28), device=self.device)
+            input_true = (x, torch.tensor(1, device=self.device))
+            input_false = (x, torch.tensor(-1, device=self.device))
+            expected_true = model(*input_true)
+            expected_false = model(*input_false)
+
+            ep = torch.export.export(model, input_true, strict=False)
+            so_path = torch._inductor.aot_compile(ep.module(), input_true)
+            optimized = AOTIRunnerUtil.legacy_load(self.device, so_path)
+
+            self.assertEqual(optimized(*input_true), expected_true)
+            self.assertEqual(optimized(*input_false), expected_false)
+
     @common_utils.parametrize("dynamic", [False, True])
     def test_cond_unbacked_symint_closure(self, dynamic):
         inputs = (
