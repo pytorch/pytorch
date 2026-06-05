@@ -12,6 +12,13 @@ from torch.types import _size
 __all__ = ["Distribution"]
 
 
+def _all_true_or_runtime_assert(valid: Tensor, error_message: str) -> bool:
+    if torch.compiler.is_exporting():
+        torch._assert_async(torch._is_all_true(valid), error_message)
+        return True
+    return bool(torch._is_all_true(valid))
+
+
 class Distribution:
     r"""
     Distribution is the abstract base class for probability distributions.
@@ -73,7 +80,12 @@ class Distribution:
                     continue  # skip checking lazily-constructed args
                 value = getattr(self, param)
                 valid = constraint.check(value)
-                if not torch._is_all_true(valid):
+                if not _all_true_or_runtime_assert(
+                    valid,
+                    f"Expected parameter {param} of distribution "
+                    f"{self.__class__.__name__} to satisfy the constraint "
+                    f"{repr(constraint)}.",
+                ):
                     raise ValueError(
                         f"Expected parameter {param} "
                         f"({type(value).__name__} of shape {tuple(value.shape)}) "
@@ -320,7 +332,11 @@ class Distribution:
         if support is None:
             raise AssertionError("support is unexpectedly None")
         valid = support.check(value)
-        if not torch._is_all_true(valid):
+        if not _all_true_or_runtime_assert(
+            valid,
+            "Expected value argument to be within the support "
+            f"({repr(support)}) of the distribution {self.__class__.__name__}.",
+        ):
             raise ValueError(
                 "Expected value argument "
                 f"({type(value).__name__} of shape {tuple(value.shape)}) "

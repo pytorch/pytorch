@@ -3522,6 +3522,78 @@ def forward(self, add):
         self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
 
+    def test_non_strict_export_distribution_validation(self):
+        class SquashedNormal(torch.distributions.TransformedDistribution):
+            def __init__(self, loc, scale, tanh_transform_clamp=(-0.99, 0.99)):
+                self.loc = loc
+                self.scale = scale
+                self.tanh_transform_clamp = tanh_transform_clamp
+                self.base_dist = torch.distributions.Normal(loc, scale)
+                super().__init__(self.base_dist, [])
+
+            @property
+            def mean(self):
+                mu = self.loc
+                for tr in self.transforms:
+                    mu = tr(mu)
+                return mu
+
+        def squashed_normal_flatten(t):
+            return [t.loc, t.scale], t.tanh_transform_clamp
+
+        def squashed_normal_unflatten(values, context):
+            return SquashedNormal(*values, context)
+
+        pytree.register_pytree_node(
+            SquashedNormal,
+            squashed_normal_flatten,
+            squashed_normal_unflatten,
+            serialized_type_name="test_export.SquashedNormalIssue135061",
+        )
+
+        class StochasticActor(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(4, 2)
+
+            def forward(self, state):
+                out = F.relu(self.fc(state))
+                mu, log_std = out.chunk(2, dim=1)
+                log_std = torch.tanh(log_std)
+                std = (-10 + 6 * (log_std + 1)).exp()
+                return SquashedNormal(mu, std)
+
+        model = StochasticActor()
+        inputs = (torch.randn(1, 4),)
+        ep = export(model, inputs, strict=False)
+
+        FileCheck().check("torch.ops.aten._assert_async.msg").run(ep.graph_module.code)
+        eager_dist = model(*inputs)
+        exported_dist = ep.module()(*inputs)
+        self.assertEqual(exported_dist.mean, eager_dist.mean)
+
+        class LogProb(torch.nn.Module):
+            def forward(self, value):
+                dist = torch.distributions.Normal(
+                    torch.zeros_like(value), torch.ones_like(value)
+                )
+                return dist.log_prob(value)
+
+        log_prob_inputs = (torch.randn(2, 3),)
+        log_prob_ep = export(LogProb(), log_prob_inputs, strict=False)
+        FileCheck().check("Expected value argument to be within the support").run(
+            log_prob_ep.graph_module.code
+        )
+        self.assertEqual(
+            log_prob_ep.module()(*log_prob_inputs), LogProb()(*log_prob_inputs)
+        )
+        invalid_log_prob_input = log_prob_inputs[0].clone()
+        invalid_log_prob_input[0, 0] = torch.nan
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected value argument to be within the support"
+        ):
+            log_prob_ep.module()(invalid_log_prob_input)
+
     def test_draft_export_checks_mutation_with_nan(self):
         @torch.library.custom_op("export::foo", mutates_args={})
         def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
