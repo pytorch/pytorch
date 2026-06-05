@@ -638,9 +638,9 @@ static PyObject* THPVariable_make_subclass(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, std::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, Device? device_for_backend_keys=None)",
+      "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, std::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, Device? device_for_backend_keys=None, DispatchKeySet _extra_dispatch_keys=None)",
   });
-  ParsedArgs<7> parsed_args{};
+  ParsedArgs<8> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   TORCH_CHECK_TENSOR_SUBTYPE(cls);
@@ -674,6 +674,9 @@ static PyObject* THPVariable_make_subclass(
   }
   if (!r.isNone(6)) {
     data.unsafeGetTensorImpl()->_change_backend_component_keys(r.device(6));
+  }
+  if (auto extra_dispatch_keys = r.toDispatchKeySetOptional(7)) {
+    data.unsafeGetTensorImpl()->_add_extra_dispatch_keys(*extra_dispatch_keys);
   }
 
   PyObject* obj = THPVariable_WrapWithType(data, (PyTypeObject*)cls);

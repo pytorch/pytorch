@@ -668,6 +668,60 @@ class FakeTensorTest(TestCase):
                     torch._C._dispatch_key_set(y)
                 )
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA autocast")
+    @expectedFailurePropagateRealTensors
+    def test_fake_xla_cuda_autocast_dispatch_keys(self):
+        class XLACUDATensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    (5, 5),
+                    (5, 1),
+                    0,
+                    None,
+                    torch.float16,
+                    torch.strided,
+                    torch.device("xla"),
+                    False,
+                    False,
+                    None,
+                    False,
+                    False,
+                    torch._C.DispatchKeySet(torch._C.DispatchKey.AutocastCUDA),
+                )
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return NotImplemented
+
+        x = XLACUDATensor()
+        mode = FakeTensorMode()
+        fake_x = mode.from_tensor(x)
+
+        self.assertTrue(
+            torch._C._dispatch_keys(fake_x).has(torch._C.DispatchKey.AutocastCUDA)
+        )
+
+        op = torch.ops.aten.norm.ScalarOpt_dim
+
+        def f(a):
+            with torch.amp.autocast("cuda", dtype=torch.float16):
+                return op(a, 2, [1])
+
+        with mode:
+            out = f(fake_x)
+        self.assertEqual(out.dtype, torch.float32)
+        self.assertTrue(
+            torch._C._dispatch_keys(out).has(torch._C.DispatchKey.AutocastCUDA)
+        )
+
+        gm = make_fx(f, tracing_mode="fake")(x)
+        call_targets = [
+            node.target for node in gm.graph.nodes if node.op == "call_function"
+        ]
+        self.assertEqual(call_targets, [torch.ops.aten.norm.ScalarOpt_dim_dtype])
+
     def test_compare_tensor_meta_unbacked_numel(self):
         from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 

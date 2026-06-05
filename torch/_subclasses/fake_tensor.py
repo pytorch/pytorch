@@ -87,6 +87,52 @@ CONSTANT_NUMEL_LIMIT = 1
 RECURSION_COUNT = 0
 
 
+def _maybe_dispatch_key(name: str) -> torch._C.DispatchKey | None:
+    return getattr(torch._C.DispatchKey, name, None)
+
+
+_AUTOCAST_DISPATCH_KEY_BY_DEVICE_TYPE = {
+    device_type: key
+    for device_type, key in (
+        ("cpu", _maybe_dispatch_key("AutocastCPU")),
+        ("mps", _maybe_dispatch_key("AutocastMPS")),
+        ("cuda", _maybe_dispatch_key("AutocastCUDA")),
+        ("xpu", _maybe_dispatch_key("AutocastXPU")),
+        ("ipu", _maybe_dispatch_key("AutocastIPU")),
+        ("hpu", _maybe_dispatch_key("AutocastHPU")),
+        ("xla", _maybe_dispatch_key("AutocastXLA")),
+        (
+            torch._C._get_privateuse1_backend_name(),
+            _maybe_dispatch_key("AutocastPrivateUse1"),
+        ),
+        ("mtia", _maybe_dispatch_key("AutocastMTIA")),
+        ("maia", _maybe_dispatch_key("AutocastMAIA")),
+    )
+    if key is not None
+}
+
+_AUTOCAST_DISPATCH_KEYS = tuple(_AUTOCAST_DISPATCH_KEY_BY_DEVICE_TYPE.values())
+
+
+def _extra_autocast_dispatch_keys(
+    device: torch.device | str,
+    dispatch_keys: torch.DispatchKeySet | None,
+) -> torch.DispatchKeySet | None:
+    if dispatch_keys is None:
+        return None
+
+    device_type = torch.device(device).type
+    default_autocast_key = _AUTOCAST_DISPATCH_KEY_BY_DEVICE_TYPE.get(device_type)
+    extra_keys = torch._C.DispatchKeySet.from_raw_repr(0)
+    for autocast_key in _AUTOCAST_DISPATCH_KEYS:
+        if autocast_key != default_autocast_key and dispatch_keys.has(autocast_key):
+            extra_keys = extra_keys.add(autocast_key)
+
+    if extra_keys.raw_repr() == 0:
+        return None
+    return extra_keys
+
+
 # Check if device type supports device index
 @functools.cache
 def _is_indexed_device_type(device_type: str) -> bool:
@@ -463,6 +509,9 @@ class FakeTensorConverter:
         # This callback is used by both subclass and inner tensors. Require the
         # caller to explicitly specify the device in case outer and inner tensors
         # have different devices.
+        source_device = t.device
+        source_dispatch_keys = torch._C._dispatch_keys(t)
+
         def mk_fake_tensor(
             make_meta_t: Callable[[], object], device: torch.device | str
         ) -> FakeTensor:
@@ -483,6 +532,13 @@ class FakeTensorConverter:
                     # TODO: callback might be used in recursive contexts, in
                     # which case using t is wrong!  BUG!
                     constant=constant,
+                    dispatch_keys=(
+                        source_dispatch_keys
+                        if torch.device(device) == source_device
+                        and _extra_autocast_dispatch_keys(device, source_dispatch_keys)
+                        is not None
+                        else None
+                    ),
                 )
 
         out = self.meta_converter(
@@ -850,12 +906,14 @@ class FakeTensor(Tensor):
         pytype: type[Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
     ) -> Self:
+        extra_dispatch_keys = _extra_autocast_dispatch_keys(device, dispatch_keys)
         self = Tensor._make_subclass(
             cls,
             elem,
             elem.requires_grad,
             dispatch_device=True,
             device_for_backend_keys=device,
+            _extra_dispatch_keys=extra_dispatch_keys,
         )
         if not fake_mode._allow_unsafe_data_ptr_access:
             torch._C._set_throw_on_mutable_data_ptr(self)
@@ -1175,6 +1233,7 @@ class TensorMetadata:
     is_coalesced: bool | None
     dense_dim: int | None
     sparse_dim: int | None
+    dispatch_keys: int
 
     def _flatten_into(
         self,
@@ -1233,6 +1292,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         t.is_coalesced() if t.is_sparse else None,
         t.dense_dim() if is_sparse_any(t) else None,
         t.sparse_dim() if is_sparse_any(t) else None,
+        torch._C._dispatch_keys(t).raw_repr(),
     )
 
 
@@ -2184,7 +2244,12 @@ class FakeTensorMode(TorchDispatchMode):
             with in_kernel_invocation_manager(self), maybe_suppress():
                 empty.set_(storage, storage_offset, shape, stride)
 
-        return FakeTensor(self, empty, metadata.device)
+        return FakeTensor(
+            self,
+            empty,
+            metadata.device,
+            dispatch_keys=torch._C.DispatchKeySet.from_raw_repr(metadata.dispatch_keys),
+        )
 
     def _output_from_cache_entry(
         self,
@@ -3096,6 +3161,30 @@ class FakeTensorMode(TorchDispatchMode):
         common_device = None
         has_scalar_only_inputs = False
 
+        def get_common_dispatch_keys(
+            output_device: torch.device | str,
+        ) -> torch.DispatchKeySet | None:
+            output_device = torch.device(output_device)
+            found_keys = None
+            for arg in flat_args:
+                if not isinstance(arg, FakeTensor) or arg.device != output_device:
+                    continue
+                arg_dispatch_keys = (
+                    arg.dispatch_keys
+                    if arg.dispatch_keys is not None
+                    else torch._C._dispatch_keys(arg)
+                )
+                if (
+                    _extra_autocast_dispatch_keys(output_device, arg_dispatch_keys)
+                    is None
+                ):
+                    continue
+                if found_keys is not None and found_keys != arg_dispatch_keys:
+                    return None
+                found_keys = arg_dispatch_keys
+
+            return found_keys
+
         def wrap(e: T) -> T | FakeTensor:
             nonlocal common_device
             nonlocal has_scalar_only_inputs
@@ -3123,8 +3212,12 @@ class FakeTensorMode(TorchDispatchMode):
                     # We thus directly convert real tensor to fake tensor.
                     return converter.from_real_tensor(self, e)
                 else:
+                    output_device = device or common_device
                     return converter.from_meta_and_device(
-                        self, e, device or common_device
+                        self,
+                        e,
+                        output_device,
+                        dispatch_keys=get_common_dispatch_keys(output_device),
                     )
             else:
                 # pyrefly: ignore [bad-return]

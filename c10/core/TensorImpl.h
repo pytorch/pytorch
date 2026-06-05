@@ -1499,6 +1499,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void _change_backend_component_keys(c10::Device device);
 
   /**
+   * XXX: do not use, private api!
+   * Add extra dispatch keys to this tensor.
+   */
+  void _add_extra_dispatch_keys(c10::DispatchKeySet extra_keys) {
+    key_set_ = key_set_ | extra_keys;
+  }
+
+  /**
    * Whether or not the tensor is a zerotensor
    */
   inline bool _is_zerotensor() const {
