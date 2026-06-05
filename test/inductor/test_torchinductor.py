@@ -18893,6 +18893,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(x_eager.device, x_compiled.device)
+
     def test_jvp_compile_backward(self):
         def jvp_fn(f, x):
             return torch.func.jvp(f, (x.clone(),), (torch.ones_like(x),))[1]
@@ -18948,6 +18949,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         out = torch.compile(fn, fullgraph=True)()
         self.assertEqual(out.size(0), numel)
         self.assertEqual(out.stride(), (1,))
+        self.assertTrue(out._is_zerotensor())
 
     # end of class CommonTemplate - add new tests here
 
