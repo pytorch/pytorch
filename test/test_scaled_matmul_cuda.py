@@ -759,6 +759,7 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
 
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [2048, 2049])
@@ -829,6 +830,7 @@ class TestFP8Matmul(TestCase):
         # Assert outputs are close
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [16640])

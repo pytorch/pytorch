@@ -11,6 +11,138 @@ import cutlass.utils.blockscaled_layout as blockscaled_utils
 from cutlass.cute.nvgpu import cpasync, tcgen05
 from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 
+from ._clc_scheduler import (
+    ClcState,
+    create_clc_pipeline,
+    make_clc_problem_shape,
+)
+
+
+class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler):
+    @classmethod
+    def create_for_clc(
+        cls,
+        group_count,
+        tile_sched_params,
+        cluster_tile_shape_mnk,
+        problem_shape_mnkl,
+    ):
+        return cls(
+            tile_sched_params,
+            cutlass.Int32(1),
+            cutlass.Int32(0),
+            (cutlass.Int32(0), cutlass.Int32(0), cutlass.Int32(0)),
+            cutlass.Int32(0),
+            cluster_tile_shape_mnk,
+            utils.create_initial_search_state(),
+            group_count,
+            problem_shape_mnkl,
+        )
+
+    def __new_from_mlir_values__(self, values):
+        if len(values) < 11:
+            raise ValueError("Length of mlir values extracted is incorrect.")
+        new_num_persistent_clusters = cutlass.new_from_mlir_values(
+            self.num_persistent_clusters, [values[0]]
+        )
+        new_current_work_linear_idx = cutlass.new_from_mlir_values(
+            self._current_work_linear_idx, [values[1]]
+        )
+        new_cta_id_in_cluster = cutlass.new_from_mlir_values(
+            self.cta_id_in_cluster, values[2:5]
+        )
+        new_num_tiles_executed = cutlass.new_from_mlir_values(
+            self._num_tiles_executed, [values[5]]
+        )
+        search_state = cutlass.new_from_mlir_values(self.search_state, values[6:10])
+        problem_shape_mnkl = cutlass.new_from_mlir_values(
+            self.problem_shape_mnkl, [values[10]]
+        )
+        params = cutlass.new_from_mlir_values(self.params, values[11:])
+
+        return ClcGroupedGemmTileSchedulerHelper(
+            params,
+            new_num_persistent_clusters,
+            new_current_work_linear_idx,
+            new_cta_id_in_cluster,
+            new_num_tiles_executed,
+            self.cluster_tile_shape_mnk,
+            search_state,
+            self.group_count,
+            problem_shape_mnkl,
+        )
+
+    def delinearize_z(self, cta_tile_coord, problem_shape_mnkl):
+        linear_idx = cta_tile_coord[2]
+        _found, group_idx, problem_mnkl = self._group_search_and_load_problem_shape(
+            linear_idx,
+            problem_shape_mnkl,
+            self.search_state.start_group_idx,
+            self.search_state.tile_count_prev_group,
+        )
+        cluster_tile_idx_in_current_group = (
+            linear_idx - self.search_state.tile_count_prev_group
+        )
+        cluster_count_m, cluster_count_n, cluster_count_k = cute.ceil_div(
+            (problem_mnkl[0], problem_mnkl[1], problem_mnkl[2]),
+            (
+                self.cluster_tile_shape_mnk[0],
+                self.cluster_tile_shape_mnk[1],
+                self.cluster_tile_shape_mnk[2],
+            ),
+        )
+        cta_tile_idx_m, cta_tile_idx_n = self._compute_cta_tile_coord(
+            cluster_tile_idx_in_current_group,
+            cta_tile_coord,
+            cluster_count_m,
+            cluster_count_n,
+        )
+        return utils.GroupSearchResult(
+            group_idx,
+            cta_tile_idx_m,
+            cta_tile_idx_n,
+            problem_mnkl[0],
+            problem_mnkl[1],
+            problem_mnkl[2],
+            cluster_count_k,
+        )
+
+    def search_cluster_tile_count_k(self, cta_tile_coord, problem_shape_mnkl):
+        linear_idx = cta_tile_coord[2]
+        _found, group_idx, problem_mnkl = self._group_search_and_load_problem_shape(
+            linear_idx,
+            problem_shape_mnkl,
+            self.search_state.start_group_idx,
+            self.search_state.tile_count_prev_group,
+        )
+        cluster_count_k = (
+            problem_mnkl[2] + self.cluster_tile_shape_mnk[2] - 1
+        ) // self.cluster_tile_shape_mnk[2]
+        return cluster_count_k, group_idx
+
+    def delinearize_z_mn(self, cta_tile_coord, problem_shape_mnkl):
+        linear_idx = cta_tile_coord[2]
+        _found, group_idx, problem_mnkl = self._group_search_and_load_problem_shape(
+            linear_idx,
+            problem_shape_mnkl,
+            self.search_state.start_group_idx,
+            self.search_state.tile_count_prev_group,
+        )
+        cluster_tile_idx_in_current_group = (
+            linear_idx - self.search_state.tile_count_prev_group
+        )
+        cluster_count_m, cluster_count_n = cute.ceil_div(
+            (problem_mnkl[0], problem_mnkl[1]),
+            (self.cluster_tile_shape_mnk[0], self.cluster_tile_shape_mnk[1]),
+        )
+        cta_tile_idx_m, cta_tile_idx_n = self._compute_cta_tile_coord(
+            cluster_tile_idx_in_current_group,
+            cta_tile_coord,
+            cluster_count_m,
+            cluster_count_n,
+        )
+        return group_idx, cta_tile_idx_m, cta_tile_idx_n
+
 
 class Sm100GroupedBlockScaledGemmKernel:
     """This example demonstrates an implementation of grouped blockscaled GEMM using a TMA plus Blackwell SM100 TensorCore
@@ -48,9 +180,16 @@ class Sm100GroupedBlockScaledGemmKernel:
 
     # Compile-time tuning knobs.
     AB_TMA_LOAD_UNROLL = 4
-    NUM_WARPS_PER_CTA = 12
+    NUM_WARPS_PER_CTA = 8
     GENERIC_REG_REQUIREMENT = 136
     ACCUM_REG_REQUIREMENT = 232
+    # CLC dispatch swizzle (v4.5.2+). 1 = pass-through (linear order along L
+    # dim). Higher values reorder dispatches across the (M, N) cluster grid
+    # for better L2 locality. NOTE: for our current problem_shape
+    # (cluster_m, cluster_n, total_num_clusters), the M and N cluster dims
+    # are 1 each (all work along L), so swizzle has limited applicability
+    # until we restructure problem_shape to expose MN locality.
+    CLC_SWIZZLE_SIZE = 1
 
     def __init__(
         self,
@@ -87,13 +226,14 @@ class Sm100GroupedBlockScaledGemmKernel:
         self.tensormap_update_mode = utils.TensorMapUpdateMode.SMEM
 
         self.occupancy = 1
-        # Warp roles (matching CUTLASS C++ WarpCategory ordering):
-        #   - mma warp: 0
-        #   - scheduler warp: 1
-        #   - mainloop load warp: 2
-        #   - epilogue load warp: 3
-        #   - epilogue warps: 4..7
-        #   - tensormap update warps: 8..11
+        # Warp roles with CLC scheduling. This mirrors the C++ warp categories:
+        # epi_load is reserved, but this epilogue has no producer load, so the
+        # warp is not a participant in the CLC pipeline.
+        #   - mma warp:           0
+        #   - scheduler warp:     1  (CLC producer)
+        #   - mainloop load warp: 2  (A/B/SF tensormap update/fence)
+        #   - epilogue load warp: 3  (reserved, inactive)
+        #   - epilogue warps:     4..7  (epilog[0] updates/fences C)
         self.mma_warp_id = 0
         self.scheduler_warp_id = 1
         self.mainloop_load_warp_id = 2
@@ -104,16 +244,15 @@ class Sm100GroupedBlockScaledGemmKernel:
             6,
             7,
         )
-        self.tensormap_update_warp_id = (8, 9, 10, 11)
         self.tensormap_worker_warp_id = (
             self.scheduler_warp_id,
             self.mainloop_load_warp_id,
-            *self.tensormap_update_warp_id,
         )
-        if self.NUM_WARPS_PER_CTA <= self.tensormap_update_warp_id[-1]:
+        _highest_specialized_warp_id = max(*self.epilog_warp_id)
+        if self.NUM_WARPS_PER_CTA <= _highest_specialized_warp_id:
             raise ValueError(
                 "NUM_WARPS_PER_CTA must be greater than the highest specialized "
-                f"warp id ({self.tensormap_update_warp_id[-1]}), got "
+                f"warp id ({_highest_specialized_warp_id}), got "
                 f"{self.NUM_WARPS_PER_CTA}"
             )
         self.threads_per_cta = 32 * self.NUM_WARPS_PER_CTA
@@ -126,53 +265,21 @@ class Sm100GroupedBlockScaledGemmKernel:
             barrier_id=2,
             num_threads=32 * len((self.mma_warp_id, *self.epilog_warp_id)),
         )
-        # Barrier used by MMA + producer-side warps to signal A/B
-        # descriptor initialization completion.
+        # Barrier between MMA warp (which does initial tensormap init from
+        # the host-provided copy_atom) and the mainloop load warp (which
+        # then mutates and uses the descriptors per group). Only these two
+        # warps participate; the per-group update happens inline in the
+        # mainload warp now, so no inter-warp tensormap-handoff barriers
+        # are needed during the iteration.
         self.tensormap_ab_init_barrier = pipeline.NamedBarrier(
             barrier_id=3,
-            # MMA warp + scheduler warp + 4 descriptor update warps.
-            num_threads=32 * (1 + len(self.tensormap_worker_warp_id)),
+            num_threads=32 * 2,  # MMA + mainload
         )
-        # Barrier used by scheduler + mainloop loader + updater warps
-        # to synchronize per-group descriptor update completion.
-        self.tensormap_update_sync_barrier = pipeline.NamedBarrier(
-            barrier_id=4,
-            num_threads=32 * len(self.tensormap_worker_warp_id),
-        )
-        # Barrier used by producer-side warps to ensure descriptor
-        # updates for a new group do not begin until all producer-side
-        # warps have reached the same group boundary.
-        self.tensormap_pre_update_barrier = pipeline.NamedBarrier(
-            barrier_id=9,
-            num_threads=32 * len(self.tensormap_worker_warp_id),
-        )
-        # Barrier used by scheduler and mainloop loader to order
-        # descriptor fence (scheduler) before TMA loads (mainloop
-        # loader).
-        self.tensormap_fence_sync_barrier = pipeline.NamedBarrier(
-            barrier_id=5,
-            num_threads=64,
-        )
-        # Barrier used by epilogue descriptor warp and epilogue
-        # producer warp to synchronize per-tile C descriptor
-        # readiness.
-        self.epilog_tensormap_ready_barrier = pipeline.NamedBarrier(
-            barrier_id=6,
-            num_threads=64,
-        )
-        # Barrier used by epilogue producer warp (0) and descriptor warp (7)
-        # to ensure C tensormap initialization is complete before updates.
-        self.epilog_tensormap_init_barrier = pipeline.NamedBarrier(
-            barrier_id=7,
-            num_threads=64,
-        )
-        # Barrier used by epilogue producer warp (0) and descriptor
-        # warp (7) to ensure current-tile C stores are complete before
-        # warp 7 can advance and update descriptors for the next tile.
-        self.epilog_tensormap_tile_done_barrier = pipeline.NamedBarrier(
-            barrier_id=8,
-            num_threads=64,
-        )
+        # (Previously: epilog_tensormap_init_barrier coordinated epilog[0]
+        # finishing C-descriptor init with epi_load warp before epi_load used
+        # the descriptor. After moving the C tensormap update inline into
+        # epilog[0], epi_load no longer touches the C descriptor, so this
+        # init handshake protects nothing. Removed.)
         self.smem_capacity = utils.get_smem_capacity_in_bytes("sm_100")
 
     # Set up configurations that dependent on gemm inputs.
@@ -204,6 +311,7 @@ class Sm100GroupedBlockScaledGemmKernel:
 
         tiled_mma = sm100_utils.make_blockscaled_trivial_tiled_mma(
             self.a_dtype,
+            self.b_dtype,
             self.a_major_mode,
             self.b_major_mode,
             self.sf_dtype,
@@ -214,6 +322,7 @@ class Sm100GroupedBlockScaledGemmKernel:
 
         tiled_mma_sfb = sm100_utils.make_blockscaled_trivial_tiled_mma(
             self.a_dtype,
+            self.b_dtype,
             self.a_major_mode,
             self.b_major_mode,
             self.sf_dtype,
@@ -269,6 +378,11 @@ class Sm100GroupedBlockScaledGemmKernel:
             self.c_layout,
             self.c_dtype,
         )
+
+        # CLC pipeline depth. 1 stage means we always wait for the just-issued
+        # query to land before consumers read it (matches flash-attn PR #2218).
+        # Higher depth would let the producer pre-fetch further ahead.
+        self.num_clc_stage = 1
 
         # Setup A/B/C stage count in shared memory and ACC stage count in tensor memory
         self.num_acc_stage, self.num_ab_stage, self.num_c_stage = self._compute_stages(
@@ -448,6 +562,7 @@ class Sm100GroupedBlockScaledGemmKernel:
 
         tiled_mma = sm100_utils.make_blockscaled_trivial_tiled_mma(
             self.a_dtype,
+            self.b_dtype,
             self.a_major_mode,
             self.b_major_mode,
             self.sf_dtype,
@@ -458,6 +573,7 @@ class Sm100GroupedBlockScaledGemmKernel:
 
         tiled_mma_sfb = sm100_utils.make_blockscaled_trivial_tiled_mma(
             self.a_dtype,
+            self.b_dtype,
             self.a_major_mode,
             self.b_major_mode,
             self.sf_dtype,
@@ -546,12 +662,14 @@ class Sm100GroupedBlockScaledGemmKernel:
             self.epi_tile,
         )
 
-        # Compute grid size
-        estimate_tile_sched_params = self._compute_tile_sched(
-            estimate_total_num_clusters,
+        estimate_tile_sched_params = make_clc_problem_shape(
             self.cluster_shape_mn,
+            estimate_total_num_clusters,
+            swizzle_size=self.CLC_SWIZZLE_SIZE,
         )
-        grid = self._compute_grid(estimate_tile_sched_params, max_active_clusters)
+        grid = utils.ClcDynamicPersistentTileScheduler.get_grid_shape(
+            estimate_tile_sched_params
+        )
 
         self.buffer_align_bytes = 1024
         self.size_tensormap_in_i64 = (
@@ -572,6 +690,10 @@ class Sm100GroupedBlockScaledGemmKernel:
             acc_empty_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_acc_stage]
             tmem_dealloc_mbar_ptr: cute.struct.MemRange[cutlass.Int64, 1]
             tmem_holding_buf: cute.struct.MemRange[cutlass.Int32, 1]
+            # CLC pipeline: 2 mbarriers per stage (full + empty); 4 Int32s
+            # per stage hold the CLC response (m_idx, n_idx, l_idx, valid).
+            clc_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_clc_stage * 2]
+            clc_response: cute.struct.MemRange[cutlass.Int32, self.num_clc_stage * 4]
             # (EPI_TILE_M, EPI_TILE_N, STAGE)
             sC: cute.struct.Align[
                 cute.struct.MemRange[
@@ -980,40 +1102,109 @@ class Sm100GroupedBlockScaledGemmKernel:
         )
 
         #
-        # Specialized producer-side warps
+        # CLC pipeline + scheduler state. The hardware CLC scheduler dispatches
+        # tiles dynamically into the (m, n, l) coordinate space matching our
+        # original PersistentTileSchedulerParams. Consumer warps wait on the
+        # shared CLC pipeline; the scheduler warp on the leader CTA drives
+        # advance_to_next_work.
         #
-        if (
-            warp_idx == self.scheduler_warp_id
-            or warp_idx == self.mainloop_load_warp_id
-            or warp_idx == self.tensormap_update_warp_id[0]
-            or warp_idx == self.tensormap_update_warp_id[1]
-            or warp_idx == self.tensormap_update_warp_id[2]
-            or warp_idx == self.tensormap_update_warp_id[3]
-        ):
-            cute.arch.warpgroup_reg_dealloc(self.GENERIC_REG_REQUIREMENT)
-            is_scheduler_warp = warp_idx == self.scheduler_warp_id
-            is_mainloop_load_warp = warp_idx == self.mainloop_load_warp_id
-            #
-            # Persistent tile scheduling loop
-            #
-            tile_sched = utils.StaticPersistentTileScheduler.create(
-                tile_sched_params, cute.arch.block_idx(), grid_dim
+        clc_response_ptr = storage.clc_response.data_ptr()
+        clc_mbar_ptr = storage.clc_mbar_ptr.data_ptr()
+        num_clc_consumer_warps_per_cta = len(
+            (
+                self.mma_warp_id,
+                self.scheduler_warp_id,
+                self.mainloop_load_warp_id,
+                *self.epilog_warp_id,
             )
+        )
+        cluster_size = cute.size(self.cluster_shape_mn)
+        clc_pipeline = create_clc_pipeline(
+            barrier_storage=clc_mbar_ptr,
+            num_stages=self.num_clc_stage,
+            num_consumer_warps=num_clc_consumer_warps_per_cta,
+            cluster_size=cluster_size,
+            cta_layout_vmnk=cluster_layout_vmnk,
+        )
+        clc_problem_shape = make_clc_problem_shape(
+            self.cluster_shape_mn,
+            total_num_clusters[0],
+            swizzle_size=self.CLC_SWIZZLE_SIZE,
+        )
+        clc_state = ClcState.create(
+            hw_scheduler=utils.ClcDynamicPersistentTileScheduler.create(
+                clc_problem_shape,
+                cute.arch.block_idx(),
+                grid_dim,
+                clc_response_ptr,
+            ),
+            pipeline=clc_pipeline,
+            consumer_state=pipeline.make_pipeline_state(
+                pipeline.PipelineUserType.Consumer, self.num_clc_stage
+            ),
+            producer_state=pipeline.make_pipeline_state(
+                pipeline.PipelineUserType.Producer, self.num_clc_stage
+            ),
+        )
+        is_leader_cluster_cta = cta_rank_in_cluster == 0
+
+        #
+        # Specialized scheduler warp
+        #
+        if warp_idx == self.scheduler_warp_id:
+            cute.arch.setmaxregister_decrease(self.GENERIC_REG_REQUIREMENT)
+            work_tile = clc_state.initial_work_tile_info(total_num_clusters[0])
+
+            while work_tile.is_valid_tile:
+                if is_leader_cluster_cta:
+                    clc_state.prefetch_next_work()
+                clc_state.consumer_wait()
+                work_tile = clc_state.get_current_work(total_num_clusters[0])
+                clc_state.consumer_release()
+
+            if is_leader_cluster_cta:
+                clc_state.producer_tail()
+
+        #
+        # Specialized mainloop load warp
+        #
+        if warp_idx == self.mainloop_load_warp_id:
+            cute.arch.setmaxregister_decrease(self.GENERIC_REG_REQUIREMENT)
+            #
+            # Persistent tile scheduling loop — CLC-driven
+            #
             # grouped gemm tile scheduler helper will compute the group index for the tile we're working on
-            group_gemm_ts_helper = utils.GroupedGemmTileSchedulerHelper(
+            group_gemm_ts_helper = ClcGroupedGemmTileSchedulerHelper.create_for_clc(
                 group_count,
                 tile_sched_params,
                 self.cluster_tile_shape_mnk,
-                utils.create_initial_search_state(),
+                problem_sizes_mnkl,
             )
             tensormap_init_done = cutlass.Boolean(False)
             # group index of last tile
             last_group_idx = cutlass.Int32(-1)
 
-            work_tile = tile_sched.initial_work_tile_info()
+            work_tile = clc_state.initial_work_tile_info(total_num_clusters[0])
 
             ab_producer_state = pipeline.make_pipeline_state(
                 pipeline.PipelineUserType.Producer, self.num_ab_stage
+            )
+
+            # The tma_desc generic-space pointers are kernel-wide constants:
+            # they're inttoptr conversions of the GMEM descriptor pointers
+            # computed once at kernel start. Hoist out of the load loop so
+            # they're not recomputed per k-tile.
+            tma_desc_a = tensormap_manager.get_tensormap_ptr(
+                tensormap_a_gmem_ptr, cute.AddressSpace.generic
+            )
+            tma_desc_b = tensormap_manager.get_tensormap_ptr(
+                tensormap_b_gmem_ptr, cute.AddressSpace.generic
+            )
+            tma_desc_sfa = tensormap_manager.get_tensormap_ptr(
+                tensormap_sfa_gmem_ptr, cute.AddressSpace.generic
+            )
+            tma_desc_sfb = tensormap_manager.get_tensormap_ptr(
+                tensormap_sfb_gmem_ptr, cute.AddressSpace.generic
             )
 
             while work_tile.is_valid_tile:
@@ -1032,238 +1223,188 @@ class Sm100GroupedBlockScaledGemmKernel:
                         self.tensormap_ab_init_barrier.arrive_and_wait()
                         tensormap_init_done = True
 
-                    # Prevent updater warps from overwriting descriptors
-                    # while mainloop load warp may still be issuing TMA
-                    # loads against the previous group descriptors.
-                    self.tensormap_pre_update_barrier.arrive_and_wait()
+                    problem_shape_mnk = (
+                        grouped_gemm_cta_tile_info.problem_shape_m,
+                        grouped_gemm_cta_tile_info.problem_shape_n,
+                        grouped_gemm_cta_tile_info.problem_shape_k,
+                    )
+                    real_tensor_a = self.make_tensor_abc_for_tensormap_update(
+                        cur_group_idx,
+                        self.a_dtype,
+                        problem_shape_mnk,
+                        strides_abc,
+                        ptrs_abc,
+                        0,  # tensor A
+                    )
+                    real_tensor_b = self.make_tensor_abc_for_tensormap_update(
+                        cur_group_idx,
+                        self.b_dtype,
+                        problem_shape_mnk,
+                        strides_abc,
+                        ptrs_abc,
+                        1,  # tensor B
+                    )
+                    real_tensor_sfa = self.make_tensor_sfasfb_for_tensormap_update(
+                        cur_group_idx,
+                        self.sf_dtype,
+                        problem_shape_mnk,
+                        ptrs_sfasfb,
+                        0,  # tensor SFA
+                    )
+                    real_tensor_sfb = self.make_tensor_sfasfb_for_tensormap_update(
+                        cur_group_idx,
+                        self.sf_dtype,
+                        problem_shape_mnk,
+                        ptrs_sfasfb,
+                        1,  # tensor SFB
+                    )
+                    tensormap_manager.update_tensormap(
+                        (
+                            real_tensor_a,
+                            real_tensor_b,
+                            real_tensor_sfa,
+                            real_tensor_sfb,
+                        ),
+                        (tma_atom_a, tma_atom_b, tma_atom_sfa, tma_atom_sfb),
+                        (
+                            tensormap_a_gmem_ptr,
+                            tensormap_b_gmem_ptr,
+                            tensormap_sfa_gmem_ptr,
+                            tensormap_sfb_gmem_ptr,
+                        ),
+                        self.mainloop_load_warp_id,
+                        (
+                            tensormap_a_smem_ptr,
+                            tensormap_b_smem_ptr,
+                            tensormap_sfa_smem_ptr,
+                            tensormap_sfb_smem_ptr,
+                        ),
+                    )
+                    tensormap_manager.fence_tensormap_update(tensormap_a_gmem_ptr)
+                    tensormap_manager.fence_tensormap_update(tensormap_b_gmem_ptr)
+                    tensormap_manager.fence_tensormap_update(tensormap_sfa_gmem_ptr)
+                    tensormap_manager.fence_tensormap_update(tensormap_sfb_gmem_ptr)
 
-                    if warp_idx == self.tensormap_update_warp_id[0]:
-                        real_tensor_a = self.make_tensor_abc_for_tensormap_update(
-                            cur_group_idx,
-                            self.a_dtype,
-                            (
-                                grouped_gemm_cta_tile_info.problem_shape_m,
-                                grouped_gemm_cta_tile_info.problem_shape_n,
-                                grouped_gemm_cta_tile_info.problem_shape_k,
-                            ),
-                            strides_abc,
-                            ptrs_abc,
-                            0,  # 0 for tensor A
-                        )
-                        tensormap_manager.update_tensormap(
-                            (real_tensor_a,),
-                            (tma_atom_a,),
-                            (tensormap_a_gmem_ptr,),
-                            self.tensormap_update_warp_id[0],
-                            (tensormap_a_smem_ptr,),
-                        )
-                    elif warp_idx == self.tensormap_update_warp_id[1]:
-                        real_tensor_b = self.make_tensor_abc_for_tensormap_update(
-                            cur_group_idx,
-                            self.b_dtype,
-                            (
-                                grouped_gemm_cta_tile_info.problem_shape_m,
-                                grouped_gemm_cta_tile_info.problem_shape_n,
-                                grouped_gemm_cta_tile_info.problem_shape_k,
-                            ),
-                            strides_abc,
-                            ptrs_abc,
-                            1,  # 1 for tensor B
-                        )
-                        tensormap_manager.update_tensormap(
-                            (real_tensor_b,),
-                            (tma_atom_b,),
-                            (tensormap_b_gmem_ptr,),
-                            self.tensormap_update_warp_id[1],
-                            (tensormap_b_smem_ptr,),
-                        )
-                    elif warp_idx == self.tensormap_update_warp_id[2]:
-                        real_tensor_sfa = self.make_tensor_sfasfb_for_tensormap_update(
-                            cur_group_idx,
-                            self.sf_dtype,
-                            (
-                                grouped_gemm_cta_tile_info.problem_shape_m,
-                                grouped_gemm_cta_tile_info.problem_shape_n,
-                                grouped_gemm_cta_tile_info.problem_shape_k,
-                            ),
-                            ptrs_sfasfb,
-                            0,  # 0 for tensor SFA
-                        )
-                        tensormap_manager.update_tensormap(
-                            (real_tensor_sfa,),
-                            (tma_atom_sfa,),
-                            (tensormap_sfa_gmem_ptr,),
-                            self.tensormap_update_warp_id[2],
-                            (tensormap_sfa_smem_ptr,),
-                        )
-                    elif warp_idx == self.tensormap_update_warp_id[3]:
-                        real_tensor_sfb = self.make_tensor_sfasfb_for_tensormap_update(
-                            cur_group_idx,
-                            self.sf_dtype,
-                            (
-                                grouped_gemm_cta_tile_info.problem_shape_m,
-                                grouped_gemm_cta_tile_info.problem_shape_n,
-                                grouped_gemm_cta_tile_info.problem_shape_k,
-                            ),
-                            ptrs_sfasfb,
-                            1,  # 1 for tensor SFB
-                        )
-                        tensormap_manager.update_tensormap(
-                            (real_tensor_sfb,),
-                            (tma_atom_sfb,),
-                            (tensormap_sfb_gmem_ptr,),
-                            self.tensormap_update_warp_id[3],
-                            (tensormap_sfb_smem_ptr,),
-                        )
+                mma_tile_coord_mnl = (
+                    grouped_gemm_cta_tile_info.cta_tile_idx_m
+                    // cute.size(tiled_mma.thr_id.shape),
+                    grouped_gemm_cta_tile_info.cta_tile_idx_n,
+                    0,
+                )
 
-                    # Synchronize scheduler and update warps after
-                    # per-group update.
-                    self.tensormap_update_sync_barrier.arrive_and_wait()
+                # ((atom_v, rest_v), RestK)
+                tAgA_slice = tAgA[
+                    (None, mma_tile_coord_mnl[0], None, mma_tile_coord_mnl[2])
+                ]
+                # ((atom_v, rest_v), RestK)
+                tBgB_slice = tBgB[
+                    (None, mma_tile_coord_mnl[1], None, mma_tile_coord_mnl[2])
+                ]
+                # ((atom_v, rest_v), RestK)
+                tAgSFA_slice = tAgSFA[
+                    (None, mma_tile_coord_mnl[0], None, mma_tile_coord_mnl[2])
+                ]
+                # ((atom_v, rest_v), RestK)
+                tBgSFB_slice = tBgSFB[
+                    (None, mma_tile_coord_mnl[1], None, mma_tile_coord_mnl[2])
+                ]
 
-                    if is_scheduler_warp:
-                        tensormap_manager.fence_tensormap_update(tensormap_a_gmem_ptr)
-                        tensormap_manager.fence_tensormap_update(tensormap_b_gmem_ptr)
-                        tensormap_manager.fence_tensormap_update(tensormap_sfa_gmem_ptr)
-                        tensormap_manager.fence_tensormap_update(tensormap_sfb_gmem_ptr)
-
-                    if is_scheduler_warp or is_mainloop_load_warp:
-                        self.tensormap_fence_sync_barrier.arrive_and_wait()
-
-                if is_mainloop_load_warp:
-                    mma_tile_coord_mnl = (
-                        grouped_gemm_cta_tile_info.cta_tile_idx_m
-                        // cute.size(tiled_mma.thr_id.shape),
-                        grouped_gemm_cta_tile_info.cta_tile_idx_n,
-                        0,
+                # Peek (try_wait) AB buffer empty for k_tile = prefetch_k_tile_cnt
+                ab_producer_state.reset_count()
+                peek_ab_empty_status = cutlass.Boolean(1)
+                if ab_producer_state.count < cur_k_tile_cnt:
+                    peek_ab_empty_status = ab_pipeline.producer_try_acquire(
+                        ab_producer_state
                     )
 
-                    #
-                    # Slice to per mma tile index
-                    #
-                    # ((atom_v, rest_v), RestK)
-                    tAgA_slice = tAgA[
-                        (None, mma_tile_coord_mnl[0], None, mma_tile_coord_mnl[2])
-                    ]
-                    # ((atom_v, rest_v), RestK)
-                    tBgB_slice = tBgB[
-                        (None, mma_tile_coord_mnl[1], None, mma_tile_coord_mnl[2])
-                    ]
+                for k_tile in cutlass.range(
+                    0, cur_k_tile_cnt, 1, unroll=self.AB_TMA_LOAD_UNROLL
+                ):
+                    # Conditionally wait for AB buffer empty
+                    ab_pipeline.producer_acquire(
+                        ab_producer_state, peek_ab_empty_status
+                    )
 
-                    # ((atom_v, rest_v), RestK)
-                    tAgSFA_slice = tAgSFA[
-                        (None, mma_tile_coord_mnl[0], None, mma_tile_coord_mnl[2])
-                    ]
-                    # ((atom_v, rest_v), RestK)
-                    tBgSFB_slice = tBgSFB[
-                        (None, mma_tile_coord_mnl[1], None, mma_tile_coord_mnl[2])
-                    ]
+                    # Pipeline state count/index are stored as per-thread
+                    # Int32 even though they're warp-invariant. Promote
+                    # to uniform once so the 4 cute.copy calls below share
+                    # one R2UR.BROADCAST instead of each emitting their
+                    # own internally.
+                    ab_state_count = cute.arch.make_warp_uniform(
+                        ab_producer_state.count
+                    )
+                    ab_state_index = cute.arch.make_warp_uniform(
+                        ab_producer_state.index
+                    )
+                    tma_bar = ab_pipeline.producer_get_barrier(ab_producer_state)
 
-                    # Peek (try_wait) AB buffer empty for k_tile = prefetch_k_tile_cnt
-                    ab_producer_state.reset_count()
+                    # TMA load A/B/SFA/SFB
+                    cute.copy(
+                        tma_atom_a,
+                        tAgA_slice[(None, ab_state_count)],
+                        tAsA[(None, ab_state_index)],
+                        tma_bar_ptr=tma_bar,
+                        mcast_mask=a_full_mcast_mask,
+                        tma_desc_ptr=tma_desc_a,
+                    )
+                    cute.copy(
+                        tma_atom_b,
+                        tBgB_slice[(None, ab_state_count)],
+                        tBsB[(None, ab_state_index)],
+                        tma_bar_ptr=tma_bar,
+                        mcast_mask=b_full_mcast_mask,
+                        tma_desc_ptr=tma_desc_b,
+                    )
+                    cute.copy(
+                        tma_atom_sfa,
+                        tAgSFA_slice[(None, ab_state_count)],
+                        tAsSFA[(None, ab_state_index)],
+                        tma_bar_ptr=tma_bar,
+                        mcast_mask=sfa_full_mcast_mask,
+                        tma_desc_ptr=tma_desc_sfa,
+                    )
+                    cute.copy(
+                        tma_atom_sfb,
+                        tBgSFB_slice[(None, ab_state_count)],
+                        tBsSFB[(None, ab_state_index)],
+                        tma_bar_ptr=tma_bar,
+                        mcast_mask=sfb_full_mcast_mask,
+                        tma_desc_ptr=tma_desc_sfb,
+                    )
+
+                    # Peek (try_wait) AB buffer empty for k_tile = prefetch_k_tile_cnt + k_tile + 1
+                    ab_producer_state.advance()
                     peek_ab_empty_status = cutlass.Boolean(1)
                     if ab_producer_state.count < cur_k_tile_cnt:
                         peek_ab_empty_status = ab_pipeline.producer_try_acquire(
                             ab_producer_state
                         )
-
-                    #
-                    # Tma load loop
-                    #
-                    for k_tile in cutlass.range(
-                        0, cur_k_tile_cnt, 1, unroll=self.AB_TMA_LOAD_UNROLL
-                    ):
-                        # Conditionally wait for AB buffer empty
-                        ab_pipeline.producer_acquire(
-                            ab_producer_state, peek_ab_empty_status
-                        )
-
-                        # TMA load A/B/SFA/SFB
-                        cute.copy(
-                            tma_atom_a,
-                            tAgA_slice[(None, ab_producer_state.count)],
-                            tAsA[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=a_full_mcast_mask,
-                            tma_desc_ptr=tensormap_manager.get_tensormap_ptr(
-                                tensormap_a_gmem_ptr,
-                                cute.AddressSpace.generic,
-                            ),
-                        )
-                        cute.copy(
-                            tma_atom_b,
-                            tBgB_slice[(None, ab_producer_state.count)],
-                            tBsB[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=b_full_mcast_mask,
-                            tma_desc_ptr=tensormap_manager.get_tensormap_ptr(
-                                tensormap_b_gmem_ptr,
-                                cute.AddressSpace.generic,
-                            ),
-                        )
-                        cute.copy(
-                            tma_atom_sfa,
-                            tAgSFA_slice[(None, ab_producer_state.count)],
-                            tAsSFA[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=sfa_full_mcast_mask,
-                            tma_desc_ptr=tensormap_manager.get_tensormap_ptr(
-                                tensormap_sfa_gmem_ptr,
-                                cute.AddressSpace.generic,
-                            ),
-                        )
-                        cute.copy(
-                            tma_atom_sfb,
-                            tBgSFB_slice[(None, ab_producer_state.count)],
-                            tBsSFB[(None, ab_producer_state.index)],
-                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
-                                ab_producer_state
-                            ),
-                            mcast_mask=sfb_full_mcast_mask,
-                            tma_desc_ptr=tensormap_manager.get_tensormap_ptr(
-                                tensormap_sfb_gmem_ptr,
-                                cute.AddressSpace.generic,
-                            ),
-                        )
-
-                        # Peek (try_wait) AB buffer empty for k_tile = prefetch_k_tile_cnt + k_tile + 1
-                        ab_producer_state.advance()
-                        peek_ab_empty_status = cutlass.Boolean(1)
-                        if ab_producer_state.count < cur_k_tile_cnt:
-                            peek_ab_empty_status = ab_pipeline.producer_try_acquire(
-                                ab_producer_state
-                            )
-
-                #
-                # Advance to next tile
-                #
-                tile_sched.advance_to_next_work()
-                work_tile = tile_sched.get_current_work()
                 last_group_idx = cur_group_idx
 
-            # Ensure producer-side warps arrive at the tensormap init
-            # barrier even when this CTA had no valid work tiles, so
-            # the MMA warp (which unconditionally waits) does not
-            # deadlock.
+                #
+                # Advance to next tile via CLC pipeline
+                #
+                clc_state.consumer_wait()
+                work_tile = clc_state.get_current_work(total_num_clusters[0])
+                clc_state.consumer_release()
+
+            # Ensure the mainload warp arrives on the tensormap init barrier
+            # even when this CTA had no valid work tiles, so the MMA warp
+            # (which unconditionally waits) does not deadlock. Scheduler
+            # warp no longer uses the descriptor, so it doesn't arrive.
             if not tensormap_init_done:
                 self.tensormap_ab_init_barrier.arrive_and_wait()
 
             #
             # Wait A/B buffer empty
             #
-            if is_mainloop_load_warp:
-                ab_pipeline.producer_tail(ab_producer_state)
+            ab_pipeline.producer_tail(ab_producer_state)
 
         #
         # Specialized MMA warp
         #
         if warp_idx == self.mma_warp_id:
-            cute.arch.warpgroup_reg_dealloc(self.GENERIC_REG_REQUIREMENT)
+            cute.arch.setmaxregister_decrease(self.GENERIC_REG_REQUIREMENT)
             #
             # Initialize tensormaps for A, B, SFA and SFB
             #
@@ -1339,19 +1480,16 @@ class Sm100GroupedBlockScaledGemmKernel:
             )
 
             #
-            # Persistent tile scheduling loop
+            # Persistent tile scheduling loop — CLC-driven
             #
-            tile_sched = utils.StaticPersistentTileScheduler.create(
-                tile_sched_params, cute.arch.block_idx(), grid_dim
-            )
-            mma_group_gemm_ts_helper = utils.GroupedGemmTileSchedulerHelper(
+            mma_group_gemm_ts_helper = ClcGroupedGemmTileSchedulerHelper.create_for_clc(
                 group_count,
                 tile_sched_params,
                 self.cluster_tile_shape_mnk,
-                utils.create_initial_search_state(),
+                problem_sizes_mnkl,
             )
 
-            work_tile = tile_sched.initial_work_tile_info()
+            work_tile = clc_state.initial_work_tile_info(total_num_clusters[0])
             ab_consumer_state = pipeline.make_pipeline_state(
                 pipeline.PipelineUserType.Consumer, self.num_ab_stage
             )
@@ -1361,10 +1499,7 @@ class Sm100GroupedBlockScaledGemmKernel:
             while work_tile.is_valid_tile:
                 cur_tile_coord = work_tile.tile_idx
                 # MMA warp is only interested in number of tiles along K dimension
-                (
-                    cur_k_tile_cnt,
-                    cur_group_idx,
-                ) = mma_group_gemm_ts_helper.search_cluster_tile_count_k(
+                cur_k_tile_cnt, _ = mma_group_gemm_ts_helper.search_cluster_tile_count_k(
                     cur_tile_coord,
                     problem_sizes_mnkl,
                 )
@@ -1474,10 +1609,11 @@ class Sm100GroupedBlockScaledGemmKernel:
                 acc_producer_state.advance()
 
                 #
-                # Advance to next tile
+                # Advance to next tile via CLC pipeline
                 #
-                tile_sched.advance_to_next_work()
-                work_tile = tile_sched.get_current_work()
+                clc_state.consumer_wait()
+                work_tile = clc_state.get_current_work(total_num_clusters[0])
+                clc_state.consumer_release()
 
             #
             # Wait for accumulator buffer empty
@@ -1485,81 +1621,20 @@ class Sm100GroupedBlockScaledGemmKernel:
             acc_pipeline.producer_tail(acc_producer_state)
 
         #
-        # Specialized epilogue descriptor warp
-        #
-        if warp_idx == self.epilogue_load_warp_id:
-            cute.arch.warpgroup_reg_dealloc(self.GENERIC_REG_REQUIREMENT)
-            self.epilog_tensormap_init_barrier.arrive_and_wait()
-            tile_sched = utils.StaticPersistentTileScheduler.create(
-                tile_sched_params, cute.arch.block_idx(), grid_dim
-            )
-            group_gemm_ts_helper = utils.GroupedGemmTileSchedulerHelper(
-                group_count,
-                tile_sched_params,
-                self.cluster_tile_shape_mnk,
-                utils.create_initial_search_state(),
-            )
-            work_tile = tile_sched.initial_work_tile_info()
-            last_group_idx = cutlass.Int32(-1)
-
-            while work_tile.is_valid_tile:
-                cur_tile_coord = work_tile.tile_idx
-                grouped_gemm_cta_tile_info = group_gemm_ts_helper.delinearize_z(
-                    cur_tile_coord,
-                    problem_sizes_mnkl,
-                )
-                cur_group_idx = grouped_gemm_cta_tile_info.group_idx
-                is_group_changed = cur_group_idx != last_group_idx
-
-                if is_group_changed:
-                    # Construct tensor C with real shape/stride and
-                    # update descriptor.
-                    real_tensor_c = self.make_tensor_abc_for_tensormap_update(
-                        cur_group_idx,
-                        self.c_dtype,
-                        (
-                            grouped_gemm_cta_tile_info.problem_shape_m,
-                            grouped_gemm_cta_tile_info.problem_shape_n,
-                            grouped_gemm_cta_tile_info.problem_shape_k,
-                        ),
-                        strides_abc,
-                        ptrs_abc,
-                        2,  # 2 for tensor C
-                    )
-                    tensormap_manager.update_tensormap(
-                        (real_tensor_c,),
-                        (tma_atom_c,),
-                        (tensormap_c_gmem_ptr,),
-                        self.epilogue_load_warp_id,
-                        (tensormap_c_smem_ptr,),
-                    )
-                    tensormap_manager.fence_tensormap_update(tensormap_c_gmem_ptr)
-
-                # Handshake with epilogue producer warp for this tile.
-                self.epilog_tensormap_ready_barrier.arrive_and_wait()
-
-                # Wait until epilogue producer warp completes C stores
-                # for this tile before advancing and potentially
-                # updating next-tile descriptor.
-                self.epilog_tensormap_tile_done_barrier.arrive_and_wait()
-
-                tile_sched.advance_to_next_work()
-                work_tile = tile_sched.get_current_work()
-                last_group_idx = cur_group_idx
-
-        #
         # Specialized epilogue warps
         #
         if warp_idx >= self.epilog_warp_id[0] and warp_idx <= self.epilog_warp_id[-1]:
-            cute.arch.warpgroup_reg_alloc(self.ACCUM_REG_REQUIREMENT)
-            # Initialize tensormap for C
+            cute.arch.setmaxregister_increase(self.ACCUM_REG_REQUIREMENT)
+            # Initialize tensormap for C. The async copy is drained inside
+            # update_tensormap (via cp_async_bulk_wait_group) on the first
+            # group-change iteration below, which is always the first
+            # iteration when starting from last_group_idx = -1, so no
+            # cross-warp init barrier is needed.
             tensormap_manager.init_tensormap_from_atom(
                 tma_atom_c,
                 tensormap_c_smem_ptr,
                 self.epilog_warp_id[0],
             )
-            if warp_idx == self.epilog_warp_id[0]:
-                self.epilog_tensormap_init_barrier.arrive_and_wait()
             # Allocate tensor memory buffer.
             if warp_idx == self.epilog_warp_id[0]:
                 cute.arch.alloc_tmem(
@@ -1605,17 +1680,18 @@ class Sm100GroupedBlockScaledGemmKernel:
             #
             # Persistent tile scheduling loop
             #
-            tile_sched = utils.StaticPersistentTileScheduler.create(
-                tile_sched_params, cute.arch.block_idx(), grid_dim
-            )
             # grouped gemm tile scheduler helper will compute the group index for the tile we're working on
-            group_gemm_ts_helper = utils.GroupedGemmTileSchedulerHelper(
+            group_gemm_ts_helper = ClcGroupedGemmTileSchedulerHelper.create_for_clc(
                 group_count,
                 tile_sched_params,
                 self.cluster_tile_shape_mnk,
-                utils.create_initial_search_state(),
+                problem_sizes_mnkl,
             )
-            work_tile = tile_sched.initial_work_tile_info()
+            work_tile = clc_state.initial_work_tile_info(total_num_clusters[0])
+            # Count tiles consumed by this warp; replaces tile_sched.num_tiles_executed.
+            # Each iteration produces subtile_cnt subtiles; num_prev_subtiles is used
+            # to index into the c_buffer rotation.
+            epilog_tile_count = cutlass.Int32(0)
 
             acc_consumer_state = pipeline.make_pipeline_state(
                 pipeline.PipelineUserType.Consumer, self.num_acc_stage
@@ -1631,21 +1707,59 @@ class Sm100GroupedBlockScaledGemmKernel:
                 producer_group=c_producer_group,
             )
 
+            # Hoist the C tensormap generic-space pointer out of the subtile
+            # loop -- it's an inttoptr conversion of a kernel-wide constant.
+            tma_desc_c = tensormap_manager.get_tensormap_ptr(
+                tensormap_c_gmem_ptr, cute.AddressSpace.generic
+            )
+            # Track group transitions for inline C tensormap updates (done by
+            # warp epilog_warp_id[0] only; the trailing epilog_sync_barrier
+            # serves as the post-update sync for the other epilog warps).
+            last_group_idx = cutlass.Int32(-1)
+
             while work_tile.is_valid_tile:
                 cur_tile_coord = work_tile.tile_idx
-                grouped_gemm_cta_tile_info = group_gemm_ts_helper.delinearize_z(
-                    cur_tile_coord,
-                    problem_sizes_mnkl,
+                cur_group_idx, cta_tile_idx_m, cta_tile_idx_n = (
+                    group_gemm_ts_helper.delinearize_z_mn(
+                        cur_tile_coord,
+                        problem_sizes_mnkl,
+                    )
                 )
-                cur_group_idx = grouped_gemm_cta_tile_info.group_idx
-                if warp_idx == self.epilog_warp_id[0]:
-                    self.epilog_tensormap_ready_barrier.arrive_and_wait()
+                is_group_changed = cur_group_idx != last_group_idx
+                if is_group_changed and warp_idx == self.epilog_warp_id[0]:
+                    # Inline C tensormap update; replaces the cross-warp
+                    # ready/tile_done barrier dance the old epi_load warp used.
+                    grouped_gemm_cta_tile_info = group_gemm_ts_helper.delinearize_z(
+                        cur_tile_coord,
+                        problem_sizes_mnkl,
+                    )
+                    real_tensor_c = self.make_tensor_abc_for_tensormap_update(
+                        cur_group_idx,
+                        self.c_dtype,
+                        (
+                            grouped_gemm_cta_tile_info.problem_shape_m,
+                            grouped_gemm_cta_tile_info.problem_shape_n,
+                            grouped_gemm_cta_tile_info.problem_shape_k,
+                        ),
+                        strides_abc,
+                        ptrs_abc,
+                        2,  # tensor C
+                    )
+                    tensormap_manager.update_tensormap(
+                        (real_tensor_c,),
+                        (tma_atom_c,),
+                        (tensormap_c_gmem_ptr,),
+                        self.epilog_warp_id[0],
+                        (tensormap_c_smem_ptr,),
+                    )
+                    tensormap_manager.fence_tensormap_update(tensormap_c_gmem_ptr)
+                # All four epilog warps sync here; this also ensures the
+                # C descriptor update above is visible before TMA store below.
                 self.epilog_sync_barrier.arrive_and_wait()
 
                 mma_tile_coord_mnl = (
-                    grouped_gemm_cta_tile_info.cta_tile_idx_m
-                    // cute.size(tiled_mma.thr_id.shape),
-                    grouped_gemm_cta_tile_info.cta_tile_idx_n,
+                    cta_tile_idx_m // cute.size(tiled_mma.thr_id.shape),
+                    cta_tile_idx_n,
                     0,
                 )
                 # ((ATOM_V, REST_V), EPI_M, EPI_N)
@@ -1675,7 +1789,11 @@ class Sm100GroupedBlockScaledGemmKernel:
                 # Store accumulator to global memory in subtiles
                 #
                 subtile_cnt = cute.size(tTR_tAcc.shape, mode=[3])
-                num_prev_subtiles = tile_sched.num_tiles_executed * subtile_cnt
+                num_prev_subtiles = epilog_tile_count * subtile_cnt
+                # Per-group scalar; hoisted out of the subtile loop.
+                global_scale = self.load_global_scale_for_group(
+                    cur_group_idx, tensor_addr_global_scale
+                )
                 for subtile_idx in cutlass.range(subtile_cnt, unroll_full=True):
                     #
                     # Load accumulator from tensor memory buffer to register
@@ -1687,9 +1805,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                     # Convert to C type
                     #
                     acc_vec = tiled_copy_r2s.retile(tTR_rAcc).load()
-                    acc_vec = acc_vec * self.load_global_scale_for_group(
-                        cur_group_idx, tensor_addr_global_scale
-                    )
+                    acc_vec = acc_vec * global_scale
                     tRS_rC.store(acc_vec.to(self.c_dtype))
 
                     #
@@ -1702,10 +1818,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                         tRS_sC[(None, None, None, c_buffer)],
                     )
                     # Fence and barrier to make sure shared memory store is visible to TMA store
-                    cute.arch.fence_proxy(
-                        cute.arch.ProxyKind.async_shared,
-                        space=cute.arch.SharedSpace.shared_cta,
-                    )
+                    cute.arch.fence_proxy("async.shared", space="cta")
                     self.epilog_sync_barrier.arrive_and_wait()
 
                     #
@@ -1716,10 +1829,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                             tma_atom_c,
                             bSG_sC[(None, c_buffer)],
                             bSG_gC[(None, subtile_idx)],
-                            tma_desc_ptr=tensormap_manager.get_tensormap_ptr(
-                                tensormap_c_gmem_ptr,
-                                cute.AddressSpace.generic,
-                            ),
+                            tma_desc_ptr=tma_desc_c,
                         )
                         c_pipeline.producer_commit()
                         c_pipeline.producer_acquire()
@@ -1734,12 +1844,13 @@ class Sm100GroupedBlockScaledGemmKernel:
                 acc_consumer_state.advance()
 
                 #
-                # Advance to next tile
+                # Advance to next tile via CLC pipeline
                 #
-                tile_sched.advance_to_next_work()
-                work_tile = tile_sched.get_current_work()
-                if warp_idx == self.epilog_warp_id[0]:
-                    self.epilog_tensormap_tile_done_barrier.arrive_and_wait()
+                epilog_tile_count += 1
+                last_group_idx = cur_group_idx
+                clc_state.consumer_wait()
+                work_tile = clc_state.get_current_work(total_num_clusters[0])
+                clc_state.consumer_release()
 
             #
             # Dealloc the tensor memory buffer

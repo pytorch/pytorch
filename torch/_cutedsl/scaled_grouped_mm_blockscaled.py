@@ -83,9 +83,12 @@ def _get_blockscaled_format(
     mat_b: Tensor,
     scale_a: Sequence[Tensor],
     scale_b: Sequence[Tensor],
-    scale_recipe_a: Sequence[ScalingType],
-    scale_recipe_b: Sequence[ScalingType],
+    scale_recipe_a: Sequence[ScalingType | int],
+    scale_recipe_b: Sequence[ScalingType | int],
 ) -> _BlockScaledFormat | None:
+    def _recipe_matches(value: ScalingType | int, expected: ScalingType) -> bool:
+        return value == expected or value == expected.value
+
     for fmt in _BLOCKSCALED_FORMATS:
         if fmt.torch_global_scale_dtype is None:
             if len(scale_a) != 1 or len(scale_b) != 1:
@@ -97,8 +100,8 @@ def _get_blockscaled_format(
                 and mat_b.dtype == fmt.torch_ab_dtype
                 and scale_a[0].dtype == fmt.torch_scale_ab_dtype
                 and scale_b[0].dtype == fmt.torch_scale_ab_dtype
-                and scale_recipe_a[0] == fmt.scale_ab_recipe
-                and scale_recipe_b[0] == fmt.scale_ab_recipe
+                and _recipe_matches(scale_recipe_a[0], fmt.scale_ab_recipe)
+                and _recipe_matches(scale_recipe_b[0], fmt.scale_ab_recipe)
             ):
                 return fmt
             continue
@@ -113,10 +116,10 @@ def _get_blockscaled_format(
             and scale_b[0].dtype == fmt.torch_scale_ab_dtype
             and scale_a[1].dtype == fmt.torch_global_scale_dtype
             and scale_b[1].dtype == fmt.torch_global_scale_dtype
-            and scale_recipe_a[0] == fmt.scale_ab_recipe
-            and scale_recipe_a[1] == ScalingType.TensorWise
-            and scale_recipe_b[0] == fmt.scale_ab_recipe
-            and scale_recipe_b[1] == ScalingType.TensorWise
+            and _recipe_matches(scale_recipe_a[0], fmt.scale_ab_recipe)
+            and _recipe_matches(scale_recipe_a[1], ScalingType.TensorWise)
+            and _recipe_matches(scale_recipe_b[0], fmt.scale_ab_recipe)
+            and _recipe_matches(scale_recipe_b[1], ScalingType.TensorWise)
         ):
             return fmt
     return None
@@ -150,6 +153,15 @@ def assert_cutedsl_runtime_available() -> None:
         "(from NVIDIA cuda-python); "
         f"{reason}"
     )
+
+
+@functools.cache
+def _is_blackwell_device(device_id: int) -> bool:
+    try:
+        major, _ = torch.cuda.get_device_capability(device_id)
+    except Exception:
+        return False
+    return major == 10
 
 
 def _select_kernel_config_fp8(M: int, N: int, K: int) -> _KernelConfig:
@@ -578,6 +590,7 @@ def _allocate_output(
 def _compile_scaled_grouped_mm_blockscaled(
     sm_count: int,
     max_active_clusters: int,
+    estimate_total_num_clusters: int,
     mma_tile_mn: tuple[int, int],
     cluster_shape_mn: tuple[int, int],
     transpose_ab: bool,
@@ -691,7 +704,7 @@ def _compile_scaled_grouped_mm_blockscaled(
             strides_abc=fake_strides,
             tensor_address_abc=fake_ptrs_abc,
             tensor_address_sfasfb=fake_ptrs_scale,
-            estimate_total_num_clusters=max_active_clusters,
+            estimate_total_num_clusters=estimate_total_num_clusters,
             total_num_clusters=fake_total_clusters,
             tensormap_cute_tensor=fake_tensormap,
             max_active_clusters=max_active_clusters,
@@ -715,6 +728,57 @@ def _get_schedule_meta(cluster_size: int, device_id: int) -> tuple[int, int]:
     sm_count = hw.get_max_active_clusters(1)
     max_active_clusters = hw.get_max_active_clusters(cluster_size)
     return sm_count, max_active_clusters
+
+
+@functools.cache
+def _get_max_threads_per_block(device_id: int) -> int:
+    props = torch.cuda.get_device_properties(device_id)
+    return int(getattr(props, "max_threads_per_block", 1024))
+
+
+def _ceil_div_int(a: int, b: int) -> int:
+    return (a + b - 1) // b
+
+
+def _get_cluster_tile_shape_mn(
+    mma_tile_mn: tuple[int, int], cluster_shape_mn: tuple[int, int]
+) -> tuple[int, int]:
+    cta_tile_m = mma_tile_mn[0]
+    if mma_tile_mn[0] == 256:
+        cta_tile_m //= 2
+    return cta_tile_m * cluster_shape_mn[0], mma_tile_mn[1] * cluster_shape_mn[1]
+
+
+def _estimate_total_clusters_for_launch(
+    *,
+    a_is_2d: bool,
+    b_is_2d: bool,
+    transpose_ab: bool,
+    ngroups: int,
+    M: int,
+    N: int,
+    cluster_tile_m: int,
+    cluster_tile_n: int,
+) -> int:
+    if a_is_2d and b_is_2d:
+        if transpose_ab:
+            return (
+                ngroups
+                * _ceil_div_int(N, cluster_tile_m)
+                * _ceil_div_int(M, cluster_tile_n)
+            )
+        return (
+            ngroups
+            * _ceil_div_int(M, cluster_tile_m)
+            * _ceil_div_int(N, cluster_tile_n)
+        )
+
+    if transpose_ab:
+        grouped_tiles = _ceil_div_int(M, cluster_tile_n) + max(ngroups - 1, 0)
+        return _ceil_div_int(N, cluster_tile_m) * grouped_tiles
+
+    grouped_tiles = _ceil_div_int(M, cluster_tile_m) + max(ngroups - 1, 0)
+    return grouped_tiles * _ceil_div_int(N, cluster_tile_n)
 
 
 @functools.cache
@@ -763,6 +827,20 @@ def _get_aux_tensors(
         strides_abc[:ngroups],
         total_num_clusters,
     )
+
+
+@functools.cache
+def _alloc_unit_global_scales(device_index: int, cap: int) -> Tensor:
+    device = torch.device("cuda", device_index)
+    return torch.ones((cap,), device=device, dtype=torch.float32)
+
+
+def _get_unit_global_scales(ngroups: int, device: torch.device) -> Tensor:
+    cap = max(64, 1 << (ngroups - 1).bit_length())
+    device_index = (
+        device.index if device.index is not None else torch.cuda.current_device()
+    )
+    return _alloc_unit_global_scales(device_index, cap)[:ngroups]
 
 
 @functools.cache
@@ -850,6 +928,10 @@ def scaled_grouped_mm_blockscaled(
         raise ValueError("bias is not supported for scaled grouped MM")
 
     ngroups = int(offs.numel())
+    mat_a_m = int(mat_a.size(0))
+    mat_a_physical_k = int(mat_a.size(-1))
+    mat_b_n = int(mat_b.size(-1))
+    mat_b_physical_k = int(mat_b.size(0 if b_is_2d else -2))
     global_scales = None
     if fmt.torch_global_scale_dtype is not None:
         if scale_a[1].numel() != ngroups or scale_b[1].numel() != ngroups:
@@ -878,9 +960,8 @@ def scaled_grouped_mm_blockscaled(
 
     if use_fast_accum:
         raise ValueError("use_fast_accum is not supported for scaled grouped MM")
-    logical_k_a = int(mat_a.size(-1)) * fmt.logical_vals_per_elem
-    physical_k_b = int(mat_b.size(0 if b_is_2d else -2))
-    logical_k_b = physical_k_b * fmt.logical_vals_per_elem
+    logical_k_a = mat_a_physical_k * fmt.logical_vals_per_elem
+    logical_k_b = mat_b_physical_k * fmt.logical_vals_per_elem
     if a_is_2d and not b_is_2d:
         if contraction_dim and tuple(contraction_dim) != (-1, -2):
             raise ValueError("contraction_dim must be (-1, -2) if provided")
@@ -896,37 +977,45 @@ def scaled_grouped_mm_blockscaled(
 
     if a_is_2d and b_is_2d and logical_k_a != logical_k_b:
         raise ValueError("for 2d/2d grouped gemm, total K dimensions must match")
-    if a_is_2d and not b_is_2d and ngroups != mat_b.size(0):
+    if a_is_2d and not b_is_2d and ngroups != int(mat_b.size(0)):
         raise ValueError("for 2d/3d grouped gemm, offs size must match mat_b.size(0)")
 
     device = mat_a.device
-
-    props = torch.cuda.get_device_properties(device)
-    max_threads = int(getattr(props, "max_threads_per_block", 1024))
-    threads_per_block = min(ngroups, max_threads)
-    num_blocks = (ngroups + threads_per_block - 1) // threads_per_block
-
-    m_for_heuristic = mat_a.size(0) if b_is_2d else (mat_a.size(0) // max(ngroups, 1))
-    k_for_heuristic = logical_k_a // max(ngroups, 1) if b_is_2d else logical_k_a
-    if fmt.name in ("mxfp4", "nvfp4"):
-        config = _select_kernel_config_fp4(
-            m_for_heuristic, mat_b.size(-1), k_for_heuristic
-        )
-    else:
-        config = _select_kernel_config_fp8(
-            m_for_heuristic, mat_b.size(-1), k_for_heuristic
-        )
-
-    cluster_size = config.cluster_shape_mn[0] * config.cluster_shape_mn[1]
     device_id = (
         device.index if device.index is not None else torch.cuda.current_device()
     )
+    max_threads = _get_max_threads_per_block(device_id)
+    threads_per_block = min(ngroups, max_threads)
+    num_blocks = (ngroups + threads_per_block - 1) // threads_per_block
+
+    m_for_heuristic = mat_a_m if b_is_2d else (mat_a_m // max(ngroups, 1))
+    k_for_heuristic = logical_k_a // max(ngroups, 1) if b_is_2d else logical_k_a
+    if fmt.name in ("mxfp4", "nvfp4"):
+        config = _select_kernel_config_fp4(m_for_heuristic, mat_b_n, k_for_heuristic)
+    else:
+        config = _select_kernel_config_fp8(m_for_heuristic, mat_b_n, k_for_heuristic)
+
+    cluster_size = config.cluster_shape_mn[0] * config.cluster_shape_mn[1]
     sm_count, max_active_clusters = _get_schedule_meta(cluster_size, device_id)
+    cluster_tile_m, cluster_tile_n = _get_cluster_tile_shape_mn(
+        config.mma_tile_mn, config.cluster_shape_mn
+    )
+    estimate_total_num_clusters = _estimate_total_clusters_for_launch(
+        a_is_2d=a_is_2d,
+        b_is_2d=b_is_2d,
+        transpose_ab=config.transpose_ab,
+        ngroups=ngroups,
+        M=mat_a_m,
+        N=mat_b_n,
+        cluster_tile_m=cluster_tile_m,
+        cluster_tile_n=cluster_tile_n,
+    )
 
     scaled_grouped_mm_blockscaled_compiled, cluster_tile_shape_mnk = (
         _compile_scaled_grouped_mm_blockscaled(
             sm_count,
             max_active_clusters,
+            estimate_total_num_clusters,
             config.mma_tile_mn,
             config.cluster_shape_mn,
             config.transpose_ab,
@@ -950,11 +1039,9 @@ def scaled_grouped_mm_blockscaled(
         cluster_tile_m = int(cluster_tile_shape_mnk[0])
         cluster_tile_n = int(cluster_tile_shape_mnk[1])
     except Exception:
-        cta_tile_m = config.mma_tile_mn[0]
-        if config.mma_tile_mn[0] == 256:
-            cta_tile_m //= 2
-        cluster_tile_m = cta_tile_m * config.cluster_shape_mn[0]
-        cluster_tile_n = config.mma_tile_mn[1] * config.cluster_shape_mn[1]
+        cluster_tile_m, cluster_tile_n = _get_cluster_tile_shape_mn(
+            config.mma_tile_mn, config.cluster_shape_mn
+        )
     scaled_grouped_mm_prepare_metadata_compiled = (
         _compile_scaled_grouped_mm_prepare_metadata(a_is_2d, b_is_2d, threads_per_block)
     )
@@ -964,58 +1051,71 @@ def scaled_grouped_mm_blockscaled(
     stream = cuda_driver.CUstream(int(torch.cuda.current_stream().cuda_stream))
 
     if global_scales is None:
-        global_scales = torch.ones((ngroups,), device=device, dtype=torch.float32)
+        global_scales = _get_unit_global_scales(ngroups, device)
+
+    scale_a0 = scale_a[0]
+    scale_b0 = scale_b[0]
+    mat_a_ptr = int(mat_a.data_ptr())
+    mat_b_ptr = int(mat_b.data_ptr())
+    out_ptr = int(out.data_ptr())
+    scale_a_ptr = int(scale_a0.data_ptr())
+    scale_b_ptr = int(scale_b0.data_ptr())
+    global_scale_ptr = int(global_scales.data_ptr())
+    mat_a_stride = tuple(map(int, mat_a.stride()))
+    mat_b_stride = tuple(map(int, mat_b.stride()))
+    out_stride = tuple(map(int, out[0].stride() if b_is_2d else out.stride()))
+    scale_a_stride = tuple(map(int, scale_a0.stride()))
+    scale_b_stride = tuple(map(int, scale_b0.stride()))
+    mat_a_element_size = int(mat_a.element_size())
+    scale_a_element_size = int(scale_a0.element_size())
+    out_element_size = int(out.element_size())
 
     if b_is_2d:
         if a_is_2d and fmt.logical_vals_per_elem > 1:
             stride_b_logical = (0, 1, logical_k_a)
         else:
-            stride_b_logical = (0, int(mat_b.stride(0)), int(mat_b.stride(1)))
+            stride_b_logical = (0, mat_b_stride[0], mat_b_stride[1])
     elif fmt.logical_vals_per_elem > 1:
-        stride_b_logical = (int(mat_b.stride(0)), 1, logical_k_a)
+        stride_b_logical = (mat_b_stride[0], 1, logical_k_a)
     else:
-        stride_b_logical = tuple(map(int, mat_b.stride()))
+        stride_b_logical = mat_b_stride
 
     scaled_grouped_mm_prepare_metadata_compiled(
         ngroups,
-        int(mat_a.size(0)),
-        int(mat_b.size(-1)),
+        mat_a_m,
+        mat_b_n,
         logical_k_a,
-        int(mat_a.data_ptr()),
-        int(mat_b.data_ptr()),
-        int(out.data_ptr()),
-        int(scale_a[0].data_ptr()),
-        int(scale_b[0].data_ptr()),
-        int(global_scales.data_ptr()),
+        mat_a_ptr,
+        mat_b_ptr,
+        out_ptr,
+        scale_a_ptr,
+        scale_b_ptr,
+        global_scale_ptr,
         offs,
         fmt.logical_vals_per_elem,
         fmt.scale_ab_vec_size,
-        int(mat_a.element_size()),
-        int(scale_a[0].element_size()),
-        int(out.element_size()),
+        mat_a_element_size,
+        scale_a_element_size,
+        out_element_size,
         4,
-        tuple(map(int, mat_a.stride())),
-        (
-            (0, int(mat_b.stride(0)), int(mat_b.stride(1)))
-            if b_is_2d
-            else tuple(map(int, mat_b.stride()))
-        ),
+        mat_a_stride,
+        (0, mat_b_stride[0], mat_b_stride[1]) if b_is_2d else mat_b_stride,
         (
             (logical_k_a, 1)
             if a_is_2d and fmt.logical_vals_per_elem > 1
-            else tuple(map(int, mat_a.stride()))
+            else mat_a_stride
         ),
         stride_b_logical,
-        tuple(map(int, out[0].stride() if b_is_2d else out.stride())),
+        out_stride,
         (
             (
                 _round_up(logical_k_a // fmt.scale_ab_vec_size, 4),
                 1,
             )
             if (not b_is_2d) and fmt.name == "nvfp4"
-            else tuple(map(int, scale_a[0].stride()))
+            else scale_a_stride
         ),
-        tuple(map(int, scale_b[0].stride())),
+        scale_b_stride,
         int(config.transpose_ab),
         cluster_tile_m,
         cluster_tile_n,
@@ -1047,8 +1147,8 @@ def scaled_grouped_mm_blockscaled(
             if b_is_2d
             else (out.transpose(0, 1) if config.transpose_ab else out)
         ),
-        _with_l_dim(scale_a[0]),
-        _with_l_dim(scale_b[0]),
+        _with_l_dim(scale_a0),
+        _with_l_dim(scale_b0),
         ptrs_global_scale,
         ngroups,
         problem_sizes,
@@ -1098,11 +1198,12 @@ def _should_use_cutedsl_scaled_grouped_mm_blockscaled(
     b_dim = mat_b.dim()
     if not a_is_2d or (not b_is_2d and b_dim != 3):
         return False
-    try:
-        major, _ = torch.cuda.get_device_capability(mat_a.device)
-    except Exception:
-        return False
-    if major != 10:
+    device_id = (
+        mat_a.device.index
+        if mat_a.device.index is not None
+        else torch.cuda.current_device()
+    )
+    if not _is_blackwell_device(device_id):
         return False
     if not isinstance(scale_recipe_a, list) or not isinstance(scale_recipe_b, list):
         return False
@@ -1114,18 +1215,13 @@ def _should_use_cutedsl_scaled_grouped_mm_blockscaled(
         return False
     if swizzle_b[0] != SwizzleType.SWIZZLE_32_4_4.value:
         return False
-    try:
-        scale_recipe_a_enum = [ScalingType(v) for v in cast(list[int], scale_recipe_a)]
-        scale_recipe_b_enum = [ScalingType(v) for v in cast(list[int], scale_recipe_b)]
-    except Exception:
-        return False
     fmt = _get_blockscaled_format(
         mat_a,
         mat_b,
         cast(list[Tensor], scale_a),
         cast(list[Tensor], scale_b),
-        scale_recipe_a_enum,
-        scale_recipe_b_enum,
+        cast(list[int], scale_recipe_a),
+        cast(list[int], scale_recipe_b),
     )
     if fmt is None:
         return False

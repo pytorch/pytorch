@@ -133,6 +133,7 @@ errors.deprecated = false # re-enable after we've fix import formatting
 permissive-ignores = true
 replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*", "networkx.*"]
 search-path = ["tools/experimental"]
+enable-fallback-search-path = true
 
 # Dynamo sub-config - note, we experiment with stricter typing here
 [[sub-config]]
