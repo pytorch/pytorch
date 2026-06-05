@@ -135,14 +135,20 @@ def index_expanded_dims(t: torch.Tensor, expanded_dims: list[int]) -> torch.Tens
 # self-overlaps and a regular strided copy_ would be ambiguous: the overlap
 # pattern reproduces in dst because the underlying bytes are copied verbatim.
 def copy_strided_storage_(dst: torch.Tensor, src: torch.Tensor) -> None:
-    assert dst.dtype == src.dtype
-    assert tuple(dst.size()) == tuple(src.size())
-    assert tuple(dst.stride()) == tuple(src.stride())
+    if dst.dtype != src.dtype:
+        raise AssertionError(f"dtype mismatch: dst={dst.dtype} src={src.dtype}")
+    if tuple(dst.size()) != tuple(src.size()):
+        raise AssertionError(
+            f"size mismatch: dst={tuple(dst.size())} src={tuple(src.size())}"
+        )
+    if tuple(dst.stride()) != tuple(src.stride()):
+        raise AssertionError(
+            f"stride mismatch: dst={tuple(dst.stride())} src={tuple(src.stride())}"
+        )
     if dst.numel() == 0:
         return
-    assert all(st >= 0 for st in src.stride()), (
-        "copy_strided_storage_ requires non-negative strides"
-    )
+    if not (all(st >= 0 for st in src.stride())):
+        raise AssertionError("copy_strided_storage_ requires non-negative strides")
     elem = src.element_size()
     nbytes = (sum((s - 1) * st for s, st in zip(src.size(), src.stride())) + 1) * elem
     src_off = src.storage_offset() * elem

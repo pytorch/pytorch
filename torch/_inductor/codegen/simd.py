@@ -1566,9 +1566,13 @@ class _GroupedReductionLayout:
         local_reduction_size: sympy.Integer,
         local_reduction_in_r: bool,
     ) -> _GroupedReductionLayout:
-        assert len(kernel.range_trees) == 2
+        if len(kernel.range_trees) != 2:
+            raise AssertionError(
+                f"expected exactly 2 range trees, got {len(kernel.range_trees)}"
+            )
         x_tree, r_tree = kernel.range_trees
-        assert x_tree.prefix == "x"
+        if x_tree.prefix != "x":
+            raise AssertionError(f"expected x range tree, got {x_tree.prefix!r}")
         return cls(
             x_tree=x_tree,
             r_tree=r_tree,
@@ -1794,7 +1798,8 @@ class _GroupedReductionLayout:
         kernel: TritonKernel,
         value: CSEVariable,
     ) -> CSEVariable:
-        assert value.dtype is not None
+        if value.dtype is None:
+            raise AssertionError("value must have a known dtype")
         if value.shape is None or len(value.shape) < 2:
             # Some scalar or opaque CSE values do not carry block-shape
             # metadata. Pointwise consumers can still rely on Triton
@@ -1812,10 +1817,12 @@ class _GroupedReductionLayout:
         kernel: TritonKernel,
         value: CSEVariable,
     ) -> CSEVariable:
-        assert value.dtype is not None
-        assert value.shape is not None and len(value.shape) >= 2, (
-            "grouped reduction input must have a known parent-tile shape"
-        )
+        if value.dtype is None:
+            raise AssertionError("value must have a known dtype")
+        if not (value.shape is not None and len(value.shape) >= 2):
+            raise AssertionError(
+                "grouped reduction input must have a known parent-tile shape"
+            )
 
         return self._broadcast_value_to_parent_resolution(
             kernel,
@@ -1830,8 +1837,10 @@ class _GroupedReductionLayout:
         *,
         materialize_singleton: bool,
     ) -> CSEVariable:
-        assert value.dtype is not None
-        assert value.shape is not None and len(value.shape) >= 2
+        if value.dtype is None:
+            raise AssertionError("value must have a known dtype")
+        if not (value.shape is not None and len(value.shape) >= 2):
+            raise AssertionError("value must have a known parent-tile shape")
         parent_dim = str(value.shape[self.parent_axis])
         if parent_dim == self.parent_block or (
             parent_dim == "1" and not materialize_singleton
@@ -2574,7 +2583,8 @@ class SIMDScheduling(BaseScheduling):
                 node.domain_context,
             )
         )
-        assert nested_pointwise_domains is not None
+        if nested_pointwise_domains is None:
+            raise AssertionError("expected nested pointwise domains to be classified")
         pointwise_domain_by_node: dict[
             BaseSchedulerNode, scheduler.NestedReduction.PointwiseDomain
         ] = dict(nested_pointwise_domains)
@@ -2600,7 +2610,8 @@ class SIMDScheduling(BaseScheduling):
             grouped_numel,
             grouped_rnumel,
         )
-        assert any(sn is grouped_reduction for sn in grouped_schedule)
+        if not any(sn is grouped_reduction for sn in grouped_schedule):
+            raise AssertionError("grouped reduction must appear in grouped schedule")
         grouped_reduction_body = grouped_reduction._body
 
         combined_schedule = self.generate_node_schedule(
@@ -2628,9 +2639,8 @@ class SIMDScheduling(BaseScheduling):
             outer_rnumel,
             coalesce_analysis,
         )
-        assert "y" not in tiling and "z" not in tiling, (
-            "nested reduction does not support tiled reductions"
-        )
+        if not ("y" not in tiling and "z" not in tiling):
+            raise AssertionError("nested reduction does not support tiled reductions")
 
         metrics.codegen_nested_reduction += 1
         kernel_kwargs: dict[str, Any] = {
@@ -2789,7 +2799,8 @@ class SIMDScheduling(BaseScheduling):
                 # local reshape+reduce inside the outer kernel, so there is no
                 # grouped loop to close or reopen here.
                 continue
-            assert isinstance(sn, scheduler.SchedulerNode)
+            if not isinstance(sn, scheduler.SchedulerNode):
+                raise AssertionError(f"expected SchedulerNode, got {type(sn)}")
             if sn is grouped_reduction:
                 self._codegen_grouped_reduction(
                     kernel,
@@ -2801,7 +2812,8 @@ class SIMDScheduling(BaseScheduling):
                 )
                 continue
             domain = pointwise_domain_by_node.get(sn)
-            assert domain is not None
+            if domain is None:
+                raise AssertionError(f"no pointwise domain classified for {sn}")
             if domain is scheduler.NestedReduction.PointwiseDomain.REDUCED:
                 self._codegen_remapped_pointwise(
                     kernel,
@@ -2898,7 +2910,10 @@ class SIMDScheduling(BaseScheduling):
     ) -> list[list[sympy.Expr]]:
         groups = source.groups
         values = source.values
-        assert len(groups) == len(values)
+        if len(groups) != len(values):
+            raise AssertionError(
+                f"groups/values length mismatch: {len(groups)} != {len(values)}"
+            )
 
         def split_values_by_ranges(
             *new_ranges: Sequence[sympy.Expr],
@@ -2944,7 +2959,10 @@ class SIMDScheduling(BaseScheduling):
                     source,
                     sn.get_ranges(),
                 )
-                assert not reduction_vars
+                if reduction_vars:
+                    raise AssertionError(
+                        f"pointwise node must have no reduction vars, got {reduction_vars}"
+                    )
                 handler = _PointwiseRemapHandler(
                     V.get_ops_handler(),
                     kernel=kernel,
