@@ -103,7 +103,7 @@ static Tensor binary_cross_entropy_plumbing(
   Tensor result;
   if (self_bdim || target_bdim) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    const auto bdim_size = get_bdim_size2(self_value, self_bdim, target_value, target_bdim);
+    const auto bdim_size = get_bdim_size(self_value, self_bdim, target_value, target_bdim);
     auto self_ = moveBatchDimToFront(self_value, self_bdim);
     auto target_ = moveBatchDimToFront(target_value, target_bdim);
     self_ = ensure_has_bdim(self_, self_bdim.has_value(), bdim_size);
@@ -141,7 +141,7 @@ static Tensor binary_cross_entropy_backward_plumbing(
   Tensor grad_input;
   if (grad_bdim || input_bdim || target_bdim) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    const auto bdim_size = get_bdim_size3(
+    const auto bdim_size = get_bdim_size(
         grad_value, grad_bdim, input_value, input_bdim, target_value, target_bdim);
 
     auto grad_ = moveBatchDimToFront(grad_value, grad_bdim);
