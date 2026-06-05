@@ -674,6 +674,9 @@ class OptimizedModule(torch.nn.Module):
         attrs = object.__getattribute__(self, "__dict__")
         load_state_dict_pre_hooks = attrs["_load_state_dict_pre_hooks"]
         saved_load_state_dict_pre_hooks = load_state_dict_pre_hooks.copy()
+        # Run wrapper hooks above while direct `_parameters` access is proxied to
+        # `_orig_mod`, then hide them from the inherited load path to avoid
+        # invoking them a second time under the internal wrapper-parameter view.
         load_state_dict_pre_hooks.clear()
         with self._use_wrapper_parameters_for_module_methods():
             try:
