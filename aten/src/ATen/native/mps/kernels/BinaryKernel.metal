@@ -458,7 +458,7 @@ struct lcm_functor {
     // so the abs matches the CPU/CUDA kernels: abs is taken before narrowing
     // back to T on return. Divide before multiplying to limit overflow.
     auto r = a / g * b;
-    return r < 0 ? -r : r;
+    return ::metal::abs(r);
   }
 };
 
