@@ -679,6 +679,17 @@ class TestDecomp(TestCase):
 
         self.assertEqual(xs, xs_two)
 
+    def test_index_add_decomp_source_shape_mismatch(self, device):
+        x = torch.zeros([10, 5], device=device)
+        index = torch.arange(5, device=device)
+        source = torch.ones([5], device=device)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "source tensor shape must match self tensor shape",
+        ):
+            torch._decomp.decompositions.index_add(x, 0, index, source)
+
     def test_cat_single_input(self, device):
         decomp_table = torch._inductor.decomposition.select_decomp_table()
         cat_inductor = decomp_table[torch.ops.aten.cat.default]
