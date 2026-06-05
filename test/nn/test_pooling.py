@@ -2121,6 +2121,7 @@ torch.cuda.synchronize()
                         fn(x, 6, stride=2, padding=0)
 
     @onlyAccelerator
+    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     def test_pooling_bfloat16(self, device):
         _test_bfloat16_ops(
             self,
