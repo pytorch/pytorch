@@ -4841,18 +4841,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         else:
             _inference(memory_format, ref_backend, mixed, dtype)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_batchnorm_nhwc_cuda(self):
-        for dtype in (torch.half, torch.float):
-            (N, C, H, W) = 2, 64, 50, 50
-            model = torch.nn.BatchNorm2d(C, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-            model = model.eval().cuda().to(dtype)
-            inp1 = torch.randn(N, C, H, W, device=torch.device('cuda'), dtype=dtype)
-            inp2 = inp1.contiguous(memory_format=torch.channels_last)
-            out1 = model(inp1)
-            out2 = model(inp2)
-            self.assertTrue(torch.equal(out1, out2))
-
     def test_batchnorm_load_state_dict(self):
         bn = torch.nn.BatchNorm2d(3)
         self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(0))
@@ -4884,17 +4872,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         self.assertTrue(gradcheck(lambda x, y: F.pairwise_distance(x, y), (input1, input2)))
-
-
-    @unittest.expectedFailure
-    def test_pdist_cpu_gradgrad_unimplemented(self):
-        inp = torch.randn(4, 5, requires_grad=True)
-        gradgradcheck(F.pdist, (inp,))
-
-    @unittest.expectedFailure
-    def test_pdist_cuda_gradgrad_unimplemented(self):
-        inp = torch.randn(4, 5, device='cuda', requires_grad=True)
-        gradgradcheck(F.pdist, (inp,))
 
 
     def test_cosine_embedding_loss_no_reduce(self):
@@ -11973,6 +11950,19 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_simple_average(device, dtype, torch.float)
 
+    @skipMPS
+    @onlyAccelerator
+    def test_batchnorm_nhwc(self, device):
+        for dtype in (torch.half, torch.float):
+            (N, C, H, W) = 2, 64, 50, 50
+            model = torch.nn.BatchNorm2d(C, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            model = model.eval().to(device).to(dtype)
+            inp1 = torch.randn(N, C, H, W, device=device, dtype=dtype)
+            inp2 = inp1.contiguous(memory_format=torch.channels_last)
+            out1 = model(inp1)
+            out2 = model(inp2)
+            self.assertTrue(torch.equal(out1, out2))
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float, torch.half, torch.bfloat16)
@@ -14735,6 +14725,12 @@ if __name__ == '__main__':
         self.assertTrue(torch.isnan(result).item(), "Expected NaN in pdist output")
 
     @skipMPS
+    @unittest.expectedFailure
+    def test_pdist_gradgrad_unimplemented(self, device):
+        inp = torch.randn(4, 5, device=device, requires_grad=True)
+        gradgradcheck(F.pdist, (inp,))
+
+    @skipMPS
     def test_cosine_embedding_loss_with_diff_type(self, device):
         input1 = torch.tensor([[2, 3, 4], [6, 2, 4]], dtype=torch.double, device=device)
         input2 = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
@@ -15362,7 +15358,7 @@ if __name__ == '__main__':
 
     @skipMPS
     @onlyAccelerator
-    def test_batchnorm_nonaffine_cuda_half_input(self, device):
+    def test_batchnorm_nonaffine_half_input(self, device):
         input = torch.randn(16, 3, 24, 24, dtype=torch.half, device=device)
         m = nn.BatchNorm2d(3, affine=False).to(device).float()  # keep running stats in FP32
         output = m(input)
