@@ -2675,51 +2675,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    def test_custom_memory_budget_annotation_causes_cache_miss(self):
-        """Changing per-region memory_budget set via fx_traceback.annotate
-        invalidates the AOTAutograd cache."""
-        import torch.fx.traceback as fx_traceback
-
-        def make_fn(budget):
-            def fn(x, y):
-                with fx_traceback.annotate({"memory_budget": budget}):
-                    return (torch.mm(x, y) + 1).relu()
-
-            return fn
-
-        with fresh_cache():
-            compiled_fn1 = torch.compile(make_fn(0.3), backend="inductor")
-            x1 = torch.randn(10, 10, requires_grad=True)
-            y1 = torch.randn(10, 10, requires_grad=True)
-            compiled_fn1(x1, y1).sum().backward()
-
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-
-            self._clear_dynamo_and_codecache()
-
-            compiled_fn2 = torch.compile(make_fn(0.8), backend="inductor")
-            x2 = torch.randn(10, 10, requires_grad=True)
-            y2 = torch.randn(10, 10, requires_grad=True)
-            compiled_fn2(x2, y2).sum().backward()
-
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-
-            self._clear_dynamo_and_codecache()
-
-            # Same budget as the first compile -> cache hit.
-            compiled_fn3 = torch.compile(make_fn(0.3), backend="inductor")
-            x3 = torch.randn(10, 10, requires_grad=True)
-            y3 = torch.randn(10, 10, requires_grad=True)
-            compiled_fn3(x3, y3).sum().backward()
-
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-
-    @inductor_config.patch("fx_graph_remote_cache", False)
-    @inductor_config.patch("fx_graph_cache", True)
-    @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"activation_memory_budget": 0.5})
     def test_different_custom_estimator_uuids_cause_cache_miss(self):
         """Test that different uuid values cause cache miss."""
@@ -3338,6 +3293,96 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(out_fp16_2.dtype, torch.float16)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_region_activation_memory_budget_causes_cache_miss(self):
+        """Changing the budget set via torch.autograd.graph.region_activation_memory_budget
+        invalidates the AOTAutograd cache."""
+
+        def make_fn(budget):
+            def fn(x, y):
+                with torch.autograd.graph.region_activation_memory_budget(budget):
+                    return (torch.mm(x, y) + 1).relu()
+
+            return fn
+
+        with fresh_cache():
+            compiled_fn1 = torch.compile(make_fn(0.3), backend="inductor")
+            x1 = torch.randn(10, 10, requires_grad=True)
+            y1 = torch.randn(10, 10, requires_grad=True)
+            compiled_fn1(x1, y1).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            compiled_fn2 = torch.compile(make_fn(0.8), backend="inductor")
+            x2 = torch.randn(10, 10, requires_grad=True)
+            y2 = torch.randn(10, 10, requires_grad=True)
+            compiled_fn2(x2, y2).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            # Same budget as the first compile -> cache hit.
+            compiled_fn3 = torch.compile(make_fn(0.3), backend="inductor")
+            x3 = torch.randn(10, 10, requires_grad=True)
+            y3 = torch.randn(10, 10, requires_grad=True)
+            compiled_fn3(x3, y3).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_region_activation_memory_budget_graph_break_cache(self):
+        """With graph breaks, changing one graph's budget causes a miss for
+        that graph but a hit for the unchanged graph."""
+
+        def make_fn(budget_a, budget_b):
+            def fn(x):
+                with torch.autograd.graph.region_activation_memory_budget(budget_a):
+                    x = (x + 1).relu()
+                torch._dynamo.graph_break()
+                with torch.autograd.graph.region_activation_memory_budget(budget_b):
+                    return (x * 2).relu()
+
+            return fn
+
+        with fresh_cache():
+            # First run: (0.3, 0.5) -> 2 misses (one per graph)
+            compiled = torch.compile(make_fn(0.3, 0.5), backend="inductor")
+            x = torch.randn(10, 10, requires_grad=True)
+            compiled(x).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            # Change only graph B: (0.3, 0.8) -> 1 hit (A), 1 miss (B)
+            compiled = torch.compile(make_fn(0.3, 0.8), backend="inductor")
+            x = torch.randn(10, 10, requires_grad=True)
+            compiled(x).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+            self._clear_dynamo_and_codecache()
+
+            # Change only graph A: (0.7, 0.8) -> 1 miss (A), 1 hit (B)
+            compiled = torch.compile(make_fn(0.7, 0.8), backend="inductor")
+            x = torch.randn(10, 10, requires_grad=True)
+            compiled(x).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 4)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
 
 
 @functorch_config.patch({"bundled_autograd_cache": True})
