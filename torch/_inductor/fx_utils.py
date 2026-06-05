@@ -111,9 +111,8 @@ class FakeTensorUpdater:
             if new is None:
                 return old is None
             if not isinstance(new, torch.Tensor):
-                assert isinstance(new, (torch.SymInt, torch.SymBool, torch.SymFloat)), (
-                    f"Unknown type {type(new)} in {self.graph}"
-                )
+                if not isinstance(new, (torch.SymInt, torch.SymBool, torch.SymFloat)):
+                    raise AssertionError(f"Unknown type {type(new)} in {self.graph}")
                 return (
                     new.node.shape_env._maybe_evaluate_static(
                         sympy.Eq(new.node.expr, old.node.expr)
@@ -336,7 +335,8 @@ def countable_fx(node: torch.fx.Node) -> bool:
     """
     Whether or not we can count the flops of an FX node.
     """
-    assert isinstance(node, torch.fx.Node)
+    if not isinstance(node, torch.fx.Node):
+        raise AssertionError(f"expected torch.fx.Node, got {type(node)}")
     if not hasattr(node, "target"):
         return False
     target = node.target

@@ -204,7 +204,8 @@ class InductorChoices:
         """
         # Extract device_type from kernel_inputs
         device_type = kernel_inputs.device_type
-        assert device_type is not None, "get_ktc requires a valid device type"
+        if device_type is None:
+            raise AssertionError("get_ktc requires a valid device type")
         # Extract template_name from the template object
         template_name = template.uid
 

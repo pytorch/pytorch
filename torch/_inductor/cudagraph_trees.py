@@ -277,7 +277,8 @@ class TreeManagerContainer:
                 self._finalize_tree_manager()
 
     def _finalize_tree_manager(self) -> None:
-        assert self.lock.locked()
+        if not self.lock.locked():
+            raise AssertionError("expected lock to be held")
         self.tree_manager = None
 
         # TODO - when issue #91395 is landed, we can set a weakref on
@@ -366,7 +367,8 @@ def get_obj(local: Any, attr_name: str) -> Any:
     if hasattr(local, attr_name):
         return getattr(local, attr_name)
     else:
-        assert torch._C._is_key_in_tls(attr_name)
+        if not torch._C._is_key_in_tls(attr_name):
+            raise AssertionError(f"expected {attr_name} key in tls")
         return torch._C._get_obj_in_tls(attr_name)
 
 
@@ -497,7 +499,8 @@ def cudagraphify(
     mutated_input_idxs: tuple[int, ...] = (),
     compile_id: CompileId | None = None,
 ) -> tuple[ModelType, OutputType]:
-    assert not (is_backward and is_inference)
+    if is_backward and is_inference:
+        raise AssertionError("expected not (is_backward and is_inference)")
     mode = (
         CompilationMode.BACKWARD
         if is_backward
@@ -542,7 +545,8 @@ class StorageWeakRefWrapper:
         if isinstance(inp, Tensor):
             stor = inp.untyped_storage()
         else:
-            assert isinstance(inp, UntypedStorage)
+            if not isinstance(inp, UntypedStorage):
+                raise AssertionError(f"expected UntypedStorage, got {type(inp)}")
             stor = inp
         self.ref = StorageWeakRef(stor)
         self._data_ptr = stor.data_ptr()
@@ -588,7 +592,8 @@ class StorageWeakRefWrapper:
             #  - one from the Python storage object
             #  - one from the cached Tensor
             stor_count -= 2
-        assert stor_count >= 0
+        if stor_count < 0:
+            raise AssertionError(f"expected stor_count >= 0, got {stor_count}")
         return stor_count == 0
 
     def __repr__(self) -> str:
@@ -656,7 +661,8 @@ def _update_current_stream_external_object() -> Generator[None, None, None]:
 
 def map_to_ref(t: Tensor | None) -> StorageWeakRefWrapper | None:
     if not isinstance(t, torch.Tensor):
-        assert t is None
+        if t is not None:
+            raise AssertionError(f"expected t to be None, got {t}")
         return None
     return StorageWeakRefWrapper(t)
 
@@ -716,7 +722,8 @@ class CUDAWarmupNode:
         self.id = id
 
     def run(self, new_inputs: Any) -> OutputType:
-        assert not self.has_run, "Wrapped function should never be run twice"
+        if self.has_run:
+            raise AssertionError("Wrapped function should never be run twice")
 
         # See: output_is_alias_of_persistent_static_inputs below. We should only be returning freshly created
         # storages in path_live_weakrefs.
@@ -765,7 +772,10 @@ class CUDAWarmupNode:
             if s is not None:
                 non_cudagraph_inps_storage_ptrs.add(s._cdata)
 
-        assert len(new_inputs) == 0
+        if len(new_inputs) != 0:
+            raise AssertionError(
+                f"expected new_inputs to be empty, got {len(new_inputs)}"
+            )
 
         # sdpa returns cpu tensors when not recording cuda graph
         def add_ref(o: Any) -> bool:
@@ -843,7 +853,8 @@ class AliasesPriorGraphOutput(OutputAliasInfo):
     index: PathOutputIndex
 
     def __init__(self, index: PathOutputIndex) -> None:
-        assert isinstance(index, tuple)
+        if not isinstance(index, tuple):
+            raise AssertionError(f"expected index to be a tuple, got {type(index)}")
         self.index = index
 
 
@@ -855,7 +866,8 @@ class AliasesNewOutput(OutputAliasInfo):
     index: int
 
     def __init__(self, index: int) -> None:
-        assert isinstance(index, int)
+        if not isinstance(index, int):
+            raise AssertionError(f"expected index to be an int, got {type(index)}")
         self.index = index
 
 
@@ -893,7 +905,10 @@ class CUDAGraphNode:
         mode: CompilationMode | None,
         compile_id: CompileId | None,
     ) -> None:
-        assert isinstance(inputs, (list, tuple))
+        if not isinstance(inputs, (list, tuple)):
+            raise AssertionError(
+                f"expected inputs to be list or tuple, got {type(inputs)}"
+            )
 
         self.wrapped_function = wrapped_function
         self.id = id
@@ -1128,14 +1143,16 @@ class CUDAGraphNode:
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
         # their memory being reclaimed in subsequent cuda graph recordings. We record the tensor metadata
         # needed to reconstruct instead.
-        assert self.recording_outputs is not None
+        if self.recording_outputs is None:
+            raise AssertionError("expected recording_outputs to not be None")
         for out in self.recording_outputs:
             if isinstance(out, torch.Tensor):
                 self.outputs_metadata.append(
                     self._tensor_metadata(out, ignore_storage_offset=False)
                 )
             else:
-                assert isinstance(out, (int, type(None))), type(out)
+                if not isinstance(out, (int, type(None))):
+                    raise AssertionError(type(out))
                 self.outputs_metadata.append(out)
 
         self.graph.replay()
@@ -1182,10 +1199,14 @@ class CUDAGraphNode:
 
         # graph is already invoked in the __init__
         # inputs are copied over in _allocate_recording_inputs and subsequently cleared
-        assert len(new_inputs) == 0
+        if len(new_inputs) != 0:
+            raise AssertionError(
+                f"expected new_inputs to be empty, got {len(new_inputs)}"
+            )
         outputs = self.recording_outputs
         self.recording_outputs = None
-        assert outputs is not None
+        if outputs is None:
+            raise AssertionError("expected outputs to not be None")
         return outputs
 
     def run(self, new_inputs: list[InputType]) -> OutputType:
@@ -1224,7 +1245,8 @@ class CUDAGraphNode:
             zip(self.output_storage_alias, self.outputs_metadata)
         ):
             if not isinstance(metadata, dict):  # tensor metadata
-                assert isinstance(metadata, (int, type(None)))
+                if not isinstance(metadata, (int, type(None))):
+                    raise AssertionError(f"expected int or None, got {type(metadata)}")
                 outputs.append(metadata)
                 continue
 
@@ -1244,7 +1266,8 @@ class CUDAGraphNode:
 
             static_t = self.static_output_tensors[i]
             if static_t is not None:
-                assert self.outputs_weakrefs[i] is None
+                if self.outputs_weakrefs[i] is not None:
+                    raise AssertionError(f"expected outputs_weakrefs[{i}] to be None")
                 outputs.append(static_t)
                 continue
 
@@ -1255,14 +1278,18 @@ class CUDAGraphNode:
             if isinstance(storage, UntypedStorage) or storage is None:
                 out = self._reconstruct_from_tensor_metadata(metadata, storage)
             else:
-                assert isinstance(storage, int)
+                if not isinstance(storage, int):
+                    raise AssertionError(
+                        f"expected storage to be int, got {type(storage)}"
+                    )
                 out = self._reconstruct_from_tensor_metadata(
                     metadata, cast(torch.Tensor, outputs[storage]).untyped_storage()
                 )
 
             outputs.append(out)
             w = self.outputs_weakrefs[i]
-            assert w is not None
+            if w is None:
+                raise AssertionError("expected w to not be None")
             w.swap_weakref(out.untyped_storage()._weak_ref())
 
         return outputs
@@ -1281,10 +1308,14 @@ class CUDAGraphNode:
         if isinstance(out_alias_info, AliasesPriorGraphOutput):
             depth, existing_output_index = out_alias_info.index
             ref = self.path_weakrefs[depth][existing_output_index]
-            assert ref is not None
+            if ref is None:
+                raise AssertionError("expected ref to not be None")
             return torch.UntypedStorage._new_with_weak_ptr(ref())
 
-        assert isinstance(out_alias_info, AliasesNewOutput)
+        if not isinstance(out_alias_info, AliasesNewOutput):
+            raise AssertionError(
+                f"expected AliasesNewOutput, got {type(out_alias_info)}"
+            )
         return out_alias_info.index
 
     def prepare_storages_for_construction(
@@ -1303,7 +1334,8 @@ class CUDAGraphNode:
         return output_storages
 
     def run_graph(self) -> None:
-        assert self.graph is not None
+        if self.graph is None:
+            raise AssertionError("expected graph to not be None")
         self.graph.replay()
 
     def all_outputs_are_dead(self) -> bool:
@@ -1315,7 +1347,8 @@ class CUDAGraphNode:
 
     def _record(self, model: ModelType, inputs: list[InputType]) -> OutputType:
         "Record the model"
-        assert self.graph is not None
+        if self.graph is None:
+            raise AssertionError("expected graph to not be None")
 
         def static_input_iter() -> Generator[torch.Tensor, None, None]:
             for i in self.wrapped_function.static_input_idxs:
@@ -1365,7 +1398,8 @@ class CUDAGraphNode:
             static_outputs = model(inputs)
 
         # running model should reclaim memory
-        assert len(inputs) == 0
+        if len(inputs) != 0:
+            raise AssertionError(f"expected inputs to be empty, got {len(inputs)}")
 
         if not isinstance(static_outputs, (list, tuple)):
             static_outputs = (static_outputs,)
@@ -1391,7 +1425,10 @@ class CUDAGraphNode:
         delta = self._get_different_indices(prev_liveness, curr_liveness)
         self.expected_dead_indices_after_graph = delta
 
-        assert len(self.outputs_weakrefs) == 0
+        if len(self.outputs_weakrefs) != 0:
+            raise AssertionError(
+                f"expected outputs_weakrefs to be empty, got {len(self.outputs_weakrefs)}"
+            )
         # index from data pointer to index in outputs
         output_new_storages_index: dict[StorageDataPtr, int] = {}
 
@@ -1447,11 +1484,11 @@ class CUDAGraphNode:
         if self.stack_traces is None:
             self.stack_traces = [None for _ in range(len(outputs))]
         else:
-            assert len(self.stack_traces) == len(outputs), (
-                "Wrong number of stack traces passed in"
-            )
+            if len(self.stack_traces) != len(outputs):
+                raise AssertionError("Wrong number of stack traces passed in")
 
-        assert not self.outputs_weakrefs
+        if self.outputs_weakrefs:
+            raise AssertionError("expected outputs_weakrefs to be empty")
         for out, static_output_tensor in zip(outputs, self.static_output_tensors):
             if not isinstance(out, torch.Tensor) or static_output_tensor is not None:
                 self.outputs_weakrefs.append(None)
@@ -1483,13 +1520,17 @@ class CUDAGraphNode:
         node = list(self._path_from_root)[depth]
         node.unaliased_in_all_paths[output_index] = False
         x = self.path_weakrefs[depth][output_index]
-        assert x is not None
+        if x is None:
+            raise AssertionError("expected x to not be None")
         x.remove_extra_reference()
 
     def _initialize_cached_tensors(self) -> None:
         # we should not be clearing output_weakrefs, and they should be set in the first
         # record run
-        assert len(self.outputs_weakrefs) == len(self.outputs_metadata)
+        if len(self.outputs_weakrefs) != len(self.outputs_metadata):
+            raise AssertionError(
+                "expected len(outputs_weakrefs) == len(outputs_metadata)"
+            )
 
         for i, (storage_info, metadata, make_cached) in enumerate(
             zip(
@@ -1502,8 +1543,14 @@ class CUDAGraphNode:
                 self.cached_tensor_outputs.append(None)
                 continue
 
-            assert storage_info is UnaliasedStorage
-            assert isinstance(metadata, dict)
+            if storage_info is not UnaliasedStorage:
+                raise AssertionError(
+                    f"expected storage_info to be UnaliasedStorage, got {storage_info}"
+                )
+            if not isinstance(metadata, dict):
+                raise AssertionError(
+                    f"expected metadata to be dict, got {type(metadata)}"
+                )
             s = self.create_storage(metadata)
             out = self._reconstruct_from_tensor_metadata(metadata, storage=s)  # type: ignore[arg-type]
 
@@ -1528,10 +1575,12 @@ class CUDAGraphNode:
                 # pyrefly: ignore
                 if self_loc.cached_tensor_outputs[i]._use_count() > 1:
                     # c10::Tensor may also holds one reference count
-                    assert refcount >= 3
+                    if refcount < 3:
+                        raise AssertionError(f"expected refcount >= 3, got {refcount}")
                     return refcount == 3
                 else:
-                    assert refcount >= 2
+                    if refcount < 2:
+                        raise AssertionError(f"expected refcount >= 2, got {refcount}")
                     return refcount == 2
 
             check = functools.partial(check_refcount, i=i)
@@ -1596,7 +1645,8 @@ class CUDAGraphNode:
         "Check that all of the indices specified are dead references"
         for depth, output_index in indices:
             w = output_refs[depth][output_index]
-            assert w is not None
+            if w is None:
+                raise AssertionError("expected w to not be None")
             if w() is not None:
                 return False
         return True
@@ -1611,9 +1661,15 @@ class CUDAGraphNode:
     ) -> list[PathOutputIndex]:
         "Find indices where the two lists differ."
         dead_indices = []
-        assert len(prev) <= len(curr)
+        if len(prev) > len(curr):
+            raise AssertionError(
+                f"expected len(prev) <= len(curr), got {len(prev)} > {len(curr)}"
+            )
         for i, (outputs1, outputs2) in enumerate(zip(prev, curr)):
-            assert len(outputs1) == len(outputs2)
+            if len(outputs1) != len(outputs2):
+                raise AssertionError(
+                    f"expected len(outputs1) == len(outputs2), got {len(outputs1)} != {len(outputs2)}"
+                )
             for j, (output1, output2) in enumerate(zip(outputs1, outputs2)):
                 if output1 != output2:
                     dead_indices.append((i, j))
@@ -1637,7 +1693,10 @@ class CUDAGraphNode:
             return
 
         for i, node in enumerate(self._path_from_root):
-            assert self.path_weakrefs[i] is node.outputs_weakrefs
+            if self.path_weakrefs[i] is not node.outputs_weakrefs:
+                raise AssertionError(
+                    "expected path_weakrefs[i] to be node.outputs_weakrefs"
+                )
 
         nodes = list(self._path_from_root)
 
@@ -1651,11 +1710,16 @@ class CUDAGraphNode:
                 # tensor can die early, but it can't be alive when it should be dead
                 w = self.path_weakrefs[depth][output_idx]
                 if (stor_weak_ptr_and_data_ptr := maybe_deref(w)) is not None:
-                    assert output_liveness
+                    if not output_liveness:
+                        raise AssertionError("expected output_liveness to be truthy")
                     stor_weak_ptr, stor_data_ptr = stor_weak_ptr_and_data_ptr
-                    assert (stor_data_ptr in live_storage_data_ptrs) == (
-                        stor_weak_ptr in live_storage_weak_ptrs
-                    )
+                    if not (
+                        (stor_data_ptr in live_storage_data_ptrs)
+                        == (stor_weak_ptr in live_storage_weak_ptrs)
+                    ):
+                        raise AssertionError(
+                            "expected data_ptr and weak_ptr liveness to agree"
+                        )
                     live_storage_data_ptrs.add(stor_data_ptr)
                     live_storage_weak_ptrs.add(stor_weak_ptr)
 
@@ -1664,10 +1728,16 @@ class CUDAGraphNode:
                     )
 
                     if is_persistent_alias:
-                        assert stor_data_ptr not in live_blocks
+                        if stor_data_ptr in live_blocks:
+                            raise AssertionError(
+                                "expected stor_data_ptr not in live_blocks"
+                            )
 
         for depth, output_index in newly_dead:
-            assert not is_live(self.path_weakrefs[depth][output_index])
+            if is_live(self.path_weakrefs[depth][output_index]):
+                raise AssertionError(
+                    "expected path_weakrefs[depth][output_index] to not be live"
+                )
 
     def debug_check_invariants_before_invocation(self) -> None:
         self.debug_assert_invariants(
@@ -1713,7 +1783,8 @@ class CUDAGraphNode:
         for i, unaliased in enumerate(self.unaliased_in_all_paths):
             if unaliased:
                 n = self.outputs_weakrefs[i]
-                assert n is not None
+                if n is None:
+                    raise AssertionError("expected n to not be None")
                 n.remove_extra_reference()
 
     def remove_path_cached_tensors(self) -> None:
@@ -1728,7 +1799,8 @@ class CUDAGraphNode:
     def _tensor_metadata(
         x: torch.Tensor, ignore_storage_offset: bool = True
     ) -> dict[str, Any]:
-        assert isinstance(x, torch.Tensor)
+        if not isinstance(x, torch.Tensor):
+            raise AssertionError(f"expected x to be a torch.Tensor, got {type(x)}")
         # We ignore the storage offset for inputs, but not for outputs
         # TODO: - should we make the storage resizable ?
         return {
@@ -1775,7 +1847,10 @@ class CUDAGraphNode:
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
-                    assert isinstance(inp, (int, torch.Generator, OpaqueBase))
+                    if not isinstance(inp, (int, torch.Generator, OpaqueBase)):
+                        raise AssertionError(
+                            f"expected int, Generator, or OpaqueBase, got {type(inp)}"
+                        )
 
                     recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
@@ -1905,7 +1980,10 @@ def check_memory_pool(
     live_storages_ptrs: list[StorageWeakRefWrapper],
 ) -> None:
     """Validate cudagraph pool allocations against tracked live storages and surface leaks."""
-    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)
+    if not all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs):
+        raise AssertionError(
+            "expected all live_storages_ptrs to be StorageWeakRefWrapper"
+        )
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}  # noqa: set_linter
 
     # check if there is a divergence first, then do the expensive snapshot call after
@@ -2156,7 +2234,8 @@ class CUDAGraphTreeManager:
         )
 
     def run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
-        assert self.graph is not None, "Running CUDAGraph after shutdown"
+        if self.graph is None:
+            raise AssertionError("Running CUDAGraph after shutdown")
         self.mode = self.id_to_mode[function_id]
         self.compile_id = self.id_to_compile_id[function_id]
         out = self._run(new_inputs, function_id)
@@ -2259,7 +2338,8 @@ class CUDAGraphTreeManager:
 
             return self.run_eager(new_inputs, function_id)
 
-        assert not isinstance(self.current_node, CUDAWarmupNode)
+        if isinstance(self.current_node, CUDAWarmupNode):
+            raise AssertionError("expected current_node to not be a CUDAWarmupNode")
         child_nodes = (
             self.roots if self.current_node is None else self.current_node.children
         )
@@ -2322,7 +2402,10 @@ class CUDAGraphTreeManager:
                     _id = curr_node_id.id if curr_node_id else None
                     # unexpected_rerecord_reason is either a string (if debug was enabled)
                     # or a callable (if debug was disabled)
-                    assert unexpected_rerecord_reason is not None
+                    if unexpected_rerecord_reason is None:
+                        raise AssertionError(
+                            "expected unexpected_rerecord_reason to not be None"
+                        )
                     reason = (
                         unexpected_rerecord_reason
                         if isinstance(unexpected_rerecord_reason, str)
@@ -2370,7 +2453,8 @@ class CUDAGraphTreeManager:
     def record_function(
         self, new_inputs: list[InputType], function_id: FunctionID
     ) -> OutputType:
-        assert not isinstance(self.current_node, CUDAWarmupNode)
+        if isinstance(self.current_node, CUDAWarmupNode):
+            raise AssertionError("expected current_node to not be a CUDAWarmupNode")
         with torch._dynamo.callback_handler.install_callbacks(
             CallbackTrigger.CUDAGRAPH_RECORDING, str(self.compile_id)
         ):
@@ -2547,8 +2631,10 @@ class CUDAGraphTreeManager:
         previously recorded node are dead or because it was executed in a different
         generation. Will set current_node to None and in_recording to False if successful.
         """
-        assert self.in_recording
-        assert self.current_node is not None
+        if not self.in_recording:
+            raise AssertionError("expected in_recording to be True")
+        if self.current_node is None:
+            raise AssertionError("expected current_node to not be None")
 
         # multiple invocations, allow overwriting the previous generation
         if self.can_start_new_generation():
@@ -2569,7 +2655,8 @@ class CUDAGraphTreeManager:
         Will set current_node to None if successful.
         """
 
-        assert not self.in_recording
+        if self.in_recording:
+            raise AssertionError("expected in_recording to be False")
         if self.current_node is None:
             return
 
@@ -2586,7 +2673,8 @@ class CUDAGraphTreeManager:
             self.current_node = None
             return
 
-        assert self.current_node is not None
+        if self.current_node is None:
+            raise AssertionError("expected current_node to not be None")
         if self.current_node.all_outputs_are_dead():
             self.current_node = None
             return
@@ -2601,7 +2689,8 @@ class CUDAGraphTreeManager:
         ):
             return
 
-        assert self.current_node is not None
+        if self.current_node is None:
+            raise AssertionError("expected current_node to not be None")
         existing_nodes = [
             node
             for node in self.current_node._path_from_root
@@ -2642,14 +2731,19 @@ class CUDAGraphTreeManager:
         )
 
     def dealloc_current_path_weakrefs(self) -> None:
-        assert self.current_node is not None
+        if self.current_node is None:
+            raise AssertionError("expected current_node to not be None")
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
 
         stor_stack_trace: dict[int, str | None] = {}
         for node in self.current_node._path_from_root:
-            assert node.stack_traces is not None
-            assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            if node.stack_traces is None:
+                raise AssertionError("expected node.stack_traces to not be None")
+            if len(node.tensor_weakrefs) != len(node.stack_traces):
+                raise AssertionError(
+                    "expected len(node.tensor_weakrefs) == len(node.stack_traces)"
+                )
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()
                 if ten is None:
@@ -2691,7 +2785,10 @@ class CUDAGraphTreeManager:
                 torch._C._set_storage_data_ptr_access_error_msg(_storage_deref, msg)
 
     def clear_current_path_state_and_set_to_none(self) -> None:
-        assert isinstance(self.current_node, CUDAGraphNode)
+        if not isinstance(self.current_node, CUDAGraphNode):
+            raise AssertionError(
+                f"expected current_node to be a CUDAGraphNode, got {type(self.current_node)}"
+            )
         self.current_node.clear_path_state()
         self.current_node = None
 
@@ -2700,7 +2797,10 @@ class CUDAGraphTreeManager:
         Checkpoint the current execution state in the caching allocator so that
         additional cudagraph recordings can be made respecting existent live storages.
         """
-        assert isinstance(self.current_node, CUDAGraphNode)
+        if not isinstance(self.current_node, CUDAGraphNode):
+            raise AssertionError(
+                f"expected current_node to be a CUDAGraphNode, got {type(self.current_node)}"
+            )
         self.debug_checkpointing_counter += 1
         log.debug(
             "Checkpointing cuda caching allocator state. Number of checkpoints %d",
@@ -2709,7 +2809,8 @@ class CUDAGraphTreeManager:
 
         state = self.current_node.checkpointed_caching_state
         device = self.current_node.device
-        assert state is not None and device is not None
+        if not (state is not None and device is not None):
+            raise AssertionError("expected state and device to not be None")
 
         # currently we deallocate on instead of allowing stale recordings
         stale_storages: list[int] = []
@@ -2741,9 +2842,16 @@ class CUDAGraphTreeManager:
             )
             for wrapper in live_storages_wrappers:
                 storage_ptr = wrapper()
-                assert storage_ptr is not None
-                assert torch._C._has_Standard_Deleter(storage_ptr)
-                assert wrapper.data_ptr() not in ptrs_to_deallocate
+                if storage_ptr is None:
+                    raise AssertionError("expected storage_ptr to not be None")
+                if not torch._C._has_Standard_Deleter(storage_ptr):
+                    raise AssertionError(
+                        "expected storage_ptr to have standard deleter"
+                    )
+                if wrapper.data_ptr() in ptrs_to_deallocate:
+                    raise AssertionError(
+                        "expected wrapper.data_ptr() not in ptrs_to_deallocate"
+                    )
 
     def live_cudagraph_pool_storages_in_curr_execution(
         self,
