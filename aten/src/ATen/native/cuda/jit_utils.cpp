@@ -1582,11 +1582,24 @@ NvrtcFunction jit_pwise_function(
     } else {
       // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
       std::vector<char> buffer(std::istreambuf_iterator<char>(read_stream), {});
-      AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
-      AT_CUDA_DRIVER_CHECK(
-        nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
       read_stream.close();
-      return compiled_kernel_;
+      try {
+        AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
+        AT_CUDA_DRIVER_CHECK(
+          nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+        return compiled_kernel_;
+      } catch (const c10::Error& e) {
+        if (compiled_kernel_.module != nullptr) {
+          nvrtc.cuModuleUnload(compiled_kernel_.module);
+        }
+        std::remove(file_path.c_str());
+        TORCH_WARN_ONCE(
+            "Ignoring invalid CUDA kernel cache file and recompiling.",
+            " File path was ", file_path, ".",
+            " Error was ", e.what_without_backtrace(), ".",
+            " This warning will only appear once per process.");
+        compiled_kernel_ = NvrtcFunction();
+      }
     }
   }
 
@@ -1685,12 +1698,17 @@ NvrtcFunction jit_pwise_function(
                       " This warning will only appear once per process.");
     } else {
       std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
-      if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
+      cubin.close();
+      if (cubin.fail()) {
+        TORCH_WARN_ONCE("Failed to write kernel cache file!",
+                        " File path was ", tmp_file_path, ".",
+                        " This warning will only appear once per process.");
+        std::remove(tmp_file_path.c_str());
+      } else if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
         // Removes tmp file if the rename failed
         std::remove(tmp_file_path.c_str());
       }
     }
-    cubin.close();
   }
 
   return compiled_kernel_;
