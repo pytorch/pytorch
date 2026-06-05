@@ -19,7 +19,6 @@
 #include <ATen/ATen.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TracerMode.h>
@@ -478,12 +477,8 @@ Tensor internal_new_from_data(
     at::AutoDispatchBelowADInplaceOrView guard;
     tensor = at::lift_fresh(tensor);
   }
-  // Plain meta has no current device to infer; indexed meta needs a post-lift
-  // move so FakeTensor records the requested fake_device.
-  if (device.type() == DeviceType::Meta && device.has_index()) {
-    tensor = tensor.to(device, /*non_blocking=*/false, /*copy=*/false);
-  } else if (
-      only_lift_cpu_tensors() && device.type() != DeviceType::CPU &&
+  // Meta has no current device to infer.
+  if (only_lift_cpu_tensors() && device.type() != DeviceType::CPU &&
       device.type() != DeviceType::Meta) {
     if (!device.has_index() &&
         !torch::utils::is_device_initialized(device.type())) {
@@ -1497,11 +1492,6 @@ Tensor tensor_ctor(
         /*copy_numpy=*/true,
         /*type_inference=*/type_inference,
         pin_memory);
-    auto names = r.toDimnameListOptional(5);
-    if (names) {
-      at::namedinference::propagate_names_if_nonempty(
-          new_tensor, *names, /*validate_names=*/true);
-    }
     new_tensor.detach_(); // ensure new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
