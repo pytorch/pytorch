@@ -913,6 +913,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_rshift_impl(tx, args[0], reverse=True)
         elif name == "__irshift__":
             return self.nb_inplace_rshift_impl(tx, args[0])
+        elif name == "__and__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_and_impl(tx, args[0])
+        elif name == "__rand__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_and_impl(tx, args[0], reverse=True)
+        elif name == "__iand__":
+            return self.nb_inplace_and_impl(tx, args[0])
         elif name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
@@ -1420,6 +1429,27 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_rshift slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_and_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_and slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rand__`` instead of ``__and__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_and_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_and slot. Default: returns NotImplemented."""
         return variables.ConstantVariable(NotImplemented)
 
     def nb_multiply_impl(
