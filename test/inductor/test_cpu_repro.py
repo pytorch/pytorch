@@ -3660,6 +3660,23 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_softmax_with_unbacked_zero_dim(self):
+        def softmax_fn(x, n):
+            return torch.softmax(x[:, : n.item()], -1)
+
+        def log_softmax_fn(x, n):
+            return torch.log_softmax(x[:, : n.item()], -1)
+
+        x = torch.randn(3, 5)
+        for fn in (softmax_fn, log_softmax_fn):
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            for length in (0, 2, 5):
+                n = torch.tensor(length)
+                actual = compiled_fn(x, n)
+                expected = fn(x, n)
+                torch.testing.assert_close(actual, expected, equal_nan=True)
+
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_local_buffer_in_outer_loop_fusion(self):
         def fn(x):
@@ -6578,13 +6595,13 @@ class CPUReproTests(TestCase):
         Original PR: https://github.com/pytorch/pytorch/pull/141766
         """
         from torch.testing._internal.common_quantization import (
-            _static_reference_quantized_linear_module,
+            _static_quantized_linear_module,
         )
 
         class Model(torch.nn.Module):
             def __init__(self, example_input):
                 super().__init__()
-                self.dense = _static_reference_quantized_linear_module(
+                self.dense = _static_quantized_linear_module(
                     N=768, K=768, bias=True, example_input=example_input
                 )
                 self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
@@ -6648,6 +6665,42 @@ class CPUReproTests(TestCase):
         )
         res = compiled_vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
         self.assertEqual(ref, res)
+
+    def test_lp_pool_inf_norm_type_compile(self):
+        x1 = torch.tensor([[[1.0, -3.0, 2.0, 4.0]]])
+        x2 = torch.tensor([[[[1.0, -3.0, 2.0], [4.0, -5.0, 6.0], [-7.0, 8.0, -9.0]]]])
+        x3 = torch.tensor(
+            [
+                [
+                    [
+                        [[1.0, -3.0, 2.0], [4.0, -5.0, 6.0]],
+                        [[-7.0, 8.0, -9.0], [10.0, -11.0, 12.0]],
+                    ]
+                ]
+            ]
+        )
+
+        def fn(x1, x2, x3):
+            return (
+                F.lp_pool1d(x1, float("inf"), 2, 1),
+                F.lp_pool1d(x1, -float("inf"), 2, 1),
+                F.lp_pool2d(x2, float("inf"), 2, 1),
+                F.lp_pool2d(x2, -float("inf"), 2, 1),
+                F.lp_pool3d(x3, float("inf"), 2, 1),
+                F.lp_pool3d(x3, -float("inf"), 2, 1),
+            )
+
+        expected = (
+            torch.tensor([[[3.0, 3.0, 4.0]]]),
+            torch.tensor([[[1.0, 2.0, 2.0]]]),
+            torch.tensor([[[[5.0, 6.0], [8.0, 9.0]]]]),
+            torch.tensor([[[[1.0, 2.0], [4.0, 5.0]]]]),
+            torch.tensor([[[[[11.0, 12.0]]]]]),
+            torch.tensor([[[[[1.0, 2.0]]]]]),
+        )
+
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x1, x2, x3)
+        self.assertEqual(actual, expected)
 
     def test_fractional_max_pool2d_3d_input(self):
         """Test for https://github.com/pytorch/pytorch/issues/156682 - 3D input causing assertion error"""
