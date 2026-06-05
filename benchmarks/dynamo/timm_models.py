@@ -143,6 +143,11 @@ class TimmRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
+        # Sentinel; captured lazily on first load_model call (which runs
+        # AFTER main() in common.py has applied any --inductor-config CLI
+        # overrides). Capturing eagerly here would always see the unmodified
+        # default and silently override the user-specified value.
+        self._orig_emulate_precision_casts = None
 
     @property
     def _config(self):
@@ -170,7 +175,7 @@ class TimmRunner(BenchmarkRunner):
 
     @property
     def _emulate_precision_casts(self):
-        return self._config.get("emulate_precision_casts", [])
+        return self._config["emulate_precision_casts"]
 
     @property
     def skip_models_for_cpu(self):
@@ -281,33 +286,29 @@ class TimmRunner(BenchmarkRunner):
         if model_name in self._config["scaled_compute_loss"]:
             self.compute_loss = self.scaled_compute_loss
 
-        if model_name in self._emulate_precision_casts:
-            # See yaml note for emulate_precision_casts. This preserves the
-            # bf16/fp16 downcast-upcast pairs that inductor would otherwise
-            # elide when fusing across mixed-precision boundaries (e.g.
-            # bf16 conv-bias-add fused into an fp32 cat-prep store), which
-            # is what eager autocast actually does.
-            #
-            # Restoration: the harness has no per-model teardown hook, so we
-            # capture the original value once and restore at process exit via
-            # atexit. This keeps process state clean across repeated harness
-            # invocations / debugger sessions. Within a single process running
-            # multiple models, the flag carries across iterations (same
-            # convention as scaled_compute_loss above) - benign for CI which
-            # uses --only <model> per process.
-            inductor_config = torch._inductor.config
-            if not hasattr(self, "_orig_emulate_precision_casts"):
-                import atexit
-
-                self._orig_emulate_precision_casts = (
-                    inductor_config.emulate_precision_casts
-                )
-                atexit.register(
-                    lambda v=self._orig_emulate_precision_casts: setattr(
-                        inductor_config, "emulate_precision_casts", v
-                    )
-                )
-            inductor_config.emulate_precision_casts = True
+        # See yaml note for emulate_precision_casts. This preserves the
+        # bf16/fp16 downcast-upcast pairs that inductor would otherwise
+        # elide when fusing across mixed-precision boundaries (e.g.
+        # bf16 conv-bias-add fused into an fp32 cat-prep store), which
+        # is what eager autocast actually does.
+        #
+        # Baseline is captured on the FIRST load_model call so that any
+        # --inductor-config emulate_precision_casts=... CLI override (applied
+        # by main() in common.py between __init__ and this point) is included
+        # in the baseline. Per-call assignment then sets the flag to
+        # (baseline OR model-in-yaml-list), which both preserves the user
+        # override across every model and toggles the flag back to baseline
+        # for non-listed models (no carry-over across iter_models).
+        if self._orig_emulate_precision_casts is None:
+            self._orig_emulate_precision_casts = (
+                torch._inductor.config.emulate_precision_casts
+            )
+        if self._orig_emulate_precision_casts:
+            torch._inductor.config.emulate_precision_casts = True
+        else:
+            torch._inductor.config.emulate_precision_casts = (
+                model_name in self._emulate_precision_casts
+            )
 
         if is_training and not use_eval_mode:
             model.train()
