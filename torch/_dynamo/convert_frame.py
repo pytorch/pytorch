@@ -347,6 +347,9 @@ def _guarded_eager_fallback(
     if not _has_condition_dependent_skip_guards(code, output):
         _cleanup_skipped_tracer_output(tracer_output)
         return ConvertFrameReturn(skip_reason=skip_reason)
+    if _has_unstable_typing_guards(output):
+        _cleanup_skipped_tracer_output(tracer_output)
+        return ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason)
 
     guarded_fallback_created = False
     try:
@@ -359,13 +362,18 @@ def _guarded_eager_fallback(
             dynamo_timed("build_guards", log_pt2_compile_event=True),
             build_guards_ctx,
         ):
-            check_fn = CheckFunctionManager(
-                code,
-                output,
-                cache_entries,
-                hooks.guard_fail_fn,
-                hooks.guard_filter_fn,
-            )
+            try:
+                check_fn = CheckFunctionManager(
+                    code,
+                    output,
+                    cache_entries,
+                    hooks.guard_fail_fn,
+                    hooks.guard_filter_fn,
+                )
+            except AssertionError as e:
+                if "Guard failed on the same frame it was created" not in str(e):
+                    raise
+                return ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason)
 
         # Use a code object owned by the cache entry so CleanupManager hooks
         # have the same lifetime as normal Dynamo cache-entry code objects.
@@ -416,6 +424,34 @@ def _has_condition_dependent_skip_guards(
         if name.startswith(("L['___", "L['__nested_")):
             continue
         return True
+    return False
+
+
+def _has_unstable_typing_guards(output: OutputGraphCommon) -> bool:
+    return any(
+        _guard_targets_paramspec_attr(guard.name, output) for guard in output.guards
+    )
+
+
+def _guard_targets_paramspec_attr(name: str, output: OutputGraphCommon) -> bool:
+    for prefix, scope in (("G[", output.global_scope), ("L[", output.local_scope)):
+        if not name.startswith(prefix):
+            continue
+        key_start = len(prefix) + 1
+        key_end = name.find("']", key_start)
+        if key_end == -1:
+            return False
+        obj = scope.get(name[key_start:key_end])
+        rest = name[key_end + 2 :]
+        if not rest.startswith("."):
+            return False
+        for attr in rest[1:].split("."):
+            if attr in {"args", "kwargs"}:
+                return isinstance(obj, typing.ParamSpec)
+            if not isinstance(obj, ModuleType):
+                return False
+            obj = vars(obj).get(attr)
+        return False
     return False
 
 
@@ -2715,7 +2751,7 @@ class CatchErrorsWrapper:
     def _handle_skip(
         self, result: ConvertFrameReturn, frame: DynamoFrameType
     ) -> ConvertFrameReturn:
-        if result.skip_reason is not None:
+        if result.skip_reason is not None and result.guarded_code is None:
             log.debug(
                 "skipping: %s (reason: %s, file: %s)",
                 frame.f_code.co_name,

@@ -2481,8 +2481,11 @@ class CleanupManager(ExactWeakKeyDictionary):
     count = 0
     instance: ClassVar[CleanupManager]
 
+    def cleanup(self, key: Any) -> None:
+        self._remove_id(id(key))
+
     def _remove_id(self, idx: int) -> None:
-        for hook in self.values[idx]:
+        for hook in self.values.get(idx, ()):
             hook()
         super()._remove_id(idx)
 
@@ -3269,9 +3272,16 @@ def iter_contains(
     from .variables import ConstantVariable
 
     if search.is_python_constant():
+        search_val = search.as_python_constant()
+        # CPython's list_contains/set_contains use PyObject_RichCompareBool
+        # which has an identity shortcut: if v is w, return True for eq.
+        # Check identity first (matters for NaN).
         found_const = any(
             x.is_python_constant()
-            and x.as_python_constant() == search.as_python_constant()
+            and (
+                x.as_python_constant() is search_val
+                or x.as_python_constant() == search_val
+            )
             for x in items
         )
         return ConstantVariable.create(found_const)

@@ -1,15 +1,20 @@
 # Owner(s): ["module: dynamo"]
+from types import ModuleType, SimpleNamespace
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
-from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list, reset_code
 from torch._dynamo.testing import CompileCounter
 
 
 _variable = 0
 _variable_2 = 0
+_P = ParamSpec("_P")
+_paramspec_module = ModuleType("_paramspec_module")
+_paramspec_module._P = ParamSpec("_paramspec_module._P")  # type: ignore[attr-defined]
 
 
 def user_function():
@@ -224,6 +229,61 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x, False), x)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(len(_debug_get_cache_entry_list(fn.__code__)), 2)
+
+    def test_condition_dependent_skip_reset_code_cleans_globals(self):
+        def fn(x, n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+        x = torch.ones(3)
+        preexisting_builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict___")
+        }
+
+        self.assertEqual(opt_fn(x, 0), x + 1)
+        new_builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict___")
+        } - preexisting_builtins_keys
+        self.assertTrue(new_builtins_keys)
+
+        reset_code(fn.__code__)
+        self.assertEqual(
+            {name for name in fn.__globals__ if name.startswith("__builtins_dict___")},
+            preexisting_builtins_keys,
+        )
+
+    def test_condition_dependent_skip_paramspec_guard_detection(self):
+        from torch._dynamo.convert_frame import _guard_targets_paramspec_attr
+
+        def fail_getattr(name):
+            raise AssertionError("module __getattr__ should not run")
+
+        lazy_module = ModuleType("lazy_module")
+        lazy_module.__getattr__ = fail_getattr  # type: ignore[attr-defined]
+
+        output = SimpleNamespace(
+            global_scope={
+                "_P": _P,
+                "_paramspec_module": _paramspec_module,
+                "lazy_module": lazy_module,
+            },
+            local_scope={},
+        )
+
+        self.assertTrue(_guard_targets_paramspec_attr("G['_P'].args", output))
+        self.assertTrue(
+            _guard_targets_paramspec_attr("G['_paramspec_module']._P.args", output)
+        )
+        self.assertFalse(
+            _guard_targets_paramspec_attr("G['lazy_module'].missing.args", output)
+        )
 
     def test_condition_dependent_skip_with_global_tensor_factory(self):
         def fn(n):
