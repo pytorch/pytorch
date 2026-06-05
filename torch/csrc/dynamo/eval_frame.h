@@ -33,8 +33,16 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(
     THP_EVAL_API_FRAME_OBJECT* frame);
 
 extern bool is_skip_guard_eval_unsafe;
-extern int fullgraph_compiled_frame_count;
-extern bool fullgraph_error_on_nested_compile;
+
+bool increment_fullgraph_compiled_frame_count_if_active(bool graph_frame);
+void increment_fullgraph_skipped_frame_count_if_active(void);
+void increment_fullgraph_root_skipped_frame_count_if_active(PyCodeObject* code);
+int set_fullgraph_compiled_frame_count(int val);
+int set_fullgraph_graph_frame_count(int val);
+int set_fullgraph_skipped_frame_count(int val);
+PyCodeObject* set_fullgraph_root_code(PyCodeObject* code);
+bool get_fullgraph_error_on_nested_compile(void);
+bool set_fullgraph_error_on_nested_compile(bool val);
 
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,

@@ -1910,7 +1910,9 @@ def _compile(
         if package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
-            package.add_guarded_code(check_fn.guards_state, out_code)
+            package.add_guarded_code(
+                check_fn.guards_state, out_code, output.fullgraph_count_frame
+            )
             package.add_inlined_source(output.tracing_context.traced_code)
             package.update_device_type(output.current_tracer.graph)
 
@@ -1921,6 +1923,7 @@ def _compile(
             check_fn.guard_manager,  # type: ignore[arg-type]
             compile_id,
             annotation_str,
+            output.fullgraph_count_frame,
         )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:

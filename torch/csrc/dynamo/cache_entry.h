@@ -2,6 +2,10 @@
 
 #include <Python.h>
 
+#ifndef __cplusplus
+#include <stdbool.h>
+#endif
+
 #ifdef __cplusplus
 
 #include <torch/csrc/dynamo/utils.h>
@@ -54,6 +58,9 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   void* diff_guard_root_mgr{nullptr};
   // backend used to create this cache entry
   py::object backend;
+  // True if executing this cache entry represents an FX graph emitted to the
+  // user backend for fullgraph frame-count validation.
+  bool fullgraph_count_frame{true};
   // Reference to owning ExtraState
   ExtraState* _owner{nullptr};
   // Reference to this CacheEntry's location in owner's linked list
@@ -84,6 +91,8 @@ PyCodeObject* CacheEntry_get_code(CacheEntry* e);
 
 // Returns borrowed string representation of CompileContext
 const char* CacheEntry_get_trace_annotation(CacheEntry* e);
+
+bool CacheEntry_get_fullgraph_count_frame(CacheEntry* e);
 
 // Returns a borrowed reference to CacheEntry as a PyObject
 // Warning: lifetime is controlled by C++

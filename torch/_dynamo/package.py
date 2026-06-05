@@ -118,6 +118,7 @@ class _GuardedCodeCacheEntry:
 
     guards_state: bytes
     dynamo_code: SerializedCode
+    fullgraph_count_frame: bool = True
 
 
 def load_guards_state(guards_state: bytes) -> Any:
@@ -760,6 +761,7 @@ class CompilePackage:
         self,
         guards_state: bytes,
         dynamo_code: types.CodeType,
+        fullgraph_count_frame: bool,
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_guarded_code")
@@ -768,6 +770,7 @@ class CompilePackage:
         guarded_code_entry = _GuardedCodeCacheEntry(
             guards_state=guards_state,
             dynamo_code=SerializedCode.from_code_object(dynamo_code),
+            fullgraph_count_frame=fullgraph_count_frame,
         )
         self._current_entry.guarded_codes.append(guarded_code_entry)
 
@@ -960,6 +963,7 @@ class CompilePackage:
                         target_code,
                         guard_manager,
                         SerializedCode.to_code_object(guarded_code.dynamo_code),
+                        guarded_code.fullgraph_count_frame,
                     )
 
     def cache_entry(self) -> _DynamoCacheEntry:

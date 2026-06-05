@@ -26,18 +26,31 @@ namespace {
 PyObject* bytecode_debugger_callback_obj = nullptr;
 std::unordered_set<PyCodeObject*> breakpoint_code_objects;
 
+// -1 means inactive, >= 0 means active with that many compiled frames.
+thread_local int fullgraph_compiled_frame_count = -1;
+thread_local int fullgraph_graph_frame_count = -1;
+thread_local int fullgraph_skipped_frame_count = -1;
+thread_local PyCodeObject* fullgraph_root_code = nullptr;
+
+// When true and fullgraph_compiled_frame_count > 0, sub-frames under fullgraph
+// compilation will error (via get_fail_callback) instead of being silently
+// skipped.
+thread_local bool fullgraph_error_on_nested_compile = false;
+
 // RAII guard that calls __exit__ on a Python context manager when destroyed.
 struct DebugContextGuard {
   py::object ctx;
 
-  explicit DebugContextGuard(py::object c) : ctx(std::move(c)) {
+  explicit DebugContextGuard(const py::object& c) : ctx(c) {
     ctx.attr("__enter__")();
   }
 
   ~DebugContextGuard() {
     // Save any pending Python exception (e.g. KeyboardInterrupt from the
     // debugger's 'q' command) so calling __exit__ doesn't clobber it.
-    PyObject *exc_type, *exc_value, *exc_tb;
+    PyObject* exc_type = nullptr;
+    PyObject* exc_value = nullptr;
+    PyObject* exc_tb = nullptr;
     PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
     try {
       ctx.attr("__exit__")(py::none(), py::none(), py::none());
@@ -52,11 +65,78 @@ struct DebugContextGuard {
 
   DebugContextGuard(const DebugContextGuard&) = delete;
   DebugContextGuard& operator=(const DebugContextGuard&) = delete;
+  DebugContextGuard(DebugContextGuard&&) = delete;
+  DebugContextGuard& operator=(DebugContextGuard&&) = delete;
 };
 
 } // namespace
 
-void set_bytecode_debugger_callback(py::object callback) {
+extern "C" bool increment_fullgraph_compiled_frame_count_if_active(
+    bool graph_frame) {
+  if (fullgraph_compiled_frame_count < 0) {
+    return false;
+  }
+  fullgraph_compiled_frame_count++;
+  if (graph_frame && fullgraph_graph_frame_count >= 0) {
+    fullgraph_graph_frame_count++;
+  }
+  return true;
+}
+
+extern "C" void increment_fullgraph_skipped_frame_count_if_active() {
+  if (fullgraph_skipped_frame_count >= 0) {
+    fullgraph_skipped_frame_count++;
+  }
+}
+
+extern "C" void increment_fullgraph_root_skipped_frame_count_if_active(
+    PyCodeObject* code) {
+  if (fullgraph_root_code == code) {
+    increment_fullgraph_skipped_frame_count_if_active();
+  }
+}
+
+extern "C" int set_fullgraph_compiled_frame_count(int val) {
+  int old = fullgraph_compiled_frame_count;
+  if (val < 0 || old < 0) {
+    fullgraph_compiled_frame_count = val;
+  }
+  return old;
+}
+
+extern "C" int set_fullgraph_graph_frame_count(int val) {
+  int old = fullgraph_graph_frame_count;
+  if (val < 0 || old < 0) {
+    fullgraph_graph_frame_count = val;
+  }
+  return old;
+}
+
+extern "C" int set_fullgraph_skipped_frame_count(int val) {
+  int old = fullgraph_skipped_frame_count;
+  if (val < 0 || old < 0) {
+    fullgraph_skipped_frame_count = val;
+  }
+  return old;
+}
+
+extern "C" PyCodeObject* set_fullgraph_root_code(PyCodeObject* code) {
+  PyCodeObject* old = fullgraph_root_code;
+  fullgraph_root_code = code;
+  return old;
+}
+
+extern "C" bool get_fullgraph_error_on_nested_compile(void) {
+  return fullgraph_error_on_nested_compile;
+}
+
+extern "C" bool set_fullgraph_error_on_nested_compile(bool val) {
+  bool old = fullgraph_error_on_nested_compile;
+  fullgraph_error_on_nested_compile = val;
+  return old;
+}
+
+void set_bytecode_debugger_callback(const py::object& callback) {
   if (callback.is_none()) {
     Py_XSETREF(bytecode_debugger_callback_obj, nullptr);
   } else {
@@ -72,7 +152,7 @@ py::object get_bytecode_debugger_callback() {
       py::handle(bytecode_debugger_callback_obj));
 }
 
-void register_breakpoint_code(py::object code) {
+void register_breakpoint_code(const py::object& code) {
   breakpoint_code_objects.insert((PyCodeObject*)code.ptr());
 }
 
@@ -307,7 +387,7 @@ int32_t dynamo_get_c_recursion_limit() {
 
 struct CRecursionLimitRAII {
   PyThreadState* tstate;
-  int32_t old_recursion_remaining;
+  int32_t old_recursion_remaining = 0;
   CRecursionLimitRAII(PyThreadState* tstate) : tstate{tstate} {
     auto limit = dynamo_get_c_recursion_limit();
     auto& remaining = tstate->c_recursion_remaining;
@@ -328,6 +408,10 @@ struct CRecursionLimitRAII {
   ~CRecursionLimitRAII() {
     this->tstate->c_recursion_remaining = this->old_recursion_remaining;
   }
+  CRecursionLimitRAII(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII& operator=(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII(CRecursionLimitRAII&&) = delete;
+  CRecursionLimitRAII& operator=(CRecursionLimitRAII&&) = delete;
 };
 
 #else
@@ -429,16 +513,16 @@ PyObject* dynamo__custom_eval_frame(
   // clearing/popping the frame, meaning that unless we default evaluate the
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
-  auto eval_custom = [&]() {
-    if (fullgraph_compiled_frame_count >= 0) {
-      fullgraph_compiled_frame_count++;
+  auto eval_custom = [&](bool count_fullgraph_frame) {
+    if (increment_fullgraph_compiled_frame_count_if_active(
+            count_fullgraph_frame)) {
       // Under fullgraph, disable or error Dynamo for sub-frames of compiled
       // code. If fullgraph_error_on_nested_compile is set, wrap the callback
       // with get_fail_callback so compilation attempts error. Otherwise, set
       // callback to None to skip sub-frames entirely.
       if (!recursive_callback.is_none() &&
           !recursive_callback.is(py::bool_(false))) {
-        if (fullgraph_error_on_nested_compile) {
+        if (get_fullgraph_error_on_nested_compile()) {
           if (!convert_frame_get_fail_callback) {
             convert_frame_get_fail_callback =
                 py::module_::import("torch._dynamo.convert_frame")
@@ -465,7 +549,7 @@ PyObject* dynamo__custom_eval_frame(
       auto ctx = py::module_::import("torch._dynamo.bytecode_debugger")
                      .attr("_DebugContext")();
       ctx.attr("_stop_at_new_code") = false;
-      debug_guard.emplace(std::move(ctx));
+      debug_guard.emplace(ctx);
     }
     // Call bytecode debugger callback if set, to allow instruction-level
     // debugging of the Dynamo-generated code
@@ -519,6 +603,7 @@ PyObject* dynamo__custom_eval_frame(
 
   if (strategy.cur_action == FrameAction::SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
+    increment_fullgraph_root_skipped_frame_count_if_active(F_CODE(frame));
     eval_default();
     return eval_result;
   }
@@ -534,6 +619,7 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
   PyObject* maybe_cached_code = nullptr;
+  bool fullgraph_count_frame = false;
   std::unique_ptr<FrameLocalsMapping> locals;
   if (!try_lookup_without_guard_eval(
           extra,
@@ -541,6 +627,7 @@ PyObject* dynamo__custom_eval_frame(
           isolate_recompiles_id,
           &maybe_cached_code,
           &trace_annotation,
+          &fullgraph_count_frame,
           is_skip_guard_eval_unsafe)) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
     _PytorchRecordFunctionState* rf =
@@ -552,6 +639,7 @@ PyObject* dynamo__custom_eval_frame(
         isolate_recompiles_id,
         &maybe_cached_code,
         &trace_annotation,
+        &fullgraph_count_frame,
         is_skip_guard_eval_unsafe);
     _pytorch_record_function_exit(rf);
   }
@@ -590,7 +678,7 @@ PyObject* dynamo__custom_eval_frame(
     cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
-    eval_custom();
+    eval_custom(fullgraph_count_frame);
     return eval_result;
   }
 
@@ -686,7 +774,7 @@ PyObject* dynamo__custom_eval_frame(
     // Re-enable custom behavior
     cached_code = CacheEntry_get_code(new_cache_entry),
     trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
-    eval_custom();
+    eval_custom(CacheEntry_get_fullgraph_count_frame(new_cache_entry));
   } else {
     eval_default();
   }
