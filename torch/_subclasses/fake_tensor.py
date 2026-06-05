@@ -385,6 +385,27 @@ class FakeTensorConverter:
 
         del self.constant_storage_mapping[weak_st]
 
+    def clear_non_cpu_constants(self) -> None:
+        """Clear non-CPU constants while keeping cheap CPU constants for folding."""
+        for weak_st, weak_tensor_refs in list(self.constant_storage_mapping.items()):
+            live_tensor_refs: list[ReferenceType[FakeTensor]] = []
+            constant: Tensor | None = None
+            for weak_tensor_ref in weak_tensor_refs:
+                ten = weak_tensor_ref()
+                if ten is None or ten.constant is None:
+                    continue
+
+                live_tensor_refs.append(weak_tensor_ref)
+                if constant is None:
+                    constant = ten.constant
+
+            if constant is None:
+                del self.constant_storage_mapping[weak_st]
+            elif constant.device.type == "cpu":
+                self.constant_storage_mapping[weak_st] = live_tensor_refs
+            else:
+                self.invalidate_constant_aliases(constant)
+
     def _get_memo(self, t: Tensor) -> FakeTensor | None:
         tid = self.meta_converter.describer.lookup_tensor.get(t)
         if tid is None:
@@ -790,18 +811,6 @@ class FakeTensor(Tensor):
     # NOTE: this probably will not do the right thing for backends
     # that have dispatch keys which are higher than the "meta" key:
     # https://github.com/pytorch/pytorch/blob/main/c10/core/DispatchKey.h#L189
-
-    # We don't support named tensors; graph break
-    @property
-    # pyrefly: ignore [bad-override]
-    def names(self) -> list[str]:
-        raise UnsupportedFakeTensorException(
-            "torch.compile doesn't support named tensors"
-        )
-
-    @names.setter
-    def names(self, _: list[str]) -> None:
-        raise NotImplementedError
 
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
