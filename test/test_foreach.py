@@ -5,6 +5,7 @@ import os
 import random
 import re
 import unittest
+import unittest.mock
 import weakref
 from contextlib import nullcontext
 from numbers import Number

@@ -49,7 +49,11 @@ def _can_use_nvmath_cublaslt(
     self: list[torch.Tensor],
     mat2: list[torch.Tensor],
 ) -> bool:
-    if self[0].dtype != torch.bfloat16 or not _check_nvmath_cublaslt():
+    if (
+        self[0].dtype != torch.bfloat16
+        or mat2[0].dtype != torch.bfloat16
+        or not _check_nvmath_cublaslt()
+    ):
         return False
 
     elem_size = self[0].element_size()
