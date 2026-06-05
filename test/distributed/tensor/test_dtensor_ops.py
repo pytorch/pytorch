@@ -153,7 +153,6 @@ dtensor_fails = {
     # dtensor_numeric_only_fails for the subtraction.
     xfail("nn.functional.linear_cross_entropy"),
     # 0-dim tensor edge cases: strategies don't handle scalar tensors
-    xfail("logsumexp"),
     xfail("masked.logsumexp"),
     xfail("transpose"),
     # conv stride+padding: TP convolution rejects stride != 1 with padding
