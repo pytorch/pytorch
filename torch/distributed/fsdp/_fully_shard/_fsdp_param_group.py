@@ -603,7 +603,7 @@ class FSDPParamGroup:
                 # access the unsharded parameters when their data is present
                 fsdp_params_with_grad: list[FSDPParam] = []
                 unsharded_grads: list[torch.Tensor] = []
-    
+
                 for fsdp_param in self.fsdp_params:
                     if not hasattr(fsdp_param, "_unsharded_param"):
                         continue
@@ -611,7 +611,9 @@ class FSDPParamGroup:
                     # previous backward did not reduce-scatter
                     if fsdp_param.unsharded_accumulated_grad is not None:
                         fsdp_params_with_grad.append(fsdp_param)
-                        unsharded_grads.append(fsdp_param.unsharded_accumulated_grad_data)
+                        unsharded_grads.append(
+                            fsdp_param.unsharded_accumulated_grad_data
+                        )
                         fsdp_param.unsharded_accumulated_grad = None
                     elif fsdp_param.unsharded_param.grad is not None:
                         fsdp_params_with_grad.append(fsdp_param)
@@ -631,10 +633,14 @@ class FSDPParamGroup:
                 self._param_group_index == self._num_param_groups - 1
                 and self.comm_ctx.reduce_scatter_states
             ):
-                with record_function(f"FSDP::post_backward_rs_wait ({self._module_fqn})"):
+                with record_function(
+                    f"FSDP::post_backward_rs_wait ({self._module_fqn})"
+                ):
                     for rs_state in self.comm_ctx.reduce_scatter_states:
                         if rs_state.event is not None:
-                            self.device_handle.current_stream().wait_event(rs_state.event)
+                            self.device_handle.current_stream().wait_event(
+                                rs_state.event
+                            )
                     self.comm_ctx.reduce_scatter_states.clear()
             if len(fsdp_params_with_grad) == 0:
                 return
@@ -655,7 +661,7 @@ class FSDPParamGroup:
                     all_reduce_stream = self._all_reduce_hook_stream
                 else:
                     all_reduce_stream = self.comm_ctx.all_reduce_stream
-    
+
                 self._wait_for_post_backward()
                 (
                     reduce_scatter_input,
@@ -729,7 +735,9 @@ class FSDPParamGroup:
                     #      Whether vector 2 exists on CUDA FSDP but is timing-
                     #      masked is unresolved. See
                     #      ``fsdp2_chunked_loss_rocm_race.md``.
-                    self.device_handle.current_stream().wait_event(self._post_reduce_event)
+                    self.device_handle.current_stream().wait_event(
+                        self._post_reduce_event
+                    )
                 if all_reduce_input is not None:
                     if self.device.type != "cpu":
                         if all_reduce_event is None:
@@ -739,7 +747,7 @@ class FSDPParamGroup:
                     self._all_reduce_state = AllReduceState(
                         all_reduce_input, all_reduce_event
                     )
-    
+
     def finalize_backward(self):
         for event in self.comm_ctx._last_post_reduce_events.values():
             self.device_handle.current_stream().wait_event(event)
