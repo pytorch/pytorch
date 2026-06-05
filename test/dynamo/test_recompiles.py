@@ -562,12 +562,6 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         apply_patches(f, x, [("c", 3), ("d", 4)])
         self.assertEqual(counter.frame_count, 1)
 
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()
-
     def test_topk_out_recompilations(self):
         """Test that topk with out= does not cause excessive recompilations"""
 
@@ -598,3 +592,12 @@ if __name__ == "__main__":
         recompiles_3 = get_num_torch_recompiles()
 
         self.assertLessEqual(recompiles_3, 2)
+
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
+
+    
