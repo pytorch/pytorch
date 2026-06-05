@@ -2475,7 +2475,7 @@ class GraphModule(torch.nn.Module):
             yield t.unsqueeze(-1).expand(4, 15, 10), False
             yield t.select(-1, 6), False
             # https://github.com/pytorch/pytorch/issues/128649
-            yield t[2:3, 5:9], dynamic
+            yield t[2:3, 5:9], False
             yield t.view(-1, 15), False
 
         def f(x):
@@ -2496,6 +2496,20 @@ class GraphModule(torch.nn.Module):
             else:
                 out_test = compiled_f(view)
                 self.assertEqual(out_ref, out_test)
+
+    def test_subclass_view_splits_dimension_mark_dynamic(self):
+        def f(x):
+            return x * 2
+
+        compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+
+        t = TwoTensor(torch.randn(4, 15), torch.randn(4, 15))
+        view = t.view(t.size(0), 3, 5)
+        torch._dynamo.mark_dynamic(view, 0)
+
+        out_ref = f(view)
+        out_test = compiled_f(view)
+        self.assertEqual(out_ref, out_test)
 
     @parametrize("dynamic", [True, False])
     def test_mark_static_with_subclass_desugaring(self, dynamic):
