@@ -3051,6 +3051,31 @@ if torch._C._has_mkldnn:
         out = x.new_empty(output_shape)
         return out
 
+    @register_meta(torch.ops.onednn.qlinear_prepack.default)
+    def meta_qlinear_prepack(weight, x_shape):
+        # Mirror the real C++ kernel pack_weight_to_onednn_tensor in
+        # aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp
+        torch._check(
+            weight.dim() == 2,
+            lambda: f"qlinear_prepack expects a 2D weight, got {weight.dim()}D",
+        )
+        torch._check(
+            weight.dtype in (torch.int8, torch.float8_e4m3fn),
+            lambda: (
+                "qlinear_prepack expects int8 or float8_e4m3fn weight, "
+                f"got {weight.dtype}"
+            ),
+        )
+        N, K = weight.shape
+        torch._check(
+            x_shape is None or x_shape[-1] == K,
+            lambda: (
+                f"qlinear_prepack: x_shape[-1] ({x_shape[-1]}) must match "
+                f"weight in_features ({K})"
+            ),
+        )
+        return weight.new_empty((K, N))
+
     _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
         "quantized", "IMPL", "Meta"
     )
