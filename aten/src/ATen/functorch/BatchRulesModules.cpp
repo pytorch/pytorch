@@ -147,7 +147,7 @@ grid_sample_backward_helper_in(
     const Tensor& input, std::optional<int64_t> input_bdim,
     const Tensor& grid, std::optional<int64_t> grid_bdim) {
 
-  auto batch_size = get_bdim_size3(
+  auto batch_size = get_bdim_size(
       grad_output, grad_output_bdim, input, input_bdim, grid, grid_bdim);
 
   auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);

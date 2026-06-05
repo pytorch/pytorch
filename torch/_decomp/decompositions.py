@@ -1748,7 +1748,7 @@ def native_group_norm_backward(
     if do_output := any(o is not None for o in possible_outputs):
         torch._check(
             all(o is not None for o in possible_outputs),
-            "Please supply arguments for all output tensors or none!",
+            lambda: "Please supply arguments for all output tensors or none!",
         )
 
     cpg = C // group

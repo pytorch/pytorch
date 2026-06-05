@@ -74,7 +74,7 @@ batch_norm_batch_rule(
     mean = std::move(std::get<1>(result));
     rstd = std::move(std::get<2>(result));
   } else {
-    bdim_size = get_bdim_size3(input, input_bdim, running_mean, running_mean_bdim, running_var, running_var_bdim);
+    bdim_size = get_bdim_size(input, input_bdim, running_mean, running_mean_bdim, running_var, running_var_bdim);
     auto input_ = moveBatchDimToFront(input, input_bdim);
     input_ = ensure_has_bdim(input_, input_bdim.has_value(), bdim_size.value());
     input_ = reshape_dim_into(0, /*channels dim*/1, input_);
@@ -153,7 +153,7 @@ std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bia
   auto rstd_ = moveBatchDimToFront(rstd, rstd_bdim);
 
   // ensure all inputs have bdim.
-  const auto bdim_size = get_bdim_size4(grad_out, grad_out_bdim, input, input_bdim, running_mean, running_mean_bdim, running_var, running_var_bdim);
+  const auto bdim_size = get_bdim_size(grad_out, grad_out_bdim, input, input_bdim, running_mean, running_mean_bdim, running_var, running_var_bdim);
   grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), bdim_size);
   input_ = ensure_has_bdim(input_, input_bdim.has_value(), bdim_size);
   mean_ = ensure_has_bdim(mean_, mean_bdim.has_value(), bdim_size);
@@ -350,7 +350,7 @@ static at::Tensor group_norm_backward_no_weight_bias_batch_rule(
   auto mean_ = moveBatchDimToFront(mean, mean_bdim);
   auto rstd_ = moveBatchDimToFront(rstd, rstd_bdim);
 
-  const auto bdim_size = get_bdim_size2(grad_out, grad_out_bdim, input, input_bdim);
+  const auto bdim_size = get_bdim_size(grad_out, grad_out_bdim, input, input_bdim);
   grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), bdim_size);
   input_ = ensure_has_bdim(input_, input_bdim.has_value(), bdim_size);
   mean_ = ensure_has_bdim(mean_, mean_bdim.has_value(), bdim_size);
@@ -547,7 +547,7 @@ static std::tuple<at::Tensor, std::optional<int64_t>> native_layer_norm_backward
   auto rstd_ = moveBatchDimToFront(rstd, rstd_bdim);
 
   // ensure grad_out / input have bdim.
-  const auto bdim_size = get_bdim_size2(grad_out, grad_out_bdim, input, input_bdim);
+  const auto bdim_size = get_bdim_size(grad_out, grad_out_bdim, input, input_bdim);
   grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), bdim_size);
   input_ = ensure_has_bdim(input_, input_bdim.has_value(), bdim_size);
   mean_ = ensure_has_bdim(mean_, mean_bdim.has_value(), bdim_size);

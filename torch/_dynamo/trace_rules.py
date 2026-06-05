@@ -2213,7 +2213,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.q_per_channel_zero_points",
         "torch.q_scale",
         "torch.q_zero_point",
-        "torch.qr",
         "torch.quantile",
         "torch.quantize_per_channel",
         "torch.quantize_per_tensor_dynamic",
