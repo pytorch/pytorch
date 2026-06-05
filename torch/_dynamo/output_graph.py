@@ -3702,6 +3702,7 @@ class SubgraphTracer(fx.Tracer):
         description: str | None = None,
     ) -> None:
         super().__init__()
+        self._proxy_dataclass = False
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
 

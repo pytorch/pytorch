@@ -3933,18 +3933,15 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         return self.python_type()(*args, **kwargs)
 
     def as_proxy(self) -> object:
-        from dataclasses import fields
+        from torch.fx.node import _create_dataclass_instance, _get_dataclass_fields
 
-        args: list[object] = []
-        kwargs: dict[str, object] = {}
-        for field in fields(self.value):  # type: ignore[arg-type]
-            proxy = self._get_field_vt(field.name).as_proxy()
-            if hasattr(field, "kw_only") and field.kw_only:
-                kwargs[field.name] = proxy
-            else:
-                args.append(proxy)
-
-        return self.python_type()(*args, **kwargs)
+        return _create_dataclass_instance(
+            self.python_type(),
+            {
+                field.name: self._get_field_vt(field.name).as_proxy()
+                for field in _get_dataclass_fields(self.value)
+            },
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.source is not None:

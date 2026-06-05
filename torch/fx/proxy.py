@@ -10,13 +10,11 @@ import traceback
 import types
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
-from dataclasses import fields, is_dataclass
 from typing import Any, cast, TypeVar
 from typing_extensions import Never
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch._C import _fx_map_arg as map_arg
 from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import getArtifactLogger
 from torch.utils._pytree import tree_map_
@@ -25,7 +23,17 @@ from torch.utils._traceback import CapturedTraceback
 from ._compatibility import compatibility
 from .graph import Graph, magic_methods, reflectable_magic_methods
 from .immutable_collections import immutable_dict, immutable_list
-from .node import Argument, base_types, Node, Target
+from .node import (
+    _create_dataclass_instance,
+    _get_dataclass_field_value,
+    _get_dataclass_fields,
+    _is_dataclass_instance,
+    _map_arg_with_dataclasses,
+    Argument,
+    base_types,
+    Node,
+    Target,
+)
 from .operator_schemas import check_for_mutable_operation
 
 
@@ -210,6 +218,12 @@ class TracerBase:
 
     # Mapping of node name to module scope
     node_name_to_scope: dict[str, tuple[str, type]]
+
+    # Whether dataclass instances should be represented as constructor nodes.
+    _proxy_dataclass: bool
+
+    def __init__(self) -> None:
+        self._proxy_dataclass = True
 
     @compatibility(is_backward_compatible=True)
     def create_node(
@@ -470,12 +484,12 @@ class TracerBase:
         elif is_opaque_value_type(type(a)):
             return a
 
-        elif is_dataclass(a):
-            kwargs = {
-                field.name: self.create_arg(getattr(a, field.name))
-                for field in fields(a)
+        elif _is_dataclass_instance(a):
+            field_values = {
+                field.name: self.create_arg(_get_dataclass_field_value(a, field.name))
+                for field in _get_dataclass_fields(a)
             }
-            return self.create_node("call_function", a.__class__, (), kwargs)
+            return cast(Argument, _create_dataclass_instance(type(a), field_values))
 
         elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
             return a  # pyrefly: ignore[bad-return]
@@ -962,9 +976,9 @@ def _create_arg_dict(self: TracerBase, a: dict[Any, Any]) -> dict[Any, Argument]
         if not isinstance(k, str):
             # Check for invalid dict keys. We do not want a Proxy to appear
             # anywhere within the key. Since keys can be collection types,
-            # we iterate through the key with map_arg
+            # including dataclasses, we iterate through the key recursively.
             k = self.create_arg(k)
-            map_arg(k, _no_nodes_error)
+            _map_arg_with_dataclasses(k, _no_nodes_error)
         r[k] = self.create_arg(v)
     return r
 

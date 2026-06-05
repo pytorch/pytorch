@@ -2,7 +2,7 @@ import inspect
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -15,7 +15,13 @@ from ._lazy_graph_module import _make_graph_module
 from ._symbolic_trace import Tracer
 from .graph import Graph
 from .graph_module import GraphModule
-from .node import Argument, map_aggregate, map_arg, Node, Target
+from .node import (
+    _map_aggregate_with_dataclasses,
+    _map_arg_with_dataclasses,
+    Argument,
+    Node,
+    Target,
+)
 from .proxy import Proxy
 
 
@@ -511,7 +517,7 @@ class Interpreter:
                 )
             return self.env[n_arg]
 
-        return map_arg(args, load_arg)
+        return _map_arg_with_dataclasses(args, load_arg)
 
 
 @compatibility(is_backward_compatible=True)
@@ -575,6 +581,7 @@ class Transformer(Interpreter):
         class TransformerTracer(Tracer):
             def __init__(self, graph: Graph) -> None:
                 super().__init__()
+                self._proxy_dataclass = False
                 self.graph = graph
                 self.tensor_attrs: dict[torch.Tensor, str] = {}  # type: ignore[assignment]
 
@@ -654,10 +661,12 @@ class Transformer(Interpreter):
             result = super().run(enable_io_processing=False)
         if result is not None:
 
-            def strip_proxy(a: Argument | Proxy) -> Any:
+            def strip_proxy(a: object) -> object:
                 return a.node if isinstance(a, Proxy) else a
 
-            new_output_node = self.new_graph.output(map_aggregate(result, strip_proxy))
+            new_output_node = self.new_graph.output(
+                cast(Argument, _map_aggregate_with_dataclasses(result, strip_proxy))
+            )
             # also preserve the metadata from the old output node, if it exists
             old_output_node = list(self.graph.nodes)[-1]
             if old_output_node.op != "output":

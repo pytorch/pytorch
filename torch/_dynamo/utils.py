@@ -3891,7 +3891,7 @@ def get_fake_values_from_nodes(
             return ensure_graph_fake(out, tx)
         return out
 
-    return torch.fx.node.map_arg(nodes, visit)
+    return torch.fx.node._map_arg_with_dataclasses(nodes, visit)
 
 
 def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) -> str:
@@ -4303,7 +4303,7 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
         return cache[node]
 
     op = node.op
-    args, kwargs = torch.fx.node.map_arg(  # type: ignore[misc]
+    args, kwargs = torch.fx.node._map_arg_with_dataclasses(  # type: ignore[misc]
         (node.args, node.kwargs),
         lambda n: get_real_value(n, tracer),
     )
