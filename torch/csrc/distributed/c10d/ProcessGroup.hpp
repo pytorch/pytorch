@@ -10,6 +10,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Deprecated.h>
 
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
@@ -359,8 +360,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
   // is interpreted as a contiguous collection of size inputBuffer * WORLD_SIZE.
   // For implementers of ProcessGroup API and advanced users only.
-  // Note: this function will be deprecated in near future.
-  virtual c10::intrusive_ptr<Work> _allgather_base(
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> all_gather_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) {
@@ -385,6 +386,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       c10d::register_work(outputBuffer, work);
     }
     return work;
+  }
+
+  // Deprecated: use all_gather_single instead. Kept as an alias for backward
+  // compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::_allgather_base is deprecated, use all_gather_single instead.")
+  virtual c10::intrusive_ptr<Work> _allgather_base(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    return all_gather_single(outputBuffer, inputBuffer, opts);
   }
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
@@ -419,10 +431,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return work;
   }
 
-  // This function is a coalesced version of `allgather_into_tensor` (currently
-  // still named as `_allgather_base`). Each tensor in the vector corresponds to
-  // an input/output of one `allgather_into_tensor` operation.
-  virtual c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+  // Coalesced version of all_gather_single. Each tensor in the vector
+  // corresponds to an input/output of one all_gather_single operation.
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> all_gather_single_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) {
@@ -447,6 +459,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       }
     }
     return work;
+  }
+
+  // Deprecated: use all_gather_single_coalesced instead. Kept as an alias for
+  // backward compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::allgather_into_tensor_coalesced is deprecated, use all_gather_single_coalesced instead.")
+  virtual c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    return all_gather_single_coalesced(outputTensors, inputTensors, opts);
   }
 
   virtual c10::intrusive_ptr<Work> gather(
@@ -542,7 +565,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return work;
   }
 
-  virtual c10::intrusive_ptr<Work> _reduce_scatter_base(
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> reduce_scatter_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) {
@@ -570,10 +594,21 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return work;
   }
 
-  // This function is a coalesced version of `reduce_scatter_tensor` (currently
-  // still named as `_reduce_scatter_base`). Each tensor in the vector
-  // corresponds to an input/output of one `reduce_scatter_tensor` operation.
-  virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+  // Deprecated: use reduce_scatter_single instead. Kept as an alias for
+  // backward compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::_reduce_scatter_base is deprecated, use reduce_scatter_single instead.")
+  virtual c10::intrusive_ptr<Work> _reduce_scatter_base(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    return reduce_scatter_single(outputBuffer, inputBuffer, opts);
+  }
+
+  // Coalesced version of reduce_scatter_single. Each tensor in the vector
+  // corresponds to an input/output of one reduce_scatter_single operation.
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) {
@@ -604,7 +639,19 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return work;
   }
 
-  virtual c10::intrusive_ptr<Work> alltoall_base(
+  // Deprecated: use reduce_scatter_single_coalesced instead. Kept as an alias
+  // for backward compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::reduce_scatter_tensor_coalesced is deprecated, use reduce_scatter_single_coalesced instead.")
+  virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    return reduce_scatter_single_coalesced(outputTensors, inputTensors, opts);
+  }
+
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> all_to_all_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       std::vector<int64_t>& outputSplitSizes,
@@ -633,6 +680,20 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       c10d::register_work(outputBuffer, work);
     }
     return work;
+  }
+
+  // Deprecated: use all_to_all_single instead. Kept as an alias for backward
+  // compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::alltoall_base is deprecated, use all_to_all_single instead.")
+  virtual c10::intrusive_ptr<Work> alltoall_base(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) {
+    return all_to_all_single(
+        outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
   }
 
   virtual c10::intrusive_ptr<Work> alltoall(
