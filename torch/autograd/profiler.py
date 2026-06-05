@@ -118,7 +118,7 @@ class _ProfilerStats:
     function_events_build_tree_call_duration_us: int = 0
 
 
-class EventItem:
+class _EventItem:
     def __init__(self, event):
         self.e = event
         self.start, self.end = self._interval_of()
@@ -129,7 +129,7 @@ class EventItem:
         return start, start + duration
 
 
-def find_events_covered_in(
+def _find_events_covered_in(
     events: list[dict[str, Any]],
     top_level_events: list[dict[str, Any]],
 ):
@@ -139,7 +139,7 @@ def find_events_covered_in(
     """
     top_level_by_tid = defaultdict(list)
     for event in top_level_events:
-        top_level_by_tid[event["tid"]].append(EventItem(event))
+        top_level_by_tid[event["tid"]].append(_EventItem(event))
     for tid in top_level_by_tid:
         top_level_by_tid[tid] = sorted(top_level_by_tid[tid], key=lambda x: x.start)
     starts_by_tid = {
@@ -163,7 +163,7 @@ def find_events_covered_in(
         tid = event.get("tid")
         if tid not in top_level_by_tid:
             continue
-        item = EventItem(event)
+        item = _EventItem(event)
         event_items = top_level_by_tid[tid]
         idx = bisect_left(starts_by_tid[tid], item.start) - 1
         if idx < 0 or idx >= len(event_items):
@@ -698,9 +698,9 @@ class profile:
             ):
                 extern_events.append(event)
 
-        compiled_events = sorted(compiled_events, key=lambda x: EventItem(x).start)
-        ops_in_compile_region = find_events_covered_in(real_events, compiled_events)
-        ops_in_extern_region = find_events_covered_in(real_events, extern_events)
+        compiled_events = sorted(compiled_events, key=lambda x: _EventItem(x).start)
+        ops_in_compile_region = _find_events_covered_in(real_events, compiled_events)
+        ops_in_extern_region = _find_events_covered_in(real_events, extern_events)
         src2dst, dst2src = self._build_flow_mapping(trace, flow_events)
         kernel_uids_by_external_id = defaultdict(list)
         for event in real_events:
@@ -712,9 +712,9 @@ class profile:
 
         def _related_compile_region(compile_event):
             src_event = uid_2_events[dst2src[compile_event["uid"]]]
-            src_item = EventItem(src_event)
+            src_item = _EventItem(src_event)
             for event in reversed(compiled_events):
-                region_item = EventItem(event)
+                region_item = _EventItem(event)
                 if (
                     src_item.start > region_item.start
                     and src_item.end < region_item.end
