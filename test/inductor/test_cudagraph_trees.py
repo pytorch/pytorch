@@ -5310,6 +5310,41 @@ if HAS_CUDA_AND_TRITON:
             run(10)
             run(25)
 
+        def test_dealloc_handles_tensor_weakrefs_stack_traces_mismatch(self):
+            """Verify dealloc_current_path_weakrefs handles tensor_weakrefs /
+            stack_traces length mismatch without asserting.
+
+            This injects the mismatch directly so the deallocation path is
+            deterministic. The fix replaces the hard assert with a warning and
+            relies on zip(), matching the existing defensive pattern for
+            outputs_weakrefs in the same function.
+            """
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            inp = torch.rand([4], device="cuda")
+
+            # First call: warmup phase creates and runs a CUDAWarmupNode.
+            torch.compiler.cudagraph_mark_step_begin()
+            foo(inp)
+
+            # Simulate the tensor_weakrefs / stack_traces length divergence.
+            node = self.curr_node()
+            self.assertEqual(len(node.tensor_weakrefs), len(node.stack_traces))
+            node.tensor_weakrefs.append(None)
+
+            # Second call: transitions warmup -> recording, which invokes
+            # try_end_curr_warmup -> dealloc_current_path_weakrefs.
+            # cudagraph_mark_step_begin ensures can_start_new_generation()
+            # returns True so dealloc is actually called.
+            # Without the fix, this would hit:
+            #   assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            # With the fix, zip() safely truncates to the shorter list.
+            torch.compiler.cudagraph_mark_step_begin()
+            foo(inp)
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_opaque_value_input_cudagraph(self):
             """Opaque reference-type objects (e.g. DeviceMesh, ProcessGroup)

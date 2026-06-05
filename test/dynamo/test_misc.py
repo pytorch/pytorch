@@ -3822,12 +3822,36 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         def constructor_arg_fn(n, x):
             return x + int(round(np.float64(n)))
 
+        def zero_dim_array_ufunc_fn(x):
+            return x + int(round(np.floor(np.array(3.1))))
+
+        def reduction_function_fn(x):
+            return x + int(round(np.sum([3.1])))
+
+        def reduction_method_fn(x):
+            return x + int(round(np.array([3.1]).sum()))
+
+        def scalar_preserving_function_fn(x):
+            return x + int(round(np.round(np.array(3.1))))
+
+        def scalar_preserving_alias_fn(x):
+            return x + int(round(np.around(np.array(3.1))))
+
+        def scalar_preserving_method_fn(x):
+            return x + int(round(np.array(3.1).round()))
+
         x = torch.ones(1)
         for fn, args in [
             (literal_fn, (x,)),
             (arg_fn, (3.1, x)),
             (constructor_fn, (x,)),
             (constructor_arg_fn, (3.1, x)),
+            (zero_dim_array_ufunc_fn, (x,)),
+            (reduction_function_fn, (x,)),
+            (reduction_method_fn, (x,)),
+            (scalar_preserving_function_fn, (x,)),
+            (scalar_preserving_alias_fn, (x,)),
+            (scalar_preserving_method_fn, (x,)),
         ]:
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(opt_fn(*args), fn(*args))
@@ -3856,6 +3880,26 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             opt_fn = torch.compile(fn, backend="eager")
             self.assertEqual(opt_fn(x), ref)
 
+        def round_ndigits_fn(x):
+            return x + round(np.float32(123456.789), 7)
+
+        self.assertEqual(
+            torch.compile(round_ndigits_fn, backend="eager")(torch.zeros(())),
+            round_ndigits_fn(torch.zeros(())),
+        )
+
+        def round_none_fn(x):
+            return (
+                x + round(np.float32(1.2), None) + round(np.float32(1.2), ndigits=None)
+            )
+
+        self.assertEqual(
+            torch.compile(round_none_fn, backend="eager", fullgraph=True)(
+                torch.zeros(())
+            ),
+            round_none_fn(torch.zeros(())),
+        )
+
     def test_numpy_array_dunder_round_still_errors(self):
         def fn(x):
             round(np.floor([3.1]))
@@ -3872,6 +3916,53 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_zero_dim_array_fn = torch.compile(zero_dim_array_fn, backend="eager")
         with self.assertRaisesRegex(TypeError, "__round__"):
             opt_zero_dim_array_fn(torch.ones(1))
+
+        def non_scalar_reduction_fn(x):
+            round(np.sum([[3.1]], axis=0))
+            return x
+
+        opt_non_scalar_reduction_fn = torch.compile(
+            non_scalar_reduction_fn, backend="eager"
+        )
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_non_scalar_reduction_fn(torch.ones(1))
+
+        def bool_scalar_fn(x):
+            round(np.greater(np.float64(2), np.float64(1)))
+            return x
+
+        opt_bool_scalar_fn = torch.compile(bool_scalar_fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_bool_scalar_fn(torch.ones(1))
+
+        def ufunc_out_fn(x):
+            out = np.array(0.0)
+            round(np.floor(3.1, out))
+            return x
+
+        opt_ufunc_out_fn = torch.compile(ufunc_out_fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_ufunc_out_fn(torch.ones(1))
+
+        def round_function_out_fn(x):
+            out = np.array(0.0)
+            round(np.round(np.array(3.1), 0, out))
+            return x
+
+        opt_round_function_out_fn = torch.compile(
+            round_function_out_fn, backend="eager"
+        )
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_round_function_out_fn(torch.ones(1))
+
+        def round_method_out_fn(x):
+            out = np.array(0.0)
+            round(np.array(3.1).round(out=out))
+            return x
+
+        opt_round_method_out_fn = torch.compile(round_method_out_fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_round_method_out_fn(torch.ones(1))
 
     def test_numpy_array_of_arrays(self):
         def fn(x, y):
@@ -4247,7 +4338,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             lambda x: x.resize_as_(torch.rand(200, 300)): torch.rand(2, 3),
             lambda x: x.swapaxes_(0, 1).mul_(2): torch.rand(2, 3),
             lambda x: x.swapdims_(0, 1).mul_(2): torch.rand(2, 3),
-            lambda x: x.rename_("N", "C").mul_(2): torch.zeros(2, 3),
             lambda x: x.as_strided_((3, 2), (2, 1)).mul_(2): torch.zeros(2, 3),
             lambda x: x.detach_().mul_(2): torch.zeros(2, 3),
         }
@@ -6248,6 +6338,47 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
+
+    @torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False)
+    def test_param_grad_in_forward(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            w = torch.nn.Parameter(torch.ones(4, 4))
+            saw_none = w.grad is None
+            if saw_none:
+                w.grad = torch.zeros_like(w)
+            return saw_none, w.grad + x
+
+        x = torch.randn(4, 4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+
+        self.assertTrue(res[0])
+        self.assertEqual(ref[1], res[1])
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(
+        graph_break_on_nn_param_ctor=False, trace_autograd_ops=True
+    )
+    def test_param_autograd_grad_in_forward(self):
+        def fn(x):
+            w = torch.nn.Parameter(torch.ones(4, 4))
+            y = (x @ w).sum()
+            (grad,) = torch.autograd.grad(y, w)
+            return grad is not None, w.grad is None, grad
+
+        x = torch.randn(4, 4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        res = opt_fn(x)
+
+        self.assertTrue(res[0])
+        self.assertTrue(res[1])
+        self.assertEqual(ref[2], res[2])
 
     def test_intermediary_tensor_grad_access(self):
         # This test creates a model, and accesses the grads
@@ -8261,7 +8392,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         x = torch.tensor([2.0])
         with self.assertRaisesRegex(
-            AssertionError, "Can't unpack a tensor of 1 rows into a tuple of 2 elements"
+            ValueError, r"not enough values to unpack \(expected 2, got 1\)"
         ):
             f1(x)
 
@@ -12535,6 +12666,20 @@ def ___make_guard_fn():
             return x
 
         self.assertEqual(fn().item(), 1)
+
+    def test_iter_version(self):
+        def fn(x):
+            s = 0
+            for i in torch.__version__:
+                try:
+                    s += int(i)
+                except ValueError:
+                    pass
+            return (x + s).sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3, 3)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_itertools_accumulate_tensors_user_defined(self):
         def udo_fn_0(a, b):
