@@ -8215,6 +8215,12 @@ def forward(self, primals_1, tangents_1):
         out = f(x)
         (grad_x,) = torch.autograd.grad(out.sum(), x, create_graph=True)
         self.assertEqual(grad_x, 2 * x)
+        self.assertTrue(grad_x.requires_grad)
+        self.assertIsNotNone(grad_x.grad_fn)
+        with self.assertRaisesRegex(
+            RuntimeError, "does not currently support double backward"
+        ):
+            grad_x.sum().backward()
 
     def test_compiled_backward_multiple_outputs(self):
         @torch.compile(backend="aot_eager")
@@ -8254,7 +8260,9 @@ def forward(self, primals_1, tangents_1):
             _codegen_compiled_backward,
         )
 
-        bwd_fn = _codegen_compiled_backward(num_rng=0, num_tensors_no_vc_check=None)
+        bwd_fn = _codegen_compiled_backward(
+            num_rng=0, num_tensors_no_vc_check=None, inputs_require_grad=False
+        )
 
         def noop(*a, **kw):
             return None
@@ -9561,6 +9569,25 @@ def forward(self, primals_1, tangents_1):
             torch.ops.aten._assert_tensor_metadata.default,
         ):
             node = g.call_function(target, args=())
+            self.assertEqual(_size_of(node), 0)
+
+    def test_size_of_fake_script_object(self):
+        import torch._functorch.config as functorch_config
+        from torch._functorch.partitioners import _size_of
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        g = torch.fx.Graph()
+        node = g.call_function(torch.ops.aten.abs.default, args=())
+        node.meta["val"] = FakeScriptObject(None, "test_class", None)
+
+        # A (Fake)ScriptObject may hold tensors internally, so by default
+        # _size_of refuses to guess its memory footprint and raises.
+        with self.assertRaisesRegex(RuntimeError, "Cannot compute the size"):
+            _size_of(node)
+
+        # The unsafe escape hatch makes _size_of assume such objects are
+        # zero size, unblocking compilation at the cost of soundness.
+        with functorch_config.patch(unsafe_treat_script_objects_as_zero_size=True):
             self.assertEqual(_size_of(node), 0)
 
 
@@ -11667,11 +11694,6 @@ aot_autograd_module_failures = set(
         # of a tracing tensor with aten._local_scalar_dense.default -
         # erroring out! It's likely that this is caused by data-dependent
         # control flow or similar.
-        torch.nn.MultiLabelMarginLoss,  # AssertionError: The values for attribute 'shape' do not match:
-        # torch.Size([1]) != torch.Size([]). Outputs of the operator are different in
-        # eager-mode PyTorch vs AOTAutograd. This means the operator will have incorrect
-        # output underneath torch.compile. This could be because the operator's
-        # implementation not traceable or that there is a bug in AOTAutograd.
         torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.eq compares a mask input
         # to a causal mask tensor, to see if Boolean is_causal should be set
         # for TransformerEncoder layers, MHA and sdp custom kernels
