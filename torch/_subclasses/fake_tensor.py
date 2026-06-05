@@ -587,6 +587,10 @@ class FakeTensorConverter:
                     )
         if make_constant:
             self.add_constant_storage_mapping(out)
+        # Propagate backend-specific metadata (e.g. PrivateUse1 BackendMeta)
+        # from the real tensor onto the fake tensor. No-op when the real tensor
+        # has no backend metadata.
+        torch._utils.copy_backend_meta(t, out)
         # NB: meta_converter set the memo
         return out
 
