@@ -5,8 +5,6 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/headeronly/util/Exception.h>
 
-#ifdef LAE_USE_CUDA
-
 int64_t test_stream_native_handle(int32_t device_index) {
   STD_TORCH_CHECK(
       device_index >= std::numeric_limits<int32_t>::min() &&
@@ -25,5 +23,3 @@ STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("test_stream_native_handle", TORCH_BOX(&test_stream_native_handle));
 }
-
-#endif // LAE_USE_CUDA

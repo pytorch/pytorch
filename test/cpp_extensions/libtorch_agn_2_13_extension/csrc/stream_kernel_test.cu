@@ -1,5 +1,3 @@
-#ifdef LAE_USE_CUDA
-
 #include <cuda_runtime.h>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/library.h>
@@ -47,5 +45,3 @@ STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CUDA, m) {
   m.impl("test_kernel_launch_on_stream", TORCH_BOX(&test_kernel_launch_on_stream));
 }
-
-#endif // LAE_USE_CUDA
