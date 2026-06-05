@@ -25,7 +25,7 @@ from .lazy import LazyVariableTracker
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from ..codegen import PyCodegen
 
@@ -324,7 +324,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
 
     @staticmethod
     def create(
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         stream_to_enter: "StreamVariable",
         **kwargs: dict[str, Any],
     ) -> "StreamContextVariable":
@@ -342,7 +342,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         )
 
     def enter(
-        self, tx: "InstructionTranslator", *args: VariableTracker
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
@@ -350,7 +350,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         return super().enter(tx)
 
     def exit(
-        self, tx: "InstructionTranslator", *args: VariableTracker
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         # to stream, from stream is the order of the arguments
         # we are leaving the target, and entering the initial stream
@@ -402,7 +402,9 @@ class StreamVariable(StreamContextVariable):
     def python_type(self) -> type:
         return self._cpython_type
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
         if self._device_handle_attr is not None and name == self._device_handle_attr:
             from ..guards import GuardBuilder, install_guard
 
@@ -422,7 +424,7 @@ class StreamVariable(StreamContextVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -512,8 +514,8 @@ class StreamVariable(StreamContextVariable):
         from .constant import ConstantVariable
 
         if not isinstance(other, StreamVariable):
-            # Stream's tp_richcompare never returns NotImplemented.
-            # Non-Stream: eq->False, ne->True, ordering->False.
+            # Stream's tp_richcompare (THPStream_richcompare) compares
+            # stream_id/device and never returns NotImplemented.
             return ConstantVariable.create(op == "__ne__")
         if self.source:
             install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
@@ -623,7 +625,9 @@ class EventVariable(VariableTracker):
         self.value = value
         self.user_object_index = user_object_index
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -636,7 +640,7 @@ class EventVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -704,7 +708,7 @@ class EventVariable(VariableTracker):
 
     @staticmethod
     def _get_stream_arg(
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> tuple["StreamVariable", int]:
@@ -755,7 +759,16 @@ class EventVariable(VariableTracker):
         # not an input or global
         if self.source:
             raise AssertionError("Event should not have a source during reconstruct")
-        # Similar to stream handling, we lift the event into a global and then codegen bytecode to load it from there.
-        prefix = "_event"
-        name = codegen.tx.output.install_global_by_id(prefix, self.value)
-        codegen.append_output(codegen.create_load_global(name, add=True))
+        if self.user_object_index is not None:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    torch._dynamo.graph_bytecode_inputs.__name__,
+                    "get_external_object_by_index",
+                )
+            )
+            codegen.append_output(codegen.create_load_const(self.user_object_index))
+            codegen.extend_output(create_call_function(1, False))
+        else:
+            prefix = "_event"
+            name = codegen.tx.output.install_global_by_id(prefix, self.value)
+            codegen.append_output(codegen.create_load_global(name, add=True))
