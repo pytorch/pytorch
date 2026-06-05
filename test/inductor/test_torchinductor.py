@@ -349,6 +349,8 @@ class TestCase(InductorTestCase):
                     "triton.autotune_pointwise": False,  # too slow
                     "implicit_fallbacks": False,
                     "generate_intermediate_hooks": True,
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
                 }
             )
         )
@@ -8577,6 +8579,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn([1, 2, 6, 6]),),
         )
 
+    def test_signbit_unsigned_dtypes(self):
+        def fn(x):
+            return torch.signbit(x)
+
+        for dtype in [
+            torch.bool,
+            torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ]:
+            x = torch.tensor([0, 1, 1, 0, 1], dtype=dtype)
+            self.common(fn, [x], check_lowp=False)
+
     def test_sign_dtype(self):
         def fn(x):
             y = torch.sign(x)
@@ -14353,6 +14369,27 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
         self.assertEqual(actual, expected)
 
+    @skip_if_halide
+    @skip_if_pallas  # cpp-only fusion path
+    @skip_if_triton_cpu
+    def test_group_norm_flatten_batch_norm_cpu_cpp_fusion(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("cpu only")
+
+        bn = nn.BatchNorm1d(140).eval()
+
+        def fn(x):
+            y = F.group_norm(x, 14)
+            y = torch.flatten(y, start_dim=1)
+            y = torch.exp(torch.clamp(y, max=20))
+            return bn(y)
+
+        torch.manual_seed(0)
+        x = torch.randn(12, 14, 2, 5)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
     @xfail_if_mps_unimplemented
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Some archs don't support mem eff SDPA"
@@ -15554,6 +15591,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn(x, source)
 
         with self.assertRaises(RuntimeError):
+            torch.compile(fn)(x, source)
+
+    @parametrize("inplace", [False, True])
+    def test_index_add_source_shape_mismatch(self, inplace):
+        def fn(x, source):
+            index = torch.arange(source.numel(), device=x.device)
+            if inplace:
+                x = x.clone()
+                x.index_add_(0, index, source)
+                return x
+            return torch.index_add(x, 0, index, source)
+
+        x = torch.randn(10, 5, device=self.device)
+        source = torch.randn(5, device=self.device)
+        msg = "source tensor shape must match self tensor shape"
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(x, source)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(x, source)
 
     @skip_if_gpu_halide  # cuda error
@@ -18097,9 +18154,6 @@ if RUN_GPU or HAS_MPS:
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
 if RUN_TPU:
-    from torch_tpu import api as tpu_api  # type: ignore[import-not-found]
-
-    tpu_api.tpu_device()  # initialize TPU runtime
 
     class SweepInputsTpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "tpu")

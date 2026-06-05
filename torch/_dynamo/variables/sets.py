@@ -60,6 +60,24 @@ def pyset_check(obj: VariableTracker) -> bool:
     return issubclass(obj.python_type(), set)
 
 
+def set_copy(obj: VariableTracker) -> VariableTracker:
+    """Mirrors CPython's internal `set_copy` (Objects/setobject.c).
+
+    Always allocates a fresh set/frozenset with a shallow-copied items dict.
+    Distinct from the user-visible `.copy()` method, which preserves identity
+    for exact frozenset (`frozenset_copy`).  Use this for binary-op scratch
+    storage so mutations don't bleed into the input.
+    """
+    base = obj._base_vt if isinstance(obj, variables.UserDefinedSetVariable) else obj
+    if base is None:
+        raise AssertionError("_base_vt must not be None")
+    return base.clone(
+        items=base.items.copy(),  # type: ignore[missing-attribute]
+        mutation_type=ValueMutationNew(),
+        source=None,
+    )
+
+
 class SetVariable(VariableTracker):
     """Represents a Python set during symbolic execution."""
 
@@ -542,9 +560,7 @@ class SetVariable(VariableTracker):
                     "0 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            return self.clone(
-                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
-            )
+            return set_copy(self)
         elif name == "clear":
             if args or kwargs:
                 raise_args_mismatch(
@@ -586,7 +602,7 @@ class SetVariable(VariableTracker):
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
 
-        result = self_.call_method(tx, "copy", [], {})
+        result = set_copy(self_)
         if self_ is other_:
             return result
         result.items.update(other_.items)  # type: ignore[missing-attribute]
@@ -615,7 +631,7 @@ class SetVariable(VariableTracker):
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
 
-        result = self_.call_method(tx, "copy", [], {})
+        result = set_copy(self_)
         for k in list(other_.items.keys()):  # type: ignore[missing-attribute]
             result.items.pop(k, None)  # type: ignore[missing-attribute]
         return result
@@ -645,8 +661,6 @@ class SetVariable(VariableTracker):
 
         https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L2097
         CPython uses PyAnySet_Check: only accepts set/frozenset (not dict views).
-        We also accept SetVariable subclasses (e.g. OrderedSetVariable) which
-        are not literal set/frozenset but have compatible set_items.
         """
         if not isinstance(other, SetVariable):
             try:
@@ -871,8 +885,18 @@ class FrozensetVariable(SetVariable):
         elif name == "__init__":
             # frozenset is immutable. Calling __init__ again shouldn't have any effect
             return ConstantVariable.create(None)
+        elif name == "copy":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            if type(self) is FrozensetVariable:
+                return self
+            return super().call_method(tx, name, args, kwargs)
         elif name in (
-            "copy",
             "difference",
             "intersection",
             "symmetric_difference",
