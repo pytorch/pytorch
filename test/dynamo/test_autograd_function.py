@@ -2,6 +2,7 @@
 import copy
 import math
 from dataclasses import dataclass
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
@@ -228,6 +229,31 @@ class ModuleWithGradFunc(torch.nn.Module):
 
 class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
     # Sound behaviors, tested for working capture
+    def test_function_ctx_does_not_instantiate_function(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.scale = 3
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * ctx.scale
+
+        def fn(x):
+            return Foo.apply(x)
+
+        x = torch.randn(3, requires_grad=True)
+        ref = fn(x)
+        with mock.patch.object(
+            torch.autograd.Function,
+            "__init__",
+            side_effect=AssertionError("deprecated Function instantiated"),
+        ):
+            res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(res, ref)
+
     def test_autograd_function_equivalence(self):
         for grad in [True, False]:
             for i in range(1, 5):
