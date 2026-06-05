@@ -120,6 +120,107 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
         )
         self.assertEqual(_count_ops(traced.graph, aten.split.Tensor), 0)
 
+    def test_no_slice_gathered_consumed_directly(self):
+        """
+        Resilient anchor: when inductor folds the FSDP no-op identity slice
+        (even sharding), the gathered tensor is consumed straight off the
+        wait, with no aten.slice. The pass must still anchor on
+        wait(all_gather) and transform. The wait here also has multiple direct
+        users (norm + div), which the previous wait.users==1 gate rejected.
+        """
+        group_name = "0"
+        world_size = 2
+        ns_steps = 3
+
+        def muon_no_slice(x_shard):
+            gathered = c10d.all_gather_into_tensor.default(
+                x_shard, world_size, group_name
+            )
+            waited = c10d.wait_tensor.default(gathered)
+            # No slice: wait feeds the chain directly (norm + div).
+            norm_val = aten.linalg_vector_norm.default(waited, 2, [-2, -1], True)
+            norm_val = aten.clamp_min.default(norm_val, 1e-7)
+            X = aten.div.Tensor(waited, norm_val)
+
+            X = aten.transpose.int(X, -2, -1)
+            for _ in range(ns_steps):
+                A = aten.mm.default(X, aten.transpose.int(X, -2, -1))
+                X = aten.add.Tensor(X, aten.mm.default(A, X))
+            X = aten.transpose.int(X, -2, -1)
+
+            chunks = aten.split.Tensor(X, x_shard.shape[0], 0)
+            return operator.getitem(chunks, 0)
+
+        with FakeTensorMode():
+            x_shard = torch.randn(64, 32, device=self.device)
+            traced = make_fx(muon_no_slice)(x_shard)
+
+        # Precondition: the gathered tensor is consumed with no slice.
+        self.assertEqual(_count_ops(traced.graph, aten.slice.Tensor), 0)
+        self.assertEqual(
+            _count_ops(traced.graph, c10d.all_gather_into_tensor.default), 1
+        )
+
+        decomp_gram_matrix_all_gather(traced)
+
+        self.assertEqual(
+            _count_ops(traced.graph, c10d.all_gather_into_tensor.default),
+            0,
+            "all_gather should be eliminated even with no slice wrapping the wait",
+        )
+        self.assertGreaterEqual(
+            _count_ops(traced.graph, c10d.all_reduce.default), ns_steps
+        )
+        self.assertEqual(_count_ops(traced.graph, aten.split.Tensor), 0)
+
+    def test_no_transform_unsafe_entry_region(self):
+        group_name = "0"
+        world_size = 2
+        ns_steps = 3
+
+        def finish(X, x_shard):
+            X = aten.transpose.int(X, -2, -1)
+            for _ in range(ns_steps):
+                A = aten.mm.default(X, aten.transpose.int(X, -2, -1))
+                X = aten.add.Tensor(X, aten.mm.default(A, X))
+            X = aten.transpose.int(X, -2, -1)
+            return operator.getitem(aten.split.Tensor(X, x_shard.shape[0], 0), 0)
+
+        def side_user(x_shard):
+            gathered = c10d.all_gather_into_tensor.default(
+                x_shard, world_size, group_name
+            )
+            waited = c10d.wait_tensor.default(gathered)
+            side = aten.mul.Tensor(waited, 2.0)
+            return finish(waited, x_shard), side
+
+        def column_slice(x_shard):
+            gathered = c10d.all_gather_into_tensor.default(
+                x_shard, world_size, group_name
+            )
+            waited = c10d.wait_tensor.default(gathered)
+            return finish(aten.slice.Tensor(waited, 1, 0, 16), x_shard)
+
+        def unsupported_reduction(x_shard):
+            gathered = c10d.all_gather_into_tensor.default(
+                x_shard, world_size, group_name
+            )
+            waited = c10d.wait_tensor.default(gathered)
+            return finish(
+                aten.sub.Tensor(waited, aten.amax.default(waited, [0], True)), x_shard
+            )
+
+        for fn in (side_user, column_slice, unsupported_reduction):
+            with FakeTensorMode():
+                traced = make_fx(fn)(torch.randn(64, 32, device=self.device))
+
+            decomp_gram_matrix_all_gather(traced)
+
+            self.assertEqual(
+                _count_ops(traced.graph, c10d.all_gather_into_tensor.default), 1
+            )
+            self.assertEqual(_count_ops(traced.graph, c10d.all_reduce.default), 0)
+
     def test_shampoo_preconditioner(self):
         """
         Shampoo-like optimizer with iterative preconditioner (3 iterations).
@@ -276,21 +377,26 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
 
     def test_padded_shard_trimming(self):
         """
-        FSDP padding: shard is padded for divisibility but the final getitem
-        output is unpadded. The pass should insert a slice to trim the shard.
+        FSDP padding: the shard is padded for divisibility, but the gathered
+        tensor is sliced down to the unpadded total before the Gram compute
+        and split into unpadded per-rank chunks. The getitem output
+        (unpadded_per_rank) is then smaller than the padded shard, so the
+        pass must insert a slice trimming the shard down to the unpadded size.
         """
         group_name = "0"
         world_size = 2
         ns_steps = 3
-        shard_size = 64
-        unpadded_size = 60
+        shard_size = 64  # padded shard
+        unpadded_per_rank = 60
+        gathered_unpadded = unpadded_per_rank * world_size
 
         def padded_step(x_shard):
             gathered = c10d.all_gather_into_tensor.default(
                 x_shard, world_size, group_name
             )
             waited = c10d.wait_tensor.default(gathered)
-            X = aten.slice.Tensor(waited, 0, 0, x_shard.shape[0] * world_size)
+            # Slice strips padding: keep only the unpadded total rows.
+            X = aten.slice.Tensor(waited, 0, 0, gathered_unpadded)
 
             X = aten.transpose.int(X, -2, -1)
 
@@ -300,11 +406,9 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
 
             X = aten.transpose.int(X, -2, -1)
 
-            # Split into shard-sized chunks, but getitem output is trimmed
-            # to unpadded size via a subsequent slice
-            chunks = aten.split.Tensor(X, shard_size, 0)
-            chunk = operator.getitem(chunks, 0)
-            return aten.slice.Tensor(chunk, 0, 0, unpadded_size)
+            # Even split into unpadded per-rank chunks (60 < padded 64).
+            chunks = aten.split.Tensor(X, unpadded_per_rank, 0)
+            return operator.getitem(chunks, 0)
 
         with FakeTensorMode():
             x_shard = torch.randn(shard_size, 32, device=self.device)
@@ -322,12 +426,26 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
         self.assertGreaterEqual(
             _count_ops(traced.graph, c10d.all_reduce.default), ns_steps
         )
+        # Trim path under test: pass slices the placeholder shard to unpadded size.
+        trim_slices = [
+            n
+            for n in traced.graph.nodes
+            if n.op == "call_function"
+            and n.target is aten.slice.Tensor
+            and isinstance(n.args[0], fx.Node)
+            and n.args[0].op == "placeholder"
+            and len(n.args) >= 4
+            and n.args[3] == unpadded_per_rank
+        ]
+        self.assertEqual(len(trim_slices), 1, "pass should insert a shard-trim slice")
 
-    def test_multiple_getitem_users(self):
+    def test_no_transform_multiple_consumed_getitems(self):
         """
-        When split produces multiple getitems with users (e.g., multi-rank
-        simulation), the pass should still work -- it picks one getitem
-        for shape inference.
+        When the split feeds multiple consumed getitems (e.g. several ranks'
+        shards used in the same graph), collapsing the split into a single
+        rank-local result would leave the sibling getitems reading past the
+        now shard-sized split input. The pass must bail rather than corrupt
+        the graph.
         """
         group_name = "0"
         world_size = 2
@@ -365,11 +483,11 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
         decomp_gram_matrix_all_gather(traced)
 
         self.assertEqual(
-            _count_ops(traced.graph, c10d.all_gather_into_tensor.default), 0
+            _count_ops(traced.graph, c10d.all_gather_into_tensor.default),
+            1,
+            "all_gather should remain when split has other consumed getitems",
         )
-        self.assertGreaterEqual(
-            _count_ops(traced.graph, c10d.all_reduce.default), ns_steps
-        )
+        self.assertEqual(_count_ops(traced.graph, c10d.all_reduce.default), 0)
 
 
 if __name__ == "__main__":

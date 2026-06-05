@@ -19,7 +19,6 @@ import torch
 import torch.fx as fx
 from torch._inductor.fx_passes.bucketing import get_collective_type, is_wait_tensor
 from torch._inductor.fx_utils import get_fake_args_kwargs
-from torch._inductor.pattern_matcher import CallFunction, Ignored, KeywordArg
 from torch._inductor.virtualized import V
 from torch.distributed.distributed_c10d import _resolve_process_group, GroupName
 from torch.utils._ordered_set import OrderedSet
@@ -28,6 +27,11 @@ from torch.utils._ordered_set import OrderedSet
 aten = torch.ops.aten
 c10d = torch.ops._c10d_functional
 logger = logging.getLogger(__name__)
+
+# Require >= 2 Gram mms: targets iterative optimizers (Newton-Schulz),
+# skips single fwd/bwd Grams (decomposable but not yet validated).
+# TODO: validate single-Gram fwd/bwd decomposition on a real model.
+_MIN_GRAM_MMS = 2
 
 
 def _get_fake_mode(node: fx.Node) -> torch._subclasses.fake_tensor.FakeTensorMode:
@@ -98,37 +102,26 @@ def gram_source(gram_node: fx.Node) -> fx.Node:
     return b if _is_2d_transpose(a) else a
 
 
-# Slice args (dim, start, end) are Ignored() -- actual slice semantics
-# are validated later via gathered_rows vs shard_rows shape checks.
-_all_gather_wait_slice_pattern = CallFunction(
-    aten.slice.Tensor,
-    CallFunction(
-        c10d.wait_tensor.default,
-        CallFunction(
-            c10d.all_gather_into_tensor.default,
-            KeywordArg("shard"),
-            KeywordArg("world_size"),
-            KeywordArg("group_name"),
-        ),
-    ),
-    Ignored(),
-    Ignored(),
-    Ignored(),
-)
-
-
 class AllGatherInfo(NamedTuple):
     shard: fx.Node
     group_name: str
     ag_node: fx.Node
     wait_node: fx.Node
-    slice_node: fx.Node
+    # Full gathered tensor consumed downstream: an identity/trim slice
+    # wrapping the wait when present, else the wait itself.
+    entry_node: fx.Node
 
 
 def find_all_gather_ancestor(
     node: fx.Node, max_depth: int = 30
 ) -> AllGatherInfo | None:
-    """Walk backward from node to find all_gather -> wait -> slice chain."""
+    """Walk backward from node to find an all_gather -> wait [-> slice] chain.
+
+    The trailing slice is optional. Inductor folds the FSDP identity slice
+    slice(wait, 0, 0, gathered_rows) when sharding is even (it is a no-op), so
+    we anchor on the wait and use a slice that wraps it as the entry node only
+    when one is present (FSDP padding trims, or overlap scheduling keeps it).
+    """
     visited: OrderedSet[fx.Node] = OrderedSet()
     queue = [(node, 0)]
     while queue:
@@ -138,21 +131,32 @@ def find_all_gather_ancestor(
         visited.add(n)
         for inp in n.all_input_nodes:
             queue.append((inp, depth + 1))
-        if n.op != "call_function" or n.target is not aten.slice.Tensor:
+        if n.op != "call_function" or n.target is not c10d.wait_tensor.default:
             continue
-        match = _all_gather_wait_slice_pattern.match(n)
-        if not match:
+        ag_node = n.args[0]
+        if (
+            not isinstance(ag_node, fx.Node)
+            or ag_node.target is not c10d.all_gather_into_tensor.default
+        ):
             continue
-        wait_node = n.args[0]
-        assert isinstance(wait_node, fx.Node)
-        ag_node = wait_node.args[0]
-        assert isinstance(ag_node, fx.Node)
+        # all_gather_into_tensor(shard, world_size, group_name)
+        shard, group_name = ag_node.args[0], ag_node.args[2]
+        if not isinstance(shard, fx.Node) or not isinstance(group_name, str):
+            continue
+        entry_node = n
+        if len(n.users) == 1:
+            (only_user,) = n.users
+            if (
+                only_user.op == "call_function"
+                and only_user.target is aten.slice.Tensor
+            ):
+                entry_node = only_user
         return AllGatherInfo(
-            shard=match.kwargs["shard"],
-            group_name=match.kwargs["group_name"],
+            shard=shard,
+            group_name=group_name,
             ag_node=ag_node,
-            wait_node=wait_node,
-            slice_node=n,
+            wait_node=n,
+            entry_node=entry_node,
         )
     return None
 
@@ -236,17 +240,42 @@ _DECOMPOSABLE_REDUCTIONS = (
 )
 
 
+def _valid_entry_slice(node: fx.Node) -> bool:
+    val = node.meta.get("val")
+    dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim", 0)
+    start = node.args[2] if len(node.args) > 2 else node.kwargs.get("start", 0)
+    end = node.args[3] if len(node.args) > 3 else node.kwargs.get("end", None)
+    step = node.args[4] if len(node.args) > 4 else node.kwargs.get("step", 1)
+    if (
+        not isinstance(val, torch.Tensor)
+        or not isinstance(dim, int)
+        or not isinstance(start, int)
+        or not isinstance(step, int)
+        or (end is not None and not isinstance(end, int))
+    ):
+        return False
+    return (
+        -val.dim() <= dim < val.dim()
+        and dim % val.dim() == 0
+        and start == 0
+        and step == 1
+        and (end is None or end >= int(val.shape[0]))
+    )
+
+
 def _reduction_includes_sharded_dim(node: fx.Node) -> bool:
     """True if a reduction reduces over dim 0 (the sharded dimension).
 
-    Returns False for reductions over only non-sharded dims, and
-    False for unknown reduction ops (caller must bail out).
+    Returns False for reductions over only non-sharded dims. Unknown reduction
+    ops are assumed to include the sharded dim so the caller bails out.
     """
     if not _is_reduction(node):
         return False
 
     def _dims_include_zero(dims: object) -> bool:
-        if not isinstance(dims, (list, tuple)):
+        if isinstance(dims, int):
+            dims = [dims]
+        elif not isinstance(dims, (list, tuple)):
             return True
         inp = node.args[0] if node.args else None
         inp_val = inp.meta.get("val") if isinstance(inp, fx.Node) else None
@@ -267,9 +296,9 @@ def _reduction_includes_sharded_dim(node: fx.Node) -> bool:
         dims = node.args[1] if len(node.args) > 1 else None
         return dims is None or _dims_include_zero(dims)
 
-    # All-dim reductions. Return False for unknown ops so the caller
-    # bails out rather than silently producing wrong results.
-    return node.target in _DECOMPOSABLE_REDUCTIONS
+    if len(node.args) > 1 and isinstance(node.args[1], (int, list, tuple)):
+        return _dims_include_zero(node.args[1])
+    return True
 
 
 def _gram_shape_is_decomposable(gram_node: fx.Node, gathered_rows: int) -> bool:
@@ -308,6 +337,19 @@ def _collect_dependent_chain(start: fx.Node, stop: fx.Node) -> OrderedSet[fx.Nod
             chain.add(n)
         n = n.next
     return chain
+
+
+def _collect_split_path_chain(start: fx.Node, stop: fx.Node) -> OrderedSet[fx.Node]:
+    chain = _collect_dependent_chain(start, stop)
+    path: OrderedSet[fx.Node] = OrderedSet()
+    stack = [stop]
+    while stack:
+        node = stack.pop()
+        if node in path:
+            continue
+        path.add(node)
+        stack.extend(inp for inp in node.all_input_nodes if inp in chain)
+    return OrderedSet(n for n in chain if n in path)
 
 
 def _has_unsupported_sharded_reduction(
@@ -361,11 +403,14 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
     for ag_node, gram_mms in ag_to_grams.items():
         info = ag_infos[ag_node]
 
-        if len(ag_node.users) != 1 or len(info.wait_node.users) != 1:
+        # ag must feed only its wait. The wait may have multiple users when no
+        # slice wraps it (the gathered tensor feeds the chain directly); those
+        # users are validated to stay inside the dependent chain below.
+        if len(ag_node.users) != 1:
             continue
 
         rank = _resolve_process_group(GroupName(info.group_name)).rank()
-        split_result = find_split_getitem(info.slice_node, rank=rank)
+        split_result = find_split_getitem(info.entry_node, rank=rank)
         if split_result is None:
             continue
         split_node, getitem_node = split_result
@@ -375,25 +420,31 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
             continue
 
         # Validate: gathered rows must differ from shard rows
-        slice_val = info.slice_node.meta.get("val")
+        entry_val = info.entry_node.meta.get("val")
         shard_val = (
             info.shard.meta.get("val") if isinstance(info.shard, fx.Node) else None
         )
-        if slice_val is None or shard_val is None:
+        if entry_val is None or shard_val is None:
             continue
-        gathered_rows = int(slice_val.shape[0])
+        gathered_rows = int(entry_val.shape[0])
         shard_rows = int(shard_val.shape[0])
         if gathered_rows == shard_rows:
+            continue
+        if info.entry_node is not info.wait_node and not _valid_entry_slice(
+            info.entry_node
+        ):
             continue
 
         valid_grams = [
             mm for mm in gram_mms if _gram_shape_is_decomposable(mm, gathered_rows)
         ]
 
-        if not valid_grams:
+        if len(valid_grams) < _MIN_GRAM_MMS:
             logger.debug(
-                "decomp_gram: skip %s -- 0 decomposable Gram mms",
+                "decomp_gram: skip %s -- %d < %d decomposable Gram mms",
                 ag_node.name,
+                len(valid_grams),
+                _MIN_GRAM_MMS,
             )
             continue
         gram_mms = valid_grams
@@ -404,6 +455,16 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
             for u in split_node.users
             if u.op == "call_function" and u.target is operator.getitem
         ]
+
+        # Collapsing the split into the rank-local result invalidates sibling
+        # getitems; in real SPMD only the rank's own getitem is consumed, so bail.
+        if any(g is not getitem_node and len(g.users) > 0 for g in all_getitems):
+            logger.debug(
+                "decomp_gram: skip %s -- split has other consumed getitems",
+                ag_node.name,
+            )
+            continue
+
         shapes = [
             tuple(int(d) for d in u.meta["val"].shape)
             for u in all_getitems
@@ -421,7 +482,7 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
         # Shard trimming for FSDP padding
         replacement: fx.Node = info.shard
         if expected_rows < shard_rows:
-            with graph.inserting_before(info.slice_node):
+            with graph.inserting_before(info.entry_node):
                 replacement = graph.call_function(
                     aten.slice.Tensor,
                     args=(info.shard, 0, 0, expected_rows),
@@ -430,12 +491,9 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
         elif expected_rows > shard_rows:
             continue
 
-        # Verify all slice users are inside the dependent chain
-        chain = _collect_dependent_chain(info.slice_node, split_node)
-        chain.add(split_node)
-        for gi in all_getitems:
-            chain.add(gi)
-        if any(u not in chain for u in info.slice_node.users):
+        # Verify the rewritten region is closed over the path to split.
+        chain = _collect_split_path_chain(info.entry_node, split_node)
+        if any(u is not split_node and u not in chain for n in chain for u in n.users):
             continue
 
         gram_set: OrderedSet[fx.Node] = OrderedSet(gram_mms)
@@ -444,7 +502,7 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
 
         # === Transform ===
 
-        info.slice_node.replace_all_uses_with(replacement)
+        info.entry_node.replace_all_uses_with(replacement)
 
         for mm_node in gram_mms:
             _insert_all_reduce_wait(graph, mm_node, info.group_name)
@@ -487,13 +545,10 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
                 affected.add(n)
             n = n.next
 
-        for dead in [
-            getitem_node,
-            split_node,
-            info.slice_node,
-            info.wait_node,
-            ag_node,
-        ]:
+        # entry_node may be the wait itself; dedup so we don't erase twice.
+        for dead in OrderedSet(
+            [getitem_node, split_node, info.entry_node, info.wait_node, ag_node]
+        ):
             if len(dead.users) == 0:
                 graph.erase_node(dead)
 
