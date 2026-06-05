@@ -1225,6 +1225,13 @@ def adaptive_max_pool2d(
     return NotImplemented
 
 
+def _scalar_tensor_for_search(
+    value: torch.types.Number, device: torch.device
+) -> torch.Tensor:
+    # List tensor construction specializes unbacked SymInts/SymFloats from .item().
+    return torch.scalar_tensor(value, dtype=type_to_dtype(type(value)), device=device)
+
+
 @register_decomposition(aten.searchsorted.Scalar)
 def searchsorted_scalar(
     sorted_sequence: torch.Tensor,
@@ -1235,14 +1242,15 @@ def searchsorted_scalar(
     side: str | None = None,
     sorter: torch.Tensor | None = None,
 ) -> torch.Tensor:
+    self_tensor = _scalar_tensor_for_search(self, sorted_sequence.device)
     return aten.searchsorted(
         sorted_sequence,
-        torch.tensor([self], device=sorted_sequence.device),
+        self_tensor,
         out_int32=out_int32,
         right=right,
         side=side,
         sorter=sorter,
-    )[0]
+    )
 
 
 @register_decomposition(aten.bucketize.Scalar)
@@ -1253,12 +1261,13 @@ def bucketize_scalar(
     out_int32: bool = False,
     right: bool = False,
 ) -> torch.Tensor:
+    self_tensor = _scalar_tensor_for_search(self, boundaries.device)
     return aten.bucketize(
-        torch.tensor([self], device=boundaries.device),
+        self_tensor,
         boundaries,
         out_int32=out_int32,
         right=right,
-    ).squeeze(0)
+    )
 
 
 @decomp.register_decomposition(aten.rrelu_with_noise_functional, extra_random_decomps)

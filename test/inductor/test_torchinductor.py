@@ -14475,6 +14475,41 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=False,
             )
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_searchsorted_scalar_unbacked_value(self):
+        def fn(sorted_sequence, unsorted_sequence, sorter):
+            scalar = sorted_sequence[-1].item() // 3
+            return (
+                torch.searchsorted(sorted_sequence, scalar),
+                torch.searchsorted(
+                    sorted_sequence,
+                    scalar,
+                    out_int32=True,
+                    right=True,
+                    side="right",
+                ),
+                torch.searchsorted(unsorted_sequence, scalar, sorter=sorter),
+            )
+
+        sorted_sequence = torch.tensor([0, 1, 3, 7], device=self.device)
+        unsorted_sequence = torch.tensor([7, 0, 3, 1], device=self.device)
+        sorter = torch.argsort(unsorted_sequence)
+        self.common(
+            fn,
+            (sorted_sequence, unsorted_sequence, sorter),
+            check_lowp=False,
+        )
+
+        def float_fn(sorted_sequence):
+            scalar = sorted_sequence[-1].item() / 3
+            return torch.searchsorted(sorted_sequence, scalar)
+
+        self.common(
+            float_fn,
+            (sorted_sequence.to(torch.float32),),
+            check_lowp=False,
+        )
+
     @requires_gpu()
     @skip_if_gpu_halide
     @skip_if_not_triton
@@ -14731,6 +14766,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for out_int32 in [True, False]:
             for right in [True, False]:
                 self.common(fn, (boundaries, out_int32, right), check_lowp=False)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_bucketize_scalar_unbacked_value(self):
+        def fn(boundaries):
+            scalar = boundaries[-1].item() // 3
+            return (
+                torch.bucketize(scalar, boundaries),
+                torch.bucketize(scalar, boundaries, out_int32=True, right=True),
+            )
+
+        boundaries = torch.tensor([0, 1, 3, 7], device=self.device)
+        self.common(fn, (boundaries,), check_lowp=False)
+
+        def float_fn(boundaries):
+            scalar = boundaries[-1].item() / 3
+            return torch.bucketize(scalar, boundaries)
+
+        self.common(
+            float_fn,
+            (boundaries.to(torch.float32),),
+            check_lowp=False,
+        )
 
     @requires_gpu()
     @skip_if_gpu_halide
