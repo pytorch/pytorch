@@ -34,10 +34,6 @@ TORCH_LIBRARY_IMPL(_, VmapMode, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, VmapMode, m) {
-  // NB: I'd really like to register a special kernel like
-  // CppFunction::makeNamedNotSupported() to avoid listing out the types of everything.
-  // However, registering e.g. CppFunction::makeNamedNotSupported() as an implementation
-  // only works for operators that support boxing.
 #define TENSOROPTIONS std::optional<c10::ScalarType>, std::optional<c10::Layout>, std::optional<c10::Device>, std::optional<bool>
 
   // random operations (out-of-place)
@@ -84,15 +80,11 @@ TORCH_LIBRARY_IMPL(aten, VmapMode, m) {
 
   m.impl("rand", unsupportedRandomOp<IntArrayRef, TENSOROPTIONS>);
   m.impl("rand.generator", unsupportedRandomOp<IntArrayRef, std::optional<Generator>, TENSOROPTIONS>);
-  m.impl("rand.names", unsupportedRandomOp<IntArrayRef, std::optional<DimnameList>, TENSOROPTIONS>);
-  m.impl("rand.generator_with_names", unsupportedRandomOp<IntArrayRef, std::optional<Generator>, std::optional<DimnameList>, TENSOROPTIONS>);
   m.impl("rand.out", unsupportedRandomOp_<IntArrayRef, Tensor&>);
   m.impl("rand.generator_out", unsupportedRandomOp_<IntArrayRef, std::optional<Generator>, Tensor&>);
 
   m.impl("randn", unsupportedRandomOp<IntArrayRef, TENSOROPTIONS>);
   m.impl("randn.generator", unsupportedRandomOp<IntArrayRef, std::optional<Generator>, TENSOROPTIONS>);
-  m.impl("randn.names", unsupportedRandomOp<IntArrayRef, std::optional<DimnameList>, TENSOROPTIONS>);
-  m.impl("randn.generator_with_names", unsupportedRandomOp<IntArrayRef, std::optional<Generator>, std::optional<DimnameList>, TENSOROPTIONS>);
   m.impl("randn.out", unsupportedRandomOp_<IntArrayRef, Tensor&>);
   m.impl("randn.generator_out", unsupportedRandomOp_<IntArrayRef, std::optional<Generator>, Tensor&>);
 
