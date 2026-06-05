@@ -991,6 +991,47 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         finally:
             d.clear()
 
+    def test_live_cell_container_dict_keys_view_blocks_dict_mutation(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            keys = [d.keys()]
+
+            def inner():
+                return keys
+
+            d["foo"] = 1
+            return t + 1, inner()[0]
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dictionary mutation when a dict view is live",
+            ):
+                fn(torch.tensor([0.0]))
+            self.assertEqual(d, {})
+        finally:
+            d.clear()
+
+    def test_uninitialized_cell_does_not_block_dict_mutation(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            def inner():
+                return keys
+
+            d["foo"] = 1
+            keys = d.keys()
+            return t + (1 if "foo" in inner() else 0)
+
+        try:
+            self.assertEqual(fn(torch.tensor([0.0])), torch.tensor([1.0]))
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
     def test_function_attribute_dict_keys_view_blocks_dict_mutation(self):
         d = {}
 

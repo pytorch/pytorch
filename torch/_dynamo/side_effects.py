@@ -1093,6 +1093,15 @@ class SideEffects:
         live_backing_ids: set[int] = set()
         seen_real_values: set[int] = set()
 
+        def visit_cell_contents(
+            cell: variables.CellVariable, cache: dict[int, Any] | None = None
+        ) -> None:
+            if self.has_pending_mutation_of_attr(cell, "cell_contents"):
+                contents = self.load_attr(cell, "cell_contents", check=False)
+                visit_vt(contents, cache)
+            elif cell.pre_existing_contents is not None:
+                collect_from_vt(cell.pre_existing_contents.unwrap())
+
         def collect_from_real_value(value: Any) -> None:
             obj_id = id(value)
             if obj_id in seen_real_values:
@@ -1137,7 +1146,7 @@ class SideEffects:
             if isinstance(value, CellType):
                 tracked_cell = self.id_to_variable.get(id(value))
                 if isinstance(tracked_cell, variables.CellVariable):
-                    visit_vt(self.load_cell(tracked_cell))
+                    visit_cell_contents(tracked_cell)
                     return
                 try:
                     collect_from_real_value(value.cell_contents)
@@ -1290,7 +1299,7 @@ class SideEffects:
                 collect_from_vt(value)
                 value = value.unwrap()
                 if isinstance(value, variables.CellVariable):
-                    collect_from_vt(self.load_cell(value).unwrap())
+                    visit_cell_contents(value, cache)
                     return
 
                 nonvars = value._nonvar_fields
