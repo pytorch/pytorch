@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 from __future__ import annotations
 
+import copy
 import gc
 import pickle
 import threading
@@ -323,6 +324,20 @@ class TestCompiledFxGraph(TestCase):
         self.assertIsNone(graph.current_callable)
         loaded = pickle.loads(pickle.dumps(graph))
         self.assertIsNone(loaded.current_callable)
+
+    def test_deepcopy_preserves_current_callable(self) -> None:
+        def original_callable(inputs: list[str]) -> tuple[str, list[str]]:
+            return ("original", inputs)
+
+        def wrapped_callable(inputs: list[str]) -> tuple[str, list[str]]:
+            return ("wrapped", inputs)
+
+        graph = self._make_graph(original_callable, "deepcopy-cache-key")
+        graph.current_callable = wrapped_callable
+
+        graph_copy = copy.deepcopy(graph)
+        self.assertEqual(graph_copy(["copy"]), ("wrapped", ["copy"]))
+        self.assertIsNotNone(graph_copy.current_callable)
 
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     def test_current_callable_stable_in_multithreaded_torch_compile(self) -> None:

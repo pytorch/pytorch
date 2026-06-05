@@ -23,6 +23,7 @@ serialized format:
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import logging
 import os
@@ -1059,6 +1060,27 @@ class CompiledFxGraph(OutputCode):
         state["_base_callable"] = None
         state["_current_callable_cleared"] = True
         return state
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> CompiledFxGraph:
+        result = type(self).__new__(type(self))
+        memo[id(self)] = result
+
+        local_state = self._current_callable_state()
+        for key, value in self.__dict__.items():
+            if key != "_current_callable_tls":
+                setattr(result, key, copy.deepcopy(value, memo))
+
+        result._current_callable_tls = threading.local()
+        if not getattr(result, "_current_callable_cleared", False):
+            current_callable = getattr(local_state, "value", None)
+            if current_callable is not None:
+                result._current_callable_state().value = copy.deepcopy(
+                    current_callable, memo
+                )
+            elif result._base_callable is not None:
+                result._current_callable_state().value = result._base_callable
+
+        return result
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         current_callable = state.pop("current_callable", None)
