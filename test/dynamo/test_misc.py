@@ -13556,6 +13556,20 @@ fn
 
         fn(torch.tensor([3, 3]))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_python_mod_guard_reused_after_size_refinement(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            u0, u1 = x.tolist()
+            torch._check(u0 % u1 == 0)
+            torch._check_is_size(u0)
+            torch._check_is_size(u1)
+            if u0 % u1 == 0:
+                return torch.tensor(True)
+            return torch.tensor(False)
+
+        self.assertEqual(fn(torch.tensor([6, 3])), torch.tensor(True))
+
     @torch._dynamo.config.patch(assume_static_by_default=True)
     def test_mark_unbacked_strict(self):
         @torch.compile(backend="eager")
