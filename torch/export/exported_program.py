@@ -329,10 +329,11 @@ def default_decompositions() -> "CustomDecompTable":
 
 
 def _parametrized_target_to_original_target(target: str) -> str | None:
-    marker = ".parametrizations."
-    if target.startswith("parametrizations."):
+    parametrizations_prefix = "parametrizations."
+    marker = f".{parametrizations_prefix}"
+    if target.startswith(parametrizations_prefix):
         prefix = ""
-        rest = target[len("parametrizations.") :]
+        rest = target[len(parametrizations_prefix) :]
     elif marker in target:
         prefix, rest = target.split(marker, 1)
     else:

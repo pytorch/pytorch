@@ -59,12 +59,12 @@ class UnwrapTensorSubclass(torch.nn.Module):
         return _unwrap_tensor_subclasses(self.subclass_meta, todo, 0)[0]
 
     def right_inverse(self, tensor: torch.Tensor) -> list[torch.Tensor | OpaqueBase]:
-        if type(tensor) is torch.Tensor:
-            raise AssertionError("tensor must be a subclass, not torch.Tensor")
+        if not is_traceable_wrapper_subclass(tensor):
+            raise AssertionError("tensor must be a traceable wrapper subclass")
         plain_tensors: list[torch.Tensor | OpaqueBase] = []
 
         def _create_subclass_meta(tensor, idx, plain_tensor_container):  # type: ignore[no-untyped-def]
-            if type(tensor) is torch.Tensor:
+            if not is_traceable_wrapper_subclass(tensor):
                 plain_tensor_container.append(tensor)
                 return None, idx + 1
             inner_tensors_attrnames, metadata = tensor.__tensor_flatten__()  # type: ignore[attr-defined]
@@ -122,7 +122,7 @@ def _flattened_tensor_attr_paths(
     def _collect_attr_paths(
         tensor: torch.Tensor | OpaqueBase, attr_path: tuple[str, ...]
     ) -> None:
-        if type(tensor) is torch.Tensor or isinstance(tensor, OpaqueBase):
+        if not is_traceable_wrapper_subclass(tensor):
             flattened_paths.append(attr_path)
             return
 
@@ -135,13 +135,13 @@ def _flattened_tensor_attr_paths(
 
 
 def _flattened_state_dict_name(original_fqn: str, attr_path: tuple[str, ...]) -> str:
-    attr_suffix = "_".join(attr.replace(".", "_") for attr in attr_path)
-    if not attr_suffix:
+    if not attr_path:
         return original_fqn
+    attr_suffix = "_".join(attr.replace(".", "_") for attr in attr_path)
 
     parent, sep, leaf = original_fqn.rpartition(".")
     flattened_leaf = f"{leaf}_{attr_suffix}"
-    return f"{parent}{sep}{flattened_leaf}" if sep else flattened_leaf
+    return f"{parent}{sep}{flattened_leaf}"
 
 
 def _make_unique_state_dict_name(name: str, used_names: set[str]) -> str:
@@ -149,9 +149,9 @@ def _make_unique_state_dict_name(name: str, used_names: set[str]) -> str:
         return name
 
     idx = 1
-    while f"{name}_{idx}" in used_names:
+    while (uniq := f"{name}_{idx}") in used_names:
         idx += 1
-    return f"{name}_{idx}"
+    return uniq
 
 
 def _collect_tensor_subclass_state_fqns(

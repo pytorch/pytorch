@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import torch
 import torch._dynamo as torchdynamo
+import torch._functorch._aot_autograd.graph_capture as graph_capture
 import torch.fx.traceback as fx_traceback
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
@@ -42,14 +43,19 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
-from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
+from torch._functorch.aot_autograd import (
+    aot_export_joint_with_descriptors,
+    aot_export_module,
+)
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
+from torch._library.opaque_object import _OPAQUE_TYPES_BY_NAME
 from torch._subclasses import FakeTensorMode
 from torch.export import default_decompositions, Dim, export, unflatten
+from torch.export._patches import register_lstm_while_loop_decomposition
 from torch.export._trace import (
     _export,
     _export_to_torch_ir,
@@ -1278,7 +1284,7 @@ def forward(self, x):
     detach_21 = torch.ops.aten.detach.default(view_3);  view_3 = None
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(detach_19, detach_20, detach_21, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  detach_19 = detach_20 = detach_21 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
+    flex_attention = torch.ops.higher_order.flex_attention(detach_19, detach_20, detach_21, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, None, None, None, None, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  detach_19 = detach_20 = detach_21 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  getitem_1 = None
     getitem_2 = flex_attention[2];  flex_attention = getitem_2 = None
@@ -1347,10 +1353,7 @@ graph():
         # while-loop decomposition, avoiding numerical divergence from the
         # fused mkldnn kernel.
         with torch.backends.mkldnn.flags(enabled=False):
-            from torch.export._patches import (
-                register_gru_while_loop_decomposition,
-                register_lstm_while_loop_decomposition,
-            )
+            from torch.export._patches import register_gru_while_loop_decomposition
 
             # Test 1: Basic single-layer LSTM with dynamic sequence length
             seqlen = 32
@@ -1533,6 +1536,56 @@ graph():
             self.assertEqual(eager_out_bigru, ep_out_bigru)
             ep_out_bigru_dynamic = ep_bigru.module()(x_, h0_bi)
             self.assertEqual(ep_out_bigru_dynamic, model_bigru(x_, h0_bi))
+
+    def test_dynamic_lstm_with_aliased_flat_weights(self):
+        from torch.export._patches import register_lstm_while_loop_decomposition
+
+        def share_flat_weight_storage(lstm):
+            flat_weight_names = lstm._flat_weights_names
+            old_weights = [getattr(lstm, name).detach() for name in flat_weight_names]
+            flat = torch.nn.Parameter(
+                torch.empty(
+                    sum(weight.numel() for weight in old_weights),
+                    device=old_weights[0].device,
+                    dtype=old_weights[0].dtype,
+                )
+            )
+            offset = 0
+            with torch.no_grad():
+                for name, old_weight in zip(flat_weight_names, old_weights):
+                    view = flat[offset : offset + old_weight.numel()].view_as(
+                        old_weight
+                    )
+                    view.copy_(old_weight)
+                    setattr(lstm, name, torch.nn.Parameter(view))
+                    offset += old_weight.numel()
+            lstm._init_flat_weights()
+
+        class BiLSTM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(4, 3, batch_first=True, bidirectional=True)
+                share_flat_weight_storage(self.lstm)
+
+            def forward(self, x):
+                out, _ = self.lstm(x)
+                return out
+
+        with torch.backends.mkldnn.flags(enabled=False):
+            model = BiLSTM()
+            storages = {
+                getattr(model.lstm, name).untyped_storage().data_ptr()
+                for name in model.lstm._flat_weights_names
+            }
+            self.assertEqual(len(storages), 1)
+
+            x = torch.randn(2, 5, 4)
+            dynamic_shapes = {"x": {1: Dim.DYNAMIC}}
+            with register_lstm_while_loop_decomposition():
+                ep = export(model, (x,), dynamic_shapes=dynamic_shapes)
+
+            x_dynamic = torch.randn(2, 7, 4)
+            self.assertEqual(ep.module()(x_dynamic), model(x_dynamic))
 
     @testing.expectedFailureStrictV2
     def test_no_tensor_computation(self):
@@ -3141,6 +3194,113 @@ class GraphModule(torch.nn.Module):
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
 
+    def test_buffer_assignment_hook_cleanup_after_failed_export(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 20)
+                self.register_buffer("step", torch.tensor(0, dtype=torch.int64))
+                self.register_buffer("flag", torch.tensor(True, dtype=torch.bool))
+
+            def forward(self, x):
+                self.step += 1
+                x = self.linear(x)
+                if self.flag.item():
+                    x = x + 1
+                return x
+
+        model = M()
+        inputs = (torch.randn(1, 10),)
+
+        model(*inputs)
+        step_before_export = model.step.item()
+
+        with self.assertRaisesRegex(
+            torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+            "Could not guard on data-dependent expression",
+        ):
+            export(model, inputs, strict=False)
+
+        model(*inputs)
+        self.assertEqual(model.step.item(), step_before_export + 1)
+
+    def test_aot_export_buffer_assignment_hook_cleanup_after_failed_export(self):
+        class ExpectedFailure(RuntimeError):
+            pass
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("step", torch.tensor(0, dtype=torch.int64))
+
+            def forward(self, x):
+                self.step += 1
+                return (x + self.step.to(x.dtype),)
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self._export_root = mod
+
+            def forward(self, *args):
+                return self._export_root(*args)
+
+        real_register_buffer_assignment_hook = (
+            graph_capture.register_buffer_assignment_hook
+        )
+        hook_registered_on = None
+        hook_removed = False
+
+        class HookHandle:
+            def __init__(self, handle) -> None:
+                self.handle = handle
+
+            def remove(self):
+                nonlocal hook_removed
+                hook_removed = True
+                self.handle.remove()
+
+        def register_buffer_assignment_hook(mod, assigned_buffers):
+            nonlocal hook_registered_on
+            hook_registered_on = mod
+            return HookHandle(
+                real_register_buffer_assignment_hook(mod, assigned_buffers)
+            )
+
+        def fail_graph_capture(*args, **kwargs):
+            raise ExpectedFailure("failed inside aot_dispatch_base_graph")
+
+        root = M()
+        inputs = (torch.randn(2, 3),)
+
+        with (
+            patch.object(
+                graph_capture,
+                "register_buffer_assignment_hook",
+                register_buffer_assignment_hook,
+            ),
+            patch.object(
+                graph_capture,
+                "_create_graph_and_save_traced_inputs",
+                fail_graph_capture,
+            ),
+        ):
+            with self.assertRaisesRegex(
+                ExpectedFailure, "failed inside aot_dispatch_base_graph"
+            ):
+                aot_export_module(
+                    Wrapper(root),
+                    inputs,
+                    trace_joint=False,
+                    pre_dispatch=False,
+                )
+
+        self.assertIs(hook_registered_on, root)
+        self.assertTrue(hook_removed)
+
+        root(*inputs)
+        self.assertEqual(root.step.item(), 1)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_tensor_constant_idx(self):
         def while_loop_decomp(x, y0):
@@ -3897,6 +4057,67 @@ graph():
         ][0]
         self.assertIsNotNone(child_signature)
         self.assertEqual([arg.name for arg in child_signature.inputs], ["w"])
+
+    def test_subclasses_non_traceable_subclass_leaf(self):
+        class NonTraceable(torch.Tensor):
+            pass
+
+        class Outer(torch.Tensor):
+            @staticmethod
+            def __new__(cls, inner):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    inner.shape,
+                    dtype=inner.dtype,
+                    device=inner.device,
+                    requires_grad=inner.requires_grad,
+                )
+
+            def __init__(self, inner):
+                self.inner = inner
+
+            def __tensor_flatten__(self):
+                return ["inner"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+                return Outer(inner_tensors["inner"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+
+                def unwrap(t):
+                    return t.inner if isinstance(t, Outer) else t
+
+                def wrap(t):
+                    if isinstance(t, torch.Tensor) and not isinstance(t, Outer):
+                        return Outer(t)
+                    return t
+
+                return pytree.tree_map(
+                    wrap,
+                    func(
+                        *pytree.tree_map(unwrap, args),
+                        **pytree.tree_map(unwrap, kwargs),
+                    ),
+                )
+
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            _flattened_tensor_attr_paths,
+            UnwrapTensorSubclass,
+        )
+
+        inner = torch.ones(3, 4).as_subclass(NonTraceable)
+        outer = Outer(inner)
+
+        self.assertEqual(_flattened_tensor_attr_paths(outer), [("inner",)])
+
+        parametrization = UnwrapTensorSubclass()
+        plain_tensors = parametrization.right_inverse(outer)
+        self.assertEqual(len(plain_tensors), 1)
+        self.assertIs(plain_tensors[0], inner)
+        self.assertIs(parametrization(*plain_tensors).inner, inner)
 
     @testing.expectedFailureCppRuntimeNonStrict
     def test_subclasses_parameterization_nested(self):
@@ -7255,6 +7476,26 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 strict=False,
             ).graph
 
+    def test_export_min_scaled_dynamic_dim(self):
+        class Model(torch.nn.Module):
+            def forward(self, input_ids):
+                seq_len = input_ids.size(1)
+                max_len = min(128 * seq_len, 512 * seq_len)
+                if max_len == 128 * seq_len:
+                    return input_ids.sum()
+                else:
+                    return input_ids.sum()
+
+        input_ids = torch.randn(1, 100)
+        ep = export(
+            Model(),
+            (input_ids,),
+            dynamic_shapes={
+                "input_ids": {1: Dim("text_seq_length", max=2048)},
+            },
+        )
+        self.assertEqual(ep.module()(input_ids), input_ids.sum())
+
     def test_math_pow(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -8821,6 +9062,87 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 "Dynamo does not support RNN, GRU, or LSTM.",
             ):
                 _ = export(mod, inp, strict=True)
+
+    def test_export_lstm_hidden_state_shapes(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(
+                    input_size=13,
+                    hidden_size=20,
+                    num_layers=1,
+                    bias=False,
+                    batch_first=True,
+                    bidirectional=True,
+                )
+
+            def forward(self, x):
+                output, (h_n, c_n) = self.lstm(x)
+                return output, h_n, c_n
+
+        m = M()
+        x = torch.randn(4, 10, 13)
+
+        with torch.backends.mkldnn.flags(enabled=False):
+            ep = export(m, (x,))
+            output_node = next(node for node in ep.graph.nodes if node.op == "output")
+            graph_outputs = output_node.args[0]
+
+            self.assertEqual(
+                graph_outputs[0].meta["val"].shape, torch.Size([4, 10, 40])
+            )
+            self.assertEqual(graph_outputs[1].meta["val"].shape, torch.Size([2, 4, 20]))
+            self.assertEqual(graph_outputs[2].meta["val"].shape, torch.Size([2, 4, 20]))
+            eager_outputs = m(x)
+            export_outputs = ep.module()(x)
+        self.assertEqual(eager_outputs, export_outputs)
+
+        with (
+            torch.backends.mkldnn.flags(enabled=False),
+            register_lstm_while_loop_decomposition(),
+        ):
+            ep = export(m, (x,))
+            output_node = next(node for node in ep.graph.nodes if node.op == "output")
+            graph_outputs = output_node.args[0]
+
+            self.assertEqual(
+                graph_outputs[0].meta["val"].shape, torch.Size([4, 10, 40])
+            )
+            self.assertEqual(graph_outputs[1].meta["val"].shape, torch.Size([2, 4, 20]))
+            self.assertEqual(graph_outputs[2].meta["val"].shape, torch.Size([2, 4, 20]))
+
+    def test_export_lstm_where_hidden_state_shape(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.LSTM(
+                    input_size=24,
+                    hidden_size=32,
+                    num_layers=1,
+                    batch_first=False,
+                )
+
+            def forward(self, x):
+                seq_out, (h_n, _) = self.rnn(x)
+                cond = torch.tensor(True)
+                return torch.where(cond, seq_out[-1], h_n[0])
+
+        m = M().eval()
+        x = torch.randn(6, 2, 24)
+
+        with torch.no_grad(), torch.backends.mkldnn.flags(enabled=False):
+            ep = export(m, (x,), dynamic_shapes={"x": {1: Dim("batch")}})
+
+        where_node = next(
+            node for node in ep.graph.nodes if node.target == torch.ops.aten.where.self
+        )
+        where_shape = where_node.meta["val"].shape
+        self.assertEqual(len(where_shape), 2)
+        self.assertEqual(where_shape[1], 32)
+
+        with torch.no_grad(), torch.backends.mkldnn.flags(enabled=False):
+            runtime_output = ep.module()(torch.randn(6, 4, 24))
+        self.assertEqual(runtime_output.shape, torch.Size([4, 32]))
 
     @requires_gpu
     def test_export_lstm_gpu(self):
@@ -14258,6 +14580,12 @@ graph():
                 return x + f.int_1 + f.int_2
 
         torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
+        self.addCleanup(
+            lambda name=torch._library.opaque_object.get_opaque_type_name(MyInput): (
+                torch._C._unregister_opaque_type(name),
+                _OPAQUE_TYPES_BY_NAME.pop(name, None),
+            )
+        )
         ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
 
         inp = torch.ones(2, 2)
@@ -17686,7 +18014,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 y = torch.empty(2 * 2)
-                torch.distributed.all_gather_into_tensor(y, x)
+                torch.distributed.all_gather_single(y, x)
                 return y
 
         with self.distributed_env(world_size=2):
@@ -17719,7 +18047,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 y = torch.empty(2)
-                torch.distributed.reduce_scatter_tensor(y, x)
+                torch.distributed.reduce_scatter_single(y, x)
                 return y
 
         with self.distributed_env(world_size=2):

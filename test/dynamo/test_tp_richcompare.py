@@ -704,6 +704,66 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         self._assert_all_cmp_equals((1, (2, 3)), (1, (2, 3)))
 
     # =====================================================================
+    # Deque comparison (DequeVariable)
+    # =====================================================================
+
+    def test_deque_cmp(self):
+        from collections import deque
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: deque([1, 2, 3]), lambda: deque([1, 2, 3])
+        )
+        self._assert_all_sourceless_cmp_equals(
+            lambda: deque([1, 2]), lambda: deque([1, 3])
+        )
+
+    def test_deque_cmp_cross_type(self):
+        """deque vs list: NotImplemented (different types)."""
+        from collections import deque
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: deque([1, 2]), lambda: [1, 2], error_ops=self._ORDERING_OPS
+        )
+
+    # =====================================================================
+    # List subclass comparison (UserDefinedListVariable)
+    # =====================================================================
+
+    def test_list_subclass_cmp(self):
+        """list subclass without __eq__ uses list's comparison."""
+
+        class MyList(list):
+            pass
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: MyList([1, 2, 3]), lambda: MyList([1, 2, 3])
+        )
+        self._assert_all_sourceless_cmp_equals(
+            lambda: MyList([1, 2]), lambda: MyList([1, 3])
+        )
+
+    def test_list_subclass_vs_list(self):
+        """MyList vs plain list."""
+
+        class MyList(list):
+            pass
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: MyList([1, 2, 3]), lambda: [1, 2, 3]
+        )
+
+    def test_immutable_list_cmp(self):
+        """torch.fx.immutable_collections.immutable_list comparison."""
+        from torch.fx.immutable_collections import immutable_list
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: immutable_list([1, 2, 3]), lambda: immutable_list([1, 2, 3])
+        )
+        self._assert_all_sourceless_cmp_equals(
+            lambda: immutable_list([1, 2]), lambda: immutable_list([1, 3])
+        )
+
+    # =====================================================================
     # dict_items comparison (set-like)
     # =====================================================================
 
@@ -1231,6 +1291,30 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(5))
         self.assertTrue(result)
 
+    def test_tuple_cmp_symbolic_shapes_ordering(self):
+        """Tuple ordering (>=, <=, >, <) with symbolic shape elements."""
+
+        def fn(x):
+            return x.shape >= (3, 4), x.shape <= (3, 4), x.shape > (2, 5)
+
+        ge, le, gt = torch.compile(fn, backend="eager")(torch.randn(3, 4))
+        self.assertTrue(ge)
+        self.assertTrue(le)
+        self.assertTrue(gt)
+
+    def test_tuple_cmp_symbolic_shapes_ordering_two_tensors(self):
+        """Ordering between two tensor shapes."""
+
+        def fn(x, y):
+            return x.shape >= y.shape, x.shape < y.shape, x.shape == y.shape
+
+        ge, lt, eq = torch.compile(fn, backend="eager")(
+            torch.randn(3, 4), torch.randn(3, 5)
+        )
+        self.assertFalse(ge)
+        self.assertTrue(lt)
+        self.assertFalse(eq)
+
     # =====================================================================
     # Sourceless torch.Size
     # =====================================================================
@@ -1516,6 +1600,238 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
 
         expected = fn()
         result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    # =====================================================================
+    # NaN identity in containers (followups)
+    # =====================================================================
+
+    def test_list_nan_identity(self):
+        """NaN element identity: [nan] == [nan] is True, [nan] <= [nan] is True."""
+        nan = float("nan")
+        lst = [nan]
+        self._assert_all_cmp_equals(lst, lst)
+
+    def test_list_nan_different_objects(self):
+        """Different NaN objects: [float('nan')] == [float('nan')] is False."""
+
+        def fn():
+            return [float("nan")] == [float("nan")]
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    def test_tuple_nan_identity(self):
+        """NaN element identity in tuples."""
+        nan = float("nan")
+
+        def fn(a, b):
+            return a == b, a != b
+
+        expected = fn((nan,), (nan,))
+        result = torch.compile(fn, backend="eager", fullgraph=True)((nan,), (nan,))
+        self.assertEqual(result, expected)
+
+    def test_dict_nan_identity(self):
+        """Dict value NaN identity: {k: nan} == {k: nan} is True."""
+        nan = float("nan")
+
+        def fn(a, b):
+            return a == b, a != b
+
+        expected = fn({"k": nan}, {"k": nan})
+        result = torch.compile(fn, backend="eager", fullgraph=True)(
+            {"k": nan}, {"k": nan}
+        )
+        self.assertEqual(result, expected)
+
+    def test_dict_nan_different_objects(self):
+        """Different NaN value objects in dicts compare as not equal."""
+
+        def fn():
+            return {"k": float("nan")} == {"k": float("nan")}
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    def test_contains_nan_identity(self):
+        """NaN in list: nan in [nan] is True (identity shortcut)."""
+        nan = float("nan")
+
+        def fn(lst, x):
+            return x in lst
+
+        expected = fn([nan, 1, 2], nan)
+        result = torch.compile(fn, backend="eager", fullgraph=True)([nan, 1, 2], nan)
+        self.assertEqual(result, expected)
+
+    def test_contains_nan_different_objects(self):
+        """Different NaN objects: float('nan') in [float('nan')] is False."""
+
+        def fn():
+            return float("nan") in [float("nan"), 1, 2]
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    # =====================================================================
+    # Subclass custom __eq__ (followups)
+    # =====================================================================
+
+    def test_set_subclass_custom_eq(self):
+        """set subclass with custom __eq__ must use the custom method."""
+
+        class MySet(set):
+            def __eq__(self, other):
+                return "custom_eq"
+
+            def __ne__(self, other):
+                return "custom_ne"
+
+            def __hash__(self):
+                return 0
+
+        def fn(s1, s2):
+            return (s1 == s2, s1 != s2)
+
+        s1 = {1, 2, 3}
+        s2 = MySet({1, 2, 3})
+        expected = fn(s1, s2)
+        torch._dynamo.reset()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(s1, s2)
+        self.assertEqual(result, expected)
+
+    def test_set_subclass_custom_eq_reversed(self):
+        """MySet == set uses subclass priority."""
+
+        class MySet(set):
+            def __eq__(self, other):
+                return "custom_eq"
+
+            def __hash__(self):
+                return 0
+
+        def fn(s1, s2):
+            return s2 == s1
+
+        s1 = MySet({1, 2, 3})
+        s2 = {1, 2, 3}
+        expected = fn(s1, s2)
+        torch._dynamo.reset()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(s1, s2)
+        self.assertEqual(result, expected)
+
+    def test_tuple_subclass_custom_eq(self):
+        """tuple subclass with custom __eq__ must use the custom method."""
+
+        class MyTuple(tuple):  # noqa: SLOT001
+            def __eq__(self, other):
+                return "custom_eq"
+
+            def __hash__(self):
+                return 0
+
+        def fn(t1, t2):
+            return t1 == t2
+
+        t1 = (1, 2, 3)
+        t2 = MyTuple((1, 2, 3))
+        expected = fn(t1, t2)
+        torch._dynamo.reset()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t1, t2)
+        self.assertEqual(result, expected)
+
+    def test_tuple_subclass_inherited_eq(self):
+        """tuple subclass without __eq__ uses tuple's comparison."""
+
+        class MyTuple(tuple):  # noqa: SLOT001
+            pass
+
+        def fn(t1, t2):
+            return t1 == t2, t1 != t2, t1 < t2
+
+        t1 = MyTuple((1, 2, 3))
+        t2 = MyTuple((1, 2, 4))
+        expected = fn(t1, t2)
+        torch._dynamo.reset()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t1, t2)
+        self.assertEqual(result, expected)
+
+    def test_set_subclass_inherited_eq(self):
+        """set subclass without __eq__ uses set's comparison."""
+
+        class MySet(set):
+            pass
+
+        def fn(s1, s2):
+            return s1 == s2, s1 != s2, s1 < s2
+
+        s1 = MySet({1, 2})
+        s2 = MySet({1, 2, 3})
+        expected = fn(s1, s2)
+        torch._dynamo.reset()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(s1, s2)
+        self.assertEqual(result, expected)
+
+    # =====================================================================
+    # Tensor vs non-proxyable types (followups)
+    # =====================================================================
+
+    def test_tensor_eq_user_defined_object(self):
+        """tensor == UserDefinedObject() should return False (identity fallback)."""
+
+        class MyObj:
+            pass
+
+        def fn(t):
+            return t == MyObj()
+
+        t = torch.randn(3)
+        expected = fn(t)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(result, expected)
+
+    def test_tensor_ne_user_defined_object(self):
+        class MyObj:
+            pass
+
+        def fn(t):
+            return t != MyObj()
+
+        t = torch.randn(3)
+        expected = fn(t)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(result, expected)
+
+    # =====================================================================
+    # DispatchKeySet comparison (followups)
+    # =====================================================================
+
+    def test_dispatch_key_set_eq(self):
+        from torch._C import DispatchKey, DispatchKeySet
+
+        def fn(a, b):
+            return a == b
+
+        ks1 = DispatchKeySet(DispatchKey.CPU)
+        ks2 = DispatchKeySet(DispatchKey.CPU)
+        expected = fn(ks1, ks2)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(ks1, ks2)
+        self.assertEqual(result, expected)
+
+    def test_dispatch_key_set_ne(self):
+        from torch._C import DispatchKey, DispatchKeySet
+
+        def fn(a, b):
+            return a != b
+
+        ks1 = DispatchKeySet(DispatchKey.CPU)
+        ks2 = DispatchKeySet(DispatchKey.CUDA)
+        expected = fn(ks1, ks2)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(ks1, ks2)
         self.assertEqual(result, expected)
 
 

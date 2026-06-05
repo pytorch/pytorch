@@ -2400,6 +2400,7 @@ from torch._linalg_utils import (  # type: ignore[misc]
     eig,
     lstsq,
     matrix_rank,
+    qr,
     solve,
 )
 from torch.utils.dlpack import from_dlpack, to_dlpack
@@ -2886,13 +2887,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
-from torch import fx as fx
-
-
-# Register MPS specific decomps
-torch.backends.mps._init()
-
-from torch import compiler as compiler
+from torch import compiler as compiler, fx as fx
 
 
 class _TritonLibrary:
@@ -3014,12 +3009,6 @@ def _constrain_as_size(
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)
 
 
-from torch import _logging
-
-
-_logging._init_logs()
-
-
 def _import_device_backends():
     """
     Leverage the Python plugin mechanism to load out-of-the-tree device extensions.
@@ -3076,11 +3065,18 @@ def _as_tensor_fullprec(t):
         return torch.as_tensor(t)
 
 
-# `_import_device_backends` should be kept at the end to ensure
-# all the other functions in this module that may be accessed by
-# an autoloaded backend are defined
+# `_import_device_backends` should run after the definitions above to ensure
+# all the other functions in this module that may be accessed by an autoloaded
+# backend are defined.
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+from torch import _logging
+
+
+# Keep `TORCH_LOGS` initialization after backend autoload so backends can
+# register their log names before `TORCH_LOGS` is parsed and validated.
+_logging._init_logs()
 
 # Register all registered custom / override ops in torch/_native
 import torch._native
