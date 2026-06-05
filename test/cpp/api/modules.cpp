@@ -5513,6 +5513,12 @@ TEST_F(ModulesTest, PrettyPrintBCEWithLogitsLoss) {
       "torch::nn::BCEWithLogitsLoss()");
 }
 
+TEST_F(ModulesTest, MultiheadAttentionRejectsZeroNumHeads){
+  EXPECT_THROW(
+    MultiheadAttention(MultiheadAttentionOptions(0,0)),
+    c10::Error);
+}
+
 TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
   ASSERT_EQ(
       c10::str(MultiheadAttention(20, 10)),
