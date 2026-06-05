@@ -183,14 +183,18 @@ from .variables.lists import (
 from .variables.misc import (
     CellVariable,
     ExceptionVariable,
-    GetAttrVariable,
     NullVariable,
     PythonModuleVariable,
     TracebackVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-from .variables.object_protocol import generic_bool, generic_contains, generic_getiter
+from .variables.object_protocol import (
+    generic_bool,
+    generic_contains,
+    generic_getiter,
+    virtual_iterator_next,
+)
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -945,11 +949,6 @@ def generic_jump(
                     "object with non-constant truthiness.",
                     hints=[],
                 )
-        elif not value.is_tensor() and value.has_unpack_var_sequence(self):
-            if truth_fn(len(value.unpack_var_sequence(self))):
-                if push:
-                    self.push(value)
-                self.jump(inst)
         elif isinstance(value, SymNodeVariable):
             try:
                 # if the user is branching on a SymBool, guard on it
@@ -966,6 +965,12 @@ def generic_jump(
                     return jump_graph_break(self, inst, value, extra_msg=f"\n{e}")
                 raise
             if truth_fn(eval_result):
+                if push:
+                    self.push(value)
+                self.jump(inst)
+        elif not value.is_tensor():
+            result = generic_bool(self, value)  # type: ignore[arg-type]
+            if truth_fn(result):
                 if push:
                     self.push(value)
                 self.jump(inst)
@@ -1514,7 +1519,10 @@ class InstructionTranslatorBase(
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(
-                self, fn, args, kwargs,
+                self,
+                fn,
+                args,
+                kwargs,
                 allow_nested_graph_breaks=allow_nested_graph_breaks,
             )
 
@@ -2454,13 +2462,29 @@ class InstructionTranslatorBase(
         self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
     def FOR_ITER(self, inst: Instruction) -> None:
-        it = self.pop().realize()
-        self.push(it)
+        if sys.version_info >= (3, 15):
+            null_or_idx = self.pop()
+            it = self.pop().realize()
+            self.push(it)
+            self.push(null_or_idx)
+        else:
+            it = self.pop().realize()
+            self.push(it)
         try:
-            val = it.next_variable(self)
-            self.push(val)
-        except (StopIteration, exc.ObservedUserStopIteration) as e:
-            if isinstance(e, exc.ObservedUserStopIteration):
+            if sys.version_info >= (3, 15):
+                val, next_ = virtual_iterator_next(self, it, null_or_idx)
+                self.pop()
+                self.push(next_)
+                self.push(val)
+            else:
+                val = it.next_variable(self)
+                self.push(val)
+        except (
+            StopIteration,
+            exc.ObservedUserStopIteration,
+            exc.ObservedIndexError,
+        ) as e:
+            if isinstance(e, (exc.ObservedUserStopIteration, exc.ObservedIndexError)):
                 exc.handle_observed_exception(self)
 
             if sys.version_info >= (3, 12):
@@ -2981,7 +3005,16 @@ class InstructionTranslatorBase(
             self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
 
     def GET_ITER(self, inst: Instruction) -> None:
-        self.call_function(VariableTracker.build(self, iter), [self.pop()], {})
+        if sys.version_info >= (3, 15):
+            obj = self.pop()
+            if isinstance(obj, (ListVariable, TupleVariable)):
+                self.push(obj)
+                self.push(VariableTracker.build(self, 0))
+            else:
+                self.call_function(VariableTracker.build(self, iter), [obj], {})
+                self.push(NullVariable())
+        else:
+            self.call_function(VariableTracker.build(self, iter), [self.pop()], {})
 
     @break_graph_if_unsupported(
         push=True,
@@ -4002,14 +4035,7 @@ class InstructionTranslatorBase(
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
-        if seq.is_tensor():
-            val = seq.unpack_var_sequence(self, idxes=range(inst.argval))  # type: ignore[arg-type]
-        elif isinstance(seq, GetAttrVariable) and seq.obj.is_tensor():
-            # x, y = a.shape
-            proxy = getattr(seq.obj.as_proxy(), seq.name)
-            val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
-        else:
-            val = unpack_iterable(self, seq)
+        val = unpack_iterable(self, seq)
         if len(val) < inst.argval:
             raise_value_error(
                 self,
@@ -4386,6 +4412,9 @@ class InstructionTranslatorBase(
         if inst.arg == 0:
             self.append_prefix_inst(inst)
             self.accept_prefix_inst = False
+        elif sys.version_info >= (3, 15) and inst.arg == 4:
+            # https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Include/internal/pycore_opcode_utils.h#L90
+            self.append_prefix_inst(inst)
         else:
             if self.accept_prefix_inst:
                 raise AssertionError("expected not self.accept_prefix_inst to be true")
@@ -4787,7 +4816,11 @@ class InstructionTranslatorBase(
     # 3.14 opcodes
     LOAD_FAST_BORROW = LOAD_FAST
     NOT_TAKEN = NOP
-    POP_ITER = POP_TOP
+
+    def POP_ITER(self, inst: Instruction) -> None:
+        self.pop()
+        if sys.version_info >= (3, 15):
+            self.pop()
 
     # See
     # https://github.com/python/cpython/blob/805e3368d6d07e58430654d1365283924fdf4143/Python/ceval.c#L559
@@ -5669,7 +5702,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             parent.output, func.get_code(), lambda: parent.inline_depth + 1
         ):
             tracer = cls.build_inline_tracer(
-                parent, func, args, kwargs,
+                parent,
+                func,
+                args,
+                kwargs,
                 allow_nested_graph_breaks=allow_nested_graph_breaks,
             )
             return tracer.inline_call_()
@@ -6288,15 +6324,33 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         if not (len(self.stack) >= 2):
             raise AssertionError("expected len(self.stack) >= 2 to be true")
         val = self.pop()
-        tos = self.stack[-1]
-        if isinstance(tos, (IteratorVariable, LocalGeneratorObjectVariable)) or (
-            isinstance(tos, UserDefinedObjectVariable)
-            and isinstance(tos.value, collections.abc.Iterator)
+        if sys.version_info >= (3, 15):
+            null_or_index = self.pop()
+        receiver = self.stack[-1]
+        if (
+            isinstance(receiver, (IteratorVariable, LocalGeneratorObjectVariable))
+            or (
+                isinstance(receiver, UserDefinedObjectVariable)
+                and isinstance(receiver.value, collections.abc.Iterator)
+            )
+            or (
+                sys.version_info >= (3, 15)
+                and isinstance(receiver, (ListVariable, TupleVariable))
+            )
         ):
             if val.is_constant_none():
                 try:
-                    val = tos.next_variable(self)  # type: ignore[arg-type]
-                except (StopIteration, exc.ObservedUserStopIteration) as ex:
+                    if sys.version_info >= (3, 15):
+                        val, next_idx = virtual_iterator_next(
+                            self, receiver, null_or_index
+                        )
+                    else:
+                        val = receiver.next_variable(self)  # type: ignore[arg-type]
+                except (
+                    StopIteration,
+                    exc.ObservedUserStopIteration,
+                    exc.ObservedIndexError,
+                ):
                     # To implement SEND, we have to look at the implementation
                     # when the iterator returns StopIteration. This translates to this code
                     # 3.11: https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2619
@@ -6305,9 +6359,11 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                     # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
                     if sys.version_info < (3, 12):
                         self.pop()  # Python 3.12 uses new opcode END_SEND
-                    self.push(ConstantVariable.create(ex.value))
+                    self.push(val)
                     self.jump(inst)
                 else:
+                    if sys.version_info >= (3, 15):
+                        self.push(next_idx)
                     self.push(val)
             else:
                 # invoke send
@@ -6324,7 +6380,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         else:
             unimplemented(
                 gb_type="SEND with bad type",
-                context=f"TOS type: {typestr(tos)}",
-                explanation=f"Attempted to SEND with unsupported type {typestr(tos)}.",
+                context=f"TOS type: {typestr(receiver)}",
+                explanation=f"Attempted to SEND with unsupported type {typestr(receiver)}.",
                 hints=[],
             )
