@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import warnings
 from abc import ABC, abstractmethod
@@ -19,7 +20,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -1928,13 +1929,14 @@ def cudagraphify(
     else:
         cudagraphify_fn = cudagraphify_impl
 
-    compiled_fn = None
+    thread_local = threading.local()
 
     def run(new_inputs: Sequence[InputType]) -> Any:
-        nonlocal compiled_fn
+        compiled_fn = getattr(thread_local, "compiled_fn", None)
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)  # type: ignore[arg-type]
+            thread_local.compiled_fn = compiled_fn
         return compiled_fn(new_inputs)  # type: ignore[arg-type]
 
     return run
@@ -2680,6 +2682,21 @@ def run_pre_grad_passes(
     return model_
 
 
+@dataclass(frozen=True)
+class _ConstantDecompTable(Generic[_P, _T]):
+    """
+    Picklable wrapper around a user-supplied decomposition dict.
+
+    This module-level class is addressable as (module, qualname), so pickle can
+    serialize an instance by reducing its single field.
+    """
+
+    table: dict[OpOverload, Callable[_P, _T]]
+
+    def __call__(self) -> dict[OpOverload, Callable[_P, _T]]:
+        return self.table
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -2701,9 +2718,9 @@ def compile_fx(
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
     if decompositions is not None:
-
-        def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
-            return decompositions  # pyrefly: ignore[bad-return]
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = (
+            _ConstantDecompTable(decompositions)
+        )
     else:
         get_decomp_fn = select_decomp_table
 
