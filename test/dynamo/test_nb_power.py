@@ -213,8 +213,8 @@ class TestNbPower(torch._dynamo.test_case.TestCase):
 
             def __pow__(self, other, mod=None):
                 if mod is not None:
-                    return (self.value ** other.value) % mod.value
-                return type(self)(self.value ** other.value)
+                    return (self.value**other.value) % mod.value
+                return type(self)(self.value**other.value)
 
         self.assertEqual(pow(C(2), C(10), C(1000)), 24)
 
@@ -245,7 +245,7 @@ class TestNbPower(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_three_arg_pow_udo_as_modulus(self):
-        # UDO as modulus: base's __pow__ receives the UDO modulus as its third arg.
+        # UDOV as modulus: base's __pow__ receives the UDOV modulus as its third arg.
         class Mod:
             def __init__(self, v):
                 self.value = v
@@ -256,14 +256,14 @@ class TestNbPower(torch._dynamo.test_case.TestCase):
 
             def __pow__(self, other, mod=None):
                 if mod is not None:
-                    return (self.value ** other.value) % mod.value
-                return type(self)(self.value ** other.value)
+                    return (self.value**other.value) % mod.value
+                return type(self)(self.value**other.value)
 
         self.assertEqual(pow(A(2), A(10), Mod(1000)), 24)
 
     @make_dynamo_test
     def test_three_arg_pow_udo_not_implemented_raises(self):
-        # UDO __pow__ returns NotImplemented for 3-arg form; must raise TypeError.
+        # UDOV __pow__ returns NotImplemented for 3-arg form; must raise TypeError.
         class C:
             def __pow__(self, other, mod=None):
                 if mod is not None:

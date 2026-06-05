@@ -2055,6 +2055,11 @@ class BuiltinVariable(BaseBuiltinVariable):
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
         # ref: https://github.com/python/cpython/blob/main/Objects/abstract.c#L2004-L2078
+        if kwargs:
+            raise_type_error(
+                tx,
+                f"{self.fn.__name__}() takes no keyword arguments",
+            )
         if len(args) == 0:
             return TupleVariable([], mutation_type=ValueMutationNew())
         elif len(args) > 1:
@@ -2062,11 +2067,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                 tx,
                 f"{self.fn.__name__} expected at most 1 argument, got {len(args)}",
             )
-        elif kwargs:
-            raise_type_error(
-                tx,
-                f"{self.fn.__name__} takes no keyword arguments",
-            )
+
+        obj = args[0]
+        if isinstance(obj, TupleVariable) and obj.python_type() is tuple:
+            return obj
 
         items = unpack_iterable(tx, args[0])
         return TupleVariable(items, mutation_type=ValueMutationNew())

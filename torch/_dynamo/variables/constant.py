@@ -723,9 +723,6 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c (complex_pow)
 
         if z is not None:
-            # 3-arg pow(x, y, mod): only int supports modular exponentiation.
-            if not isinstance(self.value, int) or not z.is_python_constant():
-                return ConstantVariable.create(NotImplemented)
             z = z.as_python_constant()
 
         if not other.is_python_constant():
