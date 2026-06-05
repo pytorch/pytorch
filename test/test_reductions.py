@@ -3179,7 +3179,7 @@ class TestReductionsDevice(TestCase):
             torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
             actual)
 
-# Tests to ensure that reduction functions employing comparison operators are usable when there
+    # Tests to ensure that reduction functions employing comparison operators are usable when there
     # exists a zero dimension (i.e. when the tensors are empty) in the tensor. These tests specifically
     # cater to functions where specifying the `dim` parameter is necessary.
     def test_tensor_compare_ops_empty(self, device):

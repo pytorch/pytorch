@@ -8,7 +8,7 @@ import torch._inductor.decomposition
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
-    run_tests, TestCase, IS_WINDOWS, IS_FBCODE, IS_REMOTE_GPU, TEST_CUDA
+    run_tests, TestCase, IS_WINDOWS, IS_FBCODE, IS_REMOTE_GPU
 )
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing import FileCheck
@@ -203,7 +203,6 @@ class TestOutDtypeOpCUDA(TestCase):
         self.assertTrue(torch.allclose(ref, test_out))
         self.assertTrue(torch.allclose(ref, test_out_c))
 
-    @unittest.skipIf(not TEST_CUDA, "cuda only")
     def test_out_dtype_inductor_decomp_trace(self, device) -> None:
         def func(x, w):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
@@ -219,7 +218,6 @@ def forward(self, x_1, w_1):
     _int_mm = torch.ops.aten._int_mm.default(x_1, w_1);  x_1 = w_1 = None
     return _int_mm""")
 
-    @unittest.skipIf(not TEST_CUDA, "cuda only")
     def test_out_dtype_int_mm_default_trace(self, device) -> None:
         def func(x, w):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
