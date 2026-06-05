@@ -46,10 +46,12 @@ class NCCLTestBase {
     c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts =
         c10::make_intrusive<c10d::ProcessGroupNCCL::Options>();
     opts->timeout = pgTimeout_;
+#ifdef NCCL_HAS_COMM_SPLIT
     if (split_from) {
       opts->split_from = *split_from;
       opts->split_color = ++color_;
     }
+#endif
     pg_ = c10::make_intrusive<::c10d::ProcessGroupNCCL>(
         store_, rank, size, std::move(opts));
   }
