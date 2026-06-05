@@ -101,6 +101,7 @@ from ..utils import (
     unpatched_nn_module_getattr,
 )
 from .base import (
+    _RICHCOMPARE_OPS,
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
     MutationType,
@@ -260,22 +261,6 @@ def is_hashable(obj: object) -> bool:
         return True
     except TypeError:
         return False
-
-
-_SENTINEL = object()
-
-
-def _get_underlying_value(vt: "VariableTracker") -> object:
-    """Extract the underlying Python value from a VT for C-level comparison.
-
-    Returns _SENTINEL if the value cannot be extracted.
-    """
-    if isinstance(vt, UserDefinedVariable) and hasattr(vt, "value"):
-        return vt.value
-    try:
-        return vt.as_python_constant()
-    except Exception:
-        return _SENTINEL
 
 
 class UserDefinedVariable(VariableTracker):
@@ -2428,6 +2413,52 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
         return self.call_method(tx, "__ior__", [other], {})
 
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9472 (slot_nb_and)
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__and__",
+            "__rand__",
+            nb_slot=PyNumberSlots.NB_AND,
+            reverse=reverse,
+        )
+
+    def nb_inplace_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__iand__", [other], {})
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9473 (slot_nb_xor)
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__xor__",
+            "__rxor__",
+            nb_slot=PyNumberSlots.NB_XOR,
+            reverse=reverse,
+        )
+
+    def nb_inplace_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__ixor__", [other], {})
+
     def nb_add_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2625,12 +2656,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Skip comparison ops: they go through richcompare_impl on the
             # UserDefined*Variable subclass, which handles _base_vt
             # unwrapping and avoids tracing tensor elements via list_cmp.
-            _CMP_OPS = {"__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"}
             if (
                 self._base_vt is not None
                 and self._base_methods is not None
                 and method in self._base_methods
-                and name not in _CMP_OPS
+                and name not in _RICHCOMPARE_OPS
             ):
                 return self._base_vt.call_method(tx, name, args, kwargs)
 
@@ -2924,11 +2954,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
-        if self._base_vt is not None and self._base_methods is not None:
-            iter_method = self._maybe_get_baseclass_method("__iter__")
-            if iter_method is not None and iter_method in self._base_methods:
-                return self._base_vt.unpack_var_sequence(tx)
-        return super().unpack_var_sequence(tx)
+        return unpack_iterable(tx, self)
 
     def is_supported_random(self) -> bool:
         try:
@@ -3736,8 +3762,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 or in_allowlist
                 or is_pybind11_enum_member(self.value)
             ):
-                other_val = _get_underlying_value(other)
-                if other_val is not _SENTINEL:
+                other_val = other.get_real_python_backed_value()
+                if other_val is not NO_SUCH_SUBOBJ:
                     try:
                         result = method(self.value, other_val)
                         return ConstantVariable.create(result)
@@ -4817,6 +4843,14 @@ class DefaultDictVariable(UserDefinedDictVariable):
         new.call_method(tx, "update", [right], {})
         return new
 
+    def nb_inplace_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        self.call_method(tx, "update", [other], {})
+        return self
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -4857,6 +4891,15 @@ class DefaultDictVariable(UserDefinedDictVariable):
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             return self._missing_impl(tx, args[0])
+        elif name == "__ior__":
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return self.nb_inplace_or_impl(tx, args[0])
         elif name == "copy":
             # defaultdict.copy() creates a new defaultdict with same factory
             # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2282
@@ -4938,15 +4981,6 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
             self._base_vt = set_vt
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None after initialization")
-
-    def richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        if self._base_vt is None:
-            raise AssertionError("expected _base_vt to be set")
-        if isinstance(other, UserDefinedSetVariable) and other._base_vt is not None:
-            other = other._base_vt
-        return self._base_vt.richcompare_impl(tx, other, op)
 
     def as_python_constant(self) -> object:
         if self._base_vt is None:
@@ -5073,23 +5107,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             _, (idx, _) = type_attr.__reduce__()
             return self.items[idx]
         return super().resolve_data_descriptor(tx, name, type_attr, source)
-
-    def richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        if op in ("__eq__", "__ne__"):
-            result = self.is_python_equal(other)
-            if op == "__ne__":
-                result = not result
-            return VariableTracker.build(tx, result)
-        # Ordering: delegate to base TupleVariable, unwrapping other if needed.
-        if self._base_vt is None:
-            raise AssertionError("expected _base_vt to be set")
-        if isinstance(other, UserDefinedTupleVariable):
-            if other._base_vt is None:
-                raise AssertionError("expected other._base_vt to be set")
-            other = other._base_vt
-        return self._base_vt.richcompare_impl(tx, other, op)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # Sourceless namedtuples/structseqs (e.g. tensor subclass metadata from

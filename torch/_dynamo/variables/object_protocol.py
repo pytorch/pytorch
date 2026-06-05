@@ -173,46 +173,96 @@ type_implements_mp_length = partial(
 )
 
 
-def type_implements_nb_bool(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_bool slot (i.e. has __bool__ or __len__)."""
+def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the nb slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_BOOL)
+    return has_slot(number_slots, slot)
 
 
-def type_implements_nb_int(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_int slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_INT)
-
-
-def type_implements_nb_index(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_index slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_INDEX)
-
-
-def type_implements_nb_float(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_float slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_FLOAT)
-
-
-def type_implements_nb_negative(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_negative slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_NEGATIVE)
-
-
-def type_implements_nb_positive(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_positive slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_POSITIVE)
-
-
-def type_implements_nb_absolute(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_absolute slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_ABSOLUTE)
+type_implements_nb_add = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_ADD)
+type_implements_nb_subtract = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_SUBTRACT
+)
+type_implements_nb_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_MULTIPLY
+)
+type_implements_nb_remainder = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_REMAINDER
+)
+type_implements_nb_power = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_POWER)
+type_implements_nb_negative = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_NEGATIVE
+)
+type_implements_nb_positive = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_POSITIVE
+)
+type_implements_nb_absolute = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_ABSOLUTE
+)
+type_implements_nb_bool = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_BOOL)
+type_implements_nb_invert = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INVERT
+)
+type_implements_nb_lshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_LSHIFT
+)
+type_implements_nb_rshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_RSHIFT
+)
+type_implements_nb_and = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_AND)
+type_implements_nb_xor = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_XOR)
+type_implements_nb_or = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_OR)
+type_implements_nb_int = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_INT)
+type_implements_nb_float = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_FLOAT)
+type_implements_nb_inplace_add = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_ADD
+)
+type_implements_nb_inplace_subtract = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_SUBTRACT
+)
+type_implements_nb_inplace_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_MULTIPLY
+)
+type_implements_nb_inplace_remainder = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_REMAINDER
+)
+type_implements_nb_inplace_power = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_POWER
+)
+type_implements_nb_inplace_lshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_LSHIFT
+)
+type_implements_nb_inplace_rshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_RSHIFT
+)
+type_implements_nb_inplace_and = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_AND
+)
+type_implements_nb_inplace_xor = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_XOR
+)
+type_implements_nb_inplace_or = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_OR
+)
+type_implements_nb_floor_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_FLOOR_DIVIDE
+)
+type_implements_nb_true_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_TRUE_DIVIDE
+)
+type_implements_nb_inplace_floor_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_FLOOR_DIVIDE
+)
+type_implements_nb_inplace_true_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_TRUE_DIVIDE
+)
+type_implements_nb_index = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_INDEX)
+type_implements_nb_matrix_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_MATRIX_MULTIPLY
+)
+type_implements_nb_inplace_matrix_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_MATRIX_MULTIPLY
+)
 
 
 def type_implements_tp_iter(obj_type: type) -> bool:
@@ -229,12 +279,6 @@ def type_implements_tp_repr(obj_type: type) -> bool:
     """Check whether obj_type implements the tp_repr slot."""
     _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_REPR)
-
-
-def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
-    """Check whether obj_type implements the nb slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, slot)
 
 
 def pyiter_check(obj_type: type) -> bool:
@@ -804,6 +848,10 @@ NB_SLOT_MAPPING = {
     "nb_inplace_add": PyNumberSlots.NB_INPLACE_ADD,
     "nb_multiply": PyNumberSlots.NB_MULTIPLY,
     "nb_inplace_multiply": PyNumberSlots.NB_INPLACE_MULTIPLY,
+    "nb_and": PyNumberSlots.NB_AND,
+    "nb_inplace_and": PyNumberSlots.NB_INPLACE_AND,
+    "nb_xor": PyNumberSlots.NB_XOR,
+    "nb_inplace_xor": PyNumberSlots.NB_INPLACE_XOR,
     "nb_floor_divide": PyNumberSlots.NB_FLOOR_DIVIDE,
     "nb_inplace_floor_divide": PyNumberSlots.NB_INPLACE_FLOOR_DIVIDE,
     "nb_true_divide": PyNumberSlots.NB_TRUE_DIVIDE,
@@ -1046,6 +1094,7 @@ def sequence_repeat(
             f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
         )
     count = n.nb_index_impl(tx)
+    validate_sequence_repeat_count(tx, count)
     return seq.sq_repeat_impl(tx, count)
 
 
@@ -1066,7 +1115,21 @@ def sequence_inplace_repeat(
             f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
         )
     count = n.nb_index_impl(tx)
+    validate_sequence_repeat_count(tx, count)
     return seq.sq_inplace_repeat_impl(tx, count)
+
+
+def validate_sequence_repeat_count(
+    tx: "InstructionTranslatorBase",
+    count: VariableTracker,
+) -> None:
+    n = count.as_python_constant()
+    if n < -sys.maxsize - 1 or n > sys.maxsize:
+        raise_observed_exception(
+            OverflowError,
+            tx,
+            args=["cannot fit 'int' into an index-sized integer"],
+        )
 
 
 def generic_multiply(
@@ -1265,8 +1328,7 @@ def slot_wrapper_imul(
 # ---------------------------------------------------------------------------
 
 
-def is_richcompare_not_implemented(result: VariableTracker) -> bool:
-    return result.is_constant_match(NotImplemented)
+is_richcompare_not_implemented = is_nb_not_implemented
 
 
 def object_richcompare(
@@ -1289,9 +1351,11 @@ def object_richcompare(
         return ConstantVariable.create(NotImplemented)
     elif op == "__ne__":
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6279-L6298
+        # Safe to call as_python_constant(): only identity-based types use
+        # object_richcompare, so eq_result is always True or NotImplemented.
         eq_result = self.richcompare_impl(tx, other, "__eq__")
         if is_richcompare_not_implemented(eq_result):
-            return ConstantVariable.create(NotImplemented)
+            return eq_result
         return ConstantVariable.create(not eq_result.as_python_constant())
     else:
         return ConstantVariable.create(NotImplemented)
@@ -1337,8 +1401,8 @@ _OP_STR: dict[str, str] = {
 
 def generic_richcompare(
     tx: "InstructionTranslatorBase",
-    lhs: VariableTracker,
-    rhs: VariableTracker,
+    v: VariableTracker,
+    w: VariableTracker,
     op: str,
 ) -> VariableTracker:
     """Dynamo's do_richcompare.
@@ -1353,49 +1417,49 @@ def generic_richcompare(
     reflected = _REFLECTED_OP[op]
 
     try:
-        lhs_type = lhs.python_type()
+        v_type = v.python_type()
     except NotImplementedError:
-        lhs_type = None
+        v_type = None
     try:
-        rhs_type = rhs.python_type()
+        w_type = w.python_type()
     except NotImplementedError:
-        rhs_type = None
+        w_type = None
 
     checked_reverse = False
 
     # Step 1: subclass priority
     if (
-        lhs_type is not None
-        and rhs_type is not None
-        and lhs_type is not rhs_type
-        and issubclass(rhs_type, lhs_type)
+        v_type is not None
+        and w_type is not None
+        and v_type is not w_type
+        and issubclass(w_type, v_type)
     ):
         checked_reverse = True
-        result = rhs.richcompare_impl(tx, lhs, reflected)
+        result = w.richcompare_impl(tx, v, reflected)
         if not is_richcompare_not_implemented(result):
             return result
 
     # Step 2: forward
-    result = lhs.richcompare_impl(tx, rhs, op)
+    result = v.richcompare_impl(tx, w, op)
     if not is_richcompare_not_implemented(result):
         return result
 
     # Step 3: reflected (if not already tried)
     if not checked_reverse:
-        result = rhs.richcompare_impl(tx, lhs, reflected)
+        result = w.richcompare_impl(tx, v, reflected)
         if not is_richcompare_not_implemented(result):
             return result
 
     # Step 4: fallback
     if op in ("__eq__", "__ne__"):
-        identity = vt_identity_compare(lhs, rhs)
+        identity = vt_identity_compare(v, w)
         if identity is not None:
             if op == "__ne__":
                 return ConstantVariable.create(not identity.as_python_constant())
             return identity
         unimplemented(
             gb_type="richcompare identity fallback undetermined",
-            context=f"generic_richcompare({lhs}, {rhs}, {op})",
+            context=f"generic_richcompare({v}, {w}, {op})",
             explanation="Cannot determine object identity for comparison fallback.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
@@ -1403,8 +1467,32 @@ def generic_richcompare(
         raise_type_error(
             tx,
             f"'{_OP_STR[op]}' not supported between instances of "
-            f"'{lhs.python_type_name()}' and '{rhs.python_type_name()}'",
+            f"'{v.python_type_name()}' and '{w.python_type_name()}'",
         )
+
+
+def generic_richcompare_bool(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+    op: str,
+) -> VariableTracker:
+    """Dynamo's PyObject_RichCompareBool for eq/ne.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1046-L1080
+
+    Like generic_richcompare, but with an identity shortcut first: if v
+    and w are the same Python object, eq is True and ne is False. This
+    matters for NaN (nan is nan -> True, but nan == nan -> False). Used by
+    container comparisons (list_richcompare, tuplerichcompare) which call
+    PyObject_RichCompareBool per element in CPython.
+    """
+    if op not in ("__eq__", "__ne__"):
+        raise AssertionError(f"generic_richcompare_bool only supports eq/ne, got {op}")
+    identity = vt_identity_compare(v, w)
+    if identity is not None and identity.as_python_constant():
+        return ConstantVariable.create(op == "__eq__")
+    return generic_richcompare(tx, v, w, op)
 
 
 def generic_hash_impl(
@@ -1565,3 +1653,33 @@ def generic_issubclass(
 
     # Coerce to bool (PyObject_IsTrue, abstract.c L2812).
     return generic_bool(tx, result)
+
+
+def virtual_iterator_next(
+    tx: "InstructionTranslatorBase",
+    iter_: VariableTracker,
+    null_or_idx: VariableTracker,
+) -> tuple[VariableTracker, VariableTracker]:
+    """
+    Mirrors _PyForIter_VirtualIteratorNext.
+
+    When ``null_or_idx`` is a tagged int (3.15+ virtual-iter path), dispatch
+    to the iterable's ``_tp_iteritem`` slot via ``tp_iteritem_impl`` and
+    return ``(value, next_index)``.  Otherwise fall back to the standard
+    iterator protocol (``tp_iternext``) and return ``(value, NULL)``.
+
+    Iterator exhaustion is signaled by ``ObservedUserStopIteration``
+    propagating out of the slot impl, matching the rest of Dynamo's
+    iterator protocol.
+
+    https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Python/ceval.c#L3733
+    """
+    from .misc import NullVariable
+
+    if (
+        not isinstance(null_or_idx, NullVariable)
+        and maybe_get_python_type(null_or_idx) is int
+    ):
+        return iter_.tp_iteritem_impl(tx, null_or_idx)
+    next_ = generic_iternext(tx, iter_)
+    return next_, NullVariable()
