@@ -1254,6 +1254,50 @@ class OverridesData:
     mps: Callable[..., str] | None = None
 
 
+@functools.cache
+def _pytorch_cpu_vec_intrinsics_contract_addcmul() -> bool:
+    # ATen's CPU addcmul vector path is written as vector intrinsics:
+    # self_vec + value_vec * t1_vec * t2_vec. GCC contracts the final
+    # multiply-add in that expression, while clang keeps it as mul/mul/add.
+    build_config = torch.__config__.show()
+    compiler_lines = [
+        line.removeprefix("  - ")
+        for line in build_config.splitlines()
+        if line.startswith("  - ")
+    ]
+    return any(
+        line == "GCC" or line.startswith("GCC ") for line in compiler_lines
+    ) and not any(
+        line == "clang" or line.startswith("clang ") for line in compiler_lines
+    )
+
+
+def _addcmul_no_fma(self_value: str, value_times_tensor1: str, tensor2: str) -> str:
+    return (
+        "([&] {\n"
+        f"auto product = {OpOverrides.paren(value_times_tensor1)} * "
+        f"{OpOverrides.paren(tensor2)};\n"
+        "#if defined(__GNUC__) || defined(__clang__)\n"
+        'asm volatile("" : "+m"(product));\n'
+        "#else\n"
+        "(void)*reinterpret_cast<const volatile char*>(&product);\n"
+        "#endif\n"
+        f"return {OpOverrides.paren(self_value)} + product;\n"
+        "}())"
+    )
+
+
+def _addcmul_aten_cppvec(
+    self_value: str, value_times_tensor1: str, tensor2: str
+) -> str:
+    if (
+        getattr(V.kernel, "tail_size", None) is not None
+        or _pytorch_cpu_vec_intrinsics_contract_addcmul()
+    ):
+        return f"fmadd({value_times_tensor1}, {tensor2}, {self_value})"
+    return _addcmul_no_fma(self_value, value_times_tensor1, tensor2)
+
+
 # NB: if you add a new special function, don't forget to update
 # torch._inductor.ops_handler too
 pointwise_overrides_data: dict[str, OverridesData] = dict(
@@ -1310,6 +1354,14 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         # preserves subnormals and matches eager's FMA precision.
         triton=lambda x, y, z: f"tl.fma({x}, {y}, {z})",
         name="fma",
+    ),
+    addcmul_aten=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        cpp=lambda self_value, value_times_tensor1, tensor2: (
+            f"std::fma({value_times_tensor1}, {tensor2}, {self_value})"
+        ),
+        cppvec=_addcmul_aten_cppvec,
+        name="addcmul_aten",
     ),
     # mul_rn: Multiplication with round-to-nearest. This prevents Triton's
     # compiler from fusing the multiplication with subsequent operations,

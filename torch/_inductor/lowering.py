@@ -7975,21 +7975,23 @@ square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
 
 
-@register_lowering(aten.addcmul, broadcast=True)
-def addcmul(self, tensor1, tensor2, *, value=1):
+def _addcmul(self, tensor1, tensor2, *, value=1):
     """
     Computes self + value * tensor1 * tensor2 using FMA for better precision.
 
-    Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
-    This is computed as: fma(value, tensor1 * tensor2, self)
+    CUDA eager computes value != 1 as fma(value, tensor1 * tensor2, self).
+    CPU eager uses the single C++ expression self + value * tensor1 * tensor2;
+    compilers contract this as fma(value * tensor1, tensor2, self), so the CPU
+    lowering uses that order for bitwise parity.
 
-    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
-    we fall back to regular arithmetic since FMA doesn't support integers.
+    Note: FMA is only used for floating-point types on CPU and non-AMD GPUs.
+    For integer types, we fall back to regular arithmetic since FMA doesn't
+    support integers.
 
-    For floating-point types, we use mul_rn (round-to-nearest multiplication)
-    to force rounding of the product before the FMA. This prevents Triton's
-    compiler from fusing the multiplication with the FMA, matching eager's
-    rounding behavior.
+    For CUDA/XPU floating-point types, we use mul_rn (round-to-nearest
+    multiplication) to force rounding of the product before the FMA. This
+    prevents Triton's compiler from fusing the multiplication with the FMA,
+    matching eager's rounding behavior.
     """
     dtype = get_promoted_dtype(
         self,
@@ -8001,13 +8003,17 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     self_loader = self.make_loader()
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
+    value_loader = value.make_loader() if isinstance(value, TensorBox) else None
 
-    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
+    # CUDA/XPU use the eager CUDA addcmul order; CPU uses the eager CPU order.
     device = self.get_device()
-    use_fma = (
+    use_cuda_fma = (
         dtype.is_floating_point
         and device is not None
         and device.type in ["cuda", "xpu"]
+    )
+    use_cpu_fma = (
+        dtype.is_floating_point and device is not None and device.type == "cpu"
     )
 
     def inner_fn(idx):
@@ -8015,25 +8021,30 @@ def addcmul(self, tensor1, tensor2, *, value=1):
         t1_val = t1_loader(idx)
         t2_val = t2_loader(idx)
 
-        if value == 1 and use_fma:
+        if value == 1 and use_cuda_fma:
             return ops.fma(t1_val, t2_val, self_val)
 
-        # Match eager order: self + value * (tensor1 * tensor2)
+        if value_loader is not None:
+            value_expr = value_loader(idx)
+        elif isinstance(value, sympy.Basic):
+            value_expr = ops.index_expr(value, dtype)
+        else:
+            value_expr = ops.constant(value, dtype)
+
+        if use_cpu_fma:
+            value_times_t1 = ops.mul(value_expr, t1_val)
+            return ops.addcmul_aten(self_val, value_times_t1, t2_val)
+
+        # Match eager CUDA order: self + value * (tensor1 * tensor2)
         # Compute tensor1 * tensor2 first
-        if use_fma:
+        if use_cuda_fma:
             # Use mul_rn to force rounding of the product, preventing Triton
             # from fusing t1*t2 with the subsequent FMA
             t1_times_t2 = ops.mul_rn(t1_val, t2_val)
         else:
             t1_times_t2 = ops.mul(t1_val, t2_val)
 
-        # Use index_expr for sympy expressions (e.g., from .item()), constant otherwise
-        if isinstance(value, sympy.Basic):
-            value_expr = ops.index_expr(value, dtype)
-        else:
-            value_expr = ops.constant(value, dtype)
-
-        if use_fma:
+        if use_cuda_fma:
             # Use FMA for floating-point types for better precision
             return ops.fma(value_expr, t1_times_t2, self_val)
         else:
@@ -8046,6 +8057,16 @@ def addcmul(self, tensor1, tensor2, *, value=1):
         inner_fn=inner_fn,
         ranges=self.get_size(),
     )
+
+
+@register_lowering(aten.addcmul, broadcast=True)
+def addcmul(self, tensor1, tensor2, *, value=1):
+    return _addcmul(self, tensor1, tensor2, value=value)
+
+
+@register_lowering(inductor_prims.addcmul, broadcast=True)
+def addcmul_tensor_value(self, tensor1, tensor2, value):
+    return _addcmul(self, tensor1, tensor2, value=value)
 
 
 @register_lowering(aten.addcdiv, broadcast=True)
