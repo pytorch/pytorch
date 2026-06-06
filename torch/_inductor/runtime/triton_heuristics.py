@@ -3623,6 +3623,20 @@ def _handle_combo_kernel_per_subkernel_blocks(
     if combo_meta is None or "heuristic_0" not in combo_meta:
         return None
 
+    # CAP no-bench: combo_grid_meta carries a stitched config; skip the
+    # combo_tuning_groups computation and return a single stitched config.
+    # default_config holds BLOCK keys for the grid lambda; backend kwargs
+    # (HIP options like waves_per_eu) come from stitched_backend_kwargs.
+    stitched_warps = combo_meta.get("stitched_num_warps")
+    if stitched_warps is not None:
+        return [
+            triton.Config(
+                combo_meta["stitched_backend_kwargs"],
+                num_warps=stitched_warps,
+                num_stages=combo_meta["stitched_num_stages"],
+            )
+        ]
+
     num_kernels = combo_meta["num_kernels"]
     inductor_meta_clean = {
         k: v for k, v in inductor_meta.items() if k != "combo_grid_meta"
