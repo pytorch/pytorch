@@ -4197,6 +4197,62 @@ def set_current_node(node: torch.fx.Node) -> Generator[None, None, None]:
         _current_node.value = old
 
 
+def _run_python_impl_with_float_schema_symfloat(
+    target: object, args: Any, kwargs: Any
+) -> Any:
+    if not isinstance(target, torch._ops.OpOverload):
+        raise NotImplementedError
+
+    has_float_symfloat = False
+    for idx, schema_arg in enumerate(target._schema.arguments):
+        if not isinstance(schema_arg.type, torch.FloatType):
+            continue
+        if schema_arg.kwarg_only:
+            value = kwargs.get(schema_arg.name)
+        elif idx < len(args):
+            value = args[idx]
+        else:
+            value = kwargs.get(schema_arg.name)
+        has_float_symfloat = has_float_symfloat or isinstance(value, torch.SymFloat)
+    if not has_float_symfloat:
+        raise NotImplementedError
+
+    fake_mode = None
+    for arg in pytree.arg_tree_leaves(*args, **kwargs):
+        fake_mode = maybe_get_fake_mode(arg)
+        if fake_mode is not None:
+            break
+    if fake_mode is None:
+        raise NotImplementedError
+
+    maybe_fake_impl = torch._library.simple_registry.singleton.find(
+        target.name()
+    ).fake_impl.kernel
+    if maybe_fake_impl is not None:
+        ctx = torch._library.fake_impl.FakeImplCtx(fake_mode, target)
+        with torch._library.fake_impl.set_ctx_getter(lambda: ctx), fake_mode:
+            return maybe_fake_impl(*args, **kwargs)
+
+    namespace, name = target._schema.name.split("::", maxsplit=1)
+    if target._schema.overload_name:
+        name = f"{name}.{target._schema.overload_name}"
+    for dispatch_key in (
+        "CompositeExplicitAutograd",
+        "CompositeImplicitAutograd",
+        "",
+    ):
+        impl = torch.library._impl_fns.get(f"{namespace}/{name}/{dispatch_key}")
+        if impl is None:
+            continue
+        fn, with_keyset = impl
+        if with_keyset:
+            raise NotImplementedError
+        with fake_mode:
+            return fn(*args, **kwargs)
+
+    raise NotImplementedError
+
+
 def run_node(
     tracer: Any, node: torch.fx.Node, args: Any, kwargs: Any, nnmodule: Any
 ) -> Any:
@@ -4228,7 +4284,15 @@ def run_node(
 
         try:
             if op == "call_function":
-                return node.target(*args, **kwargs)  # type: ignore[operator]
+                try:
+                    return node.target(*args, **kwargs)  # type: ignore[operator]
+                except RuntimeError as e:
+                    try:
+                        return _run_python_impl_with_float_schema_symfloat(
+                            node.target, args, kwargs
+                        )
+                    except NotImplementedError:
+                        raise e from None
             elif op == "call_method":
                 if not hasattr(args[0], node.target):  # type: ignore[arg-type]
                     from . import graph_break_hints

@@ -3048,7 +3048,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         args: list[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import SymNodeVariable
+        from . import SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
 
         if self.kind == AllowInGraphKind.NONSTRICT_TRACE:
@@ -3059,6 +3059,58 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
+
+        def tensor_float_args_to_symfloat(
+            args: list[VariableTracker], kwargs: dict[str, VariableTracker]
+        ) -> tuple[list[VariableTracker], dict[str, VariableTracker]]:
+            if not isinstance(self.value, torch._ops.OpOverload):
+                return args, kwargs
+
+            def is_single_element_non_complex_tensor(
+                arg: VariableTracker,
+            ) -> TypeIs[TensorVariable]:
+                if not isinstance(arg, TensorVariable):
+                    return False
+                if arg.dtype is not None and arg.dtype.is_complex:
+                    return False
+                if arg.ndim == 0:
+                    return True
+                if arg.valid_size():
+                    numel = product(arg.size)
+                    return isinstance(numel, int) and numel == 1
+                return False
+
+            def maybe_convert(arg: VariableTracker) -> VariableTracker:
+                if is_single_element_non_complex_tensor(arg):
+                    return arg.nb_float_impl(tx)
+                return arg
+
+            new_args = list(args)
+            new_kwargs = dict(kwargs)
+            changed = False
+            for idx, schema_arg in enumerate(self.value._schema.arguments):
+                if not isinstance(schema_arg.type, torch.FloatType):
+                    continue
+                if schema_arg.kwarg_only:
+                    if schema_arg.name in new_kwargs:
+                        new_arg = maybe_convert(new_kwargs[schema_arg.name])
+                        changed = changed or new_arg is not new_kwargs[schema_arg.name]
+                        new_kwargs[schema_arg.name] = new_arg
+                    continue
+                if idx < len(new_args):
+                    new_arg = maybe_convert(new_args[idx])
+                    changed = changed or new_arg is not new_args[idx]
+                    new_args[idx] = new_arg
+                elif schema_arg.name in new_kwargs:
+                    new_arg = maybe_convert(new_kwargs[schema_arg.name])
+                    changed = changed or new_arg is not new_kwargs[schema_arg.name]
+                    new_kwargs[schema_arg.name] = new_arg
+
+            if changed:
+                return new_args, new_kwargs
+            return args, kwargs
+
+        args, kwargs = tensor_float_args_to_symfloat(args, kwargs)
 
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs

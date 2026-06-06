@@ -11416,6 +11416,131 @@ def ___make_guard_fn():
             out = torch.empty(2, 272)
             f2(tensors, dim, num_chunks, out)
 
+    def test_custom_op_float_arg_accepts_scalar_tensor(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("float_arg_scalar_tensor(Tensor x, float scale) -> Tensor")
+
+            @torch.library.impl(
+                lib, "float_arg_scalar_tensor", "CompositeExplicitAutograd"
+            )
+            def _(x, scale):
+                return x.clone()
+
+            op = torch.ops.mylib.float_arg_scalar_tensor.default
+
+            def fn(x, scale):
+                return op(x, scale)
+
+            def fn_kwarg(x, scale):
+                return op(x, scale=scale)
+
+            x = torch.zeros(3, 16, 8, 8, dtype=torch.int8)
+            scale = torch.tensor(0.01)
+
+            self.assertEqual(op(x, scale), x)
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x, scale),
+                fn(x, scale),
+            )
+            self.assertEqual(
+                torch.compile(fn_kwarg, backend="eager", fullgraph=True)(x, scale),
+                fn_kwarg(x, scale),
+            )
+
+    def test_custom_op_float_arg_scalar_tensor_data_dependent_metadata(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("float_arg_scalar_tensor_shape(Tensor x, float scale) -> Tensor")
+
+            @torch.library.impl(
+                lib, "float_arg_scalar_tensor_shape", "CompositeExplicitAutograd"
+            )
+            def _(x, scale):
+                return x[: int(scale)]
+
+            op = torch.ops.mylib.float_arg_scalar_tensor_shape.default
+
+            def fn(x, scale):
+                return op(x, scale)
+
+            x = torch.arange(5)
+            scale = torch.tensor(2.0)
+
+            self.assertEqual(op(x, scale).shape, (2,))
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UserError,
+                "data-dependent expression",
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x, scale)
+
+    def test_custom_op_float_arg_scalar_tensor_fake_ctx(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("float_arg_scalar_tensor_fake(Tensor x, float scale) -> Tensor")
+
+            @torch.library.impl(
+                lib, "float_arg_scalar_tensor_fake", "CompositeExplicitAutograd"
+            )
+            def _(x, scale):
+                return x[: int(scale)]
+
+            @torch.library.register_fake("mylib::float_arg_scalar_tensor_fake", lib=lib)
+            def _(x, scale):
+                return x.new_empty((torch.library.get_ctx().new_dynamic_size(),))
+
+            op = torch.ops.mylib.float_arg_scalar_tensor_fake.default
+
+            def fn(x, scale):
+                return op(x, scale)
+
+            x = torch.arange(5)
+            scale = torch.tensor(2.0)
+
+            self.assertEqual(op(x, scale).shape, (2,))
+            torch.compile(fn, backend="eager", fullgraph=True)(x, scale)
+
+    def test_custom_op_float_arg_scalar_tensor_composite_alloc(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "float_arg_scalar_tensor_composite_alloc(Tensor x, float scale) -> Tensor"
+            )
+
+            @torch.library.impl(
+                lib,
+                "float_arg_scalar_tensor_composite_alloc",
+                "CompositeExplicitAutograd",
+            )
+            def _(x, scale):
+                return torch.empty_like(x)
+
+            op = torch.ops.mylib.float_arg_scalar_tensor_composite_alloc.default
+
+            def fn(x, scale):
+                return op(x, scale)
+
+            x = torch.arange(5)
+            scale = torch.tensor(2.0)
+
+            self.assertEqual(op(x, scale).shape, (5,))
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x, scale).shape,
+                (5,),
+            )
+
+    def test_library_impl_fns_gc_cleanup(self):
+        ns = "mylib_impl_fns_gc_cleanup"
+        lib = torch.library.Library(ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
+        lib.define("foo(Tensor x) -> Tensor")
+
+        @torch.library.impl(lib, "foo", "CompositeExplicitAutograd")
+        def _(x):
+            return x.clone()
+
+        key = f"{ns}/foo/CompositeExplicitAutograd"
+        self.assertIn(key, torch.library._impl_fns)
+
+        del lib
+        gc.collect()
+        self.assertNotIn(key, torch.library._impl_fns)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
         @torch.compile(backend="eager")
