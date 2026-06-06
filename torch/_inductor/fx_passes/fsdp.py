@@ -57,7 +57,7 @@ def is_fsdp_all_gather(n: torch.fx.Node) -> bool:
 
 
 def is_fsdp_all_gather_wait(wait: torch.fx.Node) -> bool:
-    ag_node = wait.args[0]
+    ag_node = wait.args[0]  # type: ignore[arg-type, union-attr]
     return is_fsdp_all_gather(ag_node)  # type: ignore[arg-type]
 
 

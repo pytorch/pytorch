@@ -79,7 +79,6 @@ bool isRegisteredOpaqueType(const std::string& type_name) {
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", c10::TypeFactory::get<GeneratorType>()},
-      {"Dimname", c10::TypeFactory::get<StringType>()},
       {"ScalarType", c10::TypeFactory::get<ScalarTypeType>()},
       {"Layout", c10::TypeFactory::get<LayoutType>()},
       {"MemoryFormat", c10::TypeFactory::get<MemoryFormatType>()},
@@ -108,9 +107,6 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Any", c10::TypeFactory::get<c10::AnyType>()},
       {"AnyClassType", c10::TypeFactory::get<c10::AnyClassType>()},
       {"AnyEnumType", c10::TypeFactory::get<c10::AnyEnumType>()},
-      // PyObjectType::get() used directly because PyObjectType is excluded
-      // from FORALL_DYNAMIC_TYPES (not supported on xplat/mobile)
-      {"PyObject", c10::PyObjectType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE) && !L.nextIf(TK_NONE_TYPE)) {
@@ -340,7 +336,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         });
         return;
       }
-      throw(ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'");
+      throw(ErrorReport(L.cur()) << "Unexpected specifier '" << field << '\'');
     }
     if (device.has_value() || requires_grad.has_value()) {
       throw(

@@ -1182,7 +1182,7 @@ def define_buck_targets(
         ],
     )
 
-    # TODO: Enable support for KleidiAI bazel build
+    # TODO: Enable support for KleidiAI
     # @lint-ignore BUCKLINT
     fb_native.genrule(
         name = "generate_aten_config",

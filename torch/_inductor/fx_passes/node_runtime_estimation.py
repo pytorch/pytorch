@@ -12,12 +12,14 @@ from typing import Any
 
 import torch
 import torch.fx as fx
+from torch._inductor import config
 from torch._inductor.fx_passes.bucketing import (
     _resolve_group_name,
     _schedulable_wait_node,
 )
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._logging import getArtifactLogger, trace_structured
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
 
 
@@ -167,6 +169,12 @@ def _benchmark_collective_with_cuda_events_impl(
         (args, kwargs),
     )
 
+    args, kwargs = torch.utils._pytree.tree_map_only(
+        torch.SymInt,
+        lambda s: optimization_hint(s, fallback=config.unbacked_symint_fallback),
+        (args, kwargs),
+    )
+
     # Warmup: call collective once and wait
     torch.cuda.synchronize()
     result = n.target(*args, **kwargs)  # type: ignore[operator]
@@ -292,7 +300,10 @@ def _log_compute_estimations(
                 continue
             if "val" in arg.meta:
                 t = arg.meta["val"]
-                ret += f" {dtype_abbrs[t.dtype]}{tuple(t.shape)}"
+                if isinstance(t, torch.Tensor):
+                    ret += f" {dtype_abbrs[t.dtype]}{tuple(t.shape)}"
+                elif isinstance(t, torch.SymInt):
+                    ret += f" SymInt({t})"
         return ret
 
     headers = [
@@ -304,13 +315,20 @@ def _log_compute_estimations(
         "Flops",
     ]
 
+    def _fmt(v: object) -> str:
+        if isinstance(v, torch.types.py_sym_types):
+            if v.node.has_hint():
+                return f"{v}({v.node.hint:.4f})"
+            return str(v)
+        return f"{v:.4f}"
+
     rows = [
         [
             _node_summary(node),
-            f"{est_b * 1e3:.4f}",
-            f"{est_a * 1e3:.4f}",
-            f"{(est_a / est_b) if est_b > 0 else 0:.4f}",
-            f"{(est_a - est_b) * 1e3:.4f}",
+            _fmt(est_b * 1e3),
+            _fmt(est_a * 1e3),
+            _fmt((est_a / est_b) if est_b > 0 else 0),
+            _fmt((est_a - est_b) * 1e3),
             str(count_flops_fx(node)),
         ]
         for node, est_b, est_a in zip(

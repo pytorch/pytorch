@@ -1936,25 +1936,32 @@ along dimension :attr:`dim` according to the indices or number of sections speci
 by :attr:`indices_or_sections`. This function is based on NumPy's
 :func:`numpy.array_split`.
 
+.. function:: tensor_split(input, sections, dim=0) -> List of Tensors
+   :noindex:
+
+   Splits :attr:`input` into :attr:`sections` sections along dimension :attr:`dim`.
+   If :attr:`input` is divisible by :attr:`sections` along dimension :attr:`dim`, each
+   section will be of equal size, :code:`input.size(dim) / sections`. If :attr:`input`
+   is not divisible by :attr:`sections`, the sizes of the first
+   :code:`int(input.size(dim) % sections)` sections will have size
+   :code:`int(input.size(dim) / sections) + 1`, and the rest will have size
+   :code:`int(input.size(dim) / sections)`.
+
+   :attr:`sections` can also be a zero-dimensional long tensor.
+
+.. function:: tensor_split(input, indices, dim=0) -> List of Tensors
+   :noindex:
+
+   Splits :attr:`input` along dimension :attr:`dim` at each of the indices in
+   :attr:`indices`. For instance, :code:`indices=[2, 3]` and :code:`dim=0`
+   would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and
+   :code:`input[3:]`.
+
+   :attr:`indices` can be a list or tuple of ints, or a one-dimensional long
+   tensor on the CPU.
+
 Args:
     input (Tensor): the tensor to split
-    indices_or_sections (Tensor, int or list or tuple of ints):
-        If :attr:`indices_or_sections` is an integer ``n`` or a zero dimensional long tensor
-        with value ``n``, :attr:`input` is split into ``n`` sections along dimension :attr:`dim`.
-        If :attr:`input` is divisible by ``n`` along dimension :attr:`dim`, each
-        section will be of equal size, :code:`input.size(dim) / n`. If :attr:`input`
-        is not divisible by ``n``, the sizes of the first :code:`int(input.size(dim) % n)`
-        sections will have size :code:`int(input.size(dim) / n) + 1`, and the rest will
-        have size :code:`int(input.size(dim) / n)`.
-
-        If :attr:`indices_or_sections` is a list or tuple of ints, or a one-dimensional long
-        tensor, then :attr:`input` is split along dimension :attr:`dim` at each of the indices
-        in the list, tuple or tensor. For instance, :code:`indices_or_sections=[2, 3]` and :code:`dim=0`
-        would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
-
-        If :attr:`indices_or_sections` is a tensor, it must be a zero-dimensional or one-dimensional
-        long tensor on the CPU.
-
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
 
 Example::
@@ -8352,6 +8359,58 @@ Example::
 )
 
 add_docstr(
+    torch.nonzero_static,
+    r"""
+nonzero_static(input, *, size, fill_value=-1) -> Tensor
+
+Returns a 2-D tensor where each row is the index for a non-zero value.
+The returned Tensor has the same `torch.dtype` as `torch.nonzero()`.
+
+Args:
+    {input}
+
+Keyword args:
+    size (int): the size of non-zero elements expected to be included in the out
+        tensor. Pad the out tensor with `fill_value` if the `size` is larger
+        than total number of non-zero elements, truncate out tensor if `size`
+        is smaller. The size must be a non-negative integer.
+    fill_value (int, optional): the value to fill the output tensor with when `size` is larger
+        than the total number of non-zero elements. Default is `-1` to represent
+        invalid index.
+
+Example::
+
+    # Example 1: Padding
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 4
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[  0,   0],
+            [  1,   0],
+            [  1,   1],
+            [  -1, -1]], dtype=torch.int64)
+
+    # Example 2: Truncating
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[  0,   0],
+            [  1,   0]], dtype=torch.int64)
+
+    # Example 3: 0 size
+    >>> input_tensor = torch.tensor([10])
+    >>> static_size = 0
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(0, 1), dtype=torch.int64)
+
+    # Example 4: 0 rank input
+    >>> input_tensor = torch.tensor(10)
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(2, 0), dtype=torch.int64)
+""".format(**common_args),
+)
+
+add_docstr(
     torch.normal,
     r"""
 normal(mean, std, *, generator=None, out=None) -> Tensor
@@ -8854,90 +8913,6 @@ Example::
     torch.float32
     >>> torch.promote_types(torch.uint8, torch.long)
     torch.long
-""",
-)
-
-add_docstr(
-    torch.qr,
-    r"""
-qr(input: Tensor, some: bool = True, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor], None]) -> (Tensor, Tensor)
-
-Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
-and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
-with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
-:math:`R` being an upper triangular matrix or batch of upper triangular matrices.
-
-If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
-Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
-
-.. warning::
-
-    :func:`torch.qr` is deprecated in favor of :func:`torch.linalg.qr`
-    and will be removed in a future PyTorch release. The boolean parameter :attr:`some` has been
-    replaced with a string parameter :attr:`mode`.
-
-    ``Q, R = torch.qr(A)`` should be replaced with
-
-    .. code:: python
-
-        Q, R = torch.linalg.qr(A)
-
-    ``Q, R = torch.qr(A, some=False)`` should be replaced with
-
-    .. code:: python
-
-        Q, R = torch.linalg.qr(A, mode="complete")
-
-.. warning::
-          If you plan to backpropagate through QR, note that the current backward implementation
-          is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
-          columns of :attr:`input` are linearly independent.
-          This behavior will probably change once QR supports pivoting.
-
-.. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
-          and may produce different (valid) decompositions on different device types
-          or different platforms.
-
-Args:
-    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
-                batch dimensions consisting of matrices of dimension :math:`m \times n`.
-    some (bool, optional): Set to ``True`` for reduced QR decomposition and ``False`` for
-                complete QR decomposition. If `k = min(m, n)` then:
-
-                  * ``some=True`` : returns `(Q, R)` with dimensions (m, k), (k, n) (default)
-
-                  * ``'some=False'``: returns `(Q, R)` with dimensions (m, m), (m, n)
-
-Keyword args:
-    out (tuple, optional): tuple of `Q` and `R` tensors.
-                The dimensions of `Q` and `R` are detailed in the description of :attr:`some` above.
-
-Example::
-
-    >>> a = torch.tensor([[12., -51, 4], [6, 167, -68], [-4, 24, -41]])
-    >>> q, r = torch.qr(a)
-    >>> q
-    tensor([[-0.8571,  0.3943,  0.3314],
-            [-0.4286, -0.9029, -0.0343],
-            [ 0.2857, -0.1714,  0.9429]])
-    >>> r
-    tensor([[ -14.0000,  -21.0000,   14.0000],
-            [   0.0000, -175.0000,   70.0000],
-            [   0.0000,    0.0000,  -35.0000]])
-    >>> torch.mm(q, r).round()
-    tensor([[  12.,  -51.,    4.],
-            [   6.,  167.,  -68.],
-            [  -4.,   24.,  -41.]])
-    >>> torch.mm(q.t(), q).round()
-    tensor([[ 1.,  0.,  0.],
-            [ 0.,  1., -0.],
-            [ 0., -0.,  1.]])
-    >>> a = torch.randn(3, 4, 5)
-    >>> q, r = torch.qr(a, some=False)
-    >>> torch.allclose(torch.matmul(q, r), a)
-    True
-    >>> torch.allclose(torch.matmul(q.mT, q), torch.eye(5))
-    True
 """,
 )
 
@@ -11061,8 +11036,7 @@ always be real-valued, even if :attr:`input` is complex.
 
 .. note:: The implementation of :func:`torch.linalg.svd` on CPU uses LAPACK's routine `?gesdd`
           (a divide-and-conquer algorithm) instead of `?gesvd` for speed. Analogously,
-          on GPU, it uses cuSOLVER's routines `gesvdj` and `gesvdjBatched` on CUDA 10.1.243
-          and later, and MAGMA's routine `gesdd` on earlier versions of CUDA.
+          on GPU, it uses cuSOLVER's routines `gesvdj` and `gesvdjBatched`.
 
 .. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
           be represented as a column-major matrix (i.e. Fortran-contiguous).

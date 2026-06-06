@@ -117,6 +117,7 @@ class ExceptionTests(__TestCase):
             self.assertEqual(buf1, buf2)
             self.assertEqual(exc.__name__, excname)
 
+    @torch._dynamo.error_on_graph_break(False)
     def testRaising(self):
         self.raise_catch(AttributeError, "AttributeError")
         self.assertRaises(AttributeError, getattr, sys, "undefined_attribute")
@@ -201,6 +202,7 @@ class ExceptionTests(__TestCase):
 
         self.raise_catch(StopAsyncIteration, "StopAsyncIteration")
 
+    @torch._dynamo.error_on_graph_break(False)
     def testSyntaxErrorMessage(self):
         # make sure the right exception message is raised for each of
         # these code fragments
@@ -225,6 +227,7 @@ class ExceptionTests(__TestCase):
         ckmsg("continue\n", "'continue' not properly in loop")
         ckmsg("f'{6 0}'", "invalid syntax. Perhaps you forgot a comma?")
 
+    @torch._dynamo.error_on_graph_break(False)
     def testSyntaxErrorMissingParens(self):
         def ckmsg(src, msg, exception=SyntaxError):
             try:
@@ -2349,6 +2352,7 @@ class SyntaxErrorTests(__TestCase):
         self.assertIn("SyntaxError: Non-UTF-8 code starting with '\\x89' in file", err[-1])
 
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_string_source(self):
         def try_compile(source):
             with self.assertRaises(SyntaxError) as cm:

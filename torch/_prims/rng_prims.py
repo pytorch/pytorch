@@ -140,15 +140,9 @@ def get_device(args, kwargs):
             device = torch.device(device)
         return device.type
 
-    devices = {arg.device.type for arg in args if isinstance(arg, torch.Tensor)}
-    if any(dev == "cuda" for dev in devices):
-        return "cuda"
-    elif any(dev == "xpu" for dev in devices):
-        return "xpu"
-    elif any(dev == "hpu" for dev in devices):
-        return "hpu"
-    elif any(dev == "cpu" for dev in devices):
-        return "cpu"
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            return arg.device.type
     return None
 
 
@@ -320,10 +314,29 @@ run_and_save_rng_state = register_run_and_save_rng_state_op()
 run_with_rng_state = register_run_with_rng_state_op()
 
 
+def _impl_graphsafe_rng(op, *args, rng_state=None, **kwargs):
+    # pyrefly: ignore [missing-attribute]
+    device_idx = rng_state.device.index
+    device_type = rng_state.device.type  # pyrefly: ignore [missing-attribute]
+    device_mod = getattr(torch, device_type, None)
+    if device_mod is None or not hasattr(device_mod, "default_generators"):
+        raise AssertionError(
+            f"GraphSafe RNG operations not supported for device '{device_type}' "
+            f"(no torch.{device_type}.default_generators)"
+        )
+    generator = device_mod.default_generators[device_idx]
+    current_state = generator.graphsafe_get_state()
+
+    generator.graphsafe_set_state(rng_state)
+    out = op(*args, **kwargs)
+    generator.graphsafe_set_state(current_state)
+    return out
+
+
 def register_graphsafe_run_with_rng_state_op():
     class GraphSafeRunWithRngState(HigherOrderOperator):
         def __init__(self):
-            super().__init__("graphsafe_run_with_rng_state")
+            super().__init__("graphsafe_run_with_rng_state", cacheable=True)
 
         def __call__(self, op, *args, rng_state=None, **kwargs):
             # pyrefly: ignore [missing-attribute]
@@ -335,26 +348,17 @@ def register_graphsafe_run_with_rng_state_op():
         autograd_not_implemented(graphsafe_run_with_rng_state, deferred_error=True)
     )
 
-    @graphsafe_run_with_rng_state.py_impl(DispatchKey.CUDA)
-    def impl_cuda(op, *args, rng_state=None, **kwargs):
-        # pyrefly: ignore [missing-attribute]
-        device_idx = rng_state.device.index
-        generator = torch.cuda.default_generators[device_idx]
-        current_state = generator.graphsafe_get_state()
-
-        generator.graphsafe_set_state(rng_state)
-        out = op(*args, **kwargs)
-        generator.graphsafe_set_state(current_state)
-        return out
-
     @graphsafe_run_with_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(op, *args, rng_state=None, **kwargs):
+        from torch._functorch._aot_autograd.utils import supports_graphsafe_rng
+
         device = get_device(args, kwargs)
-        if device != "cuda":
+        if device is None or not supports_graphsafe_rng(torch.device(device)):
             raise AssertionError(
-                f"GraphSafe RNG operations only supported for CUDA, got {device}"
+                f"GraphSafe RNG operations not supported for device '{device}'. "
+                f"Call register_graphsafe_rng_device_type('{device}') to register."
             )
-        return impl_cuda(op, *args, rng_state=rng_state, **kwargs)
+        return _impl_graphsafe_rng(op, *args, rng_state=rng_state, **kwargs)
 
     @graphsafe_run_with_rng_state.py_impl(FakeTensorMode)
     def impl_fake_tensor_mode(mode, op, *args, rng_state=None, **kwargs):
@@ -393,6 +397,20 @@ def register_graphsafe_run_with_rng_state_op():
 
 graphsafe_run_with_rng_state = register_graphsafe_run_with_rng_state_op()
 
+_registered_graphsafe_dispatch_keys: set["DispatchKey"] = set()
+
+
+def register_graphsafe_rng_dispatch(dispatch_key: "DispatchKey") -> None:
+    """Register graphsafe_run_with_rng_state py_impl for a dispatch key."""
+    if dispatch_key in _registered_graphsafe_dispatch_keys:
+        return
+    _registered_graphsafe_dispatch_keys.add(dispatch_key)
+    graphsafe_run_with_rng_state.py_impl(dispatch_key)(_impl_graphsafe_rng)
+
+
+# Register CUDA as a graphsafe RNG device by default
+register_graphsafe_rng_dispatch(DispatchKey.CUDA)
+
 
 # Late-bind OpaqueBaseMeta as Generator's metaclass. This is done here
 # rather than in THPGenerator_init (C++) to avoid making torch._C depend
@@ -427,7 +445,12 @@ def register_run_dtensor_rng_op():
 
     class RunDTensorRngOp(HigherOrderOperator):
         def __init__(self):
-            super().__init__("run_dtensor_rng_op", cacheable=True)
+            # Not cacheable: the compiled wrapper bakes in the current device
+            # (torch.cuda.set_device(N)) and the rank-dependent start/end offset
+            # ints; sharing the cached graph across ranks routes every rank's
+            # set_rng_state to one rank's device and offsets, leaving the other
+            # ranks' generators unchanged (#185520).
+            super().__init__("run_dtensor_rng_op", cacheable=False)
 
         def __call__(self, start_offset_incr, end_offset_incr, op, *args, **kwargs):
             # pyrefly: ignore [missing-attribute]
