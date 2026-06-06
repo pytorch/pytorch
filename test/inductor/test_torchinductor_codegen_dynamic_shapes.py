@@ -452,6 +452,8 @@ test_failures = {
     # Refinement means we don't actually generate dynamic shapes (but only on
     # cpu apparently?!)
     "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
+    # The scalar (1,) case intentionally does not generate dynamic code.
+    "test_floordiv_int_min_neg_one_cpu_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_scalar_various_values_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
