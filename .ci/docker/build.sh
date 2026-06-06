@@ -317,6 +317,14 @@ if [[ -n "${CI:-}" ]]; then
   progress_flag="--progress=plain"
 fi
 
+# On a remote buildkit builder there is no local Docker daemon to receive
+# `--load`, so push directly to the registry instead. The caller is expected
+# to have logged in to the target registry already (e.g. via ecr-login).
+output_flag="--load -t ${tmp_tag}"
+if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
+  output_flag="--push"
+fi
+
 # Build image
 docker buildx build \
        ${no_cache_flag} \
@@ -353,8 +361,7 @@ docker buildx build \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
-       --load \
-       -t "$tmp_tag" \
+       ${output_flag} \
        "$@" \
        .
 
@@ -369,6 +376,14 @@ UBUNTU_VERSION=$(echo ${UBUNTU_VERSION} | sed 's/-rc$//')
 function drun() {
   docker run --rm "$tmp_tag" "$@"
 }
+
+# Post-build sanity checks run the freshly built image locally via `drun`.
+# Skip them when we built on a remote buildkit and pushed straight to the
+# registry, since the image is not present in any local daemon.
+if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
+  echo "REMOTE_BUILDKIT set: skipping local image sanity checks (image was pushed, not loaded)."
+  exit 0
+fi
 
 if [[ "$OS" == "ubuntu" ]]; then
 

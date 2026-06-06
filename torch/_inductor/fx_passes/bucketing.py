@@ -5,6 +5,8 @@ from collections import defaultdict
 from collections.abc import Callable
 from typing import Any, Literal, TYPE_CHECKING, TypeAlias
 
+import sympy
+
 import torch
 import torch.distributed as dist
 import torch.utils._pytree as pytree
@@ -96,13 +98,14 @@ def _compute_foreach_groups(
     Returns a flat list with -1 as group delimiter, or None if only one group exists.
     For example, groups [[0, 2], [1]] would be encoded as [0, 2, -1, 1].
     """
-    from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
-
     groups: defaultdict[tuple[torch.dtype, torch.dtype, tuple[int, ...]], list[int]] = (
         defaultdict(list)
     )
     for i, (ag_in, out_dtype) in enumerate(zip(ag_ins, out_dtypes)):
-        shape = tuple(guarding_hint_or_throw(s) for s in ag_in.shape)
+        shape = tuple(
+            _hint_int_or_raise(s, context="all-gather foreach grouping")
+            for s in ag_in.shape
+        )
         key = (ag_in.dtype, out_dtype, shape)
         groups[key].append(i)
 
@@ -117,6 +120,64 @@ def _compute_foreach_groups(
             result.append(-1)
 
     return result
+
+
+# Bucketing has two separate shape contracts:
+#
+# 1. Semantic tensor shapes stay symbolic.  The traced bucket merge graph must
+#    preserve runtime tensor expressions such as numel(), split sizes,
+#    torch.empty extents, narrow offsets/lengths, and reshape shapes.  Those
+#    values describe actual tensor semantics and must not be specialized from
+#    optimization hints.
+#
+# 2. Optimization-policy choices may use hints.  Bucket byte accounting and
+#    foreach grouping need Python integers to decide how to group collectives.
+#    For those policy-only decisions, concrete ints, backed SymInts, hinted
+#    unbacked SymInts, and derived expressions from hinted symbols are valid.
+#    Unhinted symbolic values fail fast instead of forcing guards or guessing.
+#
+# In short: hints may decide which bucket/group we choose, but they must never
+# replace symbolic sizes in the graph we trace for the bucketed collective.
+def _hint_int_or_raise(value: object, *, context: str) -> int:
+    if type(value) is int:
+        return value
+
+    if not isinstance(value, torch.SymInt):
+        raise AssertionError(f"Expected int or SymInt for {context}, got {type(value)}")
+
+    node = value.node
+    if node._hint is not None:
+        return int(node._hint)
+    shape_env = node.shape_env
+    if shape_env is None:
+        raise AssertionError(f"ShapeEnv is required to hint {context}: {value}")
+
+    expr = sympy.sympify(node.expr).xreplace(shape_env.replacements)
+    expr = expr.xreplace(shape_env.backed_var_to_val)
+    expr = expr.xreplace(shape_env.var_to_hint_override)
+    if isinstance(expr, sympy.Expr):
+        expr = expr.expand(identity=True)
+    if getattr(expr, "free_symbols", None):
+        raise RuntimeError(
+            f"Could not extract optimization hint for {context}: {value}. "
+            "Collective bucketing requires hinted symbolic sizes for policy "
+            "decisions."
+        )
+    return int(expr)
+
+
+def _numel_hint_or_raise(tensor: torch.Tensor, *, context: str) -> int:
+    return _hint_int_or_raise(tensor.numel(), context=context)
+
+
+def _size_bytes_hint_or_raise(
+    tensor: torch.Tensor,
+    *,
+    dtype: torch.dtype | None = None,
+    context: str,
+) -> int:
+    element_size = tensor.element_size() if dtype is None else dtype.itemsize
+    return _numel_hint_or_raise(tensor, context=context) * element_size
 
 
 def _get_collective_node_from_wait(node: torch.fx.Node) -> torch.fx.Node | None:
@@ -483,9 +544,13 @@ def greedy_bucket_collective_by_mb(
                 continue
             assert "val" in node.meta
             n_val = node.meta["val"]
-            out_size_bytes = n_val.numel() * n_val.element_size()
+            out_size_bytes = _size_bytes_hint_or_raise(
+                n_val, context="collective bucket output size"
+            )
             n_input_val = node.all_input_nodes[0].meta["val"]
-            in_size_bytes = n_input_val.numel() * n_input_val.element_size()
+            in_size_bytes = _size_bytes_hint_or_raise(
+                n_input_val, context="collective bucket input size"
+            )
             size_bytes = max(out_size_bytes, in_size_bytes)
             if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
                 # Current bucket is full, create new bucket
@@ -1059,6 +1124,67 @@ def has_mergeable_all_gather_convert_dtype(n: torch.fx.Node) -> bool:
     )
 
 
+def _sort_bucket_region(
+    g: torch.fx.Graph,
+    new_nodes: list[torch.fx.Node],
+    new_nodes_inputs: list[torch.fx.Node],
+) -> None:
+    """Topologically sort the smallest region spanning *new_nodes* and their inputs.
+
+    After bucketing inserts *new_nodes*, some *new_nodes_inputs* may sit after
+    the new collective in the linked list.  This sorts just the affected
+    region so every input precedes its consumer.
+
+    Complexity: O(D) where D = distance between the farthest input and
+    new_nodes in the linked list.  No full-graph enumeration.
+    """
+    if not new_nodes or not new_nodes_inputs:
+        return
+
+    new_set: OrderedSet[torch.fx.Node] = OrderedSet(new_nodes)
+    external: OrderedSet[torch.fx.Node] = OrderedSet(
+        [inp for inp in new_nodes_inputs if inp not in new_set]
+    )
+    if not external:
+        return
+
+    # Walk backward/forward from the new_nodes span to find all external
+    # inputs.  ``remaining`` counts how many we still need to locate;
+    # each walk stops as soon as its share is found.
+    first = new_nodes[0]
+    last = new_nodes[-1]
+    remaining = len(external)
+
+    cursor: torch.fx.Node | None = first.prev
+    while cursor is not None and cursor.op != "placeholder" and remaining > 0:
+        if cursor in external:
+            first = cursor
+            remaining -= 1
+        cursor = cursor.prev
+
+    cursor = last.next
+    while cursor is not None and cursor.op != "output" and remaining > 0:
+        if cursor in external:
+            last = cursor
+            remaining -= 1
+        cursor = cursor.next
+
+    if first is last:
+        return
+
+    region: OrderedSet[torch.fx.Node] = OrderedSet()
+    cursor = first
+    while cursor is not None:
+        region.add(cursor)
+        if cursor is last:
+            break
+        cursor = cursor.next
+
+    from torch._dynamo.graph_deduplication import _stable_topological_sort_region
+
+    _stable_topological_sort_region(g, region)
+
+
 def process_collective_bucket(
     g: torch.fx.Graph,
     bucket_nodes: list[torch.fx.Node],
@@ -1115,8 +1241,9 @@ def process_collective_bucket(
     if insert_before is None:
         insert_before = bucket_nodes[-1].next
 
-    # Insert traced function and get replacements + new nodes
     g_fn_inps = bucket_ins + (extra_graph_inps or [])
+
+    # Insert traced function and get replacements + new nodes
     replacements, new_nodes = _insert_fn_trace_before_node(
         g,
         fn_to_trace,
@@ -1157,6 +1284,8 @@ def process_collective_bucket(
         # Erase any convert_element_type nodes we tracked
         for pre_node in reversed(ag_node_to_pre_nodes[node]):
             g.erase_node(pre_node)
+
+    _sort_bucket_region(g, new_nodes, g_fn_inps)
 
     return new_nodes, replacements
 
@@ -1324,6 +1453,7 @@ def merge_all_gather_bucket(
         ag_nodes,
         ag_merge_fn,
         create_trace_args,
+        insert_before=insert_before,
         wait_insertion_point=wait_insertion_point,
         extra_graph_inps=(
             [group_name] if isinstance(group_name, torch.fx.Node) else None
