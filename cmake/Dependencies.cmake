@@ -119,11 +119,27 @@ if(USE_ASAN OR USE_LSAN OR USE_TSAN)
   if(USE_ASAN)
     if(TARGET Sanitizer::address)
       list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::address)
+      # torch_hip needs the sanitizer linked so HIP-side TUs participate
+      # in the libstdc++ container annotations propagated via
+      # Sanitizer::address (see cmake/Modules/FindSanitizer.cmake).
+      if(USE_ROCM)
+        list(APPEND Caffe2_HIP_DEPENDENCY_LIBS Sanitizer::address)
+        # Disable jiterator under ROCm + ASAN: jiterator JITs kernels
+        # through hiprtc and we haven't set up an ASAN-aware hiprtc
+        # runtime. Read by the AT_USE_JITERATOR() gate in
+        # aten/src/ATen/jit_macros.h.
+        add_definitions(-DAT_DISABLE_JITERATOR)
+      endif()
     else()
       message(WARNING "ASAN not found. Suppress this warning with -DUSE_ASAN=OFF.")
       caffe2_update_option(USE_ASAN OFF)
     endif()
-    if(TARGET Sanitizer::undefined)
+    # UBSan (-fsanitize=undefined) combined with ASAN on ROCm Clang
+    # causes ASAN global metadata to reference unaligned original
+    # globals instead of aligned __sanitized_padded_global copies,
+    # triggering an unconditional alignment check abort in the ASAN
+    # runtime. Skip UBSan under USE_ROCM until that interaction is fixed.
+    if(TARGET Sanitizer::undefined AND NOT USE_ROCM)
       list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::undefined)
     endif()
   endif()
@@ -1026,6 +1042,13 @@ if(USE_ROCM)
     endif()
     if(USE_ROCM_CK_GEMM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
+    endif()
+    # add_definitions(-DAT_DISABLE_JITERATOR) above doesn't reliably
+    # propagate to HIP TUs; mirror the pattern used for USE_ROCM and
+    # add it explicitly so the AT_USE_JITERATOR() gate in
+    # aten/src/ATen/jit_macros.h fires under hipified .cu/.cuh TUs.
+    if(USE_ASAN)
+      list(APPEND HIP_CXX_FLAGS -DAT_DISABLE_JITERATOR)
     endif()
     # CMAKE_HIP_FLAGS: flags passed to the HIP compiler for device code.
     # Architecture is handled by CMAKE_HIP_ARCHITECTURES (set in LoadHIP.cmake).
