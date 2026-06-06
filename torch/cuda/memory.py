@@ -1416,29 +1416,47 @@ def _use_uvm(device: "Device" = None):
         if err != _rt.cudaError_t.cudaSuccess:
             raise RuntimeError(f"CUDA error: {err}. {msg}")
 
+    _advise_uses_struct = hasattr(_rt, "cudaMemLocation")
+
+    def _mem_advise(ptr, size, advice, device_id, _runtime=_rt):
+        """Call cudaMemAdvise, handling struct-vs-int API difference.
+
+        cuda-bindings 13.x requires a cudaMemLocation struct;
+        cuda-bindings 12.x expects a plain int device ordinal.
+        We try struct first and latch to int on TypeError.
+        """
+        nonlocal _advise_uses_struct
+        if _advise_uses_struct:
+            try:
+                loc = _runtime.cudaMemLocation()
+                loc.type = _runtime.cudaMemLocationType.cudaMemLocationTypeDevice
+                loc.id = device_id
+                return _runtime.cudaMemAdvise(ptr, size, advice, loc)
+            except TypeError:
+                _advise_uses_struct = False
+        return _runtime.cudaMemAdvise(ptr, size, advice, device_id)
+
     def _uvm_alloc(size, device, stream, _runtime=_rt):
         try:
             err, ptr = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
             _check(err, f"cudaMallocManaged({size})")
+            ptr = int(ptr)
             if device >= 0:
-                location = _runtime.cudaMemLocation()
-                location.type = _runtime.cudaMemLocationType.cudaMemLocationTypeDevice
-                location.id = device
                 _check(
-                    _runtime.cudaMemAdvise(
+                    _mem_advise(
                         ptr,
                         size,
                         _runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
-                        location,
+                        device,
                     ),
                     "cudaMemAdvise(SetPreferredLocation)",
                 )
                 _check(
-                    _runtime.cudaMemAdvise(
+                    _mem_advise(
                         ptr,
                         size,
                         _runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
-                        location,
+                        device,
                     ),
                     "cudaMemAdvise(SetAccessedBy)",
                 )

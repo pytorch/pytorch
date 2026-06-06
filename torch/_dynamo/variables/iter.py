@@ -15,7 +15,6 @@ handling of iterator operations during code transformation and optimization.
 
 import itertools
 import sys
-from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 from .. import graph_break_hints, polyfills, variables
@@ -62,7 +61,9 @@ class ItertoolsVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
 
         return python_constant_richcompare_impl(self, tx, other, op)
@@ -255,7 +256,9 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -267,32 +270,6 @@ class IteratorVariable(VariableTracker):
             explanation="This abstract method must be implemented",
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
-
-    # NOTE: only call when unpacking this iterator safely done eagerly!
-    # Normally, iterators are accessed lazily.
-    # Example of safe eager unpacking: list(map(f, seq))
-    # Example of unsafe eager unpacking: list(islice(map(f, seq), 5))
-    def force_unpack_var_sequence(
-        self, tx: "InstructionTranslatorBase"
-    ) -> list[VariableTracker]:
-        result: list[VariableTracker] = []
-        self.force_apply_to_var_sequence(tx, result.append)
-        return result
-
-    def force_apply_to_var_sequence(
-        self, tx: "InstructionTranslatorBase", fn: Callable[[Any], Any]
-    ) -> None:
-        while True:
-            try:
-                fn(self.tp_iternext_impl(tx))
-            except ObservedUserStopIteration:
-                handle_observed_exception(tx)
-                break
-
-    # don't call force_unpack_var_sequence since it can mutate
-    # IteratorVariable state!
-    def has_force_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return True
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -499,9 +476,6 @@ class MapVariable(IteratorVariable):
 
     def python_type(self) -> type:
         return map
-
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return False
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L1409-L1450

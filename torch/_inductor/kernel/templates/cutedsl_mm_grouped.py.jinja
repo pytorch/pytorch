@@ -95,6 +95,23 @@ def get_gemm_cache_key(prep_cache_key, max_active_clusters, total_num_clusters):
     )
 
 
+def compute_total_num_clusters(problem_sizes_mnkl, cluster_tile_shape_mn):
+    total_num_clusters = 0
+    for m, n, _, _ in problem_sizes_mnkl:
+        num_clusters_mn = tuple(
+            ceildiv(x, y) for x, y in zip((m, n), cluster_tile_shape_mn)
+        )
+        total_num_clusters += functools.reduce(lambda x, y: x * y, num_clusters_mn)
+    return total_num_clusters
+
+
+def compute_cluster_tile_shape(mma_tiler_mn, cluster_shape_mn, use_2cta_instrs):
+    cta_tile_shape_mn = list(mma_tiler_mn)
+    if use_2cta_instrs:
+        cta_tile_shape_mn[0] = cta_tile_shape_mn[0] // 2
+    return tuple(x * y for x, y in zip(cta_tile_shape_mn, cluster_shape_mn))
+
+
 @cute.kernel
 def build_group_ptrs_from_bases_kernel(
     base_A_u64: cutlass.Int64,  # device addr of input_a (bytes)
@@ -266,29 +283,6 @@ def launch_build_group_ptrs_from_bases(
     tensormap_workspace_t = torch.empty(tensormap_shape, device=dev, dtype=torch.int64)
 
     # --- Total clusters ---
-    def compute_total_num_clusters(
-        problem_sizes_mnkl,
-        cluster_tile_shape_mn,
-    ):
-        total_num_clusters = 0
-        for m, n, _, _ in problem_sizes_mnkl:
-            num_clusters_mn = tuple(
-                ceildiv(x, y) for x, y in zip((m, n), cluster_tile_shape_mn)
-            )
-            total_num_clusters += functools.reduce(lambda x, y: x * y, num_clusters_mn)
-        return total_num_clusters
-
-    # Compute cluster tile shape
-    def compute_cluster_tile_shape(
-        mma_tiler_mn,
-        cluster_shape_mn,
-        use_2cta_instrs,
-    ):
-        cta_tile_shape_mn = list(mma_tiler_mn)
-        if use_2cta_instrs:
-            cta_tile_shape_mn[0] = cta_tile_shape_mn[0] // 2
-        return tuple(x * y for x, y in zip(cta_tile_shape_mn, cluster_shape_mn))
-
     cluster_tile_shape_mn = compute_cluster_tile_shape(
         (TILE_M, TILE_N), (CLUSTER_M, CLUSTER_N), bool(USE_2_CTA)
     )
@@ -341,14 +335,16 @@ def launch_build_group_ptrs_from_bases(
     )
 
 
-def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile_dtypes, device_index=0):
-    """Trigger CuTe DSL compilation with small representative tensors.
+def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile_dtypes, device_index=0, device_capability=None, hw_info=None):
+    """Compile CuTe DSL kernels using fake tensors (no CUDA tensor allocation).
 
-    Called by the subprocess worker to warm the disk cache so the parent
-    process can load pre-compiled kernels at runtime.
+    Called by the subprocess worker to warm the disk cache. Uses fake compact
+    CuTe tensors for cute.compile(), avoiding torch.cuda.* calls so this can
+    run in forked subprocess workers where PyTorch CUDA is unavailable.
     """
-    torch.cuda.set_device(device_index)
-    device = f"cuda:{device_index}"
+    import logging
+    _precompile_log = logging.getLogger(__name__)
+
     dtype_a = getattr(torch, precompile_dtypes["input_a"])
     dtype_b = getattr(torch, precompile_dtypes["input_b"])
     dtype_out = getattr(torch, precompile_dtypes["output"])
@@ -358,20 +354,144 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
     shape_out = tuple(precompile_shapes["output"])
     shape_offs = tuple(precompile_shapes["input_a_offs"])
 
-    input_a = torch.empty_strided(
-        shape_a, tuple(precompile_strides["input_a"]), device=device, dtype=dtype_a,
-    )
-    input_b = torch.empty_strided(
-        shape_b, tuple(precompile_strides["input_b"]), device=device, dtype=dtype_b,
-    )
-    buf_out = torch.empty_strided(
-        shape_out, tuple(precompile_strides["output"]), device=device, dtype=dtype_out,
-    )
+    stride_a = tuple(precompile_strides["input_a"])
+    stride_b = tuple(precompile_strides["input_b"])
+    stride_out = tuple(precompile_strides["output"])
 
+    sumM, K = shape_a
     G = shape_offs[0]
-    offs_data = [shape_a[0] * (i + 1) // G for i in range(G)]
-    input_a_offs = torch.tensor(offs_data, device=device, dtype=torch.int32)
+    N = shape_b[2]
 
-    stream = torch.cuda.current_stream().cuda_stream
+    # _main transposes input_b: (G, K, N) -> (G, N, K)
+    trans_shape_b = (shape_b[0], shape_b[2], shape_b[1])
+    trans_stride_b = (stride_b[0], stride_b[2], stride_b[1])
 
-    {{kernel_name}}_main(input_a, input_b, input_a_offs, buf_out, stream)
+    # Cache key must match get_prep_cache_key() which uses post-transpose tensors
+    prep_cache_key = (
+        shape_a, stride_a, dtype_a,
+        trans_shape_b, trans_stride_b, dtype_b,
+        shape_out, stride_out, dtype_out,
+    )
+
+    # --- Build CPU proxy tensors from metadata ---
+    # Subprocess workers cannot allocate CUDA tensors, so we create CPU
+    # tensors with matching shape/stride/dtype for _to_fake_cute_tensor.
+    def _cpu_proxy(shape, stride, dtype):
+        return torch.empty_strided(shape, stride, dtype=dtype, device="cpu")
+
+    # _main transposes then unsqueezes: a.unsqueeze(-1), b[0].unsqueeze(-1), c.unsqueeze(-1)
+    # Replicate those stride transformations on CPU proxies.
+    proxy_a = _cpu_proxy(shape_a, stride_a, dtype_a).unsqueeze(-1)
+    proxy_b_transposed = _cpu_proxy(
+        trans_shape_b, trans_stride_b, dtype_b,
+    )
+    proxy_b_unsq = proxy_b_transposed[0].unsqueeze(-1)
+    proxy_out = _cpu_proxy(shape_out, stride_out, dtype_out).unsqueeze(-1)
+
+    proxy_offs = _cpu_proxy(shape_offs, (1,), torch.int32)
+    proxy_ptrs = _cpu_proxy((G, 3), (3, 1), torch.int64)
+    proxy_probs = _cpu_proxy((G, 4), (4, 1), torch.int32)
+    proxy_strides = _cpu_proxy((G, 3, 2), (6, 2, 1), torch.int32)
+
+    # --- Compile prep_executor ---
+    sizeof_element = torch.tensor(0, dtype=dtype_a).element_size()
+    sA_m, sA_k = stride_a
+    sB_0, sB_n, sB_k = trans_stride_b
+    sC_m, sC_n = stride_out
+
+    prep_executor = cute.compile(
+        launch_build_group_ptrs_from_bases,
+        base_A_u64=0,
+        base_B_u64=0,
+        base_C_u64=0,
+        offs=_to_fake_cute_tensor(proxy_offs, assumed_align=4),
+        G=int(G),
+        K=int(K),
+        N=int(N),
+        sizeof_element=sizeof_element,
+        stride_A_m_elems=sA_m,
+        stride_A_k_elems=sA_k,
+        stride_B0_elems=sB_0,
+        stride_Bk_elems=sB_k,
+        stride_Bn_elems=sB_n,
+        stride_C_m_elems=sC_m,
+        stride_C_n_elems=sC_n,
+        out_ptrs=_to_fake_cute_tensor(proxy_ptrs),
+        out_problem=_to_fake_cute_tensor(proxy_probs, assumed_align=4),
+        out_strides_abc=_to_fake_cute_tensor(proxy_strides, assumed_align=4),
+        stream=cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
+        options="--enable-tvm-ffi",
+    )
+
+    disk_cache_set(
+        _prep_fn_cache, __file__, _KERNEL_CONFIG_KEY, prep_cache_key,
+        prep_executor, device_index, device_capability=device_capability,
+    )
+
+    # --- Compile GEMM executor ---
+    if hw_info is None:
+        _precompile_log.debug(
+            "hw_info not provided in precompile metadata; "
+            "skipping GEMM executor precompile (will compile lazily at runtime)"
+        )
+        return
+
+    sm_count, max_active_clusters = hw_info
+    tensormap_shape = (
+        sm_count,
+        GroupedGemmKernel.num_tensormaps,
+        GroupedGemmKernel.bytes_per_tensormap // 8,
+    )
+
+    proxy_tensormap = _cpu_proxy(tensormap_shape, (
+        tensormap_shape[1] * tensormap_shape[2],
+        tensormap_shape[2],
+        1,
+    ), torch.int64)
+
+    # Compute per-group problem sizes analytically from offsets
+    offs_data = [sumM * (i + 1) // G for i in range(G)]
+    problem_sizes = []
+    for i in range(G):
+        m_beg = 0 if i == 0 else offs_data[i - 1]
+        problem_sizes.append((offs_data[i] - m_beg, N, K, 1))
+
+    cluster_tile_shape_mn = compute_cluster_tile_shape(
+        (TILE_M, TILE_N), (CLUSTER_M, CLUSTER_N), bool(USE_2_CTA),
+    )
+    total_num_clusters = int(compute_total_num_clusters(
+        problem_sizes, cluster_tile_shape_mn,
+    ))
+
+    gemm_cache_key = get_gemm_cache_key(
+        prep_cache_key, max_active_clusters, total_num_clusters,
+    )
+
+    grouped_gemm = GroupedGemmKernel(
+        acc_dtype=ACC_DTYPE,
+        use_2cta_instrs=USE_2_CTA,
+        mma_tiler_mn=(TILE_M, TILE_N),
+        cluster_shape_mn=(CLUSTER_M, CLUSTER_N),
+        tensormap_update_mode=TENSORMAP_UPDATE_MODE,
+    )
+
+    gemm_executor = cute.compile(
+        grouped_gemm,
+        _to_fake_cute_tensor(proxy_a),
+        _to_fake_cute_tensor(proxy_b_unsq),
+        _to_fake_cute_tensor(proxy_out),
+        G,
+        _to_fake_cute_tensor(proxy_probs, assumed_align=4),
+        _to_fake_cute_tensor(proxy_strides, assumed_align=4),
+        _to_fake_cute_tensor(proxy_ptrs),
+        total_num_clusters,
+        _to_fake_cute_tensor(proxy_tensormap),
+        max_active_clusters,
+        cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
+        options="--enable-tvm-ffi",
+    )
+
+    disk_cache_set(
+        _gemm_fn_cache, __file__, _KERNEL_CONFIG_KEY, gemm_cache_key,
+        gemm_executor, device_index, device_capability=device_capability,
+    )
