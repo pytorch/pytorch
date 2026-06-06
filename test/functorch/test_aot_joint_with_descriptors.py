@@ -817,11 +817,18 @@ class inner_f(torch.nn.Module):
                 return self.compiled(x @ self.weight).sum()
 
         with ExitStack() as stack:
-            aot_export_joint_with_descriptors(
+            joint_with_descriptors = aot_export_joint_with_descriptors(
                 stack, ModuleWithCompiledCallable(), (torch.randn(4, 4),)
             )
 
         self.assertEqual(backend_calls, [])
+        for node in joint_with_descriptors.graph_module.graph.nodes:
+            self.assertFalse(
+                any(
+                    key.startswith("_torchdynamo_disable")
+                    for key in node.meta.get("custom", {})
+                )
+            )
 
     def test_export_ignores_compile_called_inside_forward(self):
         backend_calls = []
@@ -841,14 +848,10 @@ class inner_f(torch.nn.Module):
             def forward(self, x):
                 return torch.compile(faster, backend=backend)(x @ self.weight).sum()
 
-        with self.assertWarnsRegex(
-            UserWarning,
-            "torch.compile is ignored when called inside torch.export region",
-        ):
-            with ExitStack() as stack:
-                aot_export_joint_with_descriptors(
-                    stack, ModuleWithNestedCompile(), (torch.randn(4, 4),)
-                )
+        with ExitStack() as stack:
+            aot_export_joint_with_descriptors(
+                stack, ModuleWithNestedCompile(), (torch.randn(4, 4),)
+            )
 
         self.assertEqual(backend_calls, [])
 

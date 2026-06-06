@@ -1378,19 +1378,9 @@ def aot_export_joint_with_descriptors(
     of the inputs to determine if inputs are parameters and their FQNs.
     """
 
-    # Avoid importing torch._export.utils at module load time: torch.export's
-    # initialization imports this module.
-    from torch._export.utils import _compiling_state_context
+    dynamo_config_ctx = torch._dynamo.config.patch(error_on_nested_fx_trace=False)
 
-    tracing_context = torch._guards.TracingContext.try_get()
-    created_tracing_context = tracing_context is None
-    if created_tracing_context:
-        tracing_context = torch._guards.TracingContext(None)
-        tracing_ctx = torch._guards.tracing(tracing_context)
-    else:
-        tracing_ctx = nullcontext()
-
-    with _compiling_state_context(), tracing_ctx:
+    with dynamo_config_ctx:
         (
             functional_call,
             _params_buffers_flat,
@@ -1423,9 +1413,6 @@ def aot_export_joint_with_descriptors(
             _record_nn_module_stack=_record_nn_module_stack,
             _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
         )
-
-        if created_tracing_context and tracing_context.fake_mode is None:
-            tracing_context.fake_mode = fake_mode
 
         # TODO: Maybe this should be in create_aot_state?  Not sure, that would
         # increase its scope

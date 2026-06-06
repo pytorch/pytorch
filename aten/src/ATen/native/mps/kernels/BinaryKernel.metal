@@ -435,33 +435,15 @@ struct igammac_functor {
 struct gcd_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    // Binary GCD (Stein's algorithm). Uses shifts, subtraction and ctz (the
-    // device analog of C++20 std::countr_zero) instead of integer
-    // division/modulo, which is emulated (and slow) for 64-bit ints on MPS.
-    // ctz is only ever evaluated on values guarded to be non-zero.
-    T u = a < 0 ? -a : a;
-    T v = b < 0 ? -b : b;
-    if (u == 0) {
-      return v;
+    // Euclidean algorithm for GCD
+    T x = a < 0 ? -a : a;
+    T y = b < 0 ? -b : b;
+    while (x != 0) {
+      T c = x;
+      x = y % x;
+      y = c;
     }
-    if (v == 0) {
-      return u;
-    }
-    // Factor out the common powers of two, then make u odd.
-    const int shift = ::metal::ctz(static_cast<ulong>(u | v));
-    u >>= ::metal::ctz(static_cast<ulong>(u));
-    // Invariant: u is odd. Make v odd, then subtract the smaller from the
-    // larger (keeping v >= u so the unsigned subtraction never underflows).
-    do {
-      v >>= ::metal::ctz(static_cast<ulong>(v));
-      if (u > v) {
-        T t = u;
-        u = v;
-        v = t;
-      }
-      v -= u;
-    } while (v != 0);
-    return u << shift;
+    return y;
   }
 };
 
@@ -469,9 +451,14 @@ struct lcm_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
     T g = gcd_functor{}(a, b);
-    // Divide before multiplying to avoid overflow; g divides a exactly.
-    T r = g == 0 ? 0 : a / g * b;
-    return r < 0 ? -r : r;
+    if (g == 0) {
+      return 0;
+    }
+    // `auto` keeps the C++ integer-promoted type (sub-int types widen to int),
+    // so the abs matches the CPU/CUDA kernels: abs is taken before narrowing
+    // back to T on return. Divide before multiplying to limit overflow.
+    auto r = a / g * b;
+    return ::metal::abs(r);
   }
 };
 

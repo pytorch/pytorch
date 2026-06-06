@@ -183,7 +183,6 @@ from .variables.lists import (
 from .variables.misc import (
     CellVariable,
     ExceptionVariable,
-    GetAttrVariable,
     NullVariable,
     PythonModuleVariable,
     TracebackVariable,
@@ -950,11 +949,6 @@ def generic_jump(
                     "object with non-constant truthiness.",
                     hints=[],
                 )
-        elif not value.is_tensor() and value.has_unpack_var_sequence(self):
-            if truth_fn(len(value.unpack_var_sequence(self))):
-                if push:
-                    self.push(value)
-                self.jump(inst)
         elif isinstance(value, SymNodeVariable):
             try:
                 # if the user is branching on a SymBool, guard on it
@@ -971,6 +965,12 @@ def generic_jump(
                     return jump_graph_break(self, inst, value, extra_msg=f"\n{e}")
                 raise
             if truth_fn(eval_result):
+                if push:
+                    self.push(value)
+                self.jump(inst)
+        elif not value.is_tensor():
+            result = generic_bool(self, value)  # type: ignore[arg-type]
+            if truth_fn(result):
                 if push:
                     self.push(value)
                 self.jump(inst)
@@ -1510,6 +1510,7 @@ class InstructionTranslatorBase(
         fn: BaseUserFunctionVariable,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
+        allow_nested_graph_breaks: bool = False,
     ) -> Any:
         """
         A call to some user defined function by inlining it.
@@ -1517,7 +1518,13 @@ class InstructionTranslatorBase(
         if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
-            return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+            return InliningInstructionTranslator.inline_call(
+                self,
+                fn,
+                args,
+                kwargs,
+                allow_nested_graph_breaks=allow_nested_graph_breaks,
+            )
 
     def get_line_of_code_header(self, lineno: int | None = None) -> str:
         if lineno is None:
@@ -4028,14 +4035,7 @@ class InstructionTranslatorBase(
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
-        if seq.is_tensor():
-            val = seq.unpack_var_sequence(self, idxes=range(inst.argval))  # type: ignore[arg-type]
-        elif isinstance(seq, GetAttrVariable) and seq.obj.is_tensor():
-            # x, y = a.shape
-            proxy = getattr(seq.obj.as_proxy(), seq.name)
-            val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
-        else:
-            val = unpack_iterable(self, seq)
+        val = unpack_iterable(self, seq)
         if len(val) < inst.argval:
             raise_value_error(
                 self,
@@ -5695,12 +5695,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         func: BaseUserFunctionVariable,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
+        allow_nested_graph_breaks: bool = False,
     ) -> VariableTracker:
         tracer = None
         with profile_inline_call(
             parent.output, func.get_code(), lambda: parent.inline_depth + 1
         ):
-            tracer = cls.build_inline_tracer(parent, func, args, kwargs)
+            tracer = cls.build_inline_tracer(
+                parent,
+                func,
+                args,
+                kwargs,
+                allow_nested_graph_breaks=allow_nested_graph_breaks,
+            )
             return tracer.inline_call_()
 
     @staticmethod
@@ -5775,6 +5782,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         func: BaseUserFunctionVariable,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
+        allow_nested_graph_breaks: bool = False,
     ) -> InliningInstructionTranslator:
         if not isinstance(
             func,
@@ -5917,6 +5925,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent.symbolic_torch_function_state,
                 parent.symbolic_stream_state,
                 func,
+                allow_nested_graph_breaks=allow_nested_graph_breaks,
             )
         else:
             tracer = InliningInstructionTranslator(
@@ -5927,6 +5936,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent.symbolic_torch_function_state,
                 parent.symbolic_stream_state,
                 func,
+                allow_nested_graph_breaks=allow_nested_graph_breaks,
             )
         return tracer
 
@@ -6026,6 +6036,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_torch_function_state: SymbolicTorchFunctionState,
         symbolic_stream_state: SymbolicStreamState,
         funcvar: BaseUserFunctionVariable | LocalGeneratorObjectVariable,
+        allow_nested_graph_breaks: bool = False,
     ) -> None:
         f_globals = funcvar.get_globals()
         f_builtins = f_globals["__builtins__"]
@@ -6081,6 +6092,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
+        self._allow_nested_graph_breaks = allow_nested_graph_breaks
 
     @property
     def fake_mode(self) -> FakeTensorMode | None:
@@ -6096,6 +6108,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         """
         if not config.nested_graph_breaks:
             return False
+        if not self._allow_nested_graph_breaks:
+            return False
         if not self.funcvar.should_allow_nested_graph_breaks():
             return False
         if not self.parent.should_compile_partial_graph():
@@ -6104,6 +6118,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def should_compile_partial_graph(self) -> bool:
         if config.nested_graph_breaks:
+            if not self._allow_nested_graph_breaks:
+                return False
             if not self.funcvar.should_allow_nested_graph_breaks():
                 return False
             if not self.parent.should_compile_partial_graph():

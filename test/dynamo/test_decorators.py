@@ -2485,29 +2485,6 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with self.assertRaises(RuntimeError):
             exported_model = torch.export.export(model, (inp,))
 
-    def test_dynamo_disable_annotations_with_none_module(self):
-        def no_module_fn(x):
-            return x + 1
-
-        no_module_fn.__module__ = None
-        disabled_no_module_fn = torch._dynamo.disable(no_module_fn)
-
-        class SimpleModel(torch.nn.Module):
-            def forward(self, x):
-                return disabled_no_module_fn(x) * 2
-
-        inp = torch.rand(2, 2)
-        with torch.fx.traceback.preserve_node_meta():
-            exported_model = torch.export.export(SimpleModel(), (inp,))
-
-        self.assertTrue(
-            any(
-                node.meta.get("custom", {}).get("_torchdynamo_disable_method")
-                == "no_module_fn"
-                for node in exported_model.graph_module.graph.nodes
-            )
-        )
-
     def test_allow_in_graph_inside_compile_gives_clear_error(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178511
         # Calling allow_in_graph inside a compiled region is not supported.

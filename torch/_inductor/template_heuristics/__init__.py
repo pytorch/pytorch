@@ -1,15 +1,16 @@
-# NOTE: add new template heuristics here, so they get imported and registered
-# TODO: write a simple glob if there are many heuristics to auto import them in the right order
-from . import (
-    aten,
-    base,
-    contiguous_mm,
-    decompose_k,
-    nv_universal_gemm,
-    registry,
-    tlx,
-    triton,
+"""Backward-compatibility shim. This module was moved to
+torch._inductor.heuristics.template. This shim will be removed in a future release.
+"""
+
+import warnings
+
+
+warnings.warn(
+    "torch._inductor.template_heuristics has been moved to "
+    "torch._inductor.heuristics.template. Please update your imports. "
+    "This shim will be removed in a future release.",
+    FutureWarning,
+    stacklevel=2,
 )
 
-# expose the entry function
-from .registry import get_template_heuristic
+from torch._inductor.heuristics.template.registry import get_template_heuristic

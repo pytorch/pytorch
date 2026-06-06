@@ -321,15 +321,6 @@ def insert_deferred_runtime_asserts(
                         )
                         and s not in expr_to_proxy
                     ):
-                        custom = node.meta.get("custom")
-                        if (
-                            custom is None
-                            and node in placeholders
-                            and first_non_placeholder is not None
-                            and "_torchdynamo_disable_method"
-                            in first_non_placeholder.meta.get("custom", {})
-                        ):
-                            custom = first_non_placeholder.meta.get("custom")
                         with _set_node_metadata_hook(
                             gm,
                             functools.partial(
@@ -338,7 +329,7 @@ def insert_deferred_runtime_asserts(
                                 nn_module_stack=node.meta.get("nn_module_stack"),
                                 # nodes added in `apply_runtime_assertion_pass` will have the same annotation
                                 # as the input node to the assertion
-                                custom=custom,
+                                custom=node.meta.get("custom"),
                             ),
                         ):
                             expr_to_proxy[s] = fx.Proxy(cb(), tracer=tracer)
