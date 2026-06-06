@@ -1,16 +1,14 @@
-"""Backward-compatibility shim. This module was moved to
-torch._inductor.heuristics.template. This shim will be removed in a future release.
-"""
-
-import warnings
-
-
-warnings.warn(
-    "torch._inductor.template_heuristics has been moved to "
-    "torch._inductor.heuristics.template. Please update your imports. "
-    "This shim will be removed in a future release.",
-    FutureWarning,
-    stacklevel=2,
+# Backward-compatibility shim.
+# This package has been moved to torch._inductor.heuristics.template.
+# These re-exports will be removed in a future release.
+from torch._inductor.heuristics.template import (
+    aten,
+    base,
+    contiguous_mm,
+    decompose_k,
+    nv_universal_gemm,
+    registry,
+    tlx,
+    triton,
 )
-
 from torch._inductor.heuristics.template.registry import get_template_heuristic
