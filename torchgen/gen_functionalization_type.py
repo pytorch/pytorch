@@ -133,11 +133,18 @@ class GenCompositeViewCopyKernel:
             return """\
 at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
   c10::SymDimVector shape = infer_size_dv(size, self.sym_numel());
+  const bool pin_memory = self.is_pinned();
   if (!at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape).has_value()) {
+    if (pin_memory) {
+      return at::_unsafe_view_symint(
+          clone_preserve_pin_memory(self, /*pin_memory=*/true, at::MemoryFormat::Contiguous),
+          shape);
+    }
     return self.reshape_symint(size);
   } else {
     auto output = at::_ops::view::call(self, size);
-    return output.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+    return clone_preserve_pin_memory(
+        output, pin_memory, at::MemoryFormat::Contiguous);
   }
 }
 """
@@ -168,13 +175,17 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
 
         if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
             return_cloned_output = """\
-  return output.clone(/*memory_format=*/at::MemoryFormat::Contiguous);"""
+  const bool pin_memory = output.is_pinned();
+  return clone_preserve_pin_memory(
+      output, pin_memory, at::MemoryFormat::Contiguous);"""
         else:
             # If the return type is a list, we need to clone each tensor in the list.
             return_cloned_output = f"""\
   {view_copy_sig.returns_type().cpp_type()} out_clone;
+  const bool pin_memory = !output.empty() && output[0].is_pinned();
   for (const auto i : c10::irange(output.size())) {{
-    out_clone.push_back(output[i].clone(/*memory_format=*/at::MemoryFormat::Contiguous));
+    out_clone.push_back(clone_preserve_pin_memory(
+        output[i], pin_memory, at::MemoryFormat::Contiguous));
   }}
   return out_clone;"""
 

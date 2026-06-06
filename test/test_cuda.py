@@ -6928,6 +6928,28 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
                 data = torch.empty(8)
                 data.copy_(data_gpu, non_blocking=True)
 
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "cuda graph test is skipped")
+    def test_pinned_lift_fresh_copy_to_device_with_cudagraph(self):
+        def f(example_grad):
+            return torch.tensor(example_grad.numel(), pin_memory=True).to(
+                example_grad.device, non_blocking=True
+            )
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+        x = torch.rand(10, device="cuda")
+
+        f(x)
+        compiled_f(x)
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            out = compiled_f(x)
+        graph.replay()
+        torch.cuda.synchronize()
+
+        self.assertEqual(out, torch.tensor(10, device="cuda"))
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
