@@ -360,7 +360,7 @@ def build_collectives(
 
             # 2. we found a partial match but some ranks are missing
             # 3. we found no match
-            #  -> since its not a complete collective, no entry goes into collectives but we still record a nccl call
+            #  -> since it's not a complete collective, no entry goes into collectives but we still record a nccl call
             #     TODO should there be a way to mark 'mismatches'?
             else:
                 logger.debug("appending a non-matching collective")

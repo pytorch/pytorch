@@ -318,11 +318,11 @@ class _StrictExportGetItemDefaultStopHandler(torch.overrides.TorchFunctionMode):
         args: tuple[object, ...] = (),
         kwargs: dict[str, object] | None = None,
     ) -> Any:
-        if kwargs:
-            return func(*args, **kwargs)
+        if func is not torch.Tensor.__getitem__ or kwargs:
+            return func(*args, **(kwargs or {}))
         if (override := self._override(func, args)) is not None:
             return override()
-        return func(*args, **(kwargs or {}))
+        return func(*args)
 
 
 # mypy: disable-error-code="no-untyped-def,var-annotated,assignment,index,operator"
