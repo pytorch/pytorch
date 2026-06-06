@@ -168,6 +168,7 @@ class TestInductorDynamic(TestCase):
         self._stack.close()
         TestCase.tearDown(self)
         torch._dynamo.reset()
+
     def test_constant_fold_uniform_value_dynamic(self, device):
         def full_add_zero(x):
             a = torch.full(x.shape, 1, dtype=x.dtype, device=x.device)
