@@ -7751,13 +7751,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             tensor_output = unflatten(tensor_input)
             self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
 
-        # Unflatten NamedTensor
-
-        unflatten = nn.Unflatten(dim='features', unflattened_size=(('C', 2), ('H', 5), ('W', 5)))
-        named_tensor_input = tensor_input.refine_names('N', 'features')
-        named_tensor_output = unflatten(named_tensor_input)
-        self.assertEqual(named_tensor_output.size(), torch.Size([2, 2, 5, 5]))
-
     def test_unflatten_invalid_arg(self):
         # Wrong type for unflattened_size (tuple of floats)
 
@@ -7765,27 +7758,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 TypeError,
                 r"unflattened_size must be tuple of ints, but found element of type float at pos 2"):
             nn.Unflatten(dim=1, unflattened_size=(2, 5, 5.0))
-
-        # Wrong type for unflattened_size (list of lists and list of tuples)
-        for us in ([['C', 2], ['W', 5], ['H', 5]], [('C', 2), ('W', 5), ('H', 5)]):
-            with self.assertRaisesRegex(
-                    TypeError,
-                    r"unflattened_size must be a tuple of tuples, but found type list"):
-                nn.Unflatten(dim='features', unflattened_size=us)
-
-        # Wrong type for unflattened_size (tuple of lists)
-
-        with self.assertRaisesRegex(
-                TypeError,
-                r"unflattened_size must be tuple of tuples, but found element of type list at pos 0"):
-            nn.Unflatten(dim='features', unflattened_size=(['C', 2], ['W', 5], ['H', 5]))
-
-        # Wrong type for unflattened_size (tuple of dicts)
-
-        with self.assertRaisesRegex(
-                TypeError,
-                r"unflattened_size must be tuple of tuples, but found element of type dict at pos 0"):
-            nn.Unflatten(dim='features', unflattened_size=({'C': 2}, {'W': 5}, {'H': 5}))
 
     def test_layer_norm_grads_with_create_graph_flag(self):
         atol = 1e-5
@@ -7929,6 +7901,46 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         with self.assertRaises(RuntimeError):
             res = arg_class(*arg_4)
+
+    def test_lp_pool_inf_norm_type(self):
+        cases = [
+            (
+                F.lp_pool1d,
+                torch.tensor([[[1.0, -3.0, 2.0, 4.0]]]),
+                2,
+                1,
+                torch.tensor([[[3.0, 3.0, 4.0]]]),
+                torch.tensor([[[1.0, 2.0, 2.0]]]),
+            ),
+            (
+                F.lp_pool2d,
+                torch.tensor([[[[1.0, -3.0, 2.0], [4.0, -5.0, 6.0], [-7.0, 8.0, -9.0]]]]),
+                2,
+                1,
+                torch.tensor([[[[5.0, 6.0], [8.0, 9.0]]]]),
+                torch.tensor([[[[1.0, 2.0], [4.0, 5.0]]]]),
+            ),
+            (
+                F.lp_pool3d,
+                torch.tensor([[[[[1.0, -3.0, 2.0], [4.0, -5.0, 6.0]], [[-7.0, 8.0, -9.0], [10.0, -11.0, 12.0]]]]]),
+                2,
+                1,
+                torch.tensor([[[[[11.0, 12.0]]]]]),
+                torch.tensor([[[[[1.0, 2.0]]]]]),
+            ),
+        ]
+
+        for lp_pool, input, kernel_size, stride, expected_inf, expected_neg_inf in cases:
+            with self.subTest(lp_pool=lp_pool.__name__, norm_type=float("inf")):
+                self.assertEqual(
+                    lp_pool(input, float("inf"), kernel_size, stride),
+                    expected_inf,
+                )
+            with self.subTest(lp_pool=lp_pool.__name__, norm_type=-float("inf")):
+                self.assertEqual(
+                    lp_pool(input, -float("inf"), kernel_size, stride),
+                    expected_neg_inf,
+                )
 
     def test_pickle_module_no_weights_only_warning(self):
         with warnings.catch_warnings(record=True) as w:

@@ -2929,7 +2929,8 @@
       "Context": "str(self.key)",
       "Explanation": "Cannot perform sort whose key comparison is not a compile-time constant. Key type: {self.key.python_type()}. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.",
       "Hints": [
-        "Use something else as the key."
+        "Use something else as the key.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     },
     {
@@ -4502,6 +4503,14 @@
     }
   ],
   "GB4608": [
+    {
+      "Gb_type": "richcompare identity fallback undetermined",
+      "Context": "generic_richcompare({v}, {w}, {op})",
+      "Explanation": "Cannot determine object identity for comparison fallback.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "richcompare identity fallback undetermined",
       "Context": "generic_richcompare({lhs}, {rhs}, {op})",
