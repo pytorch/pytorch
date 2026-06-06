@@ -427,7 +427,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 "-c",
                 """
 import torch
-from torch.profiler import _cupti_monitor
+from torch.profiler.cupti import monitor as _cupti_monitor
 
 _cupti_monitor.enable_hes_early()
 assert _cupti_monitor.is_hes_enabled()
@@ -443,7 +443,7 @@ assert _cupti_monitor.is_hes_enabled()
                 "-c",
                 """
 import torch
-from torch.profiler import _cupti_monitor
+from torch.profiler.cupti import monitor as _cupti_monitor
 
 torch.randn(1, device="cuda")
 _cupti_monitor.enable_hes_early()
@@ -461,7 +461,7 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_collection_raw_dump_smoke(self):
-        from torch.profiler import _cupti_monitor
+        from torch.profiler.cupti import monitor as _cupti_monitor
 
         with TemporaryDirectoryName() as out_dir:
             self.assertIsNone(_cupti_monitor.get_monitor())
@@ -499,7 +499,7 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_collection_repeated_lifecycle(self):
-        from torch.profiler import _cupti_monitor
+        from torch.profiler.cupti import monitor as _cupti_monitor
 
         for _ in range(2):
             with TemporaryDirectoryName() as out_dir:
