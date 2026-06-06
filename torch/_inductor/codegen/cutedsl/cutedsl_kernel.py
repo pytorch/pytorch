@@ -50,7 +50,7 @@ class CuteDSLPrinter(PythonPrinter):
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError("ToFloat expects exactly one argument")
-        return f"cutlass.Float64({self._print(expr.args[0])})"
+        return f"cutlass.Float64({self.doprint(expr.args[0])})"
 
 
 cutedsl_pexpr = CuteDSLPrinter().doprint

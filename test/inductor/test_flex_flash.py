@@ -2788,9 +2788,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
                 kernel_options={"BACKEND": "FLASH"},
             )
 
-        q, k, v = create_test_tensors(
-            seq_len=128, device="cuda", dtype=torch.float16
-        )
+        q, k, v = create_test_tensors(seq_len=128, device="cuda", dtype=torch.float16)
         expected = fn(q, k, v)
         actual, code = run_and_get_code(
             torch.compile(fn, dynamic=True, fullgraph=True), q, k, v
