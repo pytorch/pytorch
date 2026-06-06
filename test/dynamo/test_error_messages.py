@@ -107,7 +107,7 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(lst),
             """\
 sort with non-constant keys
-  Explanation: Cannot perform sort with non-constant key. First non-constant key type: <class 'torch.Tensor'>. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.
+  Explanation: Cannot perform sort whose key comparison is not a compile-time constant. Key type: <class 'torch.Tensor'>. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.
   Hint: Use something else as the key.
 
   Developer debug context: LazyVariableTracker(realized: TensorVariable())
