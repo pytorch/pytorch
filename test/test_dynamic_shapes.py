@@ -1964,6 +1964,17 @@ class TestSymNumberMagicMethods(TestCase):
         shape_env = ShapeEnv()
         self._do_test(fn, True, False, shape_env, is_unary_fn)
 
+    def test_unbacked_symbool_eq_expect_true(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symbool()
+        b = shape_env.create_unbacked_symbool()
+
+        expr = a == b
+
+        self.assertIsInstance(expr, torch.SymBool)
+        self.assertEqual(expr.node.expr, sympy.Eq(a.node.expr, b.node.expr))
+        self.assertIs(expr.node.expect_true("", 0), True)
+
     @parametrize("fn", list(sym_node.magic_methods.keys()))
     @parametrize("first_type", ["int", "float"])
     @parametrize("second_type", ["int", "float"])

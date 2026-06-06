@@ -858,6 +858,11 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     if isinstance(expr, (sympy.And, sympy.Or)):
         return type(expr)(*map(canonicalize_bool_expr, expr.args))
 
+    if isinstance(expr, sympy.Rel) and (
+        not isinstance(expr.lhs, sympy.Expr) or not isinstance(expr.rhs, sympy.Expr)
+    ):
+        return expr
+
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
     t: type[Any]
     if isinstance(expr, tuple(opposite.keys())):
