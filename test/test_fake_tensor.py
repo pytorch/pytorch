@@ -149,6 +149,76 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    def test_random_uniform_range_checks(self):
+        def check_eager_meta_and_fake(dtype, op, exc, msg):
+            with self.assertRaisesRegex(exc, msg):
+                op(torch.empty((2, 2), dtype=dtype))
+
+            with self.assertRaisesRegex(exc, msg):
+                op(torch.empty((2, 2), device="meta", dtype=dtype))
+
+            with FakeTensorMode():
+                with self.assertRaisesRegex(exc, msg):
+                    op(torch.empty((2, 2), dtype=dtype))
+
+        random_cases = [
+            (
+                torch.bool,
+                lambda x: x.random_(-1, 1),
+                RuntimeError,
+                "from is out of bounds",
+            ),
+            (
+                torch.bool,
+                lambda x: x.random_(1, 1),
+                RuntimeError,
+                "from=1 >= to=1",
+            ),
+            (
+                torch.bool,
+                lambda x: x.random_(3),
+                RuntimeError,
+                "to - 1 is out of bounds",
+            ),
+            (
+                torch.int8,
+                lambda x: x.random_(-129, 0),
+                RuntimeError,
+                "from is out of bounds",
+            ),
+            (
+                torch.int8,
+                lambda x: x.random_(0, 129),
+                RuntimeError,
+                "to - 1 is out of bounds",
+            ),
+        ]
+        for case in random_cases:
+            check_eager_meta_and_fake(*case)
+
+        uniform_cases = [
+            (
+                torch.bool,
+                lambda x: x.uniform_(-1, 1),
+                NotImplementedError,
+                "not implemented",
+            ),
+            (
+                torch.float32,
+                lambda x: x.uniform_(float("inf"), 1),
+                RuntimeError,
+                "from is out of bounds",
+            ),
+            (
+                torch.float32,
+                lambda x: x.uniform_(1, -1),
+                RuntimeError,
+                "from=1",
+            ),
+        ]
+        for case in uniform_cases:
+            check_eager_meta_and_fake(*case)
+
     def test_sparse_spdiags(self):
         with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
             out = torch.sparse.spdiags(torch.randn(2, 3), torch.tensor([0, -1]), (2, 3))

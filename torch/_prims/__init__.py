@@ -2851,6 +2851,33 @@ def _uniform_meta(
     stride: ShapeType,
     generator: torch.Generator | None = None,
 ) -> TensorLikeType:
+    supported_real_dtypes = (
+        torch.float64,
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+    )
+    if utils.is_complex_dtype(dtype):
+        bounds_dtype = utils.corresponding_real_dtype(dtype)
+    elif dtype in supported_real_dtypes:
+        bounds_dtype = dtype
+    else:
+        raise NotImplementedError(f'"check_uniform_bounds" not implemented for {dtype}')
+
+    finfo = torch.finfo(bounds_dtype)
+    torch._check(low >= finfo.min, lambda: f"from is out of bounds for {bounds_dtype}")
+    torch._check(low <= finfo.max, lambda: f"from is out of bounds for {bounds_dtype}")
+    torch._check(high >= finfo.min, lambda: f"to is out of bounds for {bounds_dtype}")
+    torch._check(high <= finfo.max, lambda: f"to is out of bounds for {bounds_dtype}")
+    torch._check(
+        low <= high,
+        lambda: f"uniform_ expects to return a [from, to) range, but found from={low} > to={high}",
+    )
+    torch._check(
+        (high - low) <= finfo.max,
+        lambda: f"uniform_ expects to-from <= std::numeric_limits<{bounds_dtype}>::max(), "
+        f"but found to={high} and from={low} which result in to-from to exceed the limit",
+    )
     return TensorMeta(shape=shape, strides=stride, dtype=dtype, device=device)
 
 
