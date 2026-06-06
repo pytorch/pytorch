@@ -2553,6 +2553,7 @@ class AOTDispatchAutogradCompileSpec:
     compiled_fw_func: Callable[..., Any]
     compiled_bw_func: Callable[..., Any] | None
     maybe_subclass_meta: SubclassMeta | None
+    num_fw_outs_saved_for_bw: int
     num_symints_saved_for_bw: int
     backward_state_indices: list[int]
     disable_amp: bool
@@ -2564,149 +2565,6 @@ class AOTDispatchAutogradCompileSpec:
     aot_config: AOTConfig
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
-
-
-@dataclass
-class _AutogradSavedState:
-    metadata: ViewAndMutationMeta
-
-    def save_from_forward(self, ctx: Any, fw_outs: Sequence[Any]) -> None:
-        tensors_saved_with_vc_check = fw_outs[
-            self.metadata.tensors_saved_for_backwards_with_vc_check_slice
-        ]
-        tensors_saved_no_vc_check = fw_outs[
-            self.metadata.tensors_saved_for_backwards_no_vc_check_slice
-        ]
-        if not all(isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check):
-            raise AssertionError(
-                "expected all tensors_saved_with_vc_check to be Tensors, "
-                f"got types: {[type(x) for x in tensors_saved_with_vc_check]}"
-            )
-        if not all(isinstance(x, torch.Tensor) for x in tensors_saved_no_vc_check):
-            raise AssertionError(
-                "expected all tensors_saved_no_vc_check to be Tensors, "
-                f"got types: {[type(x) for x in tensors_saved_no_vc_check]}"
-            )
-
-        # See Note [Detaching saved tensors in AOTAutograd]
-        num_vc_check = len(tensors_saved_with_vc_check)
-        tensors_to_save = [
-            x.detach() if x._is_view() else x for x in tensors_saved_with_vc_check
-        ]
-        tensors_no_vc_check = [
-            x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
-        ]
-
-        # dynamic_saved_tensors_idxs has indices relative to all saved tensors
-        # (vc_check + no_vc_check combined). Mark dynamics on the detached tensors.
-        for idx, dims in self.metadata.dynamic_saved_tensors_idxs.items():
-            if idx < num_vc_check:
-                mark_dynamo_propagated_dynamic_indices(tensors_to_save[idx], dims)
-            else:
-                mark_dynamo_propagated_dynamic_indices(
-                    tensors_no_vc_check[idx - num_vc_check], dims
-                )
-
-        ctx.save_for_backward(*tensors_to_save)
-        ctx._tensors_no_vc_check = tensors_no_vc_check
-
-        symint_outs = fw_outs[self.metadata.symints_saved_for_backwards_slice]
-        if not all(
-            isinstance(x, (int, float, torch.SymInt, torch.SymFloat))
-            for x in symint_outs
-        ):
-            raise AssertionError(
-                "expected all symint_outs to be int/float/SymInt/SymFloat, "
-                f"got types: {[type(x) for x in symint_outs]}"
-            )
-        ctx.symints = symint_outs
-
-        opaque_object_outs = fw_outs[
-            self.metadata.opaque_objects_saved_for_backwards_slice
-        ]
-        if not all(
-            is_opaque_type(type(obj)) or isinstance(obj, OpaqueBase)
-            for obj in opaque_object_outs
-        ):
-            raise AssertionError(
-                "expected all opaque_object_outs to be opaque types, "
-                f"got types: {[type(obj) for obj in opaque_object_outs]}"
-            )
-        ctx.opaque_objects = opaque_object_outs
-
-
-@dataclass
-class _AutogradForwardEpilogue:
-    metadata: ViewAndMutationMeta
-
-    def finalize(self, ctx: Any, fw_outs: Sequence[Any]) -> tuple[Any, ...]:
-        num_outputs = self.metadata.num_outputs
-        num_outputs_aliased = self.metadata.num_outputs_aliased
-        num_mutated_runtime_inps = self.metadata.num_mutated_inp_runtime_indices
-        num_forward_returns = self.metadata.num_forward_returns
-
-        raw_returns = list(fw_outs[:num_forward_returns])
-
-        # Wrap all autograd.Function.forward() outputs that are aliases
-        # so that autograd.Function doesn't treat them as tensors
-        if num_mutated_runtime_inps > 0:
-            for i, idx in enumerate(self.metadata.mutated_inp_runtime_indices):
-                # We could make this faster by only looping over inputs with metadata-only mutations
-                # (instead of looping over inputs with either data or metadata mutations), but there shouldn't be many.
-                info = self.metadata.input_info[idx]
-                if info.mutates_metadata and not info.mutates_data:
-                    raw_returns[i] = TensorAlias(raw_returns[i])
-
-            if config.debug_assert:
-                user_mutated_inputs_raw = raw_returns[0:num_mutated_runtime_inps]
-                mut_inp_infos = [
-                    x
-                    for x in self.metadata.input_info
-                    if x.mutates_data or x.mutates_metadata
-                ]
-                if len(user_mutated_inputs_raw) != len(mut_inp_infos):
-                    raise AssertionError(
-                        "expected len(user_mutated_inputs_raw) == len(mut_inp_infos), "
-                        f"got {len(user_mutated_inputs_raw)} != {len(mut_inp_infos)}"
-                    )
-
-        if self.metadata.num_unsafe_view_outputs > 0:
-            for idx in self.metadata.unsafe_view_out_indices:
-                raw_return_idx = num_mutated_runtime_inps + idx
-                o = raw_returns[raw_return_idx]
-                raw_returns[raw_return_idx] = torch.ops.aten._unsafe_view(o, o.shape)
-
-        if num_outputs_aliased > 0:
-            for idx in self.metadata.aliased_out_indices:
-                raw_return_idx = num_mutated_runtime_inps + idx
-                raw_returns[raw_return_idx] = TensorAlias(raw_returns[raw_return_idx])
-
-            if config.debug_assert:
-                intermediates_raw = raw_returns[
-                    num_mutated_runtime_inps + num_outputs :
-                ]
-                if any(isinstance(x, TensorAlias) for x in intermediates_raw):
-                    raise AssertionError("expected no TensorAlias in intermediates_raw")
-
-        # invariant: intermediate bases always require gradients, so we don't have to
-        # consider marking them as non-differentiable.
-        raw_returns_not_including_intermediate_bases = raw_returns[
-            : num_mutated_runtime_inps + num_outputs
-        ]
-        raw_returns_meta = [
-            x
-            for x in self.metadata.input_info
-            if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
-        ] + self.metadata.output_info
-
-        fw_outs_not_requiring_grad = [
-            x
-            for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
-            if isinstance(x, torch.Tensor) and not raw_returns_meta[i].requires_grad
-        ]
-        ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
-        ctx._materialize_non_diff_grads = False
-        return tuple(raw_returns)
 
 
 @dataclass
@@ -3156,17 +3014,49 @@ def _codegen_backward_epilogue(
 def _codegen_compiled_forward(
     fw_metadata: ViewAndMutationMeta,
     backward_state_indices: list[int],
+    num_fw_outs_saved_for_bw: int,
     disable_amp: bool,
     num_rng: int,
 ) -> Callable[..., Any]:
     from .subclass_codegen import _compile_and_exec_source
 
-    lines: list[str] = [
-        "def _compiled_forward(ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_):"
-    ]
+    if fw_metadata.num_symints_saved_for_bw is None:
+        raise AssertionError("num_symints_saved_for_bw must not be None")
+    if fw_metadata.num_tensors_saved_with_no_vc_check is None:
+        raise AssertionError("num_tensors_saved_with_no_vc_check must not be None")
+
+    num_symints = fw_metadata.num_symints_saved_for_bw
+    num_no_vc = fw_metadata.num_tensors_saved_with_no_vc_check
+    num_opaque = fw_metadata.num_opaque_objects_saved_for_bw or 0
+    num_saved_tensors = num_fw_outs_saved_for_bw - num_symints - num_opaque
+    num_vc = num_saved_tensors - num_no_vc
+    if num_vc < 0:
+        raise AssertionError(
+            f"expected non-negative number of tensors saved with VC check, got {num_vc}"
+        )
+
+    num_forward = fw_metadata.num_forward
+    vc_indices = list(range(num_forward, num_forward + num_vc))
+    no_vc_indices = list(range(num_forward + num_vc, num_forward + num_saved_tensors))
+    opaque_indices = list(
+        range(
+            num_forward + num_saved_tensors,
+            num_forward + num_saved_tensors + num_opaque,
+        )
+    )
+    symint_indices = list(
+        range(
+            num_forward + num_saved_tensors + num_opaque,
+            num_forward + num_fw_outs_saved_for_bw,
+        )
+    )
+
+    lines: list[str] = ["def _compiled_forward(ctx, args, _compiled_fw_, _rng_add_):"]
     code_globals: dict[str, object] = {
         "torch": torch,
         "BackwardState": BackwardState,
+        "Tensor": Tensor,
+        "TensorAlias": TensorAlias,
     }
 
     if backward_state_indices:
@@ -3189,8 +3079,189 @@ def _codegen_compiled_forward(
         lines.append("    fw_outs = _compiled_fw_(list(args))")
         _codegen_normalize_as_list(lines, "fw_outs", indent_level=1)
 
-    lines.append("    _save_(ctx, fw_outs)")
-    lines.append("    return _finalize_(ctx, fw_outs)")
+    for i, idx in enumerate(vc_indices):
+        lines.append(f"    _saved_{i} = fw_outs[{idx}]")
+        lines.append(f"    if not isinstance(_saved_{i}, Tensor):")
+        lines.append("        raise AssertionError(")
+        lines.append(
+            f"            f'expected saved tensor at fw_outs[{idx}], got {{type(_saved_{i})}}')"
+        )
+        lines.append(
+            f"    _saved_{i} = _saved_{i}.detach() if _saved_{i}._is_view() else _saved_{i}"
+        )
+
+    for i, idx in enumerate(no_vc_indices):
+        lines.append(f"    _saved_no_vc_{i} = fw_outs[{idx}]")
+        lines.append(f"    if not isinstance(_saved_no_vc_{i}, Tensor):")
+        lines.append("        raise AssertionError(")
+        lines.append(
+            f"            f'expected saved tensor at fw_outs[{idx}], got {{type(_saved_no_vc_{i})}}')"
+        )
+        lines.append(
+            "    _saved_no_vc_"
+            f"{i} = _saved_no_vc_{i}.detach() if _saved_no_vc_{i}._is_view() else _saved_no_vc_{i}"
+        )
+
+    if fw_metadata.dynamic_saved_tensors_idxs:
+        code_globals["_mark_dynamic_"] = mark_dynamo_propagated_dynamic_indices
+        for idx, dims in fw_metadata.dynamic_saved_tensors_idxs.items():
+            dims_name = f"_dynamic_dims_{idx}"
+            code_globals[dims_name] = dims
+            if idx < num_vc:
+                lines.append(f"    _mark_dynamic_(_saved_{idx}, {dims_name})")
+            elif idx < num_saved_tensors:
+                lines.append(
+                    f"    _mark_dynamic_(_saved_no_vc_{idx - num_vc}, {dims_name})"
+                )
+            else:
+                raise AssertionError(
+                    "dynamic_saved_tensors_idxs should only contain tensor indices, "
+                    f"got {idx} for {num_saved_tensors} saved tensors"
+                )
+
+    if num_vc > 0:
+        saved_args = ", ".join(f"_saved_{i}" for i in range(num_vc))
+        lines.append(f"    ctx.save_for_backward({saved_args})")
+
+    if num_no_vc > 0:
+        no_vc_args = ", ".join(f"_saved_no_vc_{i}" for i in range(num_no_vc))
+        lines.append(f"    ctx._tensors_no_vc_check = [{no_vc_args}]")
+
+    if num_symints > 0:
+        for i, idx in enumerate(symint_indices):
+            lines.append(f"    _symint_{i} = fw_outs[{idx}]")
+            lines.append(
+                f"    if not isinstance(_symint_{i}, (int, float, torch.SymInt, torch.SymFloat)):"
+            )
+            lines.append("        raise AssertionError(")
+            lines.append(
+                f"            f'expected symint at fw_outs[{idx}], got {{type(_symint_{i})}}')"
+            )
+        symint_args = ", ".join(f"_symint_{i}" for i in range(num_symints))
+        lines.append(f"    ctx.symints = [{symint_args}]")
+    else:
+        lines.append("    ctx.symints = ()")
+
+    if num_opaque > 0:
+        code_globals["_is_opaque_type_"] = is_opaque_type
+        code_globals["OpaqueBase"] = OpaqueBase
+        for i, idx in enumerate(opaque_indices):
+            lines.append(f"    _opaque_{i} = fw_outs[{idx}]")
+            lines.append(
+                f"    if not (_is_opaque_type_(type(_opaque_{i})) or isinstance(_opaque_{i}, OpaqueBase)):"
+            )
+            lines.append("        raise AssertionError(")
+            lines.append(
+                f"            f'expected opaque object at fw_outs[{idx}], got {{type(_opaque_{i})}}')"
+            )
+        opaque_args = ", ".join(f"_opaque_{i}" for i in range(num_opaque))
+        lines.append(f"    ctx.opaque_objects = [{opaque_args}]")
+    else:
+        lines.append("    ctx.opaque_objects = ()")
+
+    num_forward_returns = fw_metadata.num_forward_returns
+    num_mutated_runtime_inps = fw_metadata.num_mutated_inp_runtime_indices
+    num_outputs = fw_metadata.num_outputs
+    needs_raw_returns_list = (
+        num_mutated_runtime_inps > 0
+        or fw_metadata.num_unsafe_view_outputs > 0
+        or fw_metadata.num_outputs_aliased > 0
+    )
+
+    raw_returns_meta = [
+        x
+        for x in fw_metadata.input_info
+        if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
+    ] + list(fw_metadata.output_info)
+    non_diff_indices = [
+        i
+        for i, meta in enumerate(raw_returns_meta)
+        if i < num_mutated_runtime_inps + num_outputs and not meta.requires_grad
+    ]
+
+    if non_diff_indices:
+        needs_raw_returns_list = True
+
+    if needs_raw_returns_list:
+        raw_return_args = ", ".join(f"fw_outs[{i}]" for i in range(num_forward_returns))
+        lines.append(f"    raw_returns = [{raw_return_args}]")
+
+        if num_mutated_runtime_inps > 0:
+            code_globals["_config_"] = config
+            num_mutated_inp_infos = sum(
+                info.mutates_data or info.mutates_metadata
+                for info in fw_metadata.input_info
+            )
+            lines.append("    if _config_.debug_assert:")
+            lines.append(
+                f"        _user_mutated_inputs_raw = raw_returns[0:{num_mutated_runtime_inps}]"
+            )
+            lines.append(
+                f"        if len(_user_mutated_inputs_raw) != {num_mutated_inp_infos}:"
+            )
+            lines.append("            raise AssertionError(")
+            lines.append(
+                "                'expected len(user_mutated_inputs_raw) == len(mut_inp_infos), '"
+            )
+            lines.append(
+                f"                f'got {{len(_user_mutated_inputs_raw)}} != {num_mutated_inp_infos}')"
+            )
+
+        for i, idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
+            info = fw_metadata.input_info[idx]
+            if info.mutates_metadata and not info.mutates_data:
+                lines.append(f"    raw_returns[{i}] = TensorAlias(raw_returns[{i}])")
+
+        if fw_metadata.num_unsafe_view_outputs > 0:
+            for idx in fw_metadata.unsafe_view_out_indices:
+                raw_return_idx = num_mutated_runtime_inps + idx
+                lines.append(f"    _unsafe_view_{idx} = raw_returns[{raw_return_idx}]")
+                lines.append(
+                    f"    raw_returns[{raw_return_idx}] = torch.ops.aten._unsafe_view("
+                    f"_unsafe_view_{idx}, _unsafe_view_{idx}.shape)"
+                )
+
+        if fw_metadata.num_outputs_aliased > 0:
+            for idx in fw_metadata.aliased_out_indices:
+                raw_return_idx = num_mutated_runtime_inps + idx
+                lines.append(
+                    f"    raw_returns[{raw_return_idx}] = TensorAlias(raw_returns[{raw_return_idx}])"
+                )
+
+            code_globals["_config_"] = config
+            lines.append("    if _config_.debug_assert:")
+            intermediate_start = num_mutated_runtime_inps + num_outputs
+            lines.append(
+                f"        _intermediates_raw = raw_returns[{intermediate_start}:]"
+            )
+            lines.append(
+                "        if any(isinstance(x, TensorAlias) for x in _intermediates_raw):"
+            )
+            lines.append(
+                "            raise AssertionError('expected no TensorAlias in intermediates_raw')"
+            )
+
+        if non_diff_indices:
+            checks = " + ".join(
+                f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
+                for i in non_diff_indices
+            )
+            lines.append(f"    _non_diff = {checks}")
+            lines.append("    if _non_diff:")
+            lines.append("        ctx.mark_non_differentiable(*_non_diff)")
+
+        lines.append("    ctx._materialize_non_diff_grads = False")
+        lines.append("    return tuple(raw_returns)")
+    else:
+        lines.append("    ctx._materialize_non_diff_grads = False")
+        if num_forward_returns == 0:
+            lines.append("    return ()")
+        else:
+            return_values = ", ".join(
+                f"fw_outs[{i}]" for i in range(num_forward_returns)
+            )
+            trailing_comma = "," if num_forward_returns == 1 else ""
+            lines.append(f"    return ({return_values}{trailing_comma})")
 
     source = "\n".join(lines)
     return _compile_and_exec_source(
@@ -3201,6 +3272,8 @@ def _codegen_compiled_forward(
 def _codegen_compiled_backward(
     num_rng: int,
     num_tensors_no_vc_check: int | None,
+    num_symints_saved_for_bw: int,
+    num_opaque_objects_saved_for_bw: int,
     inputs_require_grad: bool,
 ) -> Callable[..., Any]:
     from .subclass_codegen import _compile_and_exec_source
@@ -3230,9 +3303,13 @@ def _codegen_compiled_backward(
     else:
         lines.append("    _saved = _ctx_.saved_tensors")
 
+    symints_arg = "_ctx_.symints" if num_symints_saved_for_bw > 0 else "()"
+    opaque_objects_arg = (
+        "_ctx_.opaque_objects" if num_opaque_objects_saved_for_bw > 0 else "()"
+    )
     lines.append(
-        "    all_args = _prologue_(_saved, _ctx_.symints,"
-        " _ctx_.opaque_objects, grad_args)"
+        f"    all_args = _prologue_(_saved, {symints_arg},"
+        f" {opaque_objects_arg}, grad_args)"
     )
     lines.append("    del _saved")
 
@@ -3275,8 +3352,6 @@ class _AOTDispatchAutogradFunctionFactory:
         compile_id_str = str(compile_id) if compile_id is not None else None
         self.spec.fw_metadata.compile_id_str = compile_id_str
 
-        saved_state = _AutogradSavedState(self.spec.fw_metadata)
-        forward_epilogue = _AutogradForwardEpilogue(self.spec.fw_metadata)
         rng_state = _AutogradRngStateTracker(
             num_rng=self.spec.fw_metadata.num_graphsafe_rng_states,
             graphsafe_idx=self.spec.fw_metadata.graphsafe_rng_state_index,
@@ -3326,6 +3401,7 @@ class _AOTDispatchAutogradFunctionFactory:
         _codegen_fwd = _codegen_compiled_forward(
             fw_metadata,
             backward_state_indices,
+            self.spec.num_fw_outs_saved_for_bw,
             disable_amp,
             rng_state.num_rng,
         )
@@ -3333,110 +3409,10 @@ class _AOTDispatchAutogradFunctionFactory:
         _codegen_bwd = _codegen_compiled_backward(
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
+            fw_metadata.num_symints_saved_for_bw or 0,
+            fw_metadata.num_opaque_objects_saved_for_bw or 0,
             any(inp.requires_grad for inp in fw_metadata.input_info),
         )
-
-        # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
-        # wrapping, _unsafe_view, and non-differentiable output collection with
-        # all indices resolved at compile time.
-        num_mutated_runtime_inps = fw_metadata.num_mutated_inp_runtime_indices
-        num_outputs = fw_metadata.num_outputs
-        num_outputs_aliased = fw_metadata.num_outputs_aliased
-
-        _xform_lines = ["def _transform_raw_returns(raw_returns):"]
-        _xform_globals: dict[str, object] = {
-            "TensorAlias": TensorAlias,
-            "torch": torch,
-            "Tensor": Tensor,
-        }
-
-        for i, idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
-            info = fw_metadata.input_info[idx]
-            if info.mutates_metadata and not info.mutates_data:
-                _xform_lines.append(
-                    f"    raw_returns[{i}] = TensorAlias(raw_returns[{i}])"
-                )
-
-        if fw_metadata.num_unsafe_view_outputs > 0:
-            for idx in fw_metadata.unsafe_view_out_indices:
-                ri = num_mutated_runtime_inps + idx
-                _xform_lines.append(f"    _o = raw_returns[{ri}]")
-                _xform_lines.append(
-                    f"    raw_returns[{ri}] = torch.ops.aten._unsafe_view(_o, _o.shape)"
-                )
-
-        if num_outputs_aliased > 0:
-            for idx in fw_metadata.aliased_out_indices:
-                ri = num_mutated_runtime_inps + idx
-                _xform_lines.append(
-                    f"    raw_returns[{ri}] = TensorAlias(raw_returns[{ri}])"
-                )
-
-        # Non-differentiable output collection: build a list of specific indices
-        # at compile time rather than iterating at runtime.
-        _non_diff_indices: list[int] = []
-        _returns_meta = [
-            x
-            for x in fw_metadata.input_info
-            if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
-        ] + list(fw_metadata.output_info)
-        for i, meta in enumerate(_returns_meta):
-            if i < num_mutated_runtime_inps + num_outputs and not meta.requires_grad:
-                _non_diff_indices.append(i)
-        if _non_diff_indices:
-            checks = " + ".join(
-                f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
-                for i in _non_diff_indices
-            )
-            _xform_lines.append(f"    non_diff = {checks}")
-        else:
-            _xform_lines.append("    non_diff = []")
-        _xform_lines.append("    return non_diff")
-
-        _xform_source = "\n".join(_xform_lines)
-
-        from .subclass_codegen import _compile_and_exec_source
-
-        _codegen_transform_raw_returns: Callable[..., list[Any]] = (
-            _compile_and_exec_source(  # type: ignore[assignment]
-                _xform_source,
-                _xform_globals,
-                "_transform_raw_returns",
-                "compiled_fn_wrapper",
-            )
-        )
-
-        # Monkey-patch forward_epilogue.finalize to use codegen'd transform
-        def _codegen_finalize(ctx: Any, fw_outs: Any) -> tuple[Any, ...]:
-            num_forward_returns = fw_metadata.num_forward_returns
-            raw_returns = list(fw_outs[:num_forward_returns])
-            fw_outs_not_requiring_grad = _codegen_transform_raw_returns(raw_returns)
-            if config.debug_assert:
-                if num_mutated_runtime_inps > 0:
-                    user_mutated_inputs_raw = raw_returns[0:num_mutated_runtime_inps]
-                    mut_inp_infos = [
-                        x
-                        for x in fw_metadata.input_info
-                        if x.mutates_data or x.mutates_metadata
-                    ]
-                    if len(user_mutated_inputs_raw) != len(mut_inp_infos):
-                        raise AssertionError(
-                            f"expected len(user_mutated_inputs_raw) == len(mut_inp_infos), "
-                            f"got {len(user_mutated_inputs_raw)} != {len(mut_inp_infos)}"
-                        )
-                if num_outputs_aliased > 0:
-                    intermediates_raw = raw_returns[
-                        num_mutated_runtime_inps + num_outputs :
-                    ]
-                    if any(isinstance(x, TensorAlias) for x in intermediates_raw):
-                        raise AssertionError(
-                            "expected no TensorAlias in intermediates_raw"
-                        )
-            ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
-            ctx._materialize_non_diff_grads = False
-            return tuple(raw_returns)
-
-        forward_epilogue.finalize = _codegen_finalize  # type: ignore[method-assign]
 
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
@@ -3454,6 +3430,8 @@ class _AOTDispatchAutogradFunctionFactory:
 
             @staticmethod
             def _compiled_autograd_key(ctx: Any) -> tuple[Any, ...]:
+                if num_symints_saved_for_bw_ == 0:
+                    return (ctx._autograd_function_id,)
                 return (ctx._autograd_function_id, *ctx.symints)
 
             @staticmethod
@@ -3462,10 +3440,8 @@ class _AOTDispatchAutogradFunctionFactory:
                 return CompiledFunction._fwd_fn(
                     ctx,
                     deduped_flat_tensor_args,
-                    rng_state.add_forward_args,
-                    saved_state.save_from_forward,
-                    forward_epilogue.finalize,
                     CompiledFunction.compiled_fw,
+                    rng_state.add_forward_args,
                 )
 
             @staticmethod
