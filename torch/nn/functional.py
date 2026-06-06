@@ -1115,6 +1115,12 @@ def lp_pool3d(
             ceil_mode=ceil_mode,
         )
     kd, kw, kh = _triple(kernel_size)
+    if isinstance(norm_type, (int, float)):
+        if norm_type == float("inf"):
+            return max_pool3d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool3d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1156,6 +1162,12 @@ def lp_pool2d(
             ceil_mode=ceil_mode,
         )
     kw, kh = _pair(kernel_size)
+    if isinstance(norm_type, (int, float)):
+        if norm_type == float("inf"):
+            return max_pool2d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool2d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1193,6 +1205,12 @@ def lp_pool1d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
+    if isinstance(norm_type, (int, float)):
+        if norm_type == float("inf"):
+            return max_pool1d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool1d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -3660,6 +3678,7 @@ def linear_cross_entropy(
     linear_weight: Tensor,
     target: Tensor,
     *,
+    linear_bias: Tensor | None = None,
     weight: Tensor | None = None,
     reduction: str = "mean",
     ignore_index: int | None = None,
@@ -3687,6 +3706,13 @@ def linear_cross_entropy(
         input (Tensor) : input samples.
         linear_weight (Tensor) : linear weight.
         target (Tensor) : Ground truth class indices or class probabilities;
+        linear_bias (Tensor, optional): bias added to the linear
+            projection (shape ``(C,)`` or ``(C, d_1, ..., d_K)`` for
+            K-dimensional loss, matching :attr:`linear_weight`).
+            With ``options != None``, K-dimensional bias
+            (``out_features != ()``) falls back to the reference
+            implementation with a warning; the chunked path supports
+            only ``(C,)``-shaped bias. Default: ``None``.
         weight (Tensor, optional): a manual rescaling weight given to each class.
         reduction (str, optional): Specifies the reduction to apply to
             the output: ``'none'`` | ``'mean'`` |
@@ -3773,13 +3799,14 @@ def linear_cross_entropy(
         where :math:`N` is batch size and :math:`C` is number of classes.
 
     """
-    if has_torch_function_variadic(input, linear_weight, target, weight):
+    if has_torch_function_variadic(input, linear_weight, target, linear_bias, weight):
         return handle_torch_function(
             linear_cross_entropy,
-            (input, linear_weight, target, weight),
+            (input, linear_weight, target, linear_bias, weight),
             input,
             linear_weight,
             target,
+            linear_bias=linear_bias,
             weight=weight,
             reduction=reduction,
             ignore_index=ignore_index,
@@ -3803,6 +3830,14 @@ def linear_cross_entropy(
         )
     num_classes = linear_weight.shape[0]
     out_features = linear_weight.shape[1:-1]
+    if linear_bias is not None and tuple(linear_bias.shape) != (
+        num_classes,
+        *out_features,
+    ):
+        raise RuntimeError(
+            "expected linear_bias shape "
+            f"{(num_classes, *out_features)}, got {tuple(linear_bias.shape)}"
+        )
     if len(out_features) > 0 and len(num_batches) == 0:
         raise RuntimeError(
             f"K-dimensional loss defined by linear_weight shape {tuple(linear_weight.shape)} requires"
@@ -3832,10 +3867,12 @@ def linear_cross_entropy(
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
             "reduction in {'mean','sum'}, label_smoothing == 0, target.dtype"
-            " == int64, out_features == (), and not under torch.jit.trace."
-            f" Got reduction={reduction!r}, label_smoothing={label_smoothing}, "
-            f"target.dtype={target.dtype}, out_features={tuple(out_features)}, "
-            f"tracing={torch.jit.is_tracing()}.",
+            " == int64, out_features == (). Got "
+            f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
+            f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
+            f", tracing={torch.jit.is_tracing()}"
+            f", linear_bias.shape="
+            f"{tuple(linear_bias.shape) if linear_bias is not None else None}.",
             stacklevel=2,
         )
 
@@ -3885,6 +3922,7 @@ def linear_cross_entropy(
             input,
             linear_weight,
             target,
+            linear_bias,
             weight,
             reduction,
             ignore_index,
@@ -3895,6 +3933,9 @@ def linear_cross_entropy(
             options.allow_retain_graph,
             input.requires_grad and torch.is_grad_enabled(),
             linear_weight.requires_grad and torch.is_grad_enabled(),
+            linear_bias is not None
+            and linear_bias.requires_grad
+            and torch.is_grad_enabled(),
         )[0]
 
         if not has_batches:
@@ -3905,8 +3946,12 @@ def linear_cross_entropy(
         linear_weight = linear_weight.reshape(
             (math.prod(out_features, start=num_classes), in_features)
         )
+        if linear_bias is not None:
+            linear_bias = linear_bias.reshape(
+                math.prod(out_features, start=num_classes)
+            )
 
-    logits = linear(input, linear_weight)
+    logits = linear(input, linear_weight, linear_bias)
     # recover logits shape that corresponds to the shape of specified
     # linear_weight:
     logits = logits.reshape(logits_shape)
