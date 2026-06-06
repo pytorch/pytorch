@@ -1878,6 +1878,56 @@ class TestMeta(TestCase):
             self.assertEqual(ref_out.size(), fake_out.size())
             self.assertEqual(ref_out.stride(), fake_out.stride())
 
+        with self.subTest(ref_requires_grad=True):
+            with FakeTensorMode() as mode:
+                fake_input = mode.from_tensor(complex_input.requires_grad_())
+                fake_scalar = mode.from_tensor(
+                    torch.ones((), device=device, dtype=torch.float32).expand_as(
+                        complex_input
+                    )
+                )
+                fake_out = torch._refs.add(fake_scalar, fake_input)
+
+            self.assertTrue(fake_out.requires_grad)
+            self.assertEqual(ref_out.size(), fake_out.size())
+            self.assertEqual(ref_out.stride(), fake_out.stride())
+
+        with self.subTest(ref_where_pred_stride=True):
+            pred = complex_input.real > 0
+            a = torch.ones_like(complex_input.real)
+            b = torch.zeros_like(complex_input.real)
+            ref_out = torch.where(pred, a, b)
+
+            with FakeTensorMode() as mode:
+                fake_pred = mode.from_tensor(pred)
+                fake_a = mode.from_tensor(a)
+                fake_b = mode.from_tensor(b)
+                fake_out = torch._refs.where(fake_pred, fake_a, fake_b)
+
+            self.assertEqual(ref_out.size(), fake_out.size())
+            self.assertEqual(ref_out.stride(), fake_out.stride())
+
+        with self.subTest(ref_non_elementwise_outputs=True):
+            real_input = complex_input.real.detach()
+            with FakeTensorMode() as mode:
+                fake_input = mode.from_tensor(real_input)
+                logsumexp_out = torch._refs.logsumexp(fake_input, 1)
+                dot_out = torch._refs.dot(fake_input.flatten(), fake_input.flatten())
+                prelu_out = torch._refs.nn.functional.prelu(
+                    mode.from_tensor(torch.randn(2, 3, 5, 7, device=device)),
+                    mode.from_tensor(torch.randn(3, device=device)),
+                )
+                addr_out = torch._refs.addr(
+                    mode.from_tensor(torch.randn(2, 3, device=device)),
+                    mode.from_tensor(torch.randn(2, device=device)),
+                    mode.from_tensor(torch.randn(3, device=device)),
+                )
+
+            self.assertEqual(logsumexp_out.size(), (17,))
+            self.assertEqual(dot_out.size(), ())
+            self.assertEqual(prelu_out.size(), (2, 3, 5, 7))
+            self.assertEqual(addr_out.size(), (2, 3))
+
 
     def test_map_location_deserialize(self):
         import io
@@ -2035,6 +2085,26 @@ class TestMeta(TestCase):
             self.assertEqual(out_dtype, [in_dtype, bias_dtype, bias_dtype])
         else:
             self.assertEqual(out_dtype, [in_dtype,])
+
+    @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
+    def test_scaled_dot_product_flash_attention_for_cpu_logsumexp_dtype(self, dtype):
+        B, H, L, E = 2, 4, 8, 16
+
+        def run(device):
+            query = torch.randn(B, H, L, E, device=device, dtype=dtype)
+            key = torch.randn(B, H, L, E, device=device, dtype=dtype)
+            value = torch.randn(B, H, L, E, device=device, dtype=dtype)
+
+            output, logsumexp = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu(
+                query, key, value
+            )
+            return output.dtype, logsumexp.dtype
+
+        cpu_output_dtype, cpu_logsumexp_dtype = run("cpu")
+        meta_output_dtype, meta_logsumexp_dtype = run("meta")
+
+        self.assertEqual(cpu_output_dtype, meta_output_dtype)
+        self.assertEqual(cpu_logsumexp_dtype, meta_logsumexp_dtype)
 
 class TestMetaKernelConv(TestCase):
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")

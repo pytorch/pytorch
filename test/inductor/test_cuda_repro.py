@@ -71,6 +71,12 @@ from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import skipCUDAIf
 
 
+def _strip_triton_static_asserts(code):
+    return "\n".join(
+        line for line in code.splitlines() if "tl.static_assert" not in line
+    )
+
+
 try:
     try:
         import triton  # @manual
@@ -634,6 +640,7 @@ class CudaReproTests(TestCase):
 
         # fwd, backward
         for code in codes:
+            code = _strip_triton_static_asserts(code)
             f = FileCheck()
             # in eager, there are two down casts
             for _ in range(2):
@@ -1165,7 +1172,7 @@ class CudaReproTests(TestCase):
         # tmp0 - not wrapping of negative numbers
         FileCheck().check("tl.device_assert(((0 <= tmp0) & (tmp0 < 4))").check_next(
             "atomic_add"
-        ).run(code[0])
+        ).run(_strip_triton_static_asserts(code[0]))
         self.assertEqual(
             out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
         )
@@ -1643,6 +1650,49 @@ class CudaReproTests(TestCase):
 
     @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180948")
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @config.patch(
+        emulate_precision_casts=False,
+        emulate_precision_casts_on_saved_tensors=True,
+    )
+    def test_saved_lowp_checkpoint_truncates_subsequent_uses(self, lowp_dtype):
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        torch.manual_seed(0)
+        lowp_name = str(lowp_dtype).removeprefix("torch.")
+
+        def policy(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.sigmoid.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy)
+
+        def g(x):
+            y = torch.sigmoid(x)
+            return y * y
+
+        def fn(x):
+            return checkpoint(g, x, use_reentrant=False, context_fn=context_fn)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = (torch.randn(64, device=device_type, dtype=lowp_dtype) * 3).requires_grad_(
+            True
+        )
+
+        expected = fn(x)
+        actual, (code,) = run_and_get_code(
+            opt_fn, x.detach().clone().requires_grad_(True)
+        )
+
+        torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        self.assertIn(f".to(tl.{lowp_name})", code)
+
+    @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_preserves_explicit_precision_cast(
         self, lowp_dtype
@@ -1705,7 +1755,6 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expected, actual)
 
-    @skipIfXpu(msg="AssertionError, torch-xpu-ops: #2554")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_min_pow_chain(self):
         torch.manual_seed(0)
@@ -1749,11 +1798,15 @@ class CudaReproTests(TestCase):
             ]
             compiled_out = opt_fn(*compiled_args)
 
+            # On XPU, the Triton backend's kernel fusion produces slightly
+            # different mixed-precision (fp16/bf16/f32) intermediate values,
+            # which the chained pow ops amplify exponentially.
+            rtol = 5e-2 if TEST_XPU else 1e-3
             for eager_tensor, compiled_tensor in zip(eager_out, compiled_out):
                 torch.testing.assert_close(
                     eager_tensor,
                     compiled_tensor,
-                    rtol=1e-3,
+                    rtol=rtol,
                     atol=1e-3,
                 )
 
@@ -2418,7 +2471,7 @@ foo(torch.rand([256], device=\"{device_type}\"))
         self.assertEqual(expect, actual)
 
         # Expect the code iterates in contiguous order, and is not tiled
-        lines = code[0].split("\n")
+        lines = _strip_triton_static_asserts(code[0]).split("\n")
         start = lines.index("@triton.jit")
         kernel_code = "\n".join(lines[start : start + 14])
         self.assertExpectedInline(

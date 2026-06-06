@@ -10,7 +10,6 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorIteratorInternal.h>
 
@@ -57,20 +56,31 @@ inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_
   }
 }
 
-std::optional<Device> fake_device_from_meta_tensor(const TensorBase& tensor) {
+std::optional<Device> device_from_tensor_backend(const TensorBase& tensor) {
   if (!tensor.defined()) {
     return std::nullopt;
   }
-  // Python FakeTensor enters meta kernels as a meta tensor, but its key set
-  // still carries the fake backend. Use that backend for TensorIterator device
-  // checks and promotion rules so fake tensors follow the real-device path.
-  if (tensor.key_set().has_backend(c10::BackendComponent::CUDABit)) {
-    return Device(kCUDA);
+
+  // FakeTensor enters C++ meta kernels under the Meta dispatch key, so
+  // TensorImpl::device() reports meta.  Its key set still carries the fake
+  // backend; recover that backend generically so TensorIterator can apply the
+  // same device checks and stride rules it would use for real tensors.
+  const auto backend = tensor.key_set().highestBackendKey();
+  if (backend == c10::BackendComponent::InvalidBit ||
+      backend == c10::BackendComponent::MetaBit) {
+    return std::nullopt;
   }
-  if (tensor.key_set().has_backend(c10::BackendComponent::CPUBit)) {
-    return Device(kCPU);
+  switch (backend) {
+#define DO_CASE(device, _)                  \
+    case c10::BackendComponent::device##Bit: \
+      return Device(c10::DeviceType::device);
+    C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
+#undef DO_CASE
+    case c10::BackendComponent::MAIABit:
+      return Device(c10::DeviceType::MAIA);
+    default:
+      return std::nullopt;
   }
-  return std::nullopt;
 }
 
 OptionalTensorRef make_otr(const TensorBase &tensor) {
@@ -412,8 +422,8 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     TORCH_INTERNAL_ASSERT(op.target_dtype == op.current_dtype)
 
     if (is_meta_) {
-      if (auto fake_device = fake_device_from_meta_tensor(op.tensor_base())) {
-        op.device = *fake_device;
+      if (auto device = device_from_tensor_backend(op.tensor_base())) {
+        op.device = *device;
       }
     }
 
@@ -558,9 +568,6 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
             at::empty_like(op.tensor(),
                            op.tensor_base().options().dtype(common_dtype_),
                            LEGACY_CONTIGUOUS_MEMORY_FORMAT)));
-        if (!names_.empty()) {
-          namedinference::propagate_names(op.tensor_base(), names_);
-        }
         op.current_dtype = common_dtype_;
         op.target_dtype = common_dtype_;
       }
@@ -617,47 +624,19 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
         // can just return contiguous output
         // it is faster because it avoids allocating 0 size tensor and
         // resizing and restriding it
-        set_output_raw_strided(i, tensor_shape, {}, original_options(op), names_);
+        set_output_raw_strided(i, tensor_shape, {}, original_options(op));
       } else {
         auto tensor_stride = invert_perm(op.stride_bytes);
         for (const auto dim : c10::irange(ndim())) {
           tensor_stride[dim] /= static_cast<int64_t>(element_size);
         }
-        set_output_raw_strided(i, tensor_shape, tensor_stride, original_options(op), names_);
+        set_output_raw_strided(i, tensor_shape, tensor_stride, original_options(op));
       }
       op.current_dtype = op.target_dtype;
     } else if (op.tensor_base().defined()) {
       // Even if we don't resize, we still need to tell set_output about
-      // the output, so that we properly set guard and propagate names
-      set_output_raw_strided(i, op.tensor_base().sizes(), {}, original_options(op), names_);
-    }
-  }
-}
-
-void TensorIteratorBase::compute_names(const TensorIteratorConfig& config) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const bool should_infer_names{std::any_of(
-      operands_.begin(),
-      operands_.end(),
-      [](const OperandInfo& op) {
-        return op.tensor_base().defined() && op.tensor_base().has_names();
-      })};
-  if (!should_infer_names) {
-    return;
-  }
-
-  for (auto& op : operands_) {
-    if (!op.tensor_base().defined()) continue;
-    // Don't include output tensors if we are resizing, since we will
-    // clobber their names in any case.  (If the output tensor was
-    // also an input tensor, we'll pick it up when it shows up again
-    // in operands).
-    if (config.resize_outputs_ && op.is_output) continue;
-    // perform name inference
-    if (names_.empty()) {
-      names_ = op.tensor_base().names();
-    } else {
-      names_ = NameVector(unify_from_right(names_, op.tensor_base().names()));
+      // the output, so that we properly set guard
+      set_output_raw_strided(i, op.tensor_base().sizes(), {}, original_options(op));
     }
   }
 }
@@ -1188,7 +1167,7 @@ TensorIterator TensorIterator::reduce_op(TensorBase& out1, TensorBase& out2, con
 
 void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
   const bool meta_in_tls =
-      c10::impl::tls_is_dispatch_key_included(DispatchKey::Meta);
+      c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Meta);
   for (const auto idx : c10::irange(config.tensors_.size())) {
     auto& tensor = config.tensors_[idx];
     // If *any* of the arguments is a meta tensor, the overall
@@ -1406,7 +1385,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor_base().defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output_raw_strided(i, shape_, {}, original_options(op).memory_format(memory_format), names_);
+          set_output_raw_strided(i, shape_, {}, original_options(op).memory_format(memory_format));
         }
         break;
       }
@@ -1423,7 +1402,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor_base().defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output_raw_strided(i, shape_, tensor_base(i_defined).strides(), original_options(op), names_);
+          set_output_raw_strided(i, shape_, tensor_base(i_defined).strides(), original_options(op));
         }
         break;
       }
@@ -1526,8 +1505,6 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // Check that the outputs have no internal overlap
   // and do not share memory with inputs.
   compute_mem_overlaps(config);
-  // Check that input dimensions are aligned correctly & compute outnames.
-  compute_names(config);
   // compute the broadcasted shape
   compute_shape(config);
   // mark outputs for resizing if necessary
@@ -1591,7 +1568,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 // The precondition for this function is that maybe_get_output() now
 // unconditionally returns a real Tensor (prior to output setting,
 // this function may return an undefined tensor.)
-void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options) {
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
   const auto& t = maybe_get_output(output_idx);
@@ -1661,7 +1638,7 @@ void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef 
 // This is the "traditional" implementation of set_output.  On TensorIterator
 // instances, it is invoked directly from various call sites in this file.  No
 // funny business.
-void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options) {
   // NB: intentionally no superclass call
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
@@ -1680,10 +1657,6 @@ void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef size
           op.tensor_base().unsafeGetTensorImpl()->empty_tensor_restride(*memory_format);
         }
       }
-  }
-  if (!names.empty()) {
-    TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
-    namedinference::propagate_names(op.tensor_base(), names);
   }
 }
 

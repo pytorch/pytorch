@@ -72,6 +72,88 @@ def _maybe_convert_to_dtype(a, dtype):
     )
 
 
+def _common_tensoriterator_device(args):
+    device = None
+    for arg in args:
+        if not isinstance(arg, TensorLike):
+            continue
+
+        arg_device = getattr(arg, "fake_device", arg.device)
+        if utils.is_cpu_scalar_tensor(arg):
+            if device is None:
+                device = arg_device
+            continue
+        return arg_device
+    return device
+
+
+def _maybe_broadcast_for_strides(args):
+    common_shape = None
+    for arg in args:
+        if isinstance(arg, TensorLike):
+            shape = tuple(arg.shape)
+        elif isinstance(arg, Number):
+            shape = ()
+        else:
+            return None
+
+        try:
+            common_shape = (
+                shape
+                if common_shape is None
+                else utils.infer_size_shapes(common_shape, shape)
+            )
+        except RuntimeError:
+            return None
+
+    if common_shape is None:
+        return None
+
+    result = []
+    for arg in args:
+        if isinstance(arg, TensorLike):
+            result.append(arg.expand(common_shape))
+    return result
+
+
+def _maybe_correct_cuda_tensoriterator_strides(result, args):
+    if not isinstance(result, TensorLike):
+        return result
+
+    device = _common_tensoriterator_device(args)
+    if device is None or device.type != "cuda":
+        return result
+
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    if not isinstance(result, FakeTensor) and result.device.type != "meta":
+        return result
+
+    if any(isinstance(arg, TensorLike) and arg.layout != torch.strided for arg in args):
+        return result
+
+    broadcasted_args = _maybe_broadcast_for_strides(args)
+    if broadcasted_args is None:
+        return result
+
+    if tuple(result.shape) != tuple(broadcasted_args[0].shape):
+        return result
+
+    try:
+        strides = utils.compute_elementwise_output_strides(*broadcasted_args)
+    except ValueError:
+        return result
+
+    if result.stride() == strides:
+        return result
+    out = torch.empty_strided(
+        result.shape, strides, dtype=result.dtype, device=result.device
+    )
+    if result.requires_grad:
+        out.requires_grad_(True)
+    return out
+
+
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
     if not isinstance(a, Number):
         msg = f"Found unknown type {type(a)} when trying to convert scalars!"
@@ -140,6 +222,7 @@ class elementwise_type_promotion_wrapper:
                 *flattened_type_promoting_args,
                 type_promotion_kind=self.type_promotion_kind,
             )
+            stride_args = pytree.arg_tree_leaves(*bound.arguments.values())
 
             promoted_args = {
                 x: _maybe_convert_to_dtype(bound.arguments[x], compute_dtype)
@@ -157,9 +240,16 @@ class elementwise_type_promotion_wrapper:
                     result_dtype = maybe_dtype
 
             if isinstance(result, TensorLike):
-                return _maybe_convert_to_dtype(result, result_dtype)
+                result = _maybe_convert_to_dtype(result, result_dtype)
+                return _maybe_correct_cuda_tensoriterator_strides(result, stride_args)
             if isinstance(result, Sequence):
-                return tuple(_maybe_convert_to_dtype(x, result_dtype) for x in result)
+                return tuple(
+                    _maybe_correct_cuda_tensoriterator_strides(
+                        _maybe_convert_to_dtype(x, result_dtype),
+                        stride_args,
+                    )
+                    for x in result
+                )
             raise AssertionError(f"Unhandled result type: {type(result)}")
 
         _fn.__signature__ = sig  # type: ignore[attr-defined]
