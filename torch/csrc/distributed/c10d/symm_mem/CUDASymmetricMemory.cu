@@ -570,7 +570,7 @@ static void validate_nvlink_fabric_support(
       }
       oss << "rank " << r << " (host: " << reqs[r].hostname
           << ", device: " << reqs[r].device_idx
-          << ", clique_id: " << reqs[r].clique_id << ")";
+          << ", clique_id: " << reqs[r].clique_id << ')';
     }
     TORCH_CHECK(false, oss.str());
   }

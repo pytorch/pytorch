@@ -83,7 +83,7 @@ struct TORCH_API Object {
     }
     std::stringstream err;
     err << _ivalue()->type()->repr_str() << " does not have a field with name '"
-        << name.c_str() << "'";
+        << name.c_str() << '\'';
     throw ObjectAttributeError(err.str());
   }
 

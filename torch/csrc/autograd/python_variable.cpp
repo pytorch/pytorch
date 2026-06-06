@@ -1150,9 +1150,9 @@ class NativeOpSchema {
     std::ostringstream ss;
     ss << op_.operator_name().name;
     if (!op_.operator_name().overload_name.empty()) {
-      ss << "." << op_.operator_name().overload_name;
+      ss << '.' << op_.operator_name().overload_name;
     }
-    ss << "(";
+    ss << '(';
     bool first = true;
     for (const auto& item : comparison_key_) {
       if (!first)
@@ -1164,7 +1164,7 @@ class NativeOpSchema {
         ss << item.iv;
       }
     }
-    ss << ")";
+    ss << ')';
     return ss.str();
   }
 

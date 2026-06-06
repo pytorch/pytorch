@@ -18,7 +18,7 @@ namespace {
 static void openregCheck(orError_t result, const char* file, int line) {
   if (result != orSuccess) {
     std::stringstream ss;
-    ss << file << ":" << line << ": ";
+    ss << file << ':' << line << ": ";
     if (result == orErrorNotReady) {
       ss << "OpenReg operation not ready";
     } else {
