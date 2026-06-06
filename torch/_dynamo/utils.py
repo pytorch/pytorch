@@ -3277,9 +3277,16 @@ def iter_contains(
     from .variables import ConstantVariable
 
     if search.is_python_constant():
+        search_val = search.as_python_constant()
+        # CPython's list_contains/set_contains use PyObject_RichCompareBool
+        # which has an identity shortcut: if v is w, return True for eq.
+        # Check identity first (matters for NaN).
         found_const = any(
             x.is_python_constant()
-            and x.as_python_constant() == search.as_python_constant()
+            and (
+                x.as_python_constant() is search_val
+                or x.as_python_constant() == search_val
+            )
             for x in items
         )
         return ConstantVariable.create(found_const)
@@ -5773,6 +5780,10 @@ def _make_inlined(
         from torch._dynamo.variables.functions import UserFunctionVariable
 
         with _force_inline():
-            return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+            return tx.inline_user_function_return(
+                UserFunctionVariable(f),
+                list(args),
+                dict(kwargs),
+            )
 
     return inline_call
