@@ -590,6 +590,7 @@ function(target_optimize_if_llvm_bolt_enabled tgt)
             -lite -infer-stale-profile
             -reorder-blocks=ext-tsp -reorder-functions=hfsort
             -split-functions -split-all-cold -split-eh -dyno-stats
+            --update-debug-sections
     COMMENT "Optimizing $<TARGET_FILE_NAME:${tgt}> with LLVM BOLT (original kept in prebolt/)"
     VERBATIM)
 endfunction()
