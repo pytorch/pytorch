@@ -164,6 +164,64 @@ def is_tensor_like_type(typ: Any) -> bool:
     return typ == _C.TensorType.get() or typ == _C.OptionalType(_C.TensorType.get())
 
 
+# Source of truth for tensor-bearing schema types that custom op registration
+# supports without deprecation. Keep this in sync with
+# c10::DispatchKeyExtractor::isDispatchType.
+SUPPORTED_CUSTOM_OP_SCHEMA_TYPES = (
+    "Tensor",
+    "Optional[Tensor]",
+    "List[Tensor]",
+    "List[Optional[Tensor]]",
+)
+
+
+# should be torch._C.JitType but that annotation is busted
+def _is_tensor_schema_type(typ: Any) -> bool:
+    return isinstance(typ, torch.TensorType)
+
+
+# should be torch._C.JitType but that annotation is busted
+def _is_optional_tensor_schema_type(typ: Any) -> bool:
+    return isinstance(typ, torch.OptionalType) and _is_tensor_schema_type(
+        typ.getElementType()
+    )
+
+
+# should be torch._C.JitType but that annotation is busted
+def _custom_op_schema_type_contains_tensor(typ: Any) -> bool:
+    if _is_tensor_schema_type(typ):
+        return True
+    if isinstance(typ, (torch.OptionalType, torch.ListType)):
+        return _custom_op_schema_type_contains_tensor(typ.getElementType())
+    return any(
+        _custom_op_schema_type_contains_tensor(contained_type)
+        for contained_type in typ.containedTypes()
+    )
+
+
+# should be torch._C.JitType but that annotation is busted
+def is_supported_custom_op_schema_type(typ: Any) -> bool:
+    if not _custom_op_schema_type_contains_tensor(typ):
+        return True
+    if _is_tensor_schema_type(typ) or _is_optional_tensor_schema_type(typ):
+        return True
+    if isinstance(typ, torch.ListType):
+        elem = typ.getElementType()
+        return _is_tensor_schema_type(elem) or _is_optional_tensor_schema_type(elem)
+    return False
+
+
+def get_unsupported_custom_op_schema_types(schema: _C.FunctionSchema) -> list[str]:
+    unsupported = []
+    for arg in schema.arguments:
+        if not is_supported_custom_op_schema_type(arg.type):
+            unsupported.append(f"argument '{arg.name}' with type {arg.type}")
+    for idx, ret in enumerate(schema.returns):
+        if not is_supported_custom_op_schema_type(ret.type):
+            unsupported.append(f"return {idx} with type {ret.type}")
+    return unsupported
+
+
 def mutates_and_returns_first_arg(op: OpOverload):
     """Check if an op is an inplace aten op, i.e. it mutates and returns the first arg.
 

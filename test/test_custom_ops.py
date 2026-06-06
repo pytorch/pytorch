@@ -11,6 +11,7 @@ import sys
 import tempfile
 import typing
 import unittest
+import warnings
 from functools import partial
 from pathlib import Path
 from typing import *  # noqa: F403
@@ -2126,6 +2127,112 @@ Dynamic shape operator
                 lib.define(f"foo12({type_name} a) -> Tensor")
             finally:
                 torch._C._unregister_opaque_type(type_name)
+
+    def test_define_warns_for_unsupported_schema_types(self):
+        tests = [
+            (
+                "deep_tensor_list_arg(Tensor[][][][] x) -> Tensor",
+                r"argument 'x' with type List\[List\[List\[List\[Tensor\]\]\]\]",
+            ),
+            (
+                "optional_tensor_list_arg(Tensor[]? x) -> Tensor",
+                r"argument 'x' with type Optional\[List\[Tensor\]\]",
+            ),
+            (
+                "deep_tensor_list_return(Tensor x) -> Tensor[][]",
+                r"return 0 with type List\[List\[Tensor\]\]",
+            ),
+            (
+                "dict_arg(Dict(str, Tensor) x) -> Tensor",
+                r"argument 'x' with type Dict\[str, Tensor\]",
+            ),
+        ]
+        for schema, regex in tests:
+            with self.subTest(schema=schema):
+                lib = self.lib()
+                with self.assertWarnsRegex(FutureWarning, regex):
+                    lib.define(schema)
+
+    def test_define_does_not_warn_for_supported_schema_types(self):
+        schemas = [
+            "supported_tensor(Tensor x) -> Tensor",
+            "supported_optional_tensor(Tensor? x) -> Tensor?",
+            "supported_tensor_list(Tensor[] x) -> Tensor[]",
+            "supported_optional_tensor_list(Tensor?[] x) -> Tensor",
+            "supported_scalars(int i, float f, bool b, str s, Scalar n, Device d) -> Tensor",
+            "supported_scalar_lists(int[] i, float[] f, bool[] b, str[] s, Scalar[] n, Device[] d) -> Tensor",
+            "supported_optional_scalars(int? i, float? f, bool? b, str? s, Scalar? n, Device? d) -> Tensor",
+            "supported_enum_lists(ScalarType[] dtypes, Layout[] layouts, MemoryFormat[] formats) -> Tensor",
+        ]
+        lib = self.lib()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            for schema in schemas:
+                lib.define(schema)
+        custom_op_schema_warnings = [
+            w for w in caught if "unsupported schema types" in str(w.message)
+        ]
+        self.assertEqual(custom_op_schema_warnings, [])
+
+    def test_define_wrapper_warns_at_user_stacklevel(self):
+        lib = self.lib()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            torch.library.define(
+                f"{self.test_ns}::wrapper_stacklevel",
+                "(Tensor[][] x) -> Tensor",
+                lib=lib,
+            )
+        custom_op_schema_warnings = [
+            w for w in caught if "unsupported schema types" in str(w.message)
+        ]
+        self.assertEqual(len(custom_op_schema_warnings), 1)
+        self.assertEqual(
+            os.path.abspath(custom_op_schema_warnings[0].filename),
+            os.path.abspath(__file__),
+        )
+
+    def test_legacy_define_wrapper_warns_at_user_stacklevel(self):
+        lib = self.lib()
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+
+            @torch.library.define(
+                lib, "legacy_wrapper_stacklevel(Tensor[][] x) -> Tensor"
+            )
+            def f(x):
+                return x[0][0]
+
+        custom_op_schema_warnings = [
+            w for w in caught if "unsupported schema types" in str(w.message)
+        ]
+        self.assertEqual(len(custom_op_schema_warnings), 1)
+        self.assertEqual(
+            os.path.abspath(custom_op_schema_warnings[0].filename),
+            os.path.abspath(__file__),
+        )
+
+    def test_custom_op_manual_schema_warns_at_user_stacklevel(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+
+            @torch.library.custom_op(
+                f"{self.test_ns}::custom_op_stacklevel",
+                mutates_args=(),
+                schema="(Tensor[][] x) -> Tensor",
+            )
+            def f(x: list[list[Tensor]]) -> Tensor:
+                return x[0][0]
+
+        custom_op_schema_warnings = [
+            w for w in caught if "unsupported schema types" in str(w.message)
+        ]
+        self.assertEqual(len(custom_op_schema_warnings), 1)
+        self.assertEqual(
+            os.path.abspath(custom_op_schema_warnings[0].filename),
+            os.path.abspath(__file__),
+        )
 
     def test_is_tensorlist_like_type(self):
         tensorlists = [
