@@ -468,7 +468,7 @@ def _cuda_system_info_comment() -> str:
             model_str += f"{comment}\n"
         else:
             model_str += "# Not searching for nvcc on ROCM setup\n"
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except (OSError, subprocess.CalledProcessError):
         model_str += "# nvcc not found\n"
 
     gpu_names = Counter(
