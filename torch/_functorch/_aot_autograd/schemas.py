@@ -1031,8 +1031,12 @@ class GraphSignature:
                 if trace_joint:
                     # Only buffers can be mutated, not parameters
                     if idx < len(parameters):
-                        raise AssertionError(
-                            f"expected idx ({idx}) >= len(parameters) ({len(parameters)}) when tracing joint"
+                        raise RuntimeError(
+                            "Mutating module parameters while exporting a joint "
+                            "forward/backward graph is not supported. Only buffers "
+                            "can be mutated as module state. If this state does "
+                            "not need gradients, register it as a buffer instead. "
+                            f"Found mutation on parameter {parameters[idx]!r}."
                         )
                 mutations.append(names[idx + num_tokens])
 
