@@ -1155,7 +1155,7 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
       max_indices->copy_(bag_size);
     }
   } else {
-    TORCH_CHECK(mode == EmbeddingBagMode::MAX, "`mode` must be sum, min, or max.")
+    TORCH_CHECK(mode == EmbeddingBagMode::MAX, "`mode` must be sum, mean, or max.")
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
