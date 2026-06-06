@@ -1730,6 +1730,18 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(eager_no_sq, comp_ind_no_sq)
         self.assertEqual(eager_no_sq.stride(), comp_ind_no_sq.stride())
 
+    def test_aot_eager_group_norm_preserves_contiguous_view(self):
+        def fn(x):
+            y = x.flatten(2).transpose(1, 2) @ torch.ones(2, 2)
+            return torch.nn.functional.group_norm(y.transpose(1, 2).view(1, 2, 2, 2), 1)
+
+        x = torch.randn(1, 2, 2, 2)
+        eager_out = fn(x)
+        compiled_out = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_unbacked_activation_specialized_in_inductor(self):

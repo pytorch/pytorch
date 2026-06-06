@@ -1121,11 +1121,24 @@ def _view_meta(
         return typing_cast(
             FakeTensor, _view_unbacked_meta(a, shape, allow_copy=allow_copy)
         )
-    else:
+
+    # Match eager view stride calculation, including size-1 dimensions whose
+    # strides can be recomputed by at::detail::computeStride.
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
+    shape = utils.infer_size(shape, a.numel())
+    new_strides = _compute_stride(a.size(), a.stride(), shape)
+    if new_strides is not None:
+        return typing_cast(FakeTensor, a.as_strided(shape, new_strides))
+
+    if allow_copy:
+        strides = make_contiguous_strides_for(shape)
         return typing_cast(
             FakeTensor,
-            torch._refs._reshape_view_helper(a, *shape, allow_copy=allow_copy),
+            a.clone(memory_format=torch.contiguous_format).as_strided(shape, strides),
         )
+
+    msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
+    raise ValueError(msg)
 
 
 @register_op_impl(aten.view_copy.default)
