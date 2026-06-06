@@ -6280,6 +6280,20 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         for x in [torch.contiguous_format, torch.channels_last]:
             self.assertEqual(fn(x), opt_fn(x))
 
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    def test_cuda_tensor_is_pinned_constant_false(self):
+        def pinned_memory_of(arg):
+            return arg.is_pinned()
+
+        def fn(x):
+            if pinned_memory_of(x):
+                return x + 1
+            return x + 2
+
+        x = torch.randn(4, device="cuda")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_python_slice(self):
         def f1(input):
             y = 0
