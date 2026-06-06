@@ -656,6 +656,142 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
+    def test_non_strict_scalar_tensor_slice_bounds(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, i):
+                start = i * 2
+                end = torch.minimum(start + 5, torch.tensor(x.size(0), device=x.device))
+                return x[start:end]
+
+        x = torch.randn(10)
+        i = torch.tensor(1, dtype=torch.int64)
+        ep = export(Module(), (x, i), strict=False)
+        self.assertEqual(ep.module()(x, i), Module()(x, i))
+        FileCheck().check_count("torch.ops.aten.slice.Tensor", 1, exactly=True).run(
+            str(ep.graph)
+        )
+
+    def test_non_strict_scalar_tensor_slice_step(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, step):
+                torch._check(step.item() > 0)
+                return x[::step]
+
+        x = torch.randn(10)
+        step = torch.tensor(2, dtype=torch.int64)
+        ep = export(Module(), (x, step), strict=False)
+        self.assertEqual(ep.module()(x, step), Module()(x, step))
+        FileCheck().check_count("torch.ops.aten.slice.Tensor", 1, exactly=True).run(
+            str(ep.graph)
+        )
+
+    def test_non_strict_bool_scalar_tensor_slice_not_rewritten(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, b):
+                return x[:b]
+
+        with self.assertRaisesRegex(
+            torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+            "Could not guard on data-dependent expression",
+        ) as cm:
+            export(Module(), (torch.arange(5), torch.tensor(True)), strict=False)
+        self.assertNotIn("Expected a value of type 'Optional[int]'", str(cm.exception))
+
+    def test_non_strict_while_loop_scalar_tensor_slice_bounds(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                i = torch.tensor(0, dtype=torch.int64, device=x.device)
+                out = torch.zeros((), dtype=x.dtype, device=x.device)
+
+                def cond_fn(i, out, x):
+                    return i < 1
+
+                def body_fn(i, out, x):
+                    start = i * 2
+                    end = torch.minimum(
+                        start + 3, torch.tensor(x.size(0), device=x.device)
+                    )
+                    patch = x[start:end]
+                    return i + 1, out + patch.sum(), x.clone()
+
+                _, out, _ = torch.while_loop(cond_fn, body_fn, (i, out, x))
+                return out
+
+        x = torch.randn(10)
+        dynamic_shapes = {"x": {0: Dim("n", min=4, max=20)}}
+        ep = export(Module(), (x,), dynamic_shapes=dynamic_shapes, strict=False)
+        self.assertEqual(ep.module()(x), Module()(x))
+        FileCheck().check_count(
+            "torch.ops.higher_order.while_loop", 1, exactly=True
+        ).run(str(ep.graph))
+        FileCheck().check_count("torch.ops.aten.slice.Tensor", 1, exactly=True).run(
+            ep.graph_module.while_loop_body_graph_0.code
+        )
+
+    def test_non_strict_while_loop_scalar_tensor_slice_step(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, step):
+                i = torch.tensor(0, dtype=torch.int64, device=x.device)
+                out = torch.zeros((), dtype=x.dtype, device=x.device)
+
+                def cond_fn(i, out, x, step):
+                    return i < 1
+
+                def body_fn(i, out, x, step):
+                    torch._check(step.item() > 0)
+                    patch = x[::step]
+                    return i + 1, out + patch.sum(), x.clone(), step.clone()
+
+                _, out, _, _ = torch.while_loop(cond_fn, body_fn, (i, out, x, step))
+                return out
+
+        x = torch.randn(10)
+        step = torch.tensor(2, dtype=torch.int64)
+        dynamic_shapes = {
+            "x": {0: Dim("n", min=4, max=20)},
+            "step": None,
+        }
+        ep = export(Module(), (x, step), dynamic_shapes=dynamic_shapes, strict=False)
+        self.assertEqual(ep.module()(x, step), Module()(x, step))
+        FileCheck().check_count(
+            "torch.ops.higher_order.while_loop", 1, exactly=True
+        ).run(str(ep.graph))
+        FileCheck().check_count("torch.ops.aten.slice.Tensor", 1, exactly=True).run(
+            ep.graph_module.while_loop_body_graph_0.code
+        )
+
+    def test_non_strict_while_loop_bool_scalar_tensor_slice_not_rewritten(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, b):
+                i = torch.tensor(0, dtype=torch.int64, device=x.device)
+                out = torch.zeros((), dtype=x.dtype, device=x.device)
+
+                def cond_fn(i, out, x, b):
+                    return i < 1
+
+                def body_fn(i, out, x, b):
+                    patch = x[:b]
+                    return i + 1, out + patch.sum(), x.clone(), b.clone()
+
+                _, out, _, _ = torch.while_loop(cond_fn, body_fn, (i, out, x, b))
+                return out
+
+        dynamic_shapes = {
+            "x": {0: Dim("n", min=4, max=10)},
+            "b": None,
+        }
+        with self.assertRaisesRegex(
+            torchdynamo.exc.TorchRuntimeError,
+            "slice indices must be integers",
+        ) as cm:
+            export(
+                Module(),
+                (torch.arange(5, dtype=torch.float32), torch.tensor(True)),
+                dynamic_shapes=dynamic_shapes,
+                strict=False,
+            )
+        self.assertNotIn("Expected a value of type 'Optional[int]'", str(cm.exception))
+
     @skipIfCrossRef  # CrossRefMode interferes with functorch ops
     @skipIfTorchDynamo("export inside dynamo is not supported")
     def test_gradient_tracking_tensors(self) -> None:
