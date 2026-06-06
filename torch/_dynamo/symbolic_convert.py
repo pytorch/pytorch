@@ -4138,18 +4138,22 @@ class InstructionTranslatorBase(
         self.push(b)
         self.push(a)
 
+    @staticmethod
+    def _format_value_template(format_spec: str, flag: int) -> str:
+        conversion = ("", "!s", "!r", "!a")[flag]
+        return "{" + conversion + ":" + format_spec + "}"
+
     def _convert_value(self, value: VariableTracker, flag: int) -> VariableTracker:
-        if flag == 1:
-            return VariableTracker.build(self, str).call_function(self, [value], {})  # type: ignore[arg-type]
-        elif flag == 2:
-            return VariableTracker.build(self, repr).call_function(self, [value], {})  # type: ignore[arg-type]
-        elif flag == 3:
-            return VariableTracker.build(self, ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+        if flag:
+            fmt_var = VariableTracker.build(self, self._format_value_template("", flag))
+            return BuiltinVariable(str.format).call_function(self, [fmt_var, value], {})
         return value
 
     def _format_value(self, fmt_spec: VariableTracker, flags: int) -> None:
         value = self.pop()
-        if isinstance(value, SymNodeVariable):
+        conversion = flags & 0x03
+        format_spec = fmt_spec.as_python_constant()
+        if isinstance(value, SymNodeVariable) and conversion == 0:
             from torch._dynamo.variables.lazy import (
                 LazySymNodeFormatString,
                 LazyVariableTracker,
@@ -4161,10 +4165,8 @@ class InstructionTranslatorBase(
             self.push(value)
             return
 
-        value = self._convert_value(value, flags & 0x03)
-
         fmt_var = VariableTracker.build(
-            self, "{:" + fmt_spec.as_python_constant() + "}"
+            self, self._format_value_template(format_spec, conversion)
         )
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
