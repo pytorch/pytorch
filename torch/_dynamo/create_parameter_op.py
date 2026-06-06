@@ -24,7 +24,8 @@ class TracableCreateParameter(torch.autograd.Function):
     def forward(ctx: Any, tensor: Any, placeholder: Any) -> torch.nn.Parameter:
         if tensor.requires_grad:
             tensor = tensor.detach()
-        return placeholder.set_(tensor)
+        placeholder.set_(tensor)
+        return torch.nn.Parameter(placeholder, requires_grad=placeholder.requires_grad)
 
     @staticmethod
     def backward(ctx: Any, *grad_outputs: torch.Tensor) -> tuple[None, torch.Tensor]:

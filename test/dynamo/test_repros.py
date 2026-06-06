@@ -43,6 +43,10 @@ import torch.library
 import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.backends.debugging import ExplainWithBackend
+from torch._dynamo.create_parameter_op import (
+    new_parameter_placeholder,
+    tracable_create_parameter,
+)
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -56,6 +60,7 @@ from torch._dynamo.testing import (
     skipIfPy312,
 )
 from torch._inductor.utils import fresh_cache
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn import functional as F
 from torch.nn.attention.flex_attention import (
     AuxRequest,
@@ -7241,6 +7246,17 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             "https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0264.html"
         )
         self.assertEqual(explain_output.break_reasons[0].reason, expected_msg)
+
+    def test_tracable_parameter_fake_is_leaf_after_set(self):
+        with FakeTensorMode():
+            tensor = torch.ones(1, 1)
+            placeholder = new_parameter_placeholder(
+                (1, 1), tensor.dtype, tensor.device, requires_grad=True
+            )
+            param = tracable_create_parameter(tensor, placeholder)
+
+            self.assertIsNone(param._base)
+            self.assertFalse(param.is_leaf)
 
     @parametrize("backend", ["eager", "inductor"])
     def test_issue164247(self, backend: str):
