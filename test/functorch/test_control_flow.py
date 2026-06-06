@@ -10253,7 +10253,7 @@ class <lambda>(torch.nn.Module):
     @parametrize("device", ["cuda", "cpu"])
     @parametrize("dynamic", [True, False])
     def test_scan_auto_functionalize_multiple_buffer_mutation(self, device, dynamic):
-        # Two buffers, both mutated each step — exercises the multi-base
+        # Two buffers, both mutated each step -- exercises the multi-base
         # _all_bases path through do_auto_functionalize_v2.
         class M(torch.nn.Module):
             def __init__(self):
@@ -10281,7 +10281,7 @@ class <lambda>(torch.nn.Module):
     @parametrize("dynamic", [True, False])
     def test_scan_auto_functionalize_captured_tensor_mutation(self, device, dynamic):
         # Mutate a tensor captured from the enclosing scope. In scan, such
-        # captures become lifted freevars — Dynamo passes them as the
+        # captures become lifted freevars -- Dynamo passes them as the
         # tail of additional_inputs, so this test specifically exercises
         # the lifted-freevar branch of subgraph_mutated_input_storages /
         # parent_mutated_input_indices.
@@ -10331,7 +10331,7 @@ class <lambda>(torch.nn.Module):
     def test_scan_xs_mutation_graph_breaks(self):
         # Same as above, but the mutated slot is xs[t]. Each step sees a
         # storage-disjoint slice so a write is unobservable to step t+1
-        # — disallowed by the scan contract.
+        # -- disallowed by the scan contract.
         def combine_fn(carry, x):
             x.add_(1)  # mutating xs[t] is disallowed
             return carry + x, carry * x
@@ -10355,7 +10355,7 @@ class <lambda>(torch.nn.Module):
     def test_scan_init_and_xs_mutation_graph_breaks(self):
         # combine_fn mutates BOTH init and xs in the same call. Dynamo
         # must aggregate them and graph-break with both regions in the
-        # message — a regression here would either miss one region or
+        # message -- a regression here would either miss one region or
         # allow the call through.
         def combine_fn(carry, x):
             carry.add_(1)
@@ -10386,7 +10386,7 @@ class <lambda>(torch.nn.Module):
     def test_scan_auto_functionalize_partial_buffer_mutation(self, device, dynamic):
         # 3 lifted buffers, only 2 mutated (in non-contiguous positions).
         # Verifies that the parent-side index list is correctly built
-        # AND that the schema only marks the actually-mutated slots —
+        # AND that the schema only marks the actually-mutated slots --
         # a constant-offset bug would mismatch.
         class M(torch.nn.Module):
             def __init__(self):
@@ -10411,7 +10411,7 @@ class <lambda>(torch.nn.Module):
         self.assertIn("auto_functionalized_v2", graph_str)
 
     def test_scan_eager_init_mutation_raises(self):
-        # No torch.compile, no make_fx — pure eager call. The
+        # No torch.compile, no make_fx -- pure eager call. The
         # _check_alias_and_mutation fallback in scan_functionalize must
         # still reject mutation on init/xs for users who skip Dynamo.
         def combine_fn(carry, x):
@@ -10723,12 +10723,12 @@ class TestHopSchema(TestCase):
 
         cases = [
             # 2 buffers: only first, only second (the case aorenste flagged),
-            # and both — covers all non-empty subsets at this size.
+            # and both -- covers all non-empty subsets at this size.
             (2, (0,)),
             (2, (1,)),
             (2, (0, 1)),
             # 3 buffers: only middle, only last, first+last (non-contiguous),
-            # and all — distinguishes start/middle/end positions and mixed
+            # and all -- distinguishes start/middle/end positions and mixed
             # selections that a constant offset would mismatch.
             (3, (1,)),
             (3, (2,)),
@@ -10783,7 +10783,7 @@ class TestHopSchema(TestCase):
         # them through as a comma-joined string and gen_schema should
         # honor that without re-running the analysis on combine_fn.
         # Indices are over the flat (init, xs, additional_inputs) input
-        # list — 0=init0, 1=xs0, 2=additional_input0, 3=additional_input1.
+        # list -- 0=init0, 1=xs0, 2=additional_input0, 3=additional_input1.
         # The schema's `aN!` numbering counts the combine_fn slot too, so
         # additional_input1 (flat idx 3) becomes a4 in the schema string.
         def combine_fn(carry, x, buf0, buf1):
@@ -10803,7 +10803,7 @@ class TestHopSchema(TestCase):
 
     def test_scan_gen_schema_init_mutation_raises_via_kwarg(self):
         # When Dynamo passes a mutated-index that lands on init/xs, the
-        # disallow contract must still fire — this is the kwarg-path
+        # disallow contract must still fire -- this is the kwarg-path
         # equivalent of test_scan_gen_schema_init_mutation_raises.
         def combine_fn(carry, x, buf):
             return carry + x, carry * x

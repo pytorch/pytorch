@@ -1977,7 +1977,7 @@
     {
       "Gb_type": "torch.scan: combine_fn mutates init or xs",
       "Context": "init={init_part}, xs={xs_part}",
-      "Explanation": "scan only supports in-place mutation of additional_inputs (loop-invariant tensors). init is the *initial* carry only — from step 1 on the driver feeds combine_fn's returned carry, so an in-place write to init would only affect step 0. xs[t] is a fresh, storage-disjoint slice each step, so a mutation cannot be observed by step t+1. Update the carry via the combine_fn return value; for in-place lifted buffers use additional_inputs.",
+      "Explanation": "scan only supports in-place mutation of additional_inputs (loop-invariant tensors). init is the *initial* carry only -- from step 1 on the driver feeds combine_fn's returned carry, so an in-place write to init would only affect step 0. xs[t] is a fresh, storage-disjoint slice each step, so a mutation cannot be observed by step t+1. Update the carry via the combine_fn return value; for in-place lifted buffers use additional_inputs.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]

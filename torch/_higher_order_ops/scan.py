@@ -275,15 +275,21 @@ class ScanOp(HigherOrderOperator):
     ):
         from torch._higher_order_ops.schema import HopSchemaGenerator
 
-        # When combine_fn is already a materialized GraphModule (the Dynamo
-        # path), we don't need to slice xs / re-trace the body.
-        if isinstance(combine_fn, torch.fx.GraphModule):
-            combine_gm: torch.fx.GraphModule = combine_fn
-        else:
-            all_inputs = tuple(
-                list(init) + [first_slice_copy(x) for x in xs] + list(additional_inputs)
-            )
-            combine_gm = materialize_as_graph(combine_fn, all_inputs)
+        all_inputs = tuple(
+            list(init)
+            + [
+                torch.empty_strided(
+                    x.shape[1:],
+                    x.stride()[1:],
+                    dtype=x.dtype,
+                    device=x.device,
+                    requires_grad=x.requires_grad,
+                )
+                for x in xs
+            ]
+            + list(additional_inputs)
+        )
+        combine_gm = materialize_as_graph(combine_fn, all_inputs)
 
         # Mutation semantics for scan:
         # - additional_inputs is mutable: loop-invariant tensor identity
@@ -961,15 +967,14 @@ def scan_functionalize(
     )
 
     if hasattr(ctx, "mode"):
-        with ctx.mode:
-            hop_instance = HopInstance.create(
-                scan_op,
-                combine_fn,
-                init,
-                xs,
-                additional_inputs,
-                mutated_arg_indices=mutated_arg_indices,
-            )
+        hop_instance = HopInstance.create(
+            scan_op,
+            combine_fn,
+            init,
+            xs,
+            additional_inputs,
+            mutated_arg_indices=mutated_arg_indices,
+        )
         if can_auto_functionalize(hop_instance):
             return do_auto_functionalize_v2(
                 ctx.mode,

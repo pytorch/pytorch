@@ -3234,7 +3234,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 context=f"init={init_part}, xs={xs_part}",
                 explanation=(
                     "scan only supports in-place mutation of additional_inputs "
-                    "(loop-invariant tensors). init is the *initial* carry only — "
+                    "(loop-invariant tensors). init is the *initial* carry only -- "
                     "from step 1 on the driver feeds combine_fn's returned carry, "
                     "so an in-place write to init would only affect step 0. "
                     "xs[t] is a fresh, storage-disjoint slice each step, so a "
