@@ -15,6 +15,19 @@ from ._clc_scheduler import ClcState, create_clc_pipeline, make_clc_problem_shap
 
 
 class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler):
+    """Wraps the static-persistent group scheduler so we can call
+    `delinearize_z(cta_tile_coord, problem_shape)` on a tile coordinate that
+    comes from CLC dispatch instead of the base class's own iteration state.
+
+    Only the mainload warp uses this (post single-warp metadata broadcast);
+    the result is written to the `tile_meta` smem region and read by mma /
+    epilog warps after `tile_metadata_ready_barrier`.
+
+    The base class constructor requires per-iteration state we don't use
+    (num_persistent_clusters, current_work_linear_idx, cta_id_in_cluster,
+    num_tiles_executed); `create_for_clc` passes placeholders for those.
+    """
+
     @classmethod
     def create_for_clc(
         cls,
@@ -23,12 +36,14 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
         cluster_tile_shape_mnk,
         problem_shape_mnkl,
     ):
+        # The four Int32 placeholders below are static-persistent iteration
+        # state required by the base constructor but unused under CLC.
         return cls(
             tile_sched_params,
-            cutlass.Int32(1),
-            cutlass.Int32(0),
-            (cutlass.Int32(0), cutlass.Int32(0), cutlass.Int32(0)),
-            cutlass.Int32(0),
+            cutlass.Int32(1),  # num_persistent_clusters (unused)
+            cutlass.Int32(0),  # _current_work_linear_idx (unused)
+            (cutlass.Int32(0), cutlass.Int32(0), cutlass.Int32(0)),  # cta_id_in_cluster (unused)
+            cutlass.Int32(0),  # _num_tiles_executed (unused)
             cluster_tile_shape_mnk,
             utils.create_initial_search_state(),
             group_count,
@@ -103,42 +118,6 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
             cluster_count_k,
         )
 
-    def search_cluster_tile_count_k(self, cta_tile_coord, problem_shape_mnkl):
-        linear_idx = cta_tile_coord[2]
-        _found, group_idx, problem_mnkl = self._group_search_and_load_problem_shape(
-            linear_idx,
-            problem_shape_mnkl,
-            self.search_state.start_group_idx,
-            self.search_state.tile_count_prev_group,
-        )
-        cluster_count_k = (
-            problem_mnkl[2] + self.cluster_tile_shape_mnk[2] - 1
-        ) // self.cluster_tile_shape_mnk[2]
-        return cluster_count_k, group_idx
-
-    def delinearize_z_mn(self, cta_tile_coord, problem_shape_mnkl):
-        linear_idx = cta_tile_coord[2]
-        _found, group_idx, problem_mnkl = self._group_search_and_load_problem_shape(
-            linear_idx,
-            problem_shape_mnkl,
-            self.search_state.start_group_idx,
-            self.search_state.tile_count_prev_group,
-        )
-        cluster_tile_idx_in_current_group = (
-            linear_idx - self.search_state.tile_count_prev_group
-        )
-        cluster_count_m, cluster_count_n = cute.ceil_div(
-            (problem_mnkl[0], problem_mnkl[1]),
-            (self.cluster_tile_shape_mnk[0], self.cluster_tile_shape_mnk[1]),
-        )
-        cta_tile_idx_m, cta_tile_idx_n = self._compute_cta_tile_coord(
-            cluster_tile_idx_in_current_group,
-            cta_tile_coord,
-            cluster_count_m,
-            cluster_count_n,
-        )
-        return group_idx, cta_tile_idx_m, cta_tile_idx_n
-
 
 class Sm100GroupedBlockScaledGemmKernel:
     """This example demonstrates an implementation of grouped blockscaled GEMM using a TMA plus Blackwell SM100 TensorCore
@@ -178,7 +157,7 @@ class Sm100GroupedBlockScaledGemmKernel:
     AB_TMA_LOAD_UNROLL = 4
     NUM_WARPS_PER_CTA = 8
     GENERIC_REG_REQUIREMENT = 136
-    ACCUM_REG_REQUIREMENT = 232
+    ACCUM_REG_REQUIREMENT = 168
     # CLC dispatch swizzle (v4.5.2+). 1 = pass-through (linear order along L
     # dim). Higher values reorder dispatches across the (M, N) cluster grid
     # for better L2 locality. NOTE: for our current problem_shape
@@ -276,6 +255,16 @@ class Sm100GroupedBlockScaledGemmKernel:
         # the descriptor. After moving the C tensormap update inline into
         # epilog[0], epi_load no longer touches the C descriptor, so this
         # init handshake protects nothing. Removed.)
+        # Sync point used by the mainload warp to broadcast per-tile metadata
+        # (group_idx, cta_tile_idx_m/n, k_tile_count, problem_shape_mnk) to
+        # the mma and epilog warps via the tile_meta smem region. Replaces
+        # the per-warp delinearize_z that previously ran in 6 warps per tile;
+        # the producer warp does the group search once and shares the result.
+        self.tile_metadata_ready_barrier = pipeline.NamedBarrier(
+            barrier_id=4,
+            # mainload (producer) + mma + 4 epilog (consumers)
+            num_threads=32 * (2 + len(self.epilog_warp_id)),
+        )
         self.smem_capacity = utils.get_smem_capacity_in_bytes("sm_100")
 
     # Set up configurations that dependent on gemm inputs.
@@ -690,6 +679,16 @@ class Sm100GroupedBlockScaledGemmKernel:
             # per stage hold the CLC response (m_idx, n_idx, l_idx, valid).
             clc_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_clc_stage * 2]
             clc_response: cute.struct.MemRange[cutlass.Int32, self.num_clc_stage * 4]
+            # Per-tile metadata broadcast by the mainload warp to mma/epilog
+            # warps after delinearize_z. Fields (in order):
+            #   [0] group_idx
+            #   [1] cta_tile_idx_m
+            #   [2] cta_tile_idx_n
+            #   [3] cta_tile_count_k  (k-tile count for the current group)
+            #   [4] problem_shape_m
+            #   [5] problem_shape_n
+            #   [6] problem_shape_k
+            tile_meta: cute.struct.MemRange[cutlass.Int32, 7]
             # (EPI_TILE_M, EPI_TILE_N, STAGE)
             sC: cute.struct.Align[
                 cute.struct.MemRange[
@@ -1106,6 +1105,12 @@ class Sm100GroupedBlockScaledGemmKernel:
         #
         clc_response_ptr = storage.clc_response.data_ptr()
         clc_mbar_ptr = storage.clc_mbar_ptr.data_ptr()
+        # Per-tile metadata smem region as a flat 7-element Int32 tensor;
+        # written once per tile by the mainload warp after delinearize_z,
+        # then read by mma and epilog warps after tile_metadata_ready_barrier.
+        tile_meta_smem = cute.make_tensor(
+            storage.tile_meta.data_ptr(), cute.make_layout(7)
+        )
         num_clc_consumer_warps_per_cta = len(
             (
                 self.mma_warp_id,
@@ -1211,14 +1216,31 @@ class Sm100GroupedBlockScaledGemmKernel:
                 )
                 cur_k_tile_cnt = grouped_gemm_cta_tile_info.cta_tile_count_k
                 cur_group_idx = grouped_gemm_cta_tile_info.group_idx
+                # First-iteration handshake with MMA's tensormap init MUST
+                # happen before the tile_metadata_ready_barrier below,
+                # because MMA arrives at tensormap_ab_init_barrier before
+                # ever reaching its own tile_metadata_ready_barrier; hitting
+                # them in the opposite order on the producer side would
+                # deadlock against MMA on the very first tile.
+                if not tensormap_init_done:
+                    self.tensormap_ab_init_barrier.arrive_and_wait()
+                    tensormap_init_done = True
+                # Broadcast the per-tile metadata to mma + epilog warps via
+                # smem; they read after tile_metadata_ready_barrier instead
+                # of redoing delinearize_z in each warp. One thread writes,
+                # the named barrier provides the cross-warp visibility.
+                with cute.arch.elect_one():
+                    tile_meta_smem[0] = cur_group_idx
+                    tile_meta_smem[1] = grouped_gemm_cta_tile_info.cta_tile_idx_m
+                    tile_meta_smem[2] = grouped_gemm_cta_tile_info.cta_tile_idx_n
+                    tile_meta_smem[3] = cur_k_tile_cnt
+                    tile_meta_smem[4] = grouped_gemm_cta_tile_info.problem_shape_m
+                    tile_meta_smem[5] = grouped_gemm_cta_tile_info.problem_shape_n
+                    tile_meta_smem[6] = grouped_gemm_cta_tile_info.problem_shape_k
+                self.tile_metadata_ready_barrier.arrive_and_wait()
                 is_group_changed = cur_group_idx != last_group_idx
                 # skip tensormap update if we're working on the same group
                 if is_group_changed:
-                    if not tensormap_init_done:
-                        # wait tensormap initialization complete
-                        self.tensormap_ab_init_barrier.arrive_and_wait()
-                        tensormap_init_done = True
-
                     problem_shape_mnk = (
                         grouped_gemm_cta_tile_info.problem_shape_m,
                         grouped_gemm_cta_tile_info.problem_shape_n,
@@ -1478,13 +1500,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             #
             # Persistent tile scheduling loop — CLC-driven
             #
-            mma_group_gemm_ts_helper = ClcGroupedGemmTileSchedulerHelper.create_for_clc(
-                group_count,
-                tile_sched_params,
-                self.cluster_tile_shape_mnk,
-                problem_sizes_mnkl,
-            )
-
             work_tile = clc_state.initial_work_tile_info(total_num_clusters[0])
             ab_consumer_state = pipeline.make_pipeline_state(
                 pipeline.PipelineUserType.Consumer, self.num_ab_stage
@@ -1493,14 +1508,11 @@ class Sm100GroupedBlockScaledGemmKernel:
                 pipeline.PipelineUserType.Producer, self.num_acc_stage
             )
             while work_tile.is_valid_tile:
-                cur_tile_coord = work_tile.tile_idx
-                # MMA warp is only interested in number of tiles along K dimension
-                cur_k_tile_cnt, _ = (
-                    mma_group_gemm_ts_helper.search_cluster_tile_count_k(
-                        cur_tile_coord,
-                        problem_sizes_mnkl,
-                    )
-                )
+                # MMA warp only needs cta_tile_count_k for this tile; read
+                # the value broadcast by the mainload warp via tile_meta
+                # smem (slot [3]) after the metadata-ready barrier.
+                self.tile_metadata_ready_barrier.arrive_and_wait()
+                cur_k_tile_cnt = tile_meta_smem[3]
 
                 # (MMA, MMA_M, MMA_N)
                 tCtAcc = tCtAcc_base[(None, None, None, acc_producer_state.index)]
@@ -1676,15 +1688,11 @@ class Sm100GroupedBlockScaledGemmKernel:
             )
 
             #
-            # Persistent tile scheduling loop
+            # Persistent tile scheduling loop. Per-tile group/coord info is
+            # broadcast by the mainload warp via the tile_meta smem region
+            # and consumed here after tile_metadata_ready_barrier; no
+            # per-warp delinearize_z is needed.
             #
-            # grouped gemm tile scheduler helper will compute the group index for the tile we're working on
-            group_gemm_ts_helper = ClcGroupedGemmTileSchedulerHelper.create_for_clc(
-                group_count,
-                tile_sched_params,
-                self.cluster_tile_shape_mnk,
-                problem_sizes_mnkl,
-            )
             work_tile = clc_state.initial_work_tile_info(total_num_clusters[0])
             # Count tiles consumed by this warp; replaces tile_sched.num_tiles_executed.
             # Each iteration produces subtile_cnt subtiles; num_prev_subtiles is used
@@ -1716,28 +1724,23 @@ class Sm100GroupedBlockScaledGemmKernel:
             last_group_idx = cutlass.Int32(-1)
 
             while work_tile.is_valid_tile:
-                cur_tile_coord = work_tile.tile_idx
-                cur_group_idx, cta_tile_idx_m, cta_tile_idx_n = (
-                    group_gemm_ts_helper.delinearize_z_mn(
-                        cur_tile_coord,
-                        problem_sizes_mnkl,
-                    )
-                )
+                # Wait for the mainload warp's metadata broadcast and read
+                # the values directly from smem.
+                self.tile_metadata_ready_barrier.arrive_and_wait()
+                cur_group_idx = tile_meta_smem[0]
+                cta_tile_idx_m = tile_meta_smem[1]
+                cta_tile_idx_n = tile_meta_smem[2]
                 is_group_changed = cur_group_idx != last_group_idx
                 if is_group_changed and warp_idx == self.epilog_warp_id[0]:
                     # Inline C tensormap update; replaces the cross-warp
                     # ready/tile_done barrier dance the old epi_load warp used.
-                    grouped_gemm_cta_tile_info = group_gemm_ts_helper.delinearize_z(
-                        cur_tile_coord,
-                        problem_sizes_mnkl,
-                    )
                     real_tensor_c = self.make_tensor_abc_for_tensormap_update(
                         cur_group_idx,
                         self.c_dtype,
                         (
-                            grouped_gemm_cta_tile_info.problem_shape_m,
-                            grouped_gemm_cta_tile_info.problem_shape_n,
-                            grouped_gemm_cta_tile_info.problem_shape_k,
+                            tile_meta_smem[4],
+                            tile_meta_smem[5],
+                            tile_meta_smem[6],
                         ),
                         strides_abc,
                         ptrs_abc,
