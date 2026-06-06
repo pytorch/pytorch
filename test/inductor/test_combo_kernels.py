@@ -807,8 +807,11 @@ class ComboKernelTests(TestCase):
         out_eager = fn(*inps)
         out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
         combined = " ".join(code)
+        # Count emitted kernels by their async_compile.triton(...) calls;
+        # generated_kernel_count is inflated by throwaway probe codegen so
+        # is not a reliable count of real kernels.
+        self.assertEqual(combined.count("async_compile.triton("), 1)
 
         default_match = re.search(r"'default_config':\s*\{([^}]*)\}", combined)
         self.assertIsNotNone(default_match, "default_config not emitted")
@@ -841,8 +844,8 @@ class ComboKernelTests(TestCase):
         torch._inductor.metrics.reset()
         out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
         combined = " ".join(code)
+        self.assertEqual(combined.count("async_compile.triton("), 1)
 
         default_match = re.search(r"'default_config':\s*\{([^}]*)\}", combined)
         self.assertIsNotNone(default_match)
@@ -860,10 +863,11 @@ class ComboKernelTests(TestCase):
         }
     )
     def test_combo_kernel_no_bench_carve_out(self):
-        # torch.bucketize sets AutotuneHint.ONE_ELEMENT_PER_THREAD which
-        # pushes its pointwise heuristic past the <=2 fusion gate.  That
-        # subkernel must be carved out to a standalone kernel; the two
-        # simple pointwise subkernels fuse.  Expect 1 combo + 1 standalone.
+        # torch.bucketize triggers carve-out under both gate variants:
+        #   CUDA: pointwise heuristic returns 3 configs (>2) -> carve out
+        #   ROCm: lowering sets AutotuneHint.ONE_ELEMENT_PER_THREAD -> carve out
+        # Simple pointwise (b*2.0, c+1.0) passes both gates -> fuses into combo.
+        # Expect 1 combo + 1 standalone on both backends.
         def fn(a, b, c, boundaries):
             return torch.bucketize(a, boundaries), b * 2.0, c + 1.0
 
@@ -876,9 +880,13 @@ class ComboKernelTests(TestCase):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         with fresh_cache():
-            out_compiled = torch.compile(fn)(a, b, c, boundaries)
+            out_compiled, code = run_and_get_code(
+                torch.compile(fn), a, b, c, boundaries
+            )
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        combined = " ".join(code)
+        # 1 combo (b*2, c+1) + 1 standalone (bucketize) = 2 real kernels.
+        self.assertEqual(combined.count("async_compile.triton("), 2)
 
 
 class ComboKernelBenchmarkTests(TestCase):

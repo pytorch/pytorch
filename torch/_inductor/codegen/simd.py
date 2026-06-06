@@ -49,7 +49,7 @@ from ..optimize_indexing import (
     indexing_dtype_strength_reduction,
 )
 from ..runtime.coordinate_descent_tuner import CoordescTuner
-from ..runtime.hints import DeviceProperties, TileHint
+from ..runtime.hints import DeviceProperties
 from ..runtime.runtime_utils import (
     green_text,
     last_power_of_2,
@@ -3427,13 +3427,13 @@ class SIMDScheduling(BaseScheduling):
             src_code = kernel.codegen_kernel()
         return src_code, kernel
 
-    def _probe_subkernel_heuristic(self, node_info: NodeInfo) -> list[Any]:
+    def _probe_subkernel_heuristic(self, node_info: NodeInfo) -> tuple[list[Any], Any]:
         from ..runtime.triton_heuristics import (
             persistent_reduction,
             pointwise,
             reduction,
         )
-        from .triton_utils import non_constexpr_signature
+        from .triton_utils import select_tile_hint
 
         kernel_kwargs: dict[str, Any] = dict(
             is_combo_kernel=True,
@@ -3442,22 +3442,15 @@ class SIMDScheduling(BaseScheduling):
         self.kernel_type.apply_feature_required_overrides(
             node_info.features, kernel_kwargs
         )
-        kernel_count_before = metrics.generated_kernel_count
-        unaligned_snapshot = OrderedSet(V.graph.unaligned_buffers)
-        try:
-            kernel = self.kernel_type(
-                node_info.tiling,
-                features=node_info.features,
-                tiling_scores=node_info.tiling_scores,
-                **kernel_kwargs,
-            )
-            with config.patch(benchmark_kernel=False), V.set_kernel_handler(kernel):
-                self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
-                _ = kernel.codegen_kernel()
-        finally:
-            V.graph.unaligned_buffers = unaligned_snapshot
-            # pyrefly: ignore [bad-assignment]
-            metrics.generated_kernel_count = kernel_count_before
+        kernel = self.kernel_type(
+            node_info.tiling,
+            features=node_info.features,
+            tiling_scores=node_info.tiling_scores,
+            **kernel_kwargs,
+        )
+        with config.patch(benchmark_kernel=False), V.set_kernel_handler(kernel):
+            self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
+            _ = kernel.codegen_kernel()
 
         size_hints = {
             prefix: next_power_of_2(int(V.graph.sizevars.optimization_hint(numel)))
@@ -3485,41 +3478,42 @@ class SIMDScheduling(BaseScheduling):
                 return_configs=True,
             )
         else:
-            tile_hint = None
-            if len(size_hints) == 2:
-                _, _, signature, _ = kernel.args.python_argdefs()
-                tile_hint = (
-                    TileHint.SQUARE
-                    if len(non_constexpr_signature(signature)) == 4
-                    else TileHint.DEFAULT
-                )
+            _, _, signature, _ = kernel.args.python_argdefs()
             configs = pointwise(
                 size_hints,
                 triton_meta=kernel.triton_meta,
-                tile_hint=tile_hint,
+                tile_hint=select_tile_hint(size_hints, signature),
                 inductor_meta=inductor_meta,
                 return_configs=True,
             )
-        return configs
+        return configs, kernel
 
     @staticmethod
-    def _stitch_no_bench_combo_config(chosen_configs: list[Any]) -> Any:
+    def _stitch_no_bench_combo_config(
+        chosen_configs: list[Any], chosen_nodes: list[Any]
+    ) -> Any:
         import triton
 
         def block_keys(cfg: Any) -> list[str]:
             return [k for k in cfg.kwargs if k.endswith("BLOCK")]
 
-        def effective_tile_elems(cfg: Any) -> int:
-            te = 1
-            for k in block_keys(cfg):
-                te *= int(cfg.kwargs[k])
-            return te
+        def node_total_bytes(snode: Any) -> int:
+            return sum(
+                V.graph.get_dep_size_hint(d, count_bytes=True)
+                for d in itertools.chain(
+                    snode.read_writes.reads, snode.read_writes.writes
+                )
+            )
 
-        # Heaviest subkernel (largest effective tile elems) dominates runtime;
-        # its config is authoritative for the combo. Its num_warps, num_stages,
+        # Heaviest subkernel by total memory traffic dominates runtime; its
+        # config is authoritative for the combo. Its num_warps, num_stages,
         # and non-BLOCK kwargs (HIP backend options like waves_per_eu) apply
         # combo-wide. Per-subkernel BLOCK kwargs are suffixed (XBLOCK_0, ...).
-        winner_cfg = max(chosen_configs, key=effective_tile_elems)
+        winner_idx = max(
+            range(len(chosen_configs)),
+            key=lambda i: node_total_bytes(chosen_nodes[i]),
+        )
+        winner_cfg = chosen_configs[winner_idx]
 
         stitched_kwargs: dict[str, Any] = {
             f"{key}_{i}": int(cfg.kwargs[key])
@@ -3645,8 +3639,14 @@ class SIMDScheduling(BaseScheduling):
                 carve_out_pns: list[Any] = []
                 if no_bench_mode:
                     for pn in node_group:
-                        configs = self._probe_subkernel_heuristic(node_schedule_map[pn])
-                        if configs and len(configs) <= 2:
+                        configs, probe_kernel = self._probe_subkernel_heuristic(
+                            node_schedule_map[pn]
+                        )
+                        if torch.version.hip:
+                            fuse_ok = configs and not probe_kernel.autotune_hints
+                        else:
+                            fuse_ok = configs and len(configs) <= 2
+                        if fuse_ok:
                             fusion_pns.append(pn)
                             fusion_configs.append(configs[0])
                         else:
@@ -3683,7 +3683,9 @@ class SIMDScheduling(BaseScheduling):
 
                     if no_bench_mode and fusion_configs:
                         kernel.no_bench_stitched_config = (
-                            self._stitch_no_bench_combo_config(fusion_configs)
+                            self._stitch_no_bench_combo_config(
+                                fusion_configs, fusion_pns
+                            )
                         )
 
                     src_code = kernel.codegen_kernel()
