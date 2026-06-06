@@ -3338,32 +3338,12 @@ def _index_add(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
-    torch._check(
-        dim == 0 or dim < tensor.ndim,
-        lambda: (
-            f"index_add_(): Indexing dim {dim} is out of bounds of the source tensor "
-            f"with dim {tensor.ndim}"
-        ),
-    )
     index_size = index.size(0) if index.ndim == 1 else 1
     tensor_size = tensor.size(dim) if tensor.ndim > 0 else 1
     torch._check(
         tensor_size == index_size,
         lambda: f"Number of indices ({index_size}) should be equal to tensor.size(dim) ({tensor_size}), for {dim=}",
     )
-
-    def source_shape_error() -> str:
-        return (
-            "source tensor shape must match self tensor shape, excluding the specified "
-            f"dimension. Got self.shape = {list(x.shape)} source.shape = {list(tensor.shape)}"
-        )
-
-    torch._check(x.ndim == tensor.ndim, source_shape_error)
-    if x.ndim != 0:
-        for i in range(x.ndim):
-            if i != dim:
-                torch._check(x.size(i) == tensor.size(i), source_shape_error)
-
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         torch._check(
