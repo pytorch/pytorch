@@ -83,8 +83,6 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
 CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE = {
     OperatorName.parse("cumsum.out"),
     OperatorName.parse("cumprod.out"),
-    OperatorName.parse("cumsum.dimname_out"),
-    OperatorName.parse("cumprod.dimname_out"),
 }
 
 # This file contains codegen that relates to the functionalization pass.
@@ -135,11 +133,18 @@ class GenCompositeViewCopyKernel:
             return """\
 at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
   c10::SymDimVector shape = infer_size_dv(size, self.sym_numel());
+  const bool pin_memory = self.is_pinned();
   if (!at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape).has_value()) {
-    return preserve_pin_memory_if_needed(self.reshape_symint(size), self.is_pinned());
+    if (pin_memory) {
+      return at::_unsafe_view_symint(
+          clone_preserve_pin_memory(self, /*pin_memory=*/true, at::MemoryFormat::Contiguous),
+          shape);
+    }
+    return self.reshape_symint(size);
   } else {
     auto output = at::_ops::view::call(self, size);
-    return clone_preserve_pin_memory(output, at::MemoryFormat::Contiguous);
+    return clone_preserve_pin_memory(
+        output, pin_memory, at::MemoryFormat::Contiguous);
   }
 }
 """
@@ -170,13 +175,17 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
 
         if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
             return_cloned_output = """\
-  return clone_preserve_pin_memory(output, at::MemoryFormat::Contiguous);"""
+  const bool pin_memory = output.is_pinned();
+  return clone_preserve_pin_memory(
+      output, pin_memory, at::MemoryFormat::Contiguous);"""
         else:
             # If the return type is a list, we need to clone each tensor in the list.
             return_cloned_output = f"""\
   {view_copy_sig.returns_type().cpp_type()} out_clone;
+  const bool pin_memory = !output.empty() && output[0].is_pinned();
   for (const auto i : c10::irange(output.size())) {{
-    out_clone.push_back(clone_preserve_pin_memory(output[i], at::MemoryFormat::Contiguous));
+    out_clone.push_back(clone_preserve_pin_memory(
+        output[i], pin_memory, at::MemoryFormat::Contiguous));
   }}
   return out_clone;"""
 
@@ -351,7 +360,7 @@ def emit_expr_has_symbolic_values(expr: str, type: CType) -> str:
 
 # Detects whether any of the SymInt arguments are, in fact, symbolic values.
 # This is used in the constructor of ViewMeta.
-def emit_has_symbolic_inputs(sig: DispatcherSignature) -> tuple[str, str]:
+def emit_has_symbolic_inputs(sig: DispatcherSignature) -> str:
     name = "has_symbolic_inputs"
     statements = [
         f"{name} = {name} | ({emit_expr_has_symbolic_values(binding.name, binding.nctype.type)});"
@@ -362,12 +371,9 @@ def emit_has_symbolic_inputs(sig: DispatcherSignature) -> tuple[str, str]:
         )
     ]
     body = "\n      ".join(statements)
-    return (
-        name,
-        f"""
+    return f"""
       bool {name} = false;
-      {body}""",
-    )
+      {body}"""
 
 
 # Generates the Functionalization kernel for:
@@ -426,10 +432,7 @@ def emit_view_functionalization_body(
             e.expr for e in translate(meta_call_ctx, call_sig.arguments(), method=False)
         ]
 
-        (
-            symbolic_inputs_varname,
-            symbolic_inputs_check,
-        ) = emit_has_symbolic_inputs(call_sig)
+        symbolic_inputs_check = emit_has_symbolic_inputs(call_sig)
 
         if "inplace_view" in f.tags:
             # See Note [Functionalization Pass - Inplace View Ops] for more details

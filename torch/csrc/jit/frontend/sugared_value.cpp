@@ -265,7 +265,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   }
 
   ErrorReport report(loc);
-  report << "'" << value_->type()->repr_str()
+  report << '\'' << value_->type()->repr_str()
          << "' object has no attribute or method '" << field << "'.";
   if (auto classType = value_->type()->cast<ClassType>()) {
     if (classType->isUnresolvedClassAttribute(field)) {
@@ -357,7 +357,7 @@ void SimpleValue::setAttr(
         throw(
             ErrorReport(loc)
             << "Assignment to attribute '" << field
-            << "' cannot be of a type that contains class " << "'"
+            << "' cannot be of a type that contains class " << '\''
             << classType->repr_str() << "'.\n"
             << "Classes that recursively contain instances of themselves"
             << " are not yet supported");
@@ -460,7 +460,7 @@ Value* SimpleValue::len(const SourceRange& loc, GraphFunction& m) {
     return g.insert(aten::len, {val}, {}, loc);
   } else {
     throw(
-        ErrorReport(loc) << "'" << val_type->repr_str() << "'"
+        ErrorReport(loc) << '\'' << val_type->repr_str() << '\''
                          << " object is not iterable");
   }
 }
@@ -500,7 +500,7 @@ SugaredValuePtr SimpleValue::getitem(
     return attr(loc, m, "__getitem__")->call(loc, m, {idx}, {}, 1);
   } else {
     throw(
-        ErrorReport(loc) << "'" << val_type->repr_str() << "'"
+        ErrorReport(loc) << '\'' << val_type->repr_str() << '\''
                          << " object is not subscriptable");
   }
 }
@@ -527,7 +527,7 @@ SugaredValuePtr SimpleValue::iter(const SourceRange& loc, GraphFunction& m) {
     return std::make_shared<SugaredTupleValue>(tup_sugared);
   } else {
     throw(
-        ErrorReport(loc) << "'" << type->repr_str() << "'"
+        ErrorReport(loc) << '\'' << type->repr_str() << '\''
                          << " object is not iterable");
   }
 }
@@ -798,8 +798,8 @@ std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
       [&field](const at::EnumNameValue& nv) { return nv.first == field; });
   if (it == names_values.end()) {
     throw(
-        ErrorReport(loc) << enum_type_->repr_str() << "'"
-                         << " has no attribute '" << field << "'");
+        ErrorReport(loc) << enum_type_->repr_str() << '\''
+                         << " has no attribute '" << field << '\'');
   }
   auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
       enum_type_, it->first, it->second);
@@ -861,7 +861,7 @@ std::shared_ptr<SugaredValue> TorchCheckValue::call(
     } else {
       throw(
           ErrorReport(loc) << "torch._check() got unexpected keyword argument '"
-                           << kwarg.name() << "'");
+                           << kwarg.name() << '\'');
     }
   }
 

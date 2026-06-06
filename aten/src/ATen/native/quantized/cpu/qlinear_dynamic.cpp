@@ -277,9 +277,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
   float x_min = 0;
   float x_max = 0;
   if (input.numel() > 0) {
-    auto [x_min_t, x_max_t] = at::aminmax(input_contig);
-    x_min = x_min_t.item<float>();
-    x_max = x_max_t.item<float>();
+    x_min = input_contig.min().item<float>();
+    x_max = input_contig.max().item<float>();
   } else {
     // On empty input, no output data will be generated,
     // so use arbitrary qparams.
