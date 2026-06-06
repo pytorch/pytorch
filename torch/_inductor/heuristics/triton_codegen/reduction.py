@@ -614,6 +614,8 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
             else:
                 MAX_NUM_STAGES = 1
+            if inductor_meta.get("tma_min_block_sizes"):
+                MAX_NUM_STAGES = min(MAX_NUM_STAGES, 2)
             c.kwargs["NUM_STAGES"] = min(  # type: ignore[union-attr]
                 max(num_iters // 4, 1), MAX_NUM_STAGES
             )
