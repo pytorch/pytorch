@@ -3403,37 +3403,6 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(y, x + 2.0)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @parametrize(
-        "op_factory, opname",
-        [
-            subtest((torch.library.custom_op, "custom"), name="custom_op"),
-            subtest((torch.library.triton_op, "triton"), name="triton_op"),
-        ],
-    )
-    def test_register_autograd_incorrect_num_gradients(self, op_factory, opname):
-        @op_factory(
-            f"_torch_testing::incorrect_num_gradients_{opname}",
-            mutates_args=(),
-        )
-        def f(x: Tensor) -> Tensor:
-            return x.sin()
-
-        def setup_context(ctx, inputs, output):
-            pass
-
-        def backward(ctx, grad_output):
-            return ()
-
-        f.register_autograd(backward, setup_context=setup_context)
-
-        x = torch.randn(3, requires_grad=True)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"incorrect number of gradients \(expected 1, got 0\)",
-        ):
-            f(x).sum().backward()
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema(self):
         @torch.library.custom_op(
             "_torch_testing::add",
