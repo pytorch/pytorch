@@ -3281,3 +3281,7 @@
 - name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
   self: norm_backward(grads[i], self[i], ord, result[i])
   result: norm_jvp(self_p, self_t, ord, result[i])
+
+- name: _foreach_mm(Tensor[] self, Tensor[] mat2) -> Tensor[]
+  self: mm_mat1_backward(grads[i], mat2[i], self[i].sym_sizes(), self[i].sym_strides(), self[i].layout(), 1)
+  mat2: mm_mat2_backward(grads[i], self[i], mat2[i].sym_sizes(), mat2[i].sym_strides(), mat2[i].layout(), 1)
