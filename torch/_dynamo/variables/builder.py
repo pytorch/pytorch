@@ -113,7 +113,12 @@ from torch.utils.weak import TensorWeakRef
 
 from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
-from ..exc import InternalTorchDynamoError, raise_observed_exception, unimplemented
+from ..exc import (
+    InternalTorchDynamoError,
+    ObservedException,
+    raise_observed_exception,
+    unimplemented,
+)
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..pgo import (
     auto_dynamic,
@@ -3702,7 +3707,11 @@ def _wrap_fx_proxy(
         # with preserve_rng_state():
         # only allow_non_graph_fake in this instance because we handle the non-fake
         # cases properly below.
-        example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+        try:
+            example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+        except ObservedException:
+            tx.output.remove_node(proxy.node)
+            raise
 
     # pyrefly: ignore[bad-return]
     return handle_traced_output(

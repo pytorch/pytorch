@@ -4069,6 +4069,12 @@ def _get_fake_value_impl(
                 from_exc=cause,
             )
         elif isinstance(
+            cause, torch._subclasses.fake_tensor.FakeTensorMemoryOverlapError
+        ):
+            from torch._dynamo.exc import raise_observed_exception
+
+            raise_observed_exception(RuntimeError, tx, args=list(cause.args))
+        elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             if not torch._dynamo.config.capture_dynamic_output_shape_ops:

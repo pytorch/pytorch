@@ -4817,6 +4817,19 @@ def meta_masked_fill_(self, mask, value):
     return self
 
 
+@register_meta(aten.masked_fill_.Tensor)
+def meta_masked_fill__tensor(self, mask, value):
+    torch._check(
+        value.dim() == 0,
+        lambda: (
+            "masked_fill_ only supports a 0-dimensional value tensor, "
+            f"but got tensor with {value.dim()} dimension(s)."
+        ),
+    )
+    check_inplace_broadcast(self.shape, mask.shape)
+    return self
+
+
 @register_meta(aten._masked_scale.default)
 def meta__masked_scale(self, mask, scale):
     masked_scale = self.new_empty(self.size()).to(
