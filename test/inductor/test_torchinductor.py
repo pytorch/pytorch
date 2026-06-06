@@ -5482,7 +5482,6 @@ for dtype in (torch.int32, torch.int64):
         with config.patch({"triton.use_block_ptr": use_block_ptr}):
             self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
-    @xfail_if_mps  # aten::full with zero-sized dim triggers AcceleratorError on MPS
     def test_max_unpool_empty_output(self):
         class Unpool1d(nn.Module):
             def __init__(self):
