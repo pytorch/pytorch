@@ -111,7 +111,9 @@ class _KeyPathTrie:
         return node, kp
 
 
-def make_sourced_prefixes(nn_module, args, kwargs) -> _KeyPathTrie:
+def make_sourced_prefixes(
+    nn_module, args, kwargs, *, source_is_input: bool = False
+) -> _KeyPathTrie:
     kp_args, kp_kwargs = tree_map_with_path(
         lambda kp, _: _KeyPath(kp),
         (tuple(None for _ in args), {k: None for k in kwargs}),  # noqa: C420
@@ -120,7 +122,7 @@ def make_sourced_prefixes(nn_module, args, kwargs) -> _KeyPathTrie:
 
     sourced_prefixes = _KeyPathTrie()
     for name, struct in kp_combined_args.items():
-        src = LocalSource(name)
+        src = LocalSource(name, is_input=source_is_input)
 
         if isinstance(struct, _KeyPath):
             sourced_prefixes.add(struct.kp, src)
@@ -402,6 +404,7 @@ def make_fake_inputs(
     kwargs,
     dynamic_shapes,
     prefer_deferred_runtime_asserts_over_guards=False,
+    source_is_input=False,
 ):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -478,7 +481,9 @@ def make_fake_inputs(
     with fake_mode:
         original_signature = inspect.signature(nn_module.forward)
         sources: dict[tuple[int, int], list[Source]] = defaultdict(list)
-        sourced_prefixes = make_sourced_prefixes(nn_module, args, kwargs)
+        sourced_prefixes = make_sourced_prefixes(
+            nn_module, args, kwargs, source_is_input=source_is_input
+        )
         fake_args, fake_kwargs = tree_map_with_path(
             lambda kp, val: fakify(
                 fake_mode,
@@ -1065,6 +1070,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 args = ()
                 if func in (
                     torch.distributed.all_reduce,
+                    torch.distributed.reduce_scatter_single,
                     torch.distributed.reduce_scatter_tensor,
                     torch.distributed._reduce_scatter_base,
                 ):

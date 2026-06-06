@@ -523,9 +523,6 @@ PyObject* dynamo__custom_eval_frame(
     return eval_result;
   }
 
-  // default and run-only mode require guard eval
-  std::unique_ptr<FrameLocalsMapping> locals =
-      std::make_unique<FrameLocalsMapping>(frame);
   PyObject* backend = get_backend(callback.ptr()); // borrowed
 
   // We don't run the current custom_eval_frame behavior for guards.
@@ -536,18 +533,28 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
-  _PytorchRecordFunctionState* rf =
-      _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = nullptr;
-  lookup(
-      extra,
-      locals.get(),
-      backend,
-      isolate_recompiles_id,
-      &maybe_cached_code,
-      &trace_annotation,
-      is_skip_guard_eval_unsafe);
-  _pytorch_record_function_exit(rf);
+  std::unique_ptr<FrameLocalsMapping> locals;
+  if (!try_lookup_without_guard_eval(
+          extra,
+          backend,
+          isolate_recompiles_id,
+          &maybe_cached_code,
+          &trace_annotation,
+          is_skip_guard_eval_unsafe)) {
+    locals = std::make_unique<FrameLocalsMapping>(frame);
+    _PytorchRecordFunctionState* rf =
+        _pytorch_record_function_enter(cache_lookup_profiler_str);
+    lookup(
+        extra,
+        locals.get(),
+        backend,
+        isolate_recompiles_id,
+        &maybe_cached_code,
+        &trace_annotation,
+        is_skip_guard_eval_unsafe);
+    _pytorch_record_function_exit(rf);
+  }
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
@@ -605,6 +612,9 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // call callback
+  if (locals == nullptr) {
+    locals = std::make_unique<FrameLocalsMapping>(frame);
+  }
   CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
   FrameState* frame_state = extract_frame_state(extra);
   py::object callback_result;
@@ -628,7 +638,7 @@ PyObject* dynamo__custom_eval_frame(
     guarded_code = callback_result.attr("guarded_code").ptr();
   } catch (py::error_already_set& e) {
     // internal exception, returning here will leak the exception into user
-    // code this is useful for debugging -- but we dont want it to happen
+    // code this is useful for debugging -- but we don't want it to happen
     // outside of testing NB: we intentionally DO NOT re-enable custom
     // behavior to prevent cascading failure from internal exceptions.  The
     // upshot is if Dynamo barfs, that's it for Dynamo, even if you catch the
