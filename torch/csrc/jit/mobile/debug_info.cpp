@@ -222,7 +222,9 @@ std::pair<std::string, std::string> MobileDebugTable::
     }
     debug_handles_string += "}";
     debug_handles_string = debugHandlesNotFoundMessage(debug_handles_string);
-    return {debug_handles_string, debug_handles_string};
+    auto debug_handles_string_copy = debug_handles_string;
+    return {
+        std::move(debug_handles_string), std::move(debug_handles_string_copy)};
   }
   return (getStackTraceWithModuleHierarchy(
       debug_infos, "top", top_module_type_name));

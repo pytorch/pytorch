@@ -6,6 +6,8 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <utility>
+
 #ifdef USE_KINETO
 #include <libkineto.h>
 #endif
@@ -426,7 +428,7 @@ std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
         responses.push_back(std::get<int>(res));
       }
     }
-    return {true, responses};
+    return {true, std::move(responses)};
   } else if (val.isList()) {
     const auto& val_list = val.toList();
     size_t list_size = val_list.size();
@@ -441,7 +443,7 @@ std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
         responses.push_back(std::get<int>(res));
       }
     }
-    return {true, responses};
+    return {true, std::move(responses)};
   } else {
     // push back an invalid value for indices representing non-tensor inputs
     return {false, -1};
