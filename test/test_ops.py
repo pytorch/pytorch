@@ -61,18 +61,15 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     is_iterable_of_tensors,
-    IS_LINUX,
     IS_SANDCASTLE,
     MACOS_VERSION,
     noncontiguous_like,
     parametrize,
     run_tests,
     set_default_dtype,
-    skipIfRocm,
     skipIfTorchDynamo,
     skipIfTorchInductor,
     suppress_warnings,
-    TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
     TestCase,
@@ -192,7 +189,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("nn.functional.softplus"),
     xfail("nn.functional.softshrink"),
     xfail("ormqr"),
-    xfail("qr"),
     xfail("renorm"),
     xfail("round"),
     xfail("round", "decimals_0"),
@@ -276,14 +272,10 @@ class TestCommon(TestCase):
             "aten.max.default",
             "aten.max.dim",
             "aten.max.dim_max",
-            "aten.max.names_dim",
-            "aten.max.names_dim_max",
             "aten.max.unary_out",
             "aten.min.default",
             "aten.min.dim",
             "aten.min.dim_min",
-            "aten.min.names_dim",
-            "aten.min.names_dim_min",
             "aten.min.unary_out",
             # not pointwise
             "aten.isin.Tensor_Tensor",
@@ -293,8 +285,6 @@ class TestCommon(TestCase):
             "aten.isin.Scalar_Tensor",
             "aten.isin.Scalar_Tensor_out",
             "aten.mode.default",
-            "aten.mode.dimname",
-            "aten.mode.dimname_out",
             "aten.mode.values",
         )
 
@@ -481,8 +471,7 @@ class TestCommon(TestCase):
             and op.formatted_name
             in ("signal_windows_exponential", "signal_windows_bartlett")
             and dtype == torch.float64
-            and ("cuda" in device or "xpu" in device)
-            or "cpu" in device
+            and ("cpu" in device or "cuda" in device or "xpu" in device)
         ):
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
@@ -494,7 +483,6 @@ class TestCommon(TestCase):
                 )
 
     # Tests that the cpu and gpu results are consistent
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/101625")
     @onlyOn(["cuda", "xpu"])
     @suppress_warnings
     @skipCUDAIfNotRocm
@@ -836,7 +824,6 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/165294")
     @skipXPU
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -1539,7 +1526,6 @@ class TestCommon(TestCase):
 
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/108743")
     @skipXPU
     @ops(op_db, allowed_dtypes=(torch.complex32,))
     def test_complex_half_reference_testing(self, device, dtype, op):
@@ -1968,10 +1954,6 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual
             )
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHINDUCTOR or IS_LINUX,
-        "https://github.com/pytorch/pytorch/issues/181685",
-    )
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
@@ -2424,6 +2406,15 @@ class _TestTagsMode(TorchDispatchMode):
 @unMarkDynamoStrictTest
 class TestTags(TestCase):
     @onlyCPU
+    @skipOps(
+        {
+            skip("sparse.sampled_addmm"),
+            skip("sparse.mm", variant_name="reduce"),
+            skip("nn.functional.max_pool1d"),
+            skip("to_sparse"),
+            skip("bmm", variant_name="triton_optimized"),
+        }
+    )
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_tags(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2738,6 +2729,8 @@ fake_backward_skips = {
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     skip("nn.functional.ctc_loss"),
+    xfail("index_fill"),
+    skip("bmm", variant_name="triton_optimized"),
 }
 
 fake_autocast_backward_xfails = {
@@ -2873,6 +2866,7 @@ class TestFakeTensor(TestCase):
                     allow_dynamic_output_shape_mode, match_results=False
                 )
 
+    @skipOps({skip("bmm", variant_name="triton_optimized")})
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_pointwise_ops(self, device, dtype, op):
         name = op.name
@@ -2926,10 +2920,24 @@ class TestFakeTensor(TestCase):
                 with mode:
                     op(input, *args, **kwargs)
 
+    @skipOps(
+        {
+            xfail("item"),
+            skip("native_batch_norm"),
+            skip("bmm", variant_name="triton_optimized"),
+        }
+    )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
         self._test_fake_helper(device, dtype, op, contextlib.nullcontext)
 
+    @skipOps(
+        {
+            xfail("item"),
+            skip("native_batch_norm"),
+            skip("bmm", variant_name="triton_optimized"),
+        }
+    )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake_autocast(self, device, dtype, op):
         device_type = torch.device(device).type
@@ -2976,19 +2984,12 @@ class TestFakeTensor(TestCase):
             except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 pass
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/159151"
-    )
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(fake_backward_xfails)
+    @skipOps(fake_backward_xfails | {skip("sparse.sampled_addmm")})
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHINDUCTOR or IS_LINUX or TEST_WITH_ROCM,
-        "https://github.com/pytorch/pytorch/issues/159150",
-    )
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(fake_backward_xfails | fake_autocast_backward_xfails)

@@ -783,7 +783,7 @@ class MemoryPlanningLine(WrapperLine):
 
 @dataclasses.dataclass
 class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine):
-    """Enter a CUDA device context and retrieve user stream objects.
+    """Enter a device context and retrieve user stream objects.
 
     Attributes:
         num_streams: Number of streams (determined by user annotations on nodes).
@@ -800,7 +800,7 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
             super().codegen(code)
         else:
             super().codegen(code)
-            code.writeline(f"{DEFAULT_STREAM} = torch.cuda.current_stream()")
+            code.writeline(f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}")
 
             if self.num_streams > 1:
                 for i in range(1, self.num_streams):
@@ -813,7 +813,7 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
 
 @dataclasses.dataclass
 class ExitDeviceContextManagerWithStreamInfoLine(ExitDeviceContextManagerLine):
-    """Exit a CUDA device context.
+    """Exit a device context.
 
     Attributes:
         num_streams: Number of streams that were allocated (must match Enter).
@@ -829,16 +829,16 @@ class ExitDeviceContextManagerWithStreamInfoLine(ExitDeviceContextManagerLine):
 
 @dataclasses.dataclass
 class EnterCudaStreamContextLine(WrapperLine):
-    """Enter a context executed by respective CUDA Stream.
+    """Enter a context executed by the respective device stream.
 
     Attributes:
-        stream_idx: The index number corresponds to the entering CUDA Stream context.
+        stream_idx: The index number for the entering device stream context.
     """
 
     stream_idx: int
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.writeline(f"with torch.cuda.stream({get_stream_name(self.stream_idx)}):")
+        code.writeline(f"with {get_stream_name(self.stream_idx)}:")
         code.do_indent()
 
 
@@ -2366,16 +2366,38 @@ class PythonWrapperCodegen(CodeGen):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
 
+        def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
+            # Deferred runtime asserts reference pre-replacement backed
+            # symbols (e.g. s77) that were replaced to this canonical
+            # symbol (s31) during constraint solving. Emit aliases so
+            # the asserts compile. Skip unbacked symbols — they are
+            # defined separately by the unbacked symbol codegen path.
+            from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+            for src, tgt in V.graph.sizevars.shape_env.replacements.items():
+                if (
+                    tgt == sym
+                    and isinstance(src, sympy.Symbol)
+                    and src not in bound_vars
+                    and not symbol_is_type(
+                        src, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+                    )
+                ):
+                    code.writeline(f"{src} = {sym}")
+                    bound_vars.add(src)
+
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
             code.writeline(f"{value} = {name}")
             bound_vars.add(value)
+            maybe_emit_replacement_aliases(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
                 if isinstance(size, sympy.Symbol) and size not in bound_vars:
                     code.writeline(f"{size} = {sizeof(name)}[{dim}]")
                     bound_vars.add(size)
+                    maybe_emit_replacement_aliases(size)
             for dim, stride in enumerate(value.get_stride()):
                 if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
                     code.writeline(f"{stride} = {strideof(name)}[{dim}]")
@@ -2545,6 +2567,12 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_device_copy(self, src, dst, non_blocking: bool | str):
         self.writeline(f"{dst}.copy_({src}, {non_blocking})")
+
+    def sync_d2h_copy(self, buffer_name: str) -> None:
+        event_var = f"_d2h_event_{buffer_name}"
+        self.writeline(f"{event_var} = torch.Event()")
+        self.writeline(f"{event_var}.record()")
+        self.writeline(f"{event_var}.synchronize()")
 
     def codegen_multi_output(self, node: ir.MultiOutput):
         result_name = node.get_name()
@@ -3588,7 +3616,7 @@ class PythonWrapperCodegen(CodeGen):
                 elif raw_key == "" and infer_arg_by_inputs(
                     raw_keys, raw_args, i, reused_args
                 ):
-                    # Empty raw_key means this is a arg that's not native to the triton kernel,
+                    # Empty raw_key means this is an arg that's not native to the triton kernel,
                     # and is being added by inductor.
                     arg_str = reused_args[raw_arg]
                 elif isinstance(arg_type, torch_dtype):
@@ -4494,7 +4522,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # pyre-fixme[16]: scheduler.current_stream_name added in scheduler commit
         if (current_stream_name := V.graph.scheduler.current_stream_name) is not None:
             name = f"{current_stream_name}_raw"
-            self.writeline(f"{name} = {current_stream_name}.cuda_stream")
+            self.writeline(
+                f"{name} = {V.graph.device_ops.stream_handle(current_stream_name)}"
+            )
         else:
             name = get_raw_stream_name(device_idx)
             self.writeline(f"{name} = get_raw_stream({device_idx})")
