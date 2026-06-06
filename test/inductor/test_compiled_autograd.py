@@ -63,6 +63,15 @@ from torch.testing._internal.triton_utils import (
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
+try:
+    from torch.distributed.tensor import DeviceMesh, DTensor, Shard
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+    HAS_DTENSOR = True
+except ImportError:
+    HAS_DTENSOR = False
+
+
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
 
@@ -4441,6 +4450,47 @@ class CompiledAutograd1(torch.nn.Module):
         with compiled_autograd._enable(lambda gm: gm):
             loss.backward()
 
+    @unittest.skipIf(
+        not HAS_DTENSOR,
+        "DTensor/FakePG requires distributed build",
+    )
+    def test_dtensor_backward_symints_do_not_reuse_native_sharding_cache(self):
+        def run_case():
+            torch._dynamo.reset()
+            with compiled_autograd._enable(compiler_fn):
+                mesh = DeviceMesh("cpu", torch.arange(2))
+
+                def fn(x, y):
+                    out = x.sin()
+                    y.add_(2)
+                    return out
+
+                opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+                x_eager = DTensor.from_local(
+                    torch.randn(4), mesh, [Shard(0)], run_check=False
+                ).requires_grad_(True)
+                y_eager = DTensor.from_local(
+                    torch.randn(4), mesh, [Shard(0)], run_check=False
+                ).requires_grad_(False)
+
+                x = x_eager.clone().detach().requires_grad_(True)
+                y = y_eager.clone().detach().requires_grad_(False)
+
+                # The first backward populates the native sharding cache.
+                # The compiled-autograd backward must not reuse that entry when it
+                # contains SymInts from a different tracing context.
+                fn(x_eager.clone(), y_eager).sum().backward()
+                opt_fn(x.clone(), y).sum().backward()
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        try:
+            run_case()
+            run_case()
+        finally:
+            dist.destroy_process_group()
+
     def test_anomaly_mode_already_nan(self):
         def fn():
             with torch.autograd.detect_anomaly():
@@ -5488,7 +5538,7 @@ test_contexts = {
 }
 
 # These groups of tests aren't supported yet
-xfail_re = re.compile(r"^test_(sparse|profiler|gradcheck|named_tensor)")
+xfail_re = re.compile(r"^test_(sparse|profiler|gradcheck)")
 
 # Tests fail at different stages, we categorize them wrt to their backends
 # We run only the last passing backend in this order:
