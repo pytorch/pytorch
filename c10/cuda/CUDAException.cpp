@@ -31,7 +31,7 @@ void c10_cuda_check_implementation(
   check_message.append(error_string);
   check_message.append(c10::cuda::get_cuda_error_help(cuda_error));
   check_message.append(c10::cuda::get_cuda_async_error_suffix(cuda_error));
-  check_message.append("\n");
+  check_message.push_back('\n');
   if (include_device_assertions) {
     check_message.append(c10_retrieve_device_side_assertion_info());
   } else {
