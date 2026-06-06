@@ -21,7 +21,7 @@ static const std::unordered_map<NodeKind, int> expectedInputCount = {
     {aten::fill_, 7}};
 
 bool isInplaceOp(const Node* node) {
-  return inPlaceToOutOfPlace.contains(node->kind());
+  return inPlaceToOutOfPlace.count(node->kind()) != 0;
 }
 
 // Remove all in-place ops and replace them with out-of-place equivalents.
@@ -54,7 +54,7 @@ void RemoveInplaceOps(Block* block) {
       }
 
       int additionalInputCount = 0;
-      if (expectedInputCount.contains(node->kind())) {
+      if (expectedInputCount.find(node->kind()) != expectedInputCount.end()) {
         additionalInputCount = expectedInputCount.at(node->kind()) -
             static_cast<int>(newNode->inputs().size());
       }

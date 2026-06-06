@@ -168,7 +168,7 @@ static void ConvertQuantizedWeight(
 }
 
 // CONV1D needs a different unpacking from CONV, since it's
-// packed as CONV2D intentionally at the first place.
+// packed as CONV2D intentionally in the first place.
 // See: https://github.com/pytorch/pytorch/pull/38248
 enum class QuantizedParamsType { CONV1D, CONV, LINEAR };
 
@@ -302,8 +302,8 @@ static void unpackQuantizedWeightsHelper(
         const int64_t kSpatialDim = conv_params_packed[0].item<int64_t>();
         // skip kSpatialDim
         int64_t idx = 1;
-        // kSpatialDim = 2 even it's for Conv1D from torch.op to adopt Conv2D,
-        // so we need a special unpack for Conv1D which has Conv2D dim.
+        // kSpatialDim = 2 even if it's for Conv1D from torch.op to adapt
+        // Conv2D, so we need a special unpack for Conv1D which has Conv2D dim.
         // See: https://github.com/pytorch/pytorch/pull/38248
         for (const auto i : c10::irange(kSpatialDim)) {
           if (params_type != QuantizedParamsType::CONV1D || i != 0) {
@@ -479,7 +479,7 @@ static void UnpackQuantizedTensorInputs(std::shared_ptr<Graph>& graph) {
       continue;
     }
     auto scalar_type = shape_type->scalarType().value();
-    if (!qTypeToValType.contains(scalar_type)) {
+    if (qTypeToValType.find(scalar_type) == qTypeToValType.end()) {
       index++;
       continue;
     }

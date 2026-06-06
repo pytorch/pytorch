@@ -479,14 +479,12 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto input_shape_getter = inputs_outputs_.getInputShapeGenerator();
   auto concrete_input_getter = inputs_outputs_.getConcreteInputGenerator();
 
-  // TODO: CTAD will take care of template args when we move to C++17
-  auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
-  auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
-  auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
-  auto extra_meta = StealOrDefault<decltype(extra_meta_)>(extra_meta_);
-  auto kwinputs = StealOrDefault<decltype(kwinputs_)>(kwinputs_);
-  auto gpu_fallback =
-      StealOrDefault<decltype(device_fallback_)>(device_fallback_);
+  auto jit_stack = StealOrDefault(jit_stack_);
+  auto jit_module = StealOrDefault(jit_modules_);
+  auto extra_args = StealOrDefault(extra_args_);
+  auto extra_meta = StealOrDefault(extra_meta_);
+  auto kwinputs = StealOrDefault(kwinputs_);
+  auto gpu_fallback = StealOrDefault(device_fallback_);
 
   for (auto event = op_events_.begin(); event != op_events_.end(); ++event) {
     ExtraFields<EventType::TorchOp> e{
@@ -713,7 +711,7 @@ RecordQueue::RecordQueue(
 }
 
 bool RecordQueue::tracePython() const {
-  return config_.with_stack && activities_.contains(ActivityType::CPU);
+  return config_.with_stack && activities_.count(ActivityType::CPU);
 }
 
 bool RecordQueue::getPythonGcEvents() const {

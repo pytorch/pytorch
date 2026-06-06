@@ -260,7 +260,7 @@ struct SchemaParser {
         } else {
           auto text = tok.text();
           if (isPossiblyOptionalScalarType(real_type) &&
-              str2dtype.contains(text)) {
+              str2dtype.count(text) > 0) {
             return static_cast<int64_t>(str2dtype.at(text));
           } else {
             throw(

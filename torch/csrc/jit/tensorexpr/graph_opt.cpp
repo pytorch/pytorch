@@ -151,7 +151,7 @@ static void moveCatOpToEnd(Node* cat, const std::shared_ptr<Graph>& subgraph) {
         TORCH_INTERNAL_ASSERT(
             use.user->output()->owningGraph() == subgraph.get(),
             buildErrorMessage(
-                "aten::cat user graph does not math the given subgraph."));
+                "aten::cat user graph does not match the given subgraph."));
         auto new_cat = moveCatAfterUse(cat, use.user, subgraph);
         moveCatOpToEnd(new_cat, subgraph);
       }
@@ -247,7 +247,7 @@ std::vector<int64_t> makeShapesSymbolic(
 
     auto new_sizes = c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
       auto value = shape.value();
-      if (shape_to_sym_shape.contains(value)) {
+      if (shape_to_sym_shape.count(value)) {
         return shape_to_sym_shape.at(value);
       }
       return value;
@@ -431,14 +431,14 @@ static bool trimGraphOnce(const std::shared_ptr<Graph>& graph) {
   bool changed = false;
   for (size_t idx = 0; idx < ret->inputs().size(); idx++) {
     auto v = ret->inputs()[idx];
-    if (graph_inputs.contains(v)) {
+    if (graph_inputs.count(v)) {
       continue;
     }
     // Delete the graph output IDX and add all inputs of the node producing that
     // value to the graph outputs
     graph->eraseOutput(idx);
     for (auto v_ins : v->node()->inputs()) {
-      if (outputs.contains(v_ins)) {
+      if (outputs.count(v_ins)) {
         continue;
       }
       if (v_ins->node()->kind() == prim::Constant) {

@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <algorithm>
 #include <cstdint>
+#include <initializer_list>
 #include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -830,7 +831,7 @@ void BlockInfo::prepare_for_memory_planner(
       // Types are stored in the underlying TorchScript IR
       bool is_tensor_type = out_v->type()->castRaw<TensorType>();
       if (opts.manage_output_tensors && is_tensor_type &&
-          !graph_output_values.contains(out_v) &&
+          graph_output_values.find(out_v) == graph_output_values.end() &&
           value_group_.isOutputAlias(out_v)) {
         managed_output_tensor_values_.insert(out_v);
         continue;
@@ -1513,9 +1514,9 @@ void BlockRunner::benchmark(
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
               << results.instances_per_node_type[kind] << " nodes";
-    if (results.out_nodes.contains(kind)) {
+    if (results.out_nodes.count(kind)) {
       std::cout << ", out variant)" << '\n';
-    } else if (results.native_nodes.contains(kind)) {
+    } else if (results.native_nodes.count(kind)) {
       std::cout << ", native)" << '\n';
     } else {
       std::cout << ')' << '\n';
@@ -1879,7 +1880,7 @@ bool BlockRunner::check_for_memory_leak(
           val->debugName() + " of node " + std::to_string(n) +
           " which has kind " + pnode.node()->kind().toQualString() +
           " was not cleaned up";
-      if (!output_ivalues.contains(ival)) {
+      if (output_ivalues.count(ival) == 0) {
         // check for intermediates
         if (!ival->isNone()) {
           TORCH_CHECK(
@@ -1974,7 +1975,7 @@ bool BlockRunner::isManagedOutputTensorValue(const Value* value) const {
     return false;
   }
   const auto& managed_outputs = block_info_.managed_output_tensor_values();
-  return managed_outputs.contains(value);
+  return managed_outputs.find(value) != managed_outputs.end();
 }
 
 void BlockRunner::disableManageOutputTensors() {
@@ -2135,7 +2136,7 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
-  const static std::array<c10::Symbol, 7> special_case_ops = {
+  const static auto special_case_ops = {
       fromQualString("prim::TypeCheck"),
       fromQualString("prim::IfThenElse"),
       fromQualString("static_runtime::select_tensor"),

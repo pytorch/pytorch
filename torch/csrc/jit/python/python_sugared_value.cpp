@@ -159,7 +159,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
 
 std::string PythonValue::kind() const {
   std::stringstream ss;
-  ss << "python value of type '" << typeString(self) << "'";
+  ss << "python value of type '" << typeString(self) << '\'';
   return ss.str();
 }
 
@@ -229,7 +229,7 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       "set_stream",
       "synchronize"};
 
-  if (cuda_ops.contains(field)) {
+  if (cuda_ops.find(field) != cuda_ops.end()) {
     // Both current_device and set_device API's are a part of c10::cuda
     // namespace. Hence, to resolve the conflict for jit, we append _ to both
     // these APIs.
@@ -856,8 +856,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       ErrorReport(loc)
       << "Module '"
       << concreteType_->getJitType()->expectRef<ClassType>().name()->name()
-      << "'"
-      << " has no attribute '" << field << "' " << hint);
+      << '\'' << " has no attribute '" << field << "' " << hint);
 }
 
 SugaredValuePtr ModuleValue::iter(const SourceRange& loc, GraphFunction& m) {

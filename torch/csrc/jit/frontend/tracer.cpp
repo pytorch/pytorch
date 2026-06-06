@@ -231,7 +231,7 @@ Value* TracingState::getValue(const IValue& var) {
 }
 bool TracingState::hasValue(const IValue& var) const {
   for (const auto& frame : env_stack) {
-    if (frame.contains(var)) {
+    if (frame.count(var)) {
       return true;
     }
   }
@@ -718,12 +718,6 @@ void addInputs(
     const char* name,
     const std::optional<at::Device>& value) {
   detail::genericAddOptionalInput(n, name, value);
-}
-void addInputs(
-    Node* n,
-    const char* name,
-    std::optional<at::DimnameList> value) {
-  TORCH_CHECK(false, "NYI: Named tensors are not supported with the tracer");
 }
 void addInputs(
     Node* n,

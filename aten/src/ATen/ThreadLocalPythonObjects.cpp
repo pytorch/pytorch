@@ -18,7 +18,11 @@ const std::shared_ptr<SafePyObject>& ThreadLocalPythonObjects::get(const std::st
 }
 
 bool ThreadLocalPythonObjects::contains(const std::string& key) {
-  return py_objects.obj_dict_.contains(key);
+  return py_objects.obj_dict_.count(key);
+}
+
+void ThreadLocalPythonObjects::erase(const std::string& key) {
+  py_objects.obj_dict_.erase(key);
 }
 
 void ThreadLocalPythonObjects::set_state(ThreadLocalPythonObjects state) {

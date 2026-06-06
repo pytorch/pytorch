@@ -104,7 +104,7 @@ Weights::Weights(
     // /extra/xl_weights/<model_name>_model_param_config.json
     // Currently, we only use the metadata from model definition.
     std::optional<TensorMeta> tensorMeta;
-    if (weightsMeta_.contains(tensorName)) {
+    if (weightsMeta_.find(tensorName) != weightsMeta_.end()) {
       tensorMeta = weightsMeta_.at(tensorName);
     } else {
       TORCH_CHECK(
@@ -115,12 +115,12 @@ Weights::Weights(
     }
     std::optional<TensorMeta> newTensorMeta;
     if (maybeNewWeightsMeta) {
-      if (!stateDictPaths.contains(tensorName)) {
+      if (stateDictPaths.find(tensorName) == stateDictPaths.end()) {
         TORCH_CHECK(false, "Tensor name not found in state dict paths");
       }
 
       std::string paramName = stateDictPaths.at(tensorName);
-      if (maybeNewWeightsMeta->contains(paramName)) {
+      if (maybeNewWeightsMeta->find(paramName) != maybeNewWeightsMeta->end()) {
         newTensorMeta = *maybeNewWeightsMeta->at(paramName);
       } else {
         TORCH_CHECK(
@@ -327,7 +327,7 @@ at::Tensor& Weights::at(const std::string& name) {
 }
 
 bool Weights::contains(const std::string& name) const {
-  return allValues_.contains(name);
+  return allValues_.find(name) != allValues_.end();
 }
 
 c10::IValue Weights::getCustomObj(const std::string& name) const {
@@ -439,7 +439,7 @@ void Weights::setValue(
     const std::string& name,
     const at::Tensor& newValue,
     bool skipDeviceCheck) {
-  if (allValues_.contains(name)) {
+  if (allValues_.find(name) != allValues_.end()) {
     validateValue(name, newValue, skipDeviceCheck);
   } else {
     LOG(WARNING) << name << " is not found in the registered weights";
@@ -482,7 +482,7 @@ std::string Weights::toString() const {
 void Weights::validateAllWeightsLoaded() {
   auto checkNames = [&](const auto& names) {
     for (const auto& name : names) {
-      if (unusedWeights_.contains(std::string(name))) {
+      if (unusedWeights_.find(std::string(name)) != unusedWeights_.end()) {
         continue;
       }
       auto it = allValues_.find(std::string(name));

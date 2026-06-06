@@ -114,8 +114,8 @@ std::string DebugUtil::GetTensorsGraphInfo(
     }
   }
   std::stringstream ss;
-  // Call into a function pointer that may backed by python or empty depending
-  // on runtime
+  // Call into a function pointer that may be backed by python or empty
+  // depending on runtime
   std::vector<SourceLocation> frames = GetPythonFramesFunction()();
   ss << "Python Stacktrace:\n";
   for (auto& location : frames) {
@@ -165,7 +165,7 @@ void DebugUtil::SaveTensorsGraphInfo(
 
 bool DebugUtil::ExperimentEnabled(const std::string& name) {
   static const std::unordered_set<std::string>* xset = LoadExperiments();
-  return xset->contains(name);
+  return xset->find(name) != xset->end();
 }
 
 } // namespace torch::lazy

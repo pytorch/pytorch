@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
 
 #include <functional>
+#include <unordered_set>
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
@@ -134,7 +135,7 @@ Reducer::Reducer(
   }
   // Check whether the module is multi_device_module
   {
-    std::set<int> unique_devices;
+    std::unordered_set<int> unique_devices;
     for (const auto& v : params_) {
       auto device_idx = static_cast<int>(v.device().index());
       auto [_, inserted] = unique_devices.emplace(device_idx);
@@ -826,7 +827,8 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t index) {
   // Something is wrong if all variables contained in this bucket have
   // already been marked as ready.
   // We don't expect the same variable to be marked ready twice.
-  bool marked_twice = perIterationReadyParams_.contains(index);
+  bool marked_twice =
+      perIterationReadyParams_.find(index) != perIterationReadyParams_.end();
 
   if (marked_twice) {
     // Report index of param that has been marked twice. In debug mode, also
@@ -1002,7 +1004,8 @@ std::vector<at::Tensor> Reducer::get_variables_for_bucket(
     const Bucket& bucket) const {
   // Check if we have cached mapping previously.
   if (has_rebuilt_bucket_ &&
-      cached_variables_for_bucket_.contains(bucket_index)) {
+      cached_variables_for_bucket_.find(bucket_index) !=
+          cached_variables_for_bucket_.end()) {
     return cached_variables_for_bucket_[bucket_index];
   }
   std::vector<at::Tensor> variables_for_bucket;
@@ -1503,7 +1506,7 @@ void Reducer::search_unused_parameters(
   for (const auto& it : gradAccToVariableMap_) {
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
-    if (!seen.contains(it.first)) {
+    if (seen.count(it.first) == 0) {
       if (ddp_debug_level_ == c10d::DebugLevel::Detail) {
         const auto param_info = param_names_.find(it.second);
         TORCH_INTERNAL_ASSERT(
@@ -1609,7 +1612,8 @@ void Reducer::copy_bucket_to_grad(
 std::vector<std::string> Reducer::getUnmarkedParamsForIteration() {
   std::vector<std::string> unMarkedParamNames;
   for (const auto& it : param_names_) {
-    if (!perIterationReadyParams_.contains(it.first)) {
+    if (perIterationReadyParams_.find(it.first) ==
+        perIterationReadyParams_.end()) {
       unMarkedParamNames.push_back(it.second);
     }
   }
@@ -1620,7 +1624,8 @@ std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
   std::vector<size_t> unmarked_param_indices;
   const auto variable_count = params_.size();
   for (const auto variable_index : c10::irange(variable_count)) {
-    if (!perIterationReadyParams_.contains(variable_index)) {
+    if (perIterationReadyParams_.find(variable_index) ==
+        perIterationReadyParams_.end()) {
       unmarked_param_indices.push_back(variable_index);
     }
   }
@@ -2348,7 +2353,7 @@ compute_bucket_assignment_by_size(
     bucket.size += tensor.numel() * tensor.element_size();
 
     // Initialize bucket size limit iterator if necessary.
-    if (!bucket_size_limit_iterators.contains(key)) {
+    if (bucket_size_limit_iterators.count(key) == 0) {
       bucket_size_limit_iterators[key] = bucket_size_limits.begin();
     }
 
@@ -2408,7 +2413,8 @@ compute_bucket_assignment_by_size(
     bucket_indices.emplace_back(std::get<0>(bucket_indices_with_size));
     per_bucket_size_limits.emplace_back(std::get<1>(bucket_indices_with_size));
   }
-  return std::make_tuple(bucket_indices, per_bucket_size_limits);
+  return std::make_tuple(
+      std::move(bucket_indices), std::move(per_bucket_size_limits));
 }
 
 // Verifies corresponding params in the model replica have the same

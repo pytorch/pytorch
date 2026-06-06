@@ -5,6 +5,8 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <unordered_set>
+
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 namespace c10d {
@@ -68,7 +70,7 @@ bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
 c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     c10::DeviceType deviceType) {
   // If there is a backend associated with this device type then return it
-  if (deviceTypeToBackend_.contains(deviceType)) {
+  if (deviceTypeToBackend_.find(deviceType) != deviceTypeToBackend_.end()) {
     return deviceTypeToBackend_.at(deviceType);
   }
 
@@ -82,7 +84,7 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   }
 
   // Check if the backend has already been initialized
-  if (backendTypeToBackend_.contains(backendType)) {
+  if (backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end()) {
     auto backend = backendTypeToBackend_.at(backendType);
     deviceTypeToBackend_[deviceType] = backend;
     return backend;
@@ -166,7 +168,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   TORCH_CHECK(
       ranks.size() <= static_cast<size_t>(size_),
       "the split group's size should be no larger than the world_size set by init_process_group");
-  std::set<int> ranks_set(ranks.begin(), ranks.end());
+  std::unordered_set<int> ranks_set(ranks.begin(), ranks.end());
   TORCH_CHECK(
       ranks_set.size() == ranks.size(),
       "Split ranks should not have duplicates. Please provide a list of unique ranks to split the group.");
