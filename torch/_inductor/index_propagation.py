@@ -16,8 +16,7 @@ The underlying handler would just see:
     ops.load("buf0", x * 2)
 
 This is limited by the set of operators handled in the sympy expression
-printers. So simple operations like minimum and maximum cannot be translated to
-SymPy expressions yet, despite sympy.Min and sympy.Max existing.
+printers.
 
 """
 
@@ -96,6 +95,10 @@ class SymPyOps:
 
     @staticmethod
     def index_expr(value: sympy.Expr | int, dtype: torch.dtype) -> TypedExpr:
+        return TypedExpr(value, dtype)
+
+    @staticmethod
+    def value_expr(value: sympy.Expr | int, dtype: torch.dtype) -> TypedExpr:
         return TypedExpr(value, dtype)
 
     @staticmethod
@@ -237,6 +240,9 @@ class IndexPropagation(DefaultHandler):
             val = dtype_to_type(dtype)(expr)
             return self._inner.constant(val, dtype)
         return self._inner.index_expr(expr, dtype)
+
+    def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> IndexPropResult:
+        return self.wrap(self._inner.value_expr(expr, dtype))
 
     def unwrap(self, a: Any | IndexPropVar) -> Any:
         if isinstance(a, (list, tuple)):

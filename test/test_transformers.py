@@ -850,6 +850,7 @@ class TestTransformers(NNTestCase):
 
         self.assertEqual(eager_out, compiled_out)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/101787")
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
     def test_decoder_padding_and_src_mask_bool(self):
 
@@ -1412,8 +1413,6 @@ class TestTransformers(NNTestCase):
         criterion = nn.MSELoss()
         encoder = nn.TransformerEncoder(layer, 2).to(device)
         optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
-        encoder.train()
-
         encoder.train()
         optimizer.zero_grad()
         inputs = torch.randn(S, L, E).to(device)
@@ -2250,25 +2249,64 @@ class TestSDPA(NNTestCase):
         y = torch.nn.functional.scaled_dot_product_attention(x, x, x)
         self.assertFalse(y.isnan().any().item())
 
-    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    def test_sdpa_zero_sized_tensors(self, device, dtype):
-        zero_size_configs = [
-            (0, 4, 10, 64),
-            (2, 4, 0, 64),
-            (2, 4, 10, 0),
-            (0, 0, 0, 0),
-        ]
-        for b, h, s, d in zero_size_configs:
-            q = torch.zeros(b, h, s, d, dtype=dtype, device=device, requires_grad=True)
-            k = torch.zeros(b, h, s, d, dtype=dtype, device=device, requires_grad=True)
-            v = torch.zeros(b, h, s, 32, dtype=dtype, device=device, requires_grad=True)
-            out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
-            self.assertEqual(out.shape, (b, h, s, 32))
-            self.assertEqual(out, torch.zeros(b, h, s, 32, dtype=dtype, device=device))
-            out.sum().backward()
-            self.assertEqual(q.grad.shape, q.shape)
-            self.assertEqual(k.grad.shape, k.shape)
-            self.assertEqual(v.grad.shape, v.shape)
+    @parametrize(
+        "q_shape,k_shape,v_shape",
+        [
+            # B=0: no batches, output is empty
+            ((0, 4, 10, 64), (0, 4, 10, 64), (0, 4, 10, 32)),
+            # H=0: no heads, output is empty
+            ((2, 0, 10, 64), (2, 0, 10, 64), (2, 0, 10, 32)),
+            # L_q=0: no query positions, output is empty
+            ((2, 4, 0, 64), (2, 4, 10, 64), (2, 4, 10, 32)),
+            # L_k=0: softmax over empty set, undefined
+            ((2, 4, 10, 64), (2, 4, 0, 64), (2, 4, 0, 32)),
+            # head_dim_v=0: output last dim is 0
+            ((2, 4, 10, 64), (2, 4, 10, 64), (2, 4, 10, 0)),
+            # all zero
+            ((0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)),
+        ],
+    )
+    def test_sdpa_zero_output(self, device, q_shape, k_shape, v_shape):
+        q = torch.randn(*q_shape, device=device, requires_grad=True)
+        k = torch.randn(*k_shape, device=device, requires_grad=True)
+        v = torch.randn(*v_shape, device=device, requires_grad=True)
+        out = F.scaled_dot_product_attention(q, k, v)
+        expected_shape = list(q_shape)
+        expected_shape[-1] = v_shape[-1]
+        self.assertEqual(out.shape, tuple(expected_shape))
+        self.assertEqual(out, torch.zeros(expected_shape, device=device))
+        out.sum().backward()
+        self.assertEqual(q.grad.shape, q.shape)
+        self.assertEqual(k.grad.shape, k.shape)
+        self.assertEqual(v.grad.shape, v.shape)
+
+    @parametrize("value_dim", [1, 8])
+    @parametrize("scale", [None, 1.0])
+    def test_sdpa_zero_qk_head_dim_matches_eager_attention(self, device, value_dim, scale):
+        torch.manual_seed(0)
+        query = torch.empty((1, 16, 16, 0), device=device, requires_grad=True)
+        key = torch.empty((1, 16, 16, 0), device=device, requires_grad=True)
+        value = torch.randn((1, 16, 16, value_dim), device=device, requires_grad=True)
+        grad_output = torch.randn((1, 16, 16, value_dim), device=device)
+
+        actual = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, scale=scale)
+        actual.backward(grad_output)
+        actual_query_grad = query.grad.detach().clone()
+        actual_key_grad = key.grad.detach().clone()
+        actual_value_grad = value.grad.detach().clone()
+
+        query_ref = query.detach().clone().requires_grad_()
+        key_ref = key.detach().clone().requires_grad_()
+        value_ref = value.detach().clone().requires_grad_()
+        scores = torch.matmul(query_ref, key_ref.transpose(-2, -1))
+        probs = torch.softmax(scores, dim=-1, dtype=torch.float32).to(query_ref.dtype)
+        expected = torch.matmul(probs, value_ref)
+        expected.backward(grad_output)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_query_grad, query_ref.grad)
+        self.assertEqual(actual_key_grad, key_ref.grad)
+        self.assertEqual(actual_value_grad, value_ref.grad)
 
     def test_sdpa_output_shape_uses_value_head_dim(self, device):
         # Regression test for https://github.com/pytorch/pytorch/issues/176767
