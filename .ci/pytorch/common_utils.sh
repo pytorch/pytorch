@@ -283,8 +283,10 @@ function install_torchrec_and_fbgemm() {
     install_fbgemm "rocm"
   else
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
-    # Skip fbgemm for CUDA 13 as it's not compatible yet
-    if [[ "$fbgemm_build_variant" != "cuda" || "$BUILD_ENVIRONMENT" != *cuda13* ]]; then
+    if [[ "$fbgemm_build_variant" == "cuda" && "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
+      # Skip fbgemm for CUDA 13 as it's not compatible yet
+      return
+    else
       install_fbgemm "${fbgemm_build_variant}"
     fi
   fi
@@ -349,6 +351,12 @@ function install_cutlass_dsl() {
   # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
   pip_install nvidia-cutlass-dsl==4.5.2 apache-tvm-ffi==0.1.11
   echo "NVIDIA CUTLASS DSL installation complete."
+}
+
+function install_nvmath() {
+  echo "Installing nvmath-python from PyPI..."
+  pip_install nvmath-python
+  echo "nvmath-python installation complete."
 }
 
 function install_cutlass_api() {

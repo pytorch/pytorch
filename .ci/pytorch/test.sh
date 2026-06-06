@@ -418,8 +418,10 @@ test_python() {
 
 test_python_smoke() {
   # Smoke tests for H100/B200
+  install_nvmath
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -521,8 +523,18 @@ test_lazy_tensor_meta_reference_disabled() {
   export -n TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE
 }
 
+preload_fbgemm_lib_tbb() {
+  # TODO (huydhn): Newer FBGEMM has a bug in detecting libtbb when building from source
+  local libtbb_path
+  libtbb_path="$(find "$(dirname "$(command -v python)")/../lib/" -name libtbb.so.12 -print -quit)"
+  if [[ -n "${libtbb_path}" ]]; then
+    export LD_PRELOAD="${libtbb_path}${LD_PRELOAD:+:${LD_PRELOAD}}"
+  fi
+}
+
 test_dynamo_core() {
   install_torchrec_and_fbgemm
+  preload_fbgemm_lib_tbb
   time python test/run_test.py \
     --include-dynamo-core-tests \
     --verbose \
@@ -2335,9 +2347,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     # Skip torchrec/fbgemm for cuda13 as they're not compatible yet
     if [[ "${TEST_CONFIG}" != *cpu* && "${TEST_CONFIG}" != *xpu* && "${BUILD_ENVIRONMENT}" != *cuda13* ]]; then
       install_torchrec_and_fbgemm
-      # TODO (huydhn): Newer FBGEMM has a bug in detecting libtbb when building from source
-      LIBTBB_PATH="$(find "$(dirname "$(which python)")/../lib/" -name libtbb.so.12)"
-      export LD_PRELOAD="$LIBTBB_PATH":"$LD_PRELOAD"
+      preload_fbgemm_lib_tbb
     fi
     setup_torch_trace
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
