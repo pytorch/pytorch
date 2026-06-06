@@ -67,6 +67,7 @@ from torch.compiler._cache import (
 )
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
+from torch.fx.traceback import _get_memory_budget_annotation
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -584,6 +585,18 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
         self.input_tensor_alias_cache_key = _compute_input_tensor_alias_cache_key(
             example_inputs
+        )
+
+        # region_activation_memory_budget is graph-wide (the partitioner enforces
+        # a single value across the graph) and propagates to every node, so the
+        # cache key only needs the value off the first node. node.meta is stripped
+        # by GraphModule.__reduce__, so without recording it here a budget change
+        # would not invalidate the cache.
+        first_node = next(iter(gm.graph.nodes), None)
+        self.region_activation_memory_budget: float | None = (
+            _get_memory_budget_annotation(first_node)
+            if first_node is not None
+            else None
         )
 
         # Note: We use the live config module, not self.autograd_config (the

@@ -9,6 +9,8 @@
 #include <c10/util/Synchronized.h>
 #include <c10/util/flat_hash_map.h>
 #include <fmt/format.h>
+#include <torch/csrc/Device.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/guards.h>
@@ -20,6 +22,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/extension.h>
 #include <cstdint>
 
@@ -1520,9 +1523,10 @@ class StorageOverlapChecker {
    * an `overlapping` tensor or not.
    */
   void add(PyObject* obj, bool overlapping) {
-    // Just check that `obj` is actually a tensor, so that we can keep it alive
-    // by incrementing its ref-count.
-    TORCH_CHECK(THPVariable_CheckExact(obj) || THPVariable_Check(obj));
+    if (!(THPVariable_CheckExact(obj) || THPVariable_Check(obj))) {
+      _get_ignored(overlapping)++;
+      return;
+    }
     Py_INCREF(obj);
     _get(overlapping).push_back(obj);
   }
@@ -1533,6 +1537,7 @@ class StorageOverlapChecker {
       Py_DECREF(item);
     }
     vec.clear();
+    _get_ignored(overlapping) = 0;
   }
 
   /**
@@ -1542,15 +1547,16 @@ class StorageOverlapChecker {
    * sure it has collected all expected tensors.
    */
   bool maybe_check() {
-    TORCH_CHECK(_expected_overlapping >= _overlapping.size());
-    TORCH_CHECK(_expected_non_overlapping >= _non_overlapping.size());
-    if (_expected_overlapping == _overlapping.size() &&
-        _expected_non_overlapping == _non_overlapping.size()) {
+    const auto actual_overlapping = _overlapping.size() + _ignored_overlapping;
+    const auto actual_non_overlapping =
+        _non_overlapping.size() + _ignored_non_overlapping;
+    TORCH_CHECK(_expected_overlapping >= actual_overlapping);
+    TORCH_CHECK(_expected_non_overlapping >= actual_non_overlapping);
+    if (_expected_overlapping == actual_overlapping &&
+        _expected_non_overlapping == actual_non_overlapping) {
       // Transform each list of PyObject* into an actual list of Tensors.
-      auto overlapping_tensors =
-          _tensors_from(_overlapping, _expected_overlapping);
-      auto non_overlapping_tensors =
-          _tensors_from(_non_overlapping, _expected_non_overlapping);
+      auto overlapping_tensors = _tensors_from(_overlapping);
+      auto non_overlapping_tensors = _tensors_from(_non_overlapping);
       return check_overlapping(overlapping_tensors, non_overlapping_tensors);
     } else {
       // If we haven't collected them all yet, keep on running.
@@ -1567,14 +1573,16 @@ class StorageOverlapChecker {
     return overlapping ? _overlapping : _non_overlapping;
   }
 
+  size_t& _get_ignored(bool overlapping) {
+    return overlapping ? _ignored_overlapping : _ignored_non_overlapping;
+  }
+
   /**
    * Transforms a given list of PyObject* into a list of Tensor.
    */
-  std::vector<Tensor> _tensors_from(
-      const std::vector<PyObject*>& objects,
-      size_t size) {
+  std::vector<Tensor> _tensors_from(const std::vector<PyObject*>& objects) {
     std::vector<Tensor> tensors;
-    tensors.reserve(size);
+    tensors.reserve(objects.size());
     std::ranges::transform(
         objects, std::back_inserter(tensors), [](PyObject* obj) {
           return THPVariable_Unpack(obj);
@@ -1587,9 +1595,12 @@ class StorageOverlapChecker {
   // Expected number of non-overlapping tensors.
   size_t _expected_non_overlapping;
   // Collected possibly overlapping tensors.
-  std::vector<PyObject*> _overlapping;
+  std::vector<PyObject*> _overlapping{};
   // Collected non-overlapping tensors.
-  std::vector<PyObject*> _non_overlapping;
+  std::vector<PyObject*> _non_overlapping{};
+  // Sources that are not tensors for the current guard run.
+  size_t _ignored_overlapping{0};
+  size_t _ignored_non_overlapping{0};
 };
 
 /**
@@ -3961,7 +3972,11 @@ class GuardManager {
     return GuardDebugInfo(true, num_guards_executed);
   }
 
-  bool has_no_accessors() {
+  bool has_no_leaf_guards() const {
+    return _leaf_guards.empty();
+  }
+
+  bool has_no_accessors() const {
     return _accessors.empty();
   }
 
@@ -4280,6 +4295,11 @@ class RootGuardManager : public GuardManager {
 
   void add_epilogue_lambda_guard(std::unique_ptr<LeafGuard> leaf_guard) {
     _epilogue_lambda_guards.emplace_back(std::move(leaf_guard));
+  }
+
+  bool has_no_guards() const {
+    return has_no_leaf_guards() && has_no_accessors() &&
+        _epilogue_lambda_guards.empty();
   }
 
   void set_init_local_state_flag() {
@@ -7267,11 +7287,34 @@ double profile_guard_manager(
 
 } // namespace
 
+// These helpers are exported to Python as raw function pointers on the
+// torch._C._dynamo.guards module; see the grouped PyModule_AddObject calls in
+// torch_c_dynamo_guards_init below for the rationale.
 static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
   TORCH_CHECK(
       obj != nullptr && (THPVariable_CheckExact(obj) || THPVariable_Check(obj)),
       "_torchinductor_pyobject_tensor_data_ptr: non-tensor input");
   return THPVariable_Unpack(obj).data_ptr();
+}
+
+static PyObject* _torchinductor_thp_device_new(
+    int device_type,
+    int device_index) {
+  return THPDevice_New(
+      c10::Device(static_cast<c10::DeviceType>(device_type), device_index));
+}
+
+static PyObject* _torchinductor_get_thp_dtype(int dtype) {
+  return Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>(dtype)));
+}
+
+static PyObject* _torchinductor_get_thp_layout(int layout) {
+  return Py_NewRef(torch::getTHPLayout(static_cast<c10::Layout>(layout)));
+}
+
+static PyObject* _torchinductor_get_thp_memory_format(int memory_format) {
+  return Py_NewRef(torch::utils::getTHPMemoryFormat(
+      static_cast<c10::MemoryFormat>(memory_format)));
 }
 
 void* convert_to_root_guard_manager(py::object root) {
@@ -7296,6 +7339,13 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
 #endif
 
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
+}
+
+bool root_guard_manager_has_no_guards(void* root) {
+  if (root == nullptr) {
+    return false;
+  }
+  return ((RootGuardManager*)root)->has_no_guards();
 }
 
 PyObject* torch_c_dynamo_guards_init() {
@@ -7348,40 +7398,37 @@ PyObject* torch_c_dynamo_guards_init() {
     return nullptr;
   }
 
-  // We expose the address of _torchinductor_pyobject_tensor_data_ptr in order
-  // to allow manual linking in our generated TorchInductor Python bindings.
-  // While regular linking works in most cases, it does not work properly in
-  // fbcode due to janky build setup there.
-  if (PyModule_AddObject(
-          m,
+  // Expose helper function pointers on the torch._C._dynamo.guards module so
+  // TorchInductor cpp_wrapper generated code can resolve these libtorch_python
+  // helpers at runtime instead of at link time. This is required in fbcode,
+  // where libtorch_python symbols are absent from the executable's dynamic
+  // symbol table, so the generated JIT .so cannot link them directly; it reads
+  // the pointers back via PyLong_AsVoidPtr (see the torch_python_* wrappers in
+  // torch/csrc/inductor/cpp_wrapper/common.h).
+  const auto expose_inductor_symbol = [&](const char* name, auto fn) {
+    return PyModule_AddObject(
+               m, name, PyLong_FromVoidPtr(reinterpret_cast<void*>(fn))) >= 0;
+  };
+  if (!expose_inductor_symbol(
           "_torchinductor_pyobject_tensor_data_ptr",
-          PyLong_FromVoidPtr(reinterpret_cast<void*>(
-              &_torchinductor_pyobject_tensor_data_ptr))) < 0) {
+          &_torchinductor_pyobject_tensor_data_ptr) ||
+      !expose_inductor_symbol(
+          "_torchinductor_thp_device_new", &_torchinductor_thp_device_new) ||
+      !expose_inductor_symbol(
+          "_torchinductor_get_thp_dtype", &_torchinductor_get_thp_dtype) ||
+      !expose_inductor_symbol(
+          "_torchinductor_get_thp_layout", &_torchinductor_get_thp_layout) ||
+      !expose_inductor_symbol(
+          "_torchinductor_get_thp_memory_format",
+          &_torchinductor_get_thp_memory_format) ||
+      !expose_inductor_symbol(
+          "_torchinductor_thp_variable_wrap",
+          static_cast<PyObject* (*)(const at::TensorBase&)>(
+              &THPVariable_Wrap)) ||
+      !expose_inductor_symbol(
+          "_torchinductor_thputils_unpack_int",
+          static_cast<int32_t (*)(PyObject*)>(&THPUtils_unpackInt))) {
     return nullptr;
-  }
-
-  // Expose THPVariable_Wrap for cpp_wrapper inductor, for fbcode
-  {
-    using WrapFn = PyObject* (*)(const at::TensorBase&);
-    WrapFn fn = &THPVariable_Wrap;
-    if (PyModule_AddObject(
-            m,
-            "_torchinductor_thp_variable_wrap",
-            PyLong_FromVoidPtr(reinterpret_cast<void*>(fn))) < 0) {
-      return nullptr;
-    }
-  }
-
-  // Expose THPUtils_unpackInt for cpp_wrapper inductor, for fbcode
-  {
-    using UnpackFn = int32_t (*)(PyObject*);
-    UnpackFn fn = &THPUtils_unpackInt;
-    if (PyModule_AddObject(
-            m,
-            "_torchinductor_thputils_unpack_int",
-            PyLong_FromVoidPtr(reinterpret_cast<void*>(fn))) < 0) {
-      return nullptr;
-    }
   }
 
   auto py_m = py::handle(m).cast<py::module>();
