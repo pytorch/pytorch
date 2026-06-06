@@ -6,7 +6,7 @@ import sys
 
 import torch
 from torch._inductor import config
-from torch._inductor.compile_fx import compile_fx
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     IS_LINUX,
@@ -30,8 +30,10 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
     add_test_failures,
+    assert_expected_dynamic_dims,
     CommonTemplate,
     copy_tests,
+    maybe_disable_caches_for_dynamic_dim_assertions,
     run_and_get_cpp_code,
     run_and_get_triton_code,
     TestFailure,
@@ -51,6 +53,7 @@ def check_codegen(
     *,
     device: torch.types.Device,
     is_cpp_code: bool,
+    assert_dynamic_dims=None,
 ):
     kwargs = kwargs or {}
 
@@ -77,7 +80,26 @@ def check_codegen(
     def compile_fx_wrapper(model_, example_inputs_):
         nonlocal called
         called = True
-        return compile_fx(model_, example_inputs_)
+        dynamic_dim_targets = assert_expected_dynamic_dims(
+            self, model_, assert_dynamic_dims
+        )
+
+        def inner_compile_with_dynamic_dim_assertions(gm, inputs, **kwargs):
+            assert_expected_dynamic_dims(
+                self,
+                gm,
+                assert_dynamic_dims,
+                dynamic_dim_targets,
+                require_matching_aot_inputs=not kwargs.get("is_backward", False),
+            )
+            return compile_fx_inner(gm, inputs, **kwargs)
+
+        with maybe_disable_caches_for_dynamic_dim_assertions(assert_dynamic_dims):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                inner_compile=inner_compile_with_dynamic_dim_assertions,
+            )
 
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
@@ -502,7 +524,68 @@ if HAS_CPU:
         maxDiff = None
         device = "cpu"
 
-        def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
+        @torch._dynamo.config.patch(assume_static_by_default=False)
+        def test_assert_dynamic_dims_rejects_specialized_dim(self):
+            def fn(x):
+                if x.size(0) == 3:
+                    return x + 1
+                return x - 1
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "Expected user tensor input 0 dim 0 to be dynamic",
+            ):
+                self.common(
+                    fn,
+                    (torch.randn(3, 4),),
+                    assert_dynamic_dims={0: (0, 1)},
+                )
+
+        @torch._dynamo.config.patch(assume_static_by_default=False)
+        def test_assert_dynamic_dims_indexes_user_inputs_not_parameters(self):
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("bias", torch.randn(4))
+
+                def forward(self, x):
+                    return x + self.bias
+
+            self.common(
+                Model(),
+                (torch.randn(3, 4),),
+                assert_dynamic_dims={0: (0,)},
+            )
+
+        @torch._dynamo.config.patch(assume_static_by_default=False)
+        def test_assert_dynamic_dims_sorts_positional_inputs_numerically(self):
+            def fn(*xs):
+                result = xs[10].sum()
+                if xs[2].size(0) == 4:
+                    result = result + xs[2].sum()
+                for i, x in enumerate(xs):
+                    if i not in (2, 10):
+                        result = result + x.sum()
+                return result
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "Expected user tensor input 2 dim 0 to be dynamic",
+            ):
+                self.common(
+                    fn,
+                    tuple(torch.randn(i + 2, 4) for i in range(11)),
+                    assert_dynamic_dims={2: (0,)},
+                )
+
+        def common(
+            self: TestCase,
+            model,
+            example_inputs,
+            kwargs=None,
+            assert_dynamic_dims=None,
+            **_rest,
+        ):
             return check_codegen(
                 self=self,
                 model=model,
@@ -510,6 +593,7 @@ if HAS_CPU:
                 device=self.device,
                 kwargs=kwargs,
                 is_cpp_code=torch._inductor.config.cpu_backend == "cpp",
+                assert_dynamic_dims=assert_dynamic_dims,
             )
 
     copy_tests(
@@ -526,7 +610,14 @@ if HAS_GPU and not TEST_WITH_ASAN:
         maxDiff = None
         device = GPU_TYPE
 
-        def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
+        def common(
+            self: TestCase,
+            model,
+            example_inputs,
+            kwargs=None,
+            assert_dynamic_dims=None,
+            **_rest,
+        ):
             return check_codegen(
                 self=self,
                 model=model,
@@ -534,6 +625,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 device=self.device,
                 kwargs=kwargs,
                 is_cpp_code=False,
+                assert_dynamic_dims=assert_dynamic_dims,
             )
 
     copy_tests(

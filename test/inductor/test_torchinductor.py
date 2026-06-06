@@ -22,7 +22,7 @@ import unittest
 import unittest.mock
 import warnings
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TypeVar
 from typing_extensions import ParamSpec
@@ -48,6 +48,7 @@ from torch._dynamo.testing import (
     skipIfPy312,
 )
 from torch._dynamo.utils import ifdynstaticdefault
+from torch._functorch._aot_autograd.descriptors import PlainAOTInput
 from torch._guards import CompileContext, CompileId
 from torch._inductor import lowering
 from torch._inductor.aoti_eager import (
@@ -69,6 +70,7 @@ from torch._inductor.utils import (
 from torch._inductor.virtualized import V
 from torch._prims_common import check_significant_strides, is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import is_symbolic
 from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
@@ -496,6 +498,146 @@ def _assert_equal_with_significant_stride_check(
         _assert_same_significant_strides(self, actual, expected)
 
 
+def assert_expected_dynamic_dims(
+    self: TestCase,
+    graph_module: torch.fx.GraphModule,
+    assert_dynamic_dims: Mapping[int, Sequence[int]] | None,
+    dynamic_dim_targets: Mapping[int, tuple[int, Sequence[int]]] | None = None,
+    *,
+    require_matching_aot_inputs: bool = True,
+):
+    if assert_dynamic_dims is None:
+        return {}
+
+    def placeholder_value(node):
+        return node.meta.get("example_value", node.meta.get("val"))
+
+    def assert_dynamic_dims_on_node(
+        node,
+        user_input_idx: int,
+        expected_dims: Sequence[int],
+    ) -> None:
+        fake_value = placeholder_value(node)
+        if not isinstance(fake_value, torch.Tensor):
+            raise AssertionError(
+                f"Expected user tensor input {user_input_idx}, but graph "
+                f"placeholder {node.name} has non-tensor value {fake_value}"
+            )
+
+        rank = fake_value.dim()
+        for raw_dim in expected_dims:
+            dim = raw_dim if raw_dim >= 0 else rank + raw_dim
+            if dim < 0 or dim >= rank:
+                raise AssertionError(
+                    f"Expected user tensor input {user_input_idx} dim {raw_dim} "
+                    f"to be in range for rank-{rank} tensor placeholder {node.name}"
+                )
+
+            size = fake_value.size(dim)
+            self.assertTrue(
+                is_symbolic(size),
+                msg=(
+                    f"Expected user tensor input {user_input_idx} dim {raw_dim} "
+                    f"to be dynamic, but graph placeholder {node.name} has "
+                    f"static size {size}"
+                ),
+            )
+
+    def source_root_and_path(source):
+        path = []
+        while source is not None and getattr(source, "base", None) is not None:
+            if hasattr(source, "index"):
+                path.append(source.index)
+            source = source.base
+        path.reverse()
+        return source, tuple(path)
+
+    def normalized_path(path):
+        def normalize_index(idx):
+            if isinstance(idx, int):
+                return (0, idx)
+            if isinstance(idx, str):
+                return (1, idx)
+            return (2, type(idx).__name__, repr(idx))
+
+        return tuple(normalize_index(idx) for idx in path)
+
+    def user_input_sort_key(flat_input_idx, node):
+        grapharg = node.meta.get("grapharg")
+        source = getattr(grapharg, "source", None)
+        root, path = source_root_and_path(source)
+        local_name = getattr(root, "local_name", "")
+        if local_name == "ex":
+            root_order = 0
+        elif local_name == "kwargs":
+            root_order = 1
+        else:
+            root_order = 2
+        return (root_order, normalized_path(path), flat_input_idx)
+
+    placeholders = [
+        node for node in graph_module.graph.nodes if node.op == "placeholder"
+    ]
+
+    if dynamic_dim_targets is None:
+        user_tensor_placeholders = []
+        for flat_input_idx, node in enumerate(placeholders):
+            if not isinstance(placeholder_value(node), torch.Tensor):
+                continue
+
+            grapharg = node.meta.get("grapharg")
+            source = getattr(grapharg, "source", None)
+            root, _path = source_root_and_path(source)
+            if getattr(root, "is_input", False):
+                user_tensor_placeholders.append((flat_input_idx, node))
+
+        user_tensor_placeholders.sort(
+            key=lambda item: user_input_sort_key(item[0], item[1])
+        )
+
+        dynamic_dim_targets = {}
+        for input_idx, expected_dims in assert_dynamic_dims.items():
+            if input_idx < 0 or input_idx >= len(user_tensor_placeholders):
+                raise AssertionError(
+                    f"Expected user tensor input {input_idx}, but graph only has "
+                    f"{len(user_tensor_placeholders)} user tensor placeholder(s)"
+                )
+
+            flat_input_idx, placeholder = user_tensor_placeholders[input_idx]
+            assert_dynamic_dims_on_node(placeholder, input_idx, expected_dims)
+            dynamic_dim_targets[flat_input_idx] = (input_idx, expected_dims)
+        return dynamic_dim_targets
+
+    checked = set()
+    for node in placeholders:
+        desc = node.meta.get("desc")
+        if not isinstance(desc, PlainAOTInput):
+            continue
+        if desc.idx not in dynamic_dim_targets:
+            continue
+
+        input_idx, expected_dims = dynamic_dim_targets[desc.idx]
+        assert_dynamic_dims_on_node(node, input_idx, expected_dims)
+        checked.add(desc.idx)
+
+    if require_matching_aot_inputs and checked != set(dynamic_dim_targets):
+        missing_inputs = [
+            str(dynamic_dim_targets[flat_input_idx][0])
+            for flat_input_idx in set(dynamic_dim_targets) - checked
+        ]
+        raise AssertionError(
+            "Expected AOT graph to contain user tensor input(s) "
+            f"{', '.join(missing_inputs)}"
+        )
+    return dynamic_dim_targets
+
+
+def maybe_disable_caches_for_dynamic_dim_assertions(assert_dynamic_dims):
+    if assert_dynamic_dims is None:
+        return contextlib.nullcontext()
+    return config.patch({"force_disable_caches": True})
+
+
 def check_model(
     self: TestCase,
     model,
@@ -517,6 +659,7 @@ def check_model(
     output_process_fn_grad=lambda x: x,
     # TODO: enable this for all tests
     exact_stride=False,
+    assert_dynamic_dims: Mapping[int, Sequence[int]] | None = None,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -578,7 +721,26 @@ def check_model(
     def compile_fx_wrapper(model_, example_inputs_):
         nonlocal called
         called = True
-        return compile_fx(model_, example_inputs_)
+        dynamic_dim_targets = assert_expected_dynamic_dims(
+            self, model_, assert_dynamic_dims
+        )
+
+        def inner_compile_with_dynamic_dim_assertions(gm, inputs, **kwargs):
+            assert_expected_dynamic_dims(
+                self,
+                gm,
+                assert_dynamic_dims,
+                dynamic_dim_targets,
+                require_matching_aot_inputs=not kwargs.get("is_backward", False),
+            )
+            return compile_fx_inner(gm, inputs, **kwargs)
+
+        with maybe_disable_caches_for_dynamic_dim_assertions(assert_dynamic_dims):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                inner_compile=inner_compile_with_dynamic_dim_assertions,
+            )
 
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
@@ -814,6 +976,7 @@ def check_model_gpu(
     output_process_fn_grad=lambda x: x,
     # TODO: enable this for all tests
     exact_stride=False,
+    assert_dynamic_dims: Mapping[int, Sequence[int]] | None = None,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -841,6 +1004,7 @@ def check_model_gpu(
         check_has_compiled=check_has_compiled,
         output_process_fn_grad=output_process_fn_grad,
         exact_stride=exact_stride,
+        assert_dynamic_dims=assert_dynamic_dims,
     )
 
     if check_lowp:
@@ -874,6 +1038,7 @@ def check_model_gpu(
             check_has_compiled=check_has_compiled,
             output_process_fn_grad=output_process_fn_grad,
             exact_stride=exact_stride,
+            assert_dynamic_dims=assert_dynamic_dims,
         )
 
 

@@ -135,6 +135,18 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
+        @torch._dynamo.config.patch(assume_static_by_default=False)
+        def test_prod_backward_keeps_input_shape_dynamic(self):
+            def fn(x):
+                return torch.prod(x, 3, keepdim=True)
+
+            self.common(
+                fn,
+                (torch.randn(8, 10, 3, 2, requires_grad=True),),
+                check_gradient=True,
+                assert_dynamic_dims={0: (0, 1, 2, 3)},
+            )
+
         def test_bincount_weighted_count_nonzero_dtype(self):
             def fn(x, weights):
                 counts = torch.bincount(x, weights=weights, minlength=6)
