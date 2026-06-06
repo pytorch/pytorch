@@ -10,7 +10,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial
 from typing import Any, Literal
-from typing_extensions import deprecated
+from typing_extensions import deprecated, Self
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -155,7 +155,7 @@ def _pipelined_multi_all_gather_and_consume(
     communication:
 
         gathered = [
-            all_gather_tensor(x, gather_dim=0, group=group)
+            all_gather_single(x, gather_dim=0, group=group)
             for x in shard
         ]
 
@@ -304,7 +304,7 @@ def _pipelined_all_gather_and_consume(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        ag_out = all_gather_tensor(shard, gather_dim=0, group=group)
+        ag_out = all_gather_single(shard, gather_dim=0, group=group)
         shards = ag_out.chunk(group.size())
         for src_rank, shard in enumerate(shards):
             shard_consumer(shard, src_rank)
@@ -862,7 +862,7 @@ def _fused_all_gather_matmul(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        all_gather_tensor(A_shard, gather_dim, group_name) @ B
+        all_gather_single(A_shard, gather_dim, group_name) @ B
 
     Optimal stride order for A_shard - if A_shard.movedim(gather_dim, 0) is
     contiguous, no extra copy is required for input layout transformation.
@@ -1111,7 +1111,7 @@ def _fused_all_gather_scaled_matmul(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        A = all_gather_tensor(A_shard, gather_dim, group_name)
+        A = all_gather_single(A_shard, gather_dim, group_name)
         leading_dims = A.shape[:-1]
         res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
         res = res.unflatten(0, leading_dims)
@@ -1214,7 +1214,7 @@ def _fused_matmul_reduce_scatter(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
+        reduce_scatter_single(A @ B, reduce_op, scatter_dim, group_name)
 
     Optimal stride order for A - if A.movedim(scatter_dim, 0) is contiguous, no
     extra copy is required for input layout transformation. Otherwise A needs
@@ -1246,7 +1246,7 @@ def _fused_matmul_reduce_scatter_fallback(
     scatter_dim: int,
     group_name: c10d.GroupName,
 ) -> torch.Tensor:
-    res = funcol.reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
+    res = funcol.reduce_scatter_single(A @ B, reduce_op, scatter_dim, group_name)
     res = funcol.wait_tensor(res)
     return res
 
@@ -1431,7 +1431,7 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
         use_fast_accum,
     )
     C = C.view(*output_shape[:-1], B.shape[1])
-    res = funcol.reduce_scatter_tensor(
+    res = funcol.reduce_scatter_single(
         C,
         reduce_op,
         orig_scatter_dim,  # need original scatter dim for 3D+ output tensor here
@@ -2034,6 +2034,104 @@ def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
             only `"NVSHMEM"`, `"CUDA"`, `"NCCL"` are supported.
     """
     _SymmetricMemory.set_backend(name)
+
+
+class _NcclCommRegistration:
+    r"""
+    Handle returned by :func:`_register_external_nccl_comm`.
+
+    Keeps an externally-owned NCCL communicator published in PyTorch's
+    symmetric memory registry for as long as this object is alive. Dropping it
+    (via ``del``, exiting its ``with`` block, or calling :meth:`unregister`)
+    removes the entry so a successor producer can register cleanly under the
+    same ``group_name``.
+
+    The comm's lifetime is *not* owned by this object; the registration only
+    publishes a borrowed pointer. Optionally a strong reference to the source
+    comm object is held so a stray ``del comm`` cannot dangle the registered
+    pointer for the lifetime of the registration.
+    """
+
+    def __init__(
+        self,
+        group_name: str,
+        device: torch.device,
+        comm: object | None = None,
+    ) -> None:
+        self._group_name = group_name
+        self._device = device
+        self._comm = comm
+        self._active = True
+
+    def unregister(self) -> None:
+        """Remove the registration. Idempotent."""
+        if not self._active:
+            return
+        # Imported lazily: only present in NCCL builds with symmetric-memory
+        # device support.
+        from torch._C._distributed_c10d import _unregister_external_nccl_comm
+
+        _unregister_external_nccl_comm(self._group_name, self._device)
+        self._active = False
+        self._comm = None
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.unregister()
+
+    def __del__(self) -> None:
+        try:
+            self.unregister()
+        except Exception:
+            # Best-effort cleanup; never raise from __del__ (e.g. during
+            # interpreter teardown the C extension may already be gone).
+            pass
+
+
+def _register_external_nccl_comm(
+    group_name: str,
+    comm_ptr: int,
+    device: _device,
+    comm: object | None = None,
+) -> _NcclCommRegistration:
+    r"""
+    Publish an externally-owned ``ncclComm_t`` into PyTorch's symmetric memory
+    registry under ``group_name``.
+
+    This lets producers that are not a ``ProcessGroupNCCL`` (e.g. torchcomms
+    backends) supply the host NCCL communicator that
+    :func:`rendezvous` needs, without symmetric memory having to
+    ``dynamic_cast`` to a specific process-group implementation. After this
+    call, ``rendezvous(tensor, group=group_name)`` on a tensor in a process
+    group registered under ``group_name`` will find this comm.
+
+    Args:
+        group_name (str): the process-group name to register the comm under.
+        comm_ptr (int): the host ``ncclComm_t`` as an opaque integer pointer
+            (e.g. from ``torchcomms`` ``get_nccl_comm_ptr()``).
+        device (`torch.device` or str): the CUDA device the comm belongs to.
+        comm (object, optional): the source comm object. When provided, a
+            strong reference is held by the returned registration so the comm
+            cannot be garbage-collected while still registered.
+
+    Returns:
+        _NcclCommRegistration: keep this alive for as long as symmetric memory
+        should use this comm; drop it (or call ``unregister()``) to remove the
+        registration.
+
+    .. note::
+        This is only available in NCCL builds with symmetric-memory device
+        support; otherwise it raises :class:`ImportError`.
+    """
+    from torch._C._distributed_c10d import (
+        _register_external_nccl_comm as _register_external_nccl_comm_impl,
+    )
+
+    device = torch.device(device)
+    _register_external_nccl_comm_impl(group_name, comm_ptr, device)
+    return _NcclCommRegistration(group_name, device, comm)
 
 
 def get_backend(device: _device) -> str | None:
