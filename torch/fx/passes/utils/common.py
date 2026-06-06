@@ -1,3 +1,4 @@
+import torch
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
@@ -74,8 +75,17 @@ def lift_subgraph_as_module(
         leaf_node = getattr(orig_gm, leaf_node_name)
 
         orig_to_split_fqn_mapping[target] = f"{comp_name}.{target}"
-        # Relies on custom __setattr__ magic.
-        setattr(curr, leaf_node_name, leaf_node)
+        if isinstance(leaf_node, torch.Tensor) and not isinstance(
+            leaf_node, torch.nn.Parameter
+        ):
+            persistent = not (
+                isinstance(orig_gm, torch.nn.Module)
+                and leaf_node_name in orig_gm._non_persistent_buffers_set
+            )
+            curr.register_buffer(leaf_node_name, leaf_node, persistent=persistent)
+        else:
+            # Relies on custom __setattr__ magic.
+            setattr(curr, leaf_node_name, leaf_node)
 
     return GraphModule(submodule, subgraph, class_name), orig_to_split_fqn_mapping
 

@@ -44,7 +44,7 @@ from collections.abc import Generator, Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 from unittest.mock import patch
 
 import sympy
@@ -441,6 +441,7 @@ class OptimizedModule(torch.nn.Module):
         "dynamo_ctx",
         "_torchdynamo_orig_callable",
         "_torchdynamo_wrapper_id",
+        "_torchdynamo_mirrored_non_persistent_buffers",
         "get_compiler_config",
         "forward",
         "_forward",
@@ -464,6 +465,8 @@ class OptimizedModule(torch.nn.Module):
         # Installs the params/buffer
         self._orig_mod = mod  # `super().__setattr__` will register this module
         self.dynamo_ctx = dynamo_ctx
+        self._torchdynamo_mirrored_non_persistent_buffers: set[str] = set()
+        self._sync_orig_mod_non_persistent_buffers()
         self._initialize()
         self.training = self._orig_mod.training
 
@@ -496,6 +499,45 @@ class OptimizedModule(torch.nn.Module):
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
+    def _sync_orig_mod_non_persistent_buffers(self) -> None:
+        for name in list(self._torchdynamo_mirrored_non_persistent_buffers):
+            if (
+                name not in self._orig_mod._buffers
+                or name not in self._orig_mod._non_persistent_buffers_set
+            ):
+                self._buffers.pop(name, None)
+                self._non_persistent_buffers_set.discard(name)
+                self._torchdynamo_mirrored_non_persistent_buffers.remove(name)
+
+        for name in self._orig_mod._non_persistent_buffers_set:
+            if name in self._orig_mod._buffers:
+                self._buffers[name] = self._orig_mod._buffers[name]
+                self._non_persistent_buffers_set.add(name)
+                self._torchdynamo_mirrored_non_persistent_buffers.add(name)
+
+    def _remove_mirrored_non_persistent_buffers(self) -> None:
+        for name in self._torchdynamo_mirrored_non_persistent_buffers:
+            self._buffers.pop(name, None)
+            self._non_persistent_buffers_set.discard(name)
+
+    def _update_orig_mod_from_mirrored_buffers(self) -> None:
+        for name in self._torchdynamo_mirrored_non_persistent_buffers:
+            if name in self._buffers:
+                self._orig_mod._buffers[name] = self._buffers[name]
+
+    def _apply(self, fn: Callable[[torch.Tensor], torch.Tensor], recurse: bool = True):
+        self._sync_orig_mod_non_persistent_buffers()
+        if not recurse:
+            result = super()._apply(fn, recurse=False)
+            self._update_orig_mod_from_mirrored_buffers()
+            return result
+
+        self._remove_mirrored_non_persistent_buffers()
+        try:
+            return super()._apply(fn, recurse)
+        finally:
+            self._sync_orig_mod_non_persistent_buffers()
+
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if torch.nn.modules.module._has_any_global_hook():
             warnings.warn(
@@ -507,8 +549,11 @@ class OptimizedModule(torch.nn.Module):
                 ", or use the per-module hooks instead",
                 stacklevel=2,
             )
-        with _set_in_optimized_module():
-            return super().__call__(*args, **kwargs)
+        try:
+            with _set_in_optimized_module():
+                return super().__call__(*args, **kwargs)
+        finally:
+            self._sync_orig_mod_non_persistent_buffers()
 
     def _aot_compile(self, inputs: list[torch._dynamo.aot_compile.ModelInput]) -> None:
         """
@@ -579,6 +624,12 @@ class OptimizedModule(torch.nn.Module):
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__ = state
+        self._torchdynamo_mirrored_non_persistent_buffers = {
+            name
+            for name in self._orig_mod._non_persistent_buffers_set
+            if name in self._orig_mod._buffers
+        }
+        self._sync_orig_mod_non_persistent_buffers()
         self._initialize()
 
     @property
@@ -594,6 +645,15 @@ class OptimizedModule(torch.nn.Module):
         if self._super_module_initialized:
             self._orig_mod.training = value
 
+    def get_buffer(self, target: str) -> torch.Tensor:
+        self._sync_orig_mod_non_persistent_buffers()
+        if (
+            "." not in target
+            and target in self._torchdynamo_mirrored_non_persistent_buffers
+        ):
+            return cast(torch.Tensor, self._buffers[target])
+        return super().get_buffer(target)
+
     def __getattr__(self, name: str) -> Any:
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
@@ -606,7 +666,9 @@ class OptimizedModule(torch.nn.Module):
 
         if name in OptimizedModule._opt_mod_attributes:
             return super().__setattr__(name, value)
-        return setattr(self._orig_mod, name, value)
+        result = setattr(self._orig_mod, name, value)
+        self._sync_orig_mod_non_persistent_buffers()
+        return result
 
     def __delattr__(self, name: str) -> None:
         # This mirrors `__setattr__`
@@ -615,7 +677,9 @@ class OptimizedModule(torch.nn.Module):
 
         if name in OptimizedModule._opt_mod_attributes:
             return super().__delattr__(name)
-        return delattr(self._orig_mod, name)
+        result = delattr(self._orig_mod, name)
+        self._sync_orig_mod_non_persistent_buffers()
+        return result
 
     def _call_lazy_check(self, *args: Any, **kwargs: Any) -> Any:
         if (
