@@ -327,7 +327,7 @@ def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> 
         ctypes.CDLL(lib_path)
 
 
-def _preload_cuda_deps(err: OSError | None = None) -> None:
+def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> None:
     cuda_libs: list[tuple[str, str]] = [
         # NOTE: Order matters! We must preload libcublasLt BEFORE libcublas to prevent
         # libcublas from loading a mismatched system-wide libcublasLt via its RUNPATH.
@@ -357,9 +357,12 @@ def _preload_cuda_deps(err: OSError | None = None) -> None:
     ]:
         raise err
 
-    # Otherwise, try to preload dependencies from site-packages
+    # Otherwise, try to preload dependencies from site-packages. With
+    # required=False each lib is best-effort: a partial install that only ships
+    # some of these wheels (e.g. just a cupti wheel alongside a system CUDA)
+    # preloads the ones present instead of aborting on the first missing one.
     for lib_folder, lib_name in cuda_libs:
-        _preload_cuda_lib(lib_folder, lib_name)
+        _preload_cuda_lib(lib_folder, lib_name, required=required)
 
     # libnvToolsExt is Optional Dependency
     _preload_cuda_lib("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
@@ -391,8 +394,15 @@ def _load_global_deps() -> None:
             # libtorch_global_deps.so always depends in cudart, check if its installed and loaded
             if "libcudart.so" not in _maps:
                 return
-            # If all above-mentioned conditions are met, preload CUDA dependencies
-            _preload_cuda_deps()
+            # If all above-mentioned conditions are met, preload CUDA dependencies.
+            # Only libtorch_global_deps is loaded so far (it pulls libcudart, not
+            # the rest); libtorch_cpu, which DT_NEEDEDs the other CUDA libs, is
+            # imported below via torch._C. So be best-effort and front-load any
+            # component wheels that ARE present now, before that import, so they
+            # win libtorch_cpu's DT_NEEDED soname lookups (e.g. a newer cupti
+            # wheel over a system copy). A missing wheel must not abort -- rpath
+            # will satisfy libtorch_cpu's DT_NEEDED for whatever isn't preloaded.
+            _preload_cuda_deps(required=False)
         except Exception:
             pass
 
