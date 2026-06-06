@@ -22,6 +22,7 @@ from .. import config
 from .descriptors import AOTInput, BackwardTokenAOTInput
 from .functional_utils import (
     assert_functional_graph,
+    fold_foreach_input_mutation_ops,
     propagate_input_mutation_stacktraces,
 )
 from .graph_capture_wrappers import (
@@ -354,6 +355,7 @@ def aot_dispatch_base_graph(
     saved_updated_flat_args_subclasses_desugared_descs = (
         updated_flat_args_subclasses_desugared_descs
     )
+    fold_foreach_input_mutation_ops(fw_module.graph)
 
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
         # We update metadata to consider any assigned buffers as buffer mutations.
@@ -533,6 +535,7 @@ def aot_dispatch_autograd_graph(
         updated_joint_inputs_descs,
         aot_config=aot_config,
     )
+    fold_foreach_input_mutation_ops(fx_g.graph)
 
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.

@@ -1636,9 +1636,12 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
         return gm
 
     # Build the graph op-by-op by starting from the node all the way to the end
-    # copy_ can be not using tangents at all, we must copy it.
+    # copy_/foreach_copy_ can be not using tangents at all, we must copy them.
     for node in list(gm.graph.nodes)[: order[first_node_in_bwd]]:
-        if node.op == "call_function" and node.target is torch.ops.aten.copy_.default:
+        if node.op == "call_function" and node.target in (
+            torch.ops.aten.copy_.default,
+            torch.ops.aten._foreach_copy_.default,
+        ):
             insert_node_in_graph(node)
 
     for node in list(gm.graph.nodes)[order[first_node_in_bwd] :]:
@@ -2016,6 +2019,32 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
             mark_getitem_outputs(node)
 
 
+def _get_mutation_pairs(node: fx.Node) -> list[tuple[fx.Node, fx.Node]]:
+    if node.target is torch.ops.aten.copy_.default:
+        if (
+            len(node.args) >= 2
+            and isinstance(node.args[0], fx.Node)
+            and isinstance(node.args[1], fx.Node)
+        ):
+            return [(node.args[0], node.args[1])]
+        return []
+
+    if node.target is not torch.ops.aten._foreach_copy_.default or len(node.args) < 2:
+        return []
+
+    dsts, srcs = node.args[:2]
+    if not (isinstance(dsts, (list, tuple)) and isinstance(srcs, (list, tuple))):
+        return []
+    if len(dsts) != len(srcs):
+        return []
+
+    mutation_pairs = []
+    for dst, src in zip(dsts, srcs):
+        if isinstance(dst, fx.Node) and isinstance(src, fx.Node):
+            mutation_pairs.append((dst, src))
+    return mutation_pairs
+
+
 def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
     # If we have mutations of the same primal in forward and backward,
     # We must not recompute the source of mutation to not apply twice.
@@ -2024,16 +2053,19 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
         if node.op == "output":
             continue
 
-        is_copy_ = node.target is torch.ops.aten.copy_.default
-        if is_copy_:
+        mutation_pairs = _get_mutation_pairs(node)
+        if mutation_pairs:
             if _has_tag_must_be_in_backward(node):
-                has_mutation_in_bw.add(node.args[0])
+                for dst, _ in mutation_pairs:
+                    has_mutation_in_bw.add(dst)
 
-            if _has_tag_must_be_in_forward(node) and node.args[0] in has_mutation_in_bw:
-                node.args[1].meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            if _has_tag_must_be_in_forward(node):
+                for dst, src in mutation_pairs:
+                    if dst in has_mutation_in_bw:
+                        src.meta["recompute"] = CheckpointPolicy.MUST_SAVE
         else:
             # We use invariant of aotdispatch joint graph,
-            # That we emit copy_ only in the end of it.
+            # That we emit copy_/foreach_copy_ only in the end of it.
             # We do not want to iterate through all the joint graph,
             # so break at the first non-output, non-copy_ node.
             break
