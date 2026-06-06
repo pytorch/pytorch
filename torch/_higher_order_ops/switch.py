@@ -141,7 +141,7 @@ def switch(
         if torch.compiler.is_compiling():
             warnings.warn(
                 "Index is a Python constant. When used with torch.switch, it specializes on one of the branches."
-                " If you want torch.switch to preserve the branches, please make the predicate an int tensor or a SymInt.",
+                " If you want torch.switch to preserve the branches, please make the index an int tensor or a SymInt.",
                 UserWarning,
                 stacklevel=2,
             )
