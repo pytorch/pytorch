@@ -889,21 +889,26 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
     def test_all_to_all_single_autograd_compile(self):
         """Test that _c10d_functional_autograd.all_to_all_single works with torch.compile."""
         group_name = dist.group.WORLD.group_name
+        group_size = dist.group.WORLD.size()
+
+        input_tensor = torch.randn(
+            4 * self.world_size, 3, device=self.device, requires_grad=True
+        )
+        # The raw op requires explicit split sizes (SymInt[], not optional); the
+        # None default is only resolved by the all_to_all_single Python wrapper.
+        output_split_sizes = [input_tensor.shape[0] // group_size] * group_size
+        input_split_sizes = output_split_sizes
 
         @torch.compile(fullgraph=True)
         def compiled_fn(tensor):
             output = torch.ops._c10d_functional_autograd.all_to_all_single(
                 tensor,
-                output_split_sizes=None,
-                input_split_sizes=None,
-                group_name=group_name,
+                output_split_sizes,
+                input_split_sizes,
+                group_name,
             )
             output = fcols.wait_tensor(output)
             return output.sum()
-
-        input_tensor = torch.randn(
-            4 * self.world_size, 3, device=self.device, requires_grad=True
-        )
 
         loss = compiled_fn(input_tensor)
         loss.backward()
