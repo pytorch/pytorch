@@ -627,6 +627,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
+    inp = realize_inputs(inp)
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "addmm"
 

@@ -148,3 +148,25 @@ def eig(
         "should be replaced with:\n"
         "L_complex, V_complex = torch.linalg.eig(A)"
     )
+
+
+def qr(
+    input: Tensor,
+    some: bool = True,
+    *,
+    out=None,
+) -> tuple[Tensor, Tensor]:
+    reduced = "reduced" if some else "complete"
+    raise RuntimeError(
+        "This function was deprecated since version 1.9 and is now removed. "
+        "`torch.qr` is deprecated in favor of `torch.linalg.qr` and the boolean parameter "
+        "`some` has been replaced with a string parameter `mode`.\n\n"
+        "Q, R = torch.qr(A) "
+        "should be replaced with:\n"
+        "Q, R = torch.linalg.qr(A, mode='reduced')\n\n"
+        "and\n\n"
+        "Q, R = torch.qr(A, some=False) "
+        "should be replaced with:\n"
+        "Q, R = torch.linalg.qr(A, mode='complete')\n\n"
+        f"Since `some` was set to {some}, use mode='{reduced}'."
+    )
