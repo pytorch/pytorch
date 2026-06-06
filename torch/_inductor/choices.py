@@ -13,14 +13,8 @@ from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
-from .kernel_inputs import KernelInputs, MMKernelInputs
-from .kernel_template_choice import make_ktc_generator
-from .metrics import get_metric_table, is_metric_table_enabled
-from .runtime.hints import DeviceProperties, ReductionHint
-from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
-from .select_algorithm import ExternKernelChoice
-from .template_heuristics import get_template_heuristic
-from .template_heuristics.triton import (
+from .heuristics.template import get_template_heuristic
+from .heuristics.template.triton import (
     _origami_enabled,
     BaseConfigHeuristic,
     CPUConfigHeuristic,
@@ -30,6 +24,12 @@ from .template_heuristics.triton import (
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
+from .kernel_inputs import KernelInputs, MMKernelInputs
+from .kernel_template_choice import make_ktc_generator
+from .metrics import get_metric_table, is_metric_table_enabled
+from .runtime.hints import DeviceProperties, ReductionHint
+from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
+from .select_algorithm import ExternKernelChoice
 from .utils import _use_autotune_backend
 from .virtualized import V
 
@@ -517,7 +517,7 @@ class InductorChoices:
                 divisors = sympy.divisors(reduction_numel_hint)
                 closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
                 if abs(closest - tmp_split_size) < 30:
-                    # prefer even splits, but never smalle than min_elements_per_thread
+                    # prefer even splits, but never smaller than min_elements_per_thread
                     split_size = max(closest, min_elements_per_thread)
                 else:
                     split_size = tmp_split_size
