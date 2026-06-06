@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import dataclasses
 import functools
 import hashlib
 import json
@@ -27,6 +28,8 @@ from torch._dynamo.utils import (
     chromium_event_log_active,
     CompileEventLogger,
     counters,
+    is_safe_numpy_wrapper,
+    numpy_wrapper_cache_key,
     warn_once,
 )
 from torch._functorch import config
@@ -62,6 +65,7 @@ from torch.compiler._cache import (
 )
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
+from torch.fx.traceback import _get_memory_budget_annotation
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -201,6 +205,8 @@ def check_node_safe(node: Node) -> None:
 
     def is_cacheable_function(target: Callable[..., Any]) -> bool:
         if isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
+            return True
+        if is_safe_numpy_wrapper(target):
             return True
         if is_public_torch_api(target):
             return True
@@ -505,6 +511,18 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         )
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
 
+        # region_activation_memory_budget is graph-wide (the partitioner enforces
+        # a single value across the graph) and propagates to every node, so the
+        # cache key only needs the value off the first node. node.meta is stripped
+        # by GraphModule.__reduce__, so without recording it here a budget change
+        # would not invalidate the cache.
+        first_node = next(iter(gm.graph.nodes), None)
+        self.region_activation_memory_budget: float | None = (
+            _get_memory_budget_annotation(first_node)
+            if first_node is not None
+            else None
+        )
+
         # Note: We use the live config module, not self.autograd_config (the
         # saved config), because activation_memory_budget_runtime_estimator and
         # activation_memory_budget_solver are excluded from save_config (in
@@ -566,12 +584,46 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         fall through to the default __reduce_ex__ which includes non-deterministic
         storage addresses. This method catches those cases using isinstance checks.
         """
+        if isinstance(obj, torch.fx.GraphModule):
+            return self._reduce_graph_module_for_cache_key(obj)
+        if (numpy_key := numpy_wrapper_cache_key(obj)) is not None:
+            return (_ident, (numpy_key,))
         # Handle tensor subclasses that aren't exactly torch.Tensor
         # dispatch_table already handles torch.Tensor exactly
         if isinstance(obj, torch.Tensor) and type(obj) is not torch.Tensor:
             return self._reduce_tensor_subclass(obj)
         # Fall back to parent class reducer which handles unpicklable types
         return super().reducer_override(obj)
+
+    @staticmethod
+    def _format_global_for_cache_key(name: str, obj: Any) -> str:
+        if (numpy_key := numpy_wrapper_cache_key(obj)) is not None:
+            return f"# cache_key_numpy_wrapper {name}: {numpy_key!r}"
+
+        from torch.fx.graph_module import _format_import_statement
+        from torch.package import sys_importer
+
+        return _format_import_statement(name, obj, sys_importer)
+
+    def _reduce_graph_module_for_cache_key(
+        self, gm: torch.fx.GraphModule
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        recompile = getattr(gm, "_real_recompile", gm.recompile)
+        python_code = recompile()
+        # FxGraphCache strips user-defined Triton side-table indices from
+        # Inductor wrapper code. This reducer handles arbitrary AOT GraphModule
+        # code, so keep the generated code exact and let AOTAutogradCacheDetails
+        # carry Triton source/constant-arg metadata separately.
+        dict_without_graph = gm.__dict__.copy()
+        dict_without_graph.pop("_graph", None)
+
+        import_block = "\n".join(
+            sorted(
+                self._format_global_for_cache_key(name, obj)
+                for name, obj in python_code.globals.items()
+            )
+        )
+        return (_ident, ((dict_without_graph, import_block),))
 
     # [NOTE] Tensor subclass stable hashing for AOT autograd cache
     # Python's hash() varies with PYTHONHASHSEED, making cache keys unstable
@@ -943,9 +995,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         local: bool,
         remote: bool,
         compile_region_name: str | None = None,
-    ) -> Callable[..., Any] | None:
+    ) -> tuple[Callable[..., Any] | None, AOTConfig]:
         """
-        Load a result from the cache, and reconstruct a runtime wrapper around the object
+        Load a result from the cache, and reconstruct a runtime wrapper around
+        the object. On a cache miss, return an updated config carrying the
+        cache metadata needed to save the eventual compile result.
         """
         compiled_fn = None
         cache_info: dict[str, Any] = {}
@@ -1040,10 +1094,13 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             # Set the cache key so we can save a cache result later
             symints = AOTAutogradCache._filter_backed_symints(args)
             if cache_key is not None:
-                aot_config.cache_info = AOTAutogradCacheInfo(
-                    cache_key,
-                    time.time_ns(),
-                    forward_symints=symints,
+                aot_config = dataclasses.replace(
+                    aot_config,
+                    cache_info=AOTAutogradCacheInfo(
+                        cache_key,
+                        time.time_ns(),
+                        forward_symints=symints,
+                    ),
                 )
 
         cache_info.update(
@@ -1079,7 +1136,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        return compiled_fn
+        return compiled_fn, aot_config
 
     @classmethod
     def generate_guards_expression(

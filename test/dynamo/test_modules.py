@@ -1907,7 +1907,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
         mod = Mod()
         opt_mod = torch.compile(mod, backend="eager")
-        x = torch.ones(4, dtype=torch.int64)
+        x = torch.ones(4)
 
         res = opt_mod(x)
         ref = mod(x)
@@ -1920,6 +1920,47 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             "NumPy scalar comparison result",
         ):
             torch.compile(Mod(), backend="eager", fullgraph=True)(x)
+
+    def test_numpy_float_module_attr_richcompare_preserves_semantics(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = np.float64(2.0)
+
+            def forward(self, x):
+                return x * self.scale.__gt__(0)
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager")
+        x = torch.ones(4)
+
+        res = opt_mod(x)
+        ref = mod(x)
+        self.assertEqual(res, ref)
+        self.assertEqual(res.dtype, ref.dtype)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "NumPy scalar comparison result",
+        ):
+            torch.compile(Mod(), backend="eager", fullgraph=True)(x)
+
+        class ReturnMod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = np.float64(2.0)
+
+            def forward(self, x):
+                return self.scale.__gt__(0)
+
+        torch._dynamo.reset()
+        return_mod = ReturnMod()
+        opt_return_mod = torch.compile(return_mod, backend="eager")
+        res = opt_return_mod(x)
+        ref = return_mod(x)
+        self.assertEqual(res, ref)
+        self.assertIsInstance(res, np.bool_)
 
     def test_numpy_float_module_attr_item(self):
         class Mod(torch.nn.Module):
@@ -2116,6 +2157,48 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             "numpy_scalar_nan_hash",
         ):
             torch.compile(Mod(), backend="eager", fullgraph=True)(x)
+
+    def test_numpy_float_module_attr_hash(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = np.float64(2.0)
+
+            def forward(self, x):
+                return x + (hash(self.scale) % 1024)
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        self.assertEqual(opt_mod(x), mod(x))
+
+        mod.scale = np.float64(3.0)
+        self.assertEqual(opt_mod(x), mod(x))
+
+    def test_numpy_float_module_attr_graph_break_reconstruct(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = np.float64(2.0)
+
+            def forward(self, x):
+                scale = self.scale
+                y = x * scale
+                torch._dynamo.graph_break()
+                return y + scale, scale
+
+        mod = Mod()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(mod, backend=cnt)
+        x = torch.randn(4)
+
+        res_tensor, res_scale = opt_mod(x)
+        ref_tensor, ref_scale = mod(x)
+        self.assertEqual(res_tensor, ref_tensor)
+        self.assertEqual(res_scale, ref_scale)
+        self.assertIsInstance(res_scale, np.float64)
+        self.assertEqual(cnt.frame_count, 2)
 
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):

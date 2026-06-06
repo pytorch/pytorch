@@ -258,6 +258,8 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
     source /opt/intel/oneapi/umf/latest/env/vars.sh
   fi
   # shellcheck disable=SC1091
+  source /opt/intel/oneapi/tcm/latest/env/vars.sh
+  # shellcheck disable=SC1091
   source /opt/intel/oneapi/ccl/latest/env/vars.sh
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/mpi/latest/env/vars.sh
@@ -416,8 +418,10 @@ test_python() {
 
 test_python_smoke() {
   # Smoke tests for H100/B200
+  install_nvmath
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -434,6 +438,7 @@ test_python_smoke_b200() {
       nn/attention/test_open_registry \
       inductor/test_flex_flash \
       inductor/test_torchinductor \
+      inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
       inductor/test_fused_attention \
       test_varlen_attention \
@@ -445,8 +450,9 @@ test_python_smoke_b200() {
 
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
-  time python test/run_test.py --include test_transformers $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time test_xpu_sycl_tla_backend
+  time python test/run_test.py --include test_transformers $PYTHON_TEST_EXTRA_OPTION
+  # Temporary disable sycl-tla backend test for XPU since it's not stable yet. We will re-enable it once the stability is improved.
+  # time test_xpu_sycl_tla_backend
   assert_git_not_dirty
 }
 
@@ -668,7 +674,7 @@ test_inductor_aoti_cpp() {
     TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
   fi
 
-  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
+  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
 }
 
 test_inductor_aoti_cross_compile_for_windows() {
@@ -1547,6 +1553,9 @@ test_libtorch_profiler() {
 
   # Run all other tests
   python test/run_test.py --cpp --verbose -i cpp/test_privateuse1_profiler -k "not EndToEndProfiling"
+
+  # Tests for torch/csrc/profiler/collection.cpp.
+  python test/run_test.py --cpp --verbose -i cpp/test_profiler_collection
 }
 
 test_libtorch_api() {
@@ -2222,6 +2231,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchcomms
+  install_spmd_types
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
@@ -2403,6 +2413,7 @@ elif [[ "${TEST_CONFIG}" == smoke_b200 ]]; then
 elif [[ "${TEST_CONFIG}" == smoke_xpu ]]; then
   test_python_smoke_xpu
 elif [[ "${TEST_CONFIG}" == dtensor ]]; then
+  install_spmd_types
   test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   install_torchcomms

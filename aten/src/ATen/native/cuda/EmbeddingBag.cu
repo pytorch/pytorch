@@ -8,6 +8,7 @@
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/TensorUtils.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -212,8 +213,6 @@ Tensor embedding_bag_backward_cuda_sum_avg(
   if (scale_grad_by_freq) {
     count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_backward_cuda_sum_avg", [&] () {
-      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
       // Compute an increasing sequence per unique item in sortedIndices:
       // sorted: 2 5 5 5 7 7 8 9 9
       //  count: 1 1 2 3 1 2 1 1 2
@@ -420,7 +419,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             weight.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
             offset2bag.mutable_data_ptr<index_t>(), numIndices, numBags, featureSize,
             weight.stride(0), weight.stride(1), mode, bag_size.mutable_data_ptr<index_t>(),
-            per_sample_weights.defined() ? per_sample_weights.const_data_ptr<scalar_t>() : NULL,
+            per_sample_weights.defined() ? per_sample_weights.const_data_ptr<scalar_t>() : nullptr,
             per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
             padding_idx, weight.size(0));
         C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -428,7 +427,11 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
     });
   });
 
-  return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, offset2bag, bag_size, max_indices);
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(
+      std::move(output),
+      std::move(offset2bag),
+      std::move(bag_size),
+      std::move(max_indices));
 }
 
 Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &indices,
@@ -548,7 +551,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
     return output;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
     grad.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
       AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
         _embedding_bag_per_sample_weights_backward_kernel<scalar_t, index_t>
