@@ -11572,6 +11572,64 @@ graph():
 
         check_device_and_fake_mode()
 
+    def test_export_fake_tensor_device_mismatch_error(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        with fake_mode:
+            x = torch.rand(5, 2, device="meta")
+        # Exercise fake CUDA propagation without requiring CUDA on the test host.
+        x.fake_device = torch.device("cuda:0")
+
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                with self.assertRaises(ValueError) as cm:
+                    export(Model(), (x,), strict=strict)
+
+                message = str(cm.exception)
+                self.assertIn("tensors on different devices", message)
+                self.assertIn("cpu", message)
+                self.assertIn("cuda:0", message)
+                self.assertIn("Move all tensors used by forward", message)
+                self.assertNotIn("Dynamo", message)
+                self.assertNotIn("FakeTensor", message)
+                self.assertNotIn("Unhandled FakeTensor Device Propagation", message)
+
+    def test_export_internal_created_tensor_mismatch_not_attributed_to_module(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.unused = torch.nn.Parameter(torch.randn(2, 2))
+
+            def forward(self, x):
+                return x + torch.ones(5, 2)
+
+        with fake_mode:
+            x = torch.rand(5, 2, device="meta")
+        # Exercise fake CUDA propagation without requiring CUDA on the test host.
+        x.fake_device = torch.device("cuda:0")
+
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                with self.assertRaises(ValueError) as cm:
+                    export(Model(), (x,), strict=strict)
+
+                message = str(cm.exception)
+                self.assertIn("tensors created inside forward", message)
+                self.assertNotIn("Dynamo", message)
+                self.assertNotIn("FakeTensor", message)
+                self.assertNotIn("Module parameters are on cpu", message)
+                self.assertNotIn("module.to", message)
+
     def test_run_decomposition_supports_user_input_mutation(self):
         class SingleOp(torch.nn.Module):
             def __init__(self) -> None:
