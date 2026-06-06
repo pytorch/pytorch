@@ -15,32 +15,38 @@
         xh = yh[:, None] * STRIDE_H - PADDING_H + i[None, :] * DILATION_H
         xw = yw[:, None] * STRIDE_W - PADDING_W + j[None, :] * DILATION_W
 
-        x_ptrs = X_base \
-            + n[:,    None]  * stride_xn \
-            + ic[None,    :] * stride_xc \
-            + xh             * stride_xh \
-            + xw             * stride_xw
-
         mask_x = (
             (n[:,    None]  < BATCH) &
             (ic[None,    :] < GROUP_IN_C) &
             (xh >= 0) & (xh < IN_H) &
             (xw >= 0) & (xw < IN_W)
         )
+        # Masked lanes can address out of bounds; pipelined (cp.async) loads still
+        # translate the source address even when masked, so clamp masked lanes to 0.
+        x_ptrs = X_base + tl.where(
+            mask_x,
+            n[:, None] * stride_xn
+            + ic[None, :] * stride_xc
+            + xh * stride_xh
+            + xw * stride_xw,
+            0,
+        )
         matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)
         matrix_x = tl.trans(matrix_x)
-
-        dy_ptrs = dY_base \
-            + n[:,    None]  * stride_dyn \
-            + oc[None,    :] * stride_dyc \
-            + yh[:,   None]  * stride_dyh \
-            + yw[:,   None]  * stride_dyw
 
         mask_dy = (
             (n[:,    None]  < BATCH) &
             (oc[None,    :] < GROUP_OUT_C) &
             (yh[:,   None]  < OUT_H) &
             (yw[:,   None]  < OUT_W)
+        )
+        dy_ptrs = dY_base + tl.where(
+            mask_dy,
+            n[:, None] * stride_dyn
+            + oc[None, :] * stride_dyc
+            + yh[:, None] * stride_dyh
+            + yw[:, None] * stride_dyw,
+            0,
         )
         matrix_dy = tl.load(dy_ptrs, mask=mask_dy, other=0.0)
 
