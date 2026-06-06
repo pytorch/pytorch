@@ -45,7 +45,7 @@ from cutlass._mlir.dialects import llvm
 from cutlass.cutlass_dsl import dsl_user_op, T
 
 import torch
-from torch._vendor.quack.cache_utils import jit_cache
+from torch._vendor.quack.cache import jit_cache
 
 
 _NEG_INF_BITS: int = 0xFF800000
