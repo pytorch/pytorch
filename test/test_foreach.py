@@ -265,6 +265,37 @@ class TestForeach(TestCase):
                 expected = ref([ref_input, *sample.ref_args], **ref_kwargs)
                 self.assertEqual(expected, actual)
 
+    @onlyOn(["cpu"])
+    @ops(
+        [op for op in foreach_binary_op_db if op.error_inputs_func is not None],
+        dtypes=(torch.bool,),
+    )
+    def test_inplace_expected_errors(self, device, dtype, op):
+        _, _, func, ref = self._get_funcs(op)
+        seen_error_input = False
+
+        for error_input in op.error_inputs(device, dtype=dtype):
+            seen_error_input = True
+            sample = error_input.sample_input
+            foreach_input = [t.detach().clone() for t in sample.input]
+            ref_input = [t.detach().clone() for t in sample.input]
+
+            with self.assertRaisesRegex(
+                error_input.error_type, error_input.error_regex
+            ) as cm:
+                func(
+                    [foreach_input, *sample.args],
+                    self.is_cuda,
+                    expect_fastpath=False,
+                    **sample.kwargs,
+                )
+
+            error_regex = re.escape(str(cm.exception).splitlines()[0])
+            with self.assertRaisesRegex(error_input.error_type, error_regex):
+                ref([ref_input, *sample.ref_args], **sample.kwargs)
+
+        self.assertTrue(seen_error_input)
+
     def _binary_test(
         self,
         dtype,

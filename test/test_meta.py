@@ -79,6 +79,11 @@ foreach_op_db = (
     foreach_other_op_db
 )
 
+_FOREACH_INPLACE_ERROR_INPUT_OPS = {
+    "_foreach_add",
+    "_foreach_mul",
+}
+
 
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
@@ -1245,7 +1250,11 @@ class TestMeta(TestCase):
         if inplace:
             func = self._get_safe_inplace(func)
 
-        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        sample_kwargs = {}
+        # These foreach ops expose their known invalid inplace samples as ErrorInputs.
+        if inplace and not symbolic_meta and op.name in _FOREACH_INPLACE_ERROR_INPUT_OPS:
+            sample_kwargs["exclude_inplace_error_inputs"] = True
+        samples = op.sample_inputs(device, dtype, requires_grad=False, **sample_kwargs)
         for sample_input in samples:
             if inplace and sample_input.broadcasts_input:
                 continue
