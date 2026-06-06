@@ -3248,6 +3248,31 @@ def forward(self, arg0_1, arg1_1):
         mem_after = torch.cuda.memory_allocated()
         self.assertTrue(mem_after == mem_before)
 
+    def test_aot_function_disables_compiled_autograd_during_capture(self):
+        captures = 0
+
+        def compiler_fn(gm):
+            nonlocal captures
+            captures += 1
+            return gm
+
+        def f(a, b):
+            add = a + a
+            split = torch.functional.split(add, [4, 4], dim=1)
+            getitem_2 = split[1]
+            unsqueeze = getitem_2.unsqueeze(-1)
+            mul = unsqueeze * b
+            return (getitem_2, mul)
+
+        with torch._dynamo.compiled_autograd._enable(compiler_fn):
+            f_compiled = aot_function(f, nop)
+            f_compiled(
+                torch.ones(8, 8, requires_grad=True),
+                torch.ones(1, 4, 1, requires_grad=True),
+            )
+
+        self.assertEqual(captures, 0)
+
     def test_output_aliases_multiple_inputs_get_correct_one(self):
         # a and b are aliased, but have different shapes
         # The first output should view off the first input, the 2nd output should view off the 2nd input

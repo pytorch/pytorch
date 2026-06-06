@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import weakref
 from unittest.mock import patch
 
 import torch
@@ -347,6 +348,23 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             return x
 
         self._common(fn, 2, 6)
+
+    def test_pop_after_resume_releases_stack_value(self):
+        refs = []
+
+        @torch._dynamo.disable
+        def make_tensor():
+            x = torch.ones(1)
+            refs.append(weakref.ref(x))
+            return x
+
+        def fn():
+            make_tensor()
+            return refs[-1]() is None
+
+        self.assertTrue(fn())
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertTrue(opt_fn())
 
     @patch("torch._dynamo.config.assume_static_by_default", False)
     def test_dynamic_getitem(self):
