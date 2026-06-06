@@ -1037,6 +1037,53 @@ class TestAOTInductorPackage(TestCase):
         lambda device, package_cpp_only: package_cpp_only,
         "No support for cpp only",
     )
+    def test_shared_storage_blob_not_bloated(self):
+        # Constants that share one underlying storage (e.g. RNN parameters
+        # after flatten_parameters) must not each serialize the entire shared
+        # storage into the constant blob. See issue #186176.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.RNN(256, 256, num_layers=2, batch_first=True)
+
+            def forward(self, x):
+                out, _ = self.rnn(x)
+                return out
+
+        model = Model().eval()
+        example_inputs = (torch.randn(1, 10, 256),)
+
+        options = {
+            "aot_inductor.package": True,
+            "aot_inductor.package_cpp_only": self.package_cpp_only,
+            "always_keep_tensor_constants": True,
+            "aot_inductor.package_constants_in_so": False,
+            "aot_inductor.package_constants_on_disk_format": "binary_blob",
+        }
+
+        ep = torch.export.export(model, example_inputs)
+        aoti_files = torch._inductor.aot_compile(
+            ep.module(), example_inputs, options=options
+        )
+
+        blob_paths = [
+            p
+            for p in aoti_files
+            if isinstance(p, str) and p.endswith("_serialized_weights.bin")
+        ]
+        self.assertEqual(len(blob_paths), 1)
+        blob_bytes = os.path.getsize(blob_paths[0])
+
+        # Logical size of all parameters (each counted once).
+        logical_bytes = sum(
+            p.numel() * p.element_size() for p in model.parameters()
+        )
+
+        # Before the fix, every shared-storage view serialized the full flat
+        # weight buffer, inflating the blob to several times the logical size.
+        # Allow generous headroom for alignment/padding but catch gross bloat.
+        self.assertLess(blob_bytes, logical_bytes * 3)
+
     def test_package_shared_weights(self):
         options = {
             "aot_inductor.package": True,

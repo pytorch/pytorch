@@ -2736,6 +2736,15 @@ end
                     return 0
                 if t.is_mkldnn:
                     return torch.ops.mkldnn._nbytes(t)
+                if t.is_contiguous():
+                    # Serialize only this tensor's logical extent (storage
+                    # offset through its last element) rather than the entire
+                    # underlying storage. The runtime reader recovers the
+                    # tensor via storage_offset within its blob slice, so the
+                    # slice only needs to span up to this tensor's end. This
+                    # avoids N-way bloat when many constants share one storage
+                    # (e.g. RNN flatten_parameters).
+                    return (t.storage_offset() + t.numel()) * t.element_size()
                 return t.untyped_storage().nbytes()
 
             if (

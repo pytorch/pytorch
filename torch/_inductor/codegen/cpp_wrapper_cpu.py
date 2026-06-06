@@ -1187,11 +1187,23 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # If constants to serialize contain cpu tensors, we always align data_size it to 64.
                 # When loading the constants, the valid data will depends on the size
                 # not the data_size so there won't be correctness issue.
-                data_size = (
-                    torch.ops.mkldnn._nbytes(tensor)
-                    if tensor.is_mkldnn
-                    else tensor.untyped_storage().nbytes()
-                )
+                # NOTE: This must stay in sync with `_constant_nbytes` in
+                # codecache.py, which determines how many bytes are actually
+                # written into the constant blob. For contiguous tensors we
+                # only account for the tensor's logical extent (storage offset
+                # through its last element) instead of the full underlying
+                # storage, so that constants sharing one storage (e.g. RNN
+                # flatten_parameters) don't each serialize the whole buffer.
+                if tensor.numel() == 0:
+                    data_size = 0
+                elif tensor.is_mkldnn:
+                    data_size = torch.ops.mkldnn._nbytes(tensor)
+                elif tensor.is_contiguous():
+                    data_size = (
+                        tensor.storage_offset() + tensor.numel()
+                    ) * tensor.element_size()
+                else:
+                    data_size = tensor.untyped_storage().nbytes()
                 self.prefix.writeline(
                     f"constants_info_[{idx}].data_size = {data_size if all_cuda else _align(data_size)};"
                 )
