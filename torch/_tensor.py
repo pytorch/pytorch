@@ -914,6 +914,11 @@ class Tensor(torch._C.TensorBase):
 
         return eig(self, eigenvectors=eigenvectors)
 
+    def qr(self, some=True):
+        from torch._linalg_utils import qr
+
+        return qr(self, some=some)
+
     def symeig(self, eigenvectors=False):
         from torch._linalg_utils import _symeig
 

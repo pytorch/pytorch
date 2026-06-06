@@ -282,6 +282,7 @@ aten::_foreach_minimum.Scalar_out
 aten::_foreach_minimum_.List
 aten::_foreach_minimum_.Scalar
 aten::_foreach_minimum_.ScalarList
+aten::_foreach_mm
 aten::_foreach_mul.List
 aten::_foreach_mul.List_out
 aten::_foreach_mul.Scalar
