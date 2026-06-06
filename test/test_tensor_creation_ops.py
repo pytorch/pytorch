@@ -3485,7 +3485,6 @@ class TestRandomTensorCreation(TestCase):
                 torch.normal(input, std)
 
     # https://github.com/pytorch/pytorch/issues/126834
-    @xfailIfTorchDynamo
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):

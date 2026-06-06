@@ -6470,7 +6470,9 @@ def geometric(self, p, generator=None):
         0 < p and p < 1,
         lambda: f"geometric_ expects p to be in (0, 1), but got p={p}",
     )
-    return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
+    rand_dtype = torch.float32 if utils.is_integer_dtype(self.dtype) else self.dtype
+    rand = torch.rand_like(self, dtype=rand_dtype)
+    return torch.floor(torch.log1p(-rand) / math.log1p(-p)) + 1
 
 
 @register_decomposition(aten.log_normal)
@@ -6951,6 +6953,16 @@ def _internal_new_from_data(
         tensor = _recursive_build(inferred_scalar_type, data)
 
         tensor = tensor.to(device, inferred_scalar_type, non_blocking=False, copy=False)
+        if pin_memory and torch.device(device).type == "cpu":
+            pinned_tensor = torch.empty_strided(
+                tensor.shape,
+                tensor.stride(),
+                dtype=tensor.dtype,
+                device=tensor.device,
+                pin_memory=True,
+            )
+            pinned_tensor.copy_(tensor)
+            tensor = pinned_tensor
 
     # NB: lift_fresh is not needed, because we built the tensor from scalars
     # guaranteeing a fresh tensor in this case
