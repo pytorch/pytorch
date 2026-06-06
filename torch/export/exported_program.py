@@ -542,6 +542,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
         gm, new_graph_signature = _remove_unnecessary_copy_op_pass(
             gm, new_graph_signature
         )
+        gm, new_graph_signature = _remove_unused_new_graph_buffers(
+            gm,
+            new_graph_signature,
+            ep.graph_signature,
+        )
 
         # When we apply parameterization rule to unwrap
         # subclasses, the state dict will now have different
@@ -811,6 +816,51 @@ def _decompose_and_get_gm_with_new_signature_constants(
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
     return gm, new_graph_signature, ep.state_dict
+
+
+def _remove_unused_new_graph_buffers(
+    gm: torch.fx.GraphModule,
+    new_graph_signature: ExportGraphSignature,
+    old_graph_signature: ExportGraphSignature,
+) -> tuple[torch.fx.GraphModule, ExportGraphSignature]:
+    """
+    Removes unused buffer placeholders introduced while re-exporting.
+    """
+    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    if len(placeholders) != len(new_graph_signature.input_specs):
+        raise AssertionError(
+            f"placeholder count {len(placeholders)} does not match "
+            f"input_specs count {len(new_graph_signature.input_specs)}"
+        )
+
+    old_buffers = set(old_graph_signature.buffers)
+
+    def is_real_tensor_attr(target: str) -> bool:
+        try:
+            return isinstance(torch.fx.graph_module._get_attr(gm, target), torch.Tensor)
+        except (AttributeError, AssertionError):
+            return False
+
+    new_input_specs = []
+    changed = False
+    for node, spec in zip(placeholders, new_graph_signature.input_specs):
+        if (
+            spec.kind == InputKind.BUFFER
+            and isinstance(spec.target, str)
+            and spec.target not in old_buffers
+            and len(node.users) == 0
+            and not is_real_tensor_attr(spec.target)
+        ):
+            gm.graph.erase_node(node)
+            changed = True
+            continue
+        new_input_specs.append(spec)
+
+    if changed:
+        new_graph_signature.input_specs = new_input_specs
+        gm.recompile()
+
+    return gm, new_graph_signature
 
 
 def _remove_unnecessary_copy_op_pass(

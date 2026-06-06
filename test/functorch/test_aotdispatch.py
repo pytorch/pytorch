@@ -10243,6 +10243,26 @@ class TestAOTModuleSimplified(AOTTestCase):
         out_test = compiled_f(x)
         self.assertEqual(out_ref[0].detach(), out_test[0].detach())
 
+    def test_cond_branch_tensor_constant_buffers(self):
+        def branch(x):
+            torch.tensor(0)
+            return x.clone()
+
+        def fn(x):
+            return (torch.cond(x.any(), branch, branch, (x,)),)
+
+        x = torch.ones(())
+        gm = make_fx(fn, tracing_mode="real")(x)
+        self.assertEqual(
+            set(dict(gm.named_buffers()).keys()),
+            {"true_graph_0._tensor_constant0", "false_graph_0._tensor_constant0"},
+        )
+
+        compiled_f = aot_module_simplified(gm, (x,), nop)
+        self.assertEqual(compiled_f(x)[0], fn(x)[0])
+        y = torch.zeros(())
+        self.assertEqual(compiled_f(y)[0], fn(y)[0])
+
     def test_inference_python_dispatcher(self):
         # Extracted from unet
         class MockModule(torch.nn.Module):

@@ -97,6 +97,46 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
+def _unwrap_functional_tensor(t: Any) -> Any:
+    if isinstance(t, FunctionalTensor):
+        torch._sync(t)
+        return torch._from_functional_tensor(t.elem)
+    if isinstance(t, torch.Tensor) and torch._is_functional_tensor(t):
+        torch._sync(t)
+        return torch._from_functional_tensor(t)
+    return t
+
+
+@contextmanager
+def _temporarily_unwrap_functional_tensor_buffers(fn: Any):
+    subgraphs = []
+    if isinstance(fn, torch.fx.GraphModule):
+        subgraphs.append(fn)
+    wrapped_subgraph = getattr(fn, "subgraph", None)
+    if isinstance(wrapped_subgraph, torch.fx.GraphModule):
+        subgraphs.append(wrapped_subgraph)
+
+    if not subgraphs:
+        yield
+        return
+
+    originals = []
+    for subgraph in subgraphs:
+        for module in subgraph.modules():
+            for name, tensor in list(module._buffers.items()):
+                unwrapped_tensor = _unwrap_functional_tensor(tensor)
+                if unwrapped_tensor is tensor:
+                    continue
+                originals.append((module, name, tensor))
+                module._buffers[name] = unwrapped_tensor
+
+    try:
+        yield
+    finally:
+        for module, name, tensor in reversed(originals):
+            module._buffers[name] = tensor
+
+
 def _hop_compile_and_call(fn, args, kwargs=None):
     """Compile and call fn with fullgraph=True for HOP eager execution.
 
@@ -133,14 +173,15 @@ def reenter_make_fx(fn, subgraph_decomp_table=None):
             raise AssertionError(
                 "Cannot reenter make_fx when we're not under a make_fx tracing session"
             )
-        if subgraph_decomp_table is None:
-            gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
-                _maybe_run_with_interpreter(fn), *args
-            )
-        else:
-            gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph_custom_decomp(
-                _maybe_run_with_interpreter(fn), subgraph_decomp_table, *args
-            )
+        with _temporarily_unwrap_functional_tensor_buffers(fn):
+            if subgraph_decomp_table is None:
+                gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
+                    _maybe_run_with_interpreter(fn), *args
+                )
+            else:
+                gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph_custom_decomp(
+                    _maybe_run_with_interpreter(fn), subgraph_decomp_table, *args
+                )
 
         return gm
 
@@ -163,13 +204,15 @@ def _maybe_reenter_make_fx(fn, subgraph_decomp_table=None):
                 if fake_mode is None:
                     # we creaeta a fake_mode here to make sure we could
                     # trace the graph with data-dependent calls e.g. .item()
-                    return make_fx(
-                        fn,
-                        tracing_mode="fake",
-                        decomposition_table=subgraph_decomp_table,
-                    )(*args)
+                    with _temporarily_unwrap_functional_tensor_buffers(fn):
+                        return make_fx(
+                            fn,
+                            tracing_mode="fake",
+                            decomposition_table=subgraph_decomp_table,
+                        )(*args)
                 # Tracing with real if all inputs have been fakfied
-                return make_fx(fn, decomposition_table=subgraph_decomp_table)(*args)
+                with _temporarily_unwrap_functional_tensor_buffers(fn):
+                    return make_fx(fn, decomposition_table=subgraph_decomp_table)(*args)
 
             return wrapped
 
@@ -347,7 +390,11 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     # Note: we need to turn off proxy tensor mode to avoid tracing infra
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
     # as fake tensor.
-    with fake_mode, disable_proxy_modes_tracing():
+    with (
+        fake_mode,
+        disable_proxy_modes_tracing(),
+        _temporarily_unwrap_functional_tensor_buffers(fn),
+    ):
         gm = make_fx(
             fn,
             tracing_mode=tracing_mode,
