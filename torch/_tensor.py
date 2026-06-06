@@ -13,14 +13,6 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch._C as _C
-from torch._namedtensor_internals import (
-    check_serializing_named_tensor,
-    is_ellipsis,
-    resolve_ellipsis,
-    single_ellipsis_index,
-    unzip_namedshape,
-    update_names,
-)
 from torch.overrides import (
     get_default_nowrap_functions,
     handle_torch_function,
@@ -32,11 +24,6 @@ from torch.overrides import (
 
 _P = ParamSpec("_P")
 _TensorLike = TypeVar("_TensorLike", bound=_C.TensorBase)
-# Private keys for copy.deepcopy memo while copying FakeTensor bookkeeping.
-_INTERNAL_FAKE_TENSOR_DEEPCOPY = object()
-_INTERNAL_FAKE_TENSOR_DEEPCOPY_MEMO = object()
-_INTERNAL_FAKE_TENSOR_DEEPCOPY_INITIAL_KEYS = object()
-_INTERNAL_FAKE_TENSOR_DEEPCOPY_KEEP_IDS = object()
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(
@@ -156,21 +143,10 @@ class Tensor(torch._C.TensorBase):
                 "see https://github.com/pytorch/pytorch/pull/103001"
             )
         fake_mode = _C._get_dispatch_mode(_C._TorchDispatchModeKey.FAKE)
-        copying_fake_tensor_state = False
         if fake_mode is not None:
             from torch._subclasses.fake_tensor import maybe_get_fake_mode
 
-            copying_fake_tensor_state = maybe_get_fake_mode(self) is not None
-            if self.device.type != "meta" and not copying_fake_tensor_state:
-                if memo.get(_INTERNAL_FAKE_TENSOR_DEEPCOPY, 0):
-                    from torch._subclasses.fake_tensor import unset_fake_temporarily
-
-                    # Keep real tensor bookkeeping copies out of the user's memo.
-                    state_memo = memo.setdefault(
-                        _INTERNAL_FAKE_TENSOR_DEEPCOPY_MEMO, {}
-                    )
-                    with unset_fake_temporarily():
-                        return self.__deepcopy__(state_memo)
+            if self.device.type != "meta" and maybe_get_fake_mode(self) is None:
                 raise NotImplementedError(
                     "copy.deepcopy() is not supported for real tensors while "
                     f"FakeTensorMode is active. Got a tensor on device {self.device}."
@@ -273,55 +249,25 @@ class Tensor(torch._C.TensorBase):
                         new_tensor = new_tensor.neg()
             if self.requires_grad:
                 new_tensor.requires_grad_()
-            if copying_fake_tensor_state:
-                if not memo.get(_INTERNAL_FAKE_TENSOR_DEEPCOPY, 0):
-                    memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY_INITIAL_KEYS] = set(memo)
-                    memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY_KEEP_IDS] = set()
-                memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY] = (
-                    memo.get(_INTERNAL_FAKE_TENSOR_DEEPCOPY, 0) + 1
-                )
-                memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY_KEEP_IDS].add(id(self))
+            if self.grad is not None:
+                new_tensor.grad = self.grad.__deepcopy__(memo)
 
-            try:
-                if self.grad is not None:
-                    new_tensor.grad = deepcopy(self.grad, memo)
+            if type(self) is not Tensor:
+                if type(new_tensor) is not type(self):
+                    raise RuntimeError(
+                        "Type of deepcopy result does not match the type of the source tensor. "
+                        "If you encounter this, please open an issue on PyTorch's GitHub."
+                    )
 
-                if type(self) is not Tensor:
-                    if type(new_tensor) is not type(self):
-                        raise RuntimeError(
-                            "Type of deepcopy result does not match the type of the source tensor. "
-                            "If you encounter this, please open an issue on PyTorch's GitHub."
-                        )
+                # Plain Tensors don't have slots
+                slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+                for slot in slots_to_save:
+                    if hasattr(self, slot):
+                        setattr(new_tensor, slot, deepcopy(getattr(self, slot), memo))
 
-                    # Plain Tensors don't have slots
-                    slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
-                    for slot in slots_to_save:
-                        if hasattr(self, slot):
-                            setattr(
-                                new_tensor, slot, deepcopy(getattr(self, slot), memo)
-                            )
-
-                # don't try to deepcopy non-serializable cached data
-                self._clear_non_serializable_cached_data()
-                new_tensor.__dict__ = deepcopy(self.__dict__, memo)
-            finally:
-                if copying_fake_tensor_state:
-                    memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY] -= 1
-                    if not memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY]:
-                        del memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY]
-                        memo.pop(_INTERNAL_FAKE_TENSOR_DEEPCOPY_MEMO, None)
-                        initial_keys = memo.pop(
-                            _INTERNAL_FAKE_TENSOR_DEEPCOPY_INITIAL_KEYS, set()
-                        )
-                        keep_ids = memo.pop(
-                            _INTERNAL_FAKE_TENSOR_DEEPCOPY_KEEP_IDS, set()
-                        )
-                        for memo_key in list(memo):
-                            if (
-                                memo_key not in initial_keys
-                                and memo_key not in keep_ids
-                            ):
-                                memo.pop(memo_key, None)
+            # don't try to deepcopy non-serializable cached data
+            self._clear_non_serializable_cached_data()
+            new_tensor.__dict__ = deepcopy(self.__dict__, memo)
 
             memo[id(self)] = new_tensor
             return new_tensor
@@ -376,8 +322,6 @@ class Tensor(torch._C.TensorBase):
         )
 
     def _reduce_ex_internal(self, proto):
-        check_serializing_named_tensor(self)
-
         from torch.utils.hooks import warn_if_has_hooks
 
         # See Note [Don't serialize hooks]
@@ -979,6 +923,11 @@ class Tensor(torch._C.TensorBase):
 
         return eig(self, eigenvectors=eigenvectors)
 
+    def qr(self, some=True):
+        from torch._linalg_utils import qr
+
+        return qr(self, some=some)
+
     def symeig(self, eigenvectors=False):
         from torch._linalg_utils import _symeig
 
@@ -1405,91 +1354,6 @@ class Tensor(torch._C.TensorBase):
 
         return self._typed_storage()._get_legacy_storage_class()
 
-    def refine_names(self, *names):  # pyrefly: ignore  # bad-override
-        r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
-
-        Refining is a special case of renaming that "lifts" unnamed dimensions.
-        A ``None`` dim can be refined to have any name; a named dim can only be
-        refined to have the same name.
-
-        Because named tensors can coexist with unnamed tensors, refining names
-        gives a nice way to write named-tensor-aware code that works with both
-        named and unnamed tensors.
-
-        :attr:`names` may contain up to one Ellipsis (``...``).
-        The Ellipsis is expanded greedily; it is expanded in-place to fill
-        :attr:`names` to the same length as ``self.dim()`` using names from the
-        corresponding indices of ``self.names``.
-
-
-        Args:
-            names (iterable of str): The desired names of the output tensor. May
-                contain up to one Ellipsis.
-
-        Examples::
-
-            >>> imgs = torch.randn(32, 3, 128, 128)
-            >>> named_imgs = imgs.refine_names('N', 'C', 'H', 'W')
-            >>> named_imgs.names
-            ('N', 'C', 'H', 'W')
-
-            >>> tensor = torch.randn(2, 3, 5, 7, 11)
-            >>> tensor = tensor.refine_names('A', ..., 'B', 'C')
-            >>> tensor.names
-            ('A', None, None, 'B', 'C')
-
-        .. warning::
-            The named tensor API is experimental and subject to change.
-
-        """
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.refine_names, (self,), self, *names)
-        names = resolve_ellipsis(names, self.names, "refine_names")
-        return super().refine_names(names)
-
-    def align_to(self, *names):  # pyrefly: ignore  # bad-override
-        r"""Permutes the dimensions of the :attr:`self` tensor to match the order
-        specified in :attr:`names`, adding size-one dims for any new names.
-
-        All of the dims of :attr:`self` must be named in order to use this method.
-        The resulting tensor is a view on the original tensor.
-
-        All dimension names of :attr:`self` must be present in :attr:`names`.
-        :attr:`names` may contain additional names that are not in ``self.names``;
-        the output tensor has a size-one dimension for each of those new names.
-
-        :attr:`names` may contain up to one Ellipsis (``...``).
-        The Ellipsis is expanded to be equal to all dimension names of :attr:`self`
-        that are not mentioned in :attr:`names`, in the order that they appear
-        in :attr:`self`.
-
-
-        Args:
-            names (iterable of str): The desired dimension ordering of the
-                output tensor. May contain up to one Ellipsis that is expanded
-                to all unmentioned dim names of :attr:`self`.
-
-        Examples::
-
-            >>> tensor = torch.randn(2, 2, 2, 2, 2, 2)
-            >>> named_tensor = tensor.refine_names('A', 'B', 'C', 'D', 'E', 'F')
-
-            # Move the F and E dims to the front while keeping the rest in order
-            >>> named_tensor.align_to('F', 'E', ...)
-
-        .. warning::
-            The named tensor API is experimental and subject to change.
-
-        """
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.align_to, (self,), self, *names)
-        ellipsis_idx = single_ellipsis_index(names, "align_to")
-        if ellipsis_idx is None:
-            return super().align_to(names)
-        return super().align_to(
-            [name for name in names if not is_ellipsis(name)], ellipsis_idx
-        )
-
     def unflatten(self, dim, sizes):  # type: ignore[override]
         r"""
         unflatten(dim, sizes) -> Tensor
@@ -1503,71 +1367,7 @@ class Tensor(torch._C.TensorBase):
         if not sizes:
             raise RuntimeError("unflatten: sizes must be non-empty")
 
-        names = None
-        if isinstance(sizes, OrderedDict) or (
-            isinstance(sizes, (tuple, list)) and isinstance(sizes[0], (tuple, list))
-        ):
-            names, sizes = unzip_namedshape(sizes)
-            return super().unflatten(dim, sizes, names)
-        else:
-            return super().unflatten(dim, sizes)
-
-    def rename_(self, *names, **rename_map):
-        """In-place version of :meth:`~Tensor.rename`."""
-
-        if has_torch_function_unary(self):
-            return handle_torch_function(
-                Tensor.rename_, (self,), self, *names, **rename_map
-            )
-
-        # Note [rename_ / rename API]
-        # The Python API for these is different from the C++ API. In Python:
-        # 1) tensor.rename(*names) takes a vararglist of names
-        # 2) tensor.rename(**rename_map) takes a map of names to rename.
-        # C++ is static, making it difficult to implement similar behavior.
-        return update_names(self, names, rename_map, inplace=True)
-
-    def rename(self, *names, **rename_map):
-        """Renames dimension names of :attr:`self`.
-
-        There are two main usages:
-
-        ``self.rename(**rename_map)`` returns a view on tensor that has dims
-        renamed as specified in the mapping :attr:`rename_map`.
-
-        ``self.rename(*names)`` returns a view on tensor, renaming all
-        dimensions positionally using :attr:`names`.
-        Use ``self.rename(None)`` to drop names on a tensor.
-
-        One cannot specify both positional args :attr:`names` and keyword args
-        :attr:`rename_map`.
-
-        Examples::
-
-            >>> imgs = torch.rand(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
-            >>> renamed_imgs = imgs.rename(N='batch', C='channels')
-            >>> renamed_imgs.names
-            ('batch', 'channels', 'H', 'W')
-
-            >>> renamed_imgs = imgs.rename(None)
-            >>> renamed_imgs.names
-            (None, None, None, None)
-
-            >>> renamed_imgs = imgs.rename('batch', 'channel', 'height', 'width')
-            >>> renamed_imgs.names
-            ('batch', 'channel', 'height', 'width')
-
-        .. warning::
-            The named tensor API is experimental and subject to change.
-
-        """
-        if has_torch_function_unary(self):
-            return handle_torch_function(
-                Tensor.rename, (self,), self, *names, **rename_map
-            )
-
-        # See Note [rename_ / rename API]
-        return update_names(self, names, rename_map, inplace=False)
+        return super().unflatten(dim, sizes)
 
     def to_sparse_coo(self):
         """Convert a tensor to :ref:`coordinate format <sparse-coo-docs>`.
@@ -1718,18 +1518,6 @@ class Tensor(torch._C.TensorBase):
         if raise_ambiguity:
             raise RuntimeError("The tensor does not have unique dim order.")
         return tuple(out_perm)
-
-    def _update_names(self, names, inplace):
-        if has_torch_function_unary(self):
-            return handle_torch_function(
-                Tensor._update_names, (self,), self, names, inplace
-            )
-
-        # See Note [rename_ / rename API]
-        if inplace:
-            return super().rename_(names)
-        else:
-            return super().rename(names)
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
