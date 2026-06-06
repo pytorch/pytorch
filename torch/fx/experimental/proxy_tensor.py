@@ -525,6 +525,19 @@ def _get_proxies(t: torch.Tensor | TraceableWrapperSubclass) -> list[Proxy]:
     return proxies
 
 
+# sympy Max/Min are n-ary (they flatten, e.g. Max(a, Max(b, c)) -> Max(a, b, c)),
+# but torch.sym_max/sym_min are binary. Reduce so _build_proxy_for_sym_expr can
+# rebuild flattened expressions as nested binary ops. These are module-level
+# (not lambdas) so they have a qualified name and survive FX codegen/pickling
+# when used as a graph node target.
+def _nary_sym_max(*args: Any) -> Any:
+    return functools.reduce(torch.sym_max, args)
+
+
+def _nary_sym_min(*args: Any) -> Any:
+    return functools.reduce(torch.sym_min, args)
+
+
 @functools.cache
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
@@ -540,6 +553,15 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
         op = getattr(operator, v, None)
         if op is not None:
             handlers[k] = op
+        # sympy Max/Min have no operator.* equivalent. Map them to n-ary-safe
+        # wrappers over torch.sym_max/sym_min. Without this,
+        # _build_proxy_for_sym_expr cannot rebuild expressions like Max(1, u2)
+        # that escape a disable_proxy_modes_tracing region (e.g. DTensor shard
+        # propagation size inference).
+        elif v == "maximum":
+            handlers[k] = _nary_sym_max
+        elif v == "minimum":
+            handlers[k] = _nary_sym_min
 
     # sympy.Add is n-ary (e.g. Add(a, b, c)) but operator.add is binary.
     # torch.sym_sum handles n-ary integer addition and accepts both
@@ -1798,12 +1820,6 @@ class TorchFunctionMetadataMode(TorchFunctionMode):
             and any(isinstance(s, py_sym_types) for s in args[0].size())
         ):
             return torch.ops.aten.sym_size.default(*args, **kwargs)
-        if (
-            result := _maybe_rewrite_getitem_with_scalar_tensor_index(
-                func, args, kwargs
-            )
-        ) is not None:
-            return result
         return func(*args, **kwargs)
 
 
@@ -1854,13 +1870,6 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 # pyrefly: ignore [bad-argument-type]
                 func(*args, **kwargs)
             return node
-        if (
-            result := _maybe_rewrite_getitem_with_scalar_tensor_index(
-                func, args, kwargs
-            )
-        ) is not None:
-            return result
-
         # We need more complicated handling here because the inputs
         # to these functions are sometimes tensors or symints where
         # we need to fetch the proxies properly.
@@ -1918,112 +1927,6 @@ _jvp_predispatch_functions = frozenset(
         torch._functorch.predispatch._exit_dual_level,
     }
 )
-
-
-def _is_scalar_tensor_index(item: object) -> bool:
-    if not isinstance(item, Tensor) or item.ndim != 0:
-        return False
-
-    from torch._prims_common import is_integer_dtype
-
-    return is_integer_dtype(item.dtype)
-
-
-def _maybe_tensor_index_item(item: object) -> object:
-    if _is_scalar_tensor_index(item):
-        return item.item()  # type: ignore[union-attr]
-    return item
-
-
-def _maybe_rewrite_getitem_with_scalar_tensor_index(
-    func: Callable[..., Any], args: tuple[object, ...], kwargs: dict[str, object]
-) -> object | None:
-    if (
-        getattr(func, "__name__", None) != "__getitem__"
-        or not args
-        or not isinstance(args[0], Tensor)
-    ):
-        return None
-
-    def select(t: Tensor, dim: int, item: object) -> Tensor:
-        return torch.select(t, dim, _maybe_tensor_index_item(item))  # type: ignore[arg-type]
-
-    def slice_tensor(
-        t: Tensor,
-        dim: int,
-        start: object,
-        stop: object,
-        step: object,
-    ) -> Tensor:
-        return torch.ops.aten.slice(
-            t,
-            dim,
-            _maybe_tensor_index_item(start),
-            _maybe_tensor_index_item(stop),
-            _maybe_tensor_index_item(step),
-        )
-
-    def rewrite(
-        dim: int, item: object
-    ) -> tuple[int, tuple[Callable[..., Any], list[Any]]] | None:
-        if item is None:
-            return dim + 1, (torch.unsqueeze, [dim])
-        if isinstance(item, (int, SymInt)):
-            return dim, (torch.select, [dim, item])
-        if _is_scalar_tensor_index(item):
-            return dim, (select, [dim, item])
-        if isinstance(item, slice):
-            step = 1 if item.step is None else item.step
-            if (
-                item.start is None
-                and item.stop is None
-                and isinstance(step, int)
-                and step == 1
-            ):
-                return dim + 1, (lambda t: t, [])
-            return dim + 1, (slice_tensor, [dim, item.start, item.stop, step])
-        return None
-
-    items = list(args[1]) if isinstance(args[1], tuple) else [args[1]]
-
-    has_scalar_tensor_index = False
-    index_ellipsis = None
-    t = args[0]
-    n_none_slices = t.ndim + 1
-    for i, item in enumerate(items):
-        if _is_scalar_tensor_index(item) or (
-            isinstance(item, slice)
-            and any(
-                _is_scalar_tensor_index(s) for s in (item.start, item.stop, item.step)
-            )
-        ):
-            has_scalar_tensor_index = True
-        if item is Ellipsis:
-            index_ellipsis = i
-        if item is not None:
-            n_none_slices -= 1
-
-    if not has_scalar_tensor_index:
-        return None
-
-    if index_ellipsis is not None:
-        none_slices = [slice(None)] * n_none_slices
-        items[index_ellipsis : index_ellipsis + 1] = none_slices
-
-    dim = 0
-    sequence = []
-    for item in items:
-        r = rewrite(dim, item)
-        if r is None:
-            return None
-        dim, call_spec = r
-        sequence.append(call_spec)
-
-    result = args[0]
-    for method, method_args in sequence:
-        result = method(result, *method_args)
-    return result
-
 
 # These JVP predispatch wrappers manage transform nesting/level state
 # and must survive FX dead code elimination even with zero output users.
