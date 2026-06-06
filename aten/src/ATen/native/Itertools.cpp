@@ -24,7 +24,7 @@ using namespace at;
 Tensor _triu_mask(c10::SymInt n, int64_t dims, bool diagonal, TensorOptions opt) {
   // get a mask that has value 1 whose indices satisfies i < j < k < ...
   // or i <= j <= k <= ... (depending on diagonal)
-  Tensor range = at::arange(n, opt.dtype(kLong));
+  Tensor range = at::arange(std::move(n), opt.dtype(kLong));
   std::vector<Tensor> index_grids = at::meshgrid(std::vector<Tensor>(dims, range), "ij");
   Tensor mask = at::full(index_grids[0].sizes(), true, opt.dtype(kBool));
   if(diagonal) {
@@ -65,7 +65,7 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   }
   c10::SymInt num_elements = self.sym_numel();
   std::vector<Tensor> grids = at::meshgrid(std::vector<Tensor>(r, self), "ij");
-  Tensor mask = _triu_mask(num_elements, r, with_replacement, self.options());
+  Tensor mask = _triu_mask(std::move(num_elements), r, with_replacement, self.options());
   for(Tensor &t : grids) {
     t = t.masked_select(mask);
   }
