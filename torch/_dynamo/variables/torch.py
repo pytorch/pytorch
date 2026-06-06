@@ -2224,6 +2224,20 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 tx, len(tx.symbolic_torch_function_state.mode_stack)
             )
 
+        @register(torch._C._len_torch_dispatch_stack)
+        def handle_len_torch_dispatch(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            if args or kwargs:
+                raise_type_error(tx, "len_torch_dispatch_stack takes no arguments")
+            # Dynamo does not trace user TorchDispatchModes. During tracing,
+            # internal modes may be on the real stack, but user code observes
+            # an empty supported dispatch-mode stack.
+            return VariableTracker.build(tx, 0)
+
         @register(torch._C._get_function_stack_at)
         def handle_get_stack_at(
             self,
