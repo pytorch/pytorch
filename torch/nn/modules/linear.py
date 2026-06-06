@@ -7,7 +7,7 @@ from torch import Tensor
 from torch.nn import functional as F, init
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-from .lazy import LazyModuleMixin
+from .lazy import _to_concrete_int, LazyModuleMixin
 from .module import Module
 
 
@@ -320,18 +320,13 @@ class LazyLinear(LazyModuleMixin, Linear):
         # pyrefly: ignore [bad-argument-type]
         if self.has_uninitialized_params():
             with torch.no_grad():
-                in_features = input.shape[-1]
-                if isinstance(in_features, torch.SymInt):
-                    in_features = int(in_features)
-                self.in_features = in_features
+                self.in_features = _to_concrete_int(input.shape[-1])
                 self.weight.materialize((self.out_features, self.in_features))
                 if self.bias is not None:
                     self.bias.materialize((self.out_features,))
                 self.reset_parameters()
         if self.in_features == 0:
-            in_features = input.shape[-1]
-            if isinstance(in_features, torch.SymInt):
-                in_features = int(in_features)
+            in_features = _to_concrete_int(input.shape[-1])
             if in_features != self.weight.shape[-1]:
                 raise AssertionError(
                     f"The in_features inferred from input: {in_features} "

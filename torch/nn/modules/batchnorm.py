@@ -7,7 +7,7 @@ from torch.nn import functional as F, init
 from torch.nn.parameter import Parameter, UninitializedBuffer, UninitializedParameter
 
 from ._functions import SyncBatchNorm as sync_batch_norm
-from .lazy import LazyModuleMixin
+from .lazy import _to_concrete_int, LazyModuleMixin
 from .module import Module
 
 
@@ -280,10 +280,7 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
         # pyrefly: ignore [bad-argument-type]
         if self.has_uninitialized_params():
-            num_features = input.shape[1]
-            if isinstance(num_features, torch.SymInt):
-                num_features = int(num_features)
-            self.num_features = num_features
+            self.num_features = _to_concrete_int(input.shape[1])
             if self.affine:
                 if not isinstance(self.weight, UninitializedParameter):
                     raise AssertionError(
@@ -323,7 +320,7 @@ class BatchNorm1d(_BatchNorm):
     elements of :math:`\gamma` are set to 1 and the elements of :math:`\beta` are set to 0.
     At train time in the forward pass, the variance is calculated via the biased estimator,
     equivalent to ``torch.var(input, correction=0)``. However, the value stored in the
-    moving average of the variance is calculated via the unbiased  estimator, equivalent to
+    moving average of the variance is calculated via the unbiased estimator, equivalent to
     ``torch.var(input, correction=1)``.
 
     Also by default, during training this layer keeps running estimates of its
@@ -438,7 +435,7 @@ class BatchNorm2d(_BatchNorm):
     to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
     ``torch.var(input, correction=0)``. However, the value stored in the moving average of the
-    standard-deviation is calculated via the unbiased  estimator, equivalent to
+    standard-deviation is calculated via the unbiased estimator, equivalent to
     ``torch.var(input, correction=1)``.
 
     Also by default, during training this layer keeps running estimates of its
@@ -552,7 +549,7 @@ class BatchNorm3d(_BatchNorm):
     to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
     ``torch.var(input, correction=0)``. However, the value stored in the moving average of the
-    standard-deviation is calculated via the unbiased  estimator, equivalent to
+    standard-deviation is calculated via the unbiased estimator, equivalent to
     ``torch.var(input, correction=1)``.
 
     Also by default, during training this layer keeps running estimates of its
@@ -653,7 +650,7 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
 class SyncBatchNorm(_BatchNorm):
     r"""Applies Batch Normalization over a N-Dimensional input.
 
-    The N-D input is a mini-batch of [N-2]D inputs with additional channel dimension) as described in the paper
+    The N-D input is a mini-batch of [N-2]D inputs with additional channel dimension as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 

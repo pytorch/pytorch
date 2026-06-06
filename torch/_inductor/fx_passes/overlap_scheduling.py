@@ -26,6 +26,7 @@ from torch._inductor.fx_passes.bucketing import (
 from torch._inductor.fx_passes.memory_estimator import MemoryTracker
 from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._logging import trace_structured
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
@@ -300,6 +301,12 @@ def benchmark_node_with_cache_key(
         args, kwargs = torch.utils._pytree.tree_map_only(
             torch.Tensor,
             lambda t: to_real(t),
+            (args, kwargs),
+        )
+
+        args, kwargs = torch.utils._pytree.tree_map_only(
+            torch.SymInt,
+            lambda s: optimization_hint(s, fallback=config.unbacked_symint_fallback),
             (args, kwargs),
         )
 
@@ -1276,14 +1283,18 @@ class OverlapScheduler:
         ):
             return
 
-        # Compile candidates - limit by distance to bound compile time
+        # Compile candidates - limit by number of plausible candidates to bound
+        # compile time.  Do not stop after seeing max_node_distance raw entries:
+        # early entries may be filtered by PG/prefetch distance, while later
+        # entries can still use the current overlap window.
         candidates = []
-        for i, collective in enumerate(self.unscheduled_collectives):
-            if i > self.max_node_distance:
-                break
-
+        for collective in self.unscheduled_collectives:
             pg_name = get_group_name(collective)
             if pg_name == exclude_pg:
+                continue
+
+            pg_available_time = remaining_time_per_pg.get(pg_name, 0.0)
+            if pg_available_time <= 0:
                 continue
 
             if (
@@ -1295,6 +1306,8 @@ class OverlapScheduler:
                 continue
 
             candidates.append(collective)
+            if len(candidates) >= self.max_node_distance:
+                break
 
         def get_priority(n: fx.Node) -> int:
             dominates_next_compute = (
@@ -1309,13 +1322,18 @@ class OverlapScheduler:
             else:
                 return 3  # Off-path, doesn't block reduce_scatter
 
-        candidates.sort(
-            key=lambda n: (
+        def overlap_priority(n: fx.Node) -> tuple[int, int, float, int]:
+            return (
                 get_priority(n),
                 self.compute_index_domination[n],
+                -min(
+                    remaining_time_per_pg.get(get_group_name(n), 0.0),
+                    self.collective_info[n].exposed_time_ms,
+                ),
                 self.node_idx[n],
-            ),
-        )
+            )
+
+        candidates.sort(key=overlap_priority)
 
         if self.prioritize_bucketing_during_scheduling:
             # group candidates by bucket key first so same-bucket
@@ -1325,11 +1343,12 @@ class OverlapScheduler:
                 key = get_full_bucket_key(coll, self.bucket_mode)
                 bucket_groups[key].append(coll)
 
-            # Sort bucket groups by minimum domination index, larger groups first as tiebreaker
+            # Sort bucket groups by the best candidate priority in each group,
+            # with larger groups first as tiebreaker.
             sorted_bucket_keys = sorted(
                 bucket_groups.keys(),
                 key=lambda k: (
-                    min(self.compute_index_domination[c] for c in bucket_groups[k]),
+                    min(overlap_priority(c) for c in bucket_groups[k]),
                     -len(bucket_groups[k]),
                 ),
             )
@@ -1338,9 +1357,7 @@ class OverlapScheduler:
             candidates = []
             for b_key in sorted_bucket_keys:
                 group = bucket_groups[b_key]
-                group.sort(
-                    key=lambda n: (self.compute_index_domination[n], self.node_idx[n])
-                )
+                group.sort(key=overlap_priority)
                 candidates.extend(group)
 
         for collective in candidates:

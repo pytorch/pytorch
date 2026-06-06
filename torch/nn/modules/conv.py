@@ -10,7 +10,7 @@ from torch.nn import functional as F, init
 from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-from .lazy import LazyModuleMixin
+from .lazy import _to_concrete_int, LazyModuleMixin
 from .module import Module
 from .utils import _pair, _reverse_repeat_tuple, _single, _triple
 
@@ -862,7 +862,7 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
-        amount of zero padding to both sizes of the input. This is set so that
+        amount of zero padding to both sides of the input. This is set so that
         when a :class:`~torch.nn.Conv1d` and a :class:`~torch.nn.ConvTranspose1d`
         are initialized with same parameters, they are inverses of each other in
         regard to the input and output shapes. However, when ``stride > 1``,
@@ -1052,7 +1052,7 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
-        amount of zero padding to both sizes of the input. This is set so that
+        amount of zero padding to both sides of the input. This is set so that
         when a :class:`~torch.nn.Conv2d` and a :class:`~torch.nn.ConvTranspose2d`
         are initialized with same parameters, they are inverses of each other in
         regard to the input and output shapes. However, when ``stride > 1``,
@@ -1249,7 +1249,7 @@ class ConvTranspose3d(_ConvTransposeNd):
 
     Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
-        amount of zero padding to both sizes of the input. This is set so that
+        amount of zero padding to both sides of the input. This is set so that
         when a :class:`~torch.nn.Conv3d` and a :class:`~torch.nn.ConvTranspose3d`
         are initialized with same parameters, they are inverses of each other in
         regard to the input and output shapes. However, when ``stride > 1``,
@@ -1483,9 +1483,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
         in_channels = (
             input.shape[1] if input.dim() == num_dims_batch else input.shape[0]
         )
-        if isinstance(in_channels, torch.SymInt):
-            in_channels = int(in_channels)
-        return in_channels
+        return _to_concrete_int(in_channels)
 
     # Function to return the number of spatial dims expected for inputs to the module.
     # This is expected to be implemented by subclasses.
