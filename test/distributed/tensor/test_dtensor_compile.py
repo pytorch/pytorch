@@ -12,6 +12,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.testing
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch._C import FileCheck
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
@@ -250,6 +251,111 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         res = fn(x)
         res.to_local().sum().backward()
+
+    def test_compile_waits_act_nested_in_dtensor_local_tensor(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180614.
+        # AOTAutograd must resolve AsyncCollectiveTensors (ACTs) nested in
+        # ``DTensor._local_tensor`` (e.g. from ``redistribute(async_op=True)``
+        # or FSDP2's async all-gather) before tracing and again before runtime
+        # execution. Otherwise inductor can read an in-flight collective.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(x):
+            return x + 1
+
+        def make_dtensor_with_act_local():
+            dt = DTensor.from_local(
+                torch.randn(4, 4, device=self.device_type),
+                mesh,
+                [Replicate()],
+                run_check=False,
+            )
+            dt._local_tensor = AsyncCollectiveTensor(dt._local_tensor.clone())
+            return dt
+
+        wait_calls = []
+        orig_wait_tensor = funcol.wait_tensor
+
+        def counting_wait_tensor(t):
+            wait_calls.append(1)
+            return orig_wait_tensor(t)
+
+        with patch.object(funcol, "wait_tensor", counting_wait_tensor):
+            # Warmup compiles through Python dispatch (which waits); clear the
+            # counter so we measure only the compiled runtime path.
+            fn(make_dtensor_with_act_local())
+            wait_calls.clear()
+
+            dt = make_dtensor_with_act_local()
+            self.assertFalse(dt._local_tensor.completed)
+            fn(dt)
+
+        self.assertGreaterEqual(
+            len(wait_calls),
+            1,
+            "compiled graph must wait the AsyncCollectiveTensor nested in "
+            "DTensor._local_tensor",
+        )
+        self.assertTrue(dt._local_tensor.completed)
+
+    def test_direct_aot_dtensor_local_tensor_act_to_plain_no_crash(self):
+        # Companion to the wait test above: the crash half of
+        # https://github.com/pytorch/pytorch/issues/180614. Direct AOTAutograd
+        # entry points do not have Dynamo guards to recompile when a nested ACT
+        # input is later a plain tensor. The compiled graph must run on the
+        # plain local instead of trying to wait or unwrap it as ACT.
+        from torch._functorch.aot_autograd import aot_function
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fw_compiler(gm, example_inputs):
+            return gm
+
+        fn = aot_function(lambda x: x + 1, fw_compiler=fw_compiler)
+
+        # Trace with an ACT-wrapped local so the codegen specializes on it.
+        dt_act = DTensor.from_local(
+            torch.randn(4, 4, device=self.device_type),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+        dt_act._local_tensor = AsyncCollectiveTensor(dt_act._local_tensor.clone())
+        fn(dt_act)
+
+        # Invoke the same compiled graph with a plain-local DTensor.
+        dt_plain = DTensor.from_local(
+            torch.randn(4, 4, device=self.device_type),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+        self.assertNotIsInstance(dt_plain._local_tensor, AsyncCollectiveTensor)
+        out = fn(dt_plain)
+        self.assertEqual(out.to_local(), dt_plain.to_local() + 1)
+
+    def test_compile_dtensor_local_tensor_act_backward_passthrough(self):
+        # Passthrough forwards preserve ACT wrappers. If nested ACTs are
+        # allowed into traced metadata, backward expects an ACT tangent and
+        # rejects the plain-local cotangent autograd supplies.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return x
+
+        local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+        dt = DTensor.from_local(local, mesh, [Replicate()], run_check=False)
+        dt._local_tensor = AsyncCollectiveTensor(dt._local_tensor.clone())
+        out = fn(dt)
+        out.to_local().sum().backward()
+        self.assertIsNotNone(local.grad)
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW or TEST_XPU,

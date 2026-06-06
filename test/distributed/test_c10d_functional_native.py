@@ -1610,6 +1610,28 @@ class ACTCompileTest(TestCase):
         r2 = compiled_fn(act2)
         self.assertEqual(r2, elem2 * 2)
 
+    def test_direct_aot_top_level_act_path_accepts_plain_runtime_input(self):
+        """
+        Unlike torch.compile, direct AOTAutograd entry points do not have
+        Dynamo input-type guards to force a recompile when a top-level ACT input
+        is later a plain tensor. The runtime wait path must therefore guard
+        before calling trigger_wait() on the recorded ACT input path.
+        """
+        from torch._functorch.aot_autograd import aot_function
+
+        def fw_compiler(gm, example_inputs):
+            return gm
+
+        compiled_fn = aot_function(lambda x: x * 2, fw_compiler=fw_compiler)
+
+        elem = torch.randn(4, 4)
+        r1 = compiled_fn(AsyncCollectiveTensor(elem))
+        self.assertEqual(r1, elem * 2)
+
+        plain = torch.randn(4, 4)
+        r2 = compiled_fn(plain)
+        self.assertEqual(r2, plain * 2)
+
     def test_act_guard_recompiles(self):
         """
         Dynamo must recompile when an input switches between plain tensor

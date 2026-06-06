@@ -797,7 +797,7 @@ def aot_function(
             flat_fn, out_spec = create_tree_flattened_fn(fn, args, kwargs)
             (fake_mode, shape_env) = construct_fake_mode(flat_args, aot_config)
             fake_flat_args: FakifiedFlatArgs
-            fake_flat_args, act_input_indices = process_inputs(
+            fake_flat_args, act_input_paths = process_inputs(
                 flat_args, aot_config, fake_mode, shape_env
             )
             # TODO: We actually could use the pytree path to make better descs.
@@ -815,7 +815,7 @@ def aot_function(
                     fake_mode,
                     shape_env,
                 )
-                aot_state.fw_metadata.act_input_indices = act_input_indices
+                aot_state.fw_metadata.act_input_paths = act_input_paths
                 aot_graph_capture = aot_stage1_graph_capture(aot_state, flat_fn)
                 compiled_fn, _ = aot_stage2_compile(
                     aot_state,
@@ -922,12 +922,12 @@ def autograd_cache_key(
     )
 
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
-    fake_flat_args, _act_input_indices = process_inputs(
+    fake_flat_args, act_input_paths = process_inputs(
         full_args, aot_config, fake_mode, shape_env, ignore_shape_env
     )
 
     return autograd_cache.autograd_cache_key(
-        graph, fake_flat_args, aot_config, compiler_config_extra
+        graph, fake_flat_args, aot_config, compiler_config_extra, act_input_paths
     )
 
 
@@ -1054,7 +1054,7 @@ def prepare_aot_module_simplified(
     ShapeEnv | None,
     pytree.TreeSpec | None,
     PytreeThunk | None,
-    list[int],
+    list[tuple[int, tuple[str, ...]]],
 ]:
     if not flatten:
         if kwargs is not None:
@@ -1108,7 +1108,7 @@ def prepare_aot_module_simplified(
 
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
-    fake_flat_args, act_input_indices = process_inputs(
+    fake_flat_args, act_input_paths = process_inputs(
         full_args, aot_config, fake_mode, shape_env, ignore_shape_env
     )
 
@@ -1124,7 +1124,7 @@ def prepare_aot_module_simplified(
         shape_env,
         in_spec,
         out_spec,
-        act_input_indices,
+        act_input_paths,
     )
 
 
@@ -1182,7 +1182,7 @@ def aot_module_simplified(
             shape_env,
             _in_spec,
             _out_spec,
-            act_input_indices,
+            act_input_paths,
         ) = prepare_aot_module_simplified(
             mod,
             args,
@@ -1212,6 +1212,7 @@ def aot_module_simplified(
                     compiler_config_extra,
                     local,
                     remote,
+                    act_input_paths,
                     compile_region_name=compile_region_name,
                 )
 
@@ -1233,7 +1234,7 @@ def aot_module_simplified(
                 fake_mode,
                 shape_env,
             )
-            aot_state.fw_metadata.act_input_indices = act_input_indices
+            aot_state.fw_metadata.act_input_paths = act_input_paths
             aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
             compiled_fn, _ = aot_stage2_compile(
                 aot_state,
@@ -1390,7 +1391,7 @@ def aot_export_joint_with_descriptors(
         shape_env,
         in_spec,
         out_spec,
-        act_input_indices,
+        act_input_paths,
     ) = prepare_aot_module_simplified(
         mod,
         args,
@@ -1424,7 +1425,7 @@ def aot_export_joint_with_descriptors(
         fake_mode,
         shape_env,
     )
-    aot_state.fw_metadata.act_input_indices = act_input_indices
+    aot_state.fw_metadata.act_input_paths = act_input_paths
 
     # NB: no cache lookup!
     aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
@@ -1930,7 +1931,7 @@ def _aot_export_function(
         fake_mode, shape_env = construct_fake_mode(flat_args, aot_config)
     else:
         shape_env = fake_mode.shape_env
-    fake_flat_args, act_input_indices = process_inputs(
+    fake_flat_args, act_input_paths = process_inputs(
         flat_args, aot_config, fake_mode, shape_env
     )
     # TODO: Improve the descs here with pytree information
@@ -1948,7 +1949,7 @@ def _aot_export_function(
             fake_mode,
             shape_env,
         )
-        aot_state.fw_metadata.act_input_indices = act_input_indices
+        aot_state.fw_metadata.act_input_paths = act_input_paths
         aot_graph_capture = aot_stage1_graph_capture(aot_state, flat_fn)
         fx_g, meta = aot_stage2_export(aot_state, aot_graph_capture)
 
