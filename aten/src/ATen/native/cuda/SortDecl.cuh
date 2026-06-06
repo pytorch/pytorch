@@ -11,14 +11,17 @@
     #include <rocm-core/rocm_version.h>
   #endif
 #else
-  #include <cuda_runtime_api.h>
+  // cuda.h defines CUDA_VERSION (used by HAS_WARP_MERGE_SORT below);
+  // cuda_runtime_api.h only defines CUDART_VERSION, which would leave
+  // CUDA_VERSION undefined here and silently disable warp-merge sort.
+  #include <cuda.h>
 #endif
 
 #if !defined(HAS_WARP_MERGE_SORT)
   #if defined(USE_ROCM)
     #define HAS_WARP_MERGE_SORT() (ROCM_VERSION >= 70000)
   #else
-    #define HAS_WARP_MERGE_SORT() (CUDA_VERSION >= 110600)
+    #define HAS_WARP_MERGE_SORT() (CUDA_VERSION >= 11060)
   #endif
 #endif
 
