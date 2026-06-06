@@ -54,6 +54,7 @@ jobs:
           { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      build-additional-packages: "torchrec fbgemm"
       python-version: ${{ matrix.python-version }}
       compiler: clang18
       cuda-version: cpu
