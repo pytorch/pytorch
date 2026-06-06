@@ -1444,6 +1444,16 @@ def forward(self, x_1):
         self.assertIs(mod_copied.a, mod_copied.b)
         self.assertEqual(mod_copied.b.storage()._cdata, mod_copied.a.storage()._cdata)
 
+    def test_deepcopy_real_tensor_in_fake_mode_error(self):
+        x = torch.randn([], device="cpu")
+        with FakeTensorMode():
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "copy.deepcopy\\(\\) is not supported for real tensors while "
+                "FakeTensorMode is active. Got a tensor on device cpu.",
+            ):
+                copy.deepcopy(x)
+
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
