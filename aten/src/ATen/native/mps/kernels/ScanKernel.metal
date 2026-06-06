@@ -30,14 +30,6 @@ C10_METAL_CONSTEXPR auto simd_size = c10::metal::simdgroup_size;
 // Original work is licensed under MIT License:
 // https://github.com/ml-explore/mlx/blob/main/LICENSE
 
-inline uint64_t simd_shuffle_and_fill_up(
-    uint64_t data,
-    uint64_t filling,
-    uint16_t delta) {
-  return as_type<uint64_t>(metal::simd_shuffle_and_fill_up(
-      as_type<uint2>(data), as_type<uint2>(filling), delta));
-}
-
 inline int64_t simd_shuffle_and_fill_up(
     int64_t data,
     int64_t filling,
@@ -51,10 +43,6 @@ inline bool simd_shuffle_and_fill_up(bool data, bool filling, uint16_t delta) {
       static_cast<uint32_t>(data), static_cast<uint32_t>(filling), delta);
 }
 
-inline uint64_t simd_shuffle(uint64_t data, uint16_t lane) {
-  return as_type<uint64_t>(metal::simd_shuffle(as_type<uint2>(data), lane));
-}
-
 inline int64_t simd_shuffle(int64_t data, uint16_t lane) {
   return as_type<int64_t>(metal::simd_shuffle(as_type<uint2>(data), lane));
 }
@@ -62,32 +50,6 @@ inline int64_t simd_shuffle(int64_t data, uint16_t lane) {
 inline bool simd_shuffle(bool data, uint16_t lane) {
   return simd_shuffle(static_cast<uint32_t>(data), lane);
 }
-
-#define DEFINE_SIMD_SCAN()                                               \
-  template <typename U, metal::enable_if_t<sizeof(U) < 8, bool> = true>  \
-  U simd_scan(U val) {                                                   \
-    return simd_scan_impl(val);                                          \
-  }                                                                      \
-                                                                         \
-  template <typename U, metal::enable_if_t<sizeof(U) == 8, bool> = true> \
-  U simd_scan(U val) {                                                   \
-    for (int i = 1; i <= 16; i *= 2) {                                   \
-      val = operator()(val, simd_shuffle_and_fill_up(val, init, i));     \
-    }                                                                    \
-    return val;                                                          \
-  }
-
-#define DEFINE_SIMD_EXCLUSIVE_SCAN()                                     \
-  template <typename U, metal::enable_if_t<sizeof(U) < 8, bool> = true>  \
-  U simd_exclusive_scan(U val) {                                         \
-    return simd_exclusive_scan_impl(val);                                \
-  }                                                                      \
-                                                                         \
-  template <typename U, metal::enable_if_t<sizeof(U) == 8, bool> = true> \
-  U simd_exclusive_scan(U val) {                                         \
-    val = simd_scan(val);                                                \
-    return simd_shuffle_and_fill_up(val, init, 1);                       \
-  }
 
 template <typename T, typename acc_t = accum_t<T>>
 struct LogCumSumExpOp {
@@ -152,15 +114,6 @@ inline ValueIndexPair<T, acc_t> make_pair(acc_t v, int64_t i) {
   return result;
 }
 
-// Helper function for shuffling pairs in SIMD operations
-template <typename T, typename acc_t = accum_t<T>>
-inline ValueIndexPair<T, acc_t> simd_shuffle_pair(
-    ValueIndexPair<T, acc_t> data,
-    uint16_t lane) {
-  return make_pair<T, acc_t>(
-      simd_shuffle(data.value, lane), simd_shuffle(data.index, lane));
-}
-
 template <typename T, typename acc_t = accum_t<T>>
 struct CumMinOp {
   using pair_t = ValueIndexPair<T, acc_t>;
@@ -211,13 +164,6 @@ struct CumMinOp {
   }
 
  private:
-  pair_t simd_shuffle_pair(pair_t data, uint16_t delta) {
-    pair_t init_val = get_init();
-    return make_pair<T, acc_t>(
-        simd_shuffle_and_fill_up(data.value, init_val.value, delta),
-        simd_shuffle_and_fill_up(data.index, init_val.index, delta));
-  }
-
   pair_t simd_shuffle_and_fill_up_pair(
       pair_t data,
       pair_t filling,
@@ -278,13 +224,6 @@ struct CumMaxOp {
   }
 
  private:
-  pair_t simd_shuffle_pair(pair_t data, uint16_t delta) {
-    pair_t init_val = get_init();
-    return make_pair<T, acc_t>(
-        simd_shuffle_and_fill_up(data.value, init_val.value, delta),
-        simd_shuffle_and_fill_up(data.index, init_val.index, delta));
-  }
-
   pair_t simd_shuffle_and_fill_up_pair(
       pair_t data,
       pair_t filling,
