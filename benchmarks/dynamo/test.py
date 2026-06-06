@@ -37,6 +37,15 @@ class TestDynamoBenchmark(unittest.TestCase):
         )
         self.assertFalse(args.use_warm_peak_memory)
 
+    def test_detectron2_maskrcnn_uses_iou_for_bool_masks(self) -> None:
+        runner = TorchBenchmarkRunner()
+        for name in (
+            "detectron2_maskrcnn_r_101_fpn",
+            "detectron2_maskrcnn_r_50_c4",
+        ):
+            self.assertTrue(runner.use_iou_for_bool_accuracy(name))
+            self.assertEqual(runner.get_iou_threshold(name), 0.99)
+
     @unittest.skipIf(is_asan_or_tsan(), "ASAN/TSAN not supported")
     def test_benchmark_infra_runs(self) -> None:
         """
