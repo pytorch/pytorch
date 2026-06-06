@@ -370,7 +370,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     }
   }
 
-  return std::make_tuple(cmd, target_file);
+  return std::make_tuple(std::move(cmd), std::move(target_file));
 }
 
 std::string compile_so(
