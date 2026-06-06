@@ -13939,9 +13939,14 @@ class TestAutogradDeviceType(TestCase):
         a.grad = None
 
         # --- as a decorator ---
+        torch._C._set_grad_layout_enforcement_enabled(True)
+
         @torch.autograd.enforce_grad_layout_policy(False)
         def do_backward():
             ContiguousGrad.apply(a).backward()
+
+        # Check that the flag doesn't leak during function decoration.
+        self.assertTrue(torch._C._is_grad_layout_enforcement_enabled())
 
         do_backward()
         self.assertTrue(a.grad.is_contiguous())
@@ -15597,6 +15602,18 @@ class TestMultithreadAutograd(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "blah"):
             out.backward()
+
+    def test_remove_obj_from_tls(self):
+        # Regression test for deadlock introduced by
+        # https://github.com/pytorch/pytorch/pull/173568.
+        # _remove_obj_from_tls must erase the key from the C++ thread_local
+        # map so that no SafePyObject survives to thread exit (where its
+        # destructor would try to acquire the GIL via __call_tls_dtors,
+        # risking deadlock when another thread holds the GIL).
+        torch._C._stash_obj_in_tls("test_obj", {"dummy": True})
+        self.assertTrue(torch._C._is_key_in_tls("test_obj"))
+        torch._C._remove_obj_from_tls("test_obj")
+        self.assertFalse(torch._C._is_key_in_tls("test_obj"))
 
 
 class TestNestedCheckpoint(TestCase):
