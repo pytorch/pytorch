@@ -1,13 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import torch
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 _QUACK_DEFAULT_TILE_M = 128
@@ -118,7 +112,7 @@ def _split_epilogue_args(
 def gemm_epilogue(
     a: torch.Tensor,
     b: torch.Tensor,
-    epilogue_fn: Callable,
+    epilogue_fn,
     epilogue_key: str,
     *,
     C: torch.Tensor | None = None,

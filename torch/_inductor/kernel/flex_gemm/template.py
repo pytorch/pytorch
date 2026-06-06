@@ -1,0 +1,76 @@
+# mypy: allow-untyped-defs
+import itertools
+from typing import Any
+
+from torch._inductor import ir
+from torch._inductor.codecache import code_hash
+from torch._inductor.codegen.common import KernelTemplate
+from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
+
+
+class FlexGemmEpilogueTemplate(KernelTemplate):
+    index_counter = itertools.count()
+
+    def __init__(self) -> None:
+        super().__init__("flex_gemm_epilogue")
+
+    def generate(self, **kwargs: Any) -> ChoiceCaller:
+        input_nodes = kwargs.pop("input_nodes")
+        layout = kwargs.pop("layout")
+        config = kwargs.pop("config")
+        if kwargs:
+            raise RuntimeError(f"unexpected FlexGEMM epilogue options: {kwargs}")
+        return FlexGemmEpilogueTemplateCaller(
+            name=f"flex_gemm_epilogue_{next(self.index_counter)}",
+            input_nodes=input_nodes,
+            layout=layout,
+            config=config,
+        )
+
+
+class FlexGemmEpilogueTemplateCaller(ChoiceCaller):
+    def __init__(
+        self,
+        name: str,
+        input_nodes: list[Buffer],
+        layout: Layout,
+        config: ir.FlexGemmEpilogueConfig,
+    ) -> None:
+        super().__init__(
+            name=name,
+            input_nodes=input_nodes,
+            layout=layout,
+            description=f"FlexGEMM epilogue template {config.epilogue_name}",
+        )
+        self.config = config
+
+    def benchmark(self, *args: Any, out: Any) -> float:
+        return 0.0
+
+    def output_node(self) -> TensorBox:
+        return TensorBox.create(
+            ir.FlexGemmEpilogueTemplateBuffer(
+                layout=self.layout,
+                inputs=self.input_nodes,
+                config=self.config,
+            )
+        )
+
+    def call_name(self) -> str:
+        return self.name
+
+    def to_callable(self) -> Any:
+        raise NotImplementedError("FlexGEMM epilogue templates are codegen-only")
+
+    def hash_key(self) -> str:
+        return code_hash(repr(self.config))
+
+    def info_dict(self) -> dict[str, Any]:
+        return {
+            "backend": "FlexGEMM",
+            "template": "flex_gemm_epilogue",
+            "tuned": False,
+        }
+
+
+flex_gemm_epilogue_template = FlexGemmEpilogueTemplate()

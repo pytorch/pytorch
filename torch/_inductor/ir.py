@@ -5857,6 +5857,30 @@ class TemplateBuffer(OperationBuffer):
         return tuple(walk(structured, []))
 
 
+@dataclasses.dataclass(frozen=True)
+class FlexGemmEpilogueConfig:
+    epilogue_name: str
+    epilogue_source: str
+    gemm_op: str
+    alpha: float
+    beta: float
+    out_dtype: Any | None = None
+
+
+class FlexGemmEpilogueTemplateBuffer(TemplateBuffer):
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: Sequence[IRNode],
+        config: FlexGemmEpilogueConfig,
+    ) -> None:
+        super().__init__(layout, inputs, make_kernel_render=None)
+        self.config = config
+
+    def should_allocate(self) -> bool:
+        return False
+
+
 class TritonTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
