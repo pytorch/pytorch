@@ -11469,7 +11469,6 @@ if not TEST_MKL:
     )
 
 symbolic_aot_autograd_failures = {
-    xfail("combinations", ""),  # aten.masked_select.default
     xfail(
         "index_fill", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
