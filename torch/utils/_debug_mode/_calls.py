@@ -42,6 +42,7 @@ class _DebugCall:
         # results from dispatch hooks
         self.record = record
         self.log = log
+        self.tensor_hash_leaves: dict[str, list[tuple[str, Any]]] = {}
         self.output_str: str | None = None
 
     def stringify_args(
