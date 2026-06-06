@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
 from unittest import mock
 from unittest.mock import patch
 
@@ -9,6 +10,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
+from torch._inductor.runtime.triton_heuristics import persistent_reduction
 from torch._inductor.scheduler import MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
@@ -19,6 +21,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._triton import has_triton_tma_device
 
 
 class TestBase(TestCase):
@@ -383,6 +386,78 @@ class MixOrderReductionTest(TestBase):
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
         )
+
+    @unittest.skipUnless(
+        has_triton_tma_device(), "Test requires Triton TMA device support"
+    )
+    @parametrize("allow_multi_stages", (False, True))
+    @inductor_config.patch(
+        {
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    # The 1M-row input plus its grads needs a fair amount of device memory.
+    @largeTensorTest("16GB", device=GPU_TYPE, inductor=True)
+    def test_rms_norm_bwd_tma(self, allow_multi_stages):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/186241.
+
+        With TMA enabled, the mix-order reduction loop used to leave the scalar
+        `xoffset` (which TMA descriptors index off) frozen while only advancing
+        the `xindex` tensor, so every loop iteration read/wrote the first tile
+        and produced wrong results. Additionally NUM_STAGES >= 3 with TMA active
+        triggers a misaligned-address crash, so the heuristic caps stages at 2.
+
+        ``allow_multi_stages=True`` exercises the multi-stage path that
+        previously crashed (now capped at NUM_STAGES=2 with TMA); ``False``
+        disables multi-staging entirely as a sanity check.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x, w, eps):
+            orig_dtype = x.dtype
+            x = x.float()
+            rsqrt = torch.rsqrt((x * x).sum(dim=-1) / x.shape[-1] + eps)
+            return (x * rsqrt[:, None] * w).to(dtype=orig_dtype)
+
+        def fwd_bwd(compiled_f):
+            x.grad = None
+            w.grad = None
+            out = compiled_f(x, w, eps)
+            out.backward(dy)
+            return x.grad, w.grad
+
+        torch.manual_seed(1337)
+        # Large M so the RSPLIT loop runs many iterations per program: this is
+        # what surfaces the stale-xoffset bug (a single iteration would hide it).
+        M, N = 1000000, 256
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        dy = torch.randn_like(x)
+        eps = 1e-5
+
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": False,
+                "triton.mix_order_reduction_allow_multi_stages": allow_multi_stages,
+            },
+        )
+
+        ref = fwd_bwd(f)
+        act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
+
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+        if inductor_config.triton.mix_order_reduction:
+            # The fix advances the scalar xoffset inside the mix-order loop so
+            # TMA descriptors point at the right tile each iteration.
+            FileCheck().check("xoffset += XBLOCK").run(bwd_wrapper)
 
     @parametrize(
         "wbdtype",
@@ -1249,6 +1324,62 @@ class OverFusionTest(TestBase):
         # max_reads should limit over-fusion, not disable mix_order entirely
         self.assertGreater(metrics.codegen_mix_order_reduction, 0)
         self.assertGreater(metrics.rejected_mix_order_reduction_fusion, 0)
+
+
+class MixOrderReductionHeuristicTest(TestBase):
+    """
+    CPU-runnable unit tests for the mix-order persistent_reduction autotuning
+    heuristic. These exercise the config generation logic directly (via
+    ``return_configs=True``) without needing a GPU.
+    """
+
+    def _gen_num_stages(self, *, tma, allow_multi_stages, rsplit_size=256, rnumel=256):
+        """
+        Drive the mix-order branch of persistent_reduction and return the set of
+        NUM_STAGES values across the generated configs.
+        """
+        inductor_meta = {
+            "RSPLIT_SIZE": rsplit_size,
+            "mix_order_reduction_allow_multi_stages": allow_multi_stages,
+        }
+        if tma:
+            # XBLOCK is not a reduction prefix, so it survives the persistent
+            # reduction filtering and marks TMA as active.
+            inductor_meta["tma_min_block_sizes"] = {"XBLOCK": 8}
+        configs = persistent_reduction(
+            {"x": 4096, "r0_": rnumel},
+            triton_meta={"device": object()},
+            inductor_meta=inductor_meta,
+            return_configs=True,
+        )
+        self.assertTrue(configs, "expected at least one config")
+        return {c.kwargs["NUM_STAGES"] for c in configs}
+
+    def test_tma_caps_num_stages(self):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/186241
+        (part 2). With TMA active, NUM_STAGES >= 3 triggers a misaligned-address
+        crash, so the heuristic must cap it at 2. Without TMA the same shape is
+        allowed to pick NUM_STAGES=3.
+        """
+        # rnumel <= 8192 and num_iters // 4 >= 3 lets the non-TMA path reach 3.
+        no_tma = self._gen_num_stages(tma=False, allow_multi_stages=True)
+        self.assertIn(3, no_tma, f"expected NUM_STAGES=3 without TMA, got {no_tma}")
+
+        with_tma = self._gen_num_stages(tma=True, allow_multi_stages=True)
+        self.assertTrue(
+            all(s <= 2 for s in with_tma),
+            f"NUM_STAGES must be capped at 2 with TMA, got {with_tma}",
+        )
+
+    def test_num_stages_single_when_multi_stage_disabled(self):
+        """
+        When multi-staging is disabled, NUM_STAGES collapses to 1 regardless of
+        whether TMA is active.
+        """
+        for tma in (False, True):
+            stages = self._gen_num_stages(tma=tma, allow_multi_stages=False)
+            self.assertEqual(stages, {1}, f"tma={tma}: expected {{1}}, got {stages}")
 
 
 @inductor_config.patch(
