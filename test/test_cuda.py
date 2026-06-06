@@ -97,6 +97,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_PYTHON_BINDINGS,
     TEST_NUMPY,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TestCase,
 )
 from torch.utils._triton import has_triton
@@ -251,6 +252,10 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/148607",
+    )
     @serialTest()
     def test_host_memory_stats(self):
         # Helper functions
@@ -1615,6 +1620,7 @@ print(t.is_pinned())
                 tmp3 = torch.cuda.FloatTensor(t.size())
                 self.assertEqual(tmp3.data_ptr(), ptr[0], msg="allocation not reused")
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/120318")
     def test_record_stream_on_shifted_view(self):
         # See issue #27366
 
@@ -2741,6 +2747,7 @@ torch.cuda.synchronize()
             # Compare the states generated outside and inside the graph
             self.assertEqual(random_values, graphed_random_values)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180232")
     @xfailCUDAIfSM89OrLaterOnWindows
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -2836,6 +2843,7 @@ torch.cuda.synchronize()
         self.assertEqual(buf0, ref0)
         self.assertEqual(buf1, ref1)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177001")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -3069,6 +3077,7 @@ exit(2)
             with torch.cuda.graph(torch.cuda.CUDAGraph()):
                 torch.zeros(2**40, device="cuda")
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -3391,15 +3400,11 @@ exit(2)
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/104055")
     @unittest.skipIf(
-        (not TEST_CUDA_GRAPH)
-        or IS_WINDOWS
-        or (  # appears to still be broken on Windows as of 11.4+
-            torch.version.cuda
-            and int(torch.version.cuda.split(".")[0]) == 11
-            and int(torch.version.cuda.split(".")[1]) < 4
-        ),
-        "Graph bindings disallow concurrent replay for CUDA < 11.4, see "
+        (not TEST_CUDA_GRAPH) or IS_WINDOWS,
+        "Graph bindings disallow concurrent replay; "
+        + "still appears broken on Windows. See "
         + "https://github.com/pytorch/pytorch/pull/57556",
     )
     @unittest.skipIf(
@@ -4070,6 +4075,7 @@ exit(2)
             model_graphed({"x": real_inputs[0]}), model_control({"x": real_inputs[0]})
         )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179961")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -4434,6 +4440,10 @@ exit(2)
         graph.replay()
         self.assertTrue(torch.all(x == 6.0))
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/122413",
+    )
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -5015,6 +5025,9 @@ class TestCudaAllocator(TestCase):
         self.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
 
     @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179745"
+    )
+    @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     def test_memory_snapshot(self):
@@ -5229,6 +5242,9 @@ class TestCudaAllocator(TestCase):
             disarm()
 
     @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179744"
+    )
+    @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     @requiresCppContext
@@ -5393,6 +5409,9 @@ class TestCudaAllocator(TestCase):
             torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179798"
+    )
+    @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     @requiresCppContext
@@ -5523,6 +5542,9 @@ class TestCudaAllocator(TestCase):
                 finally:
                     torch.cuda.memory._record_memory_history(None)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/180263"
+    )
     @serialTest()
     def test_max_split_expandable(self):
         try:
@@ -6064,6 +6086,7 @@ print(value, end="")
         )
         self.assertEqual(torch.cuda._raw_device_count_amdsmi(), raw_device_cnt)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180227")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_uuids(self):
@@ -6083,6 +6106,7 @@ print(value, end="")
                 matching = False
         self.assertEqual(True, matching)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180123")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_uuid_visible_devices(self):
@@ -6720,6 +6744,9 @@ class TestCachingHostAllocatorConfig(TestCase):
             self.assertLess(allocated, 256 * 1024 * 1024)
             self.assertGreaterEqual(allocated, size_bytes)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182111"
+    )
     def test_max_cached_size(self):
         size_bytes = 64 * 1024 * 1024
 
@@ -6731,6 +6758,9 @@ class TestCachingHostAllocatorConfig(TestCase):
             stats = torch.cuda.host_memory_stats()
             self.assertEqual(stats["allocations.current"], 0)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182087"
+    )
     def test_both_thresholds(self):
         size_bytes = 150 * 1024 * 1024
 
@@ -6745,6 +6775,9 @@ class TestCachingHostAllocatorConfig(TestCase):
             stats = torch.cuda.host_memory_stats()
             self.assertEqual(stats["allocations.current"], 1)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182261"
+    )
     def test_round_threshold_larger_than_cached_size(self):
         # When round_threshold > cached_size, allocations above the cache
         # limit should be neither rounded up nor cached.
@@ -7285,6 +7318,7 @@ class TestMemPool(TestCase):
         finally:
             self._teardown_mempool_limited_memory_test()
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180325")
     @serialTest()
     def test_mempool_no_split(self):
         torch.cuda.empty_cache()
@@ -7344,6 +7378,7 @@ class TestMemPool(TestCase):
             f"but got {blocks_no_split} vs {blocks_split}",
         )
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176145")
     @skipIfRocmArch(MI200_ARCH)
     @serialTest()
     def test_deleted_mempool_not_used_on_oom(self):
@@ -7433,6 +7468,7 @@ class TestMemPool(TestCase):
             s = p.snapshot()
             self.assertEqual(len(s), 1, "Expected to have a single segment")
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180367")
     @serialTest()
     def test_nested_mempool(self):
         torch.cuda.empty_cache()
@@ -7747,6 +7783,9 @@ class TestMemPool(TestCase):
         )
 
     @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/177000"
+    )
+    @unittest.skipIf(
         not EXPANDABLE_SEGMENTS,
         "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
     )
@@ -7782,6 +7821,10 @@ class TestMemPool(TestCase):
             num_expandable_segments, 1, "Expected to have 1 expandable segment only"
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/153460",
+    )
     @serialTest()
     def test_mempool_ctx_multithread(self):
         torch.cuda.empty_cache()
@@ -8380,6 +8423,43 @@ class TestMemPool(TestCase):
         finally:
             torch.cuda.empty_cache()
             torch.cuda.memory._set_allocator_settings("")
+
+    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
+    @unittest.skipIf(
+        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
+    )
+    def test_use_uvm(self):
+        with torch.cuda._use_uvm():
+            x = torch.randn(256, 256, device="cuda")
+            y = torch.randn(256, 256, device="cuda")
+            z = x @ y
+        self.assertEqual(z.shape, (256, 256))
+        self.assertTrue(z.is_cuda)
+
+    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
+    @unittest.skipIf(
+        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
+    )
+    def test_use_uvm_numerics(self):
+        torch.manual_seed(42)
+        with torch.cuda._use_uvm():
+            a_uvm = torch.randn(128, 128, device="cuda")
+        torch.manual_seed(42)
+        a_reg = torch.randn(128, 128, device="cuda")
+        self.assertEqual(a_uvm, a_reg)
+
+    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
+    @unittest.skipIf(
+        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
+    )
+    def test_use_uvm_backward(self):
+        with torch.cuda._use_uvm():
+            with torch.autograd.set_multithreading_enabled(False):
+                model = torch.nn.Linear(512, 512, device="cuda")
+                out = model(torch.randn(16, 512, device="cuda"))
+                out.sum().backward()
+        self.assertIsNotNone(model.weight.grad)
+        self.assertEqual(model.weight.grad.shape, (512, 512))
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -10119,6 +10199,9 @@ class TestCudaGreenContexts(TestCase):
         self.assertEqual(partial_res, full_res)
         self.assertGreater(t1 - t0, t3 - t2)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181370"
+    )
     @serialTest()
     def test_greencontext_stream_carveout(self):
         # By default, everything is performed on the current device
@@ -10248,6 +10331,9 @@ instantiate_device_type_tests(TestCudaGreenContexts, globals(), except_for="cpu"
 # Tests for fp32_precision flag propagation that don't require an actual CUDA
 # device — they only exercise C++ context state management.
 class TestFP32PrecisionFlags(TestCase):
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182021"
+    )
     @recover_orig_fp32_precision
     @serialTest()
     def test_generic_fp32_precision_propagates_to_cudnn_conv_rnn(self):

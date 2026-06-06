@@ -14,17 +14,59 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_xpu.h>
 #endif
 
+#include <ATen/Functions.h>
 #include <ATen/core/jit_type.h>
 
 namespace torch::inductor {
 
 namespace {
 
+// Find the first non-wrapped-number tensor on the IValue stack. Used as the
+// reference operand for at::result_type when aligning wrapped-number tensor
+// dtypes (see unpack_tensor_ivalue).
+// When a scalar tensor is wrapped number, dtype promotion gives it lower
+// priority than real tensors. See the comments here:
+// https://github.com/pytorch/pytorch/blob/v2.10.0/c10/core/TensorImpl.h#L1340-L1372
+inline std::optional<at::Tensor> find_reference_tensor(
+    const torch::jit::Stack& stack) {
+  for (const auto& ivalue : stack) {
+    if (ivalue.isTensor()) {
+      auto tensor = ivalue.toTensor();
+      // A reference tensor/dtype is only needed when an input tensor is a
+      // wrapped number that is originally a Python literal. This is a stubborn
+      // tech debt. Thus, here we simply pick the first input tensor `self` as
+      // the reference. Full list of relevant OpOverloads:
+      // https://fburl.com/code/3r94r47i
+      if (!tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+        return tensor;
+      }
+    }
+  }
+  return std::nullopt;
+}
+
 inline void unpack_tensor_ivalue(
     const c10::IValue& ivalue,
     const c10::Device& device,
-    std::vector<at::Tensor>& inputs) {
-  inputs.push_back(ivalue.toTensor());
+    std::vector<at::Tensor>& inputs,
+    const std::optional<at::Tensor>& ref_tensor = std::nullopt) {
+  auto tensor = ivalue.toTensor();
+  // A wrapped-number tensor originates from a Python scalar (e.g. the 1.7 in
+  // ``torch.add(x, 1.7)``) that the arg parser promoted to a 0-dim tensor
+  // (see PythonArgs::tensor_slow in python_arg_parser.cpp).  The C++ arg
+  // parser always creates these with the scalar's native dtype (float64 for
+  // Python float, int64 for Python int), but the Python-side compiler uses
+  // torch.result_type to align the dtype with the first tensor operand.
+  // We call the same at::result_type here so runtime inputs match the
+  // compiled kernel's expectations.
+  if (ref_tensor.has_value() &&
+      tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    auto ref_dtype = at::result_type(ref_tensor.value(), tensor);
+    if (tensor.scalar_type() != ref_dtype) {
+      tensor = tensor.to(ref_dtype);
+    }
+  }
+  inputs.push_back(std::move(tensor));
 }
 
 inline void unpack_optional_tensor_ivalue(
@@ -59,12 +101,13 @@ std::vector<at::Tensor> unpack_tensors(
     const std::vector<c10::Argument>& arguments,
     const torch::jit::Stack& stack,
     const c10::Device& device) {
+  auto ref_tensor = find_reference_tensor(stack);
   std::vector<at::Tensor> inputs;
   for (size_t idx = 0; idx < stack.size(); idx++) {
     const auto& ivalue = stack[idx];
     const auto& ivalue_arg = arguments[idx];
     if (ivalue.isTensor()) {
-      unpack_tensor_ivalue(ivalue, device, inputs);
+      unpack_tensor_ivalue(ivalue, device, inputs, ref_tensor);
     } else if (ivalue.isTensorList()) {
       unpack_tensor_list_ivalue(ivalue, device, inputs);
     } else if (ivalue.isOptionalTensorList()) {
@@ -89,6 +132,7 @@ bool is_default_value(
 std::vector<ParameterMetadata> unpack_input_parameters(
     const std::vector<c10::Argument>& arguments,
     const torch::jit::Stack& stack) {
+  auto ref_tensor = find_reference_tensor(stack);
   std::vector<ParameterMetadata> inputs_metadata;
   // Represent the order of argument and skip default parameter
   int64_t arg_order = 0;
@@ -129,7 +173,18 @@ std::vector<ParameterMetadata> unpack_input_parameters(
         inputs_metadata.emplace_back(std::move(t.value()), arg_order);
       }
     } else if (stack[idx].isTensor()) {
-      inputs_metadata.emplace_back(stack[idx].toTensor(), arg_order);
+      auto tensor = stack[idx].toTensor();
+      // Align wrapped-number tensor dtype via at::result_type, mirroring the
+      // Python-side torch.result_type call in _promote_scalar_args_to_tensors.
+      // This ensures cache metadata matches the compiled kernel's expectations.
+      if (ref_tensor.has_value() &&
+          tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+        auto ref_dtype = at::result_type(ref_tensor.value(), tensor);
+        if (tensor.scalar_type() != ref_dtype) {
+          tensor = tensor.to(ref_dtype);
+        }
+      }
+      inputs_metadata.emplace_back(std::move(tensor), arg_order);
     } else if (stack[idx].isString()) {
       inputs_metadata.emplace_back(stack[idx].toStringRef(), arg_order);
     } else if (stack[idx].isBool()) {
