@@ -70,7 +70,13 @@ from torch._functorch.aot_autograd import (
     _detect_attribute_assignment,
     aot_export_joint_with_descriptors,
 )
-from torch._guards import detect_fake_mode, tracing, TracingContext
+from torch._guards import (
+    compile_context,
+    CompileContext,
+    detect_fake_mode,
+    tracing,
+    TracingContext,
+)
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import is_opaque_type
 from torch._logging import dtrace_structured
@@ -1301,50 +1307,63 @@ _EXPORT_FLAGS: set[str] | None = None
 _EXPORT_MODULE_HIERARCHY: dict[str, str] | None = None
 
 
+@contextmanager
+def _non_strict_export_compile_context(strict: bool):
+    if strict or CompileContext.current_compile_id() is not None:
+        yield
+        return
+
+    from torch._dynamo.convert_frame import get_compile_id
+
+    with compile_context(CompileContext(get_compile_id(frame_state={}))):
+        yield
+
+
 def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
-        try:
-            start = time.time()
-            ep = fn(*args, **kwargs)
-            end = time.time()
-            log_export_usage(
-                event="export.time",
-                metrics=end - start,
-                flags=_EXPORT_FLAGS,
-                **get_ep_stats(ep),
-            )
-        except Exception as e:
-            t = type(e)
-            error_type = t.__module__ + "." + t.__qualname__
-            case_name = get_class_if_classified_error(e)
-            if case_name is not None:
-                log.error(exportdb_error_message(case_name))
+        with _non_strict_export_compile_context(kwargs.get("strict", True)):
+            try:
+                start = time.time()
+                ep = fn(*args, **kwargs)
+                end = time.time()
                 log_export_usage(
-                    event="export.error.classified",
-                    type=error_type,
-                    message=str(e),
+                    event="export.time",
+                    metrics=end - start,
                     flags=_EXPORT_FLAGS,
+                    **get_ep_stats(ep),
                 )
-            else:
-                log_export_usage(
-                    event="export.error.unclassified",
-                    type=error_type,
-                    message=str(e),
-                    flags=_EXPORT_FLAGS,
-                )
+            except Exception as e:
+                t = type(e)
+                error_type = t.__module__ + "." + t.__qualname__
+                case_name = get_class_if_classified_error(e)
+                if case_name is not None:
+                    log.error(exportdb_error_message(case_name))
+                    log_export_usage(
+                        event="export.error.classified",
+                        type=error_type,
+                        message=str(e),
+                        flags=_EXPORT_FLAGS,
+                    )
+                else:
+                    log_export_usage(
+                        event="export.error.unclassified",
+                        type=error_type,
+                        message=str(e),
+                        flags=_EXPORT_FLAGS,
+                    )
 
-            if hasattr(e, "partial_fx_graph"):
-                print(
-                    e.partial_fx_graph,
-                    file=sys.stderr,
-                )
+                if hasattr(e, "partial_fx_graph"):
+                    print(
+                        e.partial_fx_graph,
+                        file=sys.stderr,
+                    )
 
-            raise e
-        finally:
-            _EXPORT_FLAGS = None
-            _EXPORT_MODULE_HIERARCHY = None
+                raise e
+            finally:
+                _EXPORT_FLAGS = None
+                _EXPORT_MODULE_HIERARCHY = None
 
         return ep
 
