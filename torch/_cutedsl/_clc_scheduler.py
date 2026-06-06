@@ -86,8 +86,8 @@ class ClcState:
         return self._mask_to_actual_problem(work_tile, total_num_clusters)
 
     def _mask_to_actual_problem(self, work_tile, total_num_clusters):
-        is_valid = (
-            work_tile.is_valid_tile & (work_tile.tile_idx[2] < total_num_clusters)
+        is_valid = work_tile.is_valid_tile & (
+            work_tile.tile_idx[2] < total_num_clusters
         )
         return cutlass.utils.WorkTileInfo(work_tile.tile_idx, is_valid)
 

@@ -11,11 +11,7 @@ import cutlass.utils.blockscaled_layout as blockscaled_utils
 from cutlass.cute.nvgpu import cpasync, tcgen05
 from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 
-from ._clc_scheduler import (
-    ClcState,
-    create_clc_pipeline,
-    make_clc_problem_shape,
-)
+from ._clc_scheduler import ClcState, create_clc_pipeline, make_clc_problem_shape
 
 
 class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler):
@@ -473,7 +469,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         strides_abc: cute.Tensor,
         tensor_address_abc: cute.Tensor,
         tensor_address_sfasfb: cute.Tensor,
-        estimate_total_num_clusters: cutlass.Constexpr[int],
+        estimate_total_num_clusters: cutlass.Int32,
         total_num_clusters: cute.Tensor,
         tensormap_cute_tensor: cute.Tensor,
         max_active_clusters: cutlass.Constexpr[int],
@@ -1499,9 +1495,11 @@ class Sm100GroupedBlockScaledGemmKernel:
             while work_tile.is_valid_tile:
                 cur_tile_coord = work_tile.tile_idx
                 # MMA warp is only interested in number of tiles along K dimension
-                cur_k_tile_cnt, _ = mma_group_gemm_ts_helper.search_cluster_tile_count_k(
-                    cur_tile_coord,
-                    problem_sizes_mnkl,
+                cur_k_tile_cnt, _ = (
+                    mma_group_gemm_ts_helper.search_cluster_tile_count_k(
+                        cur_tile_coord,
+                        problem_sizes_mnkl,
+                    )
                 )
 
                 # (MMA, MMA_M, MMA_N)

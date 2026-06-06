@@ -2,10 +2,9 @@ import argparse
 import gc
 import importlib
 import subprocess
-import sys
-import time
 import warnings
 from collections.abc import Callable
+from typing import NamedTuple
 
 import torch
 from torch.nn.functional import scaled_grouped_mm, ScalingType, SwizzleType
@@ -86,7 +85,47 @@ def _parse_format(value):
     return value
 
 
-def _do_bench_cuda(fn, warmup=10, rep=100, settle_between_iters=0.0):
+_STAT_CHOICES = ("mean", "median", "min", "max", "p10", "p90")
+
+
+class BenchResult(NamedTuple):
+    value: float
+    min_us: float
+    max_us: float
+
+
+def _percentile(sorted_samples: list[float], pct: float) -> float:
+    if not sorted_samples:
+        return float("nan")
+    if len(sorted_samples) == 1:
+        return sorted_samples[0]
+    idx = (len(sorted_samples) - 1) * pct / 100.0
+    lo = int(idx)
+    hi = min(lo + 1, len(sorted_samples) - 1)
+    frac = idx - lo
+    return sorted_samples[lo] * (1 - frac) + sorted_samples[hi] * frac
+
+
+def _summarize(samples_us: list[float], stat: str) -> BenchResult:
+    sorted_samples = sorted(samples_us)
+    if stat == "mean":
+        value = sum(samples_us) / len(samples_us)
+    elif stat == "median":
+        value = _percentile(sorted_samples, 50.0)
+    elif stat == "min":
+        value = sorted_samples[0]
+    elif stat == "max":
+        value = sorted_samples[-1]
+    elif stat == "p10":
+        value = _percentile(sorted_samples, 10.0)
+    elif stat == "p90":
+        value = _percentile(sorted_samples, 90.0)
+    else:
+        raise ValueError(f"unknown stat '{stat}', expected one of {_STAT_CHOICES}")
+    return BenchResult(value=value, min_us=sorted_samples[0], max_us=sorted_samples[-1])
+
+
+def _do_bench_cuda(fn, warmup=10, rep=100, stat: str = "median") -> BenchResult:
     if isinstance(fn, (list, tuple)):
         if len(fn) == 0:
             raise ValueError("fn list for benchmarking cannot be empty")
@@ -96,8 +135,6 @@ def _do_bench_cuda(fn, warmup=10, rep=100, settle_between_iters=0.0):
         torch.cuda.synchronize()
         samples_us = []
         for i in range(rep):
-            if settle_between_iters > 0:
-                time.sleep(settle_between_iters)
             start = torch.cuda.Event(enable_timing=True)
             end = torch.cuda.Event(enable_timing=True)
             start.record()
@@ -105,15 +142,13 @@ def _do_bench_cuda(fn, warmup=10, rep=100, settle_between_iters=0.0):
             end.record()
             torch.cuda.synchronize()
             samples_us.append(start.elapsed_time(end) * 1e3)
-        return sum(samples_us) / len(samples_us)
+        return _summarize(samples_us, stat)
 
     for _ in range(warmup):
         fn()
     torch.cuda.synchronize()
     samples_us = []
     for _ in range(rep):
-        if settle_between_iters > 0:
-            time.sleep(settle_between_iters)
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
         start.record()
@@ -121,7 +156,7 @@ def _do_bench_cuda(fn, warmup=10, rep=100, settle_between_iters=0.0):
         end.record()
         torch.cuda.synchronize()
         samples_us.append(start.elapsed_time(end) * 1e3)
-    return sum(samples_us) / len(samples_us)
+    return _summarize(samples_us, stat)
 
 
 def _run_with_cuda_profiler(fn):
@@ -251,7 +286,12 @@ def _maybe_wrap_cuda_graph(fn, label: str, use_cuda_graphs: bool):
 
     keep_alive = [None]
     try:
-        keep_alive[0] = fn()
+        # Multiple eager warmups before capture: fire lazy paths (CUDA module
+        # registration, first-touch page faults, allocator path selection) so
+        # they don't get baked into the captured graph and produce
+        # capture-to-capture variance across processes.
+        for _ in range(5):
+            keep_alive[0] = fn()
         torch.cuda.synchronize()
 
         graph = torch.cuda.CUDAGraph()
@@ -261,6 +301,12 @@ def _maybe_wrap_cuda_graph(fn, label: str, use_cuda_graphs: bool):
             with torch.cuda.graph(graph):
                 keep_alive[0] = fn()
         torch.cuda.current_stream().wait_stream(capture_stream)
+
+        # Warm the replay path so driver-side state around graph launch
+        # stabilizes before the timed loop.
+        for _ in range(5):
+            graph.replay()
+        torch.cuda.synchronize()
 
         def _replay():
             graph.replay()
@@ -275,76 +321,6 @@ def _maybe_wrap_cuda_graph(fn, label: str, use_cuda_graphs: bool):
             stacklevel=2,
         )
         return fn
-
-
-def _bench_backend_subprocess(
-    g: int,
-    m: int,
-    n: int,
-    k: int,
-    input_dtype: str,
-    seed: int,
-    grouping: str,
-    warmup: int,
-    rep: int,
-    backend: str,
-    use_cuda_graphs: bool,
-    mma_tile_mn: tuple[int, int] | None,
-    cluster_shape_mn: tuple[int, int] | None,
-    transpose_ab: bool | None,
-    layout_mode: str,
-    format: str,
-    subprocess_depth: int,
-) -> float:
-    cmd = [
-        sys.executable,
-        __file__,
-        "--gmnk",
-        f"{g},{m},{n},{k}",
-        "--input-dtype",
-        input_dtype,
-        "--seed",
-        str(seed),
-        "--grouping",
-        grouping,
-        "--warmup",
-        str(warmup),
-        "--rep",
-        str(rep),
-        "--format",
-        format,
-        "--backend",
-        backend,
-        "--emit-us-only",
-        "--op",
-        "benchmark",
-        "--subprocess-depth",
-        str(subprocess_depth + 1),
-    ]
-    if use_cuda_graphs:
-        cmd.append("--use-cuda-graphs")
-    if mma_tile_mn is not None:
-        cmd.extend(["--mma-tile-mn", f"{mma_tile_mn[0]},{mma_tile_mn[1]}"])
-    if cluster_shape_mn is not None:
-        cmd.extend(
-            ["--cluster-shape-mn", f"{cluster_shape_mn[0]},{cluster_shape_mn[1]}"]
-        )
-    if transpose_ab is not None:
-        cmd.extend(["--transpose-ab", "on" if transpose_ab else "off"])
-    cmd.extend(["--layout-mode", layout_mode])
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if proc.returncode != 0:
-        raise RuntimeError(
-            "subprocess benchmark failed\n"
-            f"cmd: {' '.join(cmd)}\n"
-            f"returncode: {proc.returncode}\n"
-            f"stdout:\n{proc.stdout}\n"
-            f"stderr:\n{proc.stderr}"
-        )
-    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    if not lines:
-        raise RuntimeError("subprocess benchmark returned no output")
-    return float(lines[-1])
 
 
 def _generate_offsets(total, groups, device, mode="balanced", align=1):
@@ -695,7 +671,6 @@ def benchmark_scaled_grouped_mm(
     use_cuda_graphs=False,
     warmup=2,
     rep=20,
-    settle_between_iters=0.1,
     backend="both",
     emit_us_only=False,
     mma_tile_mn: tuple[int, int] | None = None,
@@ -704,8 +679,8 @@ def benchmark_scaled_grouped_mm(
     set_max_gpu_clocks=False,
     layout_mode: str = "2d/3d",
     format: str = "mxfp8",
-    subprocess_depth: int = 0,
     cuda_profiler_backend: str | None = None,
+    stat: str = "median",
 ):
     if dtype is None:
         dtype = torch.bfloat16
@@ -716,11 +691,8 @@ def benchmark_scaled_grouped_mm(
             "cuda_profiler_backend must be one of None/cpp/cute/both, "
             f"got {cuda_profiler_backend}"
         )
-    if settle_between_iters < 0:
-        raise ValueError(
-            f"settle_between_iters must be >= 0, got {settle_between_iters}"
-        )
-    use_subprocess = False
+    if stat not in _STAT_CHOICES:
+        raise ValueError(f"stat must be one of {_STAT_CHOICES}, got {stat}")
     if (mma_tile_mn is None) != (cluster_shape_mn is None):
         raise ValueError(
             "mma_tile_mn and cluster_shape_mn must be provided together or omitted together"
@@ -766,7 +738,6 @@ def benchmark_scaled_grouped_mm(
     run_cpp = backend in ("both", "cpp")
     run_cute = backend in ("both", "cute")
     do_correctness = run_cpp and run_cute
-    input_dtype_name = "bf16" if dtype == torch.bfloat16 else "fp16"
     gpu_perf_configured = False
     all_valid = True
 
@@ -901,59 +872,37 @@ def benchmark_scaled_grouped_mm(
         us_cpp = None
         us_cute = None
 
-        if use_subprocess:
-            _sub_kwargs = dict(
-                g=g,
-                m=m,
-                n=n,
-                k=k,
-                input_dtype=input_dtype_name,
-                seed=seed,
-                grouping=grouping,
-                warmup=warmup,
-                rep=rep,
-                use_cuda_graphs=use_cuda_graphs,
-                mma_tile_mn=mma_tile_mn,
-                cluster_shape_mn=cluster_shape_mn,
-                transpose_ab=transpose_ab,
-                layout_mode=layout_mode,
-                format=format,
-                subprocess_depth=subprocess_depth,
-            )
+        fn_cpp, fn_cute = _ensure_bench_fns()
+        bench_fn_cpp = (
+            _maybe_wrap_cuda_graph(fn_cpp, "cpp", use_cuda_graphs) if run_cpp else None
+        )
+        bench_fn_cute = (
+            _maybe_wrap_cuda_graph(fn_cute, "cute", use_cuda_graphs)
+            if run_cute
+            else None
+        )
+        if run_cpp:
+            if cuda_profiler_backend in ("cpp", "both"):
+                _run_with_cuda_profiler(bench_fn_cpp)
+            res_cpp = _do_bench_cuda(bench_fn_cpp, warmup=warmup, rep=rep, stat=stat)
+            us_cpp = res_cpp.value
+        if run_cute:
             if run_cpp:
-                us_cpp = _bench_backend_subprocess(**_sub_kwargs, backend="cpp")
-            if run_cute:
-                us_cute = _bench_backend_subprocess(**_sub_kwargs, backend="cute")
-        else:
-            fn_cpp, fn_cute = _ensure_bench_fns()
-            bench_fn_cpp = (
-                _maybe_wrap_cuda_graph(fn_cpp, "cpp", use_cuda_graphs)
-                if run_cpp
-                else None
-            )
-            bench_fn_cute = (
-                _maybe_wrap_cuda_graph(fn_cute, "cute", use_cuda_graphs)
-                if run_cute
-                else None
-            )
-            if run_cpp:
-                if cuda_profiler_backend in ("cpp", "both"):
-                    _run_with_cuda_profiler(bench_fn_cpp)
-                us_cpp = _do_bench_cuda(
-                    bench_fn_cpp,
-                    warmup=warmup,
-                    rep=rep,
-                    settle_between_iters=settle_between_iters,
-                )
-            if run_cute:
-                if cuda_profiler_backend in ("cute", "both"):
-                    _run_with_cuda_profiler(bench_fn_cute)
-                us_cute = _do_bench_cuda(
-                    bench_fn_cute,
-                    warmup=warmup,
-                    rep=rep,
-                    settle_between_iters=settle_between_iters,
-                )
+                # In --backend both, CuTeDSL inherits state left by C++ that
+                # inflates CuTeDSL's median/max even though C++ itself is
+                # unaffected. Drop two sources: (1) the graph-wrapped C++
+                # bench fn keeps a CUDA graph (and its private memory pool
+                # from torch.cuda.graph()) alive, doubling GPU memory
+                # pressure during CuTeDSL replays; (2) the caching allocator
+                # pool shape left by C++ perturbs CuTeDSL's per-iteration
+                # output allocs.
+                bench_fn_cpp = None
+                gc.collect()
+                torch.cuda.empty_cache()
+            if cuda_profiler_backend in ("cute", "both"):
+                _run_with_cuda_profiler(bench_fn_cute)
+            res_cute = _do_bench_cuda(bench_fn_cute, warmup=warmup, rep=rep, stat=stat)
+            us_cute = res_cute.value
 
         speedup = us_cpp / us_cute if us_cpp and us_cute else None
 
@@ -964,9 +913,15 @@ def benchmark_scaled_grouped_mm(
             ]
 
         if us_cpp is not None:
-            print(f"  C++: {us_cpp:.2f} us")
+            print(
+                f"  C++: {us_cpp:.2f} us  ({stat}; "
+                f"min={res_cpp.min_us:.2f}, max={res_cpp.max_us:.2f})"
+            )
         if us_cute is not None:
-            print(f"  CuTeDSL: {us_cute:.2f} us")
+            print(
+                f"  CuTeDSL: {us_cute:.2f} us  ({stat}; "
+                f"min={res_cute.min_us:.2f}, max={res_cute.max_us:.2f})"
+            )
 
         if do_correctness and run_cpp and run_cute:
             fn_cpp, fn_cute = _ensure_bench_fns()
@@ -1098,20 +1053,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--warmup",
         type=int,
-        default=2,
+        default=10,
         help="Warmup iterations for timing loops.",
     )
     parser.add_argument(
         "--rep",
         type=int,
-        default=20,
+        default=100,
         help="Measured iterations for timing loops.",
-    )
-    parser.add_argument(
-        "--settle-between-iters",
-        type=float,
-        default=0.1,
-        help="Idle time in seconds before each timed iteration.",
     )
     parser.add_argument(
         "--set-max-gpu-clocks",
@@ -1132,16 +1081,16 @@ if __name__ == "__main__":
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--subprocess-depth",
-        type=int,
-        default=0,
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument(
         "--cuda-profiler-backend",
         choices=["cpp", "cute", "both"],
         default=None,
         help="Issue one cudaProfilerStart/Stop bracket around the selected backend before timing.",
+    )
+    parser.add_argument(
+        "--stat",
+        choices=list(_STAT_CHOICES),
+        default="median",
+        help="Summary statistic to report per backend (default: median). min/max are always shown alongside.",
     )
     args = parser.parse_args()
     if (args.mma_tile_mn is None) != (args.cluster_shape_mn is None):
@@ -1158,7 +1107,6 @@ if __name__ == "__main__":
         use_cuda_graphs=args.use_cuda_graphs,
         warmup=args.warmup,
         rep=args.rep,
-        settle_between_iters=args.settle_between_iters,
         backend=args.backend,
         emit_us_only=args.emit_us_only,
         mma_tile_mn=args.mma_tile_mn,
@@ -1167,6 +1115,6 @@ if __name__ == "__main__":
         set_max_gpu_clocks=args.set_max_gpu_clocks,
         layout_mode=args.layout_mode,
         format=args.format,
-        subprocess_depth=args.subprocess_depth,
         cuda_profiler_backend=args.cuda_profiler_backend,
+        stat=args.stat,
     )

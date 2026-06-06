@@ -45,20 +45,13 @@ using FlightRecorderCUDA = FlightRecorder<at::cuda::CUDAEvent>;
 
 namespace {
 
-#if defined(NCCL_MAJOR) && \
-    ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
-#define NCCL_HAS_AVG 1
-#endif // NCCL version >= 2.10
-
 // NCCL op mapping
 const std::map<ReduceOp::RedOpType, ncclRedOp_t> ncclOp = {
     {ReduceOp::MIN, ncclMin},
     {ReduceOp::MAX, ncclMax},
     {ReduceOp::SUM, ncclSum},
     {ReduceOp::PRODUCT, ncclProd},
-#ifdef NCCL_HAS_AVG
     {ReduceOp::AVG, ncclAvg},
-#endif // NCCL_HAS_AVG
 };
 
 inline bool isUnsupportedFloat8(at::ScalarType t) {
@@ -72,7 +65,6 @@ inline bool isUnsupportedFloat8(at::ScalarType t) {
   );
 }
 
-#ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
 template <typename T, ncclDataType_t dataType>
 ncclRedOpRAII unpackPreMulSum(
     const ReduceOp& reduceOp,
@@ -97,7 +89,6 @@ ncclRedOpRAII unpackPreMulSum(
       comm);
   return ncclRedOpRAII(preMulSum, comm);
 }
-#endif // ENABLE_NCCL_PREMUL_SUM_SUPPORT
 
 ncclRedOpRAII getNcclReduceOp(
     const ReduceOp& reduceOp,
@@ -112,15 +103,12 @@ ncclRedOpRAII getNcclReduceOp(
         // represent a bool (see ncclDataType mapping).
         return ncclMax;
       }
-#ifdef NCCL_HAS_AVG
       if (reduceOp == ReduceOp::AVG) {
         C10_THROW_ERROR(
             TypeError, "Cannot use ReduceOp.AVG with boolean inputs");
       }
-#endif // NCCL_HAS_AVG
     }
     if (reduceOp == ReduceOp::PREMUL_SUM) {
-#ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
       switch (dataType) {
         case ncclHalf:
           return unpackPreMulSum<at::Half, ncclHalf>(reduceOp, comm);
@@ -135,22 +123,10 @@ ncclRedOpRAII getNcclReduceOp(
               TypeError,
               "PreMulSum Data type must be half, float, bfloat16 or double");
       }
-#else
-      C10_THROW_ERROR(ValueError, "PreMulSum requires NCCL>=2.11.1");
-#endif // ENABLE_NCCL_PREMUL_SUM_SUPPORT
     }
     return ncclOp.at(reduceOp);
   } catch (const std::out_of_range&) {
     switch (reduceOp) {
-      case ReduceOp::AVG:
-        C10_THROW_ERROR(
-            ValueError,
-            c10::str(
-                "AVG requires NCCL 2.10+. The current version is ",
-                NCCL_MAJOR,
-                ".",
-                NCCL_MINOR));
-        break;
       case ReduceOp::BAND:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
         break;
@@ -298,7 +274,6 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 // When TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK is set, all tensors (no
 // matter how they have been allocated) are registered with all NCCL comms.
 bool shouldAllCommunicatorsRegisterAllTensors() {
-#ifdef NCCL_HAS_COMM_REGISTER
   static const bool flag = [] {
     const bool flag =
         getCvarBool(TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
@@ -312,9 +287,6 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
     return flag;
   }();
   return flag;
-#else
-  return false;
-#endif // NCCL_HAS_COMM_REGISTER
 }
 
 } // namespace
@@ -995,10 +967,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   debugInfoPipeFile_ = getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
   auto desyncDebug = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
-#ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug);
-#endif // ENABLE_NCCL_ERROR_CHECKING
   if (getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false)) {
     TORCH_WARN_ONCE(
         "TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated.");
@@ -1043,14 +1013,12 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   heartbeatMonitor_ = std::make_unique<HeartbeatMonitor>(this);
   watchdog_ = std::make_unique<Watchdog>(this);
 
-#ifdef ENABLE_NCCL_ERROR_CHECKING
   // in blockingWait mode, we don't need to enable the watchdog thread to check
   // the timeout or nccl error because the main thread would throw an exception
   // and it is the user's responsibility to handle the exception.
   if (!blockingWait_) {
     watchdog_->start();
   }
-#endif // ENABLE_NCCL_ERROR_CHECKING
 
   init();
   const std::string OFF = "OFF";
@@ -1073,10 +1041,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
               << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
               << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
               << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
-#ifdef NCCL_HAS_COMM_REGISTER
               << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
               << shouldAllCommunicatorsRegisterAllTensors()
-#endif // NCCL_HAS_COMM_REGISTER
               << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << traceBufferSize_
               << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
               << ", TORCH_NCCL_CUDA_EVENT_CACHE: " << cudaEventCacheEnabled_;
@@ -1106,9 +1072,6 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
 }
 
 bool ProcessGroupNCCL::useNonblocking() {
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  return false;
-#endif // NCCL_HAS_COMM_NONBLOCKING
   // Already parsed, return the cached value
   if (useNonblocking_.has_value()) {
     return useNonblocking_.value();
@@ -1145,7 +1108,6 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   // If our backend doesn't support splitting, this is a no-op for
   // ranks not in the new subgroup (and ranks that would be in it will
   // just use a new communicator rather than split).
-#ifdef NCCL_HAS_COMM_SPLIT
   const auto key = getKeyFromDevice(device);
   LOG(INFO) << logPrefix() << "Performing nocolor split on backend device "
             << device << ", key " << key << ", i am " << this;
@@ -1157,7 +1119,6 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
                << "No parent communicator exists for nocolor split";
   }
   NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
-#endif // NCCL_HAS_COMM_SPLIT
 }
 
 bool ProcessGroupNCCL::isInitialized() {
@@ -1474,10 +1435,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
   // The process may control multiple devices, loop through the communicators on
   // each device
   // NCCL expects Group abort when there are multiple communicators created in a
-  // device. Group abort requires 2.22.0 release and up.
-  if (getNcclVersionNumber() >= NCCL_VERSION(2, 22, 0)) {
-    groupStart();
-  }
+  // device.
+  groupStart();
   for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComm = it.second;
@@ -1498,9 +1457,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
     VLOG(2) << logPrefix() << "ProcessGroupNCCL destroyed "
             << " communicator on CUDA device: " << devName;
   }
-  if (getNcclVersionNumber() >= NCCL_VERSION(2, 22, 0)) {
-    groupEnd();
-  }
+  groupEnd();
 }
 
 // Abort all communicators on this rank
@@ -2882,12 +2839,7 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
   // When nonblocking mode is enabled by TORCH_NCCL_USE_COMM_NONBLOCKING,
   // ncclInProgress could be returned when there are pending NCCL calls.
   // In this case, no exception should be thrown
-#ifdef NCCL_HAS_COMM_NONBLOCKING
-  // ncclInProgress is defined only if NCCL_HAS_COMM_NONBLOCKING is defined
   if (ncclAsyncErr != ncclSuccess && ncclAsyncErr != ncclInProgress) {
-#else
-  if (ncclAsyncErr != ncclSuccess) {
-#endif // NCCL_HAS_COMM_NONBLOCKING
     return std::make_exception_ptr(C10_BUILD_ERROR(
         DistBackendError,
         "NCCL error: " + ncclGetErrorWithVersion(ncclAsyncErr) + "\n" +
@@ -3173,12 +3125,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       globalRankStride_, // globalRankStride_
       size_); // worldSize
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
   bool useNb = useNonblocking();
   options_->config.blocking = useNb ? 0 : 1;
-#endif // NCCL_HAS_COMM_NONBLOCKING
 
-#ifdef NCCL_HAS_COMM_SPLIT
   // Use split to create a new communicator only if:
   // 1. The parent comm is known; AND
   // 2. The new comm is not for a point-to-point operation.
@@ -3199,16 +3148,13 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       }
     }
   }
-#endif // NCCL_HAS_COMM_SPLIT
 
   bool useScalableInit = false;
   // (nranks / nroots) == 128 was the default NCCL recommended
   // according to
   // https://github.com/pytorch/pytorch/pull/136789#discussion_r1779171615.
   auto ranksPerRoot = getCvarInt(TORCH_NCCL_RANKS_PER_ROOT, 128);
-#if defined(NCCL_HAS_INIT_RANK_SCALABLE) && defined(NCCL_HAS_CONFIG)
   useScalableInit = !singleP2POp && (getSize() > ranksPerRoot);
-#endif // NCCL_HAS_INIT_RANK_SCALABLE && NCCL_HAS_CONFIG
 
   if (useScalableInit) {
     auto numRoots = (getSize() + ranksPerRoot - 1) / ranksPerRoot;
@@ -3232,17 +3178,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       LOG(INFO) << logPrefix()
                 << "ProcessGroupNCCL all-gather unique IDs through store took "
                 << timerDeltaMs << " ms";
-#if defined(NCCL_HAS_INIT_RANK_SCALABLE) && defined(NCCL_HAS_CONFIG)
       ncclComm = NCCLComm::create_scalable(
           numRanks, rank, ncclIDs, deviceIndex, options_->config);
-#else
-      C10_THROW_ERROR(
-          DistBackendError,
-          c10::str(
-              logPrefix(),
-              "create_scalable is called when useScalableInit is enabled but ",
-              "neither NCCL_HAS_INIT_RANK_SCALABLE nor NCCL_HAS_CONFIG is not defined, this should not happen "));
-#endif // NCCL_HAS_INIT_RANK_SCALABLE
     }
   } else {
     // To simplify conditional nesting, just create the ncclComms[i]
@@ -3269,12 +3206,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
                   << timerDeltaMs << " ms";
       }
 
-#ifdef NCCL_HAS_CONFIG
       ncclComm = NCCLComm::create(
           numRanks, rank, ncclID, deviceIndex, options_->config);
-#else
-      ncclComm = NCCLComm::create(numRanks, rank, ncclID, deviceIndex);
-#endif // NCCL_HAS_CONFIG
     }
   }
 
@@ -3923,23 +3856,17 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   //
   // See [Sync Streams].
 
-// Not all collectives have the same signature, e.g, all-reduce take in a Tensor
-// as the input and output while all-to-all take in a vector of Tensors as input
-// and output. Because we define the signature of the fn to take only single
-// tensor as input and output, we need to do a hack to get the first element in
-// the vector and pass it to fn.
-// TODO: we should clean up this in future (by either entirely removing lambda's
-// or removing input and output from lambda's signature).
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  C10D_NCCL_CHECK(
-      fn(inputs[0], outputs[0], comm, ncclStream),
-      ncclComm->getNcclCommFailureReason());
-#else
+  // Not all collectives have the same signature, e.g, all-reduce take in a
+  // Tensor as the input and output while all-to-all take in a vector of Tensors
+  // as input and output. Because we define the signature of the fn to take only
+  // single tensor as input and output, we need to do a hack to get the first
+  // element in the vector and pass it to fn.
+  // TODO: we should clean up this in future (by either entirely removing
+  // lambda's or removing input and output from lambda's signature).
   C10D_NCCL_CHECK_TIMEOUT(
       fn(inputs[0], outputs[0], comm, ncclStream),
       ncclComm,
       ncclComm->getNcclCommFailureReason());
-#endif // NCCL_HAS_COMM_NONBLOCKING
 
   post(ncclStream, work);
 
@@ -4102,16 +4029,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   {
     torch::cuda::nccl::AutoNcclGroup nccl_group_guard(comm, useNonblocking());
     for (const auto i : c10::irange(inputs.size())) {
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-      C10D_NCCL_CHECK(
-          fn(inputs[i], outputs[i], comm, ncclStream),
-          ncclComm->getNcclCommFailureReason());
-#else
       C10D_NCCL_CHECK_TIMEOUT(
           fn(inputs[i], outputs[i], comm, ncclStream),
           ncclComm,
           ncclComm->getNcclCommFailureReason());
-#endif // NCCL_HAS_COMM_NONBLOCKING
     }
   }
 
@@ -4402,11 +4323,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // This part seems common to both p2p and coalesced-p2p usage?
   ncclComm_t comm_ = ncclComm->getNcclComm();
 
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  C10D_NCCL_CHECK(
-      fn(tensor, comm_, ncclStream, p2pTargetRank),
-      ncclComm->getNcclCommFailureReason());
-#else
   // In non-blocking mode, we need to use ncclGroup semantics to ensure that the
   // kernel is enqueued for single-P2P ops.  Otherwise, the event record below
   // may not capture the kernel, leading to data corruption.
@@ -4415,7 +4331,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
       fn(tensor, comm_, ncclStream, p2pTargetRank), std::nullopt);
   C10D_NCCL_CHECK_TIMEOUT_GROUPEND(
       ncclGroupEnd(), ncclComm, ncclComm->getNcclCommFailureReason());
-#endif // NCCL_HAS_COMM_NONBLOCKING
 
   if (!coalescing_state_) {
     post(ncclStream);
@@ -5710,15 +5625,11 @@ void ProcessGroupNCCL::groupEnd() {
 
 void ProcessGroupNCCL::groupEndNonblocking(
     const std::shared_ptr<NCCLComm>& comm) {
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  C10D_NCCL_CHECK(ncclGroupEnd(), std::nullopt);
-#else
   if (!useNonblocking()) {
     C10D_NCCL_CHECK(ncclGroupEnd(), std::nullopt);
   } else {
     C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), comm, std::nullopt);
   }
-#endif // NCCL_HAS_COMM_NONBLOCKING
   --ncclActiveGroupCounter_;
 }
 
@@ -5957,28 +5868,18 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
 
 // Allocate function
 static void* _ncclMemAlloc(size_t size, int device, void* stream) {
-#ifndef NCCL_HAS_MEM_ALLOC
-  TORCH_CHECK(
-      false, "NCCL mem allocator is not supported in this NCCL version");
-#else
   LOG(INFO) << "NCCL mem allocator: allocating " << size << " bytes";
   at::cuda::OptionalCUDAGuard gpuGuard(device);
   void* ptr = nullptr;
   TORCH_CHECK(ncclMemAlloc(&ptr, size) == ncclSuccess, "ncclMemAlloc failed");
   return ptr;
-#endif // NCCL_HAS_MEM_ALLOC
 }
 
 // Free function
 static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
-#ifndef NCCL_HAS_MEM_ALLOC
-  TORCH_CHECK(
-      false, "NCCL mem allocator is not supported in this NCCL version");
-#else
   LOG(INFO) << "NCCL mem allocator: freeing " << size << " bytes";
   at::cuda::OptionalCUDAGuard gpuGuard(device);
   TORCH_CHECK(ncclMemFree(ptr) == ncclSuccess, "ncclMemFree failed");
-#endif // NCCL_HAS_MEM_ALLOC
 }
 
 // Create a `CUDAPluggableAllocator` that uses the above functions.
@@ -5997,14 +5898,6 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
 }
 
 bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
-  // Check if NCCL has `ncclMemAlloc` and `ncclMemFree` functions
-  int version = 0;
-  // Rely on link-time versioning
-  ncclGetVersion(&version);
-  if (version < NCCL_VERSION(2, 19, 0)) {
-    return false;
-  }
-
   // We do an extra check to see if CUDA driver supports multicast.  If not, we
   // will return false. Although `ncclMemAlloc` will fall back to regular
   // `cudaMalloc` and hence not error out, we may still want to avoid creating a

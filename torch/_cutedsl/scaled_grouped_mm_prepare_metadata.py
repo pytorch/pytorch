@@ -5,7 +5,15 @@ from torch._cutedsl._compile_with_safe_names import _compile_with_safe_names
 
 @functools.cache
 def _compile_scaled_grouped_mm_prepare_metadata(
-    a_is_2d: bool, b_is_2d: bool, threads_per_block: int
+    a_is_2d: bool,
+    b_is_2d: bool,
+    threads_per_block: int,
+    logical_vals_per_elem: int,
+    scale_vec_size: int,
+    sizeof_ab: int,
+    sizeof_scale_ab: int,
+    sizeof_c: int,
+    sizeof_global_scale: int,
 ):
     import cuda.bindings.driver as cuda
     import cutlass
@@ -25,12 +33,12 @@ def _compile_scaled_grouped_mm_prepare_metadata(
         base_scale_b_u64: cutlass.Int64,
         base_global_scale_u64: cutlass.Int64,
         offs: cute.Tensor,
-        logical_vals_per_elem: cutlass.Int32,
-        scale_vec_size: cutlass.Int32,
-        sizeof_ab: cutlass.Int64,
-        sizeof_scale_ab: cutlass.Int64,
-        sizeof_c: cutlass.Int64,
-        sizeof_global_scale: cutlass.Int64,
+        logical_vals_per_elem: cutlass.Constexpr[int],
+        scale_vec_size: cutlass.Constexpr[int],
+        sizeof_ab: cutlass.Constexpr[int],
+        sizeof_scale_ab: cutlass.Constexpr[int],
+        sizeof_c: cutlass.Constexpr[int],
+        sizeof_global_scale: cutlass.Constexpr[int],
         stride_a_packed: tuple[cutlass.Int64, cutlass.Int64],
         stride_b_packed: tuple[cutlass.Int64, cutlass.Int64, cutlass.Int64],
         stride_a: tuple[cutlass.Int64, cutlass.Int64],
@@ -233,23 +241,25 @@ def _compile_scaled_grouped_mm_prepare_metadata(
 
     @cute.jit
     def _launch_scaled_grouped_mm_prepare_metadata(
-        G: cutlass.Int32,
-        M: cutlass.Int32,
-        N: cutlass.Int32,
-        K: cutlass.Int32,
-        base_a_u64: cutlass.Int64,
-        base_b_u64: cutlass.Int64,
-        base_c_u64: cutlass.Int64,
-        base_scale_a_u64: cutlass.Int64,
-        base_scale_b_u64: cutlass.Int64,
-        base_global_scale_u64: cutlass.Int64,
+        # Packed groups: see the host call site for the field order. Per the
+        # TVM FFI docs, grouping related scalars into tuples reduces per-arg
+        # marshaling overhead at the FFI boundary.
+        dims: tuple[cutlass.Int32, cutlass.Int32, cutlass.Int32, cutlass.Int32],
+        base_ptrs: tuple[
+            cutlass.Int64,
+            cutlass.Int64,
+            cutlass.Int64,
+            cutlass.Int64,
+            cutlass.Int64,
+            cutlass.Int64,
+        ],
         offs: cute.Tensor,
-        logical_vals_per_elem: cutlass.Int32,
-        scale_vec_size: cutlass.Int32,
-        sizeof_ab: cutlass.Int64,
-        sizeof_scale_ab: cutlass.Int64,
-        sizeof_c: cutlass.Int64,
-        sizeof_global_scale: cutlass.Int64,
+        logical_vals_per_elem: cutlass.Constexpr[int],
+        scale_vec_size: cutlass.Constexpr[int],
+        sizeof_ab: cutlass.Constexpr[int],
+        sizeof_scale_ab: cutlass.Constexpr[int],
+        sizeof_c: cutlass.Constexpr[int],
+        sizeof_global_scale: cutlass.Constexpr[int],
         stride_a_packed: tuple[cutlass.Int64, cutlass.Int64],
         stride_b_packed: tuple[cutlass.Int64, cutlass.Int64, cutlass.Int64],
         stride_a: tuple[cutlass.Int64, cutlass.Int64],
@@ -273,16 +283,16 @@ def _compile_scaled_grouped_mm_prepare_metadata(
         stream: cuda.CUstream,
     ):
         _scaled_grouped_mm_prepare_metadata_kernel(
-            G,
-            M,
-            N,
-            K,
-            base_a_u64,
-            base_b_u64,
-            base_c_u64,
-            base_scale_a_u64,
-            base_scale_b_u64,
-            base_global_scale_u64,
+            dims[0],
+            dims[1],
+            dims[2],
+            dims[3],
+            base_ptrs[0],
+            base_ptrs[1],
+            base_ptrs[2],
+            base_ptrs[3],
+            base_ptrs[4],
+            base_ptrs[5],
             offs,
             logical_vals_per_elem,
             scale_vec_size,
@@ -320,28 +330,32 @@ def _compile_scaled_grouped_mm_prepare_metadata(
     fake_mnkl = make_fake_tensor(cutlass.Int32, (g, 4), stride=(4, 1))
     fake_strides_abc = make_fake_tensor(cutlass.Int64, (g, 3, 2), stride=(6, 2, 1))
     fake_nclusters = make_fake_tensor(cutlass.Int32, (1,), stride=(1,))
-    fake_stream = make_fake_stream()
+    fake_stream = make_fake_stream(use_tvm_ffi_env_stream=True)
 
     compiled = _compile_with_safe_names(
         lambda: cute.compile(
             _launch_scaled_grouped_mm_prepare_metadata,
-            G=0,
-            M=0,
-            N=0,
-            K=0,
-            base_a_u64=0,
-            base_b_u64=0,
-            base_c_u64=0,
-            base_scale_a_u64=0,
-            base_scale_b_u64=0,
-            base_global_scale_u64=0,
+            dims=(
+                cute.sym_int(32),
+                cute.sym_int(32),
+                cute.sym_int(32),
+                cute.sym_int(32),
+            ),
+            base_ptrs=(
+                cute.sym_int(64),
+                cute.sym_int(64),
+                cute.sym_int(64),
+                cute.sym_int(64),
+                cute.sym_int(64),
+                cute.sym_int(64),
+            ),
             offs=fake_offs,
-            logical_vals_per_elem=1,
-            scale_vec_size=32,
-            sizeof_ab=cutlass.Int64(1),
-            sizeof_scale_ab=cutlass.Int64(1),
-            sizeof_c=cutlass.Int64(2),
-            sizeof_global_scale=cutlass.Int64(4),
+            logical_vals_per_elem=logical_vals_per_elem,
+            scale_vec_size=scale_vec_size,
+            sizeof_ab=sizeof_ab,
+            sizeof_scale_ab=sizeof_scale_ab,
+            sizeof_c=sizeof_c,
+            sizeof_global_scale=sizeof_global_scale,
             stride_a_packed=(cute.sym_int(64), cute.sym_int(64)),
             stride_b_packed=(cute.sym_int(64), cute.sym_int(64), cute.sym_int(64)),
             stride_a=(cute.sym_int(64), cute.sym_int(64)),

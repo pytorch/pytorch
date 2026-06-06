@@ -590,7 +590,6 @@ def _allocate_output(
 def _compile_scaled_grouped_mm_blockscaled(
     sm_count: int,
     max_active_clusters: int,
-    estimate_total_num_clusters: int,
     mma_tile_mn: tuple[int, int],
     cluster_shape_mn: tuple[int, int],
     transpose_ab: bool,
@@ -681,7 +680,7 @@ def _compile_scaled_grouped_mm_blockscaled(
         ),
         stride=(tensormap_stride0, tensormap_stride1, 1),
     )
-    fake_stream = make_fake_stream()
+    fake_stream = make_fake_stream(use_tvm_ffi_env_stream=True)
 
     grouped_gemm = Sm100GroupedBlockScaledGemmKernel(
         sf_vec_size=scale_ab_vec_size,
@@ -704,7 +703,7 @@ def _compile_scaled_grouped_mm_blockscaled(
             strides_abc=fake_strides,
             tensor_address_abc=fake_ptrs_abc,
             tensor_address_sfasfb=fake_ptrs_scale,
-            estimate_total_num_clusters=estimate_total_num_clusters,
+            estimate_total_num_clusters=cutlass.Int32(1),
             total_num_clusters=fake_total_clusters,
             tensormap_cute_tensor=fake_tensormap,
             max_active_clusters=max_active_clusters,
@@ -738,6 +737,12 @@ def _get_max_threads_per_block(device_id: int) -> int:
 
 def _ceil_div_int(a: int, b: int) -> int:
     return (a + b - 1) // b
+
+
+def _with_l_dim(t: Tensor) -> Tensor:
+    # Kernel expects L as the last dimension. Use a stride-0 L to avoid
+    # ambiguous layouts (multiple stride==1) for mark_layout_dynamic.
+    return t.as_strided((*t.size(), 1), (*t.stride(), 0))
 
 
 def _get_cluster_tile_shape_mn(
@@ -1015,7 +1020,6 @@ def scaled_grouped_mm_blockscaled(
         _compile_scaled_grouped_mm_blockscaled(
             sm_count,
             max_active_clusters,
-            estimate_total_num_clusters,
             config.mma_tile_mn,
             config.cluster_shape_mn,
             config.transpose_ab,
@@ -1042,33 +1046,39 @@ def scaled_grouped_mm_blockscaled(
         cluster_tile_m, cluster_tile_n = _get_cluster_tile_shape_mn(
             config.mma_tile_mn, config.cluster_shape_mn
         )
+    scale_a0 = scale_a[0]
+    scale_b0 = scale_b[0]
+    mat_a_element_size = mat_a.element_size()
+    scale_a_element_size = scale_a0.element_size()
+    out_element_size = out.element_size()
     scaled_grouped_mm_prepare_metadata_compiled = (
-        _compile_scaled_grouped_mm_prepare_metadata(a_is_2d, b_is_2d, threads_per_block)
+        _compile_scaled_grouped_mm_prepare_metadata(
+            a_is_2d,
+            b_is_2d,
+            threads_per_block,
+            fmt.logical_vals_per_elem,
+            fmt.scale_ab_vec_size,
+            mat_a_element_size,
+            scale_a_element_size,
+            out_element_size,
+            4,
+        )
     )
-
-    import cuda.bindings.driver as cuda_driver
-
-    stream = cuda_driver.CUstream(int(torch.cuda.current_stream().cuda_stream))
 
     if global_scales is None:
         global_scales = _get_unit_global_scales(ngroups, device)
 
-    scale_a0 = scale_a[0]
-    scale_b0 = scale_b[0]
-    mat_a_ptr = int(mat_a.data_ptr())
-    mat_b_ptr = int(mat_b.data_ptr())
-    out_ptr = int(out.data_ptr())
-    scale_a_ptr = int(scale_a0.data_ptr())
-    scale_b_ptr = int(scale_b0.data_ptr())
-    global_scale_ptr = int(global_scales.data_ptr())
-    mat_a_stride = tuple(map(int, mat_a.stride()))
-    mat_b_stride = tuple(map(int, mat_b.stride()))
-    out_stride = tuple(map(int, out[0].stride() if b_is_2d else out.stride()))
-    scale_a_stride = tuple(map(int, scale_a0.stride()))
-    scale_b_stride = tuple(map(int, scale_b0.stride()))
-    mat_a_element_size = int(mat_a.element_size())
-    scale_a_element_size = int(scale_a0.element_size())
-    out_element_size = int(out.element_size())
+    mat_a_ptr = mat_a.data_ptr()
+    mat_b_ptr = mat_b.data_ptr()
+    out_ptr = out.data_ptr()
+    scale_a_ptr = scale_a0.data_ptr()
+    scale_b_ptr = scale_b0.data_ptr()
+    global_scale_ptr = global_scales.data_ptr()
+    mat_a_stride = mat_a.stride()
+    mat_b_stride = mat_b.stride()
+    out_stride = out[0].stride() if b_is_2d else out.stride()
+    scale_a_stride = scale_a0.stride()
+    scale_b_stride = scale_b0.stride()
 
     if b_is_2d:
         if a_is_2d and fmt.logical_vals_per_elem > 1:
@@ -1081,23 +1091,16 @@ def scaled_grouped_mm_blockscaled(
         stride_b_logical = mat_b_stride
 
     scaled_grouped_mm_prepare_metadata_compiled(
-        ngroups,
-        mat_a_m,
-        mat_b_n,
-        logical_k_a,
-        mat_a_ptr,
-        mat_b_ptr,
-        out_ptr,
-        scale_a_ptr,
-        scale_b_ptr,
-        global_scale_ptr,
+        (ngroups, mat_a_m, mat_b_n, logical_k_a),
+        (
+            mat_a_ptr,
+            mat_b_ptr,
+            out_ptr,
+            scale_a_ptr,
+            scale_b_ptr,
+            global_scale_ptr,
+        ),
         offs,
-        fmt.logical_vals_per_elem,
-        fmt.scale_ab_vec_size,
-        mat_a_element_size,
-        scale_a_element_size,
-        out_element_size,
-        4,
         mat_a_stride,
         (0, mat_b_stride[0], mat_b_stride[1]) if b_is_2d else mat_b_stride,
         (
@@ -1126,18 +1129,9 @@ def scaled_grouped_mm_blockscaled(
         strides_abc,
         total_num_clusters,
         num_blocks,
-        stream,
     )
 
     tensormap = _get_tensormap(sm_count, device)
-
-    def _with_l_dim(t: Tensor) -> Tensor:
-        # Kernel expects L as the last dimension. Use a stride-0 L to
-        # avoid ambiguous layouts (multiple stride==1) for
-        # mark_layout_dynamic.
-        sizes = t.size()
-        strides = t.stride()
-        return t.as_strided((*sizes, 1), (*strides, 0))
 
     scaled_grouped_mm_blockscaled_compiled(
         _with_l_dim(mat_a),
@@ -1155,9 +1149,9 @@ def scaled_grouped_mm_blockscaled(
         strides_abc,
         ptrs_abc,
         ptrs_scale,
+        estimate_total_num_clusters,
         total_num_clusters,
         tensormap,
-        stream,
     )
     return out
 
