@@ -51,6 +51,7 @@ _P = ParamSpec("_P")
 # This set is maintained to ensure that two libraries don't try to override the exact same functionality to avoid
 # libraries calling into kernels not intended to be called.
 _impls: set[str] = set()
+_impl_fns: dict[str, tuple[Callable, bool]] = {}
 _defs: set[str] = set()
 
 # prim is reserved by TorchScript interpreter
@@ -258,6 +259,7 @@ class Library:
             self,
             _del_library,
             _impls,
+            _impl_fns,
             self._op_impls,
             _defs,
             self._op_defs,
@@ -510,6 +512,7 @@ class Library:
         )
 
         _impls.add(key)
+        _impl_fns[key] = (fn, with_keyset)
         self._op_impls.add(key)
 
     def register_symm_mem_args(self, op_name, arg_names):
@@ -607,6 +610,8 @@ class Library:
         self._registration_handles.clear()
         global _impls
         _impls -= self._op_impls
+        for key in self._op_impls:
+            _impl_fns.pop(key, None)
         _clear_torch_ops_cache(self._op_defs)
 
 
@@ -634,6 +639,7 @@ def _clear_torch_ops_cache(op_defs):
 
 def _del_library(
     captured_impls,
+    captured_impl_fns,
     op_impls,
     captured_defs,
     op_defs,
@@ -653,6 +659,8 @@ def _del_library(
             del schema_to_signature_cache[(name, overload_name)]
 
     captured_impls -= op_impls
+    for key in op_impls:
+        captured_impl_fns.pop(key, None)
     captured_defs -= op_defs
     for handle in registration_handles:
         handle.destroy()
