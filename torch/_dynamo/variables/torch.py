@@ -32,7 +32,7 @@ import logging
 import math
 import re
 from collections.abc import Callable, Iterable
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
@@ -279,6 +279,160 @@ methods_consuming_unbacked_scalars: frozenset[str] = frozenset(
     for name in (fn.__name__, fn.__name__ + "_")
     if hasattr(torch.Tensor, name)
 )
+
+
+# Eager torch.ops bindings accept one-element tensors for float schema arguments;
+# model that conversion explicitly before fake propagation sees FakeTensor args.
+# Do not do this for int arguments: they frequently affect output metadata, and
+# replacing an unbacked runtime item() with a trace-time concrete int can silently
+# compile the wrong shape/stride behavior.
+
+
+def _schema_arg_at_pos(schema: torch._C.FunctionSchema, pos: int) -> Any | None:
+    index = 0
+    for schema_arg in schema.arguments:
+        if schema_arg.kwarg_only:
+            continue
+        if index == pos:
+            return schema_arg
+        index += 1
+    return None
+
+
+def _schema_arg_by_name(schema: torch._C.FunctionSchema, name: str) -> Any | None:
+    for schema_arg in schema.arguments:
+        if schema_arg.name == name:
+            return schema_arg
+    return None
+
+
+_metadata_independent_float_tensor_ops = {
+    "aten::_scaled_dot_product_flash_attention_for_cpu",
+    "aten::dropout",
+}
+
+
+def _can_coerce_float_tensor_args(fn: Callable[..., Any]) -> bool:
+    if isinstance(fn, torch._ops.OpOverload):
+        return fn._schema.name in _metadata_independent_float_tensor_ops
+    if isinstance(fn, torch._ops.OpOverloadPacket):
+        return fn._qualified_op_name in _metadata_independent_float_tensor_ops
+    return False
+
+
+def _unwrap_optional_type(schema_type: Any) -> Any:
+    while isinstance(schema_type, torch.OptionalType):
+        schema_type = schema_type.getElementType()
+    return schema_type
+
+
+def _is_statically_known_one_element_tensor_arg(arg: VariableTracker) -> bool:
+    if not arg.is_tensor():
+        return False
+
+    ndim = getattr(arg, "ndim", None)
+    if ndim == 0:
+        return True
+    if ndim is None:
+        return False
+
+    valid_size = getattr(arg, "valid_size", None)
+    if valid_size is None or not valid_size():
+        return False
+
+    try:
+        size = arg.size  # pyrefly: ignore[missing-attribute]
+    except AssertionError:
+        return False
+
+    return len(size) == ndim and all(isinstance(dim, int) and dim == 1 for dim in size)
+
+
+def _should_coerce_float_tensor_arg(
+    arg: VariableTracker, schema_args: Iterable[Any | None]
+) -> bool:
+    if not _is_statically_known_one_element_tensor_arg(arg):
+        return False
+
+    has_float_schema = False
+    for schema_arg in schema_args:
+        if schema_arg is None:
+            continue
+        schema_type = _unwrap_optional_type(schema_arg.type)
+        if isinstance(schema_type, torch.FloatType):
+            has_float_schema = True
+        else:
+            return False
+    return has_float_schema
+
+
+def _coerced_scalar_fake_value(arg: VariableTracker) -> float:
+    return float(arg.get_real_value().item())  # type: ignore[attr-defined]
+
+
+@contextmanager
+def _temporary_example_value_overrides(
+    overrides: list[tuple[torch.fx.Node, float]],
+) -> Any:
+    old_values = []
+    try:
+        for node, value in overrides:
+            old_values.append((node, node.meta["example_value"]))
+            node.meta["example_value"] = value
+        yield
+    finally:
+        for node, value in old_values:
+            node.meta["example_value"] = value
+
+
+def _coerce_torch_op_scalar_tensor_args(
+    tx: "InstructionTranslatorBase",
+    fn: Callable[..., Any],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> tuple[
+    list[VariableTracker],
+    dict[str, VariableTracker],
+    list[tuple[torch.fx.Node, float]],
+]:
+    if not config.capture_scalar_outputs or not isinstance(
+        fn, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+    ):
+        return args, kwargs, []
+    if not _can_coerce_float_tensor_args(fn):
+        return args, kwargs, []
+
+    if isinstance(fn, torch._ops.OpOverload):
+        schemas = [fn._schema]
+    else:
+        schemas = [getattr(fn, overload)._schema for overload in fn.overloads()]
+
+    fake_scalar_overrides = []
+    new_args = args
+    for i, arg in enumerate(args):
+        schema_args = [_schema_arg_at_pos(schema, i) for schema in schemas]
+        if _should_coerce_float_tensor_arg(arg, schema_args):
+            if new_args is args:
+                new_args = list(args)
+            item = arg.call_method(tx, "item", [], {})
+            new_args[i] = item
+            fake_scalar_overrides.append(
+                (item.as_proxy().node, _coerced_scalar_fake_value(arg))
+            )
+
+    new_kwargs = kwargs
+    for name, arg in kwargs.items():
+        schema_args = [_schema_arg_by_name(schema, name) for schema in schemas]
+        if _should_coerce_float_tensor_arg(arg, schema_args):
+            if new_kwargs is kwargs:
+                new_kwargs = dict(kwargs)
+            item = arg.call_method(tx, "item", [], {})
+            new_kwargs[name] = item
+            fake_scalar_overrides.append(
+                (item.as_proxy().node, _coerced_scalar_fake_value(arg))
+            )
+
+    return new_args, new_kwargs, fake_scalar_overrides
 
 
 @functools.cache
@@ -3118,6 +3272,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if result:
                 return result
 
+        args, kwargs, fake_scalar_overrides = _coerce_torch_op_scalar_tensor_args(
+            tx, self.value, args, kwargs
+        )
+
         any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
 
         all_ints_or_floats = all(
@@ -3202,14 +3360,20 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
-        with ctx():
+        proxy = tx.output.create_proxy(
+            "call_function",
+            fn_,
+            *proxy_args_kwargs(args, kwargs),
+        )
+        if fake_scalar_overrides:
+            proxy.node.meta["unbacked_scalar_arg_overrides"] = {
+                node.name: value for node, value in fake_scalar_overrides
+            }
+
+        with ctx(), _temporary_example_value_overrides(fake_scalar_overrides):
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
+                proxy=proxy,
             )
 
         # Handle e.g., `torch.ones(10, requires_grad=True)`

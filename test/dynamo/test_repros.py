@@ -2347,6 +2347,159 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_torch_ops_scalar_tensor_float_arg(self):
+        def check(op, p):
+            backend = EagerAndRecordGraphs()
+
+            def fn(x, p):
+                return op(x, p, True)
+
+            x = torch.randn(10)
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+            torch.manual_seed(123)
+            expected = fn(x, p)
+            torch.manual_seed(123)
+            actual = compiled_fn(x, p)
+
+            self.assertEqual(actual, expected)
+            item_nodes = backend.graphs[0].graph.find_nodes(
+                op="call_method", target="item"
+            )
+            self.assertEqual(len(item_nodes), 1)
+
+        for p in (
+            torch.tensor(0.5, dtype=torch.float64),
+            torch.tensor([0.5], dtype=torch.float64),
+            torch.tensor([[0.5]], dtype=torch.float64),
+        ):
+            check(torch.ops.aten.dropout, p)
+            check(torch.ops.aten.dropout.default, p)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_torch_ops_scalar_tensor_optional_float_arg(self):
+        def check(scale):
+            backend = EagerAndRecordGraphs()
+
+            def fn(query, key, value, scale):
+                return torch.ops.aten._scaled_dot_product_flash_attention_for_cpu(
+                    query, key, value, scale=scale
+                )[0]
+
+            query = torch.randn(1, 2, 4, 8)
+            key = torch.randn(1, 2, 4, 8)
+            value = torch.randn(1, 2, 4, 8)
+            expected = fn(query, key, value, scale)
+            actual = torch.compile(fn, backend=backend, fullgraph=True)(
+                query, key, value, scale
+            )
+
+            self.assertEqual(actual, expected)
+            item_nodes = backend.graphs[0].graph.find_nodes(
+                op="call_method", target="item"
+            )
+            self.assertEqual(len(item_nodes), 1)
+
+        check(torch.tensor(0.5, dtype=torch.float64))
+        check(torch.tensor([0.5], dtype=torch.float64))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_torch_ops_scalar_tensor_int_arg_not_concretized(self):
+        def fn(x, dim):
+            return torch.ops.aten.select.int(x, dim, 0)
+
+        x = torch.arange(6).reshape(2, 3)
+        self.assertEqual(fn(x, torch.tensor(1)), torch.tensor([0, 3]))
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            "Expected a value of type 'int' for argument 'dim'",
+        ):
+            compiled_fn(x, torch.tensor(0))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_torch_ops_scalar_tensor_float_arg_not_concretized_for_custom_op(self):
+        with torch.library._scoped_library(
+            "test_scalar_tensor_float_metadata_124344", "FRAGMENT"
+        ) as lib:
+            lib.define("metadata_dep(Tensor x, float scale) -> Tensor")
+
+            def metadata_dep(x, scale):
+                return torch.empty((int(scale),), device=x.device)
+
+            lib.impl("metadata_dep", metadata_dep, "CompositeExplicitAutograd")
+
+            def fn(x, scale):
+                return torch.ops.test_scalar_tensor_float_metadata_124344.metadata_dep(
+                    x, scale
+                )
+
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.TorchRuntimeError,
+                "Expected a value of type 'float' for argument 'scale'",
+            ):
+                compiled_fn(torch.randn(3), torch.tensor(2.0))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_torch_ops_scalar_tensor_keeps_tensor_overload(self):
+        # Registers the quantized_decomposed torch.ops overloads used below.
+        import torch.ao.quantization.fx._decomposed
+
+        backend = EagerAndRecordGraphs()
+
+        def fn(x, scale, zero_point):
+            return torch.ops.quantized_decomposed.quantize_per_tensor(
+                x, scale, zero_point, 0, 10, torch.uint8
+            )
+
+        x = torch.randn(10)
+        scale = torch.tensor(0.5, dtype=torch.float64)
+        zero_point = torch.tensor(0, dtype=torch.int64)
+        expected = fn(x, scale, zero_point)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(
+            x, scale, zero_point
+        )
+
+        self.assertEqual(actual, expected)
+        item_nodes = backend.graphs[0].graph.find_nodes(op="call_method", target="item")
+        self.assertEqual(len(item_nodes), 0)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_torch_ops_scalar_tensor_keeps_optional_tensor_overload(self):
+        with torch.library._scoped_library(
+            "test_scalar_tensor_coercion_124344", "FRAGMENT"
+        ) as lib:
+            lib.define("mixed(Tensor x, Tensor? scale=None) -> Tensor")
+            lib.define("mixed.float(Tensor x, float? scale=None) -> Tensor")
+
+            def mixed_tensor(x, scale=None):
+                return x if scale is None else x + scale.to(x.dtype)
+
+            def mixed_float(x, scale=None):
+                return x + 100
+
+            lib.impl("mixed", mixed_tensor, "CompositeExplicitAutograd")
+            lib.impl("mixed.float", mixed_float, "CompositeExplicitAutograd")
+
+            backend = EagerAndRecordGraphs()
+
+            def fn(x, scale):
+                return torch.ops.test_scalar_tensor_coercion_124344.mixed(x, scale)
+
+            x = torch.randn(10)
+            scale = torch.tensor([0.5], dtype=torch.float64)
+            expected = fn(x, scale)
+            actual = torch.compile(fn, backend=backend, fullgraph=True)(x, scale)
+
+            self.assertEqual(actual, expected)
+            item_nodes = backend.graphs[0].graph.find_nodes(
+                op="call_method", target="item"
+            )
+            self.assertEqual(len(item_nodes), 0)
+
     def test_hf_gelu_inline(self):
         class GELUActivation(nn.Module):
             def __init__(self) -> None:
