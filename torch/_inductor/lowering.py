@@ -8596,7 +8596,7 @@ def triton_kernel_wrap_(
 @register_lowering(torch.ops.higher_order.cond, type_promotion_kind=None)
 def cond(
     pred, true_fn, false_fn, operands
-) -> list[ir.TensorBox | ir.ShapeAsConstantBuffer]:
+) -> list[ir.TensorBox | ir.ShapeAsConstantBuffer | ir.NoneAsConstantBuffer]:
     # TODO: when graph_partition is enabled, skip - partitioning handles control flow
     # we run into memory cleanup issue
     if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):

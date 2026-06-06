@@ -123,8 +123,40 @@ def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
             # inputs, so we need to merge the two outputs into a
             # single output.
             if len(outs) == 2:
-                for if_out, else_out in zip(
-                    pytree.tree_iter(outs[0]), pytree.tree_iter(outs[1])
-                ):
-                    if_out.copy_(else_out)
+                if_outs, if_spec = pytree.tree_flatten(outs[0])
+                else_outs, else_spec = pytree.tree_flatten(outs[1])
+                if if_spec != else_spec:
+                    raise ValueError(
+                        "For cudagraph captured torch.cond(), true_fn and false_fn "
+                        "must return the same pytree structure. "
+                        f"Got {if_spec} and {else_spec}."
+                    )
+                for if_out, else_out in zip(if_outs, else_outs):
+                    if isinstance(if_out, torch.Tensor) and isinstance(
+                        else_out, torch.Tensor
+                    ):
+                        if_out.copy_(else_out)
+                    elif isinstance(if_out, torch.Tensor) or isinstance(
+                        else_out, torch.Tensor
+                    ):
+                        raise ValueError(
+                            "For cudagraph captured torch.cond(), corresponding "
+                            "branch outputs must both be tensors or both be "
+                            "non-tensor constants. "
+                            f"Got {if_out} and {else_out}."
+                        )
+                    elif not (type(if_out) is int or if_out is None) or not (
+                        type(else_out) is int or else_out is None
+                    ):
+                        raise ValueError(
+                            "For cudagraph captured torch.cond(), non-tensor "
+                            "constant branch outputs must be ints or None. "
+                            f"Got {if_out} and {else_out}."
+                        )
+                    elif if_out != else_out:
+                        raise ValueError(
+                            "For cudagraph captured torch.cond(), the returned "
+                            "constants of both branches must be equal. "
+                            f"Got {if_out} and {else_out}."
+                        )
     return outs[0]
