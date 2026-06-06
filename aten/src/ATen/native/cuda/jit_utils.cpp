@@ -13,6 +13,7 @@
 #include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/native/cuda/reduction_template.cuh>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #include <sstream>
 #include <fstream>
 #include <cstdio>
@@ -1595,6 +1596,8 @@ NvrtcFunction jit_pwise_function(
   nvrtcProgram program;
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+  auto program_guard =
+      c10::make_scope_exit([&] { nvrtc.nvrtcDestroyProgram(&program); });
 
 #ifdef USE_ROCM
   std::vector<const char*> args = {"--std=c++20"};
@@ -1658,7 +1661,7 @@ NvrtcFunction jit_pwise_function(
 
   AT_CUDA_DRIVER_CHECK(
       nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-  // TODO: use guards to avoid leaking
+  program_guard.release();
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
 
   if (cache_dir.has_value()) {
