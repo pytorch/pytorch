@@ -42,7 +42,11 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
             tile_sched_params,
             cutlass.Int32(1),  # num_persistent_clusters (unused)
             cutlass.Int32(0),  # _current_work_linear_idx (unused)
-            (cutlass.Int32(0), cutlass.Int32(0), cutlass.Int32(0)),  # cta_id_in_cluster (unused)
+            (
+                cutlass.Int32(0),
+                cutlass.Int32(0),
+                cutlass.Int32(0),
+            ),  # cta_id_in_cluster (unused)
             cutlass.Int32(0),  # _num_tiles_executed (unused)
             cluster_tile_shape_mnk,
             utils.create_initial_search_state(),
