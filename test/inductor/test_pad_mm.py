@@ -10,6 +10,7 @@ from torch._inductor.fx_passes.pad_mm import (
     get_alignment_size,
     get_pad_cache,
     get_padded_length,
+    is_mm_compute_bound,
     should_pad_mm_bf16,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -191,6 +192,21 @@ class PadMMTest(TestCase):
         a = torch.randn(0, 10).to(GPU_TYPE)
         b = torch.randn(10, 100).to(GPU_TYPE)
         self.assertEqual(torch.compile(addmm)(x, a, b), addmm(x, a, b))
+
+    @unittest.skipIf(GPU_TYPE != "cuda", "TF32 matmul is CUDA-specific")
+    @inductor_config.patch(shape_padding=True)
+    def test_can_pad_non_contiguous_fp32_tf32(self):
+        old_precision = torch.get_float32_matmul_precision()
+        try:
+            torch.set_float32_matmul_precision("high")
+
+            mat1 = rand_strided((7, 4), (1, 8), device=GPU_TYPE, dtype=torch.float32)
+            mat2 = torch.randn((4, 4), device=GPU_TYPE, dtype=torch.float32)
+
+            self.assertFalse(can_pad(mat1, mat2, torch.ops.aten.mm))
+            self.assertTrue(can_pad(mat1.contiguous(), mat2, torch.ops.aten.mm))
+        finally:
+            torch.set_float32_matmul_precision(old_precision)
 
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
@@ -423,9 +439,12 @@ class PadMMTest(TestCase):
         def mm(a, b):
             return a @ b
 
-        # Size must be big enough such that `is_mm_compute_bound` returns True and we need padding to 4 elements
-        # machine balance is ~8.3 (A100), 14.1 (H100), size must be 3x that, see arithmetic_intensity for M=N=K
-        size = [61, 61]
+        # Size must be big enough that `is_mm_compute_bound` returns True on
+        # the current GPU, and must still need padding to 4 elements.
+        dim = 61
+        while not is_mm_compute_bound(dim, dim, dim, torch.float32):
+            dim += 4
+        size = [dim, dim]
         mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
         self.assertEqual(len(local_cache), 2)

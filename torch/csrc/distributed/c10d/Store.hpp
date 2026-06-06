@@ -83,7 +83,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
       WatchKeyCallback /* unused */) {
     C10_THROW_ERROR(
         NotImplementedError,
-        "watchKey is deprecated, no implementation support it.");
+        "watchKey is deprecated, no implementation supports it.");
   }
 
   virtual void append(

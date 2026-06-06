@@ -316,6 +316,12 @@ class PallasKernelOverrides(OpOverrides):
         return PallasKernelOverrides.to_dtype(var, dtype)
 
     @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        # Pallas index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
+        return PallasKernelOverrides.index_expr(expr, dtype)
+
+    @staticmethod
     def constant(val, dtype: torch.dtype) -> str:
         """Convert a constant value to JAX representation."""
         jax_dtype = torch_dtype_to_jax(dtype)
@@ -4753,30 +4759,50 @@ from torch._inductor.runtime.runtime_utils import (
                     )
             code.writeline("]")
 
-            # Build input_output_aliases for zero-copy donation
+            # Build donation info for zero-copy aliasing. Current torch_tpu
+            # exposes donate_argnums (the donated input indices); older
+            # versions took input_output_aliases ({input: output}). torch_tpu
+            # itself maps the latter to list(input_output_aliases.keys()), so
+            # the donated input indices are the alias-pair keys.
             if ctx.alias_pairs:
                 alias_map_str = ", ".join(f"{i}: {o}" for (i, o) in ctx.alias_pairs)
                 code.writeline(f"_input_output_aliases = {{ {alias_map_str} }}")
+                donate_argnums_str = ", ".join(str(i) for (i, _o) in ctx.alias_pairs)
+                code.writeline(f"_donate_argnums = [{donate_argnums_str}]")
             else:
                 code.writeline("_input_output_aliases = {}")
+                code.writeline("_donate_argnums = []")
 
             code.writeline("try:")
             with code.indent():
                 code.writeline(
-                    f"tpu_torch_pallas.call_custom_kernel("
+                    f"_results = tpu_torch_pallas.call_custom_kernel("
+                    f"'{kernel_name_str}', kernel_key, "
+                    f"inputs=input_tensors, "
+                    f"output_shapes=output_shape_tensors, "
+                    f"donate_argnums=_donate_argnums)"
+                )
+            code.writeline("except TypeError:")
+            with code.indent():
+                code.writeline(
+                    f"_results = tpu_torch_pallas.call_custom_kernel("
                     f"'{kernel_name_str}', kernel_key, "
                     f"inputs=input_tensors, "
                     f"output_shapes=output_shape_tensors, "
                     f"input_output_aliases=_input_output_aliases)"
                 )
-            code.writeline("except TypeError:")
+            # call_custom_kernel returns freshly allocated result tensors;
+            # donate_argnums only lets the kernel reuse the donated buffers
+            # internally, it does not write back into the passed-in tensors.
+            # Copy each result into the aliased output buffer the caller reads
+            # (this mirrors torch_tpu's own JaxCallable alias handling).
+            code.writeline("if _results is not None:")
             with code.indent():
                 code.writeline(
-                    f"tpu_torch_pallas.call_custom_kernel("
-                    f"input_tensors, output_shape_tensors, "
-                    f"'{kernel_name_str}', kernel_key, "
-                    f"_input_output_aliases)"
+                    "for _in_idx, _out_idx in _input_output_aliases.items():"
                 )
+                with code.indent():
+                    code.writeline("input_tensors[_in_idx].copy_(_results[_out_idx])")
 
     def _codegen_main_entry_default(
         self, ctx: _CodegenContext, jit_wrapper_name: str
