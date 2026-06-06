@@ -74,7 +74,8 @@ class TestScatterGather(TestCase):
     def test_gather_large(self, device, dtype):
         # test larger shapes to check vectorized implementation
         for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192)):
-            torch.cuda.empty_cache()
+            if device != "cpu":
+                torch.accelerator.empty_cache()
             src = make_tensor((m, k), device=device, dtype=dtype)
             alloc0 = torch.empty(src.nelement() * 2, device=device, dtype=dtype)
             discontig = alloc0.view(m, 2 * k)[:, ::2].copy_(src)
@@ -303,7 +304,8 @@ class TestScatterGather(TestCase):
         else:
             shapes.append((4, 4, 16384 * 256))
         for (m, n, k) in shapes:
-            torch.cuda.empty_cache()
+            if device != "cpu":
+                torch.accelerator.empty_cache()
             self_tensor = torch.zeros(m, k, device=device, dtype=dtype)
             src = make_tensor((n, k), device=device, dtype=dtype)
             # contiguous + aligned (should hit fast path on dim=0)
