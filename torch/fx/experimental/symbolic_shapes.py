@@ -8760,7 +8760,30 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         """
         from torch._guards import detect_fake_mode
 
-        result = super().run_node(n)
+        old_values = []
+        if overrides := n.meta.get("unbacked_scalar_arg_overrides"):
+            # Some torch.ops bindings parse one-element Tensor arguments as
+            # Python float scalars. Dynamo keeps the runtime .item() in the
+            # graph, but fake-only interpreters need the concrete scalar to
+            # avoid guarding on the unbacked item() result while replaying the
+            # schema parser.
+            def override_arg(arg: torch.fx.Node) -> torch.fx.node.Argument:
+                if (
+                    isinstance(arg, torch.fx.Node)
+                    and arg.name in overrides
+                    and arg in self.env
+                ):
+                    old_values.append((arg, self.env[arg]))
+                    self.env[arg] = overrides[arg.name]
+                return arg
+
+            torch.fx.node.map_arg((n.args, n.kwargs), override_arg)
+
+        try:
+            result = super().run_node(n)
+        finally:
+            for node, value in old_values:
+                self.env[node] = value
         fake_mode = detect_fake_mode()
         if fake_mode is None:
             raise AssertionError("fake_mode must not be None")
