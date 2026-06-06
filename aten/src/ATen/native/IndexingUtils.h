@@ -58,7 +58,8 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
           result.emplace_back(nonzero.select(1, j));
         }
       } else if (ensure_same_device && index.device() != self.device()) {
-        result.emplace_back(index.to(self.device()));
+        bool non_blocking = index.is_cpu() && self.device().is_cuda();
+        result.emplace_back(index.to(self.device(), non_blocking));
       } else {
         result.emplace_back(index);
       }
