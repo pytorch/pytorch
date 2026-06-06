@@ -3807,6 +3807,15 @@ Out-of-place version of :meth:`torch.Tensor.put_`.
 )
 
 add_docstr_all(
+    "qr",
+    r"""
+qr(some=True) -> (Tensor, Tensor)
+
+See :func:`torch.qr`
+""",
+)
+
+add_docstr_all(
     "qscheme",
     r"""
 qscheme() -> torch.qscheme

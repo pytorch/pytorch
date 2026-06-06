@@ -1876,6 +1876,8 @@ coverage_ignore_classes = [
     "mode_out",
     "nanmedian",
     "nanmedian_out",
+    "qr",
+    "qr_out",
     "slogdet",
     "slogdet_out",
     "sort",
