@@ -257,6 +257,23 @@ class MPSBasicTests(TestCase):
 
         self.common(fn, (q, k, v), atol=1e-4, rtol=1e-4, check_lowp=False)
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_sdpa_prefill_strided(self, dtype):
+        torch.manual_seed(0)
+        B, H, S, D = 1, 16, 1179, 128
+
+        def fn(q, k, v, mask):
+            q, k, v = (t.transpose(1, 2) for t in (q, k, v))
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=mask
+            )
+
+        q, k, v = (
+            torch.randn(B, S, H, D, device=self.device, dtype=dtype) for _ in range(3)
+        )
+        mask = torch.zeros(B, 1, S, S, device=self.device, dtype=dtype)
+        self.assertEqual(torch.compile(fn)(q, k, v, mask), fn(q, k, v, mask))
+
     def test_nested_masked_cat(self):
         # Regression test for YOLOv3 compilation failure on MPS.
         # See https://github.com/pytorch/pytorch/actions/runs/23477894502
