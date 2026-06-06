@@ -63,6 +63,7 @@ ALLOW_LIST = [
     ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
+    ("inductor::accumulate_grad_", datetime.date(9999, 1, 1)),
     ("onednn::qconv2d_pointwise", datetime.date(2026, 5, 1)),
     ("prim::is_ort", datetime.date(9999, 1, 1)),
     ("prim::Concat", datetime.date(9999, 1, 1)),
@@ -83,6 +84,8 @@ ALLOW_LIST = [
     ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
     ("aten::eig", datetime.date(9999, 1, 1)),
     ("aten::eig.e", datetime.date(9999, 1, 1)),
+    ("aten::qr", datetime.date(9999, 1, 1), None, True),
+    ("aten::qr.Q", datetime.date(9999, 1, 1), None, True),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::matrix_rank", datetime.date(9999, 1, 1)),
@@ -103,8 +106,8 @@ ALLOW_LIST = [
     ("aten::miopen_depthwise_convolution_backward_input", datetime.date(9999, 1, 1)),
     ("aten::miopen_depthwise_convolution_backward_weight", datetime.date(9999, 1, 1)),
     ("aten::_nested_tensor", datetime.date(9999, 1, 1)),
-    ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
-    ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
+    ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1), None, True),
+    ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1), None, True),
     ("aten::_symeig_helper", datetime.date(9999, 1, 1)),
     ("aten::symeig", datetime.date(9999, 1, 1)),
     ("aten::symeig.e", datetime.date(9999, 1, 1)),
@@ -183,6 +186,7 @@ dont_parse_list = [
     ("test_backend", datetime.date(2099, 9, 17)),
     ("dist_c10d", datetime.date(2099, 9, 17)),
     ("__backends__.nnc", datetime.date(2099, 9, 17)),
+    ("xnnpack", datetime.date(2099, 9, 17)),
 ]
 
 
