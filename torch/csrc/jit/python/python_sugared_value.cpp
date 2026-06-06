@@ -159,7 +159,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
 
 std::string PythonValue::kind() const {
   std::stringstream ss;
-  ss << "python value of type '" << typeString(self) << "'";
+  ss << "python value of type '" << typeString(self) << '\'';
   return ss.str();
 }
 
@@ -856,8 +856,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       ErrorReport(loc)
       << "Module '"
       << concreteType_->getJitType()->expectRef<ClassType>().name()->name()
-      << "'"
-      << " has no attribute '" << field << "' " << hint);
+      << '\'' << " has no attribute '" << field << "' " << hint);
 }
 
 SugaredValuePtr ModuleValue::iter(const SourceRange& loc, GraphFunction& m) {
