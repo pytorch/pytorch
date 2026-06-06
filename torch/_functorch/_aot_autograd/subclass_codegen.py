@@ -10,15 +10,22 @@ subclass types, symint positions) is baked in at compile time.
 import functools
 import keyword
 import logging
+import sys
 from collections.abc import Callable, Iterable
+from typing import cast, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 import torch
 from torch import SymInt
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .schemas import OpaqueMeta, PlainTensorMeta, SubclassCreationMeta
 
 
 log = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 
 def _is_symint_placeholder(x: None | int | SymInt) -> bool:
@@ -65,6 +72,51 @@ class _CodegenState:
         return name
 
 
+def _is_async_collective_tensor_type(
+    tp: object,
+) -> TypeIs[type["AsyncCollectiveTensor"]]:
+    """Check for the ACT type without importing distributed collectives eagerly."""
+    if "torch.distributed._functional_collectives" not in sys.modules:
+        return False
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+    return tp is AsyncCollectiveTensor
+
+
+def _maybe_wait_async_collective_tensor(x: object) -> object:
+    """Wait on ACT values and leave all other runtime inputs unchanged."""
+    if _is_async_collective_tensor_type(type(x)):
+        return cast("AsyncCollectiveTensor", x).trigger_wait()
+    return x
+
+
+def _resolve_async_collective_tensor_path(
+    x: object, attr_path: tuple[str, ...]
+) -> object:
+    """Follow a wrapper-subclass attr path and wait on the ACT leaf if present."""
+    if not attr_path:
+        return _maybe_wait_async_collective_tensor(x)
+
+    if not isinstance(x, torch.Tensor) or not is_traceable_wrapper_subclass(x):
+        return x
+
+    attrs, meta = x.__tensor_flatten__()
+    attr = attr_path[0]
+    if attr not in attrs:
+        return x
+
+    inner = getattr(x, attr)
+    resolved_inner = _resolve_async_collective_tensor_path(inner, attr_path[1:])
+    if resolved_inner is inner:
+        return x
+
+    inner_tensors = {a: getattr(x, a) for a in attrs}
+    inner_tensors[attr] = resolved_inner
+    return type(x).__tensor_unflatten__(  # type: ignore[attr-defined]
+        inner_tensors, meta, x.size(), x.stride()
+    )
+
+
 def _codegen_unwrap_subclass(
     state: _CodegenState,
     meta: SubclassCreationMeta,
@@ -93,14 +145,10 @@ def _codegen_unwrap_subclass(
                     include_symints=include_symints,
                 )
 
-    # Emit symint extraction
     if include_symints:
         size_placeholders = _compute_placeholders(meta.outer_size)
         stride_placeholders = _compute_placeholders(meta.outer_stride)
-        has_size_symints = any(size_placeholders)
-        has_stride_symints = any(stride_placeholders)
-
-        if has_size_symints or has_stride_symints:
+        if any(size_placeholders) or any(stride_placeholders):
             size_var = state.fresh_name("_size")
             state.emit(f"{size_var} = {var}.size()", indent=indent)
             for i, is_sym in enumerate(size_placeholders):
@@ -251,7 +299,7 @@ def _codegen_subclass_wrapper_source(
     out_metas: list[PlainTensorMeta | SubclassCreationMeta],
     num_fw_outs_saved_for_bw: int | None,
     frozen_inp_indices: frozenset[int] = frozenset(),
-    act_input_indices: list[int] | None = None,
+    act_input_paths: list[tuple[int, tuple[str, ...]]] | None = None,
 ) -> tuple[str, dict[str, object]]:
     """Generate source and globals for a subclass wrapper.
 
@@ -266,9 +314,13 @@ def _codegen_subclass_wrapper_source(
     # ACTs are transient eager-mode wrappers for async collective overlap.
     # Inductor triton kernels bypass __torch_dispatch__, so we must call
     # trigger_wait() before the compiled graph uses the data.
-    if act_input_indices:
-        for i in act_input_indices:
-            state.emit(f"args[{i}] = args[{i}].trigger_wait()")
+    if act_input_paths:
+        resolve_fn = state.add_global(
+            state.fresh_name("_resolve_act_path"),
+            _resolve_async_collective_tensor_path,
+        )
+        for i, attr_path in act_input_paths:
+            state.emit(f"args[{i}] = {resolve_fn}(args[{i}], {attr_path!r})")
 
     # --- Input unwrapping ---
     state.emit("unwrapped_args = []")
@@ -386,7 +438,7 @@ def codegen_subclass_wrapper(
     out_metas: list[PlainTensorMeta | SubclassCreationMeta],
     num_fw_outs_saved_for_bw: int | None,
     frozen_inp_indices: frozenset[int] = frozenset(),
-    act_input_indices: list[int] | None = None,
+    act_input_paths: list[tuple[int, tuple[str, ...]]] | None = None,
 ) -> Callable[..., object]:
     """Generate a specialized wrapper function for subclass unwrap/wrap."""
     source, globals_dict = _codegen_subclass_wrapper_source(
@@ -394,7 +446,7 @@ def codegen_subclass_wrapper(
         out_metas,
         num_fw_outs_saved_for_bw,
         frozen_inp_indices,
-        act_input_indices=act_input_indices,
+        act_input_paths=act_input_paths,
     )
     globals_dict["compiled_fn"] = compiled_fn
     return _compile_and_exec_source(

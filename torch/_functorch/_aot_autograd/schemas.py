@@ -503,10 +503,11 @@ class ViewAndMutationMeta:
     # Keeps track of which input indices store parameters (which we will treat as static)
     static_input_indices: list[int] = field(default_factory=list)
 
-    # Input indices that held AsyncCollectiveTensors at compile time.
-    # Used to emit direct trigger_wait() calls at runtime instead of
+    # Input paths that held AsyncCollectiveTensors at compile time. A path is
+    # (input_index, attr_path), where an empty attr_path means the top-level
+    # input. Used to emit direct trigger_wait() calls at runtime instead of
     # scanning every arg on every graph invocation.
-    act_input_indices: list[int] = field(default_factory=list)
+    act_input_paths: list[tuple[int, tuple[str, ...]]] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
