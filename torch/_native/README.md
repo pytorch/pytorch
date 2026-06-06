@@ -18,6 +18,13 @@ For overrides that always apply (no predicate), pass `unconditional_override=Tru
 
 All registrations will happen at the end of `import torch`. It is expected at that point that **no DSL runtime library is loaded by registration code** - this means that the runtime(s) must only be imported lazily. We can still check the presence of a module, and get its version without importing, but special care must be taken when writing op kernels to not import DSLs too early. An illustrative example is below, using `triton`:
 
+Registration code must also avoid CUDA-initializing APIs (e.g. `torch.cuda.is_available()`, `get_device_capability()`, `device_count()` without NVML mode). These call `cuInit` which poisons `fork()` for any process importing torch. Use `torch.backends.cuda.is_built()` for build-time checks. Verify with:
+
+```
+# CUDA_VISIBLE_DEVICES=0 needed on multi-GPU hosts (test skips on TEST_MULTIGPU)
+CUDA_VISIBLE_DEVICES=0 pytest test/test_cuda.py::TestCuda::test_lazy_init -v
+```
+
 First, we're going to write the registration function, and a top-level call, being very careful to not pull in the `triton` package early:
 
 ```
