@@ -54,7 +54,9 @@ class FlexFlashConfig:
     mask_mod_packed_intervals: tuple[PackedMaskInterval, ...] | None = None
 
 
-def collect_aux_scalar_symbols(*buffer_groups: Sequence[Any]) -> tuple[sympy.Symbol, ...]:
+def collect_aux_scalar_symbols(
+    *buffer_groups: Sequence[Any],
+) -> tuple[sympy.Symbol, ...]:
     symbols: dict[sympy.Symbol, None] = {}
     for buffers in buffer_groups:
         for buffer in buffers:
