@@ -223,17 +223,12 @@ def autotune_hints_to_configs(
 
 def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
     call_args = []
-    call_kwargs = {}
+    call_kwargs = dict(kwargs)
     for arg in args:
         if isinstance(arg, (int, bool)):
             call_args.append(str(arg))
         else:
             call_args.append("T")
-    for k, v in kwargs.items():
-        if isinstance(arg, (int, bool)):
-            call_kwargs[k] = v
-        else:
-            call_kwargs[k] = v
     call_kwargs.update(launcher.config.kwargs)
     call_kwargs["num_warps"] = launcher.config.num_warps
     call_kwargs["num_stages"] = launcher.config.num_stages
