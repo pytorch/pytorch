@@ -3579,6 +3579,368 @@ instantiate_parametrized_tests(FakeTensorMetaDevicePropagation)
 
 
 class FakeTensorViewCopy(TestCase):
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_mkldnn_view_errors_match_eager(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
+
+        with FakeTensorMode() as fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+
+            self.assertTrue(fake_x.is_mkldnn)
+            with self.assertRaisesRegex(RuntimeError, "Change to use reshape"):
+                fake_x.view(fake_x.size(0), -1)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_mkldnn_reshape_and_to_dense_match_eager(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
+
+        with FakeTensorMode() as fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+
+            for output in (
+                fake_x.reshape(fake_x.size(0), -1),
+                torch.reshape(fake_x, (fake_x.size(0), -1)),
+                torch.reshape(input=fake_x, shape=(fake_x.size(0), -1)),
+                torch.ops.aten.reshape.default(fake_x, [fake_x.size(0), -1]),
+                torch.ops.aten.reshape.default(self=fake_x, shape=[fake_x.size(0), -1]),
+                torch.ops.aten._mkldnn_reshape.default(fake_x, [fake_x.size(0), -1]),
+            ):
+                self.assertEqual(output.shape, (3, 20))
+                self.assertTrue(output.is_mkldnn)
+                with self.assertRaisesRegex(RuntimeError, "Change to use reshape"):
+                    output.view(output.size(0), -1)
+
+            for dense in (
+                fake_x.to_dense(),
+                torch.ops.aten.to_dense.default(fake_x),
+                torch.ops.aten._to_dense.default(fake_x, None, None),
+            ):
+                self.assertFalse(dense.is_mkldnn)
+                self.assertEqual(dense.view(dense.size(0), -1).shape, (3, 20))
+
+            for to_dense in (
+                lambda: fake_x.to_dense(dtype=torch.float64),
+                lambda: torch.ops.aten.to_dense.default(
+                    self=fake_x, dtype=torch.float64
+                ),
+                lambda: torch.ops.aten._to_dense.default(fake_x, torch.float64, None),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Unsupported dtype for ideep public tensor: Double"
+                ):
+                    to_dense()
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_mkldnn_keyword_reshape_compile_matches_eager(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
+
+        def reshape_keyword(x):
+            return torch.reshape(input=x, shape=(x.size(0), -1))
+
+        torch._dynamo.reset()
+        output = torch.compile(reshape_keyword, backend="eager", fullgraph=True)(x)
+        self.assertEqual(output.shape, (3, 20))
+        self.assertTrue(output.is_mkldnn)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_mkldnn_max_pool_errors_match_eager(self):
+        x2 = torch.randn(2, 3, 7, 7, dtype=torch.float32).to_mkldnn()
+        x3 = torch.randn(2, 3, 7, 7, 7, dtype=torch.float32).to_mkldnn()
+        unbatched_x2 = torch.randn(3, 7, 7, dtype=torch.float32).to_mkldnn()
+        unbatched_x3 = torch.randn(3, 7, 7, 7, dtype=torch.float32).to_mkldnn()
+
+        with FakeTensorMode() as fake_mode:
+            fake_x2 = fake_mode.from_tensor(x2)
+            fake_x3 = fake_mode.from_tensor(x3)
+            fake_unbatched_x2 = fake_mode.from_tensor(unbatched_x2)
+            fake_unbatched_x3 = fake_mode.from_tensor(unbatched_x3)
+
+            with self.assertRaisesRegex(
+                RuntimeError, "mkldnn_max_pool2d does not support dilation case"
+            ):
+                torch.nn.functional.max_pool2d(
+                    fake_x2, kernel_size=3, stride=3, padding=1, dilation=2
+                )
+            with self.assertRaisesRegex(
+                RuntimeError, "mkldnn_max_pool3d does not support dilation case"
+            ):
+                torch.nn.functional.max_pool3d(
+                    fake_x3, kernel_size=3, stride=3, padding=1, dilation=2
+                )
+            for stride in (0, -1):
+                with self.assertRaisesRegex(ValueError, "Strides must be positive!"):
+                    torch.nn.functional.max_pool2d(
+                        fake_x2, kernel_size=3, stride=stride, padding=1
+                    )
+                with self.assertRaisesRegex(ValueError, "Strides must be positive!"):
+                    torch.nn.functional.max_pool3d(
+                        fake_x3, kernel_size=3, stride=stride, padding=1
+                    )
+            for max_pool2d in (
+                lambda: torch.nn.functional.max_pool2d(
+                    fake_unbatched_x2, kernel_size=3, stride=3, padding=1
+                ),
+                lambda: torch.ops.aten.max_pool2d.default(
+                    fake_unbatched_x2, [3, 3], [3, 3], [1, 1], [1, 1], False
+                ),
+                lambda: torch.ops.aten.mkldnn_max_pool2d.default(
+                    fake_unbatched_x2, [3, 3], [3, 3], [1, 1], [1, 1], False
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "expects 4D input tensor"):
+                    max_pool2d()
+            for max_pool3d in (
+                lambda: torch.nn.functional.max_pool3d(
+                    fake_unbatched_x3, kernel_size=3, stride=3, padding=1
+                ),
+                lambda: torch.ops.aten.max_pool3d.default(
+                    fake_unbatched_x3,
+                    [3, 3, 3],
+                    [3, 3, 3],
+                    [1, 1, 1],
+                    [1, 1, 1],
+                    False,
+                ),
+                lambda: torch.ops.aten.mkldnn_max_pool3d.default(
+                    fake_unbatched_x3,
+                    [3, 3, 3],
+                    [3, 3, 3],
+                    [1, 1, 1],
+                    [1, 1, 1],
+                    False,
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "expects 5D input tensor"):
+                    max_pool3d()
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_mkldnn_max_pool_with_indices_errors_match_eager(self):
+        x2 = torch.randn(2, 3, 7, 7, dtype=torch.float32).to_mkldnn()
+        x3 = torch.randn(2, 3, 7, 7, 7, dtype=torch.float32).to_mkldnn()
+
+        with FakeTensorMode() as fake_mode:
+            fake_x2 = fake_mode.from_tensor(x2)
+            fake_x3 = fake_mode.from_tensor(x3)
+
+            with self.assertRaisesRegex(
+                RuntimeError, "memory_format.*incompatible with mkldnn tensor"
+            ):
+                torch.nn.functional.max_pool2d(
+                    fake_x2,
+                    kernel_size=3,
+                    stride=3,
+                    padding=1,
+                    return_indices=True,
+                )
+            with self.assertRaisesRegex(
+                RuntimeError, "memory_format.*incompatible with mkldnn tensor"
+            ):
+                torch.ops.aten.max_pool2d_with_indices.default(
+                    fake_x2, [3, 3], [3, 3], [1, 1], [1, 1], False
+                )
+            for max_pool2d in (
+                lambda: torch.nn.functional.max_pool2d(
+                    fake_x2,
+                    kernel_size=3,
+                    stride=3,
+                    padding=1,
+                    dilation=2,
+                    return_indices=True,
+                ),
+                lambda: torch.nn.functional.max_pool2d(
+                    fake_x2,
+                    kernel_size=3,
+                    stride=-1,
+                    padding=1,
+                    return_indices=True,
+                ),
+                lambda: torch.ops.aten.max_pool2d_with_indices.default(
+                    fake_x2, [3, 3], [-1, -1], [1, 1], [2, 2], False
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "memory_format.*incompatible with mkldnn tensor"
+                ):
+                    max_pool2d()
+            with self.assertRaisesRegex(
+                NotImplementedError, "max_pool3d_with_indices.*MkldnnCPU"
+            ):
+                torch.nn.functional.max_pool3d(
+                    fake_x3,
+                    kernel_size=3,
+                    stride=3,
+                    padding=1,
+                    return_indices=True,
+                )
+            with self.assertRaisesRegex(
+                NotImplementedError, "max_pool3d_with_indices.*MkldnnCPU"
+            ):
+                torch.ops.aten.max_pool3d_with_indices.default(
+                    fake_x3,
+                    [3, 3, 3],
+                    [3, 3, 3],
+                    [1, 1, 1],
+                    [1, 1, 1],
+                    False,
+                )
+            for max_pool3d in (
+                lambda: torch.nn.functional.max_pool3d(
+                    fake_x3,
+                    kernel_size=3,
+                    stride=3,
+                    padding=1,
+                    dilation=2,
+                    return_indices=True,
+                ),
+                lambda: torch.nn.functional.max_pool3d(
+                    fake_x3,
+                    kernel_size=3,
+                    stride=-1,
+                    padding=1,
+                    return_indices=True,
+                ),
+                lambda: torch.ops.aten.max_pool3d_with_indices.default(
+                    fake_x3,
+                    [3, 3, 3],
+                    [-1, -1, -1],
+                    [1, 1, 1],
+                    [2, 2, 2],
+                    False,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    NotImplementedError, "max_pool3d_with_indices.*MkldnnCPU"
+                ):
+                    max_pool3d()
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_mkldnn_max_pool_outputs_remain_mkldnn(self):
+        x2 = torch.randn(2, 3, 7, 7, dtype=torch.float32).to_mkldnn()
+        x3 = torch.randn(2, 3, 7, 7, 7, dtype=torch.float32).to_mkldnn()
+
+        with FakeTensorMode() as fake_mode:
+            fake_x2 = fake_mode.from_tensor(x2)
+            fake_x3 = fake_mode.from_tensor(x3)
+
+            outputs = (
+                torch.nn.functional.max_pool2d(
+                    fake_x2, kernel_size=3, stride=3, padding=1
+                ),
+                torch.nn.functional.max_pool2d(
+                    input=fake_x2, kernel_size=3, stride=3, padding=1
+                ),
+                torch.ops.aten.max_pool2d.default(
+                    fake_x2, [3, 3], [3, 3], [1, 1], [1, 1], False
+                ),
+                torch.ops.aten.max_pool2d.default(
+                    self=fake_x2,
+                    kernel_size=[3, 3],
+                    stride=[3, 3],
+                    padding=[1, 1],
+                    dilation=[1, 1],
+                    ceil_mode=False,
+                ),
+                torch.ops.aten.mkldnn_max_pool2d.default(
+                    fake_x2, [3, 3], [3, 3], [1, 1], [1, 1], False
+                ),
+                torch.nn.functional.max_pool3d(
+                    fake_x3, kernel_size=3, stride=3, padding=1
+                ),
+                torch.nn.functional.max_pool3d(
+                    input=fake_x3, kernel_size=3, stride=3, padding=1
+                ),
+                torch.ops.aten.max_pool3d.default(
+                    fake_x3, [3, 3, 3], [3, 3, 3], [1, 1, 1], [1, 1, 1], False
+                ),
+                torch.ops.aten.max_pool3d.default(
+                    self=fake_x3,
+                    kernel_size=[3, 3, 3],
+                    stride=[3, 3, 3],
+                    padding=[1, 1, 1],
+                    dilation=[1, 1, 1],
+                    ceil_mode=False,
+                ),
+                torch.ops.aten.mkldnn_max_pool3d.default(
+                    fake_x3, [3, 3, 3], [3, 3, 3], [1, 1, 1], [1, 1, 1], False
+                ),
+            )
+
+            for output in outputs:
+                self.assertTrue(output.is_mkldnn)
+                with self.assertRaisesRegex(RuntimeError, "Change to use reshape"):
+                    output.view(output.size(0), -1)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_mkldnn_max_pool_compile_paths_match_eager(self):
+        x2 = torch.randn(2, 3, 7, 7, dtype=torch.float32).to_mkldnn()
+        x3 = torch.randn(2, 3, 7, 7, 7, dtype=torch.float32).to_mkldnn()
+
+        def max_pool2d_valid(x):
+            return torch.nn.functional.max_pool2d(x, kernel_size=3, stride=3, padding=1)
+
+        def max_pool3d_valid(x):
+            return torch.nn.functional.max_pool3d(x, kernel_size=3, stride=3, padding=1)
+
+        for fn, x, shape in (
+            (max_pool2d_valid, x2, (2, 3, 3, 3)),
+            (max_pool3d_valid, x3, (2, 3, 3, 3, 3)),
+        ):
+            torch._dynamo.reset()
+            output = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(output.shape, shape)
+            self.assertTrue(output.is_mkldnn)
+
+        def max_pool2d_invalid_dilation(x):
+            return torch.nn.functional.max_pool2d(
+                x, kernel_size=3, stride=3, padding=1, dilation=2
+            )
+
+        def max_pool3d_invalid_dilation(x):
+            return torch.nn.functional.max_pool3d(
+                x, kernel_size=3, stride=3, padding=1, dilation=2
+            )
+
+        def max_pool2d_return_indices(x):
+            return torch.nn.functional.max_pool2d(
+                x, kernel_size=3, stride=3, padding=1, return_indices=True
+            )
+
+        def max_pool3d_return_indices(x):
+            return torch.nn.functional.max_pool3d(
+                x, kernel_size=3, stride=3, padding=1, return_indices=True
+            )
+
+        error_cases = (
+            (
+                max_pool2d_invalid_dilation,
+                x2,
+                torch._dynamo.exc.TorchRuntimeError,
+                "mkldnn_max_pool2d does not support dilation case",
+            ),
+            (
+                max_pool3d_invalid_dilation,
+                x3,
+                torch._dynamo.exc.TorchRuntimeError,
+                "mkldnn_max_pool3d does not support dilation case",
+            ),
+            (
+                max_pool2d_return_indices,
+                x2,
+                torch._dynamo.exc.TorchRuntimeError,
+                "memory_format.*incompatible with mkldnn tensor",
+            ),
+            (
+                max_pool3d_return_indices,
+                x3,
+                torch._dynamo.exc.Unsupported,
+                "max_pool3d_with_indices.*MkldnnCPU",
+            ),
+        )
+        for fn, x, error_type, error in error_cases:
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(error_type, error):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+
     def test_expand_then_view_copy_matches_eager_mode(self):
         x = torch.arange(7)
         y = x.expand(12, 7)

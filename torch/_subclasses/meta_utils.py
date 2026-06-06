@@ -1606,13 +1606,15 @@ class MetaConverter(Generic[_TensorT]):
                         strides,
                         _storage_offset,
                     ) = sym_sizes_strides_storage_offset(t, source)
-                    # TODO: This doesn't seem right, where's the MKLDNN'ness
-                    # lol
+                    # Meta tensors do not support the mkldnn layout, so track
+                    # mkldnn-ness separately on FakeTensor.
                     r = callback(
                         lambda: torch.empty_strided(
                             sizes, strides, dtype=t.dtype, device="meta"
                         )
                     )
+                    if _is_fake_tensor(r):
+                        r._fake_is_mkldnn = True
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
                             if t.size is None:

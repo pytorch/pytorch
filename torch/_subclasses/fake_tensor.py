@@ -748,6 +748,7 @@ class FakeTensor(Tensor):
     """
 
     _fake_device: torch.device
+    _fake_is_mkldnn: bool
     fake_mode: FakeTensorMode
     constant: Tensor | None
     real_tensor: Tensor | None
@@ -796,6 +797,23 @@ class FakeTensor(Tensor):
     @fake_device.setter
     def fake_device(self, device: torch.device) -> None:
         self._fake_device = self._normalize_fake_device(device)
+
+    @property
+    # pyrefly: ignore [bad-override]
+    def layout(self) -> torch.layout:
+        if bool(getattr(self, "_fake_is_mkldnn", False)):
+            # pyrefly: ignore [missing-attribute]
+            return torch._mkldnn
+        with torch._C.DisableTorchFunctionSubclass():
+            return super().layout
+
+    @property
+    # pyrefly: ignore [bad-override]
+    def is_mkldnn(self) -> bool:
+        if bool(getattr(self, "_fake_is_mkldnn", False)):
+            return True
+        with torch._C.DisableTorchFunctionSubclass():
+            return super().is_mkldnn
 
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
@@ -914,6 +932,89 @@ class FakeTensor(Tensor):
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:
         return fake_mode.from_tensor(t)
+
+    @classmethod
+    def __torch_function__(
+        cls,
+        func: object,
+        types: Sequence[type],
+        args: Sequence[object] = (),
+        kwargs: Mapping[str, object] | None = None,
+    ) -> object:
+        kwargs = kwargs or {}
+
+        missing = object()
+
+        def get_arg(
+            index: int, names: tuple[str, ...], default: object = missing
+        ) -> object:
+            if len(args) > index:
+                return args[index]
+            for name in names:
+                if name in kwargs:
+                    return kwargs[name]
+            return default
+
+        input_arg = get_arg(0, ("input", "self"))
+        if isinstance(input_arg, FakeTensor) and bool(
+            getattr(input_arg, "_fake_is_mkldnn", False)
+        ):
+            input_ = input_arg
+            if func in (
+                torch.nn.functional.max_pool2d,
+                torch.max_pool2d,
+                aten.max_pool2d.default,
+            ):
+                return_indices = get_arg(6, ("return_indices",), False)
+                if not return_indices:
+                    kernel_size = get_arg(1, ("kernel_size",))
+                    stride = get_arg(2, ("stride",), None)
+                    padding = get_arg(3, ("padding",), 0)
+                    dilation = get_arg(4, ("dilation",), 1)
+                    ceil_mode = get_arg(5, ("ceil_mode",), False)
+                    if stride is None:
+                        stride = ()
+                    with torch._C.DisableTorchFunctionSubclass():
+                        return aten.mkldnn_max_pool2d.default(
+                            input_, kernel_size, stride, padding, dilation, ceil_mode
+                        )
+
+            if func in (
+                torch.nn.functional.max_pool3d,
+                torch.max_pool3d,
+                aten.max_pool3d.default,
+            ):
+                return_indices = get_arg(6, ("return_indices",), False)
+                if not return_indices:
+                    kernel_size = get_arg(1, ("kernel_size",))
+                    stride = get_arg(2, ("stride",), None)
+                    padding = get_arg(3, ("padding",), 0)
+                    dilation = get_arg(4, ("dilation",), 1)
+                    ceil_mode = get_arg(5, ("ceil_mode",), False)
+                    if stride is None:
+                        stride = ()
+                    with torch._C.DisableTorchFunctionSubclass():
+                        return aten.mkldnn_max_pool3d.default(
+                            input_, kernel_size, stride, padding, dilation, ceil_mode
+                        )
+
+            if func in (torch.reshape, torch.Tensor.reshape, aten.reshape.default):
+                shape = args[1:] if len(args) > 1 else (get_arg(1, ("shape",)),)
+                if len(shape) == 1 and isinstance(shape[0], (list, tuple, torch.Size)):
+                    shape = tuple(shape[0])
+                with torch._C.DisableTorchFunctionSubclass():
+                    return aten._mkldnn_reshape.default(input_, shape)
+
+            if func in (
+                torch.Tensor.to_dense,
+                aten.to_dense.default,
+            ):
+                dtype = get_arg(1, ("dtype",), None)
+                masked_grad = get_arg(2, ("masked_grad",), None)
+                with torch._C.DisableTorchFunctionSubclass():
+                    return aten._to_dense.default(input_, dtype, masked_grad)
+
+        return super().__torch_function__(func, types, args, kwargs)
 
     @classmethod
     @count
@@ -1838,6 +1939,8 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("not our fake")
                 if arg.constant is not None:
                     raise _BypassDispatchCache("constant attribute")
+                if arg.is_mkldnn:
+                    raise _BypassDispatchCache("mkldnn tensor")
                 if is_sparse_any(arg):
                     raise _BypassDispatchCache(f"{arg.layout} tensor")
                 metadata = extract_tensor_metadata(arg)
@@ -2835,6 +2938,12 @@ class FakeTensorMode(TorchDispatchMode):
             if fast_impl is not None:
                 return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
 
+        pre_decomposition_impl = get_pre_decomposition_op_impls().get(func)
+        if pre_decomposition_impl is not None:
+            op_impl_out = pre_decomposition_impl(self, func, *args, **kwargs)
+            if op_impl_out is not NotImplemented:
+                return maybe_propagate_real_tensors(op_impl_out)
+
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table
 
@@ -3509,6 +3618,7 @@ from torch._subclasses.fake_impls import (  # noqa: F401
     _like_tensor_constructors,
     contains_tensor_types,
     get_fast_op_impls,
+    get_pre_decomposition_op_impls,
     has_meta,
     op_implementations_checks,
     stride_incorrect_op,
