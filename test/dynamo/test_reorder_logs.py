@@ -157,6 +157,33 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
         # output is correct
         self.assertTrue(same(opt_out, x + 1))
 
+    def test_logger_fstring_debug_resumes_after_graph_break(self):
+        counters.clear()
+        test_logger = logging.getLogger(
+            "test_logger_fstring_debug_resumes_after_graph_break"
+        )
+        old_level = test_logger.level
+        test_logger.setLevel(logging.CRITICAL)
+
+        try:
+
+            def f(x):
+                a = x + 1
+                test_logger.warning(f"a : {a=}")  # noqa: G004
+                b = x * 2
+                return b + 1
+
+            cnt = torch._dynamo.testing.CompileCounter()
+            x = torch.ones(2)
+            opt_out = torch.compile(f, backend=cnt)(x)
+
+            self.assertTrue(same(f(x), opt_out))
+            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.op_count, 3)
+            self.assertEqual(len(counters["graph_break"]), 1)
+        finally:
+            test_logger.setLevel(old_level)
+
 
 class ReorderLogsTests(torch._dynamo.test_case.TestCase):
     def test_dont_reorder_print(self):
