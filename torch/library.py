@@ -61,51 +61,39 @@ _reserved_namespaces = ["prim"]
 _SCHEMA_NAME = re.compile(r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\b")
 
 
-def _strip_schema_string_literals(schema: str) -> str:
-    chars = []
-    quote = None
-    escaped = False
-    for ch in schema:
-        if quote is None:
-            if ch in ("'", '"'):
-                quote = ch
-                chars.append(" ")
-            else:
-                chars.append(ch)
-            continue
-
-        chars.append(" ")
-        if escaped:
-            escaped = False
-        elif ch == "\\":
-            escaped = True
-        elif ch == quote:
-            quote = None
-    return "".join(chars)
-
-
 def _resolve_name_from_frame(name: str, frame):
     parts = name.split(".")
     if not parts:
         return None
 
-    if parts[0] in frame.f_locals:
-        obj = frame.f_locals[parts[0]]
-        rest = parts[1:]
-    elif parts[0] in frame.f_globals:
-        obj = frame.f_globals[parts[0]]
-        rest = parts[1:]
-    else:
-        obj = None
-        rest = ()
-        for idx in range(len(parts), 0, -1):
-            module_name = ".".join(parts[:idx])
-            if module_name in sys.modules:
-                obj = sys.modules[module_name]
-                rest = parts[idx:]
-                break
-        if obj is None:
-            return None
+    while frame is not None:
+        if parts[0] in frame.f_locals:
+            obj = frame.f_locals[parts[0]]
+            rest = parts[1:]
+        elif parts[0] in frame.f_globals:
+            obj = frame.f_globals[parts[0]]
+            rest = parts[1:]
+        else:
+            frame = frame.f_back
+            continue
+
+        for part in rest:
+            try:
+                obj = getattr(obj, part)
+            except AttributeError:
+                return None
+        return obj
+
+    obj = None
+    rest = ()
+    for idx in range(len(parts), 0, -1):
+        module_name = ".".join(parts[:idx])
+        if module_name in sys.modules:
+            obj = sys.modules[module_name]
+            rest = parts[idx:]
+            break
+    if obj is None:
+        return None
 
     for part in rest:
         try:
@@ -120,28 +108,31 @@ def _register_schema_enum_types(schema: str, frame) -> list[str]:
     seen = set()
     success = False
     try:
-        schema_args_start = schema.find("(")
-        if schema_args_start == -1:
-            success = True
-            return registered
-        schema_without_strings = _strip_schema_string_literals(
-            schema[schema_args_start:]
-        )
-        for match in _SCHEMA_NAME.finditer(schema_without_strings):
-            type_name = match.group(0)
+        while True:
+            try:
+                torch._C.parse_schema(schema)
+            except RuntimeError as exc:
+                if "unknown type specifier" not in str(exc):
+                    raise
+                type_name = _unknown_type_name_from_schema_parse_error(exc)
+                if type_name is None:
+                    raise
+                parse_error = exc
+            else:
+                success = True
+                return registered
+
             if type_name in seen:
-                continue
+                raise parse_error
             seen.add(type_name)
+            if torch._C._is_opaque_type_registered(type_name):
+                raise parse_error
 
             obj = _resolve_name_from_frame(type_name, frame)
             if not isinstance(obj, type) or not issubclass(obj, enum.Enum):
-                continue
-            if torch._C._is_opaque_type_registered(type_name):
-                continue
+                raise parse_error
             torch._C._register_opaque_type(type_name)
             registered.append(type_name)
-        success = True
-        return registered
     finally:
         if not success:
             _unregister_schema_enum_types(registered)
@@ -151,6 +142,22 @@ def _unregister_schema_enum_types(type_names: list[str]) -> None:
     unregister_opaque_type = getattr(torch._C, "_unregister_opaque_type")  # noqa: B009
     for type_name in reversed(type_names):
         unregister_opaque_type(type_name)
+
+
+def _unknown_type_name_from_schema_parse_error(exc: RuntimeError) -> str | None:
+    lines = str(exc).splitlines()
+    for idx, line in enumerate(lines):
+        marker_idx = line.find("<--- HERE")
+        if marker_idx == -1 or idx == 0:
+            continue
+        underline_start = line.find("~")
+        if underline_start == -1 or underline_start > marker_idx:
+            continue
+        schema_line = lines[idx - 1]
+        match = _SCHEMA_NAME.match(schema_line, underline_start)
+        if match is not None:
+            return match.group(0)
+    return None
 
 
 def fallthrough_kernel():

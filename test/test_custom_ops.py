@@ -83,6 +83,15 @@ class LibraryDefineMode(enum.Enum):
     SUB = -1
 
 
+class _LibraryDefineBomb:
+    @property
+    def prop(self):
+        raise RuntimeError("boom")
+
+
+_library_define_bomb = _LibraryDefineBomb()
+
+
 device_type = (
     acc.type
     if (acc := torch.accelerator.current_accelerator(check_available=True))
@@ -2154,6 +2163,11 @@ Dynamic shape operator
             torch.full((3,), 2.0),
         )
 
+    @skipIfTorchDynamo("Dynamo test wrapping rewrites local class frames")
+    def test_library_define_local_enum_subclass_schema_type(self):
+        lib = self.lib()
+        x = torch.ones(3)
+
         class PublicLocalLibraryDefineMode(enum.Enum):
             ADD = 3
             SUB = -3
@@ -2199,6 +2213,19 @@ Dynamic shape operator
         with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
             self.lib().define("not_an_enum(Tensor x, NotAnEnum mode) -> Tensor")
 
+    def test_library_define_enum_name_does_not_shadow_builtin_schema_type(self):
+        class Storage(enum.Enum):
+            VALUE = 1
+
+        mode_type = f"{LibraryDefineMode.__module__}.{LibraryDefineMode.__qualname__}"
+        self.lib().define(f"storage_arg(Storage s, {mode_type} mode) -> ()")
+
+        self.assertIn(
+            "(Storage s, PyObject mode)", str(self.ns().storage_arg.default._schema)
+        )
+        self.assertFalse(torch._C._is_opaque_type_registered("Storage"))
+        self.assertFalse(torch._C._is_opaque_type_registered(mode_type))
+
     def test_library_define_overload_name_not_resolved_as_type(self):
         attr_accessed = False
 
@@ -2214,22 +2241,13 @@ Dynamic shape operator
         self.assertFalse(attr_accessed)
 
     def test_library_define_enum_registration_cleanup_on_lookup_error(self):
-        class LeakedLibraryDefineMode(enum.Enum):
-            ADD = 1
-
-        class Bomb:
-            @property
-            def prop(self):
-                raise RuntimeError("boom")
-
-        bomb = Bomb()
-        type_name = "LeakedLibraryDefineMode"
+        type_name = f"{LibraryDefineMode.__module__}.{LibraryDefineMode.__qualname__}"
         self.assertFalse(torch._C._is_opaque_type_registered(type_name))
 
         with self.assertRaisesRegex(RuntimeError, "boom"):
             self.lib().define(
-                "leak_cleanup(Tensor x, LeakedLibraryDefineMode mode, "
-                "bomb.prop value) -> Tensor"
+                f"leak_cleanup(Tensor x, {type_name} mode, "
+                "_library_define_bomb.prop value) -> Tensor"
             )
 
         self.assertFalse(torch._C._is_opaque_type_registered(type_name))
