@@ -204,7 +204,7 @@ from .base import (
     VariableTrackerMeta,
 )
 from .builtin import BuiltinVariable
-from .constant import ConstantVariable
+from .constant import ConstantVariable, NumpyScalarVariable
 from .ctx_manager import (
     AutocastModeVariable,
     CudagraphOverrideVariable,
@@ -1308,6 +1308,8 @@ class VariableBuilder:
                 source=self.source,
             )
         elif np is not None and isinstance(value, np.generic):
+            if self.should_specialize_numpy_scalar(value):
+                return self.wrap_numpy_scalar(value)
             # numpy array scalars: convert to 0D arrays
             return self.wrap_numpy_ndarray(np.asarray(value))
         elif trace_rules.is_numpy(value):
@@ -2629,6 +2631,19 @@ class VariableBuilder:
             if isinstance(value, (list, set)):
                 return self.tx.output.side_effects.track_mutable(value, result)
             return result
+
+    def should_specialize_numpy_scalar(self, value: Any) -> bool:
+        # NumpyScalarVariable lowers tensor ops through value.item(), so only
+        # specialize scalar types whose Tensor op behavior matches that value.
+        if not NumpyScalarVariable.can_use_python_scalar_proxy(value):
+            return False
+        return self.source.guard_source.is_specialized_nn_module() or (
+            self.source.guard_source.is_unspecialized_nn_module()
+        )
+
+    def wrap_numpy_scalar(self, value: Any) -> VariableTracker:
+        self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.CONSTANT_MATCH)
+        return NumpyScalarVariable(value, source=self.source)
 
     def _wrap_symint_for_lazy(self, value: int) -> VariableTracker:
         return self.wrap_symint(value)
@@ -5007,6 +5022,12 @@ class SourcelessBuilder:
         # type: ignore[attr-defined]
         elif isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
             return UserDefinedObjectVariable(value)
+        elif (
+            np is not None
+            and isinstance(value, np.generic)
+            and NumpyScalarVariable.can_use_python_scalar_proxy(value)
+        ):
+            return NumpyScalarVariable(value)
         elif ConstantVariable.is_literal(value):
             return ConstantVariable.create(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:

@@ -1232,6 +1232,18 @@
       ]
     }
   ],
+  "GB5225": [
+    {
+      "Gb_type": "Attempted to use tensor creation function with requires_grad=True",
+      "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Create the tensor outside the compiled region.",
+        "Do not set `requires_grad=True`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0089": [
     {
       "Gb_type": "Observed exception (EXCEPT_HANDLER)",
@@ -2304,6 +2316,16 @@
       ]
     }
   ],
+  "GB3792": [
+    {
+      "Gb_type": "numpy_scalar_nan_hash",
+      "Context": "self.numpy_type.__name__",
+      "Explanation": "Dynamo cannot safely specialize hash() of a NumPy NaN scalar because NaN hashes are object-specific.",
+      "Hints": [
+        "Avoid calling hash() on NumPy NaN scalars inside compiled code."
+      ]
+    }
+  ],
   "GB5904": [
     {
       "Gb_type": "unsupported __getitem__ (sq_item)",
@@ -3184,6 +3206,16 @@
     }
   ],
   "GB0225": [
+    {
+      "Gb_type": "numpy_scalar_tensor_requires_grad",
+      "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Create the tensor outside the compiled region.",
+        "Do not set `requires_grad=True`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Attempted to use tensor creation function with requires_grad=True",
       "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
@@ -4811,6 +4843,24 @@
       "Explanation": "_autograd_grad() received an argument of type {type(var).__name__} which is not supported. Expected tensor or sequence of tensors.",
       "Hints": [
         "Ensure outputs and inputs arguments are tensors or sequences of tensors."
+      ]
+    }
+  ],
+  "GB7294": [
+    {
+      "Gb_type": "numpy_scalar_comparison_result",
+      "Context": "context",
+      "Explanation": "Dynamo cannot safely lower this NumPy scalar comparison result as a Python scalar.",
+      "Hints": [
+        "Convert the NumPy scalar to a Python scalar outside the compiled region."
+      ]
+    },
+    {
+      "Gb_type": "numpy_scalar_comparison_result",
+      "Context": "{self.numpy_type.__name__}.{name}",
+      "Explanation": "Dynamo cannot safely lower this NumPy scalar comparison result as a Python scalar.",
+      "Hints": [
+        "Convert the NumPy scalar to a Python scalar outside the compiled region."
       ]
     }
   ],
