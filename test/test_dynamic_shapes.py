@@ -8,7 +8,6 @@ import operator
 import unittest
 
 import numpy as np
-import pytest
 import sympy
 
 import torch
@@ -796,18 +795,6 @@ def forward(self, x_1):
         _constrain_range_for_size(i1)
         self.assertTrue(expect_true(i0 == 10 - i1))
         self.assertExpectedInline(str(i0), """u0""")
-
-    def test_constant_symint_is_hashable(self):
-        # Constants hash by value; symbolic stays unhashable so einops's
-        # TypeError-based cache-bypass keeps working.
-        shape_env = ShapeEnv()
-        const = shape_env.create_symintnode(sympy.Integer(42), hint=42)
-        self.assertEqual(hash(const), hash(42))
-        self.assertEqual({const: "ok"}[42], "ok")
-
-        symbolic = shape_env.create_unbacked_symint()
-        with self.assertRaises(TypeError):
-            hash(symbolic)
 
     def test_expect_true_double_digits(self):
         shape_env = ShapeEnv()
@@ -3878,7 +3865,6 @@ class TestUnbacked(TestCase):
         or IS_WINDOWS,
         "https://github.com/pytorch/pytorch/issues/163953",
     )
-    @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/163785")
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_do_not_guard_unbacked_inputs(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")

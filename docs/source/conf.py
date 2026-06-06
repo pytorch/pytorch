@@ -463,6 +463,8 @@ coverage_ignore_functions = [
     "recv",
     "reduce",
     "reduce_scatter",
+    # deprecated aliases of all_gather_single / reduce_scatter_single
+    "all_gather_into_tensor",
     "reduce_scatter_tensor",
     "scatter",
     "scatter_object_list",
@@ -1874,8 +1876,6 @@ coverage_ignore_classes = [
     "mode_out",
     "nanmedian",
     "nanmedian_out",
-    "qr",
-    "qr_out",
     "slogdet",
     "slogdet_out",
     "sort",
