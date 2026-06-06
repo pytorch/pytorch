@@ -599,7 +599,7 @@ class TestLocalTensorWorld3(LocalTensorWorldTest):
                 device=lt_reduce_scatter.device,
             )
 
-            dist.reduce_scatter_tensor(
+            dist.reduce_scatter_single(
                 lt_output_tensor, lt_reduce_scatter, group=fake_pg
             )
 
@@ -635,7 +635,7 @@ class TestLocalTensorWorld3(LocalTensorWorldTest):
                 device=lt_gather.device,
             )
 
-            dist.all_gather_into_tensor(lt_output_tensor, lt_gather, group=fake_pg)
+            dist.all_gather_single(lt_output_tensor, lt_gather, group=fake_pg)
 
             expected_output = torch.cat(list(different_tensors.values()))
 
