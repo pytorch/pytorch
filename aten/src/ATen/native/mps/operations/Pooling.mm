@@ -1,6 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -589,6 +588,15 @@ static void max_unpool_out_mps_template(const Tensor& input,
 
   auto dims = input.dim();
   auto leading_dims = input.dim() - pooling_dims;
+  for (int64_t i = 1; i < dims; ++i) {
+    TORCH_CHECK(input.size(i) > 0,
+                op_name,
+                ": Expected input to have non-zero size for non-batch dimensions, but got ",
+                input.sizes(),
+                " with dimension ",
+                i,
+                " being empty.");
+  }
 
   const auto memory_format = input.suggest_memory_format();
   std::vector<int64_t> output_size(dims);
@@ -1080,8 +1088,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(const Tensor& input,
                                                        IntArrayRef padding,
                                                        IntArrayRef dilation,
                                                        bool ceil_mode) {
-  NoNamesGuard guard;
-
   Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
   Tensor indices = at::empty({0}, input.options().dtype(kLong), MemoryFormat::Contiguous);
   mps::max_pool_with_indices_out_mps_template(output,
@@ -1094,10 +1100,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(const Tensor& input,
                                               ceil_mode,
                                               /*pooling_dims=*/3,
                                               "max_pool3d");
-
-  guard.reset();
-  namedinference::propagate_names(output, input);
-  namedinference::propagate_names(indices, input);
 
   return std::tuple<Tensor, Tensor>(output, indices);
 }
