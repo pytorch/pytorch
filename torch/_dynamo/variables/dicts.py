@@ -831,7 +831,9 @@ class ConstDictVariable(VariableTracker):
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         # dict_richcompare: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4198
         # Only supports eq/ne; returns NotImplemented for ordering.
         from .builder import SourcelessBuilder
@@ -963,15 +965,17 @@ class MappingProxyVariable(VariableTracker):
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1087-L1095
+        # https://github.com/python/cpython/blob/60403a5409ff/Objects/descrobject.c#L1087-L1095
         return self.dv_dict.sq_contains(tx, item)
 
     def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.dv_dict.mp_length(tx)
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         # mappingproxy_richcompare delegates to the underlying mapping:
-        # https://github.com/python/cpython/blob/e76aa128fe/Objects/descrobject.c#L1436
+        # https://github.com/python/cpython/blob/60403a5409ff/Objects/descrobject.c#L1231-L1236
         from .object_protocol import generic_richcompare
 
         return generic_richcompare(tx, self.dv_dict, other, op)
@@ -1119,6 +1123,28 @@ class DictViewVariable(VariableTracker):
         s.call_method(tx, "difference_update", [other_], {})
         return s
 
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L6105-L6188 (_PyDictView_Intersect)
+        s = VariableTracker.build(tx, set).call_function(tx, [self], {})
+        s.call_method(tx, "intersection_update", [other], {})
+        return s
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L6305-L6325 (dictviews_xor)
+        s = VariableTracker.build(tx, set).call_function(tx, [self], {})
+        s.call_method(tx, "symmetric_difference_update", [other], {})
+        return s
+
 
 class DictKeysVariable(DictViewVariable):
     # PyDictKeys_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6365
@@ -1161,7 +1187,9 @@ class DictKeysVariable(DictViewVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5998-L6005
         return self.dv_dict.sq_contains(tx, item)
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         # dictview_richcompare: accepts set/frozenset and dict_keys/dict_items.
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L5952-L6010
         # Uses a polyfill with len() and ``in`` so that Dynamo traces through
@@ -1225,9 +1253,13 @@ class DictValuesVariable(DictViewVariable):
 
     # dict.values() do not implement tp_as_number
     nb_or_impl = None  # type: ignore[bad-override]
-    nb_inplace_or = None
+    nb_inplace_or_impl = None  # type: ignore[bad-override]
     nb_subtract_impl = None  # type: ignore[bad-override]
     nb_inplace_subtract_impl = None  # type: ignore[bad-override]
+    nb_and_impl = None  # type: ignore[bad-override]
+    nb_inplace_and_impl = None  # type: ignore[bad-override]
+    nb_xor_impl = None  # type: ignore[bad-override]
+    nb_inplace_xor_impl = None  # type: ignore[bad-override]
 
     def is_hashable(self) -> bool:
         return True
@@ -1249,7 +1281,9 @@ class DictValuesVariable(DictViewVariable):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictValuesIterator(self.dv_dict.items)
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         # dict_values has no tp_richcompare (inherits object's).
         from .object_protocol import object_richcompare
 
@@ -1318,7 +1352,9 @@ class DictItemsVariable(DictViewVariable):
 
         return iter_contains(self.view_items_vt, item, tx)
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         # dictview_richcompare: accepts set/frozenset and dict_keys/dict_items.
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L5952-L6010
         # Uses a polyfill with len() and ``in`` so that Dynamo traces through
