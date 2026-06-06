@@ -30,13 +30,11 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
-    IS_LINUX,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TEST_WITH_SLOW,
     TestCase,
     unMarkDynamoStrictTest,
@@ -433,6 +431,11 @@ CROSS_REF_EXCLUDE_SET = {
         None,
         "bernoulli",
     ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
+    # Decomposition is intentionally partial: returns NotImplemented for
+    # non-evenly-divisible output sizes.
+    (None, None, "nn.functional.adaptive_max_pool1d"),
+    (None, None, "nn.functional.adaptive_max_pool2d"),
+    (None, None, "nn.functional.adaptive_max_pool3d"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
@@ -604,10 +607,6 @@ class TestDecomp(TestCase):
                 torch.autograd.gradcheck(func, args)
             self.check_decomposed(aten_name, mode)
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/131050"
-    )
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/76962")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
@@ -679,6 +678,17 @@ class TestDecomp(TestCase):
         xs_two[0] = x
 
         self.assertEqual(xs, xs_two)
+
+    def test_index_add_decomp_source_shape_mismatch(self, device):
+        x = torch.zeros([10, 5], device=device)
+        index = torch.arange(5, device=device)
+        source = torch.ones([5], device=device)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "source tensor shape must match self tensor shape",
+        ):
+            torch._decomp.decompositions.index_add(x, 0, index, source)
 
     def test_cat_single_input(self, device):
         decomp_table = torch._inductor.decomposition.select_decomp_table()

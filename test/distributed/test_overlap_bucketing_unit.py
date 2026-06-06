@@ -40,7 +40,7 @@ aten = torch.ops.aten
 from torch.testing._internal.common_fsdp import get_devtype
 
 
-device_type = str(get_devtype())
+device_type = get_devtype().type
 
 
 import torch
@@ -1227,6 +1227,81 @@ class TestCrossPGOverlap(InductorTestCase):
             f"Off-path reduce_scatters drifted to end: rs={rs_starts}, mm={mm_positions}, names={node_names}",
         )
 
+    @torch._inductor.config.patch(
+        {"test_configs.assume_bucketing_reduces_latency": False}
+    )
+    def test_prefetch_prioritizes_larger_hidden_time(self):
+        """
+        When multiple future collectives have the same semantic priority, choose
+        the one that can consume more of the current overlap window first.
+        """
+        group_name = self.pg1_name
+
+        def func(a, b, c):
+            group_size = 1
+            mm = torch.mm(a, a)
+
+            ag_small = torch.ops._c10d_functional.all_gather_into_tensor(
+                b, group_size, group_name
+            )
+            ag_large = torch.ops._c10d_functional.all_gather_into_tensor(
+                c, group_size, group_name
+            )
+
+            wait_small = torch.ops._c10d_functional.wait_tensor(ag_small)
+            wait_large = torch.ops._c10d_functional.wait_tensor(ag_large)
+            return mm.sum() + wait_small.sum() + wait_large.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b, c)
+
+        ag_small, ag_large = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        (mm,) = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mm.default
+        )
+
+        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
+            if node is ag_small:
+                return 1.0
+            if node is ag_large:
+                return 8.0
+            if node.target == torch.ops.aten.mm.default:
+                return 8.0
+            return 0.0
+
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        scheduler = OverlapScheduler(
+            traced,
+            # Each all_gather has a 128B footprint in this graph.  Limit in-flight
+            # collectives to one so picking the larger hidden-time candidate
+            # reduces total exposed time, rather than only changing order.
+            max_in_flight_gb=0.0000002,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=custom_runtime,
+            collective_estimator="analytical",
+        )
+        scheduler.run()
+
+        self.assertIn(mm, scheduler.collective_info[ag_large].hiding_nodes)
+        self.assertNotIn(mm, scheduler.collective_info[ag_small].hiding_nodes)
+        self.assertEqual(scheduler.collective_info[ag_large].exposed_time_ms, 0.0)
+        self.assertEqual(scheduler.collective_info[ag_small].exposed_time_ms, 1.0)
+        self.assertEqual(
+            sum(info.exposed_time_ms for info in scheduler.collective_info.values()),
+            1.0,
+        )
+
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1650,6 +1725,65 @@ class TestOverlapSchedulingFixes(InductorTestCase):
             helper.has_cycle(),
             "Cycle: pre_bucket <-> new_start via data + extra deps",
         )
+
+    def test_graphsafe_rng_state_with_insert_overlap_deps(self):
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.virtualized import V
+        from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+        torch.cuda.init()
+
+        def func(a, b, rng_state):
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(a, 1, "0")
+            rng = graphsafe_run_with_rng_state(
+                torch.ops.aten.mm.default, a, b, rng_state=rng_state
+            )
+            wait = torch.ops._c10d_functional.wait_tensor(ag)
+            return rng + wait
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            a = torch.empty(4, 4, device=self.device)
+            b = torch.empty(4, 4, device=self.device)
+            gen = torch.cuda.default_generators[0].clone_state()
+            traced = make_fx(func)(a, b, gen)
+
+        def custom_runtime_estimation(
+            node: fx.Node, override_size: int | None
+        ) -> float | None:
+            if node.op != "call_function":
+                return None
+            if node.target is graphsafe_run_with_rng_state:
+                return 10.0
+            if node.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
+                return 10.0
+            return None
+
+        schedule_overlap_bucketing(
+            traced,
+            insert_overlap_deps=True,
+            collective_bucketing=False,
+            custom_runtime_estimation=custom_runtime_estimation,
+            collective_estimator="analytical",
+            compute_estimator="analytical",
+            pre_bucketing_fsdp_collectives=False,
+        )
+
+        rng_placeholder = next(
+            n
+            for n in traced.graph.nodes
+            if n.op == "placeholder" and isinstance(n.meta.get("val"), torch.Generator)
+        )
+        user = next(iter(rng_placeholder.users))
+        self.assertIs(user.target, control_deps)
+
+        graph = GraphLowering(traced, [a, b, gen])
+        with V.set_fake_mode(fake_mode), V.set_graph_handler(graph):
+            graph.run(a, b, gen)
 
 
 class TestForeachGroupsUnit(InductorTestCase):
