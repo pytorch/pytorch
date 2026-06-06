@@ -821,13 +821,15 @@ if(USE_LLVM_BOLT)
     file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
          DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
 
-    # BOLT requires -fno-reorder-blocks-and-partition and -Wl,--emit-relocs.
+    # BOLT requires -fno-reorder-blocks-and-partition for the compiler and
+    # --emit-relocs for the linker. Since --emit-relocs increases the binary
+    # size, we limit the use to libraries that are actually optimized by BOLT
+    # instead of applying globally (see target_optimize_if_llvm_bolt_enabled)
     # NVIDIA internal benchmarking shows -fno-plt also provides a perf boost.
     append_cxx_flag_if_supported("-fno-plt" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-fno-reorder-blocks-and-partition" CMAKE_CXX_FLAGS)
     append_c_flag_if_supported("-fno-plt" CMAKE_C_FLAGS)
     append_c_flag_if_supported("-fno-reorder-blocks-and-partition" CMAKE_C_FLAGS)
-    string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,--emit-relocs")
   endif()
 endif()
 

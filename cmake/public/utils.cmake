@@ -575,6 +575,9 @@ function(target_optimize_if_llvm_bolt_enabled tgt)
   if(NOT USE_LLVM_BOLT)
     return()
   endif()
+  # BOLT needs --emit-relocs. This flag increases the binary size so we
+  # scope it to bolt optimized targets rather than applying globally.
+  target_link_options_if_supported(${tgt} "--emit-relocs")
   set(_profile "${LLVM_BOLT_PROFILES_DIR}/lib${tgt}.yaml")
   if(NOT EXISTS "${_profile}")
     message(FATAL_ERROR "USE_LLVM_BOLT is on but no BOLT profile for target '${tgt}' "
