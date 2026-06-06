@@ -27,13 +27,21 @@ def _make_zeros(shape, dtype, device, when=True):
 
 
 def _linear_cross_entropy_batch_chunked_setup_context(ctx, inputs, output):
-    *_, allow_retain_graph, compute_input_grad, compute_linear_weight_grad = inputs
+    (
+        *_,
+        allow_retain_graph,
+        compute_input_grad,
+        compute_linear_weight_grad,
+        compute_linear_bias_grad,
+    ) = inputs
     ctx.allow_retain_graph = allow_retain_graph
     ctx.compute_input_grad = compute_input_grad
     ctx.compute_linear_weight_grad = compute_linear_weight_grad
-    _, grad_input, grad_linear_weight = output
+    ctx.compute_linear_bias_grad = compute_linear_bias_grad
+    _, grad_input, grad_linear_weight, grad_linear_bias = output
     ctx._gi = grad_input if compute_input_grad else None
     ctx._gw = grad_linear_weight if compute_linear_weight_grad else None
+    ctx._gb = grad_linear_bias if compute_linear_bias_grad else None
 
 
 @dataclasses.dataclass
@@ -107,6 +115,21 @@ class _ChunkViews:
         return ctx.grad_input.narrow(0, self.bchunk_start, self.bchunk_size)
 
     @cached_property
+    def bias_grad_acc(self) -> torch.Tensor:
+        # ``ctx.linear_bias_grad_chunk`` is an acc_dtype scratch that
+        # accumulates the per-chunk sum + index_add at acc precision,
+        # then commits to ``grad_linear_bias`` (input dtype) via the
+        # ``ctx.chunks()`` post-yield hook -- mirrors
+        # ``weight_grad_chunk``'s bulk-+-correction pattern for
+        # ``grad_linear_weight``. On the non-acc path, accumulation
+        # goes directly into ``grad_linear_bias`` (no commit, no
+        # post-yield action).
+        ctx = self.ctx
+        if ctx.alloc_linear_bias_grad_chunk:
+            return ctx.linear_bias_grad_chunk
+        return ctx.grad_linear_bias
+
+    @cached_property
     def logits_downcast(self) -> torch.Tensor:
         # Lazy: first access must come AFTER in-place mods to self.logits.
         ctx = self.ctx
@@ -142,17 +165,20 @@ class _ChunkContext:
     ignore_index: int
     reduction: str
     linear_weight: torch.Tensor
+    linear_bias: torch.Tensor | None
 
-    # Optional "when=" buffers (weight_grad_chunk, logits_acc_buf,
-    # input_grad_acc_buf, input_chunk_acc_buf, grad_input, grad_linear_weight)
-    # are cached_properties below.
+    # The optional "when=" buffers (weight_grad_chunk, logits_acc_buf,
+    # input_grad_acc_buf, input_chunk_acc_buf, grad_input,
+    # grad_linear_weight, grad_linear_bias) are cached_properties below.
     logits_buf: torch.Tensor
     tmp: torch.Tensor
     output: torch.Tensor
 
     compute_input_grad: bool
     compute_linear_weight_grad: bool
+    compute_linear_bias_grad: bool
     alloc_weight_grad_chunk: bool
+    alloc_linear_bias_grad_chunk: bool
     alloc_input_grad_acc_buf: bool
     alloc_input_chunk_acc_buf: bool
     alloc_logits_acc_buf: bool
@@ -206,6 +232,18 @@ class _ChunkContext:
         if self.linear_weight_cast_dtype != self.dtype:
             return self.linear_weight.to(self.linear_weight_cast_dtype)
         return self.linear_weight
+
+    @cached_property
+    def linear_bias_cast(self) -> torch.Tensor | None:
+        # ``linear_bias`` is added to per-chunk logits, so its dtype
+        # must match the logits buffer (which may be acc_dtype on the
+        # upcast path). ``None`` when the user passed no bias -- the
+        # loop skips the add.
+        if self.linear_bias is None:
+            return None
+        if self.linear_bias.dtype != self.logits_buf.dtype:
+            return self.linear_bias.to(self.logits_buf.dtype)
+        return self.linear_bias
 
     @cached_property
     def weight_grad_chunk(self) -> torch.Tensor:
@@ -266,12 +304,42 @@ class _ChunkContext:
             when=self.compute_linear_weight_grad,
         )
 
+    @cached_property
+    def grad_linear_bias(self) -> torch.Tensor:
+        # Same shape invariant as ``linear_bias``:
+        # ``linear_bias.shape == linear_weight.shape[:-1]``. Final
+        # accumulator in input dtype to match ``grad_linear_weight``.
+        return _make_zeros(
+            self.linear_weight.shape[:-1],
+            self.dtype,
+            self.input.device,
+            when=self.compute_linear_bias_grad,
+        )
+
+    @cached_property
+    def linear_bias_grad_chunk(self) -> torch.Tensor:
+        # ``linear_weight.shape[:-1]`` acc_dtype per-chunk scratch,
+        # mirroring ``weight_grad_chunk``'s role for
+        # ``grad_linear_weight``: the sub_ + index_add_ pair
+        # accumulates per-chunk in acc_dtype, then a single downcast
+        # commit (in ``chunks()`` post-yield) lands in
+        # ``grad_linear_bias``. ``_make_zeros`` so the first chunk's
+        # accumulators start at zero; the post-yield hook zeroes it
+        # again for subsequent chunks.
+        return _make_zeros(
+            self.linear_weight.shape[:-1],
+            self.acc_dtype,
+            self.input.device,
+            when=self.alloc_linear_bias_grad_chunk,
+        )
+
     @classmethod
     def build(
         cls,
         input: torch.Tensor,
         linear_weight: torch.Tensor,
         target: torch.Tensor,
+        linear_bias: torch.Tensor | None,
         weight: torch.Tensor | None,
         reduction: str,
         ignore_index: int,
@@ -281,6 +349,7 @@ class _ChunkContext:
         acc_dtype: torch.dtype,
         compute_input_grad: bool,
         compute_linear_weight_grad: bool,
+        compute_linear_bias_grad: bool,
     ) -> "_ChunkContext":
         # ===== Validation =====
         if target.dtype != torch.int64:
@@ -294,6 +363,11 @@ class _ChunkContext:
         if reduction not in {"mean", "sum"}:
             raise NotImplementedError(
                 f"linear_cross_entropy does not support {reduction=}"
+            )
+        if linear_bias is not None and linear_bias.shape != linear_weight.shape[:-1]:
+            raise RuntimeError(
+                "linear_cross_entropy: expected linear_bias shape "
+                f"{tuple(linear_weight.shape[:-1])}, got {tuple(linear_bias.shape)}."
             )
 
         device = input.device
@@ -345,6 +419,12 @@ class _ChunkContext:
         alloc_weight_grad_chunk = compute_linear_weight_grad and not (
             acc_policy == "compact" and (is_cuda or logits_buf_dtype == dtype)
         )
+        # Per-chunk acc_dtype scratch for grad_linear_bias; same
+        # bulk-+-correction precision rationale as
+        # ``alloc_weight_grad_chunk``. Fires only when there is
+        # precision to gain: ``use_acc_dtype`` and the user asked for
+        # the bias gradient.
+        alloc_linear_bias_grad_chunk = compute_linear_bias_grad and use_acc_dtype
         alloc_input_grad_acc_buf = (
             compute_input_grad
             and not is_cuda
@@ -398,6 +478,7 @@ class _ChunkContext:
             ignore_index=ignore_index,
             reduction=reduction,
             linear_weight=linear_weight,
+            linear_bias=linear_bias,
             logits_buf=torch.empty(
                 (batch_chunk_size, num_classes),
                 dtype=logits_buf_dtype,
@@ -413,7 +494,9 @@ class _ChunkContext:
             output=_make_zeros((), output_dtype, device),
             compute_input_grad=compute_input_grad,
             compute_linear_weight_grad=compute_linear_weight_grad,
+            compute_linear_bias_grad=compute_linear_bias_grad,
             alloc_weight_grad_chunk=alloc_weight_grad_chunk,
+            alloc_linear_bias_grad_chunk=alloc_linear_bias_grad_chunk,
             alloc_input_grad_acc_buf=alloc_input_grad_acc_buf,
             alloc_input_chunk_acc_buf=alloc_input_chunk_acc_buf,
             alloc_logits_acc_buf=alloc_logits_acc_buf,
@@ -426,9 +509,13 @@ class _ChunkContext:
         )
 
     def chunks(self):
-        """Yield a ``_ChunkViews`` per iter. Post-yield, commit the buf-and-copy
-        input-grad slice into ``grad_input`` (skipped when ``grad_input_chunk``
-        aliases ``grad_input``).
+        """Yield a ``_ChunkViews`` per iter. Post-yield, run the
+        scratch-to-final commits that the loop body deferred: the
+        buf-and-copy input-grad slice into ``grad_input`` (skipped on
+        the fast path where ``grad_input_chunk`` aliases
+        ``grad_input``), and the acc_dtype linear_bias scratch into
+        ``grad_linear_bias`` (skipped when accumulation went straight
+        into ``grad_linear_bias`` in input dtype).
         """
         batch_chunk_size = self.logits_buf.shape[0]
         for bchunk_start in range(0, self.num_batches, batch_chunk_size):
@@ -439,6 +526,13 @@ class _ChunkContext:
                 self.grad_input.narrow(0, bchunk_start, bchunk_size).copy_(
                     chunk.grad_input_chunk
                 )
+            if self.alloc_linear_bias_grad_chunk:
+                # ``chunk.bias_grad_acc`` aliases ``linear_bias_grad_chunk``
+                # here; downcast-commit, then zero for the next chunk.
+                self.grad_linear_bias.add_(
+                    chunk.bias_grad_acc.to(self.grad_linear_bias.dtype)
+                )
+                chunk.bias_grad_acc.zero_()
 
     def bind_chunk(self, bchunk_start: int, bchunk_size: int) -> _ChunkViews:
         input_chunk = self.input.narrow(0, bchunk_start, bchunk_size)
@@ -484,6 +578,16 @@ class _ChunkContext:
         # poisons the loss and 1/0 the gradient.
         return x.exp_().sum(dim, dtype=self.acc_dtype)
 
+    def sum(self, x: torch.Tensor, dim: int) -> torch.Tensor:
+        # Reduce ``x`` along ``dim`` at acc_dtype on mixed-precision
+        # paths and at input dtype otherwise -- the precision
+        # contract callers see is "as accurate as the active policy
+        # allows". Currently used by the bias-grad path so the per-
+        # chunk sum carries full precision before the post-yield
+        # downcast commit to grad_linear_bias.
+        target_dtype = self.acc_dtype if self.use_acc_dtype else self.dtype
+        return x.sum(dim, dtype=target_dtype)
+
     def div(self, num: torch.Tensor, den: torch.Tensor) -> torch.Tensor:
         factor = self.tmp.narrow(0, 0, num.shape[0])
         # MPS lacks fused cross-dtype torch.div(out=); copy_ fallback.
@@ -524,9 +628,18 @@ class _ChunkContext:
         return x.to(dtype)
 
 
-# Private op. Returns ``(loss, grad_input, grad_linear_weight)`` because
-# register_autograd has no save_for_backward: grads flow via return tuple,
-# stash on ctx in ``setup_context``, backward mutates them in place (``.mul_()``).
+# Private op. Returns ``(loss, grad_input, grad_linear_weight, grad_linear_bias)``.
+# Shape invariants on outputs:
+#   ``grad_input.shape == input.shape``,
+#   ``grad_linear_weight.shape == linear_weight.shape``,
+#   ``grad_linear_bias.shape == linear_weight.shape[:-1]``.
+# The bias-shape invariant follows the (C, *out_features) layout, which
+# on this code path reduces to ``(C,)`` because the upstream gate
+# requires ``out_features == ()``.
+# ``torch.library.register_autograd`` has no ``save_for_backward``-style
+# state, so the grads flow via the return tuple, get stashed on ctx by
+# ``setup_context``, and backward mutates them in place via ``.mul_()``.
+# ``mutates_args=()`` reflects that inputs are not mutated.
 @torch.library.custom_op(
     "torch_nn::_linear_cross_entropy_batch_chunked", mutates_args=()
 )
@@ -534,6 +647,7 @@ def _linear_cross_entropy_batch_chunked(
     input: torch.Tensor,
     linear_weight: torch.Tensor,
     target: torch.Tensor,
+    linear_bias: torch.Tensor | None,
     weight: torch.Tensor | None,
     reduction: str,
     ignore_index: int,
@@ -544,10 +658,40 @@ def _linear_cross_entropy_batch_chunked(
     allow_retain_graph: bool,
     compute_input_grad: bool,
     compute_linear_weight_grad: bool,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Returns ``(loss, grad_input, grad_linear_weight)``. Grads precomputed
-    in forward and stashed on ctx; backward is a single multiply by the
-    upstream grad -- computing in forward is what lets chunking save memory.
+    compute_linear_bias_grad: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Returns ``(loss, grad_input, grad_linear_weight, grad_linear_bias)``.
+    Gradients precomputed in forward and stashed on ctx; backward is a
+    single multiply by the upstream gradient. Computing grads in
+    forward is what lets chunking save memory.
+
+    Dispatch contract
+    -----------------
+    The chunked loop body is the mathematical description of the
+    algorithm. All policy / device / dtype dispatch lives in
+    ``_ChunkContext`` (and its ``_ChunkViews`` peers):
+
+    - **Buffer choices** -- whether a per-chunk acc_dtype scratch is
+      used or accumulation runs directly into the final tensor -- live
+      in ``alloc_*`` flags computed in ``_ChunkContext.build`` and
+      surfaced as ``_ChunkViews`` properties (e.g.
+      ``grad_input_chunk``, ``bias_grad_acc``).
+    - **Scratch-to-final commits** for those buffers live in
+      ``_ChunkContext.chunks()`` post-yield hooks (e.g. the
+      ``grad_input`` buf-and-copy commit, the ``grad_linear_bias``
+      downcast-and-zero commit).
+    - **Dtype dispatch on individual math operations** lives in
+      ``_ChunkContext`` methods that mirror PyTorch ops --
+      ``mm``, ``amax``, ``dotgather``, ``sumexp_``, ``sum``, ``div``,
+      ``mul``, ``to`` -- each one hiding ``out_dtype=`` / acc-dtype /
+      buffer-reuse decisions behind a single math call.
+
+    The function body therefore should not introduce inline
+    ``if ctx.use_acc_dtype`` / ``if ctx.is_cuda`` / etc. branches; new
+    policy-aware behaviour belongs in one of the three locations
+    above. The two existing inline branches (``if compute_input_grad``,
+    ``if compute_linear_weight_grad``, etc.) gate optional outputs,
+    not dispatch.
     """
     # Direct callers must resolve "auto" / None via _adjust first.
     if acc_policy == "auto" or acc_dtype is None:
@@ -571,10 +715,22 @@ def _linear_cross_entropy_batch_chunked(
             "False at trace time but linear_weight.requires_grad is True at "
             "runtime; recompile the graph with the desired requires_grad."
         )
+    if (
+        not compute_linear_bias_grad
+        and linear_bias is not None
+        and linear_bias.requires_grad
+        and grad_enabled
+    ):
+        raise RuntimeError(
+            "linear_cross_entropy chunked op: compute_linear_bias_grad was False at "
+            "trace time but linear_bias.requires_grad is True at runtime; recompile "
+            "the graph with the desired requires_grad."
+        )
     ctx = _ChunkContext.build(
         input,
         linear_weight,
         target,
+        linear_bias,
         weight,
         reduction,
         ignore_index,
@@ -584,18 +740,23 @@ def _linear_cross_entropy_batch_chunked(
         acc_dtype,
         compute_input_grad,
         compute_linear_weight_grad,
+        compute_linear_bias_grad,
     )
     dtype = ctx.dtype
     output = ctx.output
     grad_input = ctx.grad_input
     grad_linear_weight = ctx.grad_linear_weight
+    grad_linear_bias = ctx.grad_linear_bias
     weight_grad_chunk = ctx.weight_grad_chunk
     linear_weight_cast = ctx.linear_weight_cast
+    linear_bias_cast = ctx.linear_bias_cast
 
     if reduction == "mean" and ctx.num_batches == 0:
         output.fill_(torch.nan)
 
-    compute_grads = compute_input_grad or compute_linear_weight_grad
+    compute_grads = (
+        compute_input_grad or compute_linear_weight_grad or compute_linear_bias_grad
+    )
 
     # Do not ``break`` from this loop -- ``ctx.chunks()`` runs a
     # post-yield grad_input commit that the in-flight chunk needs.
@@ -605,6 +766,8 @@ def _linear_cross_entropy_batch_chunked(
         target_chunk = chunk.target_chunk
 
         ctx.mm(chunk.input, chunk.linear_weight.T, out=logits)
+        if linear_bias_cast is not None:
+            logits.add_(linear_bias_cast)  # broadcasts (V,) -> (B_chunk, V)
         logits.sub_(ctx.amax(logits))  # softmax stability
         # output += <weight_chunk, logits[:, target_chunk]>
         output.add_(ctx.dotgather(weight_chunk, logits, target_chunk))
@@ -624,6 +787,30 @@ def _linear_cross_entropy_batch_chunked(
         output.sub_(weight_chunk.to(softmax_denom.dtype).dot(softmax_denom.log_()))
 
         if compute_grads:
+            if compute_linear_bias_grad:
+                # Must run BEFORE the linear-weight-grad branch below.
+                # The ordering invariant is defensive across all
+                # ``ctx.mul`` paths: only the (not use_acc_dtype &&
+                # num_classes >= in_features) branch overwrites the
+                # first ``in_features`` columns of ``logits_buf`` via a
+                # narrow ``out=`` view today, but ``ctx.mul``'s contract
+                # does not promise to leave ``logits_buf`` untouched on
+                # other paths -- placing the bias-grad read here keeps
+                # the loop correct regardless of which ``ctx.mul``
+                # variant fires.
+                #
+                # The inline form expresses
+                #   dL/db_j = sum_n W[T[n]] * (softmax(X)[n, j] - delta(T[n], j))
+                # as ``-logits.sum(dim=0)`` (the softmax-weighted term)
+                # plus ``index_add_(0, target_chunk, weight_chunk)``
+                # (the one-hot-weighted correction). ``logits`` is
+                # ``softmax(X) * weight_chunk[n]`` here; ``weight_chunk``
+                # already carries the sign and the 1/d mean
+                # normalization (``W`` here is the CE class weight, not
+                # ``linear_weight``), so no extra scaling is needed.
+                bias_grad_acc = chunk.bias_grad_acc
+                bias_grad_acc.sub_(ctx.sum(logits, dim=0))
+                bias_grad_acc.index_add_(0, target_chunk, weight_chunk)
             if compute_input_grad:
                 grad_input_chunk = chunk.grad_input_chunk
                 input_grad_logits = chunk.input_grad_logits
@@ -677,12 +864,14 @@ def _linear_cross_entropy_batch_chunked(
         output.to(dtype),
         grad_input.to(dtype),
         grad_linear_weight,
+        grad_linear_bias,
     )
 
 
-# Op arg count; backward returns this many slots. Hand-maintained because
-# CustomOpDef has no public arg-introspection. Update on signature change.
-_NUM_OP_INPUTS = 13
+# Op arg count; backward returns this many slots. Hand-maintained
+# because CustomOpDef has no public arg-introspection. Update on
+# signature change.
+_NUM_OP_INPUTS = 15
 
 
 @_linear_cross_entropy_batch_chunked.register_fake
@@ -690,6 +879,7 @@ def _(
     input,
     linear_weight,
     target,
+    linear_bias,
     weight,
     reduction,
     ignore_index,
@@ -700,6 +890,7 @@ def _(
     allow_retain_graph,
     compute_input_grad,
     compute_linear_weight_grad,
+    compute_linear_bias_grad,
 ):
     if reduction in {"mean", "sum"}:
         result = torch.empty((), dtype=input.dtype, device=input.device)
@@ -709,6 +900,12 @@ def _(
     grad_linear_weight_shape = (
         linear_weight.shape if compute_linear_weight_grad else (0, 0)
     )
+    # ``linear_bias.shape == linear_weight.shape[:-1]`` (the (C, *out_features)
+    # invariant); on this code path ``out_features == ()`` so it reduces
+    # to (C,), but expressing it this way keeps the relationship visible.
+    grad_linear_bias_shape = (
+        linear_weight.shape[:-1] if compute_linear_bias_grad else (0,)
+    )
 
     grad_input = torch.empty(
         grad_input_shape,
@@ -716,13 +913,24 @@ def _(
         device=input.device,
         requires_grad=False,
     )
+    # The real implementation allocates ``grad_linear_weight`` and
+    # ``grad_linear_bias`` in ``self.dtype = input.dtype`` (chunked op
+    # supports mixed-precision: ``input.dtype`` may differ from
+    # ``linear_weight.dtype``). Mirror that here so the fake-tensor
+    # shape/dtype matches what eager produces.
     grad_linear_weight = torch.empty(
         grad_linear_weight_shape,
-        dtype=linear_weight.dtype,
+        dtype=input.dtype,
         device=linear_weight.device,
         requires_grad=False,
     )
-    return result, grad_input, grad_linear_weight
+    grad_linear_bias = torch.empty(
+        grad_linear_bias_shape,
+        dtype=input.dtype,
+        device=input.device,
+        requires_grad=False,
+    )
+    return result, grad_input, grad_linear_weight, grad_linear_bias
 
 
 @_linear_cross_entropy_batch_chunked.register_vmap
@@ -751,10 +959,13 @@ def _vmap(info, in_dims, *args):
     losses = torch.stack([o[0] for o in outputs])
     grad_inputs = torch.stack([o[1] for o in outputs])
     grad_linear_weights = torch.stack([o[2] for o in outputs])
-    return (losses, grad_inputs, grad_linear_weights), (0, 0, 0)
+    grad_linear_biases = torch.stack([o[3] for o in outputs])
+    return (losses, grad_inputs, grad_linear_weights, grad_linear_biases), (0, 0, 0, 0)
 
 
-def _linear_cross_entropy_batch_chunked_backward(ctx, grad_output, _gi_grad, _gw_grad):
+def _linear_cross_entropy_batch_chunked_backward(
+    ctx, grad_output, _gi_grad, _gw_grad, _gb_grad
+):
     result = [None] * _NUM_OP_INPUTS
     if ctx.compute_input_grad:
         if ctx.allow_retain_graph:
@@ -779,6 +990,19 @@ def _linear_cross_entropy_batch_chunked_backward(ctx, grad_output, _gi_grad, _gw
                     "retain_graph=True / double backward are not supported."
                 )
             result[1] = gw.mul_(grad_output)
+
+    # ``linear_bias`` is forward arg position 3 (after input, linear_weight, target).
+    if ctx.compute_linear_bias_grad:
+        if ctx.allow_retain_graph:
+            result[3] = ctx._gb * grad_output
+        else:
+            gb, ctx._gb = ctx._gb, None
+            if gb is None:
+                raise RuntimeError(
+                    "linear_cross_entropy chunked backward called twice; "
+                    "retain_graph=True / double backward are not supported."
+                )
+            result[3] = gb.mul_(grad_output)
     return tuple(result)
 
 
