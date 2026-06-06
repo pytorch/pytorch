@@ -7013,6 +7013,35 @@ def forward(self, primals_1, tangents_1):
         x = torch.randn(4, requires_grad=True)
         fn(x).sum().backward()
 
+    def test_disable_functionalization_ignores_effect_token_metadata(self):
+        def fn(args):
+            (x,) = args
+            return torch.linalg.inv(x)
+
+        compiled_fn = compiled_function(
+            fn,
+            nop,
+            nop,
+            partition_fn=default_partition,
+            keep_inference_input_mutations=True,
+            disable_functionalization=True,
+        )
+
+        x = torch.tensor(
+            [[2.0, 0.1, -0.2], [0.3, 1.7, 0.4], [-0.1, 0.2, 2.1]]
+        ).requires_grad_()
+        eager_x = x.detach().clone().requires_grad_()
+        compiled_x = x.detach().clone().requires_grad_()
+
+        eager_out = fn([eager_x])
+        (eager_grad,) = torch.autograd.grad(eager_out.sum(), eager_x)
+
+        compiled_out = compiled_fn([compiled_x])
+        (compiled_grad,) = torch.autograd.grad(compiled_out.sum(), compiled_x)
+
+        self.assertEqual(compiled_out, eager_out)
+        self.assertEqual(compiled_grad, eager_grad)
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_force_save_effectful_ops(self):
         """Test that effectful op outputs are saved, not recomputed.
@@ -8186,6 +8215,12 @@ def forward(self, primals_1, tangents_1):
         out = f(x)
         (grad_x,) = torch.autograd.grad(out.sum(), x, create_graph=True)
         self.assertEqual(grad_x, 2 * x)
+        self.assertTrue(grad_x.requires_grad)
+        self.assertIsNotNone(grad_x.grad_fn)
+        with self.assertRaisesRegex(
+            RuntimeError, "does not currently support double backward"
+        ):
+            grad_x.sum().backward()
 
     def test_compiled_backward_multiple_outputs(self):
         @torch.compile(backend="aot_eager")
@@ -8225,7 +8260,9 @@ def forward(self, primals_1, tangents_1):
             _codegen_compiled_backward,
         )
 
-        bwd_fn = _codegen_compiled_backward(num_rng=0, num_tensors_no_vc_check=None)
+        bwd_fn = _codegen_compiled_backward(
+            num_rng=0, num_tensors_no_vc_check=None, inputs_require_grad=False
+        )
 
         def noop(*a, **kw):
             return None
@@ -9532,6 +9569,25 @@ def forward(self, primals_1, tangents_1):
             torch.ops.aten._assert_tensor_metadata.default,
         ):
             node = g.call_function(target, args=())
+            self.assertEqual(_size_of(node), 0)
+
+    def test_size_of_fake_script_object(self):
+        import torch._functorch.config as functorch_config
+        from torch._functorch.partitioners import _size_of
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        g = torch.fx.Graph()
+        node = g.call_function(torch.ops.aten.abs.default, args=())
+        node.meta["val"] = FakeScriptObject(None, "test_class", None)
+
+        # A (Fake)ScriptObject may hold tensors internally, so by default
+        # _size_of refuses to guess its memory footprint and raises.
+        with self.assertRaisesRegex(RuntimeError, "Cannot compute the size"):
+            _size_of(node)
+
+        # The unsafe escape hatch makes _size_of assume such objects are
+        # zero size, unblocking compilation at the cost of soundness.
+        with functorch_config.patch(unsafe_treat_script_objects_as_zero_size=True):
             self.assertEqual(_size_of(node), 0)
 
 
@@ -11457,12 +11513,6 @@ symbolic_aot_autograd_failures = {
         "nn.functional.batch_norm", ""
     ),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail(
-        "nn.functional.cross_entropy", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
-        "nn.functional.linear_cross_entropy", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
         "nn.functional.ctc_loss", ""
     ),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/deco...
     xfail(
@@ -11791,6 +11841,18 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         optout = run(optf)
 
         self.assertEqual(out, optout)
+
+    def test_lift_after_factory(self):
+        def f(low, high, size):
+            y = torch.randint(low=low, high=high, size=size)
+            return torch.ops.aten.lift.default(y)
+
+        torch.manual_seed(0)
+        out = f(0, 100, [2, 3])
+        torch.manual_seed(0)
+        opt_out = torch.compile(f, backend="aot_eager", fullgraph=True)(0, 100, [2, 3])
+
+        self.assertEqual(out, opt_out)
 
     def test_mutations_in_bw_detached_from_tangent(self):
         class AF(torch.autograd.Function):
