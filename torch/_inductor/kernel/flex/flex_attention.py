@@ -45,7 +45,7 @@ from .flex_flash_attention import (
     _use_flex_flash_attention_backward,
     create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
-    has_unsupported_captured_scalars,
+    has_unsupported_cpu_scalar_tensor_captures,
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
@@ -70,6 +70,24 @@ def _sanitize_kernel_options_for_triton(
     sanitized = dict(kernel_options)
     backend = cast(_Backend, sanitized.pop("BACKEND", "AUTO"))
     return sanitized, backend
+
+
+def _check_flash_supported_scalar_captures(
+    score_mod_other_buffers,
+    mask_mod_other_buffers,
+    *,
+    backward: bool = False,
+) -> None:
+    if has_unsupported_cpu_scalar_tensor_captures(
+        score_mod_other_buffers, mask_mod_other_buffers
+    ):
+        direction = " backward" if backward else ""
+        raise RuntimeError(
+            f"BACKEND='FLASH' but flash attention{direction} cannot be used: "
+            "NYI: score_mod or mask_mod captures a 0-dim CPU tensor scalar. "
+            "Workarounds: use BACKEND='TRITON' or pass the value as a tensor "
+            "on device instead of capturing a CPU scalar tensor."
+        )
 
 
 @SymbolicGridFn
@@ -184,19 +202,12 @@ def flex_attention(
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
 
-    # Early check for FLASH backend: detect unsupported captured scalars before
-    # building subgraph buffers (which can trigger unbacked_bindings errors)
+    # Early check for FLASH backend: reject scalar captures that cannot be
+    # represented by flash-attn aux_scalars before building subgraph buffers.
     if backend == "FLASH":
-        if has_unsupported_captured_scalars(
+        _check_flash_supported_scalar_captures(
             score_mod_other_buffers, mask_mod_other_buffers
-        ):
-            raise RuntimeError(
-                "BACKEND='FLASH' but flash attention cannot be used: "
-                "NYI: score_mod or mask_mod captures a dynamic scalar (SymInt/SymFloat). "
-                "The FLASH backend cannot inline symbolic values into the CuteDSL template. "
-                "Workarounds: use BACKEND='TRITON', compile with dynamic=False, or pass the "
-                "value as a tensor on device instead of capturing a Python scalar."
-            )
+        )
 
     if backend == "FLASH":
         score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
@@ -736,6 +747,9 @@ def flex_attention_backward(*args, **kwargs):
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
     if backend == "FLASH":
+        _check_flash_supported_scalar_captures(
+            score_mod_other_buffers, mask_mod_other_buffers, backward=True
+        )
         score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
         mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
 
@@ -853,6 +867,7 @@ def flex_attention_backward(*args, **kwargs):
             else joint_outputs.grad_input,
             score_mod_other_buffers=list(score_mod_other_buffers),
             mask_graph_buffer=mask_graph_buffer if needs_block_mask else None,
+            mask_mod_other_buffers=list(mask_mod_other_buffers),
             q_num_blocks=q_num_blocks if needs_block_mask else None,
             q_indices=q_indices if needs_block_mask else None,
             full_q_num_blocks=full_q_num_blocks if needs_block_mask else None,

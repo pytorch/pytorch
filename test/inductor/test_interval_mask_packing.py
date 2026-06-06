@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import sympy
+
 import torch
 from torch._inductor.kernel.flex.interval_mask_packing import (
     select_packed_mask_intervals,
@@ -273,6 +275,43 @@ class TestIntervalMaskPacking(InductorTestCase):
             intervals = select_packed_mask_intervals(torch.fx.GraphModule({}, graph))
 
         self.assertIsNone(intervals)
+
+    def test_packed_mask_interval_selector_mixes_aux_scalars_and_tensors(self):
+        graph = torch.fx.Graph()
+        b = graph.placeholder("b")
+        graph.placeholder("h")
+        q_idx = graph.placeholder("q_idx")
+        kv_idx = graph.placeholder("kv_idx")
+        limit = graph.placeholder("limit")
+        doc_ids = graph.placeholder("doc_ids")
+        offsets = graph.placeholder("offsets")
+        self._set_node_dtype(doc_ids, torch.int32, (1, 128))
+        self._set_node_dtype(offsets, torch.int32, (5,))
+        doc = graph.call_function(torch.ops.aten.index.Tensor, (doc_ids, [b, q_idx]))
+        self._set_node_dtype(doc, torch.int32)
+        start = graph.call_function(torch.ops.aten.index.Tensor, (offsets, [doc]))
+        self._set_node_dtype(start, torch.int32)
+        above_start = graph.call_function(torch.ops.aten.ge.Tensor, (kv_idx, start))
+        below_limit = graph.call_function(torch.ops.aten.lt.Tensor, (kv_idx, limit))
+        graph.output(
+            graph.call_function(
+                torch.ops.aten.bitwise_and.Tensor, (above_start, below_limit)
+            )
+        )
+
+        limit_symbol = sympy.Symbol("s_limit", integer=True, nonnegative=True)
+        with V.set_graph_handler(MockGraphHandler()):
+            intervals = select_packed_mask_intervals(
+                torch.fx.GraphModule({}, graph),
+                other_buffers=[limit_symbol, object(), object()],
+                aux_scalar_symbol_codes={limit_symbol: "aux_scalars[0]"},
+            )
+
+        self.assertIsNotNone(intervals)
+        self.assertEqual(len(intervals), 1)
+        self.assertIn("aux_scalars[0]", intervals[0].render_upper())
+        self.assertIn("aux_tensors[0]", intervals[0].render_lower())
+        self.assertIn("aux_tensors[1]", intervals[0].render_lower())
 
     def test_packed_mask_interval_selector_aux_loaded_lower_bound(self):
         graph = torch.fx.Graph()
