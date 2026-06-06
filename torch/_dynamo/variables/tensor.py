@@ -1172,6 +1172,18 @@ class TensorVariable(VariableTracker):
             )
         return None
 
+    def method_is_pinned(
+        self,
+        tx: "InstructionTranslatorBase",
+        device: VariableTracker | None = None,
+    ) -> ConstantVariable | None:
+        # ATen is_pinned() is always false for non-CPU tensors. CPU pinning can
+        # vary without changing Dynamo's tensor metadata guards, so leave it to
+        # the generic path.
+        if device is None and self.device is not None and self.device.type != "cpu":
+            return VariableTracker.build(tx, False)
+        return None
+
     def method_type(
         self,
         tx: "InstructionTranslatorBase",
