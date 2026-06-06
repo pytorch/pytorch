@@ -8,7 +8,7 @@ from .params import DictKernelTemplateParams, KernelTemplateParams
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from ...kernel_inputs import KernelInputs
+    from ..kernel_inputs import KernelInputs
 
 
 class TemplateConfigHeuristics:

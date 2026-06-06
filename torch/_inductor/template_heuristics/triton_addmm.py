@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from ...kernel.mm_common import addmm_epilogue
+from ..kernel.mm_common import addmm_epilogue
 from .base import TemplateConfigHeuristics
 
 
 if TYPE_CHECKING:
-    from ...kernel_inputs import KernelInputs
+    from ..kernel_inputs import KernelInputs
 
 
 class AddMMConfigMixin(TemplateConfigHeuristics):
