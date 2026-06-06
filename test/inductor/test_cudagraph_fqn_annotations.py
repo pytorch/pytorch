@@ -30,7 +30,7 @@ from torch.cuda._graph_annotations import (
     remap_to_exec_graph,
     resolve_pending_annotations,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
 
 
 # ── Fixtures (ported from the external validation harness) ──────────────────
@@ -285,30 +285,54 @@ class TestCudagraphFqnAnnotations(TestCase):
         annotations = dict(get_kernel_annotations())
         self.assertTrue(annotations, "expected non-empty kernel annotations")
 
-        with profile(activities=[ProfilerActivity.CUDA]) as prof, torch.no_grad():
-            compiled(x)
-            torch.cuda.synchronize()
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+        ) as prof:
+            with torch.no_grad():
+                compiled(x)
+                torch.cuda.synchronize()
 
-        events = prof.profiler.kineto_results.events()
+        # Export to Chrome trace JSON and read kernel events.  The CUPTI field
+        # "Graph Node Id" carries the same graphNodeId that keyed our annotations.
+        # Write to /artifacts/ when available (CI), otherwise use a temp file.
+        import os
+
+        artifacts_dir = "/artifacts"
+        if os.path.isdir(artifacts_dir) and os.access(artifacts_dir, os.W_OK):
+            trace_path = os.path.join(artifacts_dir, "cuda_graph_fqn_profiler_trace.json")
+            prof.export_chrome_trace(trace_path)
+            with open(trace_path) as f:
+                trace = json.load(f)
+        else:
+            with TemporaryFileName(suffix=".json") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    trace = json.load(f)
+
+        kernel_events = [
+            e for e in trace.get("traceEvents", []) if e.get("cat") == "kernel"
+        ]
         recovered: dict[int, str] = {}
-        seen_keys: set = set()
-        for evt in events:
-            md = _event_metadata(evt)
-            seen_keys.update(md.keys())
-            gid = _kernel_graph_node_id(evt)
-            if gid is not None and gid in annotations:
+        for ke in kernel_events:
+            args = ke.get("args", {})
+            raw = args.get("Graph Node Id")
+            if raw is None:
+                continue
+            try:
+                gid = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if gid in annotations:
                 for ann in annotations[gid]:
                     if isinstance(ann, dict) and "str" in ann:
                         recovered[gid] = ann["str"]
 
-        if not recovered:
-            self.fail(
-                "No FQN recovered from in-memory profiler events. Observed kernel "
-                f"event metadata keys: {sorted(seen_keys)}. Update "
-                "_GRAPH_NODE_ID_KEYS / _kernel_graph_node_id with the correct key "
-                "(see TODO(discovery))."
-            )
-
+        seen_arg_keys = sorted({k for ke in kernel_events for k in ke.get("args", {})})
+        self.assertTrue(
+            recovered,
+            f"No FQN recovered from Chrome trace kernel events. "
+            f"Kernel event arg keys seen: {seen_arg_keys}",
+        )
         # The profiler path must reproduce the nsys result: per-layer FQNs.
         self.assertTrue(
             any("L.model.layers." in v for v in recovered.values()),
