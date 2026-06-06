@@ -1196,11 +1196,28 @@ def break_graph_if_unsupported(
             self.output.add_output_instructions(cleanup)
 
             self.popn(int(push) - stack_effect)
-            if push:
+            resume_inst = self.next_instruction
+            if push and resume_inst.opname == "POP_TOP":
+                # Execute the POP_TOP before entering the resume function so the
+                # call result does not stay alive as a resume function argument.
+                pop_top = copy.copy(resume_inst)
+                pop_top.exn_tab_entry = None
+                pop_top.copy_positions(positions_inst)
+                self.output.add_output_instructions([pop_top])
+                if self.instruction_pointer is None:
+                    raise AssertionError(
+                        "expected self.instruction_pointer is not None to be true"
+                    )
+                if not (self.instruction_pointer + 1 < len(self.instructions)):
+                    raise AssertionError(
+                        "expected instruction after POP_TOP to resume at"
+                    )
+                resume_inst = self.instructions[self.instruction_pointer + 1]
+            elif push:
                 self.push(UnknownVariable())
             self.output.add_output_instructions(
                 self.create_call_resume_at(
-                    self.next_instruction,
+                    resume_inst,
                     all_stack_locals_metadata,
                 )
             )
