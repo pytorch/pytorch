@@ -8312,6 +8312,69 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
+    def test_tensor_isinstance_custom_instancecheck_graph_break(self):
+        shape_context = threading.local()
+
+        class TensorWithShapeBaseMeta(type):
+            def __instancecheck__(cls, instance):
+                try:
+                    expected_shape = shape_context.value
+                except AttributeError:
+                    expected_shape = cls.expected_shape
+                return (
+                    isinstance(instance, torch.Tensor)
+                    and tuple(instance.shape) == expected_shape
+                )
+
+        class TensorWithShapeMeta(TensorWithShapeBaseMeta):
+            pass
+
+        class TensorWithShape(metaclass=TensorWithShapeMeta):
+            expected_shape = (2, 3)
+
+        def fn(x):
+            if isinstance(x, TensorWithShape):
+                return x + 1
+            return x - 1
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(2, 3)
+        for expected_shape in [(2, 3), (2, 4)]:
+            shape_context.value = expected_shape
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "custom __instancecheck__"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        def fn_union(x):
+            if isinstance(x, typing.Union[TensorWithShape, int]):
+                return x + 1
+            return x - 1
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "custom __instancecheck__"):
+            torch.compile(fn_union, backend="eager", fullgraph=True)(x)
+
+    def test_tensor_isinstance_supported_tensor_types_no_graph_break(self):
+        def fn(x, p, b):
+            return (
+                isinstance(x, torch.FloatTensor),
+                isinstance(p, torch.nn.Parameter),
+                isinstance(b, torch.nn.Buffer),
+                isinstance(x, collections.abc.Sequence),
+                isinstance(x, abc.ABC),
+            )
+
+        x = torch.randn(2, 3)
+        p = torch.nn.Parameter(torch.randn(2, 3))
+        b = torch.nn.Buffer(torch.randn(2, 3))
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, p, b), fn(x, p, b))
+
     def test_custom_instancecheck_does_not_cause_extra_init(self):
         # When __new__ returns an object whose type is not a subclass of cls,
         # CPython's type.__call__ skips __init__. The polyfill
