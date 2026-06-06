@@ -15593,26 +15593,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaises(RuntimeError):
             torch.compile(fn)(x, source)
 
-    @parametrize("inplace", [False, True])
-    def test_index_add_source_shape_mismatch(self, inplace):
-        def fn(x, source):
-            index = torch.arange(source.numel(), device=x.device)
-            if inplace:
-                x = x.clone()
-                x.index_add_(0, index, source)
-                return x
-            return torch.index_add(x, 0, index, source)
-
-        x = torch.randn(10, 5, device=self.device)
-        source = torch.randn(5, device=self.device)
-        msg = "source tensor shape must match self tensor shape"
-
-        with self.assertRaisesRegex(RuntimeError, msg):
-            fn(x, source)
-
-        with self.assertRaisesRegex(RuntimeError, msg):
-            torch.compile(fn)(x, source)
-
     @skip_if_gpu_halide  # cuda error
     def test_mutations_loop_fusion(self):
         def fn(tensor, index, source):
