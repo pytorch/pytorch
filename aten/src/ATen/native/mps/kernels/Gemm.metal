@@ -11,6 +11,7 @@
 #include <ATen/native/mps/kernels/gemm_complex.h>
 #include <ATen/native/mps/kernels/gemm_conv1x1.h>
 #include <ATen/native/mps/kernels/gemm_gemv.h>
+#include <ATen/native/mps/kernels/gemm_gemv_bt.h>
 #include <ATen/native/mps/kernels/gemm_int.h>
 #include <ATen/native/mps/kernels/gemm_simd.h>
 #include <ATen/native/mps/kernels/gemm_splitk.h>
@@ -349,6 +350,62 @@ MB_SPLITK_ALL(bfloat)
 
 MB_CONV_ALL(half)
 MB_CONV_ALL(bfloat)
+
+// ---------------------------------------------------------------------------
+// gemv_bt (Metal 4 only): thin-M batched GEMV (M in 2..16), routed only on the M5
+// unit (kernels_40). The host requests a (MROWS, VEC, NCOLS) from this set.
+// names: gemv_bt_{dt}_{MR}_{VEC}_{none|ab}, gemv_bt_t_{dt}_{MR}_{VEC}_{NC}_{none|ab}
+// ---------------------------------------------------------------------------
+#define MB_GEMV_BT(DT, MR, VEC, EN, EV)                                  \
+  template [[host_name("gemv_bt_" #DT "_" #MR "_" #VEC "_" #EN)]]        \
+  kernel void gemv_bt<DT, MR, VEC, GemmEpilogue::EV>(                    \
+      device const DT*,                                                  \
+      device const DT*,                                                  \
+      device DT*,                                                        \
+      constant GemvBtDims&,                                              \
+      device const DT*,                                                  \
+      constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>&,      \
+      uint3,                                                             \
+      uint,                                                              \
+      uint);
+#define MB_GEMV_BT_E(DT, MR, VEC) \
+  MB_GEMV_BT(DT, MR, VEC, none, None) MB_GEMV_BT(DT, MR, VEC, ab, AlphaBeta)
+
+#define MB_GEMV_BT_T(DT, MR, VEC, NC, EN, EV)                                \
+  template [[host_name("gemv_bt_t_" #DT "_" #MR "_" #VEC "_" #NC "_" #EN)]]  \
+  kernel void gemv_bt_t<DT, MR, VEC, NC, GemmEpilogue::EV>(                  \
+      device const DT*,                                                      \
+      device const DT*,                                                      \
+      device DT*,                                                            \
+      constant GemvBtDims&,                                                  \
+      device const DT*,                                                      \
+      constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>&,          \
+      uint3,                                                                 \
+      uint,                                                                  \
+      uint);
+#define MB_GEMV_BT_T_E(DT, MR, VEC, NC) \
+  MB_GEMV_BT_T(DT, MR, VEC, NC, none, None) MB_GEMV_BT_T(DT, MR, VEC, NC, ab, AlphaBeta)
+
+// Row-major B (NCOLS=1): (MROWS, VEC) with MROWS*VEC <= 32.
+#define MB_GEMV_BT_RM_ALL(DT)                                          \
+  MB_GEMV_BT_E(DT, 2, 1) MB_GEMV_BT_E(DT, 2, 2) MB_GEMV_BT_E(DT, 2, 4) \
+  MB_GEMV_BT_E(DT, 4, 1) MB_GEMV_BT_E(DT, 4, 2) MB_GEMV_BT_E(DT, 4, 4) \
+  MB_GEMV_BT_E(DT, 8, 1) MB_GEMV_BT_E(DT, 8, 2) MB_GEMV_BT_E(DT, 8, 4) \
+  MB_GEMV_BT_E(DT, 16, 1) MB_GEMV_BT_E(DT, 16, 2)
+
+// Column-major B: (MROWS, VEC, NCOLS). NCOLS>1 only for MROWS>=8 (the M>=6 reuse
+// threshold) with MROWS*NCOLS <= 48 registers.
+#define MB_GEMV_BT_TB_ALL(DT)                                                          \
+  MB_GEMV_BT_T_E(DT, 2, 2, 1) MB_GEMV_BT_T_E(DT, 2, 4, 1) MB_GEMV_BT_T_E(DT, 2, 8, 1)  \
+  MB_GEMV_BT_T_E(DT, 4, 2, 1) MB_GEMV_BT_T_E(DT, 4, 4, 1) MB_GEMV_BT_T_E(DT, 4, 8, 1)  \
+  MB_GEMV_BT_T_E(DT, 8, 2, 1) MB_GEMV_BT_T_E(DT, 8, 4, 1) MB_GEMV_BT_T_E(DT, 8, 8, 1)  \
+  MB_GEMV_BT_T_E(DT, 8, 2, 4) MB_GEMV_BT_T_E(DT, 8, 4, 4) MB_GEMV_BT_T_E(DT, 8, 8, 4)  \
+  MB_GEMV_BT_T_E(DT, 16, 2, 2) MB_GEMV_BT_T_E(DT, 16, 4, 2) MB_GEMV_BT_T_E(DT, 16, 8, 2)
+
+MB_GEMV_BT_RM_ALL(half)
+MB_GEMV_BT_RM_ALL(bfloat)
+MB_GEMV_BT_TB_ALL(half)
+MB_GEMV_BT_TB_ALL(bfloat)
 #endif // __METAL_VERSION__ >= 400
 
 } // namespace at_gemm

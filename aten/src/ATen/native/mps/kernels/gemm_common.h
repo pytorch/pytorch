@@ -46,6 +46,14 @@ struct GemvDims {
   int self_r, self_c;
 };
 
+// Dims for the thin-M batched GEMV (gemv_bt / gemv_bt_t). M is the true row count
+// (the kernel's MROWS is padded); batch_* are 0 when 2-D (grid-z offset is a no-op).
+struct GemvBtDims {
+  int M, N, K, ldb, ldx, ldy;
+  int self_r, self_c;
+  int batch_b, batch_x, batch_y, batch_self;
+};
+
 // Dims for the split-K GEMM (deep-K, few-output-tile shapes). Inputs are packed
 // (lda == K, ldb == N, ldc == N); `kchunk` is the per-chunk K length, applied as
 // a runtime extent (the AOT build cannot template on the data-dependent K / G).

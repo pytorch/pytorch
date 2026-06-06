@@ -311,6 +311,72 @@ GemvCfg pick_gemv_nt(c10::ScalarType dt, int64_t K, int64_t align, bool tensor_u
   return {4, vec};
 }
 
+// gemv_bt launch params. mrows is the padded row capacity {2,4,8,16}; trans_b
+// marks a column-major B. Keep in sync with the instantiations in Gemm.metal.
+struct GemvBtSpec {
+  int mrows, vec, nwarps, ncols;
+  bool trans_b;
+  bool valid;
+};
+
+// Round M up to the instantiated row capacity.
+int gemv_bt_cap(int64_t M) {
+  if (M <= 2) {
+    return 2;
+  }
+  if (M <= 4) {
+    return 4;
+  }
+  if (M <= 8) {
+    return 8;
+  }
+  return 16;
+}
+
+// NWARPS derived from MROWS*VEC. MUST match gemv_bt_nwarps() in gemm_gemv_bt.h: it
+// caps the row-major partials tile (NWARPS*MROWS*32*VEC floats) in threadgroup mem.
+int gemv_bt_nwarps(int mrows, int vec) {
+  return (mrows * vec <= 24) ? 8 : 4;
+}
+
+// Heuristic gemv_bt config (metalBLAS _gemv_bt_specs). `align` is the OR of the
+// strides VEC loads must divide; invalid when VEC clamps below the column min of 2.
+GemvBtSpec pick_gemv_bt(int64_t M, int64_t N, int64_t K, bool trans_b, int64_t align) {
+  GemvBtSpec s{};
+  s.valid = false;
+  const int cap = gemv_bt_cap(M);
+  if (trans_b) {
+    int vec = clamp_vec((K >= 2048) ? 8 : (K >= 512 ? 4 : 2), align);
+    if (vec < 2) {
+      return s; // the column-major path vectorizes both X and B over K
+    }
+    int ncols = 1;
+    if (M >= 6) { // below ~6 rows X is not the bottleneck; cap*ncols<=48 registers
+      if (cap * 4 <= 48) {
+        ncols = 4;
+      } else if (cap * 2 <= 48) {
+        ncols = 2;
+      }
+    }
+    s = {cap, vec, gemv_bt_nwarps(cap, vec), ncols, true, true};
+    return s;
+  }
+  int vec = clamp_vec((N >= 4096) ? 4 : (N >= 256 ? 2 : 1), align);
+  while (vec > 1 && cap * vec > 32) { // accumulator register cap (matches instantiations)
+    vec >>= 1;
+  }
+  s = {cap, vec, gemv_bt_nwarps(cap, vec), 1, false, true};
+  return s;
+}
+
+std::string gemv_bt_name(const std::string& dt, const GemvBtSpec& s, at_gemm::GemmEpilogue epi) {
+  const char* en = (epi == at_gemm::GemmEpilogue::AlphaBeta) ? "ab" : "none";
+  if (s.trans_b) {
+    return fmt::format("gemv_bt_t_{}_{}_{}_{}_{}", dt, s.mrows, s.vec, s.ncols, en);
+  }
+  return fmt::format("gemv_bt_{}_{}_{}_{}", dt, s.mrows, s.vec, en);
+}
+
 // (BM, BN, BK, TX, TY) for the register-tiled int_gemm kernel.
 struct IntTile {
   int BM, BN, BK, TX, TY;
@@ -1021,6 +1087,7 @@ static_assert(sizeof(at_gemm::GemmDimsStrided) == 13 * sizeof(int32_t));
 static_assert(sizeof(at_gemm::SplitKDims) == 4 * sizeof(int32_t));
 static_assert(sizeof(at_gemm::SplitKReduceDims) == 2 * sizeof(int32_t));
 static_assert(sizeof(at_gemm::ConvDims) == 3 * sizeof(int32_t));
+static_assert(sizeof(at_gemm::GemvBtDims) == 12 * sizeof(int32_t));
 
 void mps_gemm(
     const Tensor& A,
@@ -1147,6 +1214,61 @@ void mps_gemm(
         out.copy_(target);
       }
       return;
+    }
+  }
+
+  // Thin-M batched GEMV (M in 2..16, half/bf16): recovers the GEMV bandwidth the
+  // matmul2d tile wastes on a few rows. M5-only; X (=A) must be row-major.
+  static const bool gemv_bt_off = c10::utils::has_env("PYTORCH_MPS_NO_GEMV_BT");
+  if (!gemv_bt_off && (dt == kHalf || dt == kBFloat16) && gemm_use_mpp() &&
+      gemm_on_m5_tensor_unit() && !ra.trans && M >= 2 && M <= 16 && K >= 64 && N >= 16) {
+    const bool tb = rb.trans;
+    const int64_t ncap = tb ? 262144 : 8192; // column-major B reaches vocab scale
+    if (N <= ncap) {
+      // Column-major vectorizes X and B over K (needs ldx, ldb, offsets, batch
+      // strides); row-major reads X scalar and only vectorizes B over N.
+      const int64_t align = tb
+          ? (rb.ld | ra.ld | ra.view.storage_offset() | rb.view.storage_offset() |
+             (batched ? (ra.view.stride(0) | rb.view.stride(0)) : 0))
+          : (rb.ld | rb.view.storage_offset() | (batched ? rb.view.stride(0) : 0));
+      const GemvBtSpec spec = pick_gemv_bt(M, N, K, tb, align);
+      if (spec.valid) {
+        // Field order must match at_gemm::GemvBtDims (size asserted above).
+        const std::array<int32_t, 12> bd = {
+            static_cast<int32_t>(M),
+            static_cast<int32_t>(N),
+            static_cast<int32_t>(K),
+            static_cast<int32_t>(rb.ld),
+            static_cast<int32_t>(ra.ld),
+            static_cast<int32_t>(ldc),
+            static_cast<int32_t>(self_r),
+            static_cast<int32_t>(self_c),
+            batched ? static_cast<int32_t>(rb.view.stride(0)) : 0,
+            batched ? static_cast<int32_t>(ra.view.stride(0)) : 0,
+            batched ? static_cast<int32_t>(target.stride(0)) : 0,
+            static_cast<int32_t>(batch_self)};
+        const std::array<float, 2> ab = {
+            static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
+        auto pso = lib.getPipelineStateForFunc(gemv_bt_name(dt_str, spec, epi));
+        const int per = tb ? (spec.nwarps * spec.ncols) : (32 * spec.vec);
+        const int64_t ng = (N + per - 1) / per;
+        const NSUInteger tg = static_cast<NSUInteger>(spec.nwarps * 32);
+        dispatch_sync_with_rethrow(stream->queue(), ^() {
+          @autoreleasepool {
+            getMPSProfiler().beginProfileKernel(pso, "gemm_gemv_bt", {rb.view, ra.view});
+            auto enc = stream->commandEncoder();
+            [enc setComputePipelineState:pso];
+            mtl_setArgs(enc, rb.view, ra.view, target, bd, self_e, ab);
+            [enc dispatchThreadgroups:MTLSizeMake(ng, 1, batch)
+                threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+            getMPSProfiler().endProfileKernel(pso);
+          }
+        });
+        if (!target.is_same(out)) {
+          out.copy_(target);
+        }
+        return;
+      }
     }
   }
 
