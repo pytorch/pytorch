@@ -5962,6 +5962,7 @@ if HAS_CUDA_AND_TRITON:
                 obs.op_outputs[aten.rand.default][2],
             )
 
+        @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
         def test_cudagraph_empty_partition_raises_error(self):
             """Verify RuntimeError is raised when partitions are empty and cudagraph_or_error=True"""
             # 1. Simulate empty partitions returning from the post-compile step
