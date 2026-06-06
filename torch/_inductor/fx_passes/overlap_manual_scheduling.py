@@ -63,28 +63,29 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         assert len(coll_nodes) > 0, "bucketed coll_nodes should have nonzero node"
 
         waits = [self.collective_info[n].wait_node for n in coll_nodes]
-        # Use earliest wait insertion point
         first_wait = min(waits, key=lambda w: self.node_idx[w])
-        # Find insertion location
-        first = coll_nodes[0]
-        next_node = first
-        while next_node in coll_nodes:
-            next_node = next_node.next
+        first = min(coll_nodes, key=lambda n: self.node_idx[n])
+        last = max(coll_nodes, key=lambda n: self.node_idx[n])
 
         if is_all_gather(first):
+            # AG: insert early (right after first AG) to start prefetch ASAP.
+            # Move wait+consumers to the earliest original wait position.
             new_nodes, replacements = merge_all_gather_bucket(
                 self.graph,
                 coll_nodes,
                 wait_insertion_point=first_wait,
-                insert_before=next_node,
+                insert_before=first.next,
                 mode=self.bucket_mode,
             )
         elif is_reduce_scatter(first):
+            # RS: pre_bucket_reduce_scatter needs all individual RS inputs,
+            # which are only available after the last RS fires.  Insert
+            # after the last coll_node (by graph position) and leave the
+            # wait in place -- it naturally follows the bucketed RS.
             new_nodes, replacements = merge_reduce_scatter_bucket(
                 self.graph,
                 coll_nodes,
-                wait_insertion_point=first_wait,
-                insert_before=next_node,
+                insert_before=last.next,
                 mode=self.bucket_mode,
             )
         else:
@@ -334,7 +335,6 @@ class ManualOverlapScheduler(OverlapScheduler):
         for i, nodes in enumerate(self.nodes_in_subgraph):
             self.bucketer.manual_bucket_collectives(nodes=nodes)
 
-        _stable_topological_sort(self.graph, {})
         self.graph.lint()
         self.nodes = list(self.graph.nodes)
         self.in_degree = Counter(user for node in self.nodes for user in node.users)

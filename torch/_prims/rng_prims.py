@@ -336,7 +336,7 @@ def _impl_graphsafe_rng(op, *args, rng_state=None, **kwargs):
 def register_graphsafe_run_with_rng_state_op():
     class GraphSafeRunWithRngState(HigherOrderOperator):
         def __init__(self):
-            super().__init__("graphsafe_run_with_rng_state")
+            super().__init__("graphsafe_run_with_rng_state", cacheable=True)
 
         def __call__(self, op, *args, rng_state=None, **kwargs):
             # pyrefly: ignore [missing-attribute]
@@ -445,7 +445,12 @@ def register_run_dtensor_rng_op():
 
     class RunDTensorRngOp(HigherOrderOperator):
         def __init__(self):
-            super().__init__("run_dtensor_rng_op", cacheable=True)
+            # Not cacheable: the compiled wrapper bakes in the current device
+            # (torch.cuda.set_device(N)) and the rank-dependent start/end offset
+            # ints; sharing the cached graph across ranks routes every rank's
+            # set_rng_state to one rank's device and offsets, leaving the other
+            # ranks' generators unchanged (#185520).
+            super().__init__("run_dtensor_rng_op", cacheable=False)
 
         def __call__(self, start_offset_incr, end_offset_incr, op, *args, **kwargs):
             # pyrefly: ignore [missing-attribute]
