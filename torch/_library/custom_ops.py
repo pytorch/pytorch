@@ -232,6 +232,8 @@ def custom_op(
 
     """
 
+    is_direct_call = fn is not None
+
     def inner(fn: Callable[..., object]) -> CustomOpDef:
         import torch
 
@@ -246,7 +248,15 @@ def custom_op(
             schema_str = schema
 
         namespace, opname = name.split("::")
-        result = CustomOpDef(namespace, opname, schema_str, fn, normalized_tags)
+        define_stacklevel = 6 if is_direct_call else 5
+        result = CustomOpDef(
+            namespace,
+            opname,
+            schema_str,
+            fn,
+            normalized_tags,
+            define_stacklevel=define_stacklevel,
+        )
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -285,12 +295,15 @@ class CustomOpDef:
         schema: str,
         fn: Callable,
         tags: tags_t = None,
+        *,
+        define_stacklevel: int = 5,
     ) -> None:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
         self._name = name
         self._schema = schema
         self._tags = _normalize_tags(tags)
+        self._define_stacklevel = define_stacklevel
 
         self._init_fn = fn
 
@@ -765,6 +778,7 @@ class CustomOpDef:
         self._lib.define(
             schema_str,
             tags=_with_pt2_compliant_tag(tags),
+            _stacklevel=self._define_stacklevel,
         )
         self._opoverload = utils.lookup_op(self._qualname)
 
