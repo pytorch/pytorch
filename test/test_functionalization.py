@@ -2314,6 +2314,35 @@ def forward(self, arg0_1):
         )
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required for pin_memory")
+    def test_lift_fresh_copy_preserves_pin_memory(self):
+        for pin_memory in [False, True]:
+            with self.subTest(pin_memory=pin_memory):
+                x = torch.tensor([1.0, 2.0, 3.0], pin_memory=pin_memory)
+                out = torch.ops.aten.lift_fresh_copy.default(x)
+
+                self.assertEqual(out, x)
+                self.assertEqual(out.is_pinned(), pin_memory)
+                self.assertNotEqual(out.data_ptr(), x.data_ptr())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required for pin_memory")
+    def test_view_copy_ops_preserve_pin_memory(self):
+        for pin_memory in [False, True]:
+            with self.subTest(pin_memory=pin_memory):
+                x = torch.randn(4, pin_memory=pin_memory)
+                x_2d = torch.randn(2, 4, pin_memory=pin_memory)
+
+                outputs = [
+                    torch.ops.aten.view_copy.default(x, [4]),
+                    torch.ops.aten.view_copy.default(x_2d.t(), [8]),
+                    torch.ops.aten.transpose_copy.int(x_2d, 0, 1),
+                    *torch.ops.aten.split_copy.Tensor(x, 2),
+                    *torch.ops.aten.unbind_copy.int(x_2d, 0),
+                ]
+
+                for out in outputs:
+                    self.assertEqual(out.is_pinned(), pin_memory)
+
 
 @xfail_inherited_tests(
     [
