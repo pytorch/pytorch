@@ -4,6 +4,7 @@ import functools
 import inspect
 import re
 import sys
+import warnings
 import weakref
 from collections.abc import Callable, Sequence
 from typing import Any, overload, TYPE_CHECKING, TypeVar, Union
@@ -269,7 +270,7 @@ class Library:
     def __repr__(self):
         return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
 
-    def define(self, schema, alias_analysis="", *, tags=()):
+    def define(self, schema, alias_analysis="", *, tags=(), _stacklevel=1):
         r"""Defines a new operator and its semantics in the ns namespace.
 
         Args:
@@ -309,6 +310,25 @@ class Library:
             _validate_out_schema(schema)
         if torch.Tag.inplace in tags:
             _validate_inplace_schema(schema)
+
+        parsed_schema = torch._C.parse_schema(schema)
+        unsupported_schema_types = (
+            torch._library.utils.get_unsupported_custom_op_schema_types(parsed_schema)
+        )
+        if unsupported_schema_types:
+            warnings.warn(
+                "Registering custom ops with unsupported schema types is deprecated. "
+                f"Found unsupported schema types: {', '.join(unsupported_schema_types)}. "
+                "PyTorch subsystems may not correctly handle unsupported "
+                "Tensor-bearing types, and the dispatcher may not correctly "
+                "dispatch on unsupported Tensor-bearing input types. Supported "
+                "custom op schema types that contain tensors are: "
+                f"{', '.join(torch._library.utils.SUPPORTED_CUSTOM_OP_SCHEMA_TYPES)}. "
+                "The ability to register custom ops with unsupported schema types "
+                "will be removed in a future PyTorch release.",
+                FutureWarning,
+                stacklevel=_stacklevel + 1,
+            )
 
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]
@@ -742,7 +762,7 @@ def define(qualname, schema, *, lib=None, tags=()):
             f'to look like e.g. "(Tensor x) -> Tensor" but '
             f'got "{schema}"'
         )
-    lib.define(name + schema, alias_analysis="", tags=tags)
+    lib.define(name + schema, alias_analysis="", tags=tags, _stacklevel=3)
 
 
 @define.register
@@ -752,7 +772,7 @@ def _(lib: Library, schema, alias_analysis=""):
     """
 
     def wrap(f):
-        name = lib.define(schema, alias_analysis)
+        name = lib.define(schema, alias_analysis, _stacklevel=2)
         lib.impl(name, f)
         return f
 
