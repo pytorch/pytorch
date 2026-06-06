@@ -834,6 +834,13 @@ def _remove_unused_new_graph_buffers(
         )
 
     old_buffers = set(old_graph_signature.buffers)
+
+    def is_real_tensor_attr(target: str) -> bool:
+        try:
+            return isinstance(torch.fx.graph_module._get_attr(gm, target), torch.Tensor)
+        except (AttributeError, AssertionError):
+            return False
+
     new_input_specs = []
     changed = False
     for node, spec in zip(placeholders, new_graph_signature.input_specs):
@@ -842,6 +849,7 @@ def _remove_unused_new_graph_buffers(
             and isinstance(spec.target, str)
             and spec.target not in old_buffers
             and len(node.users) == 0
+            and not is_real_tensor_attr(spec.target)
         ):
             gm.graph.erase_node(node)
             changed = True
