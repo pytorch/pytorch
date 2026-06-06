@@ -424,7 +424,7 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
               recordOff + startPos, (char*)dst + startPos, threadReadSize);
         }
         readSizes[i] = size;
-        LOG(INFO) << "Thread " << i << " read [" << startPos << "-" << endPos
+        LOG(INFO) << "Thread " << i << " read [" << startPos << '-' << endPos
                   << "] " << "from " << name << " of size " << n;
         TORCH_CHECK(
             threadReadSize == size,

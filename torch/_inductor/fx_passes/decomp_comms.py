@@ -20,7 +20,6 @@ import torch.fx as fx
 from torch._inductor.fx_passes.bucketing import get_collective_type, is_wait_tensor
 from torch._inductor.fx_utils import get_fake_args_kwargs
 from torch._inductor.virtualized import V
-from torch.distributed.distributed_c10d import _resolve_process_group, GroupName
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -384,6 +383,9 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
     Also corrects reductions over the sharded dim: L2 norms become
     pow(2) + all_reduce(sum) + sqrt, sums become all_reduce(sum).
     """
+    # Lazy: a module-level distributed import breaks test_circular_dependencies.
+    from torch.distributed.distributed_c10d import _resolve_process_group, GroupName
+
     graph = gm.graph
     transformed = 0
 

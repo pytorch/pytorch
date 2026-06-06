@@ -407,6 +407,9 @@ class BaseUserFunctionVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
+    def self_args(self) -> list[VariableTracker]:
+        return []
+
     def get_source(self) -> Source | None:
         return self.source
 
@@ -513,7 +516,12 @@ class BaseUserFunctionVariable(VariableTracker):
             and self.get_filename().endswith("torch/optim/lr_scheduler.py")
         ):
             return ConstantVariable.create(None)
-        return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)  # type: ignore[attr-defined]
+        return tx.inline_user_function_return(
+            self,
+            [*self.self_args(), *args],
+            kwargs,
+            allow_nested_graph_breaks=True,
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -633,6 +641,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def get_globals(self) -> dict[str, Any]:
         return self.fn.__globals__
+
+    def should_allow_nested_graph_breaks(self) -> bool:
+        from torch._dynamo.trace_rules import BUILTIN_INLINE_WHEN_CALLED
+
+        filename = self.get_filename()
+        if any(filename.startswith(d) for d in BUILTIN_INLINE_WHEN_CALLED):
+            return False
+        return True
 
     def get_source(self) -> Source:
         source = self.source
@@ -3117,7 +3133,11 @@ class PolyfilledFunctionVariable(VariableTracker):
             )
 
         traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
-        return traceable_function_variable.call_function(tx, args, kwargs)
+        return tx.inline_user_function_return(
+            traceable_function_variable,
+            list(args),
+            dict(kwargs),
+        )
 
     def call_method(
         self,
