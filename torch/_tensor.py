@@ -142,6 +142,15 @@ class Tensor(torch._C.TensorBase):
                 "of a torch.nn.utils.weight_norm usage, "
                 "see https://github.com/pytorch/pytorch/pull/103001"
             )
+        fake_mode = _C._get_dispatch_mode(_C._TorchDispatchModeKey.FAKE)
+        if fake_mode is not None:
+            from torch._subclasses.fake_tensor import maybe_get_fake_mode
+
+            if self.device.type != "meta" and maybe_get_fake_mode(self) is None:
+                raise NotImplementedError(
+                    "copy.deepcopy() is not supported for real tensors while "
+                    f"FakeTensorMode is active. Got a tensor on device {self.device}."
+                )
         if id(self) in memo:
             return memo[id(self)]
         with torch.no_grad():
