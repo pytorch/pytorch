@@ -4723,10 +4723,16 @@ class ShapeEnv:
                             specialization,
                         )
                     )
+            # StrictMinMaxConstraint documents the same size-oblivious
+            # assumptions for constrained sizes that backed_size_oblivious
+            # enables globally.
             if (
-                config.backed_size_oblivious
-                and isinstance(sym, sympy.Symbol)  # could be static
+                isinstance(sym, sympy.Symbol)  # could be static
                 and symbol_is_type(sym, SymT.SIZE)
+                and (
+                    config.backed_size_oblivious
+                    or isinstance(constraint_dims[i], StrictMinMaxConstraint)
+                )
             ):
                 self.size_like.add(sym)
             size.append(sym)

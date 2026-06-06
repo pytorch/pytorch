@@ -13653,6 +13653,18 @@ fn
         self.assertEqual(f(torch.randn(0)).shape, (1,))
         self.assertEqual(f(torch.randn(2)).shape, (2,))
 
+    def test_guard_size_oblivious_mark_dynamic_upper_bound(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if guard_size_oblivious(x.size(1) != 1024):
+                return x + 1
+            return x - 1
+
+        x = torch.randn(2, 7)
+        torch._dynamo.mark_dynamic(x, 1, min=2, max=1024)
+
+        self.assertEqual(f(x), x + 1)
+
     def _test_compile_model_free(self, model_inp_ctr, weakref_watch):
         """
         Args:
