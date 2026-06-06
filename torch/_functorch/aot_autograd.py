@@ -806,6 +806,7 @@ def aot_function(
                 PlainAOTInput(i) for i in range(len(fake_flat_args))
             ]
             with contextlib.ExitStack() as stack:
+                stack.enter_context(compiled_autograd._disable())
                 aot_state = create_aot_state(
                     stack,
                     flat_fn,
