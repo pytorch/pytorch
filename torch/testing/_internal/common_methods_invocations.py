@@ -10027,6 +10027,49 @@ class ForeachSampleInput(SampleInput):
         self.disable_fastpath = disable_fastpath
 
 
+def _foreach_inplace_type_promotion_error(opinfo, dtype, sample):
+    if opinfo.name not in ("_foreach_add", "_foreach_mul") or dtype is not torch.bool:
+        return None
+    if len(sample.args) != 1:
+        return None
+
+    rhs = sample.args[0]
+    if isinstance(rhs, list):
+        if not rhs or any(isinstance(arg, torch.Tensor) for arg in rhs):
+            return None
+        scalar_args = rhs
+    elif isinstance(rhs, (bool, int, float, complex)):
+        scalar_args = [rhs]
+    else:
+        return None
+
+    if all(isinstance(arg, bool) for arg in scalar_args):
+        return None
+
+    if any(isinstance(arg, complex) for arg in scalar_args):
+        result_type = "ComplexFloat"
+    elif any(isinstance(arg, float) for arg in scalar_args):
+        result_type = "Float"
+    else:
+        result_type = "Long"
+
+    return ErrorInput(
+        sample,
+        error_type=RuntimeError,
+        error_regex=fr"result type {result_type} can't be cast to the desired output type Bool",
+    )
+
+
+def error_inputs_foreach_inplace(opinfo, device, **kwargs):
+    dtype = kwargs.pop("dtype", None)
+    if dtype is None:
+        return
+    for sample in opinfo.sample_inputs(device, dtype, requires_grad=False, **kwargs):
+        error_input = _foreach_inplace_type_promotion_error(opinfo, dtype, sample)
+        if error_input is not None:
+            yield error_input
+
+
 class foreach_inputs_sample_func:
     def __init__(
         self,
@@ -10226,6 +10269,7 @@ class foreach_inputs_sample_func:
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         _foreach_inputs_kwargs["zero_size"] = False
         allow_higher_dtype_scalars = kwargs.pop("allow_higher_dtype_scalars", False)
+        exclude_inplace_error_inputs = kwargs.pop("exclude_inplace_error_inputs", False)
 
         # add empty tensor interspersion to test fully fixing #100701
         for num_tensors, rightmost_arg_type, intersperse_empty_tensors in itertools.product(
@@ -10253,6 +10297,12 @@ class foreach_inputs_sample_func:
                     if rightmost_arg_type in (ForeachRightmostArgType.Scalar, ForeachRightmostArgType.Tensor):
                         ref_args = args[:-1] + [[args[-1] for _ in range(num_tensors)]]
                     sample = ForeachSampleInput(input, *args, ref_args=ref_args, **kwargs)
+                    if (
+                        exclude_inplace_error_inputs
+                        and _foreach_inplace_type_promotion_error(opinfo, dtype, sample)
+                    ):
+                        args.pop()
+                        continue
                     yield sample
                     args.pop()
             else:
@@ -11662,6 +11712,7 @@ foreach_binary_op_db: list[OpInfo] = [
     ForeachFuncInfo(
         "add",
         sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
+        error_inputs_func=error_inputs_foreach_inplace,
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16, torch.int32),
         supports_alpha_param=True,
         supports_autograd=True,
@@ -11673,8 +11724,6 @@ foreach_binary_op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
                          dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
             # Samples have complex types and inplace only works if the dtype is complex.
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                         dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
                          dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
@@ -11706,14 +11755,13 @@ foreach_binary_op_db: list[OpInfo] = [
     ForeachFuncInfo(
         "mul",
         sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
+        error_inputs_func=error_inputs_foreach_inplace,
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
         decorators=(
             # Samples have complex types and inplace only works if the dtype is complex.
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                         dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
                          dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace", dtypes=(torch.bool,)),
