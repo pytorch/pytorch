@@ -835,6 +835,15 @@ from torch.utils.hooks import RemovableHandle
 # we have to use `OrderedDict` to make `RemovableHandle` work.
 _bytecode_hooks: dict[int, BytecodeHook] = OrderedDict()
 _BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY = "bytecode_hook_side_effects"
+_BYTECODE_RUNTIME_ERROR_CONTEXT_KEY = "bytecode_runtime_error_context"
+
+
+@dataclass(frozen=True)
+class BytecodeRuntimeErrorContext:
+    graph_break: bool
+    filename: str
+    name: str
+    firstlineno: int
 
 
 def get_compiled_code_side_effects(
@@ -858,6 +867,18 @@ def get_compiled_code_side_effects(
 def compiled_code_has_side_effects(code: types.CodeType) -> bool:
     """Return whether Dynamo recorded replayed Python side effects for compiled code."""
     return bool(get_compiled_code_side_effects(code))
+
+
+def get_bytecode_runtime_error_context(
+    code: types.CodeType,
+) -> BytecodeRuntimeErrorContext | None:
+    """Return runtime-error metadata for Dynamo-generated code, if present."""
+    if not code_context.has_context(code):
+        return None
+    context = code_context.get_context(code).get(_BYTECODE_RUNTIME_ERROR_CONTEXT_KEY)
+    if isinstance(context, BytecodeRuntimeErrorContext):
+        return context
+    return None
 
 
 def _copy_code_context(src_code: types.CodeType, dst_code: types.CodeType) -> None:
@@ -1818,6 +1839,14 @@ def _compile(
                         _copy_code_context(out_code, hook_output)
                     out_code = hook_output
 
+        code_context.get_context(out_code)[_BYTECODE_RUNTIME_ERROR_CONTEXT_KEY] = (
+            BytecodeRuntimeErrorContext(
+                graph_break=output.compile_subgraph_reason.graph_break,
+                filename=code.co_filename,
+                name=code.co_name,
+                firstlineno=code.co_firstlineno,
+            )
+        )
         orig_code_map[out_code] = code
         output_codes.add(out_code)
         dynamo_time_before_restart = last_attempt_start_time - start_time
