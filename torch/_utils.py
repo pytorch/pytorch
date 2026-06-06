@@ -77,8 +77,6 @@ def _to(self, device, non_blocking=False):
     if device.type == "cpu":
         pin_memory = non_blocking and self.device.type in (
             "cuda",
-            "xpu",
-            "mtia",
             torch._C._get_privateuse1_backend_name(),
         )
         untyped_storage = torch.empty(
