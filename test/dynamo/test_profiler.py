@@ -7,6 +7,8 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 from torch._dynamo.utils import chromium_event_timed, ChromiumEventLogger, dynamo_timed
+from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.ctx_manager import ProfilerRecordFunctionContextVariable
 from torch.profiler import record_function
 from torch.testing._internal.common_utils import TemporaryFileName
 
@@ -258,6 +260,26 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
                 "Expected one lookup profiler event for one opt_fn run",
             )
 
+    def test_profiler_guardless_cache_hit_skips_guard_lookup(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn((2, 2))
+        opt_fn = torch.compile(
+            fn,
+            backend="eager",
+            options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe},
+        )
+        opt_fn(x)
+
+        with torch.profiler.profile() as prof:
+            self.assertEqual(opt_fn(x), fn(x))
+
+        events = [
+            event for event in prof.events() if "TorchDynamo Cache Lookup" in event.name
+        ]
+        self.assertEqual(events, [])
+
     def test_profiler_cache_lookup_profiler_step(self):
         def fn(x, y, z):
             return torch.add(torch.sub(x, y), z)
@@ -401,6 +423,54 @@ def forward(self, arg0_1):
                 "my_net2",
             ],
         )
+
+    @torch._dynamo.config.patch("capture_profiler_record_function", True)
+    def test_profiler_record_function_create_uses_record_args_and_kwargs(self):
+        ctx = ProfilerRecordFunctionContextVariable.create(
+            func=record_function,
+            record_args=[ConstantVariable.create("with_args")],
+            record_kwargs={"args": ConstantVariable.create("payload")},
+        )
+
+        self.assertEqual(ctx.target_values, ["with_args", "payload"])
+
+        ctx = ProfilerRecordFunctionContextVariable.create(
+            func=record_function,
+            record_args=[],
+            record_kwargs={
+                "name": ConstantVariable.create("with_kwargs"),
+                "args": ConstantVariable.create("kw_payload"),
+            },
+        )
+
+        self.assertEqual(ctx.target_values, ["with_kwargs", "kw_payload"])
+
+    @torch._dynamo.config.patch("capture_profiler_record_function", True)
+    def test_dynamo_preserve_record_func_decorator(self):
+        @record_function("my_net")
+        def fn(x):
+            a = x.sin()
+            return a + 2
+
+        backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        fn_c = torch.compile(fn, backend=backend)
+        fn_c(torch.randn(10))
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_args_0_ : torch.Tensor):
+    l_args_0_ = L_args_0_
+    _record_function_enter_new = torch.ops.profiler._record_function_enter_new('my_net', None)
+    a = l_args_0_.sin();  l_args_0_ = None
+    add = a + 2;  a = None
+    _record_function_exit__record_function = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new);  _record_function_enter_new = _record_function_exit__record_function = None
+    return (add,)""",
+        )
+        with torch.profiler.profile() as prof:
+            fn_c(torch.randn(10))
+
+        annotations = [e.name for e in prof.events() if "my_" in e.name]
+        self.assertEqual(annotations, ["my_net"])
 
     @torch._dynamo.config.patch("capture_profiler_record_function", True)
     def test_dynamo_preserve_record_func_with_graph_break(self):
