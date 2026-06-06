@@ -1199,11 +1199,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 elif tensor.is_mkldnn:
                     data_size = torch.ops.mkldnn._nbytes(tensor)
                 elif tensor.is_contiguous():
-                    data_size = (
-                        tensor.storage_offset() + tensor.numel()
-                    ) * tensor.element_size()
+                    data_size = int(
+                        (tensor.storage_offset() + tensor.numel())
+                        * tensor.element_size()
+                    )
                 else:
                     data_size = tensor.untyped_storage().nbytes()
+                data_size = int(data_size)
                 self.prefix.writeline(
                     f"constants_info_[{idx}].data_size = {data_size if all_cuda else _align(data_size)};"
                 )

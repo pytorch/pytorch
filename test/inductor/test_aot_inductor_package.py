@@ -1075,9 +1075,7 @@ class TestAOTInductorPackage(TestCase):
         blob_bytes = os.path.getsize(blob_paths[0])
 
         # Logical size of all parameters (each counted once).
-        logical_bytes = sum(
-            p.numel() * p.element_size() for p in model.parameters()
-        )
+        logical_bytes = sum(p.numel() * p.element_size() for p in model.parameters())
 
         # Before the fix, every shared-storage view serialized the full flat
         # weight buffer, inflating the blob to several times the logical size.
