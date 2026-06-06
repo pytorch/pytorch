@@ -247,24 +247,24 @@ AOTI_TORCH_EXPORT const char* torch_exception_get_what();
 /// thread is shutdown.
 AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace();
 
-// Disable clang format for these two functions, else it breaks the line just
-// before the function name, which causes a failure in the preprocessor parser
-// and prevents the functions from being picked up for
-// shim_function_versions.txt.
-// clang-format off
-
 // Allocates an StableIValue on the heap, returns an owning pointer.
 // This allocation must be deleted with torch_delete_stable_ivalue or
 // by passing it to a dispatch call which frees it internally.
-AOTI_TORCH_EXPORT AOTITorchError torch_new_stable_ivalue(StableIValue** ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_stable_ivalue(StableIValue** ret_value);
 
 // Frees an StableIValue that was created by torch_new_stable_ivalue.
 // Deleting a nullptr is invalid and returns failure, allocations must
 // only be deleted once.
-AOTI_TORCH_EXPORT AOTITorchError torch_delete_stable_ivalue(StableIValue* value);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_stable_ivalue(StableIValue* value);
 
-// clang-format on
-//
+/// Retrieves the underlying Stream's backend-specific non-owning stream handle
+/// (e.g. `cudaStream_t` for CUDA). Returns a void* that can be `static_cast`ed
+/// accordingly.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_stream_native_handle(StreamHandle stream, void** ret_native_handle);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 #ifdef __cplusplus
