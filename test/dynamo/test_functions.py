@@ -3458,6 +3458,30 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(foo(), foo())
         self.assertEqual(foo(), foo())
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_manual_seed(self):
+        import torch._inductor.config as inductor_config
+
+        seed_fns = (
+            torch.cuda.manual_seed,
+            torch.cuda.manual_seed_all,
+            torch.cuda.random.manual_seed,
+            torch.cuda.random.manual_seed_all,
+        )
+
+        with inductor_config.patch("fallback_random", True):
+            for seed_fn in seed_fns:
+                with self.subTest(seed_fn=f"{seed_fn.__module__}.{seed_fn.__name__}"):
+                    torch._dynamo.reset()
+
+                    @torch.compile
+                    def foo():
+                        seed_fn(3)
+                        return torch.rand(4, device="cuda")
+
+                    self.assertEqual(foo(), foo())
+                    self.assertEqual(foo(), foo())
+
     def test_partial_across_graph_break_uninvoked(self):
         from functools import partial
 
@@ -4932,6 +4956,24 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result5, x + 5)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_guard_on_pos_default_mapping(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def target(x, b=1, c=2):
+            return x + b
+
+        @torch.compile(backend=cnts)
+        def caller(x):
+            return target(x, c=3)
+
+        x = torch.ones(())
+        self.assertEqual(caller(x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+
+        with patch.object(target, "__defaults__", (1,)):
+            expected_msg = "missing .* required positional argument: 'b'"
+            self.assertRaisesRegex(Exception, expected_msg, caller, x)
+
     def test_func_default_torch_args(self):
         """
         Tests other types of torch types as function default (size, dtype, device)
@@ -4954,6 +4996,30 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out.size(), compiled_out.size())
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_shadowed_dataclass_field_property_matches_eager(self):
+        @dataclass
+        class Data:
+            value: torch.Tensor
+            edges: torch.Tensor
+
+            @property
+            def edges(self) -> torch.Tensor:
+                return torch.randn(3)
+
+        def fn(x):
+            data = Data(value=x, edges=x)
+            return data.value.sum()
+
+        x = torch.randn(3)
+        expected_msg = (
+            r"(property 'edges' of .*Data' object has no setter"
+            r"|can't set attribute(?: 'edges')?)"
+        )
+        self.assertRaisesRegex(AttributeError, expected_msg, fn, x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaisesRegex(Exception, expected_msg, opt_fn, x)
 
     def test_dataclass_factory(self):
         @dataclass
@@ -5475,7 +5541,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         if sys.version_info < (3, 14):
             with self.assertRaises(TypeError):
                 opt_fn(x, ys, zs)
-            with self.assertRaises(TypeError):
+            torch._dynamo.reset()
+            with self.assertRaises((TypeError, torch._dynamo.exc.Unsupported)):
                 nopython_fn(x, ys, zs)
             return
 

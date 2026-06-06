@@ -202,9 +202,10 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     return mutation_counter_ <= mutation_counter_hidden_from_autograd_;
   }
 
-  void mark_inductor_storage_resize(const c10::SymInt& new_size) {
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  void mark_inductor_storage_resize(c10::SymInt new_size) {
     inductor_storage_resized_ = true;
-    curr_storage_size_ = new_size;
+    curr_storage_size_ = std::move(new_size);
     inductor_storage_resized_counter_++;
   }
 
