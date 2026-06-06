@@ -409,10 +409,14 @@ def wrap_compiler_debug(
                     # Call the compiled function with real inputs
                     out = inner_compiled_fn(real_inputs)  # type: ignore[operator]
                     # sync cuda kernels to ensure IMA detection
-                    for arg in example_inputs:
-                        if isinstance(arg, torch.Tensor) and arg.is_cuda:
-                            torch.cuda.synchronize()
-                            break
+                    if (
+                        any(
+                            isinstance(arg, torch.Tensor) and arg.device.type != "cpu"
+                            for arg in example_inputs
+                        )
+                        and torch.accelerator.is_available()
+                    ):
+                        torch.accelerator.synchronize()
                     return out
                 except Exception:
                     if config.repro_level == 1:
@@ -970,16 +974,14 @@ def isolate_fails(
 def inductor_fails(
     fx_g: torch.fx.GraphModule, args: Sequence[Any], check_str: str | None = None
 ) -> bool:
-    has_cuda = False
-    for arg in args:
-        if isinstance(arg, torch.Tensor) and arg.is_cuda:
-            has_cuda = True
-            break
+    has_gpu = any(
+        isinstance(arg, torch.Tensor) and arg.device.type != "cpu" for arg in args
+    )
 
     def sync() -> None:
-        if has_cuda:
+        if has_gpu and torch.accelerator.is_available():
             # Ensures that segfaults are surfaced
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
 
     from torch._inductor.compile_fx import compile_fx_inner
 
@@ -1286,9 +1288,10 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # It is certainly faster though!  It probably makes sense to let the
     # user specify the offload strategy.
 
-    compile_args = _get_compile_args(mod, args)
+    compile_mod = copy.deepcopy(mod)
+    compile_args = _get_compile_args(compile_mod, args)
     with tqdm(desc="Compiling"):
-        compiled = compile_fx_inner(mod, compile_args)
+        compiled = compile_fx_inner(compile_mod, compile_args)
     total = counters["inductor"]["intermediate_hooks"]
 
     known_names = set()
@@ -1433,10 +1436,9 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
 
     mod, args = repro_common(options, mod, load_args)
 
-    from torch.cuda import synchronize
-
-    compile_args = _get_compile_args(mod, args)
-    compiled = compile_fx_inner(mod, compile_args)
+    compile_mod = copy.deepcopy(mod)
+    compile_args = _get_compile_args(compile_mod, args)
+    compiled = compile_fx_inner(compile_mod, compile_args)
     if isinstance(compiled, str):
         raise AssertionError("compile_fx_inner should not return a string")
 
@@ -1452,17 +1454,15 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
         ):
             raise AccuracyError("Bad accuracy detected")
     else:
-        need_sync = False
-
-        for arg in args:
-            if isinstance(arg, torch.Tensor) and arg.is_cuda:
-                need_sync = True
-                break
-
         compiled(list(args))
-
-        if need_sync:
-            synchronize()  # ensure segfaults are surfaced
+        if (
+            any(
+                isinstance(arg, torch.Tensor) and arg.device.type != "cpu"
+                for arg in args
+            )
+            and torch.accelerator.is_available()
+        ):
+            torch.accelerator.synchronize()  # ensure segfaults are surfaced
 
 
 # TODO: lazily load the inputs or something, rather than cloning them
@@ -1550,13 +1550,13 @@ p-value, which we leave for future work.
             default=accuracy,
             help="""\
 by default, when doing accuracy minification we will reject reductions which
-change the divergence from a floating point divergence to a integral/boolean
+change the divergence from a floating point divergence to an integral/boolean
 divergence.  This is because some operations like ReLU involve temporarily
 sharp boundaries that smooth out again afterwards; without requiring
 divergence on floating point, the minifier will often fixate on divergent
 boolean tensor even though this is not the true source of the divergence.
 However, rejecting these reductions makes it more difficult for the minifier
-to make process.  Using this option will let the minifier progress for ALL
+to make progress.  Using this option will let the minifier progress for ALL
 divergences--you just might not end up with a useful repro in the end.""",
         )
 

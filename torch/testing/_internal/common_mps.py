@@ -353,7 +353,6 @@ if torch.backends.mps.is_available():
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
-            "lcm": None,
             "linalg.cond": None,
             "linalg.eigh": None,
             "linalg.eigvalsh": None,
@@ -682,16 +681,6 @@ if torch.backends.mps.is_available():
 
         UNDEFINED_XFAILLIST: dict[str, list | None] = {
             # Top 60 operators
-            # topk fails with duplicate indices
-            "topk": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-                torch.float16,
-                torch.bfloat16,
-            ],
             # PCA singular vectors are sign-ambiguous; the new Metal randn in
             # #182386 shifted the sequence so seeded sample inputs land on
             # different sign choices than CPU.
