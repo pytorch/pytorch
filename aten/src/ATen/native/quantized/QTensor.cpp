@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/quantized/QTensorImpl.h>
@@ -22,9 +23,8 @@ Tensor quantize_per_tensor_dynamic(
   if (dtype == ScalarType::Half) {
     return input_contig.to(ScalarType::Half);
   }
-  auto [x_min_t, x_max_t] = at::aminmax(input_contig);
-  float x_min = x_min_t.item<float>();
-  float x_max = x_max_t.item<float>();
+  float x_min = input_contig.min().item<float>();
+  float x_max = input_contig.max().item<float>();
 
   if (reduce_range && at::globalContext().qEngine() == at::QEngine::QNNPACK) {
     reduce_range = false;
@@ -79,6 +79,7 @@ std::vector<Tensor> quantize_per_tensor_list_cpu(
     const Tensor& zero_points,
     ScalarType dtype) {
   std::vector<Tensor> quantized_tensors;
+  quantized_tensors.reserve(tensors.size());
   for (const auto i : c10::irange(tensors.size())) {
     quantized_tensors.push_back(at::quantize_per_tensor(
         tensors[i],
@@ -109,6 +110,7 @@ Tensor dequantize_quantized(const Tensor& self) {
 
 std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
   std::vector<Tensor> dequantized_tensors;
+  dequantized_tensors.reserve(tensors.size());
   for (const auto & tensor : tensors) {
     dequantized_tensors.push_back(tensor.dequantize());
   }
@@ -175,8 +177,10 @@ Tensor& set_storage_quantized_(
     int64_t storage_offset,
     IntArrayRef sizes,
     IntArrayRef strides) {
+  checkSetStorage(self, std::move(storage), storage_offset, sizes, strides);
+  checkInBoundsForStorage(
+      sizes, strides, storage_offset, self.dtype(), self.storage());
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_storage_keep_dtype(std::move(storage));
   self_->set_storage_offset(storage_offset);
   self_->set_sizes_and_strides(sizes, strides);
   return self;
@@ -273,9 +277,8 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
     bool reduce_range) {
   at::Tensor a;
   auto input_contig = self.contiguous();
-  auto [x_min_t, x_max_t] = at::aminmax(input_contig);
-  float x_min = x_min_t.item<float>();
-  float x_max = x_max_t.item<float>();
+  float x_min = input_contig.min().item<float>();
+  float x_max = input_contig.max().item<float>();
 
   if (reduce_range && at::globalContext().qEngine() == at::QEngine::QNNPACK) {
     reduce_range = false;
