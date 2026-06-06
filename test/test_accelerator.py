@@ -187,6 +187,24 @@ class TestAccelerator(TestCase):
         ):
             event1.elapsed_time(event2)
 
+    def test_empty_cache_does_not_raise_on_uninitialized_allocator(self):
+        # Regression test for #186430. On accelerator backends whose allocator
+        # is not a c10::DeviceAllocator (e.g. MPS), the allocator-initialized
+        # probe used to route through at::getDeviceAllocator() and hit a
+        # TORCH_INTERNAL_ASSERT ("Allocator for <device> is not a
+        # DeviceAllocator.") instead of returning a bool. That in turn made
+        # torch.accelerator.empty_cache() raise rather than act as the
+        # documented no-op. Both must degrade gracefully on every accelerator
+        # backend, including those not yet on the unified allocator API.
+        #
+        # This test deliberately runs on MPS as well (unlike test_memory_stats),
+        # since MPS is exactly the backend the assert fired on.
+        initialized = torch._C._accelerator_isAllocatorInitialized()
+        self.assertIsInstance(initialized, bool)
+        # Documented to be a no-op when the allocator is not initialized; it
+        # must never raise regardless of backend.
+        torch.accelerator.empty_cache()
+
     @unittest.skipIf(TEST_MPS, "MPS doesn't support torch.accelerator memory API!")
     def test_memory_stats(self):
         # Ensure that device allocator is initialized
