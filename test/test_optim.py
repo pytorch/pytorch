@@ -2350,6 +2350,37 @@ class TestOptimRenewed(TestCase):
 
     @onlyCUDA
     @parametrize("amsgrad", [False, True])
+    @parametrize("lr_as_tensor", [False, True])
+    @parametrize("lr", [0.0, 1e-3])
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=[torch.float16, torch.float32],
+    )
+    def test_adam_capturable_forloop_no_nan(
+        self, device, dtype, optim_info, amsgrad, lr_as_tensor, lr
+    ):
+        optim_cls = optim_info.optim_cls
+        embedding = torch.nn.Embedding(16, 4, device=device, dtype=dtype)
+        initial_weight = embedding.weight.detach().clone()
+        lr_arg = torch.tensor(lr, device=device) if lr_as_tensor else lr
+        optim = optim_cls(
+            embedding.parameters(),
+            lr=lr_arg,
+            capturable=True,
+            foreach=False,
+            amsgrad=amsgrad,
+        )
+
+        indices = torch.tensor([0, 1, 0, 1], device=device)
+        embedding(indices).sum().backward()
+        optim.step()
+
+        self.assertTrue(torch.isfinite(embedding.weight).all().item())
+        if lr == 0.0:
+            self.assertEqual(embedding.weight, initial_weight)
+
+    @onlyCUDA
+    @parametrize("amsgrad", [False, True])
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
         dtypes=[torch.float32],

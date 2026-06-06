@@ -510,19 +510,29 @@ def _single_tensor_adam(
                 max_exp_avg_sqs[i].copy_(torch.maximum(max_exp_avg_sq, exp_avg_sq))
 
                 # Uses the max. for normalizing running avg. of gradient
-                # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
-                # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
-                denom = (
-                    max_exp_avg_sqs[i].sqrt() / (bias_correction2_sqrt * step_size_neg)
-                ).add_(eps / step_size_neg)
+                denom = max_exp_avg_sqs[i].sqrt()
             else:
-                denom = (
-                    exp_avg_sq.sqrt() / (bias_correction2_sqrt * step_size_neg)
-                ).add_(eps / step_size_neg)
+                denom = exp_avg_sq.sqrt()
 
+            is_low_precision = denom.dtype in (torch.float16, torch.bfloat16)
             if differentiable:
-                param.addcdiv_(exp_avg.clone(), denom)
+                exp_avg_for_update = exp_avg.clone()
+                if is_low_precision:
+                    denom = denom.float()
+                    exp_avg_for_update = exp_avg_for_update.float()
+                denom = denom / bias_correction2_sqrt
+                denom = denom + eps
+                param.addcdiv_(exp_avg_for_update * step_size_neg, denom)
+            elif is_low_precision:
+                denom = denom.float()
+                denom.div_(bias_correction2_sqrt)
+                denom.add_(eps)
+                param.addcdiv_(exp_avg.float() * step_size_neg, denom)
             else:
+                # Fold the step size into the denominator without forming 0 / -0
+                # when lr is zero and exp_avg_sq is zero.
+                denom.add_(eps * bias_correction2_sqrt)
+                denom.div_(bias_correction2_sqrt * step_size_neg)
                 param.addcdiv_(exp_avg, denom)
         else:
             step = _get_value(step_t)

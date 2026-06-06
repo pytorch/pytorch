@@ -576,6 +576,27 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
+    def test_adam_differentiable_zero_lr_grad_is_finite(self):
+        for optim_cls in (Adam, AdamW):
+            for amsgrad in (False, True):
+                params = torch.rand(10, requires_grad=True, dtype=torch.float64).clone()
+                params.grad = torch.zeros_like(params)
+                lr = torch.tensor(0.0, requires_grad=True, dtype=torch.float64)
+                optim = optim_cls(
+                    [params],
+                    lr=lr,
+                    differentiable=True,
+                    foreach=False,
+                    amsgrad=amsgrad,
+                )
+
+                optim.step()
+                params.sum().backward()
+
+                self.assertTrue(torch.isfinite(params).all().item())
+                self.assertIsNotNone(lr.grad)
+                self.assertTrue(torch.isfinite(lr.grad).item())
+
     def test_adamw_differentiable_weight_decay(self):
         params = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
