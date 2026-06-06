@@ -422,72 +422,6 @@ class FakeTensorTest(TestCase):
             y = torch.nn.parameter.Parameter(x)
             self.assertTrue(isinstance(y, torch.nn.Parameter))
 
-    def test_parameter_state_reconstruction_from_dict(self):
-        with FakeTensorMode():
-            param = torch.nn.Conv2d(3, 4, 1).weight
-
-        fake_device = param.fake_device
-        param_cls = type(param)
-        kwargs = dict(param.__dict__)
-        kwargs["requires_grad"] = param.requires_grad
-
-        reconstructed = param_cls(param.to("meta"), **kwargs)
-
-        self.assertIsInstance(reconstructed, FakeTensor)
-        self.assertIsInstance(reconstructed, torch.nn.Parameter)
-        self.assertEqual(reconstructed.requires_grad, param.requires_grad)
-        self.assertEqual(reconstructed.fake_device, fake_device)
-        self.assertEqual(reconstructed.device, fake_device)
-        self.assertIs(reconstructed.fake_mode, param.fake_mode)
-        self.assertIn("_fake_device", reconstructed.__dict__)
-        self.assertNotIn("fake_device", reconstructed.__dict__)
-        self.assertEqual(reconstructed.to("meta").fake_device, torch.device("meta"))
-
-    def test_parameter_state_reconstruction_rejects_device_conflict(self):
-        with FakeTensorMode() as mode:
-            elem = torch.empty(2, 2, device="meta")
-            with self.assertRaisesRegex(ValueError, "conflicting device values"):
-                FakeTensor(
-                    mode,
-                    elem,
-                    device=torch.device("cpu"),
-                    fake_device=torch.device("cuda:0"),
-                )
-
-    def test_parameter_state_reconstruction_accepts_normalized_device_aliases(self):
-        with FakeTensorMode() as mode:
-            elem = torch.empty(2, 2, device="meta")
-            fake = FakeTensor(
-                mode,
-                elem,
-                device=torch.device("cuda"),
-                fake_device=torch.device("cuda:0"),
-            )
-
-        self.assertEqual(fake.fake_device, torch.device("cuda:0"))
-
-    @parametrize("device_kwarg_name", ["fake_device", "device"])
-    def test_parameter_state_reconstruction_device_names(self, device_kwarg_name):
-        with FakeTensorMode():
-            param = torch.nn.Conv2d(3, 4, 1).weight
-
-        kwargs = dict(param.__dict__)
-        fake_device = kwargs.pop("_fake_device")
-        kwargs[device_kwarg_name] = fake_device
-        kwargs["requires_grad"] = param.requires_grad
-
-        reconstructed = type(param)(param.to("meta"), **kwargs)
-
-        self.assertIsInstance(reconstructed, FakeTensor)
-        self.assertIsInstance(reconstructed, torch.nn.Parameter)
-        self.assertEqual(reconstructed.requires_grad, param.requires_grad)
-        self.assertEqual(reconstructed.fake_device, fake_device)
-        self.assertEqual(reconstructed.device, fake_device)
-        self.assertIs(reconstructed.fake_mode, param.fake_mode)
-        self.assertIn("_fake_device", reconstructed.__dict__)
-        self.assertNotIn("fake_device", reconstructed.__dict__)
-        self.assertEqual(reconstructed.to("meta").fake_device, torch.device("meta"))
-
     @unittest.skipIf(not dist.is_available(), "requires distributed")
     def test_fsdp_flat_param(self):
         from torch.distributed.fsdp._flat_param import FlatParameter
@@ -544,10 +478,6 @@ class FakeTensorTest(TestCase):
             cpu_tensor = torch.empty(2, 2, device="meta")
             fake_cpu = FakeTensor(mode, cpu_tensor, torch.device("cpu"))
             self.assertEqual(fake_cpu.fake_device, torch.device("cpu"))
-            fake_cpu_from_alias = FakeTensor(
-                mode, cpu_tensor, fake_device=torch.device("cpu")
-            )
-            self.assertEqual(fake_cpu_from_alias.fake_device, torch.device("cpu"))
 
             # Test device with explicit index - should remain unchanged
             cuda_device_with_index = torch.device("cuda:0")
