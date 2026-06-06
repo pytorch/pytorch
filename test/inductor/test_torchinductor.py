@@ -1042,6 +1042,16 @@ def xfail_if_mps(fn):
     return wrapper
 
 
+def skip_if_mps(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if is_mps_backend(self.device):
+            raise unittest.SkipTest("mps not supported")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 # Just an alias to track failures due to the missing eager ops
 xfail_if_mps_unimplemented = xfail_if_mps
 
@@ -15629,12 +15639,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # out-of-range index fires a device-side assert that poisons the context
     # (uncatchable in-process). The triton-cpu and pallas backends lower the
     # runtime assert to a hard process abort rather than a catchable
-    # RuntimeError, and Halide has no device-side assert so it no-ops the
-    # check; the test is skipped on all three.
+    # RuntimeError, and Halide skips the assert at lowering. MPS does not
+    # currently satisfy the runtime-assert behavior exercised by this test,
+    # so it is skipped on MPS. The test is skipped on all five.
     @skipCUDAIf(True, "device-side assert poisons CUDA context; see #185885")
     @skip_if_triton_cpu
     @skip_if_pallas
     @skip_if_halide
+    @skip_if_mps
     def test_index_add_out_of_bounds(self):
         # https://github.com/pytorch/pytorch/issues/185885
         # Eager index_add bounds-checks the index; the inductor decomp routes
