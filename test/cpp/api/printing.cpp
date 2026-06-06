@@ -11,7 +11,7 @@ TEST(PrintSciModeTest, ToggleScientificNotation) {
   std::ostringstream oss1;
   oss1 << t;
   auto out1 = oss1.str();
-  std::cout << "With sci_mode=true: '" << out1 << "'" << std::endl;
+  std::cout << "With sci_mode=true: '" << out1 << '\'' << std::endl;
   EXPECT_TRUE(
       out1.find("e-") != std::string::npos ||
       out1.find("e+") != std::string::npos);
@@ -21,7 +21,7 @@ TEST(PrintSciModeTest, ToggleScientificNotation) {
   std::ostringstream oss2;
   oss2 << t;
   auto out2 = oss2.str();
-  std::cout << "With sci_mode=false: '" << out2 << "'" << std::endl;
+  std::cout << "With sci_mode=false: '" << out2 << '\'' << std::endl;
   EXPECT_TRUE(
       out2.find("e-") == std::string::npos &&
       out2.find("e+") == std::string::npos);

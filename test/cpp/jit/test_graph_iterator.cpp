@@ -60,12 +60,12 @@ void assert_ordering(
     std::initializer_list<std::string> expected_list) {
   auto expected = std::vector<std::string>(expected_list);
   ASSERT_EQ(expected.size(), actual.size())
-      << "Got " << actual.size() << " elements (" << actual << ")"
-      << " expected " << expected.size() << " elements (" << expected << ")";
+      << "Got " << actual.size() << " elements (" << actual << ')'
+      << " expected " << expected.size() << " elements (" << expected << ')';
   for (unsigned i = 0; i < expected.size(); i++) {
     ASSERT_EQ(expected[i], actual[i])
         << "Difference at index " << i << " in " << actual << " (expected "
-        << actual << ")";
+        << actual << ')';
   }
 }
 
