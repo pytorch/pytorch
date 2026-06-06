@@ -1,8 +1,10 @@
 # Owner(s): ["module: custom-operators"]
 
 import contextlib
+import copy
 import enum
 import gc
+import pickle
 import random
 import re
 import unittest
@@ -1153,6 +1155,123 @@ def forward(self, x_1, cfg_1):
             [],
             "Opaque output should reuse the input placeholder, not create a get_attr constant",
         )
+
+    def test_opaque_base_is_pybind_backed(self):
+        self.assertTrue(hasattr(torch._C, "_OpaqueBase"))
+        self.assertIn(torch._C._OpaqueBase, OpaqueBase.__mro__)
+
+        class PyOpaque(OpaqueBase):
+            def __init__(self, value):
+                self.value = value
+
+        self.assertEqual(PyOpaque(3).value, 3)
+        self.assertIsInstance(PyOpaque(3), torch._C._OpaqueBase)
+        self.assertIsInstance(PyOpaque(3), OpaqueBase)
+
+        class ChildPyOpaque(PyOpaque):
+            def __init__(self, value):
+                self.value = value
+
+        self.assertEqual(ChildPyOpaque(4).value, 4)
+        self.assertIsInstance(ChildPyOpaque(4), torch._C._OpaqueBase)
+        self.assertIsInstance(ChildPyOpaque(4), OpaqueBase)
+
+        @dataclass
+        class DataOpaque(OpaqueBase):
+            value: int
+
+        self.assertEqual(DataOpaque(5).value, 5)
+        self.assertIsInstance(DataOpaque(5), torch._C._OpaqueBase)
+        self.assertIsInstance(DataOpaque(5), OpaqueBase)
+        self.assertNotIn("_opaque_base_constructing", DataOpaque(5).__dict__)
+        data_copy = copy.deepcopy(DataOpaque(5))
+        self.assertEqual(data_copy.value, 5)
+        self.assertIsInstance(data_copy, torch._C._OpaqueBase)
+
+        @dataclass(frozen=True)
+        class FrozenDataOpaque(OpaqueBase):
+            value: int
+
+        self.assertEqual(FrozenDataOpaque(6).value, 6)
+        self.assertIsInstance(FrozenDataOpaque(6), torch._C._OpaqueBase)
+        self.assertIsInstance(FrozenDataOpaque(6), OpaqueBase)
+        frozen_copy = copy.deepcopy(FrozenDataOpaque(6))
+        self.assertEqual(frozen_copy.value, 6)
+        self.assertIsInstance(frozen_copy, torch._C._OpaqueBase)
+
+        size = SizeStore(4)
+        size_roundtrip = pickle.loads(pickle.dumps(size))
+        self.assertEqual(size_roundtrip, size)
+        self.assertIsInstance(size_roundtrip, torch._C._OpaqueBase)
+
+        cyclic = SizeStore(7)
+        cyclic.child = cyclic
+        cyclic_roundtrip = pickle.loads(pickle.dumps(cyclic))
+        self.assertIs(cyclic_roundtrip.child, cyclic_roundtrip)
+        self.assertIsInstance(cyclic_roundtrip, torch._C._OpaqueBase)
+
+        class ModuleOpaque(OpaqueBase, torch.nn.Module):
+            pass
+
+        module = ModuleOpaque()
+        self.assertIsInstance(module, torch.nn.Module)
+        self.assertEqual(dict(module.named_parameters()), {})
+        self.assertIsInstance(module, torch._C._OpaqueBase)
+        self.assertIsInstance(module, OpaqueBase)
+
+        class ModuleOpaqueWithInit(OpaqueBase, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.ones(()))
+
+        module_with_init = ModuleOpaqueWithInit()
+        self.assertIsInstance(module_with_init, torch.nn.Module)
+        self.assertEqual(next(iter(module_with_init.named_parameters()))[0], "param")
+        self.assertIsInstance(module_with_init, torch._C._OpaqueBase)
+        self.assertIsInstance(module_with_init, OpaqueBase)
+        module_copy = copy.deepcopy(module_with_init)
+        self.assertEqual(next(iter(module_copy.named_parameters()))[0], "param")
+        self.assertIsInstance(module_copy, torch._C._OpaqueBase)
+
+        class OpaqueWithState(OpaqueBase):
+            def __init__(self, value):
+                self.value = value
+                self.setstate_called = False
+
+            def __getstate__(self):
+                return {"encoded": self.value + 1}
+
+            def __setstate__(self, state):
+                self.value = state["encoded"] - 1
+                self.setstate_called = True
+
+        with_state_roundtrip = copy.deepcopy(OpaqueWithState(8))
+        self.assertEqual(with_state_roundtrip.value, 8)
+        self.assertTrue(with_state_roundtrip.setstate_called)
+        self.assertIsInstance(with_state_roundtrip, torch._C._OpaqueBase)
+
+        class OpaqueWithNewArgs(OpaqueBase):
+            def __new__(cls, value):
+                instance = super().__new__(cls)
+                instance.value_from_new = value
+                return instance
+
+            def __init__(self, value):
+                self.value = value
+
+            def __getnewargs__(self):
+                return (self.value,)
+
+        with_newargs_roundtrip = copy.deepcopy(OpaqueWithNewArgs(9))
+        self.assertEqual(with_newargs_roundtrip.value, 9)
+        self.assertEqual(with_newargs_roundtrip.value_from_new, 9)
+        self.assertIsInstance(with_newargs_roundtrip, torch._C._OpaqueBase)
+
+        class NonInstanceNew(OpaqueBase):
+            def __new__(cls):
+                return 123
+
+        self.assertEqual(NonInstanceNew(), 123)
 
     def test_guard_pickle_subclass_with_opaque_inner_attr(self):
         # Regression test: the guard state pickler serializes tensor subclasses
@@ -4159,62 +4278,6 @@ class fn(torch.nn.Module):
         # Already called during import; second call should be a no-op.
         torch._C._set_generator_metaclass(OpaqueBaseMeta)
         self.assertIsInstance(torch._C.Generator, OpaqueBaseMeta)
-
-    def test_opaque_base_is_pybind_backed(self):
-        self.assertTrue(hasattr(torch._C, "_OpaqueBase"))
-        self.assertIn(torch._C._OpaqueBase, OpaqueBase.__mro__)
-
-        class PyOpaque(OpaqueBase):
-            def __init__(self, value):
-                self.value = value
-
-        self.assertEqual(PyOpaque(3).value, 3)
-        self.assertIsInstance(PyOpaque(3), torch._C._OpaqueBase)
-        self.assertIsInstance(PyOpaque(3), OpaqueBase)
-
-        class ChildPyOpaque(PyOpaque):
-            def __init__(self, value):
-                self.value = value
-
-        self.assertEqual(ChildPyOpaque(4).value, 4)
-        self.assertIsInstance(ChildPyOpaque(4), torch._C._OpaqueBase)
-        self.assertIsInstance(ChildPyOpaque(4), OpaqueBase)
-
-        @dataclass
-        class DataOpaque(OpaqueBase):
-            value: int
-
-        self.assertEqual(DataOpaque(5).value, 5)
-        self.assertIsInstance(DataOpaque(5), torch._C._OpaqueBase)
-        self.assertIsInstance(DataOpaque(5), OpaqueBase)
-
-        @dataclass(frozen=True)
-        class FrozenDataOpaque(OpaqueBase):
-            value: int
-
-        self.assertEqual(FrozenDataOpaque(6).value, 6)
-        self.assertIsInstance(FrozenDataOpaque(6), torch._C._OpaqueBase)
-        self.assertIsInstance(FrozenDataOpaque(6), OpaqueBase)
-
-        class ModuleOpaque(OpaqueBase, torch.nn.Module):
-            pass
-
-        module = ModuleOpaque()
-        self.assertIsInstance(module, torch.nn.Module)
-        self.assertEqual(dict(module.named_parameters()), {})
-        self.assertIsInstance(module, torch._C._OpaqueBase)
-        self.assertIsInstance(module, OpaqueBase)
-
-        class ModuleOpaqueWithInit(OpaqueBase, torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = torch.nn.Parameter(torch.ones(()))
-
-        module_with_init = ModuleOpaqueWithInit()
-        self.assertIsInstance(module_with_init, torch.nn.Module)
-        self.assertEqual(next(iter(module_with_init.named_parameters()))[0], "param")
-        self.assertIsInstance(module_with_init, torch._C._OpaqueBase)
-        self.assertIsInstance(module_with_init, OpaqueBase)
 
     def test_generator_metaclass_is_set(self):
         """Generator's metaclass should be OpaqueBaseMeta after import"""

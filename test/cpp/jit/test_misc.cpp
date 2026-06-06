@@ -92,13 +92,13 @@ inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 template <typename T>
 std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {
   size_t i = 0;
-  out << "{";
+  out << '{';
   for (auto&& e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;
   }
-  out << "}";
+  out << '}';
   return out;
 }
 

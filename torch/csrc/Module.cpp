@@ -2999,6 +2999,10 @@ Call this whenever a new thread is created in order to propagate values from
     return at::impl::ThreadLocalPythonObjects::get_state().contains(key);
   });
 
+  py_module.def("_remove_obj_from_tls", [](const std::string& key) {
+    at::impl::ThreadLocalPythonObjects::erase(key);
+  });
+
   py_module.def("_accelerator_hooks_device_count", []() {
     auto device_type = at::getAccelerator();
     if (device_type.has_value()) {

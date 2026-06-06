@@ -256,6 +256,14 @@ def maybe_to_fake_obj(
         opaque_info = get_opaque_obj_info(x_type)
         if opaque_info is None:
             raise AssertionError(f"opaque_info for type {x_type} must not be None")
+        try:
+            opaque_base_constructing = object.__getattribute__(
+                x, "_opaque_base_constructing"
+            )
+        except AttributeError:
+            opaque_base_constructing = False
+        if opaque_base_constructing:
+            return fake_x_wrapped
         for attr_name in opaque_info.members:
             with _disable_current_modes():
                 if not hasattr(x, attr_name):

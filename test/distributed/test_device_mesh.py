@@ -308,7 +308,7 @@ class DeviceMeshTest(DTensorTestBase):
         mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
         local_tensor = torch.randn(2, 8)
-        global_tensor = funcol.all_gather_tensor(
+        global_tensor = funcol.all_gather_single(
             local_tensor, gather_dim=0, group=(mesh, 0)
         ).wait()
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
@@ -1352,7 +1352,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 contiguous=True,
             )
             local_tensor = tensor_padded_list[my_rank]
-            big_tensor = funcol.all_gather_tensor(
+            big_tensor = funcol.all_gather_single(
                 local_tensor, gather_dim=shard_dim, group=(device_mesh, 0)
             )
             big_tensor_chunks = list(
@@ -1447,7 +1447,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             res_num = ((0 + self.world_size - 1) * self.world_size) / 2
 
-            scattered_tensor = funcol.reduce_scatter_tensor(
+            scattered_tensor = funcol.reduce_scatter_single(
                 tensor_to_reduce,
                 reduceOp="sum",
                 scatter_dim=shard_dim,
@@ -2079,6 +2079,25 @@ class ProcessGroupOpaqueTypeTest(TestCase):
                 f"member but does not exist on the ProcessGroup class. "
                 f"Was it renamed or removed?",
             )
+
+    def test_fake_process_group_gets_registered_members(self):
+        from torch._library.fake_class_registry import maybe_to_fake_obj
+        from torch._library.opaque_object import get_opaque_obj_info
+        from torch.distributed.device_mesh import _register_distributed_opaque_types
+
+        _register_distributed_opaque_types()
+        opaque_info = get_opaque_obj_info(ProcessGroup)
+        self.assertIsNotNone(opaque_info)
+        original_members = opaque_info.members
+        try:
+            opaque_info.members = {
+                name: original_members[name] for name in ("size", "rank")
+            }
+            fake_pg = maybe_to_fake_obj(FakeTensorMode(), ProcessGroup(0, 1))
+            self.assertEqual(fake_pg.size(), 1)
+            self.assertEqual(fake_pg.rank(), 0)
+        finally:
+            opaque_info.members = original_members
 
 
 if __name__ == "__main__":

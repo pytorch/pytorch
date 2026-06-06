@@ -443,7 +443,7 @@ def deserialize_torch_artifact(
             "Fallback to weights_only=False succeeded. "
             "Loaded object of type %s after initial failure: %s",
             type(artifact),
-            exc_info=e,
+            e,
         )
     if not isinstance(artifact, (tuple, dict)):
         raise AssertionError(f"expected tuple or dict, got {type(artifact).__name__}")
