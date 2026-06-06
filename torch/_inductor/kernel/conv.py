@@ -354,10 +354,6 @@ aten_convolution = ExternKernelChoice(
     op_overload=aten.convolution.default,
 )
 
-aten_convolution_fallback = fallback_handler(
-    aten.convolution.default, add_to_fallback_set=False
-)
-
 
 def conv1x1_via_mm(x, w, *, out):
     w = torch.squeeze(torch.squeeze(w, -1), -1)
@@ -731,16 +727,13 @@ def convolution(
     # intentionally let autotune_select_algorithm raise so they get a clear
     # error message.
     if not choices and torch._inductor.utils._use_conv_autotune_backend("TRITON"):
-        return aten_convolution_fallback(
-            x,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            transposed,
-            output_padding,
-            groups,
+        choices.append(
+            aten_convolution.bind(
+                args,
+                layout,
+                ordered_kwargs_for_cpp_kernel,
+                **kwargs,
+            )
         )
 
     node, _ = autotune_select_algorithm("convolution", choices, args, layout)
