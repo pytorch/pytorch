@@ -961,14 +961,15 @@ def scan_functionalize(
     )
 
     if hasattr(ctx, "mode"):
-        hop_instance = HopInstance.create(
-            scan_op,
-            combine_fn,
-            init,
-            xs,
-            additional_inputs,
-            mutated_arg_indices=mutated_arg_indices,
-        )
+        with ctx.mode:
+            hop_instance = HopInstance.create(
+                scan_op,
+                combine_fn,
+                init,
+                xs,
+                additional_inputs,
+                mutated_arg_indices=mutated_arg_indices,
+            )
         if can_auto_functionalize(hop_instance):
             return do_auto_functionalize_v2(
                 ctx.mode,
