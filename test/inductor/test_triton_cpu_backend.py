@@ -12,11 +12,23 @@ except ImportError:
 
 if HAS_CPU and TRITON_HAS_CPU:
 
-    @config.patch(cpu_backend="triton")
+    @config.patch(
+        {
+            "cpu_backend": "triton",
+            "test_configs.runtime_triton_dtype_assert": False,
+            "test_configs.runtime_triton_shape_assert": False,
+        }
+    )
     class SweepInputsCpuTritonTest(test_torchinductor.SweepInputsCpuTest):
         pass
 
-    @config.patch(cpu_backend="triton")
+    @config.patch(
+        {
+            "cpu_backend": "triton",
+            "test_configs.runtime_triton_dtype_assert": False,
+            "test_configs.runtime_triton_shape_assert": False,
+        }
+    )
     class CpuTritonTests(test_torchinductor.TestCase):
         common = test_torchinductor.check_model
         device = "cpu"

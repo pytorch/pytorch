@@ -225,7 +225,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
     }
   });
 
-  return std::make_tuple(neg_log_likelihood, log_alpha);
+  return std::make_tuple(std::move(neg_log_likelihood), std::move(log_alpha));
 }
 
 // This is the backward. It consists of two phases:
@@ -416,7 +416,7 @@ std::tuple<Tensor, Tensor> ctc_loss_meta(const Tensor& log_probs, const Tensor& 
           std::tie(neg_log_likelihood, log_alpha, std::ignore, std::ignore) = ctc_loss_allocate_outputs<scalar_t, kInt>(
               log_probs, targets, input_lengths, target_lengths, BLANK);
         }
-        return std::make_tuple(neg_log_likelihood, log_alpha);
+        return std::make_tuple(std::move(neg_log_likelihood), std::move(log_alpha));
       });
 }
 
@@ -553,8 +553,52 @@ Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef inp
   return ctc_loss_impl(log_probs_, targets, input_lengths, target_lengths, BLANK, reduction, zero_infinity);
 }
 
+Tensor ctc_loss_tensor_subclass(
+    const Tensor& log_probs_,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    int64_t BLANK,
+    int64_t reduction,
+    bool zero_infinity) {
+  auto is_batched = log_probs_.dim() == 3;
+  Tensor log_probs = is_batched ? log_probs_ : log_probs_.unsqueeze(1);
+  Tensor res = std::get<0>(at::_ctc_loss(
+      log_probs,
+      targets.to(log_probs.device(), kLong),
+      input_lengths,
+      target_lengths,
+      BLANK,
+      zero_infinity));
+  if (zero_infinity) {
+    res = at::where(
+        res == Scalar(std::numeric_limits<double>::infinity()),
+        at::zeros({}, res.options()),
+        res);
+  }
+  if (reduction == at::Reduction::Mean) {
+    auto target_lengths_t = get_clamped_target_length(target_lengths, res.options());
+    return (res / target_lengths_t).mean();
+  } else if (reduction == at::Reduction::Sum) {
+    return res.sum();
+  }
+  return is_batched ? std::move(res) : res.squeeze(0);
+}
+
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+  if (at::areAnyTensorSubclassLike(
+          {log_probs, targets, input_lengths, target_lengths})) {
+    return ctc_loss_tensor_subclass(
+        log_probs,
+        targets,
+        input_lengths,
+        target_lengths,
+        BLANK,
+        reduction,
+        zero_infinity);
+  }
+
   // we don't want to convert to IntArrayRef if we can dispatch to cuDNN/MIOpen (this allows graph-capturable ctc_loss)
   // cuDNN CTC Loss (returns false on non-CUDA builds)
   bool use_cudnn =
@@ -571,10 +615,15 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& in
         log_probs, targets_check, input_lengths, target_lengths, BLANK);
   }
   bool use_accelerated = use_cudnn || use_miopen;
-  if (at::areAnyTensorSubclassLike(
-          {log_probs, targets, input_lengths, target_lengths}) || use_accelerated) {
-    // Composite Compliant path for TensorSubclasses
-    return ctc_loss_impl(log_probs, targets, input_lengths, target_lengths, BLANK, reduction, zero_infinity);
+  if (use_accelerated) {
+    return ctc_loss_impl(
+        log_probs,
+        targets,
+        input_lengths,
+        target_lengths,
+        BLANK,
+        reduction,
+        zero_infinity);
   }
   // Fast path (which accesses data_ptr) and less operator dispatches for
   // regular tensors
