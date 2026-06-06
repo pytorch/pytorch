@@ -417,6 +417,10 @@ inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
 }
 
 inline void copy_to(const Tensor& dst, const Tensor& src) {
+  if (src.dim() == 0 && src.device().type() == at::kCPU) {
+    dst.fill_(src);
+    return;
+  }
   // Use TORCH_GUARD_OR_FALSE with sym_eq to avoid data-dependent-expression
   // errors with unbacked symbolic sizes.  When we can't prove equality,
   // we fall through to the broadcast/expand path.
@@ -437,9 +441,6 @@ inline void copy_to(const Tensor& dst, const Tensor& src) {
     // constants will still appear. Users can workaround that case by
     // dst[index..] = src.reshape(..)
     dst.copy_(src);
-    return;
-  } else if (src.dim() == 0 && src.device().type() == at::kCPU) {
-    dst.fill_(src);
     return;
   }
   auto src_view = src.view_symint(slicePrefix1sSize(src.sym_sizes()));
