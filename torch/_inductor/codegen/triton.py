@@ -2079,7 +2079,22 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def rand(seed, offset):
         offset = f"({offset}).to(tl.uint32)"
+        if TritonOverrides._can_use_4x_random():
+            (block,) = V.kernel.dense_size_list()
+            return f"triton_helpers.rand4x({seed}, {offset}, {block})"
         return f"tl.rand({seed}, {offset})"
+
+    @staticmethod
+    def _can_use_4x_random():
+        return (
+            isinstance(V.kernel, TritonKernel)
+            and not isinstance(
+                V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel
+            )
+            and V.graph.get_current_device_or_throw().type == "cuda"
+            and V.kernel.triton_tensor_ndim() == 1
+            and not config.align_random_eager
+        )
 
     @staticmethod
     def rand_eager(seed, base_offset, threads_per_round, tid, vec):
@@ -2094,6 +2109,9 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def randn(seed, offset):
         offset = f"({offset}).to(tl.uint32)"
+        if TritonOverrides._can_use_4x_random():
+            (block,) = V.kernel.dense_size_list()
+            return f"triton_helpers.randn4x({seed}, {offset}, {block})"
         return f"tl.randn({seed}, {offset})"
 
     @staticmethod
