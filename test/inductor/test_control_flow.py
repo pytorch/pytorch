@@ -2,6 +2,7 @@
 
 import itertools
 import unittest
+import uuid
 
 import torch
 import torch._dynamo.testing
@@ -386,6 +387,74 @@ class CondTests(TestCase):
     @torch._inductor.config.patch(cpp_wrapper=True)
     def test_cond_no_outputs_input_mutation_cpp_wrapper(self):
         self._check_cond_no_outputs_input_mutation()
+
+    def _check_cond_equal_constant_output(self):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(
+                    p,
+                    lambda y: (y + 1, 1),
+                    lambda y: (y - 1, 1),
+                    (x,),
+                )
+
+        model = Model()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
+
+        with torch.no_grad():
+            x = torch.ones(4)
+            for pred in (torch.tensor(True), torch.tensor(False)):
+                actual = compiled_model(pred, x)
+                expected = model(pred, x)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[1], expected[1])
+
+        self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
+
+    def test_cond_equal_constant_output(self):
+        self._check_cond_equal_constant_output()
+
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    def test_cond_equal_constant_output_cpp_wrapper(self):
+        self._check_cond_equal_constant_output()
+
+    def test_cond_mixed_tensor_none_output(self):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(
+                    p,
+                    lambda y: (y + 1, None),
+                    lambda y: (y - 1, None),
+                    (x,),
+                )
+
+        model = Model()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
+
+        with torch.no_grad():
+            x = torch.ones(4)
+            for pred in (torch.tensor(True), torch.tensor(False)):
+                actual = compiled_model(pred, x)
+                expected = model(pred, x)
+                self.assertEqual(actual[0], expected[0])
+                self.assertIsNone(actual[1])
+
+        self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
+
+    def test_cond_bool_constant_outputs_rejected(self):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(p, lambda y: True, lambda y: True, (x,))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Constants returned from branches must be ints or None",
+        ):
+            torch.compile(Model(), backend="inductor", fullgraph=True)(
+                torch.tensor(True), torch.ones(4)
+            )
 
     def test_cond_differing_constant_outputs_rejected(self):
         class Model(torch.nn.Module):
@@ -777,18 +846,24 @@ class CondTests(TestCase):
         counters = {"pre_grad": 0, "post_grad": 0}
 
         class PreGradPassCounter(CustomGraphPass):
+            def __init__(self):
+                self._uuid = str(uuid.uuid4())
+
             def __call__(self, graph):
                 counters["pre_grad"] += 1
 
             def uuid(self):
-                return "PreGradPassCounter"
+                return self._uuid
 
         class PostGradPassCounter(CustomGraphPass):
+            def __init__(self):
+                self._uuid = str(uuid.uuid4())
+
             def __call__(self, graph):
                 counters["post_grad"] += 1
 
             def uuid(self):
-                return "PostGradPassCounter"
+                return self._uuid
 
         with torch._inductor.config.patch(
             {
@@ -866,6 +941,39 @@ class CondTests(TestCase):
             model=FactoryBranches(),
             inputs=(),
             device="cpu",  # device for predicate
+            dynamic=True,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_buffer_reuse_with_large_subgraph(self, device):
+        # Regression test: torch.cond subgraph with more buffers than main
+        # graph scheduler nodes caused segmented_tree OOB in memory planning.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(64, 64) for _ in range(10)]
+                )
+
+            def forward(self, p, x):
+                def true_fn(inp):
+                    h = inp
+                    for layer in self.layers:
+                        h = torch.relu(layer(h))
+                    return h.clone()
+
+                def false_fn(inp):
+                    return inp.new_zeros(inp.shape[0], 64)
+
+                return torch.cond(p, true_fn, false_fn, (x,))
+
+        model = Model().to(device)
+        inputs = (torch.randn(8, 64),)
+        self._run_test(
+            model=model,
+            inputs=inputs,
+            device=device,
             dynamic=True,
         )
 
@@ -2163,6 +2271,12 @@ class ScanTests(TestCase):
     def test_scan_in_cond(
         self, device, dynamic, reverse, dim, pred, scan_length, autograd
     ):
+        # TODO: remove when https://github.com/pytorch/pytorch/issues/182381 is resolved.
+        if autograd:
+            raise unittest.SkipTest(
+                "Fails due to issues with backward pass when compiled."
+            )
+
         init = torch.randn(4, 4, 4, dtype=torch.float64)
         xs = torch.randn(scan_length, 4, 4, 4, dtype=torch.float64)
         xs = xs.movedim(0, dim)
