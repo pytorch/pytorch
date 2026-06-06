@@ -239,7 +239,12 @@ def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode)
     constraint_sizes = [None] * n_dims
 
     for i in range(n_dims):
-        if i in getattr(t, "_dynamo_weak_dynamic_indices", {}):
+        if i in getattr(t, "_dynamo_unbacked_indices", {}):
+            dynamic_sizes.append(DimDynamic.UNBACKED)
+        elif i in getattr(t, "_dynamo_strict_unbacked_indices", {}):
+            dynamic_sizes.append(DimDynamic.UNBACKED)
+            constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
+        elif i in getattr(t, "_dynamo_weak_dynamic_indices", {}):
             dynamic_sizes.append(DimDynamic.DYNAMIC)
         elif i in getattr(t, "_dynamo_dynamic_indices", {}):
             # bit annoying, but we need to replicate process in _dynamo/variables/builder.py
@@ -278,12 +283,16 @@ def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode)
             tensor_source=source,
             shape_env_to_source_to_symbol_cache={},
             inner_contexts=inner_contexts,
+            shape_ids=getattr(t, "_dynamo_shape_ids", None),
+            unbacked_bounds=getattr(t, "_dynamo_unbacked_bounds", None),
         )
     else:
         symbolic_context: StatelessSymbolicContext = (  # type: ignore[no-redef]
             StatelessSymbolicContext(
                 dynamic_sizes=dynamic_sizes,
                 constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+                shape_ids=getattr(t, "_dynamo_shape_ids", None),
+                unbacked_bounds=getattr(t, "_dynamo_unbacked_bounds", None),
             )
         )
 
@@ -546,6 +555,10 @@ def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
         "_dynamo_dynamic_range",
         "_dynamo_static_indices",
         "_dynamo_unbacked_indices",
+        "_dynamo_strict_unbacked_indices",
+        "_dynamo_hint_overrides",
+        "_dynamo_shape_ids",
+        "_dynamo_unbacked_bounds",
         "_dynamo_propagated_dynamic_indices",
         "_has_dynamo_dim_marking",
     ):

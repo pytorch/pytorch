@@ -7308,6 +7308,162 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep = export(Foo(), inputs, dynamic_shapes=shapes)
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
+    def test_named_dim_with_one_example_does_not_specialize(self):
+        class Foo(torch.nn.Module):
+            def forward(self, img, points, labels):
+                return img + 1
+
+        img = torch.randn(1, 3, 8, 8)
+        points = torch.randn(1, 1, 2)
+        labels = torch.randn(1, 1, 1)
+        n_labels = Dim("n_labels", min=1, max=12)
+        dynamic_shapes = {
+            "img": {},
+            "points": {1: n_labels},
+            "labels": {1: n_labels},
+        }
+
+        ep = export(Foo(), (img, points, labels), dynamic_shapes=dynamic_shapes)
+        new_img = torch.randn(1, 3, 8, 8)
+        self.assertEqual(
+            ep.module()(new_img, torch.randn(1, 7, 2), torch.randn(1, 7, 1)),
+            new_img + 1,
+        )
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"Guard failed: labels\.size\(\)\[1\] == points\.size\(\)\[1\]",
+        ):
+            ep.module()(new_img, torch.randn(1, 2, 2), torch.randn(1, 3, 1))
+
+    def test_named_dim_with_one_example_unbounded_max(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        x = torch.randn(1)
+        for dim in (Dim("n"), Dim("n", min=1)):
+            ep = export(
+                Foo(),
+                (x,),
+                dynamic_shapes={"x": {0: dim}},
+            )
+
+            new_x = torch.randn(16)
+            self.assertEqual(ep.module()(new_x), new_x + 1)
+
+    def test_repeated_named_dim_invalid_zero_one_examples_fail(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x.sum() + y.sum()
+
+        for x_size, y_size in ((0, 1), (1, 2)):
+            for strict in (True, False):
+                n = Dim("n", min=0, max=5)
+                with self.assertRaisesRegex(
+                    (
+                        torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                        torch._dynamo.exc.UserError,
+                    ),
+                    "is not equal to",
+                ):
+                    export(
+                        Foo(),
+                        (torch.randn(x_size), torch.randn(y_size)),
+                        dynamic_shapes=({0: n}, {0: n}),
+                        strict=strict,
+                    )
+
+    def test_derived_dim_with_one_example_does_not_specialize(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        x = torch.randn(1)
+        n = Dim("n", min=1, max=5)
+        ep = export(Foo(), (x,), dynamic_shapes={"x": {0: 2 * n - 1}})
+
+        new_x = torch.randn(3)
+        self.assertEqual(ep.module()(new_x), new_x + 1)
+
+    def test_derived_dim_root_unbacked_before_derived_runtime_assert(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x.sum() + y.sum()
+
+        n = Dim("n", min=1, max=5)
+        ep = export(
+            Foo(),
+            (torch.randn(1), torch.randn(2)),
+            dynamic_shapes=({0: n}, {0: n + 1}),
+        )
+
+        ep.module()(torch.randn(2), torch.randn(3))
+        for x, y in (
+            (torch.randn(2), torch.randn(2)),
+            (torch.randn(5), torch.randn(5)),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
+                ep.module()(x, y)
+
+    def test_derived_dim_root_unbacked_invalid_example_fails(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x.sum() + y.sum()
+
+        n = Dim("n", min=1, max=5)
+        for strict in (True, False):
+            with self.assertRaisesRegex(
+                (
+                    torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                    torch._dynamo.exc.UserError,
+                ),
+                "Expected input.*to be equal.*but got",
+            ):
+                export(
+                    Foo(),
+                    (torch.randn(1), torch.randn(4)),
+                    dynamic_shapes=({0: n}, {0: n + 1}),
+                    strict=strict,
+                )
+
+    def test_named_dim_with_one_example_new_tracer(self):
+        class Foo(torch.nn.Module):
+            def forward(self, img, points, labels):
+                return img + 1
+
+        img = torch.randn(1, 3, 8, 8)
+        points = torch.randn(1, 1, 2)
+        labels = torch.randn(1, 1, 1)
+        n_labels = Dim("n_labels", min=1, max=12)
+
+        with config.patch(use_new_tracer_experimental=True):
+            _export_to_torch_ir(
+                Foo(),
+                (img, points, labels),
+                {},
+                {
+                    "img": {},
+                    "points": {1: n_labels},
+                    "labels": {1: n_labels},
+                },
+                restore_fqn=False,
+            )
+
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        n = Dim("n", min=1, max=5)
+        with config.patch(use_new_tracer_experimental=True):
+            _export_to_torch_ir(
+                Bar(),
+                (torch.randn(1),),
+                {},
+                {"x": {0: 2 * n - 1}},
+                restore_fqn=False,
+            )
+
     def test_map(self):
         if "cpp_runtime_nonstrict" in self.id():
             self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
@@ -9826,6 +9982,10 @@ def forward(self, x):
                 "_dynamo_dynamic_range",
                 "_dynamo_static_indices",
                 "_dynamo_unbacked_indices",
+                "_dynamo_strict_unbacked_indices",
+                "_dynamo_hint_overrides",
+                "_dynamo_shape_ids",
+                "_dynamo_unbacked_bounds",
             ]:
                 self.assertFalse(hasattr(tensor, attr))
 

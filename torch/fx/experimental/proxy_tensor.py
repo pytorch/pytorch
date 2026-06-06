@@ -3164,6 +3164,29 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     """A helper function for setting up unbacked_bindings on the destination FX graph."""
     from .symbolic_shapes import compute_unbacked_bindings
 
+    def set_nested_unbacked_bindings(
+        symbol_to_path: dict[Any, pytree.KeyPath],
+    ) -> None:
+        def find_proxy(
+            proxy_tree: _NestedProxys, path: pytree.KeyPath
+        ) -> tuple[Proxy, pytree.KeyPath]:
+            if not path:
+                raise AssertionError(f"Expected Proxy, got {proxy_tree}")
+            if isinstance(proxy_tree, Proxy):
+                return proxy_tree, path
+
+            key = path[0]
+            if isinstance(key, pytree.SequenceKey) and isinstance(proxy_tree, Sequence):
+                return find_proxy(proxy_tree[key.idx], path[1:])
+            elif isinstance(key, pytree.MappingKey) and isinstance(proxy_tree, Mapping):
+                return find_proxy(proxy_tree[key.key], path[1:])
+            else:
+                raise AssertionError(f"Expected Proxy, got {proxy_tree}")
+
+        for symbol, path in symbol_to_path.items():
+            proxy, proxy_path = find_proxy(out_proxy, path)
+            proxy.node.meta.setdefault("unbacked_bindings", {})[symbol] = proxy_path
+
     # Can't use detect_fake_mode here,
     #
     # python test/distributed/_tensor/test_dtensor_compile.py -k
@@ -3175,5 +3198,6 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
             if not isinstance(out_proxy, Proxy):
-                raise AssertionError(f"Expected Proxy, got {out_proxy}")
-            out_proxy.node.meta["unbacked_bindings"] = symbol_to_path
+                set_nested_unbacked_bindings(symbol_to_path)
+            else:
+                out_proxy.node.meta["unbacked_bindings"] = symbol_to_path

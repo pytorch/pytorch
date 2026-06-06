@@ -4851,6 +4851,10 @@ class ShapeEnv:
                 foreign_env = sz.node.shape_env  # type: ignore[union-attr]
                 if foreign_env is not None:
                     opt_hint = foreign_env.var_to_hint_override.get(sz.node.expr)  # type: ignore[union-attr]
+                    opt_hint = foreign_env.var_to_hint_override.get(  # type: ignore[union-attr]
+                        sz.node._expr,
+                        opt_hint,
+                    )
                     if opt_hint is not None:
                         hint_overrides[i] = opt_hint
 
@@ -4950,7 +4954,7 @@ class ShapeEnv:
                 and hint_overrides
                 and i in hint_overrides
             ):
-                self.var_to_hint_override[sym_sizes[-1].node.expr] = hint_overrides[i]
+                self.var_to_hint_override[sym_sizes[-1].node._expr] = hint_overrides[i]
 
         sym_strides = []
         for i, stride_expr in enumerate(new_stride_exprs):
@@ -5076,7 +5080,7 @@ class ShapeEnv:
 
         for i, sym in enumerate(sym_sizes):
             if isinstance(sym, torch.SymInt) and i in hint_overrides:
-                self.var_to_hint_override[sym.node.expr] = hint_overrides[i]
+                self.var_to_hint_override[sym.node._expr] = hint_overrides[i]
 
         sym_stride = []
         for i, stride_expr in enumerate(stride):
@@ -6030,12 +6034,25 @@ class ShapeEnv:
             for i, src in enumerate(sources):
                 source_index[src.name] = i
 
-            def get_expression(tensor_dim_src: Source) -> sympy.Expr:
+            example_value_replacements = {
+                k: sympy.sympify(v) for k, v in self.var_to_hint_override.items()
+            }
+
+            def replace_with_example_values(expr: sympy.Basic) -> sympy.Basic:
+                return expr.xreplace(self.backed_var_to_val).xreplace(
+                    example_value_replacements
+                )
+
+            def get_expression(
+                tensor_dim_src: Source, *, ignore_replacements: bool = False
+            ) -> sympy.Expr:
                 fake = placeholders[source_index[tensor_dim_src.base.name]]  # type: ignore[attr-defined]
                 if tensor_dim_src.idx is None:  # type: ignore[attr-defined]
                     raise AssertionError("tensor_dim_src.idx must not be None")
                 symint = fake.shape[tensor_dim_src.idx]  # type: ignore[attr-defined]
                 if isinstance(symint, torch.SymInt):
+                    if ignore_replacements:
+                        return symint.node._expr
                     return symint.node.expr
                 else:
                     if type(symint) is not int:
@@ -6047,13 +6064,32 @@ class ShapeEnv:
                 # Check whether given input shape values satisfy a specified equation s = s'.
                 # - Raise when the equation was violated by the given input shape values.
                 # - Otherwise issue a guard to constrain them.
-                concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2))
+                eq = sympy.Eq(expr1, expr2)
+                example_expr1 = get_expression(src1, ignore_replacements=True)
+                example_expr2 = get_expression(src2, ignore_replacements=True)
+                example_eq = sympy.Eq(example_expr1, example_expr2)
+                concrete_val = self._maybe_evaluate_static(
+                    replace_with_example_values(example_eq),
+                    compute_hint=True,
+                )
+                evaluated_eq = False
+                if concrete_val is None:
+                    concrete_val = self.evaluate_expr(eq)
+                    evaluated_eq = True
                 if not concrete_val:
                     raise ConstraintViolationError(
-                        f"{src1.name} = {expr1 if isinstance(expr1, int) else expr1.xreplace(self.backed_var_to_val)}"
+                        f"{src1.name} = {replace_with_example_values(example_expr1)}"
                         " is not equal to "
-                        f"{src2.name} = {expr2 if isinstance(expr2, int) else expr2.xreplace(self.backed_var_to_val)}"
+                        f"{src2.name} = {replace_with_example_values(example_expr2)}"
                     )
+                if not evaluated_eq:
+                    concrete_val = self.evaluate_expr(eq)
+                    if not concrete_val:
+                        raise ConstraintViolationError(
+                            f"{src1.name} = {replace_with_example_values(example_expr1)}"
+                            " is not equal to "
+                            f"{src2.name} = {replace_with_example_values(example_expr2)}"
+                        )
 
             for srcEq, root, fn in equalities_inputs.derived_equalities:
                 expr1 = get_expression(srcEq)
@@ -6068,13 +6104,26 @@ class ShapeEnv:
                 # Check whether given input shape values satisfy a specified equation s = fn(s').
                 # - Raise when the equation was violated by the given input shape values.
                 # - Otherwise issue a guard to constrain them.
-                concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2_))
+                eq = sympy.Eq(expr1, expr2_)
+                try:
+                    concrete_val = self.evaluate_expr(eq)
+                except GuardOnDataDependentSymNode:
+                    concrete_val = self._maybe_evaluate_static(
+                        replace_with_example_values(eq),
+                        compute_hint=True,
+                    )
+                    if concrete_val is None or bool(concrete_val):
+                        concrete_val = self.guard_or_defer_runtime_assert(
+                            eq,
+                            f"Expected input {srcEq.name} to be equal to "
+                            f"{fn(sympy.Symbol(debug_name))}",
+                        )
                 if not concrete_val:
                     raise ConstraintViolationError(
                         f"Expected input {srcEq.name} to be equal to "
                         f"{fn(sympy.Symbol(debug_name))}, "
-                        f"where {debug_name} = {expr2.xreplace(self.backed_var_to_val)}, "
-                        f"but got {expr1.xreplace(self.backed_var_to_val)}"
+                        f"where {debug_name} = {replace_with_example_values(expr2)}, "
+                        f"but got {replace_with_example_values(expr1)}"
                     )
 
             for phantom_symbol in equalities_inputs.phantom_symbols:
