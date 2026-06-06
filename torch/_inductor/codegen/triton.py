@@ -121,7 +121,7 @@ from .triton_utils import (
     config_of,
     equal_1_arg_indices,
     is_unaligned_buffer_name,
-    non_constexpr_signature,
+    select_tile_hint,
     should_unwrap_unspec_arg,
     signature_to_meta,
 )
@@ -6456,14 +6456,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         else:
-            tile_hint = ""
-            if len(size_hints) == 2:
-                if (
-                    len(non_constexpr_signature(signature)) == 4
-                ):  # input, output and 2 args
-                    tile_hint = "tile_hint=TileHint.SQUARE,"
-                else:
-                    tile_hint = "tile_hint=TileHint.DEFAULT,"
+            hint = select_tile_hint(size_hints, signature)
+            tile_hint = f"tile_hint=TileHint.{hint.name}," if hint is not None else ""
             heuristics_line = f"""
                 @triton_heuristics.{self._get_heuristic()}(
                     size_hints={size_hints!r}, {tile_hint}

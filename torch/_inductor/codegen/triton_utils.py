@@ -124,6 +124,21 @@ def non_constexpr_signature(signature):
     return new_signature
 
 
+def select_tile_hint(size_hints, signature):
+    """Pick TileHint.SQUARE vs TileHint.DEFAULT for 2D pointwise; None for 1D.
+
+    SQUARE applies when the kernel has exactly 2 size hints and 4 non-constexpr
+    signature args (input, output, and 2 numel args -> a square 2D tile).
+    """
+    from torch._inductor.runtime.hints import TileHint
+
+    if len(size_hints) != 2:
+        return None
+    if len(non_constexpr_signature(signature)) == 4:
+        return TileHint.SQUARE
+    return TileHint.DEFAULT
+
+
 def signature_to_meta(
     signature: list[KernelArgType],
     *,
