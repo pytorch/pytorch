@@ -13133,6 +13133,37 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             [torch.randn((4, 2)), torch.randn(4)],
         )
 
+    def test_histogram_out_empty_tensors(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("torch.histogram out= repro is CPU-only")
+
+        def fn(x, w, hist, bin_edges):
+            return torch.histogram(
+                x,
+                6,
+                weight=w,
+                range=(0.0, 7.0),
+                density=False,
+                out=(hist, bin_edges),
+            )
+
+        x = torch.rand([1, 2, 3, 4, 1], device=self.device)
+        w = torch.rand([1, 2, 3, 4, 1], device=self.device)
+        eager_hist = torch.empty(0, device=self.device)
+        eager_bin_edges = torch.empty(0, device=self.device)
+        eager_out = fn(x, w, eager_hist, eager_bin_edges)
+
+        hist = torch.empty(0, device=self.device)
+        bin_edges = torch.empty(0, device=self.device)
+        actual_out = torch.compile(fn, backend="inductor")(x, w, hist, bin_edges)
+
+        self.assertEqual(actual_out[0], eager_out[0])
+        self.assertEqual(actual_out[1], eager_out[1])
+        self.assertEqual(hist, eager_hist)
+        self.assertEqual(bin_edges, eager_bin_edges)
+        self.assertEqual(hist.shape, torch.Size([6]))
+        self.assertEqual(bin_edges.shape, torch.Size([7]))
+
     # Shape padding causes the inputs to all get specialized, so the codegen
     # test fails
     @expectedFailureCodegenDynamic
