@@ -89,7 +89,7 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import ConstantVariable, FakeIdVariable
+from .constant import ConstantVariable, FakeIdVariable, NumpyScalarVariable
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
@@ -718,8 +718,19 @@ class BuiltinVariable(BaseBuiltinVariable):
             def compare_by_value(
                 tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
             ) -> VariableTracker:
+                def value(v: VariableTracker) -> Any:
+                    if isinstance(v, NumpyScalarVariable):
+                        return v.as_python_constant()
+                    return v.value  # type: ignore[attr-defined]
+
                 try:
-                    return VariableTracker.build(tx, op(a.value, b.value))  # type: ignore[attr-defined]
+                    result = op(value(a), value(b))
+                    numpy_result = NumpyScalarVariable.maybe_create_supported(
+                        result, op.__name__
+                    )
+                    if numpy_result is not None:
+                        return numpy_result
+                    return VariableTracker.build(tx, result)
                 except TypeError as exc:
                     raise_observed_exception(
                         type(exc),

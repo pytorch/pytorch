@@ -9,6 +9,8 @@ import os
 import sys
 import unittest
 
+import numpy as np
+
 import torch
 import torch._dynamo.config as dynamo_config
 import torch.backends.cuda
@@ -2391,6 +2393,29 @@ class CudaReproTests(TestCase):
         self.assertEqual(graph.disable_cudagraphs_reason, None)
         self.assertEqual(graph.device_types, {device_type})
         self.assertEqual(compiled_fn(*inp), fn(*inp))
+
+    @skipIfXpu(msg="cudagraph is not supported on xpu")
+    @config.patch({"triton.cudagraphs": True, "graph_partition": True})
+    def test_numpy_float_module_attr_cudagraphs(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, scale) -> None:
+                super().__init__()
+                self.scale = scale
+
+            def forward(self, x):
+                return x.sin() * self.scale
+
+        for scale in (np.sqrt(4.0), np.float64(np.nan)):
+            torch._dynamo.reset()
+            mod = Mod(scale).to(device_type)
+            opt_mod = torch.compile(mod, fullgraph=True)
+            inp = torch.randn(64, device=device_type)
+
+            result, (graph,) = run_and_get_graph_lowering(opt_mod, inp)
+
+            torch.testing.assert_close(result, mod(inp), equal_nan=True)
+            self.assertEqual(graph.disable_cudagraphs_reason, None)
+            self.assertEqual(graph.device_types, {device_type})
 
     def test_epilogue_fusion_with_view(self):
         class ToyModel(torch.nn.Module):

@@ -31,7 +31,7 @@ import inspect
 import logging
 import math
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
 from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
@@ -42,7 +42,7 @@ import torch.fx
 import torch.nn
 import torch.utils._pytree as _pytree
 from torch._C import DispatchKeySet
-from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.constant import ConstantVariable, NumpyScalarVariable
 from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
@@ -924,6 +924,134 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         )
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
+        def data_arg(
+            args: Sequence[VariableTracker],
+            kwargs: dict[str, VariableTracker],
+        ) -> VariableTracker | None:
+            if args:
+                return args[0]
+            if "data" in kwargs:
+                return kwargs["data"]
+            return None
+
+        def check_any_unspec(vt: VariableTracker) -> bool:
+            # NB: This includes UnspecializedPythonVariable
+            if vt.is_tensor() or isinstance(vt, SymNodeVariable):
+                return True
+            if isinstance(vt, (ListVariable, TupleVariable)):
+                return any(check_any_unspec(item) for item in vt.items)
+            return False
+
+        def contains_numpy_scalar(vt: VariableTracker) -> bool:
+            if isinstance(vt, NumpyScalarVariable):
+                return True
+            if isinstance(vt, (ListVariable, TupleVariable)):
+                return any(contains_numpy_scalar(item) for item in vt.items)
+            return False
+
+        def maybe_set_numpy_scalar_dtype(
+            args: Sequence[VariableTracker],
+            kwargs: dict[str, VariableTracker],
+        ) -> bool:
+            def dtype_for_sym_node(vt: SymNodeVariable) -> torch.dtype | None:
+                try:
+                    py_type = vt.python_type()
+                except NotImplementedError:
+                    return None
+                if py_type is bool:
+                    return torch.bool
+                if py_type is int:
+                    return torch.int64
+                if py_type is float:
+                    return torch.get_default_dtype()
+                return None
+
+            def collect_dtypes(vt: VariableTracker) -> list[torch.dtype] | None:
+                if isinstance(vt, NumpyScalarVariable):
+                    return [torch.as_tensor(vt.as_python_constant()).dtype]
+                if isinstance(vt, TensorVariable):
+                    return [vt.dtype] if vt.dtype is not None else None
+                if isinstance(vt, SymNodeVariable):
+                    dtype = dtype_for_sym_node(vt)
+                    return [dtype] if dtype is not None else None
+                if isinstance(vt, (ListVariable, TupleVariable)):
+                    dtypes = []
+                    for item in vt.items:
+                        item_dtypes = collect_dtypes(item)
+                        if item_dtypes is None:
+                            return None
+                        dtypes.extend(item_dtypes)
+                    return dtypes
+                try:
+                    return [torch.as_tensor(vt.as_python_constant()).dtype]
+                except (TypeError, ValueError, RuntimeError) as e:
+                    log.debug(
+                        "Unable to infer dtype for tensor factory input",
+                        exc_info=e,
+                    )
+                    return None
+
+            def promote_dtypes(dtypes: list[torch.dtype]) -> torch.dtype | None:
+                if not dtypes:
+                    return None
+                dtype = dtypes[0]
+                for other in dtypes[1:]:
+                    dtype = torch.promote_types(dtype, other)
+                return dtype
+
+            if len(args) > 1 or (
+                "dtype" in kwargs and not kwargs["dtype"].is_constant_none()
+            ):
+                return False
+
+            arg = data_arg(args, kwargs)
+            if arg is not None and contains_numpy_scalar(arg):
+                dtype = promote_dtypes(collect_dtypes(arg) or [])
+                if dtype is None:
+                    return False
+                kwargs["dtype"] = ConstantVariable.create(dtype)
+                return True
+            return False
+
+        def kwargs_for_refs_tensor(
+            tx: "InstructionTranslatorBase",
+            fn: Callable[..., Any],
+            kwargs: dict[str, VariableTracker],
+        ) -> dict[str, VariableTracker]:
+            if fn is not torch.asarray or "copy" not in kwargs:
+                return kwargs
+            copy_arg = kwargs["copy"].as_python_constant()
+            if copy_arg is False:
+                raise_observed_exception(
+                    ValueError,
+                    tx,
+                    args=["can't alias arbitrary sequence into a tensor."],
+                )
+            kwargs = dict(kwargs)
+            del kwargs["copy"]
+            return kwargs
+
+        def check_numpy_scalar_asarray_copy_arg(
+            tx: "InstructionTranslatorBase",
+            fn: Callable[..., Any],
+            arg: VariableTracker,
+            kwargs: dict[str, VariableTracker],
+        ) -> None:
+            if (
+                fn is torch.asarray
+                and isinstance(arg, NumpyScalarVariable)
+                and "copy" in kwargs
+                and kwargs["copy"].as_python_constant() is False
+            ):
+                raise_observed_exception(
+                    RuntimeError,
+                    tx,
+                    args=[
+                        "can't alias NumPy scalars. "
+                        "Either remove copy=False or transform it in a ndarray. "
+                    ],
+                )
+
         @register(*tracing_state_functions())
         def handle_tracing_state_functions(
             self,
@@ -1570,6 +1698,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 example_value=None,
             )
 
+        @register(torch.as_tensor, torch.asarray)
+        def handle_tensor_from_numpy_scalar(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            arg = data_arg(args, kwargs)
+            if arg is not None and contains_numpy_scalar(arg):
+                check_numpy_scalar_asarray_copy_arg(tx, self.value, arg, kwargs)
+                if not arg.is_tensor() and check_any_unspec(arg):
+                    kwargs = kwargs_for_refs_tensor(tx, self.value, kwargs)
+                    maybe_set_numpy_scalar_dtype(args, kwargs)
+                    return TorchInGraphFunctionVariable(
+                        torch._refs.tensor
+                    ).call_function(tx, [*args], kwargs)
+                if not maybe_set_numpy_scalar_dtype(args, kwargs):
+                    return None
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        self.value,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
+            return None
+
         @register(torch.jit.annotate)
         def handle_jit_annotate(
             self, tx: "InstructionTranslatorBase", the_type: Any, the_value: V
@@ -2135,33 +2291,40 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            def check_any_unspec(x: VariableTracker) -> bool:
-                # NB: This includes UnspecializedPythonVariable
-                if x.is_tensor() or isinstance(x, SymNodeVariable):
-                    return True
-                elif isinstance(x, (ListVariable, TupleVariable)):
-                    return any(check_any_unspec(y) for y in x.items)
-                # TODO: there maybe other recursive structures you need to
-                # check
-                else:
-                    return False
-
-            data_arg = None
-            if args:
-                data_arg = args[0]
-            elif "data" in kwargs:
-                data_arg = kwargs["data"]
+            # This may add dtype before the unspecialized-data path below; that
+            # path forwards kwargs to _refs.tensor and preserves NumPy dtype.
+            numpy_scalar_dtype_added = maybe_set_numpy_scalar_dtype(args, kwargs)
+            arg = data_arg(args, kwargs)
 
             # NB: OK to pass torch.tensor(tensor), this will trace fine
-            if (
-                data_arg is not None
-                and not data_arg.is_tensor()
-                and check_any_unspec(data_arg)
-            ):
+            if arg is not None and not arg.is_tensor() and check_any_unspec(arg):
                 # This is slower and less canonical, so only use it if we
                 # have to
                 return TorchInGraphFunctionVariable(torch._refs.tensor).call_function(
                     tx, [*args], kwargs
+                )
+            elif numpy_scalar_dtype_added:
+                if (
+                    "requires_grad" in kwargs
+                    and kwargs["requires_grad"].as_python_constant()
+                ):
+                    unimplemented(
+                        gb_type="numpy_scalar_tensor_requires_grad",
+                        context=f"fn={self.value}, args={args}, kwargs={kwargs}",
+                        explanation="Dynamo does not support this.",
+                        hints=[
+                            "Create the tensor outside the compiled region.",
+                            "Do not set `requires_grad=True`.",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        self.value,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
                 )
             else:
                 return None
