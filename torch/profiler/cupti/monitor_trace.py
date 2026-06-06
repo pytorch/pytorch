@@ -12,7 +12,11 @@ from typing import cast, TYPE_CHECKING
 if TYPE_CHECKING:
     import os
 
-from . import _cupti_monitor as _mon
+from .cupti_python import (
+    Driver_api_trace_cbid,
+    ExternalCorrelationKind,
+    Runtime_api_trace_cbid,
+)
 
 
 # Matches the value Kineto uses to round the trace base time down to a ~3-month
@@ -46,7 +50,6 @@ _MEMORY_KIND_NAMES = {
 
 _FLOW_CATEGORY = "ac2g"
 _OVERHEAD_PID = -1
-_USER_EXTERNAL_CORRELATION_KIND: int | None = None
 _RUNTIME_CBID_NAMES: dict[int, str] | None = None
 _DRIVER_CBID_NAMES: dict[int, str] | None = None
 _RUNTIME_BLOCKLIST = {
@@ -82,13 +85,6 @@ _DRIVER_FLOW_NAMES = {
     "cuLaunchKernel",
     "cuLaunchKernelEx",
 }
-
-
-def _ensure_cupti_python_bindings() -> None:
-    global _USER_EXTERNAL_CORRELATION_KIND
-    cc = _mon._require_cupti_python()
-    if _USER_EXTERNAL_CORRELATION_KIND is None:
-        _USER_EXTERNAL_CORRELATION_KIND = int(cc.ExternalCorrelationKind.CUSTOM1)
 
 
 def _default_base_ns() -> int:
@@ -178,23 +174,21 @@ def _load_cbid_names(enum_cls) -> dict[int, str]:
             prefix, maybe_version = normalized.rsplit("_v", 1)
             if maybe_version.isdigit():
                 normalized = prefix
-        names[int(member.value)] = normalized
+        names[member.value] = normalized
     return names
 
 
 def _runtime_cbid_name(cbid: int) -> str:
     global _RUNTIME_CBID_NAMES
-    cc = _mon._require_cupti_python()
     if _RUNTIME_CBID_NAMES is None:
-        _RUNTIME_CBID_NAMES = _load_cbid_names(cc.Runtime_api_trace_cbid)
+        _RUNTIME_CBID_NAMES = _load_cbid_names(Runtime_api_trace_cbid)
     return _RUNTIME_CBID_NAMES.get(cbid, f"cbid_{cbid}")
 
 
 def _driver_cbid_name(cbid: int) -> str:
     global _DRIVER_CBID_NAMES
-    cc = _mon._require_cupti_python()
     if _DRIVER_CBID_NAMES is None:
-        _DRIVER_CBID_NAMES = _load_cbid_names(cc.Driver_api_trace_cbid)
+        _DRIVER_CBID_NAMES = _load_cbid_names(Driver_api_trace_cbid)
     return _DRIVER_CBID_NAMES.get(cbid, f"cbid_{cbid}")
 
 
@@ -513,7 +507,7 @@ def _gpu_user_annotation_events(
     *,
     base_ns: int,
 ) -> list[dict[str, object]]:
-    _ensure_cupti_python_bindings()
+    user_external_kind = ExternalCorrelationKind.CUSTOM1
     user_annotations = trace_window.get("user_annotations", {})
     if not isinstance(user_annotations, dict) or not user_annotations:
         return []
@@ -523,7 +517,7 @@ def _gpu_user_annotation_events(
     for event in trace_window_events:
         if event.get("kind") != "external_correlation":
             continue
-        if _as_int(event.get("external_kind", 0)) != _USER_EXTERNAL_CORRELATION_KIND:
+        if _as_int(event.get("external_kind", 0)) != user_external_kind:
             continue
         external_id = _as_int(event.get("external_id", 0))
         correlation_id = _as_int(event.get("correlation_id", 0))
