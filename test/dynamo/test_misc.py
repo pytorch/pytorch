@@ -2244,6 +2244,64 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                     opt_fn = torch.compile(fn, backend=backend)
                     self.assertEqual(opt_fn(x.clone(), clone_value(value)), expected)
 
+    def test_copy_mem_overlap_try_except(self):
+        def partial_overlap_fn(x):
+            try:
+                x[:-1].copy_(x[1:])
+            except RuntimeError:
+                x = x + 3
+            return x
+
+        def internal_overlap_fn(x, src):
+            try:
+                x[:1].expand(4).copy_(src)
+            except RuntimeError:
+                x = x + 4
+            return x
+
+        test_cases = (
+            (partial_overlap_fn, (torch.arange(5.0),)),
+            (internal_overlap_fn, (torch.arange(2.0), torch.ones(4))),
+        )
+
+        for fn, args in test_cases:
+            expected = fn(*(arg.clone() for arg in args))
+
+            for backend in ("eager", "inductor"):
+                with self.subTest(backend=backend, fn=fn.__name__):
+                    torch._dynamo.reset()
+                    opt_fn = torch.compile(fn, backend=backend)
+                    actual = opt_fn(*(arg.clone() for arg in args))
+                    self.assertEqual(actual, expected)
+
+    def test_copy_same_data_internal_overlap_try_except(self):
+        def same_view_fn(x):
+            y = x[:1].expand(4)
+            try:
+                y.copy_(y)
+            except RuntimeError:
+                x = x + 7
+            return x
+
+        def same_data_fn(x):
+            y = x[:1].expand(4)
+            z = x[:1].expand(4)
+            try:
+                y.copy_(z)
+            except RuntimeError:
+                x = x + 8
+            return x
+
+        x = torch.arange(2.0)
+        for fn in (same_view_fn, same_data_fn):
+            expected = fn(x.clone())
+
+            for backend in ("eager", "inductor"):
+                with self.subTest(backend=backend, fn=fn.__name__):
+                    torch._dynamo.reset()
+                    opt_fn = torch.compile(fn, backend=backend)
+                    self.assertEqual(opt_fn(x.clone()), expected)
+
     def test_masked_fill_internal_overlap_self_try_except(self):
         def fn(x, mask, value):
             try:
@@ -2873,7 +2931,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
     def test_structseq2(self):
         def fn(x, y):
-            return tuple(torch.return_types.linalg_qr((2 * x, y - 1)))
+            return tuple(torch.return_types.qr((2 * x, y - 1)))
 
         x = torch.randn(3, 2)
         y = torch.randn(2, 4)
@@ -16307,7 +16365,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 ),
                 "d": collections.OrderedDict(
                     {
-                        "e": torch.return_types.linalg_qr((2 * x, None)),
+                        "e": torch.return_types.qr((2 * x, None)),
                         "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                     },
                 ),
@@ -16335,7 +16393,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 ),
                 "d": collections.OrderedDict(
                     {
-                        "e": torch.return_types.linalg_qr((2 * x, None)),
+                        "e": torch.return_types.qr((2 * x, None)),
                         "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                     },
                 ),
@@ -16386,7 +16444,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 ),
                 "d": collections.OrderedDict(
                     {
-                        "e": torch.return_types.linalg_qr((2 * x, None)),
+                        "e": torch.return_types.qr((2 * x, None)),
                         "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                     },
                 ),
@@ -16400,7 +16458,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                         "d",
                         {
                             "f": MyTuple(torch.ones(4, 3), -y, y + 1),
-                            "e": torch.return_types.linalg_qr((2 * y, None)),
+                            "e": torch.return_types.qr((2 * y, None)),
                         },
                     ),
                 ],

@@ -2767,7 +2767,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: lcm_out
+    CPU, CUDA, MPS: lcm_out
   tags: pointwise
 
 - func: lcm(Tensor self, Tensor other) -> Tensor
@@ -9348,6 +9348,11 @@
 - func: cholesky_inverse.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA, MPS: cholesky_inverse_out
+
+- func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
+
+- func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
+  variants: method, function
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:

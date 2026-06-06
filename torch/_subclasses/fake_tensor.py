@@ -15,7 +15,7 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict, Unpack
 from weakref import ReferenceType
 
 import torch
@@ -88,6 +88,32 @@ aten = torch._ops.ops.aten
 CONSTANT_NUMEL_LIMIT = 1
 
 RECURSION_COUNT = 0
+
+
+class _FakeTensorConstructorIgnoredState(TypedDict, total=False):
+    # Recompute memo descriptor state when reconstructing from
+    # FakeTensor.__dict__.
+    _nonzero_memo: object
+    _nonzero_memo_vc: object
+    _nonzero_memo_epoch: object
+    _item_memo: object
+    _item_memo_vc: object
+    _item_memo_epoch: object
+    _unique_memo: object
+    _unique_memo_vc: object
+    _unique_memo_epoch: object
+    _unique_consecutive_memo: object
+    _unique_consecutive_memo_vc: object
+    _unique_consecutive_memo_epoch: object
+    _nested_int_memo: object
+    _nested_int_memo_vc: object
+    _nested_int_memo_epoch: object
+    _debug_trace: object
+
+
+_FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS = frozenset(
+    _FakeTensorConstructorIgnoredState.__annotations__
+)
 
 
 # Check if device type supports device index
@@ -300,15 +326,30 @@ def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
 
 
 def _guard_or_false(a: SymBool | bool) -> bool:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-    return guard_or_false(a)
+    return statically_known_true(a)
+
+
+def _skip_mem_overlap_check(t: Tensor) -> bool:
+    return torch._is_functional_tensor(t) or is_functorch_wrapped_tensor(t)
+
+
+def _is_non_overlapping_and_dense_or_false(t: Tensor) -> bool:
+    try:
+        return is_non_overlapping_and_dense_or_false(t)
+    except AssertionError:
+        return False
 
 
 def _has_internal_overlap(t: Tensor) -> bool:
-    if not isinstance(t, Tensor) or t.layout != torch.strided:
+    if (
+        not isinstance(t, Tensor)
+        or _skip_mem_overlap_check(t)
+        or t.layout != torch.strided
+    ):
         return False
-    if is_non_overlapping_and_dense_or_false(t):
+    if _is_non_overlapping_and_dense_or_false(t):
         return False
     return any(
         _guard_or_false(size > 1) and _guard_or_false(stride == 0)
@@ -332,16 +373,40 @@ def _same_strides(a: Tensor, b: Tensor) -> bool:
     )
 
 
+def _same_sizes(a: Tensor, b: Tensor) -> bool:
+    a_sizes = a.size()
+    b_sizes = b.size()
+    return len(a_sizes) == len(b_sizes) and all(
+        _guard_or_false(a_size == b_size) for a_size, b_size in zip(a_sizes, b_sizes)
+    )
+
+
+def _is_copy_same_data(self: object, src: object) -> bool:
+    return (
+        isinstance(self, Tensor)
+        and isinstance(src, Tensor)
+        and _same_storage(self, src)
+        and _guard_or_false(self.storage_offset() == src.storage_offset())
+        and _same_strides(self, src)
+        and _same_sizes(self, src)
+        and self.dtype == src.dtype
+        and self.is_conj() == src.is_conj()
+        and self.is_neg() == src.is_neg()
+    )
+
+
 def _has_partial_overlap(a: Tensor, b: Tensor) -> bool:
     if (
         not isinstance(a, Tensor)
         or not isinstance(b, Tensor)
+        or _skip_mem_overlap_check(a)
+        or _skip_mem_overlap_check(b)
         or a.layout != torch.strided
         or b.layout != torch.strided
         or _guard_or_false(a.numel() == 0)
         or _guard_or_false(b.numel() == 0)
-        or not is_non_overlapping_and_dense_or_false(a)
-        or not is_non_overlapping_and_dense_or_false(b)
+        or not _is_non_overlapping_and_dense_or_false(a)
+        or not _is_non_overlapping_and_dense_or_false(b)
         or not _same_storage(a, b)
     ):
         return False
@@ -357,8 +422,14 @@ def _has_partial_overlap(a: Tensor, b: Tensor) -> bool:
 
 
 _MUTATION_PARTIAL_OVERLAP_ARG_PAIRS = {
+    aten.copy_.default: (("self", "src"),),
     aten.masked_fill_.Scalar: (("self", "mask"),),
     aten.masked_fill_.Tensor: (("self", "mask"),),
+}
+
+
+_MUTATION_INTERNAL_OVERLAP_ARGS = {
+    aten.copy_.default: ("self",),
 }
 
 
@@ -429,6 +500,20 @@ def _check_partial_overlap_arg_pairs(
             _check_tensors_partial_overlap(output_arg, input_arg)
 
 
+def _check_internal_overlap_args(
+    schema_info: torch._C._SchemaInfo,
+    normalized_kwargs: Mapping[str, object],
+    arg_names: tuple[str, ...],
+) -> None:
+    for name in arg_names:
+        arg = _get_normalized_arg(schema_info, normalized_kwargs, name)
+        if arg is None:
+            continue
+        for tensor in pytree.tree_leaves(arg):
+            if isinstance(tensor, Tensor) and _has_internal_overlap(tensor):
+                _raise_internal_overlap_error()
+
+
 def _check_pointwise_mutation_mem_overlap(
     func: OpOverload,
     schema_info: torch._C._SchemaInfo,
@@ -467,10 +552,15 @@ def _check_mutation_mem_overlap(
         return
 
     partial_overlap_arg_pairs = _MUTATION_PARTIAL_OVERLAP_ARG_PAIRS.get(func, ())
+    internal_overlap_args = _MUTATION_INTERNAL_OVERLAP_ARGS.get(func, ())
     check_pointwise = torch.Tag.pointwise in func.tags and (
         torch.Tag.inplace in func.tags or torch.Tag.out in func.tags
     )
-    if not check_pointwise and not partial_overlap_arg_pairs:
+    if (
+        not check_pointwise
+        and not partial_overlap_arg_pairs
+        and not internal_overlap_args
+    ):
         return
 
     schema_info = get_schema_info(func)
@@ -485,6 +575,12 @@ def _check_mutation_mem_overlap(
     )
 
     _check_pointwise_mutation_mem_overlap(func, schema_info, normalized_kwargs)
+    if func is aten.copy_.default and _is_copy_same_data(
+        _get_normalized_arg(schema_info, normalized_kwargs, "self"),
+        _get_normalized_arg(schema_info, normalized_kwargs, "src"),
+    ):
+        return
+    _check_internal_overlap_args(schema_info, normalized_kwargs, internal_overlap_args)
     _check_partial_overlap_arg_pairs(
         schema_info, normalized_kwargs, partial_overlap_arg_pairs
     )
@@ -1028,18 +1124,88 @@ class FakeTensor(Tensor):
     @staticmethod
     def __new__(
         cls,
-        fake_mode: FakeTensorMode,
-        elem: Tensor,
-        device: torch.device,
+        fake_mode_or_elem: FakeTensorMode | Tensor | None = None,
+        elem: Tensor | None = None,
+        device: torch.device | str | None = None,
         constant: Tensor | None = None,
         real_tensor: Tensor | None = None,
         pytype: type[Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
+        *,
+        fake_mode: FakeTensorMode | None = None,
+        fake_device: torch.device | str | None = None,
+        _fake_device: torch.device | str | None = None,
+        requires_grad: bool | None = None,
+        _is_param: bool = False,
+        **state: Unpack[_FakeTensorConstructorIgnoredState],
     ) -> Self:
+        state_dict = cast(dict[str, object], state)
+        for attr_name in _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS:
+            state_dict.pop(attr_name, None)
+        if state_dict:
+            unexpected = next(iter(state_dict))
+            raise TypeError(
+                "FakeTensor.__new__() got an unexpected keyword argument "
+                f"{unexpected!r}"
+            )
+
+        if isinstance(fake_mode_or_elem, FakeTensorMode):
+            if fake_mode is not None and fake_mode is not fake_mode_or_elem:
+                raise TypeError("FakeTensor.__new__() got conflicting fake_mode values")
+            fake_mode = fake_mode_or_elem
+        else:
+            # Support bounded state-based reconstruction from known FakeTensor
+            # attrs, e.g. type(fake_tensor)(new_elem, **fake_tensor.__dict__).
+            if fake_mode_or_elem is not None:
+                if not isinstance(fake_mode_or_elem, Tensor):
+                    raise TypeError(
+                        "FakeTensor.__new__() expected a FakeTensorMode or Tensor "
+                        f"as the first argument, got {type(fake_mode_or_elem)}"
+                    )
+                if elem is not None:
+                    raise TypeError(
+                        "FakeTensor.__new__() expected either "
+                        "(fake_mode, elem, ...) or (elem, fake_mode=..., ...)"
+                    )
+                elem = fake_mode_or_elem
+            if fake_mode is None:
+                raise TypeError(
+                    "FakeTensor.__new__() missing required argument: 'fake_mode'"
+                )
+
+        if elem is None:
+            raise TypeError("FakeTensor.__new__() missing required argument: 'elem'")
+        if isinstance(elem, FakeTensor) and elem.fake_mode is not fake_mode:
+            raise AssertionError("elem must use the same FakeTensorMode as fake_mode")
+
+        specified_devices = [
+            (name, FakeTensor._normalize_fake_device(torch.device(value)))
+            for name, value in (
+                ("device", device),
+                ("fake_device", fake_device),
+                ("_fake_device", _fake_device),
+            )
+            if value is not None
+        ]
+        if specified_devices:
+            first_name, resolved_device = specified_devices[0]
+            for name, candidate_device in specified_devices[1:]:
+                if resolved_device != candidate_device:
+                    raise ValueError(
+                        "FakeTensor.__new__() got conflicting device values: "
+                        f"{first_name}={resolved_device}, {name}={candidate_device}"
+                    )
+            device = resolved_device
+        else:
+            raise TypeError(
+                "FakeTensor.__new__() missing required argument: "
+                "'device' (or 'fake_device')"
+            )
+
         self = Tensor._make_subclass(
             cls,
             elem,
-            elem.requires_grad,
+            elem.requires_grad if requires_grad is None else requires_grad,
             dispatch_device=True,
             device_for_backend_keys=device,
         )
@@ -1052,7 +1218,6 @@ class FakeTensor(Tensor):
             raise AssertionError(
                 f"elem.device.type must be 'meta', got {elem.device.type}"
             )
-        device = device if isinstance(device, torch.device) else torch.device(device)
         # NB: it is fine, if a little confusing, for device to be meta
         # (we are faking a meta tensor in that case).  However, it often
         # indicates some sort of confusion (e.g., you accidentally passed
@@ -1078,6 +1243,9 @@ class FakeTensor(Tensor):
         self.unique_memo = None
         self.unique_consecutive_memo = None
         self.nested_int_memo = None
+
+        if _is_param:
+            self._is_param = _is_param
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]

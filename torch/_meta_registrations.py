@@ -672,7 +672,27 @@ def meta_copy_(self, src, non_blocking=False):
     # which runs most of the meta checks that we care about.
     # In theory, we should make this more robust by carefully
     # auditing our C++ copy_() kernel and copying the checks here.
-    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+    from torch.fx.experimental.symbolic_shapes import (
+        free_unbacked_symbols,
+        statically_known_true,
+    )
+
+    if isinstance(src, Tensor):
+        try:
+            same_storage = self.untyped_storage()._cdata == src.untyped_storage()._cdata
+        except (AttributeError, RuntimeError):
+            same_storage = False
+        is_same_data = (
+            (self is src or same_storage)
+            and statically_known_true(self.storage_offset() == src.storage_offset())
+            and self.stride() == src.stride()
+            and self.size() == src.size()
+            and self.dtype == src.dtype
+            and self.is_conj() == src.is_conj()
+            and self.is_neg() == src.is_neg()
+        )
+        if is_same_data:
+            return self
 
     # TODO: Ideally, we'd insert a deferred runtime assert here, but if we are
     # calling an actual copy_, you'll get that automatically

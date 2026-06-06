@@ -544,6 +544,43 @@ class FunctionalTensorMode(TorchDispatchMode):
             FunctionalTensor, unwrap, (args, kwargs)
         )
 
+        if func is torch.ops.aten.copy_.default and len(args_unwrapped) >= 2:
+            from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+            self_arg = args_unwrapped[0]
+            src_arg = args_unwrapped[1]
+            self_base = (
+                torch._from_functional_tensor(self_arg)
+                if torch._is_functional_tensor(self_arg)
+                else self_arg
+            )
+            src_base = (
+                torch._from_functional_tensor(src_arg)
+                if torch._is_functional_tensor(src_arg)
+                else src_arg
+            )
+            try:
+                same_storage = (
+                    self_base.untyped_storage()._cdata
+                    == src_base.untyped_storage()._cdata
+                )
+            except (AttributeError, RuntimeError):
+                same_storage = False
+            if (
+                isinstance(self_base, torch.Tensor)
+                and isinstance(src_base, torch.Tensor)
+                and (self_base is src_base or same_storage)
+                and statically_known_true(
+                    self_base.storage_offset() == src_base.storage_offset()
+                )
+                and self_base.stride() == src_base.stride()
+                and self_base.size() == src_base.size()
+                and self_base.dtype == src_base.dtype
+                and self_base.is_conj() == src_base.is_conj()
+                and self_base.is_neg() == src_base.is_neg()
+            ):
+                return args[0]
+
         # Expectation: functionalization should not **already** be enabled above our mode.
         # Why would that be bad? when we return a FunctionalTensor here, we don't want functionalization
         # to run above this mode and further wrap that output in **another** C++ FunctionalTensorWrapper.
