@@ -254,15 +254,18 @@ MB_CGEMV(half2, half)
   MB_M5T_EB(DT, BM, BN, NSG, 0, false, 1, true, relaxed, true)  \
   MB_M5T_EB(DT, BM, BN, NSG, 1, true, 1, true, relaxed, true)
 
-// fp32: untransposed gets relaxed (default) + full (highest precision); the
-// transposed combos are relaxed-only (precise-fp32-transposed is rare and falls
-// back to the fp32-exact simd kernel), which keeps the instantiation count bounded.
-#define MB_M5T_FP(DT, BM, BN, NSG)                       \
-  MB_M5T_EB(float, BM, BN, NSG, 0, false, 0, false, relaxed, true) \
-  MB_M5T_EB(float, BM, BN, NSG, 0, false, 0, false, full, false)   \
-  MB_M5T_EB(float, BM, BN, NSG, 1, true, 0, false, relaxed, true)  \
-  MB_M5T_EB(float, BM, BN, NSG, 0, false, 1, true, relaxed, true)  \
-  MB_M5T_EB(float, BM, BN, NSG, 1, true, 1, true, relaxed, true)
+// fp32: every transpose combo gets relaxed (high/medium) + full (highest, the
+// default). set_float32_matmul_precision picks which at dispatch; full keeps
+// transposed fp32 on the tensor unit instead of falling back to the simd kernel.
+#define MB_M5T_FP(DT, BM, BN, NSG)                                  \
+  MB_M5T_EB(float, BM, BN, NSG, 0, false, 0, false, relaxed, true)  \
+  MB_M5T_EB(float, BM, BN, NSG, 0, false, 0, false, full, false)    \
+  MB_M5T_EB(float, BM, BN, NSG, 1, true, 0, false, relaxed, true)   \
+  MB_M5T_EB(float, BM, BN, NSG, 1, true, 0, false, full, false)     \
+  MB_M5T_EB(float, BM, BN, NSG, 0, false, 1, true, relaxed, true)   \
+  MB_M5T_EB(float, BM, BN, NSG, 0, false, 1, true, full, false)     \
+  MB_M5T_EB(float, BM, BN, NSG, 1, true, 1, true, relaxed, true)    \
+  MB_M5T_EB(float, BM, BN, NSG, 1, true, 1, true, full, false)
 
 #define MB_M5T_TILES(MAC, DT) \
   MAC(DT, 16, 128, 4)         \

@@ -1373,14 +1373,31 @@ class TestMPS(TestCaseMPS):
             output_cpu = torch.baddbmm(M_cpu, batch1_cpu, batch2_cpu, beta=beta, alpha=alpha)
             output_mps = torch.baddbmm(M_mps, batch1_mps, batch2_mps, beta=beta, alpha=alpha)
 
-            # MPS fp32 matmul defaults to TF32-relaxed tensor-unit math (opt out with
-            # PYTORCH_MPS_PREFER_FP32_PRECISE), so use a TF32-appropriate tolerance.
-            self.assertEqual(output_cpu, output_mps, atol=2e-2, rtol=2e-2)
+            # MPS fp32 matmul now defaults to full precision (HIGHEST); only
+            # CPU-vs-MPS accumulation-order drift remains.
+            self.assertEqual(output_cpu, output_mps, atol=1e-5, rtol=1e-5)
             self.assertEqual(output_cpu.size(), output_mps.size())
 
         helper(input_shape=(3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(10, 3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(1, 77, 77), batch1_shape=(8, 77, 64), batch2_shape=(8, 64, 77))
+
+    def test_matmul_fp32_default_full_precision(self):
+        # Regression: fp32 matmul must default to full precision (matches CPU), not
+        # silently TF32-relaxed. HIGH/MEDIUM opt into relaxed tensor-unit math, which
+        # is hardware/OS-dependent (no matmul2d -> full simd), so it is not asserted.
+        a, b = torch.randn(256, 2048), torch.randn(2048, 256)
+        ref = a @ b
+        self.assertEqual("highest", torch.get_float32_matmul_precision())
+        self.assertEqual(ref, (a.to("mps") @ b.to("mps")).cpu(), atol=1e-4, rtol=1e-4)
+        prev = torch.get_float32_matmul_precision()
+        try:
+            for p in ("high", "medium"):
+                torch.set_float32_matmul_precision(p)
+                out = (a.to("mps") @ b.to("mps")).cpu()
+                self.assertFalse(out.isnan().any() or out.isinf().any())
+        finally:
+            torch.set_float32_matmul_precision(prev)
 
     def test_local_scalar_dense_mps(self):
         x_cpu = torch.randn(1)

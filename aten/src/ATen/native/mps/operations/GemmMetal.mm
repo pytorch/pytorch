@@ -4,6 +4,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/operations/GemmMetal.h>
 
+#include <ATen/Context.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -1293,19 +1294,18 @@ void mps_gemm(
   const std::array<float, 2> alpha_beta = {
       static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
 
-  // matmul2d routing: the mpp kernel handles every resolvable layout (it needs only a
-  // row-major output, which `target` guarantees); tiny shapes or no matmul2d fall to
-  // simd. fp32 defaults to TF32-relaxed (PYTORCH_MPS_PREFER_FP32_PRECISE for exact).
+  // matmul2d routing: mpp handles every resolvable layout; tiny shapes or no matmul2d
+  // fall to simd. fp32 precision follows set_float32_matmul_precision (HIGHEST -> full,
+  // HIGH/MEDIUM -> relaxed TF32); force_precise_fp32 (complex sub-GEMMs) forces full.
   const bool use_mpp = gemm_use_mpp();
-  static const bool precise_fp32 = c10::utils::has_env("PYTORCH_MPS_PREFER_FP32_PRECISE");
-  const bool want_relaxed = (dt != kFloat) || (!precise_fp32 && !force_precise_fp32);
+  const bool relaxed_fp32 = !force_precise_fp32 &&
+      at::globalContext().float32MatmulPrecision() != at::Float32MatmulPrecision::HIGHEST;
+  const bool want_relaxed = (dt != kFloat) || relaxed_fp32;
   const bool transposed = ra.trans || rb.trans;
-  // Precise fp32 + transposed is the one tensor-unit combo we do not instantiate.
-  const bool m5t_has_variant = want_relaxed || !transposed;
   // K >= 64 sends small-K matmuls to the simd kernel; that is only worthwhile on
   // the M5 tensor unit. Off it (e.g. M2) simd is ~20x slower, so use matmul2d for
   // all K there (the kernel takes K as a runtime extent, so any K >= 1 is valid).
-  const bool use_m5t = use_mpp && m5t_has_variant && M >= 2 && N >= 32 &&
+  const bool use_m5t = use_mpp && M >= 2 && N >= 32 &&
       (K >= 64 || !gemm_on_m5_tensor_unit());
   const bool relaxed = want_relaxed;
 
