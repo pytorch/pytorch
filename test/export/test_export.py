@@ -15939,6 +15939,58 @@ graph():
         gm = export(M(), (torch.ones(2, 2),)).module()
         self.assertFalse(gm.foo.requires_grad)
 
+    def test_strict_new_tracer_free_tensors_as_constants(self):
+        inp = torch.randn(2, 2)
+        linear = torch.nn.Linear(2, 2)
+
+        class Holder(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("offset", torch.randn(2, 2))
+
+        holder = Holder()
+        free_tensor = torch.randn(2, 2)
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(2, 2))
+                self.register_buffer("buffer", torch.randn(2, 2))
+
+            def forward(self, x):
+                return (
+                    linear(x) + holder.offset + free_tensor + self.param + self.buffer
+                )
+
+        foo = Foo()
+        with config.patch(use_new_tracer_experimental=True):
+            ep = export(foo, (inp,), strict=True)
+
+        non_user_inputs = [
+            spec
+            for spec in ep.graph_signature.input_specs
+            if spec.kind != InputKind.USER_INPUT
+        ]
+        self.assertEqual(len(non_user_inputs), 6)
+        self.assertEqual(set(ep.state_dict), {"param", "buffer"})
+        state_input_kinds = {
+            spec.target: spec.kind
+            for spec in non_user_inputs
+            if spec.target in ep.state_dict
+        }
+        self.assertEqual(
+            state_input_kinds,
+            {"param": InputKind.PARAMETER, "buffer": InputKind.BUFFER},
+        )
+
+        constant_inputs = [
+            spec for spec in non_user_inputs if spec.kind == InputKind.CONSTANT_TENSOR
+        ]
+        self.assertEqual(len(constant_inputs), 4)
+        self.assertEqual(set(ep.constants), {spec.target for spec in constant_inputs})
+        self.assertTrue(set(ep.constants).isdisjoint(ep.state_dict))
+        self.assertEqual(ep.module()(inp), foo(inp))
+
     def test_constant_aliasing(self):
         class M1(torch.nn.Module):
             def __init__(self, m2, foo):
