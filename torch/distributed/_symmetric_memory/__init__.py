@@ -17,6 +17,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
+from torch._prims_common import make_contiguous_strides_for
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -473,6 +474,13 @@ lib.define(
 lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor")
 lib.define(
     "_low_contention_reduce_scatter(Tensor tensor, str reduce_op, str group_name) -> Tensor"
+)
+lib.define(
+    "_low_contention_all_gather_ce_multicast(Tensor tensor, str group_name) -> Tensor"
+)
+lib.define(
+    "_low_contention_all_gather_ce_multicast_out("
+    "Tensor tensor, str group_name, Tensor(a!) out) -> Tensor(a!)"
 )
 
 lib.define("get_remote_tensors(Tensor x, str group_name) -> Tensor[]")
@@ -1727,6 +1735,150 @@ def _low_contention_all_gather(
         symm_mem.barrier()
         torch._C._distributed_c10d._register_work(output, Work())
         return output
+
+
+def _require_multicast(device_index: int, op_name: str) -> None:
+    if not _SymmetricMemory.has_multicast_support(DeviceType.CUDA, device_index):
+        raise RuntimeError(f"{op_name} requires multicast support (NVSwitch / NVLS).")
+
+
+_CE_MULTICAST_BARRIER_CHANNEL_1 = 3
+_CE_MULTICAST_BARRIER_CHANNEL_2 = 4
+
+
+def _check_lc_ag_out(
+    tensor: torch.Tensor,
+    output: torch.Tensor,
+    world_size: int,
+    op_name: str,
+) -> None:
+    expected_shape = (tensor.shape[0] * world_size, *tensor.shape[1:])
+    if tuple(output.shape) != expected_shape:
+        raise RuntimeError(
+            f"{op_name}: expected out shape {expected_shape}, "
+            f"but got {tuple(output.shape)}."
+        )
+    if output.dtype != tensor.dtype:
+        raise RuntimeError(
+            f"{op_name}: expected out dtype {tensor.dtype}, but got {output.dtype}."
+        )
+    if output.device != tensor.device:
+        raise RuntimeError(
+            f"{op_name}: expected out device {tensor.device}, but got {output.device}."
+        )
+    if not output.is_contiguous():
+        raise RuntimeError(f"{op_name}: out must be contiguous.")
+
+
+def _check_lc_signal_pad_capacity(symm_mem: _SymmetricMemory) -> None:
+    required_bytes = (_CE_MULTICAST_BARRIER_CHANNEL_2 + 1) * symm_mem.world_size * 4
+    actual_bytes = _SymmetricMemory.signal_pad_size
+    if actual_bytes < required_bytes:
+        raise RuntimeError(
+            f"low_contention all-gather requires signal_pad_size >= "
+            f"{required_bytes} bytes for world_size={symm_mem.world_size}, but "
+            f"the current size is {actual_bytes} bytes."
+        )
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast", "Meta")
+def _low_contention_all_gather_ce_multicast_meta(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    world_size = c10d._get_group_size_by_name(group_name)
+    return tensor.new_empty(tensor.shape[0] * world_size, *tensor.shape[1:])
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast", "CUDA")
+def _low_contention_all_gather_ce_multicast(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    """Direct-input copy-engine multicast all-gather into a fresh output."""
+    device_index = (
+        tensor.device.index
+        if tensor.device.index is not None
+        else torch.cuda.current_device()
+    )
+    _require_multicast(device_index, "_low_contention_all_gather_ce_multicast")
+    world_size = c10d._get_group_size_by_name(group_name)
+    out_shape = (tensor.shape[0] * world_size, *tensor.shape[1:])
+    if torch.cuda.is_current_stream_capturing():
+        raise RuntimeError(
+            "_low_contention_all_gather_ce_multicast cannot allocate its output "
+            "during CUDA graph capture. Use "
+            "_low_contention_all_gather_ce_multicast_out with a preallocated "
+            "symmetric-memory output."
+        )
+    output = _SymmetricMemory.empty_strided_p2p(
+        size=out_shape,
+        stride=make_contiguous_strides_for(out_shape),
+        dtype=tensor.dtype,
+        device=torch.device("cuda", device_index),
+        group_name=group_name,
+    )
+    return _low_contention_all_gather_ce_multicast_impl(tensor, group_name, output)
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast_out", "Meta")
+def _low_contention_all_gather_ce_multicast_out_meta(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    return out
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast_out", "CUDA")
+def _low_contention_all_gather_ce_multicast_out(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    """Direct-input copy-engine multicast all-gather into caller-provided output."""
+    world_size = c10d._get_group_size_by_name(group_name)
+    _check_lc_ag_out(tensor, out, world_size, "_low_contention_all_gather_ce_multicast")
+    return _low_contention_all_gather_ce_multicast_impl(tensor, group_name, out)
+
+
+def _low_contention_all_gather_ce_multicast_impl(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    output: torch.Tensor,
+) -> torch.Tensor:
+    device_index = (
+        output.device.index
+        if output.device.index is not None
+        else torch.cuda.current_device()
+    )
+    _require_multicast(device_index, "_low_contention_all_gather_ce_multicast")
+    symm_mem = rendezvous(output, group_name)
+    if symm_mem is None:
+        raise RuntimeError(
+            "ce_multicast output must be allocated from symmetric memory"
+        )
+    _check_lc_signal_pad_capacity(symm_mem)
+
+    rank = symm_mem.rank
+    shard_bytes = tensor.numel() * tensor.element_size()
+    backend_stream = _get_backend_stream()
+    current_stream = torch.cuda.current_stream()
+    is_capturing = torch.cuda.is_current_stream_capturing()
+
+    backend_stream.wait_stream(current_stream)
+    with backend_stream:
+        ag_input = tensor if tensor.is_contiguous() else tensor.contiguous()
+        ag_input.record_stream(backend_stream)
+        symm_mem.barrier(channel=_CE_MULTICAST_BARRIER_CHANNEL_1)
+        torch.ops.symm_mem.memcpy_async_to_multicast(
+            output, ag_input, rank * shard_bytes, group_name
+        )
+        symm_mem.barrier(channel=_CE_MULTICAST_BARRIER_CHANNEL_2)
+        if not is_capturing:
+            output.record_stream(backend_stream)
+        torch._C._distributed_c10d._register_work(output, Work())
+    return output
 
 
 @torch.library.impl(lib, "_low_contention_reduce_scatter", "Meta")

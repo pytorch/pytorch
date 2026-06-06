@@ -1318,6 +1318,10 @@ class aten_distributed_optimizations:
     # With the empirical profiles this should be 1.0; kept for manual tuning.
     pre_bucketing_fsdp_collectives_saturation_calibration_multiplier: float = 1.0
 
+    # Direct-input NVLS multicast + Copy Engine variant. Requires NVSwitch /
+    # NVLink SHARP and uses cudaMemcpyAsync to the multicast pointer.
+    low_contention_all_gather_ce_multicast: bool = False
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
