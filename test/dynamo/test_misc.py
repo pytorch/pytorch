@@ -2790,7 +2790,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
     def test_structseq2(self):
         def fn(x, y):
-            return tuple(torch.return_types.linalg_qr((2 * x, y - 1)))
+            return tuple(torch.return_types.qr((2 * x, y - 1)))
 
         x = torch.randn(3, 2)
         y = torch.randn(2, 4)
@@ -11472,6 +11472,58 @@ def ___make_guard_fn():
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(x, scale)
 
+    def test_custom_op_optional_float_arg_accepts_scalar_tensor(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "optional_float_arg_scalar_tensor(Tensor x, float? scale) -> Tensor"
+            )
+
+            @torch.library.impl(
+                lib, "optional_float_arg_scalar_tensor", "CompositeExplicitAutograd"
+            )
+            def _(x, scale):
+                return x.clone()
+
+            op = torch.ops.mylib.optional_float_arg_scalar_tensor.default
+
+            def fn(x, scale):
+                return op(x, scale)
+
+            x = torch.zeros(3, dtype=torch.int8)
+            scale = torch.tensor(0.01)
+
+            self.assertEqual(op(x, scale), x)
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x, scale),
+                fn(x, scale),
+            )
+
+    def test_custom_op_float_arg_scalar_tensor_meta_impl(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("float_arg_scalar_tensor_meta(Tensor x, float scale) -> Tensor")
+
+            @torch.library.impl(lib, "float_arg_scalar_tensor_meta", "CPU")
+            def _(x, scale):
+                return x.clone()
+
+            @torch.library.impl(lib, "float_arg_scalar_tensor_meta", "Meta")
+            def _(x, scale):
+                return x.new_empty(x.shape)
+
+            op = torch.ops.mylib.float_arg_scalar_tensor_meta.default
+
+            def fn(x, scale):
+                return op(x, scale)
+
+            x = torch.zeros(3, dtype=torch.int8)
+            scale = torch.tensor(0.01)
+
+            self.assertEqual(op(x, scale), x)
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x, scale),
+                fn(x, scale),
+            )
+
     def test_custom_op_float_arg_scalar_tensor_fake_ctx(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("float_arg_scalar_tensor_fake(Tensor x, float scale) -> Tensor")
@@ -16349,7 +16401,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 ),
                 "d": collections.OrderedDict(
                     {
-                        "e": torch.return_types.linalg_qr((2 * x, None)),
+                        "e": torch.return_types.qr((2 * x, None)),
                         "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                     },
                 ),
@@ -16377,7 +16429,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 ),
                 "d": collections.OrderedDict(
                     {
-                        "e": torch.return_types.linalg_qr((2 * x, None)),
+                        "e": torch.return_types.qr((2 * x, None)),
                         "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                     },
                 ),
@@ -16428,7 +16480,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 ),
                 "d": collections.OrderedDict(
                     {
-                        "e": torch.return_types.linalg_qr((2 * x, None)),
+                        "e": torch.return_types.qr((2 * x, None)),
                         "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                     },
                 ),
@@ -16442,7 +16494,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                         "d",
                         {
                             "f": MyTuple(torch.ones(4, 3), -y, y + 1),
-                            "e": torch.return_types.linalg_qr((2 * y, None)),
+                            "e": torch.return_types.qr((2 * y, None)),
                         },
                     ),
                 ],

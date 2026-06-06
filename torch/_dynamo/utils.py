@@ -4197,6 +4197,13 @@ def set_current_node(node: torch.fx.Node) -> Generator[None, None, None]:
         _current_node.value = old
 
 
+def _is_float_schema_type(schema_type: Any) -> bool:
+    return isinstance(schema_type, torch.FloatType) or (
+        isinstance(schema_type, torch.OptionalType)
+        and isinstance(schema_type.getElementType(), torch.FloatType)
+    )
+
+
 def _run_python_impl_with_float_schema_symfloat(
     target: object, args: Any, kwargs: Any
 ) -> Any:
@@ -4205,7 +4212,7 @@ def _run_python_impl_with_float_schema_symfloat(
 
     has_float_symfloat = False
     for idx, schema_arg in enumerate(target._schema.arguments):
-        if not isinstance(schema_arg.type, torch.FloatType):
+        if not _is_float_schema_type(schema_arg.type):
             continue
         if schema_arg.kwarg_only:
             value = kwargs.get(schema_arg.name)
@@ -4237,8 +4244,11 @@ def _run_python_impl_with_float_schema_symfloat(
     if target._schema.overload_name:
         name = f"{name}.{target._schema.overload_name}"
     for dispatch_key in (
+        "Meta",
         "CompositeExplicitAutograd",
         "CompositeImplicitAutograd",
+        # Match torch.library's default dispatch key when impl() is called
+        # without an explicit dispatch_key argument.
         "",
     ):
         impl = torch.library._impl_fns.get(f"{namespace}/{name}/{dispatch_key}")
@@ -4287,6 +4297,12 @@ def run_node(
                 try:
                     return node.target(*args, **kwargs)  # type: ignore[operator]
                 except RuntimeError as e:
+                    message = str(e)
+                    if (
+                        "Expected a value of type 'float'" not in message
+                        and "Expected a value of type 'Optional[float]'" not in message
+                    ):
+                        raise
                     try:
                         return _run_python_impl_with_float_schema_symfloat(
                             node.target, args, kwargs

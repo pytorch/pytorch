@@ -74,6 +74,7 @@ from ..source import (
     SyntheticLocalSource,
 )
 from ..utils import (
+    _is_float_schema_type,
     _is_tensorify_enabled,
     check_unspec_or_constant_args,
     guard_if_dyn,
@@ -3089,7 +3090,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             new_kwargs = dict(kwargs)
             changed = False
             for idx, schema_arg in enumerate(self.value._schema.arguments):
-                if not isinstance(schema_arg.type, torch.FloatType):
+                if not _is_float_schema_type(schema_arg.type):
                     continue
                 if schema_arg.kwarg_only:
                     if schema_arg.name in new_kwargs:
