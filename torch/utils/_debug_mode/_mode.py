@@ -787,7 +787,7 @@ class DebugMode(TorchDispatchMode):
                 # Capture input hashes before the operation
                 input_hash, input_hash_leaves = _tree_hash((args, kwargs))
                 if input_hash_leaves:
-                    call._debug_mode_input_hash_leaves = input_hash_leaves
+                    call.tensor_hash_leaves["input"] = input_hash_leaves
                     return {"input_hash": input_hash}
             return None
 
@@ -800,7 +800,7 @@ class DebugMode(TorchDispatchMode):
 
             if not output_hash_leaves:
                 return None
-            call._debug_mode_output_hash_leaves = output_hash_leaves
+            call.tensor_hash_leaves["output"] = output_hash_leaves
             return {"hash": output_hash}
 
         try:
@@ -891,25 +891,9 @@ class DebugMode(TorchDispatchMode):
         def add_op_hashes(
             i: int,
             call,
-            hashes: Any,
             hash_type: str,
-            hash_leaves_attr: str,
         ) -> None:
-            if hash_leaves := getattr(call, hash_leaves_attr, None):
-                add_op_hash_leaves(i, call, hash_leaves, hash_type)
-                return
-
-            def add_hash_leaf(keypath, hash_value):
-                add_entry(
-                    i,
-                    call,
-                    call_type="torch op",
-                    hash_type=hash_type,
-                    hash_value=hash_value,
-                    pytree_path=keystr(keypath),
-                )
-
-            tree_map_with_path(add_hash_leaf, hashes)
+            add_op_hash_leaves(i, call, call.tensor_hash_leaves[hash_type], hash_type)
 
         for i, call in enumerate(self.operators):
             if isinstance(call, _TritonKernelCall):
@@ -935,23 +919,11 @@ class DebugMode(TorchDispatchMode):
                             arg_name=arg_name,
                         )
 
-            elif isinstance(call, _OpCall) and call.log is not None:
-                if include_inputs and "input_hash" in call.log:
-                    add_op_hashes(
-                        i,
-                        call,
-                        call.log["input_hash"],
-                        "input",
-                        "_debug_mode_input_hash_leaves",
-                    )
-                if "hash" in call.log:
-                    add_op_hashes(
-                        i,
-                        call,
-                        call.log["hash"],
-                        "output",
-                        "_debug_mode_output_hash_leaves",
-                    )
+            elif isinstance(call, _OpCall):
+                if include_inputs and "input" in call.tensor_hash_leaves:
+                    add_op_hashes(i, call, "input")
+                if "output" in call.tensor_hash_leaves:
+                    add_op_hashes(i, call, "output")
 
         return entries
 

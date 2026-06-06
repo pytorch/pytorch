@@ -1197,12 +1197,14 @@ class TestDebugModeUtils(TestCase):
             ["output", "output", "output"],
         )
 
-        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as f:
-            debug_mode.dump_tensor_hashes(f.name)
-            f.seek(0)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_name = os.path.join(tmp_dir, "tensor_hashes.txt")
+            debug_mode.dump_tensor_hashes(file_name)
+            with open(file_name, encoding="utf-8") as f:
+                content = f.read()
 
             self.assertExpectedInline(
-                f.read(),
+                content,
                 """\
 Total captured tensor hash ops: 3
 ================================================================================
@@ -1248,10 +1250,11 @@ Total captured tensor hash ops: 3
         ):
             mod(x)
 
-        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as f:
-            debug_mode.dump_tensor_hashes(f.name)
-            f.seek(0)
-            content = f.read()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_name = os.path.join(tmp_dir, "tensor_hashes.txt")
+            debug_mode.dump_tensor_hashes(file_name)
+            with open(file_name, encoding="utf-8") as f:
+                content = f.read()
 
         self.assertIn("[Foo.l1/op_0_aten::t]", content)
         self.assertIn("[Foo.l1/op_1_aten::addmm]", content)
@@ -1298,10 +1301,11 @@ Total captured tensor hash ops: 3
             ],
         )
 
-        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as f:
-            debug_mode.dump_tensor_hashes(f.name)
-            f.seek(0)
-            content = f.read()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_name = os.path.join(tmp_dir, "tensor_hashes.txt")
+            debug_mode.dump_tensor_hashes(file_name)
+            with open(file_name, encoding="utf-8") as f:
+                content = f.read()
 
         self.assertIn(
             """\
@@ -1325,21 +1329,22 @@ Total captured tensor hash ops: 3
         ):
             torch.ones(1).sin()
 
-        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as f:
-            debug_mode.dump_tensor_hashes(f.name)
-            f.seek(0)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_name = os.path.join(tmp_dir, "tensor_hashes.txt")
+            debug_mode.dump_tensor_hashes(file_name)
 
             def fail_on_nonfinite_constant(value):
                 raise AssertionError(f"non-finite JSON constant found: {value}")
 
-            file_entries = [
-                json.loads(
-                    line.split("=", 1)[1].strip(),
-                    parse_constant=fail_on_nonfinite_constant,
-                )
-                for line in f
-                if line.startswith("  Output hashes: ")
-            ]
+            with open(file_name, encoding="utf-8") as f:
+                file_entries = [
+                    json.loads(
+                        line.split("=", 1)[1].strip(),
+                        parse_constant=fail_on_nonfinite_constant,
+                    )
+                    for line in f
+                    if line.startswith("  Output hashes: ")
+                ]
 
         self.assertEqual(
             {tuple(entry) for entry in file_entries},
@@ -1398,7 +1403,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         )
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
-            dist.all_gather_into_tensor(output_tensor, tensor)
+            dist.all_gather_single(output_tensor, tensor)
 
         self.assertTrue("c10d::_allgather_base_" in debug_mode.debug_string())
 
@@ -1426,7 +1431,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
             # Call with async_op=True returns a work handle
-            work = dist.all_gather_into_tensor(output_tensor, tensor, async_op=True)
+            work = dist.all_gather_single(output_tensor, tensor, async_op=True)
             # Wait for the async operation to complete
             work.wait()
 
@@ -1456,7 +1461,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         # Use functional collectives which return AsyncCollectiveTensor
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
-            result = _functional_collectives.all_gather_tensor(
+            result = _functional_collectives.all_gather_single(
                 tensor, gather_dim=0, group=dist.group.WORLD
             )
 
