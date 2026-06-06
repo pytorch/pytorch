@@ -55,7 +55,17 @@ _GEMM_EPILOGUE_OP_ALIASES = {
     torch._scaled_grouped_mm_v2: torch.ops.aten._scaled_grouped_mm_v2.default,
 }
 _SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
-_SUPPORTED_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_scaled_mm_v2/_scaled_grouped_mm/_scaled_grouped_mm_v2/_grouped_mm"
+
+
+def supported_gemm_epilogue_op_names(*, quack_only: bool = False) -> str:
+    return "/".join(
+        op.name().removeprefix("aten::")
+        for op, info in GEMM_EPILOGUE_OPS.items()
+        if info.supports_quack or not quack_only
+    )
+
+
+_SUPPORTED_GEMM_OP_NAMES = supported_gemm_epilogue_op_names()
 
 
 @torch.library.custom_op("flex_gemm::mx_e8m0_scale", mutates_args=())
@@ -73,7 +83,9 @@ def mx_e8m0_scale(amax: torch.Tensor, max_power: int = 8) -> torch.Tensor:
     e8m0_nan_val = 255
     max_abs = amax.to(torch.float32)
     max_abs_int32 = max_abs.view(torch.int32)
-    extracted_pow2 = ((torch.bitwise_right_shift(max_abs_int32, mbits_f32)) & 0xFF) - f32_exp_bias
+    extracted_pow2 = (
+        (torch.bitwise_right_shift(max_abs_int32, mbits_f32)) & 0xFF
+    ) - f32_exp_bias
     scale_e8m0_unbiased = extracted_pow2 - max_power
     scale_e8m0_unbiased = torch.clamp(
         scale_e8m0_unbiased, min=-e8m0_exp_bias, max=e8m0_exp_bias + 1
@@ -171,7 +183,9 @@ def _(x: torch.Tensor) -> torch.Tensor:
     )
 
 
-def _quack_f32_to_floatx_unpacked(x: torch.Tensor, ebits: int, mbits: int) -> torch.Tensor:
+def _quack_f32_to_floatx_unpacked(
+    x: torch.Tensor, ebits: int, mbits: int
+) -> torch.Tensor:
     """Convert fp32 values to unsigned floatx payloads with round-to-nearest-even."""
     if x.dtype is not torch.float32:
         x = x.float()
@@ -182,17 +196,23 @@ def _quack_f32_to_floatx_unpacked(x: torch.Tensor, ebits: int, mbits: int) -> to
     ebits_f32 = 8
     f32_exp_bias = 127
     magic_adder = (1 << (mbits_f32 - mbits - 1)) - 1
-    max_normal = 2 ** ((1 << ebits) - 1 - exp_bias) * ((1 << (mbits + 1)) - 1) / (2**mbits)
+    max_normal = (
+        2 ** ((1 << ebits) - 1 - exp_bias) * ((1 << (mbits + 1)) - 1) / (2**mbits)
+    )
     min_normal = 2 ** (1 - exp_bias)
     denorm_exp = (f32_exp_bias - exp_bias) + (mbits_f32 - mbits) + 1
     denorm_mask_int = denorm_exp << mbits_f32
-    denorm_mask_float = torch.tensor(denorm_mask_int, dtype=torch.int32, device=x.device).view(torch.float32)
+    denorm_mask_float = torch.tensor(
+        denorm_mask_int, dtype=torch.int32, device=x.device
+    ).view(torch.float32)
 
     x_bits = x.view(torch.int32)
     sign = x_bits & 0x80000000
     abs_x = (x_bits ^ sign).view(torch.float32)
     saturate_mask = abs_x >= max_normal
-    denormal_mask = torch.logical_and(torch.logical_not(saturate_mask), abs_x < min_normal)
+    denormal_mask = torch.logical_and(
+        torch.logical_not(saturate_mask), abs_x < min_normal
+    )
     normal_mask = torch.logical_not(torch.logical_or(saturate_mask, denormal_mask))
 
     denormal_x = (abs_x + denorm_mask_float).view(torch.int32) - denorm_mask_int
@@ -201,12 +221,16 @@ def _quack_f32_to_floatx_unpacked(x: torch.Tensor, ebits: int, mbits: int) -> to
     normal_x = abs_x.view(torch.int32)
     mant_odd = (normal_x >> (mbits_f32 - mbits)) & 1
     val_to_add = ((exp_bias - f32_exp_bias) << mbits_f32) + magic_adder
-    normal_x = ((normal_x + val_to_add + mant_odd) >> (mbits_f32 - mbits)).to(torch.uint8)
+    normal_x = ((normal_x + val_to_add + mant_odd) >> (mbits_f32 - mbits)).to(
+        torch.uint8
+    )
 
     out = torch.full_like(x, max_int, dtype=torch.uint8)
     out = torch.where(denormal_mask, denormal_x, out)
     out = torch.where(normal_mask, normal_x, out)
-    sign_lp = ((sign >> (mbits_f32 + ebits_f32 - mbits - ebits)).to(torch.uint8)) & sign_mask
+    sign_lp = (
+        (sign >> (mbits_f32 + ebits_f32 - mbits - ebits)).to(torch.uint8)
+    ) & sign_mask
     return out | sign_lp
 
 
@@ -217,7 +241,9 @@ def nvfp4_e2m1_pack(x: torch.Tensor) -> torch.Tensor:
         raise RuntimeError("nvfp4_e2m1_pack requires an even last dimension")
     codes = _quack_f32_to_floatx_unpacked(x.float(), ebits=2, mbits=1)
     flat = codes.contiguous().view(-1)
-    packed = (flat[0::2] | (flat[1::2] << 4)).view(*codes.shape[:-1], codes.shape[-1] // 2)
+    packed = (flat[0::2] | (flat[1::2] << 4)).view(
+        *codes.shape[:-1], codes.shape[-1] // 2
+    )
     return packed.view(torch.float4_e2m1fn_x2)
 
 
@@ -250,7 +276,15 @@ def _as_list(value: Any | list[Any] | tuple[Any, ...] | None) -> list[Any]:
 
 
 def _enum_values(value: Any | list[Any] | tuple[Any, ...] | None) -> list[Any]:
-    return [item.value if hasattr(item, "value") else item for item in _as_list(value)]
+    return [
+        item.value
+        if isinstance(
+            item,
+            (torch.nn.functional.ScalingType, torch.nn.functional.SwizzleType),
+        )
+        else item
+        for item in _as_list(value)
+    ]
 
 
 class GemmEpilogueFusion(HigherOrderOperator):

@@ -6,35 +6,32 @@ from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
-
 from torch._higher_order_ops.gemm_epilogue_quack import (
+    analyze_output,
+    find_single_gemm_node,
+    fx_equivalent,
+    grouped_n_fragment_shape,
+    is_concat_half_n_shape,
+    is_n_group_shape,
+    is_nonnegative_expr,
+    is_same_fragment_n_group_shape,
+    is_scalar_one,
+    match_grouped_n_split,
+    match_mul_scalar,
+    match_negated_node,
+    match_tensorssa_reduce,
+    match_view_or_reshape,
+    method_clamp_bounds,
+    normalize_shape,
+    QUACK_TENSORSSA_FRAGMENT_N,
+    QUACK_TENSORSSA_REDUCTIONS,
     QuackAuxOutputInfo,
     QuackGroupedTensorSSAInfo,
     QuackLocalReduceInfo,
     QuackMainOutputTransformInfo,
     QuackTensorSSAReduceMatch,
     QuackViewMatch,
-    analyze_output,
-    find_single_gemm_node,
-    is_concat_half_n_shape,
-    is_n_group_shape,
-    is_nonnegative_expr,
-    is_same_fragment_n_group_shape,
-    is_scalar_one,
-    is_scalar_value,
-    match_grouped_n_split,
-    match_grouped_n_select,
-    match_mul_scalar,
-    match_negated_node,
-    match_tensorssa_reduce,
-    method_clamp_bounds,
-    match_view_or_reshape,
-    normalize_shape,
-    fx_equivalent,
-    grouped_n_fragment_shape,
     tensorssa_grouped_n_shape,
-    QUACK_TENSORSSA_FRAGMENT_N,
-    QUACK_TENSORSSA_REDUCTIONS,
     unwrap_output,
 )
 
@@ -237,6 +234,7 @@ def cute_call_function(
         ).value
     raise NotImplementedError(f"unsupported epilogue op: {target}")
 
+
 def emit_tensorssa_expr(
     kernel: QuackCuteDSLKernel,
     expr: str,
@@ -253,9 +251,7 @@ def emit_tensorssa_expr(
     )
 
 
-def emit_tensorssa_reshape(
-    kernel: QuackCuteDSLKernel, value: Any, shape: str
-) -> Any:
+def emit_tensorssa_reshape(kernel: QuackCuteDSLKernel, value: Any, shape: str) -> Any:
     return emit_tensorssa_expr(kernel, f"{value}.reshape({shape})", like=value)
 
 
@@ -279,6 +275,7 @@ def emit_tensorssa_broadcast_to(
 ) -> Any:
     return emit_tensorssa_expr(kernel, f"{value}.broadcast_to({shape})", like=value)
 
+
 def lower_view_or_reshape_node(
     node: torch.fx.Node,
     view_match: QuackViewMatch,
@@ -300,7 +297,9 @@ def lower_view_or_reshape_node(
                     "aux reductions can use other static groups"
                 )
             group_size = group_shape[-1]
-        return emit_tensorssa_reshape(kernel, source, tensorssa_grouped_n_shape(group_size))
+        return emit_tensorssa_reshape(
+            kernel, source, tensorssa_grouped_n_shape(group_size)
+        )
     mm_meta = mm_node.meta.get("val")
     if (
         mm_meta is not None
@@ -308,7 +307,9 @@ def lower_view_or_reshape_node(
         and tuple(shape) == tuple(mm_meta.shape)
     ):
         return emit_tensorssa_reshape(kernel, source, f"{env[mm_node]}.shape")
-    raise NotImplementedError(f"unsupported QUACK epilogue view/reshape: {node.format_node()}")
+    raise NotImplementedError(
+        f"unsupported QUACK epilogue view/reshape: {node.format_node()}"
+    )
 
 
 def lower_grouped_n_select_node(
@@ -345,6 +346,8 @@ def lower_grouped_n_select_node(
         view_node = node.args[0]
         index = node.args[1]
     else:
+        return None
+    if not isinstance(view_node, torch.fx.Node):
         return None
     info = grouped_tensors.get(view_node)
     if info is None or not (0 <= index < info.group_size):
@@ -397,6 +400,7 @@ def lower_tensorssa_reduce_node(
         )
     return reduced
 
+
 def propagate_grouped_tensorssa_info(
     node: torch.fx.Node,
     grouped_tensors: dict[torch.fx.Node, QuackGroupedTensorSSAInfo],
@@ -416,14 +420,15 @@ def propagate_grouped_tensorssa_info(
     ):
         return
     is_abs = (
-        (node.op == "call_function" and node.target in (torch.ops.aten.abs.default, torch.abs))
-        or (node.op == "call_method" and node.target == "abs")
-    )
+        node.op == "call_function"
+        and node.target in (torch.ops.aten.abs.default, torch.abs)
+    ) or (node.op == "call_method" and node.target == "abs")
     grouped_tensors[node] = QuackGroupedTensorSSAInfo(
         group_size=first.group_size,
         groups_per_fragment=first.groups_per_fragment,
         nonnegative=is_abs or all(info.nonnegative for info in input_infos),
     )
+
 
 def match_scaled_sigmoid_source(node: Any) -> tuple[torch.fx.Node, float] | None:
     if not isinstance(node, torch.fx.Node):
@@ -475,7 +480,11 @@ def is_fast_quick_gelu_intermediate(node: torch.fx.Node) -> bool:
         return False
     if node.target in (torch.ops.aten.sigmoid.default, torch.sigmoid):
         return any(match_fast_quick_gelu(user) is not None for user in node.users)
-    if node.target in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
+    if node.target in (
+        torch.ops.aten.mul.Tensor,
+        torch.ops.aten.mul.Scalar,
+        operator.mul,
+    ):
         if any(
             sigmoid_user.op == "call_function"
             and sigmoid_user.target in (torch.ops.aten.sigmoid.default, torch.sigmoid)
@@ -499,7 +508,9 @@ def match_fast_silu_source(node: torch.fx.Node) -> torch.fx.Node | None:
     ):
         return None
     source, denominator = node.args[:2]
-    if not isinstance(source, torch.fx.Node) or not isinstance(denominator, torch.fx.Node):
+    if not isinstance(source, torch.fx.Node) or not isinstance(
+        denominator, torch.fx.Node
+    ):
         return None
     if denominator.op != "call_function" or denominator.target not in (
         torch.ops.aten.add.Tensor,
@@ -540,7 +551,13 @@ def match_fast_gelu_source(node: torch.fx.Node) -> torch.fx.Node | None:
         ):
             continue
         add_lhs, add_rhs = erf_add.args[:2]
-        erf_node = add_rhs if is_scalar_one(add_lhs) else add_lhs if is_scalar_one(add_rhs) else None
+        erf_node = (
+            add_rhs
+            if is_scalar_one(add_lhs)
+            else add_lhs
+            if is_scalar_one(add_rhs)
+            else None
+        )
         if not isinstance(erf_node, torch.fx.Node):
             continue
         if erf_node.op != "call_function" or erf_node.target not in (
@@ -548,8 +565,7 @@ def match_fast_gelu_source(node: torch.fx.Node) -> torch.fx.Node | None:
             torch.erf,
         ):
             continue
-        erf_arg_source = match_mul_scalar(erf_node.args[0], 1 / math.sqrt(2.0))
-        if erf_arg_source is source:
+        if match_mul_scalar(erf_node.args[0], 1 / math.sqrt(2.0)) is source:
             return source
     return None
 
@@ -557,7 +573,11 @@ def match_fast_gelu_source(node: torch.fx.Node) -> torch.fx.Node | None:
 def is_fast_gelu_intermediate(node: torch.fx.Node) -> bool:
     if node.op != "call_function":
         return False
-    if node.target in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
+    if node.target in (
+        torch.ops.aten.mul.Tensor,
+        torch.ops.aten.mul.Scalar,
+        operator.mul,
+    ):
         if any(
             erf_user.op == "call_function"
             and erf_user.target in (torch.ops.aten.erf.default, torch.erf)
@@ -569,11 +589,16 @@ def is_fast_gelu_intermediate(node: torch.fx.Node) -> bool:
     if node.target in (torch.ops.aten.erf.default, torch.erf):
         return any(
             add_user.op == "call_function"
-            and add_user.target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, operator.add)
+            and add_user.target
+            in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, operator.add)
             and is_fast_gelu_intermediate(add_user)
             for add_user in node.users
         )
-    if node.target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, operator.add):
+    if node.target in (
+        torch.ops.aten.add.Tensor,
+        torch.ops.aten.add.Scalar,
+        operator.add,
+    ):
         return any(match_fast_gelu_source(user) is not None for user in node.users)
     return False
 
@@ -582,7 +607,6 @@ def is_fast_silu_intermediate(node: torch.fx.Node) -> bool:
     if node.op != "call_function":
         return False
     if node.target in (torch.ops.aten.neg.default, operator.neg):
-        source = node.args[0]
         return any(
             exp_user.op == "call_function"
             and exp_user.target in (torch.ops.aten.exp.default, torch.exp)
@@ -592,11 +616,16 @@ def is_fast_silu_intermediate(node: torch.fx.Node) -> bool:
     if node.target in (torch.ops.aten.exp.default, torch.exp):
         return any(
             add_user.op == "call_function"
-            and add_user.target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, operator.add)
+            and add_user.target
+            in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, operator.add)
             and is_fast_silu_intermediate(add_user)
             for add_user in node.users
         )
-    if node.target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, operator.add):
+    if node.target in (
+        torch.ops.aten.add.Tensor,
+        torch.ops.aten.add.Scalar,
+        operator.add,
+    ):
         return any(
             div_user.op == "call_function"
             and div_user.target
@@ -628,10 +657,8 @@ def emit_fast_sigmoid(kernel: QuackCuteDSLKernel, source: Any) -> Any:
 def emit_fast_softplus(kernel: QuackCuteDSLKernel, source: Any) -> Any:
     return emit_tensorssa_expr(
         kernel,
-        "cute.where({x} > cute.full_like({x}, 20.0), {x}, "
-        "cute.math.log(cute.math.exp({x}, fastmath=True) + cute.full_like({x}, 1.0), fastmath=True))".format(
-            x=source
-        ),
+        f"cute.where({source} > cute.full_like({source}, 20.0), {source}, "
+        f"cute.math.log(cute.math.exp({source}, fastmath=True) + cute.full_like({source}, 1.0), fastmath=True))",
         like=source,
     )
 
@@ -649,10 +676,7 @@ def emit_fast_silu(kernel: QuackCuteDSLKernel, source: Any) -> Any:
     )
 
 
-def emit_fast_quick_gelu(
-    kernel: QuackCuteDSLKernel, source: Any, alpha: float
-) -> Any:
-    half_alpha = 0.5 * alpha
+def emit_fast_quick_gelu(kernel: QuackCuteDSLKernel, source: Any, alpha: float) -> Any:
     half_source = emit_tensorssa_expr(
         kernel,
         f"({source} * cute.full_like({source}, 0.5))",
@@ -660,7 +684,7 @@ def emit_fast_quick_gelu(
     )
     tanh_arg = emit_tensorssa_expr(
         kernel,
-        f"({source} * cute.full_like({source}, {half_alpha!r}))",
+        f"({source} * cute.full_like({source}, {0.5 * alpha!r}))",
         like=source,
     )
     return emit_tensorssa_expr(
@@ -673,11 +697,11 @@ def emit_fast_quick_gelu(
 def emit_fast_gelu(kernel: QuackCuteDSLKernel, source: Any) -> Any:
     return emit_tensorssa_expr(
         kernel,
-        "(cute.full_like({x}, 0.5) * {x} * "
-        "(cute.full_like({x}, 1.0) + cute.math.tanh("
-        "{x} * (cute.full_like({x}, 0.7978845608028654) + "
-        "cute.full_like({x}, 0.035677408136300125) * {x} * {x}), "
-        "fastmath=True)))".format(x=source),
+        f"(cute.full_like({source}, 0.5) * {source} * "
+        f"(cute.full_like({source}, 1.0) + cute.math.tanh("
+        f"{source} * (cute.full_like({source}, 0.7978845608028654) + "
+        f"cute.full_like({source}, 0.035677408136300125) * {source} * {source}), "
+        "fastmath=True)))",
         like=source,
     )
 
@@ -739,9 +763,7 @@ def compile_pointwise_nodes(
                     )
                     grouped_tensors[node] = QuackGroupedTensorSSAInfo(
                         group_size=group_size,
-                        groups_per_fragment=(
-                            QUACK_TENSORSSA_FRAGMENT_N // group_size
-                        ),
+                        groups_per_fragment=(QUACK_TENSORSSA_FRAGMENT_N // group_size),
                         nonnegative=is_nonnegative_expr(mm_node),
                     )
                     continue
@@ -864,9 +886,15 @@ def compile_pointwise_nodes(
                         propagate_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                     if fast_math and node.target == torch.ops.aten.softplus.default:
-                        beta = node.args[1] if len(node.args) > 1 else node.kwargs.get("beta", 1)
+                        beta = (
+                            node.args[1]
+                            if len(node.args) > 1
+                            else node.kwargs.get("beta", 1)
+                        )
                         threshold = (
-                            node.args[2] if len(node.args) > 2 else node.kwargs.get("threshold", 20)
+                            node.args[2]
+                            if len(node.args) > 2
+                            else node.kwargs.get("threshold", 20)
                         )
                         if beta != 1 or threshold != 20:
                             raise NotImplementedError(
@@ -889,7 +917,8 @@ def compile_pointwise_nodes(
                         torch.ops.aten.gelu.default,
                     ):
                         approximate = node.kwargs.get(
-                            "approximate", node.args[1] if len(node.args) > 1 else "none"
+                            "approximate",
+                            node.args[1] if len(node.args) > 1 else "none",
                         )
                         if approximate not in ("none", "tanh"):
                             raise NotImplementedError(
@@ -907,31 +936,26 @@ def compile_pointwise_nodes(
                             continue
                     if node.target == torch.ops.flex_gemm.silu_tanh.default:
                         source = cute_arg(node.args[0], env)
-                        half = emit_tensorssa_expr(
-                            kernel,
-                            f"({source} * cute.full_like({source}, 0.5))",
-                            like=source,
-                        )
-                        env[node] = emit_tensorssa_expr(
-                            kernel,
-                            f"({half} * cute.math.tanh({half}, fastmath=True) + {half})",
-                            like=source,
-                        )
+                        env[node] = emit_fast_silu(kernel, source)
                         propagate_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                     if node.target == torch.ops.flex_gemm.tanh_fast.default:
                         source = cute_arg(node.args[0], env)
-                        env[node] = emit_tensorssa_expr(
-                            kernel,
-                            f"cute.math.tanh({source}, fastmath=True)",
-                            like=source,
+                        env[node] = emit_fast_unary(
+                            kernel, source, "cute.math.tanh({x}, fastmath=True)"
                         )
                         propagate_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                     if node.target == torch.ops.flex_gemm.mx_e8m0_scale.default:
                         source = cute_arg(node.args[0], env)
-                        max_power = node.args[1] if len(node.args) > 1 else node.kwargs.get("max_power", 8)
-                        scale_exp = f"(cute.math.floor(cute.math.log2({source})) - {max_power})"
+                        max_power = (
+                            node.args[1]
+                            if len(node.args) > 1
+                            else node.kwargs.get("max_power", 8)
+                        )
+                        scale_exp = (
+                            f"(cute.math.floor(cute.math.log2({source})) - {max_power})"
+                        )
                         env[node] = emit_tensorssa_expr(
                             kernel,
                             "cute.math.exp2("
@@ -1043,8 +1067,13 @@ def cute_epilogue_code(
     )
     if aux_output is not None:
         result = f"({result}, {cute_arg(aux_output.output_value, env)})"
-    elif local_reduce is not None and local_reduce.epilogue_reduce_source_node is not None:
-        result = f"({result}, {cute_arg(local_reduce.epilogue_reduce_source_node, env)})"
+    elif (
+        local_reduce is not None
+        and local_reduce.epilogue_reduce_source_node is not None
+    ):
+        result = (
+            f"({result}, {cute_arg(local_reduce.epilogue_reduce_source_node, env)})"
+        )
 
     return (
         kernel.body.lines,
@@ -1053,7 +1082,9 @@ def cute_epilogue_code(
         local_reduce,
         aux_output,
         main_output_transform,
-        main_output_transform.concat_layout if main_output_transform is not None else (),
+        main_output_transform.concat_layout
+        if main_output_transform is not None
+        else (),
     )
 
 
@@ -1100,7 +1131,9 @@ def materialize_quack_epilogue(
     ) = cute_epilogue_code(graph_module, fast_math=fast_math)
     key = (
         "flex_gemm_quack_epilogue_"
-        + hashlib.sha256(f"fast_math={fast_math}\n{graph_module.code}".encode()).hexdigest()[:16]
+        + hashlib.sha256(
+            f"fast_math={fast_math}\n{graph_module.code}".encode()
+        ).hexdigest()[:16]
     )
     return (
         key,

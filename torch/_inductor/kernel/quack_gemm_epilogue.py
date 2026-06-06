@@ -14,12 +14,6 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
     def __init__(self) -> None:
         super().__init__("quack_gemm_epilogue")
 
-    def maybe_append_choice(
-        self, choices: list[Any], **kwargs: Any
-    ) -> NotImplementedError | None:
-        choices.append(self.generate(**kwargs))
-        return None
-
     def generate(self, **kwargs: Any) -> ChoiceCaller:
         input_nodes = kwargs.pop("input_nodes")
         layout = kwargs.pop("layout")

@@ -6,26 +6,24 @@ from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
-
-
-QUACK_GEMM_OPS = (
-    torch.ops.aten.mm.default,
-    torch.ops.aten.addmm.default,
-    torch.ops.aten.bmm.default,
-    torch.ops.aten.baddbmm.default,
-    torch.ops.aten._scaled_mm.default,
-    torch.ops.aten._scaled_mm_v2.default,
-    torch.ops.aten._scaled_grouped_mm_v2.default,
-    torch.ops.aten._grouped_mm.default,
+from torch._higher_order_ops.gemm_epilogue import (
+    GEMM_EPILOGUE_OPS,
+    supported_gemm_epilogue_op_names,
 )
-SUPPORTED_QUACK_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_scaled_mm_v2/_scaled_grouped_mm_v2/_grouped_mm"
+
+
+QUACK_GEMM_OPS = tuple(
+    op for op, info in GEMM_EPILOGUE_OPS.items() if info.supports_quack
+)
+SUPPORTED_QUACK_GEMM_OP_NAMES = supported_gemm_epilogue_op_names(quack_only=True)
 QUACK_TENSORSSA_FRAGMENT_N = 32
 QUACK_REDUCE_DIM_M = 0
 QUACK_REDUCE_DIM_N = 1
 
 
 def unwrap_output(node: torch.fx.Node) -> Any:
-    assert node.op == "output"
+    if node.op != "output":
+        raise RuntimeError(f"expected output node, got {node.op}")
     value = node.args[0]
     if isinstance(value, (tuple, list)) and len(value) == 1:
         return value[0]
@@ -36,10 +34,7 @@ def find_single_gemm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
     gemm_nodes = [
         node
         for node in graph_module.graph.nodes
-        if (
-            node.op == "call_function"
-            and node.target in QUACK_GEMM_OPS
-        )
+        if (node.op == "call_function" and node.target in QUACK_GEMM_OPS)
     ]
     if len(gemm_nodes) != 1:
         raise NotImplementedError(
@@ -61,6 +56,7 @@ class QuackLocalReduceInfo:
     - ``epilogue_reduce_*`` is set only when the reduced value is derived from
       an intermediate epilogue expression rather than directly from the GEMM acc.
     """
+
     view_node: torch.fx.Node
     reduce_op_node: torch.fx.Node
     source_node: torch.fx.Node
@@ -122,6 +118,7 @@ class QuackMainOutputTransformInfo:
 @dataclass(frozen=True)
 class QuackOutputPlan:
     """Classified HOP body outputs and the FX nodes consumed by QUACK lowering."""
+
     output_value: Any
     skip_nodes: frozenset[torch.fx.Node]
     local_reduce: QuackLocalReduceInfo | None
@@ -183,8 +180,8 @@ def tensorssa_grouped_n_shape(group_size: int) -> str:
 
 
 def method_clamp_bounds(node: torch.fx.Node) -> tuple[Any, Any]:
-    min_value = node.kwargs["min"] if "min" in node.kwargs else None
-    max_value = node.kwargs["max"] if "max" in node.kwargs else None
+    min_value = node.kwargs.get("min")
+    max_value = node.kwargs.get("max")
     if "min" not in node.kwargs and len(node.args) > 1:
         min_value = node.args[1]
     if "max" not in node.kwargs and len(node.args) > 2:
@@ -284,7 +281,9 @@ def match_tensorssa_reduce(node: Any) -> QuackTensorSSAReduceMatch | None:
         dims = normalize_reduce_dims(
             node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
         )
-        keepdim = node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
+        keepdim = (
+            node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
+        )
         return QuackTensorSSAReduceMatch(
             node=node,
             input_node=input_node,
@@ -365,13 +364,9 @@ def match_scaled_local_n_amax_reduce(
             return None
         lhs, rhs = args[:2]
         if isinstance(rhs, (int, float)):
-            local_reduce = match_local_n_amax_reduce(
-                lhs, mm_node, scale=float(rhs)
-            )
+            local_reduce = match_local_n_amax_reduce(lhs, mm_node, scale=float(rhs))
         elif isinstance(lhs, (int, float)):
-            local_reduce = match_local_n_amax_reduce(
-                rhs, mm_node, scale=float(lhs)
-            )
+            local_reduce = match_local_n_amax_reduce(rhs, mm_node, scale=float(lhs))
         else:
             return None
     elif target in (
@@ -384,9 +379,7 @@ def match_scaled_local_n_amax_reduce(
         lhs, rhs = args[:2]
         if not isinstance(rhs, (int, float)) or rhs == 0:
             return None
-        local_reduce = match_local_n_amax_reduce(
-            lhs, mm_node, scale=1.0 / float(rhs)
-        )
+        local_reduce = match_local_n_amax_reduce(lhs, mm_node, scale=1.0 / float(rhs))
     else:
         return None
     if local_reduce is None:
@@ -486,16 +479,17 @@ def match_local_n_amax_scale_view(
             return None
         source_node = view_match.base
         epilogue_reduce_source_node = view_match.node
-    grouped_shape = grouped_n_fragment_shape(
-        normalize_shape(view_match.shape)
-    )
+    grouped_shape = grouped_n_fragment_shape(normalize_shape(view_match.shape))
     if not is_same_fragment_n_group_shape(grouped_shape):
         return None
     aux_meta = node.meta.get("val") if isinstance(node, torch.fx.Node) else None
     mm_meta = mm_node.meta.get("val")
     if aux_meta is None or mm_meta is None or len(mm_meta.shape) not in (2, 3):
         return None
-    expected_shape = (*tuple(mm_meta.shape[:-1]), mm_meta.shape[-1] // grouped_shape[-1])
+    expected_shape = (
+        *tuple(mm_meta.shape[:-1]),
+        mm_meta.shape[-1] // grouped_shape[-1],
+    )
     if tuple(aux_meta.shape) != tuple(expected_shape):
         return None
     producer_skip_nodes = extra_skip_nodes | {abs_node}
@@ -537,10 +531,16 @@ def match_local_n_primitive_scale_view(
         return None
     op_max_power = max_power
     if target == torch.ops.flex_gemm.mx_e8m0_scale.default:
-        op_max_power = scale_node.args[1] if len(scale_node.args) > 1 else scale_node.kwargs.get("max_power", max_power)
+        op_max_power = (
+            scale_node.args[1]
+            if len(scale_node.args) > 1
+            else scale_node.kwargs.get("max_power", max_power)
+        )
         if not isinstance(op_max_power, int):
             return None
     reduce_node = scale_node.args[0]
+    if not isinstance(reduce_node, torch.fx.Node):
+        return None
     reduce_match = match_tensorssa_reduce(reduce_node)
     if reduce_match is None or reduce_match.kind != "amax":
         return None
@@ -557,16 +557,17 @@ def match_local_n_primitive_scale_view(
     source_node = match_acc_source(view_match.base, mm_node)
     if source_node is None:
         return None
-    grouped_shape = grouped_n_fragment_shape(
-        normalize_shape(view_match.shape)
-    )
+    grouped_shape = grouped_n_fragment_shape(normalize_shape(view_match.shape))
     if not is_same_fragment_n_group_shape(grouped_shape):
         return None
     aux_meta = node.meta.get("val") if isinstance(node, torch.fx.Node) else None
     mm_meta = mm_node.meta.get("val")
     if aux_meta is None or mm_meta is None or len(mm_meta.shape) not in (2, 3):
         return None
-    expected_shape = (*tuple(mm_meta.shape[:-1]), mm_meta.shape[-1] // grouped_shape[-1])
+    expected_shape = (
+        *tuple(mm_meta.shape[:-1]),
+        mm_meta.shape[-1] // grouped_shape[-1],
+    )
     if tuple(aux_meta.shape) != tuple(expected_shape):
         return None
     return QuackLocalReduceInfo(
@@ -699,7 +700,11 @@ def match_reciprocal_node(node: Any) -> Any | None:
         return None
     if node.target in (torch.ops.aten.reciprocal.default, torch.reciprocal):
         return node.args[0]
-    if node.target in (torch.ops.aten.div.Tensor, torch.ops.aten.div.Scalar, operator.truediv):
+    if node.target in (
+        torch.ops.aten.div.Tensor,
+        torch.ops.aten.div.Scalar,
+        operator.truediv,
+    ):
         lhs, rhs = node.args[:2]
         if is_scalar_one(lhs):
             return rhs
@@ -725,13 +730,17 @@ def match_local_norm(
     extra_skip_nodes: set[torch.fx.Node] = set()
     if div_node.target == torch.ops.aten.div.Tensor:
         lhs, rhs = div_node.args[:2]
-    elif div_node.target in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
+    elif div_node.target in (
+        torch.ops.aten.mul.Tensor,
+        torch.ops.aten.mul.Scalar,
+        operator.mul,
+    ):
         lhs, rhs = div_node.args[:2]
         reciprocal_source = match_reciprocal_node(rhs)
         if reciprocal_source is None:
             lhs, rhs = rhs, lhs
             reciprocal_source = match_reciprocal_node(rhs)
-        if reciprocal_source is None:
+        if reciprocal_source is None or not isinstance(rhs, torch.fx.Node):
             return None
         extra_skip_nodes.add(rhs)
         rhs = reciprocal_source
@@ -760,22 +769,6 @@ def match_local_norm(
         group_size=local_reduce.group_size,
         dim=dim,
         extra_skip_nodes=frozenset(extra_skip_nodes),
-    )
-
-
-def match_local_n_norm(
-    node: Any, mm_node: torch.fx.Node
-) -> QuackLocalNormInfo | None:
-    return match_local_norm(
-        node, mm_node, match_local_n_reduce, dim=QUACK_REDUCE_DIM_N
-    )
-
-
-def match_local_m_norm(
-    node: Any, mm_node: torch.fx.Node
-) -> QuackLocalNormInfo | None:
-    return match_local_norm(
-        node, mm_node, match_local_m_reduce, dim=QUACK_REDUCE_DIM_M
     )
 
 
@@ -854,17 +847,12 @@ def match_grouped_n_select(
     view_shape = normalize_shape(view.shape) if view is not None else None
     if view is None or not output_uses_node(view.base, mm_node):
         return None
-    if (
-        node.args[1] == -1
-        or (
-            isinstance(view_shape, (list, tuple))
-            and node.args[1] == len(view_shape) - 1
-        )
+    if node.args[1] == -1 or (
+        isinstance(view_shape, (list, tuple)) and node.args[1] == len(view_shape) - 1
     ):
         shape = grouped_n_fragment_shape(view_shape)
         if not (
-            is_same_fragment_n_group_shape(shape)
-            and 0 <= node.args[2] < shape[-1]
+            is_same_fragment_n_group_shape(shape) and 0 <= node.args[2] < shape[-1]
         ):
             return None
         return view.node, node.args[2], shape[-1], ()
@@ -947,9 +935,8 @@ def match_grouped_n_contract_main(
             return True
         if value is mm_node:
             return False
-        if (
-            match_view_or_reshape(value) is not None
-            and output_uses_node(value, mm_node)
+        if match_view_or_reshape(value) is not None and output_uses_node(
+            value, mm_node
         ):
             return False
         return all(visit(arg) for arg in pytree.tree_leaves((value.args, value.kwargs)))
@@ -963,7 +950,9 @@ def match_grouped_n_contract_main(
         )
     mm_meta = mm_node.meta.get("val")
     output_meta = (
-        output_value.meta.get("val") if isinstance(output_value, torch.fx.Node) else None
+        output_value.meta.get("val")
+        if isinstance(output_value, torch.fx.Node)
+        else None
     )
     if mm_meta is None or output_meta is None or len(mm_meta.shape) not in (2, 3):
         return None
@@ -980,8 +969,10 @@ def match_grouped_n_contract_main(
 def analyze_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOutputPlan:
     local_reduce = None
     aux_output = None
-    local_norm = match_local_n_norm(output_value, mm_node) or match_local_m_norm(
-        output_value, mm_node
+    local_norm = match_local_norm(
+        output_value, mm_node, match_local_n_reduce, dim=QUACK_REDUCE_DIM_N
+    ) or match_local_norm(
+        output_value, mm_node, match_local_m_reduce, dim=QUACK_REDUCE_DIM_M
     )
     skip_nodes: set[torch.fx.Node] = set()
     if local_norm is not None and local_norm.dim == 0:
@@ -1155,7 +1146,11 @@ def is_scalar_one(value: Any) -> bool:
 def fx_equivalent(lhs: Any, rhs: Any, *, depth: int = 4) -> bool:
     if lhs is rhs:
         return True
-    if depth <= 0 or not isinstance(lhs, torch.fx.Node) or not isinstance(rhs, torch.fx.Node):
+    if (
+        depth <= 0
+        or not isinstance(lhs, torch.fx.Node)
+        or not isinstance(rhs, torch.fx.Node)
+    ):
         return False
     if lhs.op != rhs.op or lhs.target != rhs.target or lhs.kwargs != rhs.kwargs:
         return False
@@ -1174,7 +1169,11 @@ def fx_equivalent(lhs: Any, rhs: Any, *, depth: int = 4) -> bool:
 def match_mul_scalar(node: Any, scalar: float) -> torch.fx.Node | None:
     if not isinstance(node, torch.fx.Node) or node.op != "call_function":
         return None
-    if node.target not in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
+    if node.target not in (
+        torch.ops.aten.mul.Tensor,
+        torch.ops.aten.mul.Scalar,
+        operator.mul,
+    ):
         return None
     lhs, rhs = node.args[:2]
     if isinstance(lhs, torch.fx.Node) and is_scalar_value(rhs, scalar):
@@ -1189,8 +1188,12 @@ def match_negated_node(value: Any, source: torch.fx.Node) -> bool:
         return False
     if value.target in (torch.ops.aten.neg.default, operator.neg):
         return value.args[0] is source
-    if value.target in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
-        return (
+    if value.target in (
+        torch.ops.aten.mul.Tensor,
+        torch.ops.aten.mul.Scalar,
+        operator.mul,
+    ):
+        return bool(
             (value.args[0] is source and len(value.args) > 1 and value.args[1] == -1)
             or (value.args[1] is source and value.args[0] == -1)
         )

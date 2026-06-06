@@ -14,22 +14,18 @@ class QuackSplitKTemplate(KernelTemplate):
     def __init__(self) -> None:
         super().__init__("quack_split_k")
 
-    def maybe_append_choice(
-        self, choices: list[Any], **kwargs: Any
-    ) -> NotImplementedError | None:
-        choices.append(self.generate(**kwargs))
-        return None
-
     def generate(self, **kwargs: Any) -> ChoiceCaller:
-        caller = QuackSplitKTemplateCaller(
-            name=f"quack_split_k_{next(self.index_counter)}",
-            input_nodes=kwargs.pop("input_nodes"),
-            layout=kwargs.pop("layout"),
-            k_split=kwargs.pop("k_split"),
-        )
+        input_nodes = kwargs.pop("input_nodes")
+        layout = kwargs.pop("layout")
+        k_split = kwargs.pop("k_split")
         if kwargs:
             raise RuntimeError(f"Unexpected QuACK split-K template kwargs: {kwargs}")
-        return caller
+        return QuackSplitKTemplateCaller(
+            name=f"quack_split_k_{next(self.index_counter)}",
+            input_nodes=input_nodes,
+            layout=layout,
+            k_split=k_split,
+        )
 
 
 class QuackSplitKTemplateCaller(ChoiceCaller):

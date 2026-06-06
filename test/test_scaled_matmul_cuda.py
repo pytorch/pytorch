@@ -2549,7 +2549,9 @@ class TestFP8Matmul(TestCase):
                 ascalelist.append(scale_a[start:offs_cpu[i]])
                 outlist.append(out[start:offs_cpu[i]])
                 start = offs_cpu[i]
-                self.scaled_grouped_mm_helper(alist, b, ascalelist, scale_b, outlist, fast_accum)
+            self.scaled_grouped_mm_helper(
+                alist, b, ascalelist, scale_b, outlist, fast_accum
+            )
 
 
     @onlyAccelerator
@@ -2611,7 +2613,9 @@ class TestFP8Matmul(TestCase):
                 bscalelist.append(scale_b[start:offs_cpu[i]])
                 outlist.append(out[:, start:offs_cpu[i]])
                 start = offs_cpu[i]
-                self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
+            self.scaled_grouped_mm_helper(
+                a, blist, scale_a, bscalelist, outlist, fast_accum
+            )
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
