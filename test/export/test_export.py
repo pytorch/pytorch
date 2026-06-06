@@ -3227,6 +3227,56 @@ class GraphModule(torch.nn.Module):
         ep = torch.export.export(M(), args)
         self.assertEqual(ep.module()(*args), M()(*args))
 
+    def test_cond_export_allows_branch_input_alias_with_grad_enabled(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+
+                def true_fn(y):
+                    return y
+
+                def false_fn(y):
+                    return y.cos()
+
+                return torch.cond(x.sum() > 0, true_fn, false_fn, (y,))
+
+        for strict in (False, True):
+            for pred_value in (1.0, -1.0):
+                with self.subTest(strict=strict, pred_value=pred_value):
+                    args = (torch.full((2, 3), pred_value),)
+                    with torch.no_grad():
+                        expected = M()(*args)
+
+                    ep = torch.export.export(M(), args, strict=strict)
+                    self.assertEqual(ep.module()(*args), expected)
+
+    def test_cond_export_allows_branch_input_mutation_with_grad_enabled(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    x.add_(1)
+                    return x.sin()
+
+                def false_fn(x):
+                    x.sub_(1)
+                    return x.cos()
+
+                return torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+        for strict in (False, True):
+            for pred_value in (1.0, -1.0):
+                with self.subTest(strict=strict, pred_value=pred_value):
+                    args = (torch.full((2, 3), pred_value),)
+                    expected_arg = args[0].clone()
+                    with torch.no_grad():
+                        expected = M()(expected_arg)
+
+                    actual_arg = args[0].clone()
+                    ep = torch.export.export(M(), (actual_arg.clone(),), strict=strict)
+                    actual = ep.module()(actual_arg)
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(actual_arg, expected_arg)
+
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self) -> None:
