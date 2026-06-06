@@ -9757,10 +9757,6 @@ for shape in [(1,), ()]:
         self._do_test_autograd_simple_views_python(torch.double)
         self._do_test_autograd_simple_views_python(torch.cdouble)
 
-    @skipIfTorchDynamo(
-        "as_strided_ is now traced by Dynamo; autograd creation_meta "
-        "error checks are not triggered during tracing"
-    )
     def test_autograd_inplace_views_creation_meta(self):
         # Tests creation_meta properly handled for inplace views
 
@@ -9850,7 +9846,10 @@ for shape in [(1,), ()]:
         # This list was created by logging gen_inplace_or_view_type.py
         #   detach_ is excluded for this test because it cannot be applied to
         #   views and thus does not return a view
-        run_tests(lambda v: v.as_strided_((1, 0), (2, 2)))
+        if not TEST_WITH_TORCHDYNAMO:
+            # as_strided_ is now traced by Dynamo; autograd creation_meta
+            # error checks are not triggered during tracing
+            run_tests(lambda v: v.as_strided_((1, 0), (2, 2)))
         run_tests(lambda v: v.transpose_(0, 0))
         run_tests(lambda v: v.t_())
         run_tests(lambda v: v.squeeze_(0))
