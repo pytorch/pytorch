@@ -1095,6 +1095,46 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         return super().unpack_var_sequence(tx)
 
+    @staticmethod
+    def _key_source_is_unspecialized_nn_module(key: VariableTracker) -> bool:
+        if key.source is None:
+            return False
+        try:
+            return key.source.guard_source.is_unspecialized_nn_module()
+        except NotImplementedError:
+            return False
+
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        builtin_supported = (
+            torch.nn.ModuleDict.__getitem__,
+            torch.nn.ModuleList.__getitem__,
+            torch.nn.ParameterDict.__getitem__,
+            torch.nn.ParameterList.__getitem__,
+            torch.nn.Sequential.__getitem__,
+        )
+        getitem = getattr(type(self.value), "__getitem__", None)
+        if getitem in builtin_supported and self._key_source_is_unspecialized_nn_module(
+            key
+        ):
+            unimplemented(
+                gb_type="Unspecialized nn.Module container indexed by nn.Module attribute",
+                context=f"mp_subscript_impl: {self}",
+                explanation="Dynamo does not support selecting a child module "
+                "or parameter from an unspecialized nn.Module container with "
+                "a key read from nn.Module state. The selected object can "
+                "change without a direct guard on that object.",
+                hints=[
+                    "Use a constant key for nn.Module container indexing.",
+                ],
+                skip_frame=True,
+            )
+
+        return super().mp_subscript_impl(tx, key)
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
