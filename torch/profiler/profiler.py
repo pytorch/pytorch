@@ -322,7 +322,7 @@ class _KinetoProfile:
                 else None,
             )
         if self._use_cupti_monitor:
-            from torch.profiler import _cupti_monitor as _mon
+            from torch.profiler.cupti import monitor as _mon
 
             if _mon.get_monitor() is None:
                 self._monitor_tempdir = tempfile.TemporaryDirectory(
@@ -341,7 +341,7 @@ class _KinetoProfile:
             raise AssertionError("Profiler must be initialized before starting trace")
         self.profiler._start_trace()
         if self._use_cupti_monitor:
-            from torch.profiler import _cupti_monitor as _mon
+            from torch.profiler.cupti import monitor as _mon
 
             _mon.start_trace_window()
 
@@ -391,14 +391,14 @@ class _KinetoProfile:
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before stopping trace")
         if self._use_cupti_monitor:
-            from torch.profiler import _cupti_monitor as _mon
+            from torch.profiler.cupti import monitor as _mon
 
             if self.use_device:
                 torch.accelerator.synchronize()
             self._monitor_trace_window = _mon.end_trace_window()
         self.profiler.__exit__(None, None, None)
         if self._use_cupti_monitor and self._monitor_started_here:
-            from torch.profiler import _cupti_monitor as _mon
+            from torch.profiler.cupti import monitor as _mon
 
             _mon.stop_collection()
             self._monitor_started_here = False
@@ -420,7 +420,7 @@ class _KinetoProfile:
                 raise AssertionError(
                     "CUPTI monitor trace window must exist before exporting chrome trace"
                 )
-            from torch.profiler._cupti_monitor_trace import (
+            from torch.profiler.cupti.monitor_trace import (
                 merge_trace_window_into_chrome_trace,
             )
 
