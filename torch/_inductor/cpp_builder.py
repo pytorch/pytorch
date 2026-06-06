@@ -31,6 +31,7 @@ from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.torch_version import TorchVersion
+from torch.utils._ordered_set import OrderedSet
 
 
 if config.is_fbcode():
@@ -519,22 +520,49 @@ def _is_gcc(cpp_compiler: str) -> bool:
 
 
 @functools.cache
+def _is_gcc_version_less_than(cpp_compiler: str, major: int) -> bool:
+    if not _is_gcc(cpp_compiler):
+        return False
+
+    try:
+        output_msg = (
+            subprocess.check_output(
+                [cpp_compiler, "-dumpfullversion", "-dumpversion"],
+                stderr=subprocess.DEVNULL,
+            )
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+
+    version_search = re.search(r"\d+(?:\.\d+)*", output_msg)
+    if version_search is None:
+        return False
+
+    return TorchVersion(version_search.group(0)) < TorchVersion(str(major))
+
+
+@functools.cache
 def _is_msvc_cl(cpp_compiler: str) -> bool:
     if not _IS_WINDOWS:
         return False
 
     try:
-        output_msg = (
-            subprocess.check_output([cpp_compiler, "/help"], stderr=subprocess.STDOUT)
-            .strip()
-            .decode(*SUBPROCESS_DECODE_ARGS)
+        result = subprocess.run(
+            [cpp_compiler, "/help"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
         )
-        return "Microsoft" in output_msg.splitlines()[0]
-    except FileNotFoundError:
-        return False
 
-    # pyrefly: ignore [unreachable]
-    return False
+        output_msg = result.stdout.strip().decode(*SUBPROCESS_DECODE_ARGS)
+        lines = output_msg.splitlines()
+
+        return bool(lines) and "Microsoft" in lines[0]
+
+    except OSError:
+        return False
 
 
 @functools.cache
@@ -887,7 +915,7 @@ def _get_ffast_math_flags() -> list[str]:
     if _IS_WINDOWS:
         flags = []
     else:
-        # ffast-math is equivalent to these flags as in
+        # This starts from the flags implied by -ffast-math, as in
         # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
         # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
         # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
@@ -898,12 +926,15 @@ def _get_ffast_math_flags() -> list[str]:
             "funsafe-math-optimizations",
             "ffinite-math-only",
             "fno-signed-zeros",
-            "fno-math-errno",
         ]
 
         flags.append("fno-finite-math-only")
         if not config.cpp.enable_unsafe_math_opt_flag:
             flags.append("fno-unsafe-math-optimizations")
+        # Keep errno-preserving libm semantics.  With -fno-math-errno, GCC can
+        # inline/transform libm call pairs like sin(atan(x)) in ways that do not
+        # preserve NaN values (see https://github.com/pytorch/pytorch/issues/143978).
+        flags.append("fmath-errno")
         flags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
 
         if is_gcc():
@@ -928,6 +959,70 @@ def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
         cflags.append("g")
 
     return cflags, ldflags
+
+
+@functools.cache
+def _get_linux_aarch64_cpu_flags() -> OrderedSet[str]:
+    flags: OrderedSet[str] = OrderedSet()
+
+    if platform.machine() not in ("aarch64", "arm64"):
+        return flags
+
+    if not sys.platform.startswith("linux"):
+        return flags
+
+    capabilities = torch.cpu.get_capabilities()
+    flags.update(
+        capability
+        for capability in ("bf16", "sve", "sve2")
+        if capabilities.get(capability, False)
+    )
+
+    return flags
+
+
+@functools.cache
+def _get_linux_aarch64_arch_flag(cpp_compiler: str) -> str:
+    flags = _get_linux_aarch64_cpu_flags()
+
+    if _is_gcc(cpp_compiler) and _is_gcc_version_less_than(cpp_compiler, 13):
+        if OrderedSet(["bf16", "sve", "sve2"]).issubset(flags):
+            return "march=armv8.6-a+sve+sve2+bf16"
+
+        if OrderedSet(["bf16", "sve"]).issubset(flags):
+            return "march=armv8.6-a+sve+bf16"
+
+    return "march=native"
+
+
+def _get_cpu_arch_cflags(cpp_compiler: str) -> list[str]:
+    if config.is_fbcode():
+        return []
+
+    march = config.cpp.march
+    if march == "":
+        return []
+
+    # -march=native is not recognized on Apple Silicon, so the default macOS
+    # behavior is no architecture flag unless the user explicitly configures one.
+    if sys.platform == "darwin" and march is None:
+        return []
+
+    machine = platform.machine()
+    if march is None:
+        if machine == "ppc64le":
+            return ["mcpu=native"]
+        if machine == "riscv64":
+            return ["march=rv64gc"]
+        if machine == "riscv32":
+            return ["march=rv32gc"]
+        if machine in ("aarch64", "arm64"):
+            return [_get_linux_aarch64_arch_flag(cpp_compiler)]
+        return ["march=native"]
+
+    if machine == "ppc64le":
+        return [f"mcpu={march}"]
+    return [f"march={march}"]
 
 
 def _get_optimization_cflags(
@@ -971,26 +1066,22 @@ def _get_optimization_cflags(
         else:
             cflags.append("fno-omit-frame-pointer")
 
+    if config.aot_inductor.enable_line_tables and not should_add_debug_symbol_flags:
+        if not _IS_WINDOWS:
+            if _is_clang(cpp_compiler):
+                cflags.append("gline-tables-only")
+            else:
+                cflags.append("g1")
+
     cflags += _get_ffast_math_flags()
 
     if _IS_WINDOWS:
         pass
     else:
-        if sys.platform != "darwin":
-            # on macos, unknown argument: '-fno-tree-loop-vectorize'
-            if _is_gcc(cpp_compiler):
-                cflags.append("fno-tree-loop-vectorize")
-            # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
-            # `-march=native` is unrecognized option on M1
-            if not config.is_fbcode():
-                if platform.machine() == "ppc64le":
-                    cflags.append("mcpu=native")
-                elif platform.machine() == "riscv64":
-                    cflags.append("march=rv64gc")
-                elif platform.machine() == "riscv32":
-                    cflags.append("march=rv32gc")
-                else:
-                    cflags.append("march=native")
+        # on macos, unknown argument: '-fno-tree-loop-vectorize'
+        if sys.platform != "darwin" and _is_gcc(cpp_compiler):
+            cflags.append("fno-tree-loop-vectorize")
+        cflags += _get_cpu_arch_cflags(cpp_compiler)
 
         if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
             cflags.append("flto=thin")

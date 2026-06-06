@@ -103,7 +103,6 @@ def gen_empty_impl_names(
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
-        DispatchKey.XPU,
     ):
         empty_impl = "at::empty"
         empty_strided_impl = "at::empty_strided"
@@ -357,10 +356,9 @@ class RegisterDispatchKey:
                 updates = f"{copy_op}({func_res}, {out_arg.name});"
 
         functional_sig = self.wrapper_kernel_sig(g.functional)
-        wrapper_name = sig.name()
 
         return f"""\
-{sig.defn(name=wrapper_name)} {{
+{sig.defn(name=name)} {{
   auto {func_res} = {functional_sig.name()}({", ".join(e.expr for e in translate(sig.arguments(), functional_sig.arguments()))});
   {updates}
   return {returns};
@@ -594,7 +592,7 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
         self, k: SchemaKind, parent_class: str, generate_super: bool
     ) -> str:
         if generate_super:
-            set_output_super = f"{parent_class}::set_output_raw_strided(output_idx, sizes, strides, options, names);"
+            set_output_super = f"{parent_class}::set_output_raw_strided(output_idx, sizes, strides, options);"
         else:
             set_output_super = ""
 
@@ -602,12 +600,9 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
             return f"""
 void set_output_{name}(
     int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
-    TensorOptions options, DimnameList names
+    TensorOptions options
 ) override {{
 {textwrap.indent(self.gen_class_set_output_body(k, maybe_create_proxy), "    ")}
-    if (!names.empty()) {{
-      namedinference::propagate_names(outputs_[output_idx], names);
-    }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
 {textwrap.indent(set_output_super, "    ")}
@@ -714,11 +709,7 @@ resize_out(out, sizes, strides, options);
             output_type = "Tensor"
             output_value = "outputs_[output_idx]"
             proxy_field = ""
-        elif k is SchemaKind.inplace:
-            output_type = "std::reference_wrapper<Tensor>"
-            output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
-            proxy_field = f"std::array<::std::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
-        elif k is SchemaKind.out:
+        elif k is SchemaKind.inplace or k is SchemaKind.out:
             output_type = "std::reference_wrapper<Tensor>"
             output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
             proxy_field = f"std::array<::std::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"

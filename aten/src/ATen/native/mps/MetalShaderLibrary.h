@@ -8,12 +8,14 @@ typedef id<MTLLibrary> MTLLibrary_t;
 typedef id<MTLFunction> MTLFunction_t;
 typedef id<MTLComputePipelineState> MTLComputePipelineState_t;
 typedef id<MTLComputeCommandEncoder> MTLComputeCommandEncoder_t;
+typedef id<MTLBuffer> MTLBuffer_t;
 #else
 typedef void MTLCompileOptions;
 typedef void* MTLLibrary_t;
 typedef void* MTLFunction_t;
 typedef void* MTLComputePipelineState_t;
 typedef void* MTLComputeCommandEncoder_t;
+typedef void* MTLBuffer_t;
 #endif
 
 #include <c10/core/Scalar.h>
@@ -22,6 +24,7 @@ typedef void* MTLComputeCommandEncoder_t;
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -140,11 +143,38 @@ class MetalShaderLibrary {
     return getLibraryPipelineState(getLibrary(params), fname).second;
   }
   static MetalShaderLibrary& getBundledLibrary();
+  // Returns whether the library exposes a kernel under the given host_name.
+  bool hasFunction(const std::string& fname);
+  // Dispatch is probe-then-fallback for non-alpha calls: first try the direct
+  // per-(out,in) kernel; if it isn't registered, fall back to the
+  // `_dense_castout_<in>` / `_strided_castout_<in>` variant registered for the
+  // input dtype by REGISTER_UNARY_OP. The castout kernel computes the functor
+  // in the input dtype and casts the result to the user-supplied output dtype
+  // on store, matching CPU semantics. Alpha kernels skip the fallback (no
+  // alpha castout variants are registered).
   void exec_unary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,
       const std::optional<c10::Scalar> alpha = std::nullopt,
-      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
+      const std::optional<uint32_t> ilp_threshold = std::nullopt);
+  // Raw cross-dtype copy variant for call sites that don't have a
+  // TensorIterator -- e.g. when the destination is a Metal-wrapped CPU buffer
+  // (newBufferWithBytesNoCopy) from a copy_from_mps_ path. Always takes the
+  // castout fallback (cross-dtype is the use case); contiguity is implied. The
+  // kernel name must be one of the registered cast-capable unary ops
+  // (copy_identity, copy_conj, copy_neg, copy_conj_neg). offsets are in bytes;
+  // numel is the element count to process.
+  void exec_unary_kernel_raw(
+      const std::string& name,
+      MTLBuffer_t src_buf,
+      uint32_t src_offs_bytes,
+      c10::ScalarType src_dtype,
+      MTLBuffer_t dst_buf,
+      uint32_t dst_offs_bytes,
+      c10::ScalarType dst_dtype,
+      uint32_t numel,
+      const std::optional<uint32_t> ilp_threshold = std::nullopt);
   // `ilp_threshold` lets callers tune when the dense ILP variant kicks in
   // (numel >= threshold). When unspecified, the default is the same 256K
   // crossover used by the unary path, but only for floating-point output;
@@ -199,6 +229,10 @@ class MetalShaderLibrary {
   // Cache for kernel functions returned by getCachedKernelFunctionPtr
   std::unordered_map<std::string, std::unique_ptr<MetalKernelFunction>>
       kernelCache;
+  // Lazily populated set of all kernel host_names in the library; used by
+  // hasFunction() to answer probes from exec_unary_kernel.
+  std::unordered_set<std::string> functionNames;
+  bool functionNamesPopulated = false;
 };
 
 class DynamicMetalShaderLibrary : public MetalShaderLibrary {
