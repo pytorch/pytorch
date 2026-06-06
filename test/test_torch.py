@@ -2064,10 +2064,12 @@ class TestTorchDeviceType(TestCase):
         repeats = torch.full((1,), 2, device=device)
         mask = torch.randint(2, (size,), device=device, dtype=bool)
         mask_cpu = mask.cpu()
+        scalar_cpu = torch.tensor(5.)
         expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
                           lambda: _ind_put_fn(x, mask_cpu, y),
                           lambda: _ind_put_fn(x, ind, y),
                           lambda: _ind_put_fn(x, 0, 5.),
+                          lambda: _ind_put_fn(x, 0, scalar_cpu),
                           lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
                           lambda: _ind_get_fn(x, ind),
