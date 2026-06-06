@@ -306,6 +306,20 @@ def _schema_arg_by_name(schema: torch._C.FunctionSchema, name: str) -> Any | Non
     return None
 
 
+_metadata_independent_float_tensor_ops = {
+    "aten::_scaled_dot_product_flash_attention_for_cpu",
+    "aten::dropout",
+}
+
+
+def _can_coerce_float_tensor_args(fn: Callable[..., Any]) -> bool:
+    if isinstance(fn, torch._ops.OpOverload):
+        return fn._schema.name in _metadata_independent_float_tensor_ops
+    if isinstance(fn, torch._ops.OpOverloadPacket):
+        return fn._qualified_op_name in _metadata_independent_float_tensor_ops
+    return False
+
+
 def _unwrap_optional_type(schema_type: Any) -> Any:
     while isinstance(schema_type, torch.OptionalType):
         schema_type = schema_type.getElementType()
@@ -384,6 +398,8 @@ def _coerce_torch_op_scalar_tensor_args(
     if not config.capture_scalar_outputs or not isinstance(
         fn, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
     ):
+        return args, kwargs, []
+    if not _can_coerce_float_tensor_args(fn):
         return args, kwargs, []
 
     if isinstance(fn, torch._ops.OpOverload):

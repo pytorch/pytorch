@@ -2420,7 +2420,32 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             compiled_fn(x, torch.tensor(0))
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_torch_ops_scalar_tensor_float_arg_not_concretized_for_custom_op(self):
+        with torch.library._scoped_library(
+            "test_scalar_tensor_float_metadata_124344", "FRAGMENT"
+        ) as lib:
+            lib.define("metadata_dep(Tensor x, float scale) -> Tensor")
+
+            def metadata_dep(x, scale):
+                return torch.empty((int(scale),), device=x.device)
+
+            lib.impl("metadata_dep", metadata_dep, "CompositeExplicitAutograd")
+
+            def fn(x, scale):
+                return torch.ops.test_scalar_tensor_float_metadata_124344.metadata_dep(
+                    x, scale
+                )
+
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.TorchRuntimeError,
+                "Expected a value of type 'float' for argument 'scale'",
+            ):
+                compiled_fn(torch.randn(3), torch.tensor(2.0))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_torch_ops_scalar_tensor_keeps_tensor_overload(self):
+        # Registers the quantized_decomposed torch.ops overloads used below.
         import torch.ao.quantization.fx._decomposed
 
         backend = EagerAndRecordGraphs()
