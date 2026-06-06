@@ -213,7 +213,7 @@ def scan(
     )
 
     def run_flattened_scan(combine_fn, leaves_init, leaves_xs):
-        return scan_op(combine_fn, leaves_init, leaves_xs, additional_inputs=())
+        return scan_op(combine_fn, leaves_init, leaves_xs, ())
 
     carry, out = _maybe_compile_and_run_fn(
         run_flattened_scan,
@@ -290,13 +290,8 @@ class ScanOp(HigherOrderOperator):
         #   across sequential iterations, same semantics as while_loop's
         #   additional_inputs (CUDA-graph-friendly lifted / pre-allocated
         #   buffers such as KV caches or workspace scratch).
-        # - init is NOT mutable: init is only the *initial* carry. The scan
-        #   driver feeds combine_fn with combine_fn's returned carry from
-        #   step t-1 at step t, not with init, and the HOP's no-alias
-        #   invariant guarantees that returned carry is a fresh tensor. So
-        #   an in-place update to init only affects step 0 and is dropped
-        #   by steps 1..N-1. Update the carry via the combine_fn return;
-        #   use while_loop if truly sequential in-place state is needed.
+        # - init is NOT mutable: init is only the *initial* carry,
+        #   thus an in-place update to init only affects step 0.
         # - xs is NOT mutable: each iteration sees a fresh, storage-disjoint
         #   slice (xs[t] and xs[t+1] share no storage), so a mutation on
         #   xs[t] cannot be observed by iteration t+1. The only externally-
@@ -317,13 +312,14 @@ class ScanOp(HigherOrderOperator):
         #      without a Dynamo pass.
         if mutated_arg_indices:
             mutated_set = {int(i) for i in mutated_arg_indices.split(",") if i}
+            outputs = get_graph_output_example_values(combine_gm)
         else:
             (
                 _,
                 _,
                 _,
                 detected,
-                _,
+                outputs,
             ) = check_input_alias_and_mutation_return_outputs(combine_gm)
             mutated_set = set(detected)
 
@@ -341,8 +337,6 @@ class ScanOp(HigherOrderOperator):
                 "carry via the combine_fn return value; for in-place lifted "
                 "buffers use additional_inputs."
             )
-
-        outputs = get_graph_output_example_values(combine_gm)
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("combine_fn", combine_gm)
@@ -900,7 +894,7 @@ class ScanAutogradImpl:
 
 
 @scan_op.py_autograd_impl
-def scan_autograd(combine_fn, init, xs, additional_inputs):
+def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices=""):
     with disable_proxy_modes_tracing():
         hop_partitioned_graph: HopPartitionedGraph = (
             HopGraphMinCutPartitioner.create_partitioned_graph(
@@ -966,9 +960,7 @@ def scan_functionalize(
         _maybe_run_with_interpreter,
     )
 
-    if hasattr(ctx, "mode") and (
-        isinstance(combine_fn, torch.fx.GraphModule) or mutated_arg_indices
-    ):
+    if hasattr(ctx, "mode"):
         hop_instance = HopInstance.create(
             scan_op,
             combine_fn,
@@ -1019,7 +1011,9 @@ def scan_functionalize(
 
 
 @scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
-def scan_batch_rule(interpreter, combine_fn, init, xs, additional_inputs):
+def scan_batch_rule(
+    interpreter, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+):
     from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
 
     unbatched_args, in_dims = unwrap_batched(
@@ -1067,8 +1061,15 @@ def scan_batch_rule(interpreter, combine_fn, init, xs, additional_inputs):
             )
             return outputs
 
+        op_kwargs = {}
+        if mutated_arg_indices:
+            op_kwargs["mutated_arg_indices"] = mutated_arg_indices
         unwrapped_out = scan_op(
-            wrapper, unbatched_init, unbatched_xs, unbatched_additional_inputs
+            wrapper,
+            unbatched_init,
+            unbatched_xs,
+            unbatched_additional_inputs,
+            **op_kwargs,
         )
 
     if out_dims is None:

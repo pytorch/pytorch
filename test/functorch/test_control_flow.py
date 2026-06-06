@@ -3609,6 +3609,9 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         init = torch.randn(2, 2, device=device)
 
         with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
             r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):

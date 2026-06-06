@@ -3227,7 +3227,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         disallowed = sorted(i for i in combine_mutated_inputs if i < n_init + n_xs)
         if disallowed:
-            breakpoint()
             init_part = [i for i in disallowed if i < n_init]
             xs_part = [i - n_init for i in disallowed if n_init <= i]
             unimplemented(
