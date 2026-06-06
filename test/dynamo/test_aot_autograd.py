@@ -1737,10 +1737,14 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         x = torch.randn(1, 2, 2, 2)
         eager_out = fn(x)
-        compiled_out = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        for dynamic in (False, True):
+            with self.subTest(dynamic=dynamic):
+                compiled_out = torch.compile(
+                    fn, backend="aot_eager", fullgraph=True, dynamic=dynamic
+                )(x)
 
-        self.assertEqual(eager_out, compiled_out)
-        self.assertEqual(eager_out.stride(), compiled_out.stride())
+                self.assertEqual(eager_out, compiled_out)
+                self.assertEqual(eager_out.stride(), compiled_out.stride())
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
