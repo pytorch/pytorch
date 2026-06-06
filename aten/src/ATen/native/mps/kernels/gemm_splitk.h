@@ -1,18 +1,7 @@
 #pragma once
-// gemm_splitk.h - split-K matmul2d GEMM + reduction pass (deep-K, few-output-tile
-// shapes where a single matmul2d underfills the GPU but splitting K across G
-// threadgroups per tile fills it). Metal-4 only.
-//
-// KCHUNK is a RUNTIME extent: the AOT build cannot template on the data-dependent
-// K / G, so chunk g offsets the A/B base pointers to its K-range and views exactly
-// `kchunk` columns with the descriptor's K = dynamic_extent. Inputs are packed
-// (lda == K, ldb == N, ldc == N).
-//
-// EVERY chunk (including chunk 0) writes its partial to an fp32 plane; the reduce
-// sums all G planes in fp32 and stores OUT_T once. (Writing chunk 0 directly to the
-// OUT_T output - as metalBLAS does to save a plane - rounds it to bf16 before the
-// reduction, which survives catastrophic cancellation and blows up the relative
-// error at near-zero outputs. Keeping every chunk in fp32 matches m5_tensor.)
+// gemm_splitk.h - split-K matmul2d GEMM + fp32 reduction for deep-K / few-tile shapes
+// that underfill a single matmul2d (Metal-4 only). kchunk is a runtime extent; every
+// chunk writes an fp32 plane (rounding chunk 0 to bf16 first blows up near-zero error).
 #if __METAL_VERSION__ >= 400
 #include <ATen/native/mps/kernels/gemm_common.h>
 #include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>

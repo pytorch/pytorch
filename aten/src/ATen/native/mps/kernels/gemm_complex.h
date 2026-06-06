@@ -1,17 +1,7 @@
 #pragma once
-// gemm_complex.h - deinterleave / interleave helpers for the decomposed complex
-// GEMM. A complex matmul C = A @ B is computed as four real GEMMs on the
-// real/imag planes:
-//   C = (ar@br - ai@bi) + i*(ar@bi + ai@br)
-// complex_split peels an interleaved complex buffer into two contiguous real
-// planes (so the real GEMM kernels see packed inputs), and complex_combine folds
-// the four real products back into one interleaved complex result. The alpha/beta
-// addmm epilogue is applied host-side (elementwise) on the combined result, which
-// keeps the complex64 sub-GEMMs at full fp32 precision and avoids broadcasting the
-// bias index into the kernel.
-//
-// Fully-templated port of metalBLAS complex_pack.h: C2 is the interleaved element
-// (float2 / half2), R the real-component scalar (float / half).
+// gemm_complex.h - deinterleave / interleave helpers for the decomposed complex GEMM
+// C = A @ B = (ar@br - ai@bi) + i*(ar@bi + ai@br). complex_split peels a complex buffer
+// into real planes; complex_combine folds the four real products back. Port of metalBLAS.
 #include <ATen/native/mps/kernels/gemm_common.h>
 #include <metal_stdlib>
 

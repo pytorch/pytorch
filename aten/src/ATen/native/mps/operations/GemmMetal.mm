@@ -1,9 +1,6 @@
-//  Hand-written Metal GEMM dispatcher for the MPS backend.
-//
-//  Ports the dispatch brain of metalBLAS (resolve_inputs, tile pickers, the
-//  tensor-unit gate, and the autotuner) to host C++. Replaces the MPSGraph
-//  matmul path for float/half/bfloat across mm/addmm/bmm/baddbmm/addbmm/addmv/
-//  linear. int/complex stay on the existing naive-metal (do_metal_*) path.
+//  Hand-written Metal GEMM dispatcher for the MPS backend. Ports the metalBLAS
+//  dispatch brain (resolve_inputs, tile pickers, tensor-unit gate, autotuner) to
+//  host C++, replacing the MPSGraph matmul path for float/half/bfloat.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/operations/GemmMetal.h>
 
@@ -45,10 +42,9 @@ struct Resolved {
   bool trans; // true when stored column-major (the "other" orientation)
 };
 
-// metalBLAS _resolve_inputs, per matrix: rdim/cdim are the row/col dims of the
-// logical 2-D matrix (the last two dims). Row-major contiguous keeps the view
-// with ld = row stride; column-major is flagged transposed; anything else is
-// made contiguous.
+// metalBLAS _resolve_inputs, per matrix (rdim/cdim = the logical row/col dims).
+// Row-major keeps the view (ld = row stride); column-major is flagged transposed;
+// anything else is made contiguous.
 Resolved resolve_mat(const Tensor& m, int64_t rdim, int64_t cdim) {
   const int64_t R = m.size(rdim), C = m.size(cdim);
   const int64_t sr = m.stride(rdim), sc = m.stride(cdim);
@@ -191,11 +187,9 @@ std::string cgemv_nt_name(const std::string& c2, int nw, at_gemm::GemmEpilogue e
       "cgemv_nt_{}_{}_{}", c2, nw, epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none");
 }
 
-// (NWARPS, VEC) for a GEMV launch. Integers keep VEC=1 (the validated path);
-// float/half/bf16 use the metalBLAS _gemv_pick / _gemv_nt_pick heuristic - VEC
-// scales with the output width for cache-line coverage, clamped to the matrix
-// row-stride|offset alignment (a VEC-wide load needs both VEC-aligned). All
-// returned (nw, vec) have a matching instantiation in Gemm.metal (MB_GEMV_*).
+// (NWARPS, VEC) for a GEMV launch (metalBLAS _gemv_pick / _gemv_nt_pick). VEC scales
+// with the output width and is clamped to the matrix row-stride|offset alignment.
+// Every returned (nw, vec) has a matching instantiation in Gemm.metal (MB_GEMV_*).
 struct GemvCfg {
   int nw, vec;
 };
@@ -471,10 +465,9 @@ void launch_complex_combine(
   });
 }
 
-// Native interleaved-complex rank-1 GEMV (M==1 / N==1). Reads the matrix once as
-// C2 (vs the four-real-GEMM decomposition's repeated plane reads). a, b are
-// already contiguous complex of the out dtype. Returns true when handled (the
-// contiguous orientation cgemv reads); false to fall back to the decomposition.
+// Native interleaved-complex rank-1 GEMV (M==1 / N==1): reads the matrix once as C2
+// (vs the four-real-GEMM decomposition). a, b are already contiguous of the out
+// dtype. Returns true when handled, false to fall back to the decomposition.
 bool launch_cgemv_complex(
     const Tensor& a,
     const Tensor& b,
@@ -551,12 +544,8 @@ bool launch_cgemv_complex(
 
 // ---------------------------------------------------------------------------
 // Tile autotuner + process-global plan cache (port of metalBLAS dispatch.py).
-// Ambiguous regimes (best tile flips with K / aspect) emit a candidate list that
-// is probed once on private scratch and cached by (dtype, M, N, K, batched);
-// candidate 0 is the heuristic, kept unless a challenger beats it by `margin`.
-// Confident regimes return a single candidate (no probe). Packed-untransposed
-// m5_tensor only - transposed / non-packed use the heuristic. Disable with
-// PYTORCH_MPS_GEMM_AUTOTUNE=0.
+// Ambiguous regimes probe a candidate list once on scratch, cached by (dtype, M, N, K,
+// batched); confident regimes skip it. Disable with PYTORCH_MPS_GEMM_AUTOTUNE=0.
 // ---------------------------------------------------------------------------
 constexpr double kAutotuneMargin = 0.03;
 constexpr double kTallNarrowMargin = 0.01;
@@ -820,11 +809,9 @@ struct PlanKeyHash {
 std::unordered_map<PlanKey, GemmPlan, PlanKeyHash> g_tile_cache;
 std::mutex g_tile_mutex;
 
-// Time each candidate (best-of-reps min) on private scratch, returning the
-// fastest plan. Candidate 0 (heuristic m5t) is kept unless beaten by > margin.
-// split-K / conv candidates are verified against the m5t reference (max rel diff
-// <= 2%) before joining the probe. Mirrors metalBLAS _autotune_mppt: warm every
-// candidate first, then interleave timed reps.
+// Time each candidate (best-of-reps min) on scratch; candidate 0 (heuristic m5t) is
+// kept unless beaten by > margin. split-K / conv candidates are verified against the
+// m5t reference before joining the probe (metalBLAS _autotune_mppt).
 GemmPlan autotune_plan(
     const std::string& dt_str,
     bool relaxed,
@@ -880,11 +867,9 @@ GemmPlan autotune_plan(
     cand.push_back({GemmPlan{GemmPlan::kM5T, t}, [&, t](const Tensor& o) { enqueue_m5t(t, o); }});
   }
 
-  // split-K / conv candidates: include only when their result matches the m5t
-  // reference EVERYWHERE. An allclose-style per-element gate (|o-ref| <=
-  // rtol*|ref| + atol) - NOT a global-scale max-abs - because a chunked/reshaped
-  // kernel that is wrong only at a few small-magnitude outputs would slip past a
-  // global tolerance and then be selected, returning a subtly wrong result.
+  // split-K / conv candidates: included only when their result matches the m5t
+  // reference everywhere, via an allclose-style per-element gate (not a global max-
+  // abs, which a kernel wrong only at a few small outputs would slip past).
   if (!sk_specs.empty() || !conv_specs.empty()) {
     Tensor ref = at::empty({M, N}, Av.options());
     cand[0].run(ref);
@@ -1061,18 +1046,16 @@ bool gemm_supported_dtype(c10::ScalarType dt) {
 }
 
 bool gemm_use_mpp() {
-  // matmul2d (MetalPerformancePrimitives) is gated only on the OS deployment
-  // target - the SDK exposes it at macOS 26.2+ with no GPU-family requirement, and
-  // it lowers to the NAX matrix unit where present and to simdgroup execution
-  // otherwise.
+  // matmul2d (MetalPerformancePrimitives) is gated only on the OS: macOS 26.2+ with
+  // no GPU-family requirement (it lowers to the NAX matrix unit where present and to
+  // simdgroup execution otherwise).
   static const bool ok = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_2_PLUS);
   return ok;
 }
 
-// True only on the M5 tensor unit (Apple10+). The portable simd kernels are
-// competitive there for tiny shapes, but on earlier Apple GPUs (e.g. M2) matmul2d
-// is far faster even at small K (simd is ~20x slower for bf16/fp32), so the
-// "tiny shape -> simd" fallback in the dispatcher is gated on this.
+// True only on the M5 tensor unit (Apple10+), where the simd kernels are competitive
+// for tiny shapes. On earlier GPUs (e.g. M2) matmul2d is ~20x faster even at small K,
+// so the dispatcher's "tiny shape -> simd" fallback is gated on this.
 static bool gemm_on_m5_tensor_unit() {
   static const bool ok = [] {
     auto dev = MPSDevice::getInstance()->device();
@@ -1310,15 +1293,9 @@ void mps_gemm(
   const std::array<float, 2> alpha_beta = {
       static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
 
-  // matmul2d routing: the mpp kernel handles every resolvable layout - packed,
-  // transposed (column-major) and arbitrary leading dim all ride its strided
-  // tensor view + matmul2d transpose flags. The only requirement is a row-major
-  // (unit-inner-stride) output, which `target` guarantees. Everything else (matmul2d
-  // unavailable, or a tiny shape below the tile floor) falls to the portable simd
-  // kernel. fp32 defaults to TF32-relaxed (the chosen MPS speed default); set
-  // PYTORCH_MPS_PREFER_FP32_PRECISE for exact fp32, except that precise fp32 with a
-  // transposed operand has no mpp instantiation and routes to the fp32-exact
-  // simd kernel. bf16/fp16 accumulate in fp32, so they are inherently "relaxed".
+  // matmul2d routing: the mpp kernel handles every resolvable layout (it needs only a
+  // row-major output, which `target` guarantees); tiny shapes or no matmul2d fall to
+  // simd. fp32 defaults to TF32-relaxed (PYTORCH_MPS_PREFER_FP32_PRECISE for exact).
   const bool use_mpp = gemm_use_mpp();
   static const bool precise_fp32 = c10::utils::has_env("PYTORCH_MPS_PREFER_FP32_PRECISE");
   const bool want_relaxed = (dt != kFloat) || (!precise_fp32 && !force_precise_fp32);

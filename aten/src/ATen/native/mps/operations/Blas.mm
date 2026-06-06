@@ -60,11 +60,9 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
 
   dot_check(self, other);
 
-  // Route the inner product through the hand-written Metal GEMM kernels (no
-  // MPSGraph): (1, K) @ (K, 1) -> (1, 1) -> 0-D scalar. at::mm dispatches by dtype
-  // (real / integer -> mps_gemm, complex -> mps_gemm_complex) and resolves conj
-  // views, so dot matches metalBLAS (which also lowers dot to a matmul). bool has
-  // no GEMM kernel, so compute it in int32 and cast back (sum of ANDs != 0).
+  // dot via the hand-written GEMM kernels: (1, K) @ (K, 1) -> 0-D scalar. at::mm
+  // dispatches by dtype (real/integer -> mps_gemm, complex -> mps_gemm_complex) and
+  // resolves conj views. bool has no GEMM kernel, so compute in int32 and cast back.
   const int64_t K = self.numel();
   if (self.scalar_type() == kBool) {
     return at::mm(self.to(kInt).reshape({1, K}), other.to(kInt).reshape({K, 1}))
@@ -100,12 +98,9 @@ static Tensor& addmv_out_mps_impl(const Tensor& self,
     return result;
   }
 
-  // result = beta*self + alpha*(mat @ vec). at::mm routes the matrix-vector
-  // product through the MPSGraph-free GEMM kernels (float/integer) or the complex
-  // decomposition; the alpha/beta epilogue is a couple of elementwise ops. For
-  // integer outputs alpha/beta truncate to the integer type (matching torch's
-  // integer addmv, e.g. alpha=0.6 -> 0), since a float scalar can't scale an int
-  // tensor in place.
+  // result = beta*self + alpha*(mat @ vec) via the GEMM kernels (float/integer) or
+  // the complex decomposition, with an elementwise alpha/beta epilogue. Integer
+  // alpha/beta truncate to the integer type (torch's integer addmv, e.g. 0.6 -> 0).
   c10::MaybeOwned<Tensor> self_ = expand_size(self, {mat.size(0)});
   const bool is_int = c10::isIntegralType(result.scalar_type(), /*includeBool=*/false);
   const Scalar a = is_int ? Scalar(alpha_.toLong()) : alpha_;

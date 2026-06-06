@@ -9,31 +9,19 @@
 
 namespace at::native::mps {
 
-// True when matmul2d (MetalPerformancePrimitives) is available: macOS 26.4+, which
-// guarantees kernels_40.metallib (the metal4.0 build holding these kernels) is
-// loaded. No GPU-family gate - matmul2d lowers to the NAX matrix unit where present
-// and to simdgroup execution otherwise. When false, all float GEMM is served by the
-// Metal-3 simd/gemv kernels, so the MPSGraph path can be dropped fully.
+// True when matmul2d (MetalPerformancePrimitives) is available: macOS 26.2+, no
+// GPU-family gate (it lowers to the NAX matrix unit where present, else simdgroup).
+// When false, all float GEMM falls to the Metal-3 simd/gemv kernels.
 bool gemm_use_mpp();
 
-// True for dtypes the native real/integer GEMM kernels handle directly
-// (float/half/bfloat + signed/unsigned integers). Complex is handled separately
-// by mps_gemm_complex (decomposed into real GEMMs).
+// True for dtypes the native real/integer kernels handle directly (float/half/
+// bfloat + signed/unsigned integers). Complex goes through mps_gemm_complex
+// (decomposed into real GEMMs).
 bool gemm_supported_dtype(c10::ScalarType dt);
 
-// Computes `out = epilogue(A @ B)` on MPS with the hand-written Metal kernels.
-//
-//   A:   (M, K) or (B, M, K)
-//   B:   (K, N) or (B, K, N)
-//   out: (M, N) or (B, M, N)   (preallocated, row-major in its last dim)
-//   self: epilogue addend, broadcastable to `out` (ignored when epi == None)
-//
-// `epi == AlphaBeta` computes `alpha * (A @ B) + beta * self`. A/B may be
-// arbitrary strided / transposed views; non-resolvable layouts are made
-// contiguous. dtype must satisfy gemm_supported_dtype().
-//
-// fp32 defaults to TF32-relaxed tensor-unit math; force_precise_fp32 forces full
-// fp32 (used by the complex decomposition to preserve complex64 precision).
+// out = epilogue(A @ B), shapes (M,K)@(K,N)->(M,N), optionally batched. `out` is
+// preallocated row-major; AlphaBeta computes alpha*(A@B)+beta*self. A/B may be
+// strided/transposed (else made contiguous). force_precise_fp32 forces full fp32.
 void mps_gemm(
     const Tensor& A,
     const Tensor& B,
@@ -44,10 +32,9 @@ void mps_gemm(
     at_gemm::GemmEpilogue epi,
     bool force_precise_fp32 = false);
 
-// Complex GEMM (complex64 / complex32): decomposes A @ B into four real GEMMs on
-// the real/imag planes, recombines, and applies the alpha/beta epilogue
-// host-side. Same operand/shape contract as mps_gemm; handles 2-D and batched
-// 3-D. complex64 sub-GEMMs run at full fp32 precision.
+// Complex GEMM (complex64 / complex32): decomposes A @ B into four real GEMMs on the
+// real/imag planes, recombines, and applies the alpha/beta epilogue host-side. Same
+// contract as mps_gemm (2-D and batched); complex64 sub-GEMMs run at full fp32.
 void mps_gemm_complex(
     const Tensor& A,
     const Tensor& B,

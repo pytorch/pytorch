@@ -664,10 +664,9 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     return output.zero_();
   }
 
-  // Complex decomposes into four real GEMMs. Integer + float/half/bfloat run the
-  // hand-written GEMM kernels (int_gemm / simd / m5_tensor). bool and a few legacy
-  // float edge cases caught by use_metal_mm use the naive-metal kernel. The
-  // use_metal_mm float workarounds don't apply to integers.
+  // Complex decomposes into four real GEMMs; integer + float/half/bfloat run the
+  // hand-written kernels (int_gemm / simd / m5_tensor). bool and legacy float edge
+  // cases (use_metal_mm) use the naive-metal kernel; those workarounds skip integers.
   if (self.is_complex()) {
     mps_gemm_complex(self, other, output, std::nullopt, /*alpha=*/1, /*beta=*/0, at_gemm::GemmEpilogue::None);
     return output;

@@ -1,12 +1,7 @@
 #pragma once
-// gemm_gemv.h - bandwidth-bound GEMV kernels for the rank-1 (M==1 / N==1) cases,
-// which the tiled GEMM kernels handle correctly but inefficiently (a 32x32+ tile
-// is ~97% masked for a vector). Real dtypes (float/half/bfloat) and integers share
-// these (ACC_T = opmath_t<DT>: float for fp/bf16, int/long for integers).
-//
-// Fully-templated port of metalBLAS gemv_t.h / gemv_nt.h: VEC / NWARPS / epilogue
-// and (gemv_nt) the threadgroup-reduce variant for int64 are template params.
-// Reuses apply_epilogue, with the addend indexed at the output position.
+// gemm_gemv.h - bandwidth-bound GEMV for rank-1 (M==1 / N==1), which a tiled GEMM
+// handles but with a ~97%-masked tile. Real + integer dtypes (ACC_T = opmath_t<DT>).
+// Port of metalBLAS gemv_t.h / gemv_nt.h; VEC / NWARPS / epilogue are template params.
 #include <ATen/native/mps/kernels/gemm_common.h>
 #include <metal_stdlib>
 
@@ -112,9 +107,8 @@ kernel void gemv_t(
 }
 
 // y = A @ x, A is (M, K) row-major. Each simdgroup owns one row; lanes stride K
-// (VEC-wide coalesced loads) and reduce their partials via threadgroup memory.
-// (simd_sum is avoided: it has no integer overload, and under metal3.1 IF_CONSTEXPR
-// is a runtime if, so a simd_sum branch would still compile for integer dtypes.)
+// (VEC-wide coalesced loads) and reduce partials via threadgroup memory. (simd_sum
+// is avoided: no integer overload, and under metal3.1 IF_CONSTEXPR is a runtime if.)
 template <typename DT, int NWARPS, int VEC, GemmEpilogue EPI>
 kernel void gemv_nt(
     device const DT* A [[buffer(0)]],

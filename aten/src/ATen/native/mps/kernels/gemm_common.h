@@ -1,26 +1,15 @@
 #pragma once
-// Shared definitions for the hand-written MPS GEMM kernels (gemm_*.h).
-//
-// The enums and POD dim structs below are valid in BOTH Metal and host C++, so
-// the host dispatcher (operations/GemmMetal.*) and the shaders agree on the
-// constant-buffer layout. Metal-only helpers (vector load type, epilogue) are
-// guarded by __METAL__.
-//
-// These kernels are a fully-templated port of the metalBLAS shaders: every
-// variant (dtype, tile sizes, transpose, double-buffer, epilogue, batch) is a
-// template parameter and every former preprocessor branch is `if constexpr`
-// (via IF_CONSTEXPR). The only preprocessor gate is `#if __METAL_VERSION__ >=
-// 400`, used by the tensor-unit (matmul2d) kernels.
+// Shared definitions for the MPS GEMM kernels (gemm_*.h). The enums and POD dim
+// structs are valid in both Metal and host C++ so the dispatcher and shaders agree
+// on the constant-buffer layout; Metal-only helpers are guarded by __METAL__.
 
 #include <c10/metal/common.h>
 
 namespace at_gemm {
 
-// Epilogue applied in the GEMM store path.
-//   None      : C = A @ B
-//   AlphaBeta : C = alpha * (A @ B) + beta * self[r*self_r + c*self_c]
-//               The linear-layer bias add is the special case self_r == 0
-//               (row broadcast) with alpha == 1, beta == 1.
+// Epilogue applied in the GEMM store path. None: C = A @ B. AlphaBeta:
+// C = alpha*(A @ B) + beta*self[r*self_r + c*self_c] (linear-layer bias is the
+// self_r == 0 row-broadcast case with alpha == beta == 1).
 enum class GemmEpilogue : int {
   None = 0,
   AlphaBeta = 1,
@@ -38,9 +27,8 @@ struct GemmDimsStrided {
 };
 
 // Dims for the GEMV kernels (gemv_t / gemv_nt). `n` is the output length (cols for
-// gemv_t, rows for gemv_nt); `ld` is the matrix row stride; `xs` the vector stride;
-// self_r/self_c the epilogue addend strides (the kernel indexes self at its output
-// position, so one of them is the broadcast step and the other is 0).
+// gemv_t, rows for gemv_nt); `ld` the matrix row stride; `xs` the vector stride;
+// self_r/self_c the addend strides (one is the broadcast step at the output, other 0).
 struct GemvDims {
   int n, K, ld, xs;
   int self_r, self_c;

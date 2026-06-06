@@ -1,9 +1,7 @@
 #pragma once
 // gemm_simd.h - portable simdgroup_matrix<T,8,8> tiled GEMM (Metal 3; no tensor
-// unit). The universal fallback used on macOS < 26 / pre-Apple10 GPUs, and for
-// transposed / strided inputs everywhere. Fully templated port of metalBLAS
-// simd_gemm.h: tile sizes / transpose / epilogue / batch are template params;
-// MN- and K-alignment are handled by runtime bounds checks (no template axis).
+// unit). Universal fallback for macOS < 26 / pre-Apple10 GPUs and for transposed/
+// strided inputs. Port of metalBLAS simd_gemm.h; MN/K alignment via runtime bounds.
 #include <ATen/native/mps/kernels/gemm_common.h>
 #include <metal_simdgroup>
 #include <metal_simdgroup_matrix>

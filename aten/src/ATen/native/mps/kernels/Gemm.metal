@@ -1,12 +1,6 @@
-// Gemm.metal - binder + explicit-instantiation site for the hand-written Metal
-// GEMM kernels. This is the file the build globs and compiles (twice: once
-// -std=metal3.1 -> kernels_basic.metallib, once -std=metal4.0 ->
-// kernels_40.metallib). The Metal-3 families (simd, gemv) instantiate in both;
-// the tensor-unit families (matmul2d) live behind #if __METAL_VERSION__ >= 400
-// and only populate kernels_40.metallib.
-//
-// Host names encode (family, dtype, tile, flags, epilogue, batched) so the host
-// dispatcher (operations/GemmMetal.mm) can build the function name at runtime.
+// Gemm.metal - binder + explicit-instantiation site for the GEMM kernels. Compiled
+// twice (metal3.1 -> kernels_basic, metal4.0 -> kernels_40); matmul2d families sit
+// behind #if __METAL_VERSION__ >= 400. Host names encode the dispatch key.
 #include <ATen/native/mps/kernels/gemm_cgemv.h>
 #include <ATen/native/mps/kernels/gemm_complex.h>
 #include <ATen/native/mps/kernels/gemm_conv1x1.h>
@@ -171,10 +165,9 @@ MB_CPLX(half2, half)
   MB_GEMV_T_E(DT, 8, 8) MB_GEMV_T_E(DT, 16, 8)                                \
   MB_GEMV_NT_E(DT, 4, 1) MB_GEMV_NT_E(DT, 4, 2) MB_GEMV_NT_E(DT, 4, 4)
 
-// integers: the per-width VEC from _IGEMV_*_CFG, clamped to the row-stride/offset
-// alignment at dispatch (the clamp halves VEC, keeping NWARPS), so the full VEC
-// ladder must exist. gemv_t uses NW=8; gemv_nt uses NW=4 (NW=8 for int32). ACC_T =
-// opmath_t (int / long). The ladders cover every dtype's max VEC (8) and clamps.
+// integers: per-width VEC from _IGEMV_*_CFG, clamped to the row-stride/offset
+// alignment at dispatch (clamp halves VEC, keeps NWARPS), so the full VEC ladder must
+// exist. gemv_t NW=8; gemv_nt NW=4 (NW=8 for int32); ACC_T = opmath_t (int / long).
 #define MB_GEMV_INT(DT)                                                  \
   MB_GEMV_T_E(DT, 8, 1) MB_GEMV_T_E(DT, 8, 2) MB_GEMV_T_E(DT, 8, 4)      \
   MB_GEMV_T_E(DT, 8, 8)                                                  \
@@ -230,9 +223,8 @@ MB_CGEMV(float2, float)
 MB_CGEMV(half2, half)
 
 // ---------------------------------------------------------------------------
-// m5_tensor_gemm (Metal 4 only): mpp::tensor_ops::matmul2d on the M5 tensor unit.
-// Handles packed AND transposed/strided operands (the strided tensor view + the
-// matmul2d transpose flags). name:
+// m5_tensor_gemm (Metal 4 only): mpp::tensor_ops::matmul2d. Handles packed and
+// transposed/strided operands (strided tensor view + transpose flags). name:
 //   gemm_m5t_{dt}_{BM}_{BN}_{NSG}_ta{0|1}_tb{0|1}_{relaxed|full}_{none|ab}_{b0|b1}
 // ---------------------------------------------------------------------------
 #if __METAL_VERSION__ >= 400
@@ -330,9 +322,8 @@ MB_SPLITK_ALL(half)
 MB_SPLITK_ALL(bfloat)
 
 // ---------------------------------------------------------------------------
-// 1x1-conv (Metal 4 only): very-thin-N GEMM via convolution2d. Low precision only.
-// KCONST (input-channel count) must be compile-time, so a set of common K values
-// is precompiled; the host selects conv only when K matches one (else -> m5t).
+// 1x1-conv (Metal 4 only): very-thin-N GEMM via convolution2d, low precision only.
+// KCONST must be compile-time, so common K values are precompiled (else -> m5t).
 // name: conv1x1_gemm_{dt}_{BMW}_{BNO}_{NSG}_{KCONST}  (BNO = N channels: 32 | 64)
 // ---------------------------------------------------------------------------
 #define MB_CONV(DT, BMW, BNO, NSG, KC)                                            \

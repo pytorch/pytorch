@@ -1,14 +1,7 @@
 #pragma once
-// gemm_conv1x1.h - 1x1 convolution expressed as GEMM (very-thin-N path). A
-// matmul2d 32-wide N fragment underfills a thin-N tile (N <= 64); routing N as the
-// convolution output channels schedules the thin channels better. Metal-4 only.
-// Packed inputs (lda == K, ldb == N).
-//
-// convolution2d_descriptor requires a COMPILE-TIME input-channel extent, so KCONST
-// (== K) is a template parameter; the binder instantiates a set of common K values
-// and the host selects conv only when K matches one (the AOT analog of metalBLAS's
-// JIT-per-K - any other K falls to m5_tensor). The autotuner additionally keeps
-// this candidate only when it wins AND matches the reference.
+// gemm_conv1x1.h - 1x1 convolution expressed as GEMM for the very-thin-N path
+// (N <= 64 underfills a matmul2d tile). Metal-4 only. KCONST (== K) is a compile-time
+// template param, so the host selects conv only when K matches a precompiled value.
 #if __METAL_VERSION__ >= 400
 #include <ATen/native/mps/kernels/gemm_common.h>
 #include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>

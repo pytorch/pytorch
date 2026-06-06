@@ -1,14 +1,7 @@
 #pragma once
-// gemm_cgemv.h - native interleaved-complex GEMV for the rank-1 complex cases
-// (M==1 / N==1). Reads the matrix once as interleaved C2 (vs the four-real-GEMM
-// decomposition's repeated real/imag plane reads), accumulating in float2 for
-// both complex dtypes. The epilogue applies the complex alpha*acc + beta*bias
-// (complex addmm), fused into the same pass.
-//
-// Fully-templated port of metalBLAS cgemv_t.h / cgemv_nt.h: C2 (float2 / half2),
-// R (output real scalar), NWARPS and epilogue are template params. Reuses GemvDims
-// (n, K, ld, xs, self_r, self_c); the bias is indexed at the output position, so
-// the broadcast step is self_c for cgemv_t (columns) and self_r for cgemv_nt (rows).
+// gemm_cgemv.h - native interleaved-complex GEMV for rank-1 complex (M==1 / N==1):
+// reads the matrix once as C2 (vs the four-real-GEMM decomposition), accumulating in
+// float2 with a fused complex alpha*acc + beta*bias epilogue. Port of metalBLAS cgemv.
 #include <ATen/native/mps/kernels/gemm_common.h>
 #include <metal_stdlib>
 
@@ -16,10 +9,9 @@ using namespace metal;
 
 namespace at_gemm {
 
-// Complex epilogue: out = alpha*acc + beta*bias as a complex multiply. The beta
-// term is dropped at runtime when beta == 0 so an uninitialized bias NaN can't
-// reach the result (mirrors apply_epilogue). ab = {alpha_re, alpha_im, beta_re,
-// beta_im}.
+// Complex epilogue: out = alpha*acc + beta*bias (complex multiply). The beta term is
+// dropped when beta == 0 so an uninitialized bias NaN can't reach the result. ab =
+// {alpha_re, alpha_im, beta_re, beta_im}.
 template <GemmEpilogue EPI, typename C2, typename R>
 inline C2 apply_cepilogue(
     float2 acc,
@@ -88,10 +80,9 @@ kernel void cgemv_t(
   }
 }
 
-// y = A @ x, A is (M, K) row-major complex. Each simdgroup owns one row; lanes
-// stride K (coalesced C2 loads) and reduce with simd_sum (float accum, so the
-// integer-overload issue that forced gemv_nt onto threadgroup reduction does not
-// apply here; row is simdgroup-uniform, so the early return cannot deadlock).
+// y = A @ x, A is (M, K) row-major complex. Each simdgroup owns one row; lanes stride
+// K (coalesced C2 loads) and reduce with simd_sum (float accum, no integer-overload
+// issue; row is simdgroup-uniform, so the early return cannot deadlock).
 template <typename C2, typename R, int NWARPS, GemmEpilogue EPI>
 kernel void cgemv_nt(
     device const C2* A [[buffer(0)]],

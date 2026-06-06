@@ -1,14 +1,7 @@
 #pragma once
-// gemm_int.h - register-tiled integer GEMM. The simdgroup_matrix unit and the M5
-// tensor unit are float-only, so integer matmul is done with plain MACs: each
-// thread owns a TM x TN micro-tile, accumulating in ACC_T (>= OUT_T width) and
-// truncating to OUT_T on store. Two's-complement wrap makes accumulate-wide-then-
-// truncate bit-exact with torch's narrow wrapping (mod 2^n is associative), so
-// ACC_T = opmath_t<DT> (int for <=32-bit, long for 64-bit) is always sufficient.
-//
-// Fully-templated port of metalBLAS int_gemm.h: tile sizes / transpose / epilogue
-// / batch are template params; bounds are runtime checks. Shares GemmDimsStrided
-// and apply_epilogue with simd_gemm so the host binding path is identical.
+// gemm_int.h - register-tiled integer GEMM (matrix/tensor units are float-only). Each
+// thread owns a TM x TN micro-tile in ACC_T = opmath_t<DT>; two's-complement wrap makes
+// accumulate-then-truncate bit-exact with torch. Port of metalBLAS int_gemm.h.
 #include <ATen/native/mps/kernels/gemm_common.h>
 #include <metal_stdlib>
 

@@ -1,18 +1,7 @@
 #pragma once
-// mpp_gemm.h - the PRIMARY GEMM backend: mpp::tensor_ops::matmul2d
-// (MetalPerformancePrimitives). Metal-4 only (cooperative tensors), so the whole
-// file is guarded by __METAL_VERSION__ >= 400 and only populates kernels_40.metallib.
-// matmul2d is gated only on the OS (macOS 26.2+ per the SDK); it lowers to the NAX
-// matrix unit where present and to plain simdgroup execution otherwise, so it is
-// not tied to any specific GPU family.
-//
-// Fully-templated port of metalBLAS mpp_tensor.h. Handles packed, transposed
-// (column-major) and arbitrary-leading-dim operands through strided tensor_inline
-// views (inner stride 1, outer stride = the leading dim) plus the matmul2d
-// transpose flags - so col-major weights, [::k]-strided and transposed inputs all
-// ride this path without a materialized copy. Untransposed interior tiles take a
-// static-extent slice (no per-tile edge predication); transposed and partial-edge
-// tiles take a dynamic slice + per-element validity mask.
+// mpp_gemm.h - PRIMARY GEMM backend: mpp::tensor_ops::matmul2d. Metal-4 only
+// (guarded by __METAL_VERSION__ >= 400). Port of metalBLAS mpp_tensor.h; handles
+// packed/transposed/strided operands via strided tensor_inline views + transpose flags.
 #if __METAL_VERSION__ >= 400
 #include <ATen/native/mps/kernels/gemm_common.h>
 #include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
