@@ -309,11 +309,9 @@ esac
 
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
-no_cache_flag=""
 progress_flag=""
-# Do not use cache and progress=plain when in CI
+# Plain (non-TTY) progress output in CI for complete, readable build logs.
 if [[ -n "${CI:-}" ]]; then
-  no_cache_flag="--no-cache"
   progress_flag="--progress=plain"
 fi
 
@@ -321,14 +319,23 @@ fi
 # `--load`, so push directly to the registry instead. The caller is expected
 # to have logged in to the target registry already (e.g. via ecr-login).
 output_flag="--load -t ${tmp_tag}"
+cache_flag=""
 if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
   output_flag="--push"
+  # Remote BuildKit pods are ephemeral with pod-private caches, so share a cache
+  # via a per-image (hence per-arch) tag in the same registry. mode=max caches
+  # intermediate stages; image-manifest/oci-mediatypes keep it ECR-compatible.
+  if [[ -n "${DOCKER_IMAGE:-}" ]]; then
+    cache_ref="${DOCKER_IMAGE%:*}:${image}-buildcache"
+    cache_flag="--cache-from type=registry,ref=${cache_ref}"
+    cache_flag="${cache_flag} --cache-to type=registry,ref=${cache_ref},mode=max,image-manifest=true,oci-mediatypes=true"
+  fi
 fi
 
 # Build image
 docker buildx build \
-       ${no_cache_flag} \
        ${progress_flag} \
+       ${cache_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
