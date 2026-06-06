@@ -26,13 +26,15 @@ from torch._inductor.comms import (
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.fx_passes.bucketing import (
     _trace as bucketing_trace,
+    all_gather_merge_fn_to_trace_custom_ops,
     is_all_gather_into_tensor,
     is_all_reduce_tensor,
     is_all_to_all_tensor,
     is_reduce_scatter_tensor,
+    reduce_scatter_merge_fn_to_trace_custom_ops,
 )
 from torch._inductor.scheduler import (
-    _get_mm_like_fn,
+    _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
     get_estimate_runtime_cache,
     get_estimate_runtime_cache_key_from_snode,
@@ -64,6 +66,17 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 
 class TestBucketingTrace(torch._dynamo.test_case.TestCase):
+    def _make_hinted_unbacked_chunked_fake_inputs(self, *, hint=None):
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(),
+        )
+        with fake_mode:
+            u = fake_mode.shape_env.create_unbacked_symint()
+            if hint is not None:
+                torch._dynamo.override_optimization_hint(u, hint)
+            return torch.empty(u // 2, 4), torch.empty(u // 2, 4)
+
     def test_trace_ignores_ambient_pending_unbacked_symbols(self):
         fake_mode = FakeTensorMode(
             allow_non_fake_inputs=True,
@@ -77,6 +90,73 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
 
         self.assertIn(ambient, fake_mode.shape_env.pending_fresh_unbacked_symbols)
         FileCheck().check("aten.add").run(gm.code)
+
+    def test_all_gather_bucket_trace_accepts_hinted_unbacked_chunk_numel(self):
+        x, y = self._make_hinted_unbacked_chunked_fake_inputs(hint=8)
+
+        gm = bucketing_trace(
+            lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                2,
+                torch.float32,
+                [torch.float32, torch.float32],
+                0,
+            ),
+            (x, y),
+        )
+
+        FileCheck().check("sym_numel").check("_pre_bucket_all_gather").run(gm.code)
+        symbolic_shapes = [
+            str(node.meta["val"].shape)
+            for node in gm.graph.nodes
+            if "val" in node.meta and isinstance(node.meta["val"], torch.Tensor)
+        ]
+        self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
+        self.assertTrue(any("16*((u0//2))" in shape for shape in symbolic_shapes))
+
+    def test_all_gather_bucket_trace_requires_unbacked_chunk_hint(self):
+        x, y = self._make_hinted_unbacked_chunked_fake_inputs()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Collective bucketing requires hinted symbolic sizes",
+        ):
+            bucketing_trace(
+                lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                    [a, b],
+                    "0",
+                    2,
+                    torch.float32,
+                    [torch.float32, torch.float32],
+                    0,
+                ),
+                (x, y),
+            )
+
+    def test_reduce_scatter_bucket_trace_preserves_hinted_unbacked_chunk_shapes(self):
+        x, y = self._make_hinted_unbacked_chunked_fake_inputs(hint=8)
+
+        gm = bucketing_trace(
+            lambda a, b: reduce_scatter_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                2,
+                "sum",
+                torch.float32,
+                torch.device("cuda"),
+            ),
+            (x, y),
+        )
+
+        FileCheck().check("sym_numel").check("_pre_bucket_reduce_scatter").run(gm.code)
+        symbolic_shapes = [
+            str(node.meta["val"].shape)
+            for node in gm.graph.nodes
+            if "val" in node.meta and isinstance(node.meta["val"], torch.Tensor)
+        ]
+        self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
+        self.assertTrue(any("(u0//4)" in shape for shape in symbolic_shapes))
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -435,7 +515,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             def forward(self, x, world_size, tag, ranks, group_size):
                 y = self.emb(x)
                 last_dim = y.dim() - 1
-                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                res = _functional_collectives.all_gather_single(y, 0, ranks, tag)
                 out = torch.cat(torch.chunk(res, world_size, dim=0), dim=last_dim)
                 return out
 
@@ -474,7 +554,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 y = self.emb(x)
                 last_dim = y.dim() - 1
                 y = y.transpose_(0, last_dim).contiguous()
-                _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                _functional_collectives.all_gather_single(y, 0, ranks, tag)
                 out = y.transpose_(0, last_dim).contiguous()
                 return out
 
@@ -993,7 +1073,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_all_gather_tensor(self):
         def func(inp):
-            ar = _functional_collectives.all_gather_tensor(inp, 0, "0")
+            ar = _functional_collectives.all_gather_single(inp, 0, "0")
             return ar
 
         inputs = torch.ones(4, 4, device=self.device)
@@ -1010,7 +1090,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_all_gather_tensor_pg(self):
         def func(inp, *, pg):
-            ar = _functional_collectives.all_gather_tensor(inp, 0, pg)
+            ar = _functional_collectives.all_gather_single(inp, 0, pg)
             return ar
 
         inputs = torch.ones(4, 4, device=self.device)
@@ -1027,7 +1107,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather(self):
         def func(inp, out, *, pg):
-            torch.distributed.all_gather_into_tensor(
+            torch.distributed.all_gather_single(
                 out,
                 inp,
                 pg,
@@ -1087,7 +1167,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # Duplicated most of the structure from test_dynamo_rewrite_dist_all_gather
         # except uses kwargs to ensure rewrite has matching arg names
         def func(inp, out, *, pg):
-            torch.distributed.all_gather_into_tensor(
+            torch.distributed.all_gather_single(
                 output_tensor=out,
                 input_tensor=inp,
                 group=pg,
@@ -1119,7 +1199,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_reduce_scatter(self):
         def func(inp, out, *, pg):
-            torch.distributed.reduce_scatter_tensor(
+            torch.distributed.reduce_scatter_single(
                 out,
                 inp,
                 group=pg,
@@ -1305,7 +1385,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         def func(inp, out, *, pg):
             # user explicitly set the attribute `async_op` to False,
             # there should be no graph break
-            torch.distributed.reduce_scatter_tensor(out, inp, group=pg, async_op=False)
+            torch.distributed.reduce_scatter_single(out, inp, group=pg, async_op=False)
 
         local_size = [4, 4]
         # single-proc test
@@ -1329,7 +1409,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_graphbreaks_unsupported_async_op(self):
         def func(inp, out, *, pg):
-            work = torch.distributed.reduce_scatter_tensor(
+            work = torch.distributed.reduce_scatter_single(
                 out, inp, group=pg, async_op=True
             )
             work.wait()
@@ -1378,7 +1458,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_reduce_scatter_tensor(self):
         def func(inp):
-            ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, "0")
+            ar = _functional_collectives.reduce_scatter_single(inp, "sum", 0, "0")
             return ar
 
         inputs = torch.ones(4, 4, device=self.device)
@@ -2132,7 +2212,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             if torch._inductor.config.runtime_estimations_mms_benchmark:
                 cache = get_estimate_runtime_cache()
                 for snode in snodes:
-                    if _get_mm_like_fn(snode) is None:
+                    if _get_benchmarkable_extern_fn(snode) is None:
                         continue
                     cache_key = get_estimate_runtime_cache_key_from_snode(snode)
                     if cache.lookup(cache_key) is None:
@@ -3423,6 +3503,61 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             torch.allclose(eager_out, compiled_out, rtol=1e-3, atol=1e-3),
             "Mismatch between eager and compiled output.",
         )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_benchmark_collective_with_symint_args(self):
+        """
+        Test that collective benchmarking handles SymInt non-tensor arguments.
+
+        When dynamic=True, ops like all_to_all_single receive SymInt split_sizes
+        in the FX graph. The benchmark path must convert these to concrete ints
+        before calling the collective.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(group_name, group)
+        group_size = group.size()
+
+        HIDDEN = 64
+
+        def func(x, w, group_size, group_name):
+            seq = x.shape[0]
+            pad = (-seq) % group_size
+            x_padded = torch.nn.functional.pad(x, (0, 0, 0, pad))
+            chunk = x_padded.shape[0] // group_size
+            split_sizes = [chunk] * group_size
+            gathered = torch.ops._c10d_functional.all_to_all_single(
+                x_padded, split_sizes, split_sizes, group_name
+            )
+            gathered = torch.ops.c10d_functional.wait_tensor(gathered)
+            return (gathered @ w).sum()
+
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def _pass(gm):
+            return schedule_overlap_bucketing(
+                gm.owning_module,
+                collective_bucketing=True,
+                insert_overlap_deps=True,
+                collective_estimator="benchmark",
+            )
+
+        torch._inductor.config.post_grad_custom_post_pass = _pass
+
+        w = torch.randn(HIDDEN, HIDDEN, device=self.device)
+        compiled = torch.compile(func, backend="inductor", fullgraph=True, dynamic=True)
+
+        for n in (7, 11):
+            x = torch.randn(n, HIDDEN, device=self.device)
+            compiled(x, w, group_size, group_name)
 
 
 class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):

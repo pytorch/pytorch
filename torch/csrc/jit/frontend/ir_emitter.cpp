@@ -669,7 +669,7 @@ struct to_ir {
 
     // At this point, we might have received a graph that is compiled with
     // old operator schemas that might not exist in the system anymore.
-    // Therefore, we replace such ops with its' valid upgrader.
+    // Therefore, we replace such ops with its valid upgrader.
     ReplaceOldOperatorsWithUpgraders(graph);
 
     // NB ORDERING: SSA conversion has to occur before
@@ -970,7 +970,7 @@ struct to_ir {
       const std::string& stmt_name) {
     if (loop_status_ == LoopStatus::NOT_IN_LOOP) {
       throw(
-          ErrorReport(loc) << "SyntaxError: '" << stmt_name << "'"
+          ErrorReport(loc) << "SyntaxError: '" << stmt_name << '\''
                            << " outside loop");
     } else if (loop_status_ == LoopStatus::IN_UNROLLED_LOOP) {
       throw(
@@ -3681,7 +3681,7 @@ struct to_ir {
             throw(
                 ErrorReport(loc)
                 << "enumerate expected kwarg name 'start', got '"
-                << attributes[0].name().name() << "'");
+                << attributes[0].name().name() << '\'');
           }
           start_index =
               emitSugaredExpr(attributes[0].value(), 1)->asValue(loc, method);
