@@ -6595,13 +6595,13 @@ class CPUReproTests(TestCase):
         Original PR: https://github.com/pytorch/pytorch/pull/141766
         """
         from torch.testing._internal.common_quantization import (
-            _static_reference_quantized_linear_module,
+            _static_quantized_linear_module,
         )
 
         class Model(torch.nn.Module):
             def __init__(self, example_input):
                 super().__init__()
-                self.dense = _static_reference_quantized_linear_module(
+                self.dense = _static_quantized_linear_module(
                     N=768, K=768, bias=True, example_input=example_input
                 )
                 self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
@@ -6768,6 +6768,13 @@ class CPUReproTests(TestCase):
         fn(-math.inf)
         fn(math.inf)
         fn(math.nan)
+
+    def test_sin_atan_nan(self):
+        def fn(x):
+            return torch.sin(torch.atan(x))
+
+        x = torch.tensor([float("nan")])
+        self.common(fn, (x,))
 
     def test_pdist_fallback_continuous(self):
         # https://github.com/pytorch/pytorch/issues/170939
