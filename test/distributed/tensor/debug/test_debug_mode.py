@@ -1,7 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import json
 import os
+import tempfile
 import unittest
 
 import torch
@@ -1127,6 +1129,227 @@ class TestDTensorDebugMode(TestCase):
 
 class TestDebugModeUtils(TestCase):
     """Test DebugMode with NCCL backend without using DTensor."""
+
+    def test_dump_tensor_hashes_to_file(self):
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
+            x = torch.arange(4.0)
+            y = x + 1
+            y.sum()
+
+        expected_entries = [
+            {
+                "index": 0,
+                "call_type": "torch op",
+                "call": "aten::arange",
+                "call_depth": 1,
+                "hash_type": "output",
+                "arg_name": None,
+                "pytree_path": "",
+                "hash": 6.0,
+            },
+            {
+                "index": 1,
+                "call_type": "torch op",
+                "call": "aten::add.Tensor",
+                "call_depth": 1,
+                "hash_type": "input",
+                "arg_name": None,
+                "pytree_path": "[0][0]",
+                "hash": 6.0,
+            },
+            {
+                "index": 1,
+                "call_type": "torch op",
+                "call": "aten::add.Tensor",
+                "call_depth": 1,
+                "hash_type": "output",
+                "arg_name": None,
+                "pytree_path": "",
+                "hash": 10.0,
+            },
+            {
+                "index": 2,
+                "call_type": "torch op",
+                "call": "aten::sum",
+                "call_depth": 1,
+                "hash_type": "input",
+                "arg_name": None,
+                "pytree_path": "[0][0]",
+                "hash": 10.0,
+            },
+            {
+                "index": 2,
+                "call_type": "torch op",
+                "call": "aten::sum",
+                "call_depth": 1,
+                "hash_type": "output",
+                "arg_name": None,
+                "pytree_path": "",
+                "hash": 10.0,
+            },
+        ]
+        self.assertEqual(debug_mode.tensor_hashes(), expected_entries)
+        self.assertEqual(
+            [
+                entry["hash_type"]
+                for entry in debug_mode.tensor_hashes(include_inputs=False)
+            ],
+            ["output", "output", "output"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_name = os.path.join(tmp_dir, "tensor_hashes.txt")
+            debug_mode.dump_tensor_hashes(file_name)
+            with open(file_name, encoding="utf-8") as f:
+                content = f.read()
+
+            self.assertExpectedInline(
+                content,
+                """\
+Total captured tensor hash ops: 3
+================================================================================
+
+[<none>/op_0_aten::arange]
+  Call type: torch op
+  Call index: 0
+  Call depth: 1
+  Output hashes: <root>=6.0
+
+[<none>/op_1_aten::add.Tensor]
+  Call type: torch op
+  Call index: 1
+  Call depth: 1
+  Input hashes: [0][0]=6.0
+  Output hashes: <root>=10.0
+
+[<none>/op_2_aten::sum]
+  Call type: torch op
+  Call index: 2
+  Call depth: 1
+  Input hashes: [0][0]=10.0
+  Output hashes: <root>=10.0
+
+""",
+            )
+
+    def test_dump_tensor_hashes_uses_module_context_in_keys(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.l1(x).relu()
+
+        mod = Foo()
+        x = torch.ones(1, 2)
+
+        with (
+            DebugMode(record_nn_module=True) as debug_mode,
+            DebugMode.log_tensor_hashes(hash_inputs=True),
+        ):
+            mod(x)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_name = os.path.join(tmp_dir, "tensor_hashes.txt")
+            debug_mode.dump_tensor_hashes(file_name)
+            with open(file_name, encoding="utf-8") as f:
+                content = f.read()
+
+        self.assertIn("[Foo.l1/op_0_aten::t]", content)
+        self.assertIn("[Foo.l1/op_1_aten::addmm]", content)
+        self.assertIn("[Foo/op_0_aten::relu]", content)
+
+    def test_tensor_hashes_keep_tuple_hashes_as_leaves(self):
+        def tuple_hash(t):
+            return (float(t.sum().item()), int(t.numel()))
+
+        with (
+            DebugMode() as debug_mode,
+            DebugMode.log_tensor_hashes(hash_fn=tuple_hash, hash_inputs=True),
+        ):
+            x = torch.arange(4.0)
+            y = x + 1
+            y.sum()
+            y.split(2)
+
+        entries = debug_mode.tensor_hashes()
+        add_entries = [
+            entry for entry in entries if entry["call"] == "aten::add.Tensor"
+        ]
+        self.assertEqual(
+            [
+                (entry["hash_type"], entry["pytree_path"], entry["hash"])
+                for entry in add_entries
+            ],
+            [
+                ("input", "[0][0]", (6.0, 4)),
+                ("output", "", (10.0, 4)),
+            ],
+        )
+
+        split_output_entries = [
+            entry
+            for entry in entries
+            if entry["call"] == "aten::split.Tensor" and entry["hash_type"] == "output"
+        ]
+        self.assertEqual(
+            [(entry["pytree_path"], entry["hash"]) for entry in split_output_entries],
+            [
+                ("[0]", (3.0, 2)),
+                ("[1]", (7.0, 2)),
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_name = os.path.join(tmp_dir, "tensor_hashes.txt")
+            debug_mode.dump_tensor_hashes(file_name)
+            with open(file_name, encoding="utf-8") as f:
+                content = f.read()
+
+        self.assertIn(
+            """\
+[<none>/op_1_aten::add.Tensor]
+  Call type: torch op
+  Call index: 1
+  Call depth: 1
+  Input hashes: [0][0]=[6.0, 4]
+  Output hashes: <root>=[10.0, 4]
+""",
+            content,
+        )
+
+    def test_dump_tensor_hashes_writes_strict_json_for_nonfinite_hashes(self):
+        def nonfinite_hash(t):
+            return (float("nan"), float("inf"), float("-inf"))
+
+        with (
+            DebugMode() as debug_mode,
+            DebugMode.log_tensor_hashes(hash_fn=nonfinite_hash),
+        ):
+            torch.ones(1).sin()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_name = os.path.join(tmp_dir, "tensor_hashes.txt")
+            debug_mode.dump_tensor_hashes(file_name)
+
+            def fail_on_nonfinite_constant(value):
+                raise AssertionError(f"non-finite JSON constant found: {value}")
+
+            with open(file_name, encoding="utf-8") as f:
+                file_entries = [
+                    json.loads(
+                        line.split("=", 1)[1].strip(),
+                        parse_constant=fail_on_nonfinite_constant,
+                    )
+                    for line in f
+                    if line.startswith("  Output hashes: ")
+                ]
+
+        self.assertEqual(
+            {tuple(entry) for entry in file_entries},
+            {("NaN", "Infinity", "-Infinity")},
+        )
 
     def test_hash_empty_tensor(self):
         t = torch.tensor([])

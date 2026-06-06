@@ -40,6 +40,7 @@ _TRITON_INPUT_HASH_FN: Callable | None = None
 _DISPATCH_RECORD_HOOKS: list[Callable] = []
 _DISPATCH_LOG_HOOKS: list[Callable] = []
 _DISPATCH_PRE_LOG_HOOKS: list[Callable] = []
+_DISPATCH_POST_LOG_HOOKS: list[Callable] = []
 
 
 def _stringify_shape(shape) -> str:
@@ -247,5 +248,14 @@ def _run_dispatch_hooks(call: "_DebugCall", func, types, args, kwargs, result) -
             call.log = {}
         for hook in _DISPATCH_LOG_HOOKS:
             hook_out = _run_hook(hook, func, types, args, kwargs, result)
+            if hook_out is not None:
+                call.log.update(hook_out)
+
+    if _DISPATCH_POST_LOG_HOOKS:
+        # Preserve existing log from pre-hooks and regular log hooks.
+        if call.log is None:
+            call.log = {}
+        for hook in _DISPATCH_POST_LOG_HOOKS:
+            hook_out = _run_hook(hook, call, func, types, args, kwargs, result)
             if hook_out is not None:
                 call.log.update(hook_out)

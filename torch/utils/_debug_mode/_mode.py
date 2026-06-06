@@ -34,7 +34,9 @@ Usage::
 
 import contextlib
 import functools
+import json
 import logging
+import math
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
@@ -67,13 +69,7 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode_stack,
     TorchDispatchMode,
 )
-from torch.utils._pytree import (
-    keystr,
-    tree_all,
-    tree_map,
-    tree_map_only,
-    tree_map_with_path,
-)
+from torch.utils._pytree import keystr, tree_map, tree_map_only, tree_map_with_path
 
 
 if TYPE_CHECKING:
@@ -669,10 +665,11 @@ class DebugMode(TorchDispatchMode):
         record_hook: Callable | None = None,
         log_hook: Callable | None = None,
         pre_log_hook: Callable | None = None,
+        post_log_hook: Callable | None = None,
     ):
         """
         Allows installing post-hooks on arguments to intercepted __torch_dispatch__ calls;
-        hook signatures are expected as (func, types, args, kwargs, result),
+        record_hook and log_hook signatures are expected as (func, types, args, kwargs, result),
         i.e. __torch_dispatch__ args + return value.
 
         Logging hook outputs are stored in call.log and annotate calls in debug_string(),
@@ -681,6 +678,9 @@ class DebugMode(TorchDispatchMode):
 
         pre_log_hook signature is (func, types, args, kwargs, call) and is executed before
         the operation. It allows capturing state before in-place mutations.
+
+        post_log_hook signature is (call, func, types, args, kwargs, result) and is executed
+        after log_hook. It allows attaching non-rendered metadata to the DebugMode call record.
         """
         if record_hook:
             _utils._DISPATCH_RECORD_HOOKS.append(record_hook)
@@ -688,6 +688,8 @@ class DebugMode(TorchDispatchMode):
             _utils._DISPATCH_LOG_HOOKS.append(log_hook)
         if pre_log_hook:
             _utils._DISPATCH_PRE_LOG_HOOKS.append(pre_log_hook)
+        if post_log_hook:
+            _utils._DISPATCH_POST_LOG_HOOKS.append(post_log_hook)
         try:
             yield
         finally:
@@ -697,6 +699,8 @@ class DebugMode(TorchDispatchMode):
                 _utils._DISPATCH_LOG_HOOKS.pop()
             if pre_log_hook:
                 _utils._DISPATCH_PRE_LOG_HOOKS.pop()
+            if post_log_hook:
+                _utils._DISPATCH_POST_LOG_HOOKS.pop()
 
     @staticmethod
     @contextlib.contextmanager
@@ -763,9 +767,16 @@ class DebugMode(TorchDispatchMode):
             )
 
         def _tree_hash(obj):
-            return tree_map(
-                lambda x: fn(x) if isinstance(x, torch.Tensor) else None, obj
-            )
+            hash_leaves = []
+
+            def hash_leaf(keypath, x):
+                if isinstance(x, torch.Tensor):
+                    hash_value = fn(x)
+                    hash_leaves.append((keystr(keypath), hash_value))
+                    return hash_value
+                return None
+
+            return tree_map_with_path(hash_leaf, obj), hash_leaves
 
         def _dispatch_pre_log_hook(func, types, args, kwargs, call):
             """Pre-hook to capture input hashes before operation executes"""
@@ -774,22 +785,23 @@ class DebugMode(TorchDispatchMode):
 
             if hash_inputs:
                 # Capture input hashes before the operation
-                input_hash = _tree_hash((args, kwargs))
-                if not tree_all(lambda x: x is None, input_hash):
+                input_hash, input_hash_leaves = _tree_hash((args, kwargs))
+                if input_hash_leaves:
+                    call.tensor_hash_leaves["input"] = input_hash_leaves
                     return {"input_hash": input_hash}
             return None
 
-        def _dispatch_post_hook(func, types, args, kwargs, result):
+        def _dispatch_post_hook(call, func, types, args, kwargs, result):
             """Post-hook to capture output hashes after operation executes"""
             if "empty" in str(func) or "profiler" in str(func):
                 return None
 
-            out = {}
-            out["hash"] = _tree_hash(result)
+            output_hash, output_hash_leaves = _tree_hash(result)
 
-            if tree_all(lambda x: x is None, out.values()):
+            if not output_hash_leaves:
                 return None
-            return out
+            call.tensor_hash_leaves["output"] = output_hash_leaves
+            return {"hash": output_hash}
 
         try:
             if hash_inputs:
@@ -798,8 +810,8 @@ class DebugMode(TorchDispatchMode):
             _old_output_hfn = _utils._TRITON_OUTPUT_HASH_FN
             _utils._TRITON_OUTPUT_HASH_FN = fn
             with DebugMode.dispatch_hooks(
-                log_hook=_dispatch_post_hook,
                 pre_log_hook=_dispatch_pre_log_hook if hash_inputs else None,
+                post_log_hook=_dispatch_post_hook,
             ):
                 yield
         finally:
@@ -823,6 +835,201 @@ class DebugMode(TorchDispatchMode):
     @property
     def logs(self):
         return list(self.operators)
+
+    def tensor_hashes(self, include_inputs: bool = True) -> list[dict[str, Any]]:
+        """
+        Return tensor hashes collected by log_tensor_hashes() as flat records.
+
+        Each record corresponds to one tensor hash leaf, making the result easy to
+        diff or process outside of Python. For normal torch ops, "pytree_path"
+        identifies the hashed tensor inside the logged input/output pytree. For
+        Triton kernels, "arg_name" identifies the hashed kernel argument.
+        """
+        entries: list[dict[str, Any]] = []
+
+        def add_entry(
+            i: int,
+            call,
+            *,
+            call_type: str,
+            hash_type: str,
+            hash_value: Any,
+            arg_name: str | None = None,
+            pytree_path: str | None = None,
+        ) -> None:
+            if hash_value is None:
+                return
+            entries.append(
+                {
+                    "index": i,
+                    "call_type": call_type,
+                    "call": _get_call_name(call),
+                    "call_depth": call.call_depth,
+                    "hash_type": hash_type,
+                    "arg_name": arg_name,
+                    "pytree_path": pytree_path,
+                    "hash": hash_value,
+                }
+            )
+
+        def add_op_hash_leaves(
+            i: int,
+            call,
+            hash_leaves: list[tuple[str, Any]],
+            hash_type: str,
+        ) -> None:
+            for pytree_path, hash_value in hash_leaves:
+                add_entry(
+                    i,
+                    call,
+                    call_type="torch op",
+                    hash_type=hash_type,
+                    hash_value=hash_value,
+                    pytree_path=pytree_path,
+                )
+
+        def add_op_hashes(
+            i: int,
+            call,
+            hash_type: str,
+        ) -> None:
+            add_op_hash_leaves(i, call, call.tensor_hash_leaves[hash_type], hash_type)
+
+        for i, call in enumerate(self.operators):
+            if isinstance(call, _TritonKernelCall):
+                if include_inputs and call.pre_hashes is not None:
+                    for arg_name, hash_value in call.pre_hashes.items():
+                        add_entry(
+                            i,
+                            call,
+                            call_type="triton kernel",
+                            hash_type="input",
+                            hash_value=hash_value,
+                            arg_name=arg_name,
+                        )
+
+                if call.post_hashes is not None:
+                    for arg_name, hash_value in call.post_hashes.items():
+                        add_entry(
+                            i,
+                            call,
+                            call_type="triton kernel",
+                            hash_type="output",
+                            hash_value=hash_value,
+                            arg_name=arg_name,
+                        )
+
+            elif isinstance(call, _OpCall):
+                if include_inputs and "input" in call.tensor_hash_leaves:
+                    add_op_hashes(i, call, "input")
+                if "output" in call.tensor_hash_leaves:
+                    add_op_hashes(i, call, "output")
+
+        return entries
+
+    def dump_tensor_hashes(self, file_name, include_inputs: bool = True) -> None:
+        """
+        Write tensor hashes collected by log_tensor_hashes() to a text file.
+
+        The output mirrors the block-oriented format used by
+        torchtitan.tools.activation_tracer.dump_captures_to_file: a summary
+        header followed by one bracketed block per operation. Input and output
+        hash leaves are grouped under that operation. Hash values are rendered
+        as JSON values, and non-finite floats are encoded as strings ("NaN",
+        "Infinity", "-Infinity") so each hash payload remains valid JSON.
+        """
+
+        def json_safe(obj):
+            if isinstance(obj, torch.Tensor):
+                obj = obj.detach().cpu()
+                if obj.numel() == 1:
+                    return json_safe(obj.item())
+                return json_safe(obj.tolist())
+            if isinstance(obj, float):
+                if math.isnan(obj):
+                    return "NaN"
+                if math.isinf(obj):
+                    return "Infinity" if obj > 0 else "-Infinity"
+                return obj
+            if isinstance(obj, complex):
+                return {"real": json_safe(obj.real), "imag": json_safe(obj.imag)}
+            if isinstance(obj, (list, tuple)):
+                return [json_safe(x) for x in obj]
+            if isinstance(obj, dict):
+                return {k: json_safe(v) for k, v in obj.items()}
+            return obj
+
+        def leaf_name(entry) -> str:
+            if entry["arg_name"] is not None:
+                return entry["arg_name"]
+            if entry["pytree_path"]:
+                return entry["pytree_path"]
+            return "<root>"
+
+        def format_hashes(hash_entries) -> str:
+            return ", ".join(
+                f"{leaf_name(entry)}="
+                + json.dumps(json_safe(entry["hash"]), allow_nan=False, sort_keys=True)
+                for entry in hash_entries
+            )
+
+        module_context_by_index: dict[int, str] = {}
+        module_stack: list[tuple[int, str]] = []
+        for i, call in enumerate(self.operators):
+            while module_stack and module_stack[-1][0] >= call.call_depth:
+                module_stack.pop()
+            module_context_by_index[i] = (
+                module_stack[-1][1] if module_stack else "<none>"
+            )
+            if (
+                isinstance(call, _AnnotateCall)
+                and isinstance(call.header, str)
+                and call.header.startswith("nn.Mod")
+            ):
+                module_stack.append((call.call_depth, str(call.tag)))
+
+        entries = self.tensor_hashes(include_inputs=include_inputs)
+        groups: dict[tuple[int, str, str, int], dict[str, Any]] = {}
+        for entry in entries:
+            key = (
+                entry["index"],
+                entry["call_type"],
+                entry["call"],
+                entry["call_depth"],
+            )
+            if key not in groups:
+                groups[key] = {
+                    "index": entry["index"],
+                    "call_type": entry["call_type"],
+                    "call": entry["call"],
+                    "call_depth": entry["call_depth"],
+                    "input": [],
+                    "output": [],
+                }
+            groups[key][entry["hash_type"]].append(entry)
+
+        module_counters: dict[str, int] = {}
+        with open(file_name, "w", encoding="utf-8") as hash_file:
+            hash_file.write(f"Total captured tensor hash ops: {len(groups)}\n")
+            hash_file.write("=" * 80 + "\n\n")
+            for group in groups.values():
+                module_name = module_context_by_index.get(group["index"], "<none>")
+                op_counter = module_counters.get(module_name, 0)
+                module_counters[module_name] = op_counter + 1
+
+                hash_file.write(f"[{module_name}/op_{op_counter}_{group['call']}]\n")
+                hash_file.write(f"  Call type: {group['call_type']}\n")
+                hash_file.write(f"  Call index: {group['index']}\n")
+                hash_file.write(f"  Call depth: {group['call_depth']}\n")
+                if group["input"]:
+                    hash_file.write(
+                        f"  Input hashes: {format_hashes(group['input'])}\n"
+                    )
+                if group["output"]:
+                    hash_file.write(
+                        f"  Output hashes: {format_hashes(group['output'])}\n"
+                    )
+                hash_file.write("\n")
 
     def _handle_annotate(self, tag):
         """Handles DebugMode._annotate()"""
