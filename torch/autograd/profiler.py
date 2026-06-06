@@ -837,29 +837,29 @@ class profile:
 
 
 # pyrefly: ignore [invalid-inheritance]
-_cupti_monitor_module: Any = None
-_cupti_monitor_checked = False
+_cupti_annotations_module: Any = None
+_cupti_annotations_checked = False
 
 
-def _maybe_cupti_monitor():
+def _maybe_cupti_annotations():
     # The experimental CUPTI monitor lets record_function regions show up as user
-    # annotations in monitor traces. Cache the optional module once so the
-    # record_function hot path never re-imports it.
-    global _cupti_monitor_module, _cupti_monitor_checked
-    if not _cupti_monitor_checked:
-        _cupti_monitor_checked = True
+    # annotations in monitor traces, via push/pop_user_annotation. Cache the
+    # optional module once so the record_function hot path never re-imports it.
+    global _cupti_annotations_module, _cupti_annotations_checked
+    if not _cupti_annotations_checked:
+        _cupti_annotations_checked = True
         try:
-            from torch.profiler.cupti import monitor as _cupti_monitor
+            from torch.profiler.cupti.observers import profiler as _cupti_annotations
 
-            _cupti_monitor_module = _cupti_monitor
+            _cupti_annotations_module = _cupti_annotations
         except ModuleNotFoundError:
             pass
         except Exception:
             log.warning(
-                "Unexpected error importing torch.profiler.cupti.monitor",
+                "Unexpected error importing torch.profiler.cupti.observers.profiler",
                 exc_info=True,
             )
-    return _cupti_monitor_module
+    return _cupti_annotations_module
 
 
 class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritance]
@@ -922,9 +922,9 @@ class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritanc
         # Guard the CUPTI monitor hookup behind is_scripting() so TorchScript
         # never compiles _maybe_cupti_monitor (it uses globals/imports).
         if not torch.jit.is_scripting():
-            monitor = _maybe_cupti_monitor()
-            if monitor is not None:
-                self._cupti_monitor_external_id = monitor.push_user_annotation(
+            annotations = _maybe_cupti_annotations()
+            if annotations is not None:
+                self._cupti_monitor_external_id = annotations.push_user_annotation(
                     self.name
                 )
         return self
@@ -932,9 +932,9 @@ class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritanc
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if not torch.jit.is_scripting():
             if self._cupti_monitor_external_id is not None:
-                monitor = _maybe_cupti_monitor()
-                if monitor is not None:
-                    monitor.pop_user_annotation()
+                annotations = _maybe_cupti_annotations()
+                if annotations is not None:
+                    annotations.pop_user_annotation()
                 self._cupti_monitor_external_id = None
         if not self.run_callbacks_on_exit:
             return
