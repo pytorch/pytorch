@@ -16,7 +16,6 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -210,7 +209,6 @@ class MixOrderReductionTest(TestBase):
         self.check_numeric(f, (x,))
         self.assertEqual(metrics.codegen_mix_order_reduction, 1)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/167324")
     @inductor_config.patch(unroll_reductions_threshold=1)
     def test_3layer_split_reduction(self):
         """
@@ -757,6 +755,63 @@ class MixOrderReductionTest(TestBase):
             ),
         ):
             self.assertTrue(MixOrderReduction.can_fuse(mock_node_1, mock_node_2))
+
+    @patch("torch._inductor.scheduler.MixOrderReduction.is_split_reduction")
+    @patch("torch._inductor.scheduler.MixOrderReduction.get_numel_rnumel")
+    @patch("torch._inductor.scheduler.MixOrderReduction.get_common_read")
+    @patch("torch._inductor.scheduler.MixOrderReduction.has_mix_reduction_orders")
+    def test_mix_order_reduction_data_dependent_checks_skip_fusion(
+        self,
+        mock_has_mix_reduction_orders: mock.Mock,
+        mock_get_common_read: mock.Mock,
+        mock_get_numel_rnumel: mock.Mock,
+        mock_is_split_reduction: mock.Mock,
+    ):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        from torch._inductor.scheduler import BaseSchedulerNode
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        mock_node_1 = mock.create_autospec(BaseSchedulerNode)
+        mock_node_2 = mock.create_autospec(BaseSchedulerNode)
+
+        mock_node_1.is_gpu.return_value = True
+        mock_node_2.is_gpu.return_value = True
+        mock_node_1.get_device.return_value.type = "cuda"
+        mock_node_1.is_reduction.return_value = True
+        mock_node_2.is_reduction.return_value = True
+
+        from torch._inductor.utils import OrderedSet
+
+        mock_node_1.ancestors = OrderedSet()
+        mock_node_2.ancestors = OrderedSet()
+        mock_node_1.get_operation_names.return_value = OrderedSet()
+        mock_node_2.get_operation_names.return_value = OrderedSet()
+
+        mock_has_mix_reduction_orders.return_value = True
+        mock_get_common_read.return_value = ["common_read"]
+        mock_is_split_reduction.return_value = False
+
+        mock_node_1.read_writes = mock.Mock()
+        mock_node_1.read_writes.reads = []
+
+        from torch._inductor.graph import GraphLowering
+
+        gm = make_fx(lambda: torch.zeros(2, 3))()
+        graph = GraphLowering(gm)
+        nrow = graph.sizevars.shape_env.create_unbacked_symint().node.expr
+        ncol = graph.sizevars.shape_env.create_unbacked_symint().node.expr
+        mock_get_numel_rnumel.return_value = (nrow, ncol)
+
+        with (
+            V.set_graph_handler(graph),
+            inductor_config.patch(
+                {"triton.mix_order_reduction_non_strict_mode": False}
+            ),
+        ):
+            self.assertFalse(MixOrderReduction.can_fuse(mock_node_1, mock_node_2))
 
     @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
     def test_no_recompile(self):
