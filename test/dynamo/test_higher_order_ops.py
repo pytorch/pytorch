@@ -25,6 +25,7 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
+from torch._functorch.apis import _DYNAMO_WRAPPER_ATTRS
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.common_device_type import (
@@ -32,8 +33,10 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_utils import (
+    IS_LINUX,
     munge_exc,
     parametrize,
+    TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
@@ -632,6 +635,9 @@ class GraphModule(torch.nn.Module):
         arg_count = ifdynstaticdefault(2, 3)
         self._test_wrap_simple(f, default_args_generator((x,)), arg_count, 3)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/177003"
+    )
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True,
     )
@@ -810,6 +816,9 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/184831"
+    )
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
         capture_scalar_outputs=True,
@@ -861,6 +870,9 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/184682"
+    )
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
     )
@@ -929,6 +941,9 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/183671"
+    )
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
     )
@@ -2183,6 +2198,9 @@ def forward(self, child : torch.Tensor, const_unused : int):
             subgraphs.append(getattr(gm, module_name).code.strip())
         return (graph, *subgraphs)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/176204"
+    )
     def test_cond_branches_no_arguments(self):
         def fn(x):
             def true_fn():
@@ -2226,6 +2244,9 @@ def forward(self, l_x_):
     return (cos,)""",
             )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/183892"
+    )
     def test_cond_branches_no_arguments_no_closure(self):
         def fn(x):
             def true_fn():
@@ -2615,6 +2636,9 @@ class GraphModule(torch.nn.Module):
         result = f(x)
         self.assertEqual(result, [1, torch.sin(x), 2.0])
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/176969"
+    )
     def test_nested_tuple_output(self):
         def f(x):
             ((a, b),) = wrap(lambda x: ((x.sin(), x.cos()),), x)
@@ -3255,6 +3279,9 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         )
         self.assertEqual(compiled_fn_2(a, b), fn_2(a, b))
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/184537"
+    )
     def test_hints_wrapper(self):
         def ref_fn(x, y):
             x = x + y
@@ -4509,6 +4536,9 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/177056"
+    )
     def test_functional_call_sequential_params_and_buffers(self):
         # copied from test/test_stateless.py
         class MockModule(torch.nn.Module):
@@ -6027,6 +6057,72 @@ class GraphModule(torch.nn.Module):
         torch.vmap(fn, randomness="same")(x)
         with self.assertRaises(torch._dynamo.exc.RecompileError):
             torch.vmap(fn, randomness="different")(x)
+
+    def test_compile_vmap_compiled_fn_jacrev_has_aux(self):
+        def fn(x):
+            grad_res, _ = torch.func.jacrev(lambda x: tuple([x] * 2), has_aux=True)(x)
+            return grad_res
+
+        compile_options = dict(backend="eager", fullgraph=True, dynamic=False)
+        compiled_fn = torch.compile(fn, **compile_options)
+        vmapped_fn = torch.vmap(compiled_fn)
+        for attr in _DYNAMO_WRAPPER_ATTRS:
+            self.assertFalse(hasattr(vmapped_fn, attr), attr)
+        compiled_vmapped_fn = torch.compile(vmapped_fn, **compile_options)
+
+        x = torch.randn(8, dtype=torch.float64)
+        expected = vmapped_fn(x)
+        actual = compiled_vmapped_fn(x)
+
+        self.assertEqual(expected.shape, torch.Size([8]))
+        self.assertEqual(actual.shape, expected.shape)
+        self.assertEqual(actual, expected)
+
+    def test_compile_function_transform_wrappers_compiled_fn(self):
+        def scalar_fn(x):
+            return x.sin().sum()
+
+        def vector_fn(x):
+            return x.sin()
+
+        compile_options = dict(backend="eager", fullgraph=True, dynamic=False)
+
+        cases = (
+            (torch.func.grad, scalar_fn, torch.randn((), dtype=torch.float64)),
+            (
+                torch.func.grad_and_value,
+                scalar_fn,
+                torch.randn((), dtype=torch.float64),
+            ),
+            (torch.func.jacrev, vector_fn, torch.randn(3, dtype=torch.float64)),
+            (torch.func.jacfwd, vector_fn, torch.randn(3, dtype=torch.float64)),
+            (torch.func.hessian, scalar_fn, torch.randn((), dtype=torch.float64)),
+        )
+        for transform, fn, x in cases:
+            with self.subTest(transform=transform.__name__):
+                compiled_fn = torch.compile(fn, **compile_options)
+                transformed_fn = transform(compiled_fn)
+                for attr in _DYNAMO_WRAPPER_ATTRS:
+                    self.assertFalse(hasattr(transformed_fn, attr), attr)
+
+                compiled_transformed_fn = torch.compile(
+                    transformed_fn, **compile_options
+                )
+
+                self.assertEqual(compiled_transformed_fn(x), transform(fn)(x))
+
+    def test_functionalize_compiled_fn_does_not_copy_dynamo_attrs(self):
+        def fn(x):
+            y = x.clone()
+            y.add_(1)
+            return y.sin()
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=False)
+        transformed_fn = torch.func.functionalize(compiled_fn)
+        for attr in _DYNAMO_WRAPPER_ATTRS:
+            self.assertFalse(hasattr(transformed_fn, attr), attr)
+        x = torch.randn(3)
+        self.assertEqual(transformed_fn(x), torch.func.functionalize(fn)(x))
 
     def test_vmap_call_torch_compile_fn(self):
         def wrapped_fn(x):

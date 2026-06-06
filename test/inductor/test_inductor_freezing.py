@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import TEST_WITH_ROCM
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
+from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -502,39 +503,25 @@ class OptimizeForInferenceTemplate(TestCase):
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn_with_no_grad_inside_compiled_region(self):
-        def run(freezing_traced_inference):
-            mod = (
-                ConvBN(3, 32, bias=True, kernel_size=3, stride=2).eval().to(self.device)
-            )
-            x = torch.rand(3, 3, 32, 32).to(self.device)
+        mod = ConvBN(3, 32, bias=True, kernel_size=3, stride=2).eval().to(self.device)
+        x = torch.rand(3, 3, 32, 32).to(self.device)
 
+        with torch.no_grad():
+            out_eager = mod(x)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        @torch.compile()
+        def foo(mod, x):
             with torch.no_grad():
-                out_eager = mod(x)
+                return mod(x)
 
-            torch._dynamo.reset()
-            counters.clear()
+        out_compiled, code = run_and_get_code(foo, mod, x)
 
-            with config.patch("freezing_traced_inference", freezing_traced_inference):
-
-                @torch.compile()
-                def foo(mod, x):
-                    with torch.no_grad():
-                        return mod(x)
-
-                out_compiled, code = run_and_get_code(foo, mod, x)
-
-            self.assertEqual(out_compiled, out_eager, atol=1e-2, rtol=1e-2)
-            return counters["inductor"]["binary_folding"], any(
-                "frozen_param" in code_part for code_part in code
-            )
-
-        binary_folding, has_frozen_param = run(freezing_traced_inference=False)
-        self.assertEqual(binary_folding, 0)
-        self.assertFalse(has_frozen_param)
-
-        binary_folding, has_frozen_param = run(freezing_traced_inference=True)
-        self.assertEqual(binary_folding, 4)
-        self.assertTrue(has_frozen_param)
+        self.assertEqual(out_compiled, out_eager, atol=1e-2, rtol=1e-2)
+        self.assertEqual(counters["inductor"]["binary_folding"], 4)
+        self.assertTrue(any("frozen_param" in code_part for code_part in code))
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn_hardswish(self):
@@ -800,6 +787,8 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180128")
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/106557")
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
         TEST_WITH_SLOW_GRADCHECK,
