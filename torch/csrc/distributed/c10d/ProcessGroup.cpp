@@ -5,6 +5,8 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <unordered_set>
+
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 namespace c10d {
@@ -166,7 +168,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   TORCH_CHECK(
       ranks.size() <= static_cast<size_t>(size_),
       "the split group's size should be no larger than the world_size set by init_process_group");
-  std::set<int> ranks_set(ranks.begin(), ranks.end());
+  std::unordered_set<int> ranks_set(ranks.begin(), ranks.end());
   TORCH_CHECK(
       ranks_set.size() == ranks.size(),
       "Split ranks should not have duplicates. Please provide a list of unique ranks to split the group.");
