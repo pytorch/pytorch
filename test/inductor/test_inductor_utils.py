@@ -2,13 +2,18 @@
 
 import functools
 import logging
+from types import SimpleNamespace
 
 import torch
+from torch._dynamo.source import ConstantSource
 from torch._inductor import utils
+from torch._inductor.ir import get_stride_order
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
+from torch._inductor.virtualized import V
 from torch.autograd import DeviceType
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 
 
 log = logging.getLogger(__name__)
@@ -158,6 +163,25 @@ class TestBench(TestCase):
                 ],
                 1,
                 DeviceType.CUDA,
+            )
+
+
+class TestStrideOrder(TestCase):
+    def test_symbolic_stride_order_uses_current_graph_shape_env(self):
+        shape_env = ShapeEnv()
+        stride = shape_env.create_symbol(
+            42,
+            source=ConstantSource("stride"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        graph = SimpleNamespace(
+            sizevars=SimpleNamespace(shape_env=shape_env),
+            _shape_env=shape_env,
+        )
+
+        with V.set_graph_handler(graph):
+            self.assertEqual(
+                get_stride_order([stride, 1, stride, stride]), [3, 0, 2, 1]
             )
 
 
