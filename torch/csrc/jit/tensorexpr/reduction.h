@@ -132,7 +132,7 @@ class TORCH_API Reducer {
 };
 
 // An expression representing a Reduction operation (e.g. Sum, Max) broken into
-// it's component parts: initialization, accumulation var, acquisition of value
+// its component parts: initialization, accumulation var, acquisition of value
 // to be reduced and interaction.
 //
 // This is intended to be expanded in the loopnest and not make it to codegen.
