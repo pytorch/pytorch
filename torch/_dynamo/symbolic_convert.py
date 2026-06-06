@@ -5492,7 +5492,14 @@ class InstructionTranslator(InstructionTranslatorBase):
         compiler_fn = inspect.getattr_static(
             self.output.compiler_fn, "compiler_fn", self.output.compiler_fn
         )
-        ci = torch._C._functorch.peek_interpreter_stack()
+        functorch_interpreter_stack = (
+            self.output.tracing_context.functorch_interpreter_stack
+        )
+        ci = (
+            functorch_interpreter_stack[-1]
+            if functorch_interpreter_stack
+            else torch._C._functorch.peek_interpreter_stack()
+        )
         forbidden_keys = (
             torch._C._functorch.TransformType.Vmap,
             torch._C._functorch.TransformType.Grad,

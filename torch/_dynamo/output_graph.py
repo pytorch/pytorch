@@ -63,6 +63,7 @@ from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
     CompileContext,
     CompileId,
+    get_ambient_functorch_interpreter_stack,
     GlobalContextCheckpointState,
     Source,
     tracing,
@@ -665,6 +666,15 @@ class OutputGraph(OutputGraphCommon):
         package: Optional["CompilePackage"],
         one_graph: bool = False,
     ) -> None:
+        ambient_functorch_interpreters = get_ambient_functorch_interpreter_stack()
+        functorch_layers = (
+            [
+                torch._functorch.pyfunctorch.coerce_cinterpreter(ci)
+                for ci in ambient_functorch_interpreters
+            ]
+            if ambient_functorch_interpreters is not None
+            else torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
+        )
         OutputGraphGuardsState.__init__(
             self,
             local_scope,
@@ -673,7 +683,7 @@ class OutputGraph(OutputGraphCommon):
             guard_on_key_order=set(),
             input_source_to_sizes_strides={},
             dual_level=torch.autograd.forward_ad._current_level,
-            functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
+            functorch_layers=functorch_layers,
             current_device=torch.utils._device.CURRENT_DEVICE,
             # initial_global_state is only None during NopTest.
             global_state_guard=torch._dynamo.convert_frame.initial_global_state
@@ -1126,8 +1136,7 @@ class OutputGraph(OutputGraphCommon):
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
-        ci = torch._C._functorch.peek_interpreter_stack()
-        if ci is not None:
+        if self.functorch_layers:
             self.guards.add(
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )

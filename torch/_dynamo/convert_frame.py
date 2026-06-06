@@ -60,7 +60,15 @@ from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
-from torch._guards import compile_context, CompileContext, CompileId, tracing
+from torch._guards import (
+    compile_context,
+    CompileContext,
+    CompileId,
+    functorch_stack_context,
+    get_ambient_functorch_dynamic_layer_stack,
+    get_ambient_functorch_interpreter_stack,
+    tracing,
+)
 from torch._logging import structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
@@ -203,6 +211,36 @@ graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
 compile_lock = threading.RLock()
+
+
+@contextlib.contextmanager
+def _dynamo_compile_context() -> Any:
+    with (
+        compile_lock,
+        _disable_current_modes(),
+        torch._dispatch.python.suspend_functionalization(),
+    ):
+        prior_functorch_dynamic_layer_stack = (
+            get_ambient_functorch_dynamic_layer_stack()
+        )
+        prior_functorch_interpreter_stack = get_ambient_functorch_interpreter_stack()
+        functorch_interpreter_stack = torch._C._functorch.get_interpreter_stack()
+        if functorch_interpreter_stack is None:
+            with functorch_stack_context(
+                prior_functorch_dynamic_layer_stack, prior_functorch_interpreter_stack
+            ):
+                yield
+            return
+
+        clear_functorch_stack = (
+            torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack()
+        )
+        with clear_functorch_stack as functorch_dynamic_layer_stack:
+            with functorch_stack_context(
+                functorch_dynamic_layer_stack, functorch_interpreter_stack
+            ):
+                yield
+
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
@@ -2600,7 +2638,7 @@ class CatchErrorsWrapper:
         if torch._dynamo.utils.get_optimize_ddp_mode() == "ddp_optimizer":
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
-                with compile_lock:
+                with _dynamo_compile_context():
                     from torch._dynamo.backends.distributed import DDPOptimizer
 
                     ddp_optimizer = DDPOptimizer(
@@ -2623,7 +2661,7 @@ class CatchErrorsWrapper:
                         frame,
                     )
 
-        with compile_lock, _disable_current_modes():
+        with _dynamo_compile_context():
             # skip=1: skip this frame
             result = self._torchdynamo_orig_backend(
                 frame, cache_entry, self.hooks, frame_state, skip=1

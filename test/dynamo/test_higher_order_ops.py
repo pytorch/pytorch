@@ -6124,6 +6124,88 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         self.assertEqual(transformed_fn(x), torch.func.functionalize(fn)(x))
 
+    def test_functionalize_compiled_fn_compiles_with_empty_functorch_stack(self):
+        def fn(x):
+            y = x.clone()
+            y.add_(1)
+            return y.sin()
+
+        seen_stacks = []
+
+        def backend(gm, example_inputs):
+            seen_stacks.append(torch._C._functorch.peek_interpreter_stack())
+            return gm.forward
+
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True, dynamic=False)
+        x = torch.randn(3)
+
+        self.assertEqual(torch.func.functionalize(compiled_fn)(x), fn(x))
+        self.assertEqual(seen_stacks, [None])
+
+    def test_functionalize_compiled_fn_still_guards_on_functorch_stack(self):
+        def fn(x):
+            y = x.clone()
+            y.add_(1)
+            return y.sin()
+
+        compile_count = 0
+
+        def backend(gm, example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return gm.forward
+
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True, dynamic=False)
+        x = torch.randn(3)
+
+        self.assertEqual(torch.func.functionalize(compiled_fn)(x), fn(x))
+        self.assertEqual(compiled_fn(x), fn(x))
+        self.assertEqual(compile_count, 2)
+
+    def test_functionalize_nested_compile_preserves_functorch_stack(self):
+        inner_compile_count = 0
+        inner_seen_stacks = []
+        nested_results = []
+
+        def inner_fn(x):
+            y = x.clone()
+            y.add_(2)
+            return y.cos()
+
+        def inner_backend(gm, example_inputs):
+            nonlocal inner_compile_count
+            inner_compile_count += 1
+            inner_seen_stacks.append(torch._C._functorch.peek_interpreter_stack())
+            return gm.forward
+
+        inner_compiled = torch.compile(
+            inner_fn, backend=inner_backend, fullgraph=True, dynamic=False
+        )
+
+        def outer_fn(x):
+            y = x.clone()
+            y.add_(1)
+            return y.sin()
+
+        def outer_backend(gm, example_inputs):
+            nested_results.append(inner_compiled(torch.ones(3)))
+            return gm.forward
+
+        outer_compiled = torch.compile(
+            outer_fn, backend=outer_backend, fullgraph=True, dynamic=False
+        )
+        x = torch.randn(3)
+
+        self.assertEqual(torch.func.functionalize(outer_compiled)(x), outer_fn(x))
+        self.assertEqual(nested_results[0], inner_fn(torch.ones(3)))
+        self.assertEqual(inner_compile_count, 1)
+        self.assertEqual(inner_seen_stacks, [None])
+
+        probe = torch.zeros(3)
+        self.assertEqual(inner_compiled(probe), inner_fn(probe))
+        self.assertEqual(inner_compile_count, 2)
+        self.assertEqual(inner_seen_stacks, [None, None])
+
     def test_vmap_call_torch_compile_fn(self):
         def wrapped_fn(x):
             return x.sin()

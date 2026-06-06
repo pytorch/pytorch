@@ -2513,6 +2513,17 @@ class GuardBuilder(GuardBuilderBase):
         compare_fn = torch._functorch.pyfunctorch.compare_functorch_state
 
         def fn(x: Any) -> bool:
+            ambient_functorch_interpreters = (
+                torch._guards.get_ambient_functorch_interpreter_stack()
+            )
+            if ambient_functorch_interpreters is not None:
+                cis = [
+                    torch._functorch.pyfunctorch.coerce_cinterpreter(ci)
+                    for ci in ambient_functorch_interpreters
+                ]
+                return len(cis) == len(states) and all(
+                    ci.check_state(state) for ci, state in zip(cis, states)
+                )
             return compare_fn(states)
 
         self.guard_manager.root.add_lambda_guard(
