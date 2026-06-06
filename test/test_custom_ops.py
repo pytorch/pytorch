@@ -48,6 +48,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
+    IS_MACOS,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -57,6 +59,9 @@ from torch.testing._internal.common_utils import (
     subtest,
     TemporaryFileName,
     TEST_ACCELERATOR,
+    TEST_WITH_ASAN,
+    TEST_WITH_SLOW,
+    TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
     TestCase,
 )
@@ -279,6 +284,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         self.assertEqual(len(ret), 1)
         self.assertEqual(x, ret[0])
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179898"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TORCHDYNAMO or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/118253",
+    )
     def test_missing_abstract_impl(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -450,6 +462,38 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         # Test atol/rtol overrides
         torch.library.opcheck(op, (x,), {}, atol=3, rtol=0.01)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180338",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180323",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180301",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180262",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180214",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180196",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/179992",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/179909",
+    )
     @ops(custom_op_db.custom_op_db, dtypes=OpDTypes.any_one)
     def test_opcheck_opinfo(self, device, dtype, op):
         for sample_input in op.sample_inputs(
@@ -459,6 +503,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             kwargs = sample_input.kwargs
             torch.library.opcheck(op.op, args, kwargs)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179991"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TORCHDYNAMO or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/119159",
+    )
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor: ...
@@ -3350,6 +3401,37 @@ class TestCustomOpAPI(TestCase):
         y = add(x, 2.0)
         self.assertEqual(called, 1)
         self.assertEqual(y, x + 2.0)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @parametrize(
+        "op_factory, opname",
+        [
+            subtest((torch.library.custom_op, "custom"), name="custom_op"),
+            subtest((torch.library.triton_op, "triton"), name="triton_op"),
+        ],
+    )
+    def test_register_autograd_incorrect_num_gradients(self, op_factory, opname):
+        @op_factory(
+            f"_torch_testing::incorrect_num_gradients_{opname}",
+            mutates_args=(),
+        )
+        def f(x: Tensor) -> Tensor:
+            return x.sin()
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def backward(ctx, grad_output):
+            return ()
+
+        f.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"incorrect number of gradients \(expected 1, got 0\)",
+        ):
+            f(x).sum().backward()
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema(self):
