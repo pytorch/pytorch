@@ -172,7 +172,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
       dX,
       dgamma,
       dbeta);
-  return std::make_tuple(dX, dgamma, dbeta);
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 Tensor group_norm(
