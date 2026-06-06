@@ -108,6 +108,31 @@ def forward(self, x_1):
         self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_AFTER', None)", env_strings)
         self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_LEVEL', None)", env_strings)
 
+    def test_cuda_system_info_comment_nvcc_os_errors(self):
+        self.addCleanup(debug_utils._cuda_system_info_comment.cache_clear)
+        errors = (
+            PermissionError(13, "Permission denied", "nvcc"),
+            OSError(5, "Input/output error", "nvcc"),
+        )
+
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                debug_utils._cuda_system_info_comment.cache_clear()
+                with (
+                    patch.object(torch.cuda, "is_available", return_value=True),
+                    patch.object(torch.version, "hip", None),
+                    patch.object(
+                        debug_utils.subprocess,
+                        "check_output",
+                        side_effect=error,
+                    ),
+                    patch.object(torch.cuda, "device_count", return_value=0),
+                ):
+                    result = debug_utils._cuda_system_info_comment()
+
+                self.assertIn("# nvcc not found\n", result)
+                self.assertIn("# GPU Hardware Info: \n", result)
+
 
 class TestDebugUtilsDevice(TestCase):
     def test_aot_graph_parser(self, device):
