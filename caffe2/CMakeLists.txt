@@ -1698,7 +1698,9 @@ if(USE_XPU)
 endif()
 
 target_optimize_if_llvm_bolt_enabled(torch_cpu)
-target_optimize_if_llvm_bolt_enabled(torch_cuda)
+if(USE_CUDA)
+  target_optimize_if_llvm_bolt_enabled(torch_cuda)
+endif()
 target_optimize_if_llvm_bolt_enabled(torch)
 
 if(PRINT_CMAKE_DEBUG_INFO)
