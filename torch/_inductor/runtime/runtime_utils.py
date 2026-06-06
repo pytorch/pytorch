@@ -94,12 +94,14 @@ def validate_triton_config(cfg: Config) -> None:
 
 
 def assert_tensor_metadata(
-    tensor: torch.Tensor,
+    tensor: torch.Tensor | None,
     expected_size: tuple[Any, ...],
     expected_stride: tuple[Any, ...],
     expected_dtype: torch.dtype,
     op_name: str | None = None,
 ) -> None:
+    if tensor is None:
+        return
     if tensor.dtype != expected_dtype:
         op_msg = f"\nError in op: {op_name}" if op_name else ""
         raise RuntimeError(
