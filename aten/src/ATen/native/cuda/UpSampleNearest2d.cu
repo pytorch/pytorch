@@ -262,7 +262,7 @@ static void upsample_nearest2d_out_cuda_template(
   }
 
   // =================================================
-  // PATH 1: NHWC (channels-last) layout — 1D grid
+  // PATH 1: NHWC (channels-last) layout -- 1D grid
   // =================================================
   // heuristic: only use channels_last path when it's faster than the contiguous path
   if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 && \
@@ -316,7 +316,7 @@ static void upsample_nearest2d_out_cuda_template(
     });
   }
   // ==============================================
-  // PATH 2: Contiguous (NCHW) layout — 3D grid
+  // PATH 2: Contiguous (NCHW) layout -- 3D grid
   // ==============================================
   else {
     // This is needed for non-contiguous tensors.
@@ -346,7 +346,7 @@ static void upsample_nearest2d_out_cuda_template(
         maxGridSize[2], ceil_div(nc, (int64_t) block_z * 4));
 
     // output_height / output_width are int, so grid_x and grid_y are bounded
-    // by INT_MAX/block_dim — well below both the CUDA maxGridSize and the
+    // by INT_MAX/block_dim - well below both the CUDA maxGridSize and the
     // ROCm/HIP uint32_t per-dimension limit.  No HIP-specific clamp needed.
     // TODO: kernel implementation could stride on spatial dimension. We probably
     //       need to overhaul the kernel.
@@ -387,9 +387,7 @@ static void upsample_nearest2d_out_cuda_template(
 // TORCH_CHECK(grad_input.numel() < INT_MAX), so its grid stays under 2^32.
 // The backward contiguous (NCHW) launch derives `n = grad_input.numel() /
 // nbatch`, which can exceed UINT32_MAX / bdim.x and therefore still needs a
-// host-side clamp + grid-stride fallback for completeness.  Tracked alongside
-// the corresponding test_upsamplingnearest2d_backward_64bit_indexing skip in
-// test/test_nn.py.
+// host-side clamp + grid-stride fallback for completeness.
 template<nn_bw_compute_source_index_fn_t nn_bw_compute_source_index_fn>
 static void upsample_nearest2d_backward_out_cuda_template(
     const Tensor& grad_input,
