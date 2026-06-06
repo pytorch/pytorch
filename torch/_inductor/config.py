@@ -1318,6 +1318,10 @@ class aten_distributed_optimizations:
     # With the empirical profiles this should be 1.0; kept for manual tuning.
     pre_bucketing_fsdp_collectives_saturation_calibration_multiplier: float = 1.0
 
+    # Decompose collective patterns when mathematically equivalent local
+    # computation exists. See torch/_inductor/fx_passes/decomp_comms.py.
+    allow_comms_decompositions: bool = False
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
