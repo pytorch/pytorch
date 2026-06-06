@@ -784,12 +784,38 @@ c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
 
 // Small wrapper around getting the type name string from Python to make
 // types easier to interpret, e.g. give the structural type for a NamedTuple
+inline std::string basicTypeName(py::handle obj) {
+  return py::str(py::type::handle_of(obj).attr("__name__"));
+}
+
+inline std::string sequenceTypeName(py::handle obj) {
+  auto seq = py::reinterpret_borrow<py::sequence>(obj);
+  auto length = py::len(seq);
+  if (length == 0) {
+    return basicTypeName(obj);
+  }
+
+  std::stringstream ss;
+  ss << basicTypeName(obj);
+  ss << "(";
+  bool first = true;
+  for (const auto i : c10::irange(length)) {
+    if (!first) {
+      ss << ", ";
+    }
+    ss << basicTypeName(seq[i]);
+    first = false;
+  }
+  ss << ")";
+  return ss.str();
+}
+
 inline std::string friendlyTypeName(py::handle obj) {
   if (py::isinstance<py::tuple>(obj) && py::hasattr(obj, "_fields")) {
     auto field_names =
         py::cast<std::vector<std::string>>(py::getattr(obj, "_fields"));
     std::stringstream ss;
-    ss << py::str(py::type::handle_of(obj).attr("__name__"));
+    ss << basicTypeName(obj);
     ss << " (aka NamedTuple(";
     bool first = true;
     for (auto& field_name : field_names) {
@@ -801,8 +827,10 @@ inline std::string friendlyTypeName(py::handle obj) {
     }
     ss << "))";
     return ss.str();
+  } else if (py::isinstance<py::list>(obj) || py::isinstance<py::tuple>(obj)) {
+    return sequenceTypeName(obj);
   } else {
-    return py::str(py::type::handle_of(obj).attr("__name__"));
+    return basicTypeName(obj);
   }
 }
 
