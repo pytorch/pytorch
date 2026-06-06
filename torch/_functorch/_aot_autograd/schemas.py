@@ -203,6 +203,15 @@ class MemoryFormatMeta:
         if not use_memory_format:
             use_memory_format = t._has_symbolic_sizes_strides
 
+        if (
+            not use_memory_format
+            and t.layout == torch.strided
+            and torch._debug_has_internal_overlap(t) == 1
+        ):
+            # An internally overlapping output, e.g. from expand(), cannot
+            # represent arbitrary incoming gradients with its own strides.
+            use_memory_format = True
+
         if use_memory_format:
             return MemoryFormatMeta(
                 # pyrefly: ignore [unbound-name]
@@ -529,6 +538,9 @@ class ViewAndMutationMeta:
 
     graphsafe_rng_state_index: int | None = None
 
+    # Device for graphsafe RNG states (supports CUDA, TPU, etc.)
+    graphsafe_rng_device: torch.device | None = None
+
     # Stream indices for mutated inputs in the epilogue
     # Maps from index in mutated_inp_runtime_indices to the stream index that last touched
     # the storage of the tensor that will be copied back into the original input
@@ -702,7 +714,7 @@ class ViewAndMutationMeta:
 
         def extract_metadata(t: object) -> tuple[Sequence[str], object] | None:
             if isinstance(t, torch.Tensor) and is_traceable_wrapper_subclass(t):
-                (inner_tensors, flatten_spec) = t.__tensor_flatten__()
+                (inner_tensors, flatten_spec) = t.__tensor_flatten__()  # type: ignore[attr-defined]
                 # Technically, we only need the flatten_spec, not the inner tensors.
                 # However, some Tensor subclasses (like TwoTensor) may have flatten_spec = None.
                 # And we want to be able to assert that this metadata is non-None,
@@ -1071,11 +1083,11 @@ class GraphSignature:
             buffers=buffers,  # type: ignore[arg-type]
             user_inputs=user_inputs,  # type: ignore[arg-type]
             user_outputs=user_outputs,  # type: ignore[arg-type]
-            inputs_to_buffers=inputs_to_buffers,
-            inputs_to_parameters=inputs_to_parameters,
+            inputs_to_buffers=inputs_to_buffers,  # type: ignore[arg-type]
+            inputs_to_parameters=inputs_to_parameters,  # type: ignore[arg-type]
             user_inputs_to_mutate=user_inputs_to_mutate,
-            buffers_to_mutate=buffers_to_mutate,
-            parameters_to_mutate=parameters_to_mutate,
+            buffers_to_mutate=buffers_to_mutate,  # type: ignore[arg-type]
+            parameters_to_mutate=parameters_to_mutate,  # type: ignore[arg-type]
             in_spec=in_spec,
             out_spec=out_spec,
             backward_signature=backward_signature,
@@ -1115,7 +1127,7 @@ class CacheableAOTConfig:
             raise AssertionError("Can only have pre_dispatch IR for export.")
 
 
-@dataclass
+@dataclass(frozen=True)
 class AOTConfig:
     """
     Configuration for AOTDispatcher
@@ -1228,8 +1240,8 @@ class AOTState:
     # detected by doing an initial trace when we created this state.
     fw_metadata: ViewAndMutationMeta
 
-    # Top-level configuration
-    # This is morally immutable but sometimes we are naughty and mutate it.
+    # Top-level configuration. Stage-local compiler choices are threaded
+    # explicitly rather than mutating this object in place.
     aot_config: AOTConfig
 
     # When performing AOTAutograd traces and other passes, we typically

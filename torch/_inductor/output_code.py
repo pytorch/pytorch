@@ -37,6 +37,8 @@ from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
     CudagraphMetadata,
+    get_input_storage_mutation_info,
+    get_input_storage_mutation_reason,
     get_partition_cudagraph_metadata,
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
@@ -172,7 +174,7 @@ def maybe_handle_backward_generation(
         assert manager is not None
 
         def compiled_artifact(new_inputs: list[Any]) -> Callable[..., Any]:
-            manager.set_to_running_backward()
+            manager.set_to_running_backward()  # type: ignore[union-attr]
             return compiled_graph_callable(new_inputs)
 
         compiled_graph.current_callable = compiled_artifact
@@ -590,6 +592,7 @@ class CompiledFxGraph(OutputCode):
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
         self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
+        storage_mutation_info = get_input_storage_mutation_info(gm)
         self.fx_kwargs = {}
         self.inputs_to_check = ()
 
@@ -627,7 +630,14 @@ class CompiledFxGraph(OutputCode):
                     # Check mutation later to support cudagraph-managed tensors
                     has_mutation = None
 
+                storage_mutation_reason = get_input_storage_mutation_reason(
+                    storage_mutation_info,
+                )
+                if storage_mutation_reason is not None:
+                    self.disabled_cudagraphs_reason = storage_mutation_reason
+
                 cudagraph_tests = [
+                    (storage_mutation_reason is None, "input storage mutation"),
                     (not has_mutation, "mutated inputs"),
                     (
                         not config.force_disable_cudagraph_TESTING_ONLY,
@@ -1018,24 +1028,30 @@ class CompiledAOTI(OutputCode):
             return
 
         if self.device_type.startswith("cuda"):
-            current_callable = torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
-                current_callable,
-                1,
-                self.device_type,
-                "",
-                True,
-            ).run
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
+                    current_callable,
+                    1,
+                    self.device_type,
+                    "",
+                    True,
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
         elif self.device_type.startswith("xpu"):
-            current_callable = torch._C._aoti.AOTIModelContainerRunnerXpu(
-                current_callable,
-                1,
-                self.device_type,
-                "",
-            ).run
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerXpu(  # type: ignore[call-arg]
+                    current_callable,
+                    1,
+                    self.device_type,
+                    "",
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
         elif self.device_type == "cpu":
-            current_callable = torch._C._aoti.AOTIModelContainerRunnerCpu(
-                current_callable, 1
-            ).run
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerCpu(  # type: ignore[call-arg]
+                    current_callable, 1
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
         else:
             raise RuntimeError(f"unsupported device type {self.device_type}")
         self.current_callable = current_callable

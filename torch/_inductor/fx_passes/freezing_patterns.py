@@ -4,7 +4,6 @@ import functools
 import torch
 from torch._inductor.compile_fx import fake_tensor_prop
 from torch._inductor.utils import GPU_TYPES
-from torch.utils._ordered_set import OrderedSet
 
 from ..._dynamo.utils import counters
 from .. import config
@@ -35,90 +34,16 @@ pass_patterns = [
 binary_folding_pass = PatternMatcherPass()
 
 
-_binary_folding_ops = OrderedSet(
-    [
-        aten.add.Tensor,
-        aten.sub.Tensor,
-        aten.mul.Tensor,
-        aten.div.Tensor,
-    ]
-)
-
-
-def _op_not_broadcasting_with_conv(weight_tensor, other_tensor):
-    weight_shape = weight_tensor.shape
-    other_shape = other_tensor.shape
-    if len(weight_shape) < len(other_shape):
-        return False
-    if len(weight_shape) == len(other_shape) + 1:
-        for i in reversed(range(len(other_shape))):
-            if i == 0 and weight_shape[0] == other_shape[i]:
-                continue
-            if other_shape[i] != 1:
-                return False
-    else:
-        for i in reversed(range(len(other_shape))):
-            if i == 1 and weight_shape[0] == other_shape[i]:
-                continue
-            if other_shape[i] != 1:
-                return False
-    return True
-
-
-def _is_foldable_const_arg(other) -> bool:
-    if isinstance(other, float):
-        return True
-    if not isinstance(other, torch.fx.Node):
-        return False
-    if other.op == "get_attr":
-        return True
-    if other.target is aten.unsqueeze.default:
-        return _is_foldable_const_arg(other.args[0])
-    return False
-
-
-def _foldable_conv_weight_node(conv_node: torch.fx.Node) -> torch.fx.Node | None:
-    weight_node = conv_node.args[1]
-    bias_node = conv_node.args[2]
-    if not isinstance(weight_node, torch.fx.Node) or weight_node.op != "get_attr":
-        return None
-    if bias_node is not None and (
-        not isinstance(bias_node, torch.fx.Node) or bias_node.op != "get_attr"
-    ):
-        return None
-    if len(weight_node.users) != 1:
-        return None
-    return weight_node
-
-
 def _is_foldable_conv_const(conv_node: torch.fx.Node, other) -> bool:
-    if not _is_foldable_const_arg(other):
-        return False
-    weight_node = _foldable_conv_weight_node(conv_node)
-    if weight_node is None:
-        return False
-    if isinstance(other, float):
-        return True
+    from .binary_folding import _check_conv_and_broadcast_op
 
-    weight_meta_value = weight_node.meta.get("val")
-    other_meta_value = other.meta.get("val")
-    if weight_meta_value is None or other_meta_value is None:
-        return False
-    if (
-        not weight_meta_value.is_floating_point()
-        or not other_meta_value.is_floating_point()
-    ):
-        return False
-    if (
-        torch.promote_types(other_meta_value.dtype, weight_meta_value.dtype)
-        != weight_meta_value.dtype
-    ):
-        if other_meta_value.dtype != torch.float or weight_meta_value.dtype not in (
-            torch.float16,
-            torch.bfloat16,
-        ):
-            return False
-    return _op_not_broadcasting_with_conv(weight_meta_value, other_meta_value)
+    return _check_conv_and_broadcast_op(conv_node, other)
+
+
+def _is_binary_folding_op(target) -> bool:
+    from .binary_folding import _binary_ops
+
+    return target in _binary_ops
 
 
 def _foldable_conv_root(node) -> torch.fx.Node | None:
@@ -127,8 +52,8 @@ def _foldable_conv_root(node) -> torch.fx.Node | None:
     if len(node.users) != 1:
         return None
     if node.target is aten.convolution.default:
-        return node if _foldable_conv_weight_node(node) is not None else None
-    if node.target not in _binary_folding_ops:
+        return node if _is_foldable_conv_const(node, 1.0) else None
+    if not _is_binary_folding_op(node.target):
         return None
 
     lhs, rhs = node.args[0], node.args[1]
@@ -150,20 +75,19 @@ def _decompose_foldable_addcmul(graph: torch.fx.Graph) -> None:
     changed = False
     for node in graph.find_nodes(op="call_function", target=aten.addcmul.default):
         value = node.kwargs.get("value", 1)
-        if len(node.args) > 3:
-            value = node.args[3]
         if value != 1:
             continue
 
-        self_arg, t1, t2 = node.args[0], node.args[1], node.args[2]
+        self_arg, t1, t2 = node.args
         t1_conv = _foldable_conv_root(t1)
-        t2_conv = _foldable_conv_root(t2)
         if t1_conv is not None:
             conv_root = t1_conv
             other = t2
-        elif t2_conv is not None:
+            lhs, rhs = t1, t2
+        elif (t2_conv := _foldable_conv_root(t2)) is not None:
             conv_root = t2_conv
             other = t1
+            lhs, rhs = t2, t1
         else:
             continue
 
@@ -173,7 +97,7 @@ def _decompose_foldable_addcmul(graph: torch.fx.Graph) -> None:
             continue
 
         with graph.inserting_before(node):
-            prod = graph.call_function(aten.mul.Tensor, (t1, t2))
+            prod = graph.call_function(aten.mul.Tensor, (lhs, rhs))
             prod.meta.update(node.meta)
             result = graph.call_function(aten.add.Tensor, (prod, self_arg))
             result.meta.update(node.meta)
@@ -199,21 +123,23 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     binary_folding = counters["inductor"]["binary_folding"]
     fake_tensor_prop(gm, aot_example_inputs, True)
 
-    # Fold BN parameter reshapes so addcmul foldability checks can use the same
-    # get_attr constants that binary folding consumes.
-    constant_fold(gm)
-    fake_tensor_prop(gm, aot_example_inputs, True)
-    _decompose_foldable_addcmul(gm.graph)
-    fake_tensor_prop(gm, aot_example_inputs, True)
-
     torch._inductor.fx_passes.binary_folding.mark_mixed_dtype_allowed_computation_ops(
         gm
     )
+
+    if gm.graph.find_nodes(op="call_function", target=aten.addcmul.default):
+        # Fold BN parameter reshapes so addcmul foldability checks can use the same
+        # get_attr constants that binary folding consumes.
+        constant_fold(gm)
+        fake_tensor_prop(gm, aot_example_inputs, True)
+        _decompose_foldable_addcmul(gm.graph)
+        fake_tensor_prop(gm, aot_example_inputs, True)
+
     for _ in range(4):
         constant_fold(gm)
         # Make sure meta['val'] is properly set for all nodes
         fake_tensor_prop(gm, aot_example_inputs, True)
-        binary_folding_pass.apply(gm.graph)
+        binary_folding_pass.apply(gm.graph)  # type: ignore[arg-type]
         # If we don't have binary folding, we don't need to run the pass again.
         # TODO: remove the need to run fake_tensor_prop on the whole model.
         if counters["inductor"]["binary_folding"] == binary_folding:
@@ -228,7 +154,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     fake_tensor_prop(gm, aot_example_inputs, True)
 
     for pattern in pass_patterns:
-        pattern.apply(gm.graph)
+        pattern.apply(gm.graph)  # type: ignore[arg-type]
 
     # The CPU weight packing always assume the conv's weight is channels last,
     # So make sure the layout_optimization is on when doing it.

@@ -177,7 +177,7 @@ def handle_synced_deallocation(
         raise AssertionError(
             "allocating and side stream should be different for synced deallocations"
         )
-    if not torch.cuda.is_available():
+    if not torch.accelerator.is_available():
         # fallback to record_stream in this case
         with graph.inserting_after(node):
             graph.call_function(
@@ -506,7 +506,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     node = next_node
                     continue
 
-                event_index: int = node.args[0]
+                event_index: int = node.args[0]  # type: ignore[assignment]
 
                 # synchronize_event blocks the CPU thread, so it acts
                 # as a barrier across all streams. Collect deps from every
@@ -524,7 +524,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     else:
                         deps_before_sync = all_stream_deps
                 else:
-                    sync_stream = node.args[1]
+                    sync_stream = node.args[1]  # type: ignore[assignment]
                     deps_before_sync = list(stream_to_nodes.get(sync_stream, ()))
                     # Nodes without explicit stream annotation (custom.stream=None)
                     # run on the current/default stream. Include them when the sync

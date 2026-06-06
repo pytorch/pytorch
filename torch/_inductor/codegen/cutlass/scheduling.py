@@ -69,7 +69,7 @@ class CUTLASSScheduling(BaseScheduling):
             return self._can_fuse_epilogue_impl(
                 cast(CUTLASSTemplateBuffer, node1.node),
                 [],
-                node2,
+                node2,  # type: ignore[arg-type]
             )
         elif self.is_cutlass_fused_template(node1) and isinstance(
             node2, BaseSchedulerNode
@@ -80,7 +80,7 @@ class CUTLASSScheduling(BaseScheduling):
             return self._can_fuse_epilogue_impl(
                 fnode1.get_template_node(),  # type: ignore[arg-type]
                 self._unwrap_epilogue_nodes(fnode1),
-                node2,
+                node2,  # type: ignore[arg-type]
             )
 
         return False
@@ -230,11 +230,11 @@ class CUTLASSScheduling(BaseScheduling):
             elif not isinstance(node.data, Pointwise):
                 why(f"{node} is not a Pointwise op")
                 return False
-            elif not node.get_computed_buffer_name():
+            elif not node.get_computed_buffer_name():  # type: ignore[attr-defined]
                 why(f"{node} does not have a computed buffer name")
                 return False
 
-            name = node.get_computed_buffer_name()
+            name = node.get_computed_buffer_name()  # type: ignore[attr-defined]
             # dtype can differ, and strides can differ as long as they are broadcastable
             if node.get_size() != cutlass_template_buffer.get_size():
                 why(

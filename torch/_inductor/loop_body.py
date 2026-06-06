@@ -109,6 +109,13 @@ class LoopBody:
     # defined only temporarily
     indexing_exprs_name: dict[sympy.Expr, str]
 
+    @staticmethod
+    def _wrap_int_to_sympy_integer(expr):
+        # Static sizes can enter indexing expressions as Python ints.
+        if type(expr) is int:
+            return sympy.Integer(expr)
+        return expr
+
     def __init__(
         self,
         fn,
@@ -179,7 +186,9 @@ class LoopBody:
         """
         indexing_exprs = other.indexing_from_args(args, allow_same_symbol_in_index)
         self.indexing_exprs = {
-            name: V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges)
+            name: self._wrap_int_to_sympy_integer(
+                V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges)
+            )
             for name, expr in indexing_exprs.items()
         }
         self.subblocks = {k: v.clone(self) for k, v in other.subblocks.items()}
@@ -194,7 +203,7 @@ class LoopBody:
         submodules.pop("get_index")
         self.submodules = {
             "get_index": self.get_index,
-            **{k: v.clone(self) for k, v in submodules.items()},
+            **{k: v.clone(self) for k, v in submodules.items()},  # type: ignore[attr-defined]
         }
 
     def has_op(self, name: str):
@@ -263,7 +272,7 @@ class LoopBody:
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             *new_sizes,
-            prefix="t",
+            prefix="t",  # type: ignore[arg-type]
         )
 
         def new_body(*indices: Sequence[sympy.Expr]) -> Any:
@@ -284,7 +293,7 @@ class LoopBody:
         # use the original symbol prefix so we can do multiple round of reordering
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
             *new_sizes,
-            prefix="p",
+            prefix="p",  # type: ignore[arg-type]
         )
         new_body = LoopBody(
             loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
@@ -307,7 +316,7 @@ class LoopBody:
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             *new_sizes,
-            prefix="t",
+            prefix="t",  # type: ignore[arg-type]
         )
 
         def new_body(*indices: Sequence[sympy.Expr]) -> Any:
@@ -324,7 +333,7 @@ class LoopBody:
 
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
             *new_sizes,
-            prefix="p",
+            prefix="p",  # type: ignore[arg-type]
         )
         return LoopBody(
             loop_body,
@@ -352,7 +361,7 @@ class LoopBody:
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             *new_sizes,
-            prefix="p",
+            prefix="p",  # type: ignore[arg-type]
         )
 
         inverse_order = {b: a for a, b in enumerate(new_order)}
@@ -478,6 +487,7 @@ class LoopBody:
         buffer_name: str | None = None,
         mode: str | None = None,
     ):
+        expr = self._wrap_int_to_sympy_integer(expr)
         name = self.indexing_exprs_name.get(expr)
         if not name:
             name = f"index{len(self.indexing_exprs)}"
@@ -729,9 +739,17 @@ class CaptureIndexing(WrapperHandler):
         index = self._add_index(index, MemoryUsageType.INDEX_EXPR)
         return self._inner.index_expr(index, dtype)
 
+    def value_expr(self, index, dtype):
+        index = self._simplify(index)
+        if isinstance(index, (int, sympy.Integer)):
+            return self._inner.constant(int(index), dtype)
+        index = self._add_index(index, MemoryUsageType.INDEX_EXPR)
+        return self._inner.value_expr(index, dtype)
+
     def check_bounds(self, index, size, lower, upper):
         index = self._simplify(index)
         index = self._add_index(index, MemoryUsageType.CHECK_BOUNDS)
+        size = self.body._wrap_int_to_sympy_integer(size)
         size = self._add_index(size, MemoryUsageType.CHECK_BOUNDS)
         return self._inner.check_bounds(index, size, lower, upper)
 
