@@ -89,6 +89,7 @@ class _AllGatherMatch:
 
 def find_all_gather_patterns(graph: torch.fx.Graph):
     c10d = torch.ops._c10d_functional
+    split_targets = [aten.split.Tensor, aten.split.sizes, aten.split_with_sizes.default]
 
     def make_zero_dim_all_gather_pattern(shard):
         return CallFunction(
@@ -101,14 +102,14 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
             ),
         )
 
-    # Matches funcol.all_gather_tensor with gather_dim == 0
+    # Matches funcol.all_gather_single with gather_dim == 0
     zero_dim_all_gather_pattern = make_zero_dim_all_gather_pattern(KeywordArg("shard"))
 
     def make_all_gather_split_pattern(shard):
         return CallFunction(
             operator.getitem,
             CallFunction(
-                aten.split.Tensor,
+                split_targets,
                 make_zero_dim_all_gather_pattern(shard),
                 Ignored(),
                 _users=MULTIPLE,
@@ -123,7 +124,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
             KeywordArg("gather_dim"),
         )
 
-    # Matches funcol.all_gather_tensor with gather_dim > 0
+    # Matches funcol.all_gather_single with gather_dim > 0
     non_zero_dim_all_gather_pattern = make_cat_pattern(
         make_all_gather_split_pattern(KeywordArg("shard")),
     )
@@ -248,6 +249,7 @@ class _ReduceScatterMatch:
 
 def find_reduce_scatter_patterns(graph: torch.fx.Graph):
     c10d = torch.ops._c10d_functional
+    split_targets = [aten.split.Tensor, aten.split.sizes, aten.split_with_sizes.default]
 
     def reduce_scatter_template(inp: PatternExpr, users: int):
         return CallFunction(
@@ -262,7 +264,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
             ),
         )
 
-    # Matches funcol.reduce_scatter_tensor with scatter_dim == 0
+    # Matches funcol.reduce_scatter_single with scatter_dim == 0
     zero_dim_reduce_scatter_pattern_single_user = reduce_scatter_template(
         KeywordArg("input"), users=1
     )
@@ -272,7 +274,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
         KeywordArg("input"), users=2
     )
 
-    # Matches funcol.reduce_scatter_tensor with scatter_dim > 0
+    # Matches funcol.reduce_scatter_single with scatter_dim > 0
     non_zero_dim_reduce_scatter_pattern_single_user = reduce_scatter_template(
         CallFunction(
             aten.cat.default,
@@ -280,7 +282,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                 CallFunction(
                     operator.getitem,
                     CallFunction(
-                        aten.split.Tensor,
+                        split_targets,
                         KeywordArg("input"),
                         Ignored(),
                         KeywordArg("scatter_dim"),
@@ -301,7 +303,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                 CallFunction(
                     operator.getitem,
                     CallFunction(
-                        aten.split.Tensor,
+                        split_targets,
                         KeywordArg("input"),
                         Ignored(),
                         KeywordArg("scatter_dim"),
@@ -615,7 +617,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     """
     Fused the pattern
 
-        A = all_gather_tensor(A_shard, gather_dim, group_name)
+        A = all_gather_single(A_shard, gather_dim, group_name)
         C_0 = torch.matmul(A, B_0)
         C_1 = torch.matmul(A, B_1)
         C_2 = torch.matmul(A, B_2)
@@ -685,7 +687,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if filter_matmul and not filter_matmul(matmuls[0]):
         return
 
-    # Fuse the all_gather_tensor with the eligible matmuls
+    # Fuse the all_gather_single with the eligible matmuls
     graph = ag_node.graph
     with graph.inserting_before(ag_node):
         if not _is_last_dim(_get_tensor(shard_node), gather_dim):
@@ -863,7 +865,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     """
     Fused the pattern
 
-        reduce_scatter_tensor(A @ B, scatter_dim, group_name)
+        reduce_scatter_single(A @ B, scatter_dim, group_name)
 
     into
 
