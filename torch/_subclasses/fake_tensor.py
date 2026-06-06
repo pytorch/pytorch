@@ -1014,7 +1014,8 @@ class FakeTensor(Tensor):
                 with torch._C.DisableTorchFunctionSubclass():
                     return aten._to_dense.default(input_, dtype, masked_grad)
 
-        return super().__torch_function__(func, types, args, kwargs)
+        with torch._C.DisableTorchFunctionSubclass():
+            return cast(Any, func)(*args, **kwargs)
 
     @classmethod
     @count

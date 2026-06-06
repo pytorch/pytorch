@@ -31,6 +31,7 @@ from torch._dynamo.source import LocalSource
 from torch._dynamo.testing import make_test_cls_with_patches, rand_strided
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
+from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
     _check_for_subclass_arg,
@@ -128,6 +129,15 @@ class FakeTensorTest(TestCase):
         self.assertTrue(isinstance(t, FakeTensor))
         self.assertEqual(t.device.type, device_str)
         self.assertEqual(list(t.size()), size)
+
+    def test_fast_detach_with_torch_function_subclass(self):
+        with FakeTensorMode() as mode:
+            x = torch.randn(2, 3)
+            detached = fast_detach(mode, x)
+
+            self.assertTrue(isinstance(detached, FakeTensor))
+            self.assertIs(detached.fake_mode, mode)
+            self.assertEqual(detached.shape, x.shape)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cuda_initialized(self):
