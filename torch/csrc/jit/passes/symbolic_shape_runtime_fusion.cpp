@@ -592,7 +592,7 @@ static RegisterOperators reg_guard({
                   sym_dim_index = sym_dim_flat_index[value];
                 }
                 // TODO: potential optimization - if there is a Symbolic
-                // Sym with only one use we dont need to test anything
+                // Sym with only one use we don't need to test anything
                 flattened_input_dims.push_back(
                     static_cast<int64_t>(sym_dim_index));
               }
