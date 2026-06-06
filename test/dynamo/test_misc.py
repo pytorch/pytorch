@@ -11727,6 +11727,44 @@ def ___make_guard_fn():
             f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_custom_op_int_list_error_reports_symint_elements(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::split_with_sizes_and_clone_int_list_error",
+                "(Tensor input, int[] sizes) -> Tensor[]",
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "mylib::split_with_sizes_and_clone_int_list_error",
+                "cpu",
+                lib=lib,
+            )
+            @torch.library.register_fake(
+                "mylib::split_with_sizes_and_clone_int_list_error", lib=lib
+            )
+            def split_with_sizes_and_clone(input, sizes):
+                return [
+                    t.clone()
+                    for t in torch.ops.aten.split_with_sizes.default(input, sizes)
+                ]
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def f(sz, x):
+                s0, s1 = sz.tolist()
+                _, r1 = torch.ops.mylib.split_with_sizes_and_clone_int_list_error(
+                    x, [s0, s1]
+                )
+                return torch.ops.aten.sort.default(r1)
+
+            with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
+                f(torch.tensor([420, 7312 - 420]), torch.randn(7312))
+
+            msg = str(cm.exception)
+            self.assertIn("Expected a value of type 'List[int]'", msg)
+            self.assertIn("instead found type 'immutable_list(SymInt, SymInt)'", msg)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_dim_order(self):
         @torch.compile(dynamic=False, fullgraph=True, backend="eager")
         def f(x):
