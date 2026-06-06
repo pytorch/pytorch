@@ -3170,6 +3170,14 @@ def _max_unpoolnd(
     # equal. If this condition is not satisfied, the operation is
     # non-deterministic as one of the different values in `self` 'wins'.
     utils.alert_not_deterministic(f"max_unpooling{dim}d_forward_out")
+    for i, size in enumerate(output_size):
+        torch._check(
+            size >= 0,
+            lambda i=i, size=size: (
+                f"max_unpooling{dim}d(): output_size must contain non-negative "
+                f"spatial dimensions, but got output_size[{i}]={size}"
+            ),
+        )
     output_shape = list(self.shape[:-dim]) + list(output_size)
     if any(s == 0 for s in output_shape):
         return self.new_zeros(output_shape)
