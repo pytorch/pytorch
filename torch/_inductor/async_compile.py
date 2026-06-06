@@ -327,11 +327,12 @@ class AsyncCompile:
                 mp_context=ctx,
                 initializer=partial(_async_compile_initializer, os.getpid()),
             )
-            # when this pool is created in a subprocess object, the normal exit handler
-            # doesn't run, and we need to register our own handler.
-            # exitpriority has to be high, because another one of the finalizers will
-            # kill the worker thread that sends the shutdown message to the workers...
-            multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+
+        # When this pool is created in a multiprocessing subprocess, the normal
+        # atexit handler may not run, and we need to register our own handler.
+        # exitpriority has to be high, because another one of the finalizers will
+        # kill the worker thread that sends the shutdown message to the workers.
+        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
         _pool_set.add(pool)
         return pool
