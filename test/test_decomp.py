@@ -267,6 +267,8 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
             1e-3,
         ),
         (torch.float64, torch.ops.aten.native_layer_norm.default): (1e-6, 1e-6),
+        # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
+        (torch.float32, torch.ops.aten.native_group_norm.default): (1e-4, 5e-6),
         # This exceeds default tolerances only on CPU, on CUDA it's fine
         (torch.float32, torch.ops.aten.grid_sampler_2d.default): (7e-6, 3e-5),
         # Exceeds tolerances on CUDA, likely due to fma
@@ -429,6 +431,11 @@ CROSS_REF_EXCLUDE_SET = {
         None,
         "bernoulli",
     ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
+    # Decomposition is intentionally partial: returns NotImplemented for
+    # non-evenly-divisible output sizes.
+    (None, None, "nn.functional.adaptive_max_pool1d"),
+    (None, None, "nn.functional.adaptive_max_pool2d"),
+    (None, None, "nn.functional.adaptive_max_pool3d"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
@@ -671,6 +678,17 @@ class TestDecomp(TestCase):
         xs_two[0] = x
 
         self.assertEqual(xs, xs_two)
+
+    def test_index_add_decomp_source_shape_mismatch(self, device):
+        x = torch.zeros([10, 5], device=device)
+        index = torch.arange(5, device=device)
+        source = torch.ones([5], device=device)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "source tensor shape must match self tensor shape",
+        ):
+            torch._decomp.decompositions.index_add(x, 0, index, source)
 
     def test_cat_single_input(self, device):
         decomp_table = torch._inductor.decomposition.select_decomp_table()
