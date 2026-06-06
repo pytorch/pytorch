@@ -11,6 +11,7 @@ from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._inductor.custom_graph_pass import CustomGraphPass
+from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -348,6 +349,125 @@ class CondTests(TestCase):
             device=device,
             dynamic=dynamic,
         )
+
+    def _check_cond_no_outputs_input_mutation(self):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                x = x.clone()
+
+                def true_fn(x):
+                    x.add_(1)
+
+                def false_fn(x):
+                    x.sub_(1)
+
+                torch.cond(p, true_fn, false_fn, (x,))
+                return x * 2
+
+        model = Model()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
+
+        with torch.no_grad():
+            x = torch.ones(4)
+            self.assertEqual(
+                compiled_model(torch.tensor(True), x),
+                model(torch.tensor(True), x),
+            )
+            self.assertEqual(
+                compiled_model(torch.tensor(False), x),
+                model(torch.tensor(False), x),
+            )
+
+        self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
+
+    def test_cond_no_outputs_input_mutation(self):
+        self._check_cond_no_outputs_input_mutation()
+
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    def test_cond_no_outputs_input_mutation_cpp_wrapper(self):
+        self._check_cond_no_outputs_input_mutation()
+
+    def _check_cond_equal_constant_output(self):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(
+                    p,
+                    lambda y: (y + 1, 1),
+                    lambda y: (y - 1, 1),
+                    (x,),
+                )
+
+        model = Model()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
+
+        with torch.no_grad():
+            x = torch.ones(4)
+            for pred in (torch.tensor(True), torch.tensor(False)):
+                actual = compiled_model(pred, x)
+                expected = model(pred, x)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[1], expected[1])
+
+        self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
+
+    def test_cond_equal_constant_output(self):
+        self._check_cond_equal_constant_output()
+
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    def test_cond_equal_constant_output_cpp_wrapper(self):
+        self._check_cond_equal_constant_output()
+
+    def test_cond_mixed_tensor_none_output(self):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(
+                    p,
+                    lambda y: (y + 1, None),
+                    lambda y: (y - 1, None),
+                    (x,),
+                )
+
+        model = Model()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
+
+        with torch.no_grad():
+            x = torch.ones(4)
+            for pred in (torch.tensor(True), torch.tensor(False)):
+                actual = compiled_model(pred, x)
+                expected = model(pred, x)
+                self.assertEqual(actual[0], expected[0])
+                self.assertIsNone(actual[1])
+
+        self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
+
+    def test_cond_bool_constant_outputs_rejected(self):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(p, lambda y: True, lambda y: True, (x,))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Constants returned from branches must be ints or None",
+        ):
+            torch.compile(Model(), backend="inductor", fullgraph=True)(
+                torch.tensor(True), torch.ones(4)
+            )
+
+    def test_cond_differing_constant_outputs_rejected(self):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(p, lambda y: 1, lambda y: 2, (x,))
+
+        with self.assertRaisesRegex(
+            InductorError,
+            "NotImplementedError:.*differing constant outputs",
+        ):
+            torch.compile(Model(), backend="inductor", fullgraph=True)(
+                torch.tensor(True), torch.ones(4)
+            )
 
     @requires_gpu
     def test_cond_subgraph_output_stride_padding(self):

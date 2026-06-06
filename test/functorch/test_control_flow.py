@@ -5706,6 +5706,143 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
                 "graph_capture_record_stream_reuse:False"
             )
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_no_outputs_cudagraphs(self):
+        state = torch.zeros(4, device="cuda")
+
+        def true_fn():
+            state.add_(1.0)
+
+        def false_fn():
+            state.sub_(1.0)
+
+        predicate = torch.tensor(True, device="cuda")
+
+        with torch.no_grad():
+            with ControlFlowOpWarmupDispatchMode():
+                out = torch.cond(predicate, true_fn, false_fn, [])
+            torch.cuda.synchronize()
+            self.assertIsNone(out)
+            self.assertEqual(state, torch.ones(4, device="cuda"))
+
+            g = torch.cuda.CUDAGraph()
+            with (
+                torch.cuda.graph(g),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
+            ):
+                out = torch.cond(predicate, true_fn, false_fn, [])
+            self.assertIsNone(out)
+            self.assertEqual(state, torch.ones(4, device="cuda"))
+
+            g.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(state, 2 * torch.ones(4, device="cuda"))
+
+            predicate.fill_(False)
+            g.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(state, torch.ones(4, device="cuda"))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_constant_outputs_cudagraphs(self):
+        def true_fn():
+            return 1
+
+        def false_fn():
+            return 1
+
+        predicate = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
+            out = torch.cond(predicate, true_fn, false_fn, [])
+        self.assertEqual(out, 1)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_unsupported_constant_outputs_cudagraphs(self):
+        def true_fn():
+            return float("nan")
+
+        def false_fn():
+            return float("nan")
+
+        predicate = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            ValueError,
+            "constant branch outputs must be ints or None",
+        ):
+            with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
+                torch.ops.higher_order.cond(predicate, true_fn, false_fn, [])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_bool_constant_outputs_cudagraphs(self):
+        def true_fn():
+            return True
+
+        def false_fn():
+            return True
+
+        predicate = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            ValueError,
+            "constant branch outputs must be ints or None",
+        ):
+            with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
+                torch.ops.higher_order.cond(predicate, true_fn, false_fn, [])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_pytree_mismatch_cudagraphs(self):
+        def true_fn():
+            return (torch.ones(4, device="cuda"), None)
+
+        def false_fn():
+            return [torch.ones(4, device="cuda"), None]
+
+        predicate = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            ValueError,
+            "must return the same pytree structure",
+        ):
+            with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
+                torch.ops.higher_order.cond(predicate, true_fn, false_fn, [])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_unequal_constant_outputs_cudagraphs(self):
+        def true_fn():
+            return 1
+
+        def false_fn():
+            return 2
+
+        predicate = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            ValueError,
+            "returned constants of both branches must be equal",
+        ):
+            with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
+                torch.cond(predicate, true_fn, false_fn, [])
+
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
         graphs = self._check_tracing(fn, inp)
@@ -9297,6 +9434,64 @@ class GraphModule(torch.nn.Module):
             data = org_data.clone()
             output = torch.compile(fn)(predicate_true, data)
             self.assertEqual(output, org_data + 1)
+
+    @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_cond_no_outputs_aot_eager_graph(self):
+        def fn(pred, data):
+            data = data.clone()
+
+            def true_fn(x):
+                x.add_(1)
+
+            def false_fn(x):
+                x.sub_(1)
+
+            torch.cond(pred, true_fn, false_fn, (data,))
+            return data * 2
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        with torch.no_grad():
+            self.assertEqual(
+                compiled_fn(torch.tensor(True), torch.ones(4)),
+                4 * torch.ones(4),
+            )
+            self.assertEqual(
+                compiled_fn(torch.tensor(False), torch.ones(4)),
+                torch.zeros(4),
+            )
+
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[4]", arg1_1: "b8[]"):
+        clone: "f32[4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = arg1_1, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  arg1_1 = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem_1: "f32[4]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+
+        mul: "f32[4]" = torch.ops.aten.mul.Tensor(getitem_1, 2);  getitem_1 = None
+        return (mul,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4]"):
+            add: "f32[4]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            copy_: "f32[4]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (None,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4]"):
+            sub: "f32[4]" = torch.ops.aten.sub.Tensor(arg0_1, 1)
+            copy_: "f32[4]" = torch.ops.aten.copy_.default(arg0_1, sub);  arg0_1 = sub = copy_ = None
+            return (None,)
+""",
+        )
 
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     def test_while_loop_unbacked_bindings(self):
