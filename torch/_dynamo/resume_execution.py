@@ -60,6 +60,21 @@ CO_ASYNC_GENERATOR = 0x0200
 # trace_rules.py import this constant for consistency
 TORCH_DYNAMO_RESUME_IN_PREFIX = "torch_dynamo_resume_in"
 IS_TRACING_RESUME_PROLOGUE_VARNAME = "__is_tracing_resume_prologue"
+RESUME_ARGS_VARNAME = "__torch_dynamo_resume_args"
+
+
+def _boxed_resume_arg_name(code: types.CodeType) -> str | None:
+    if (
+        code.co_argcount == 1
+        and code.co_name.startswith(TORCH_DYNAMO_RESUME_IN_PREFIX)
+        and code.co_varnames[0].startswith(RESUME_ARGS_VARNAME)
+    ):
+        return code.co_varnames[0]
+    return None
+
+
+def _is_boxed_resume_code(code: types.CodeType) -> bool:
+    return _boxed_resume_arg_name(code) is not None
 
 
 # If is_resume - this codegen is for a resume function
@@ -382,9 +397,20 @@ class ContinueExecutionCache:
         ) -> None:
             meta.instructions = copy.deepcopy(instructions)
 
-            args = ["__nested_resume_fns", "__nested_frame_values"]
-            args += [f"___stack{i}" for i in range(nstack)]
-            args.extend(v for v in argnames if v not in args)
+            boxed_resume = not nested_code_objs
+            resume_arg_names = ["__nested_resume_fns", "__nested_frame_values"]
+            resume_arg_names += [f"___stack{i}" for i in range(nstack)]
+            resume_arg_names.extend(v for v in argnames if v not in resume_arg_names)
+            resume_args_varname = RESUME_ARGS_VARNAME
+            if boxed_resume:
+                unavailable_names = (
+                    set(resume_arg_names)
+                    | set(argnames_null)
+                    | set(code_options["co_varnames"])
+                )
+                while resume_args_varname in unavailable_names:
+                    resume_args_varname = unique_id(RESUME_ARGS_VARNAME)
+            args = [resume_args_varname] if boxed_resume else resume_arg_names
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
@@ -413,8 +439,17 @@ class ContinueExecutionCache:
             code_options["co_kwonlyargcount"] = 0
             code_options["co_varnames"] = tuple(
                 args
+                + (
+                    [v for v in resume_arg_names if v not in args]
+                    if boxed_resume
+                    else []
+                )
                 + [v for v in argnames_null if v not in args]
-                + [v for v in code_options["co_varnames"] if v not in args]
+                + [
+                    v
+                    for v in code_options["co_varnames"]
+                    if v not in args and v not in resume_arg_names
+                ]
                 + [IS_TRACING_RESUME_PROLOGUE_VARNAME]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
@@ -441,6 +476,30 @@ class ContinueExecutionCache:
                     ),
                 ]
             )
+            if boxed_resume:
+                for idx, name in enumerate(resume_arg_names):
+                    prefix.extend(
+                        [
+                            create_instruction("LOAD_FAST", argval=resume_args_varname),
+                            create_instruction("LOAD_CONST", argval=idx),
+                            create_binary_subscr(),
+                            create_instruction("STORE_FAST", argval=name),
+                        ]
+                    )
+                # Clear the boxed argument list as soon as all entries have
+                # real locals. The caller's stack can still own this list while
+                # the resume runs, so deleting only the local is not enough.
+                for idx in reversed(range(len(resume_arg_names))):
+                    prefix.extend(
+                        [
+                            create_instruction("LOAD_FAST", argval=resume_args_varname),
+                            create_instruction("LOAD_CONST", argval=idx),
+                            create_instruction("DELETE_SUBSCR"),
+                        ]
+                    )
+                prefix.append(
+                    create_instruction("DELETE_FAST", argval=resume_args_varname)
+                )
 
             cleanup: list[Instruction] = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
@@ -551,11 +610,6 @@ class ContinueExecutionCache:
                         create_instruction("LOAD_FAST", argval="__nested_frame_values"),
                         create_instruction("LOAD_CONST", argval=-1),
                         create_instruction("DELETE_SUBSCR"),
-                        # delete __nested values
-                        create_instruction("DELETE_FAST", argval="__nested_resume_fns"),
-                        create_instruction(
-                            "DELETE_FAST", argval="__nested_frame_values"
-                        ),
                         # Set is_tracing_resume_prologue back to allow graph breaks
                         # in the nested resume
                         create_instruction("LOAD_CONST", argval=False),
@@ -563,7 +617,11 @@ class ContinueExecutionCache:
                             "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
                         ),
                         # finish the call
-                        *create_call_function_ex(False, False),
+                        *(
+                            create_call_function(1, False)
+                            if _is_boxed_resume_code(nested_code_objs[-1])
+                            else create_call_function_ex(False, False)
+                        ),
                     ]
                 )
                 if pop_nested_resume_result:

@@ -123,6 +123,8 @@ from .polyfills import (
 )
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import (
+    _boxed_resume_arg_name,
+    _is_boxed_resume_code,
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
     ReenterWith,
@@ -1153,6 +1155,9 @@ def break_graph_if_unsupported(
             _reconstruct_block_stack(self, cg, cleanup)
             self.output.add_output_instructions(cg.get_instructions())
             del cg
+            self.output.add_output_instructions(
+                self.output.root_tx._clear_deleted_resume_args()
+            )
 
             # For inlined frames, use the root frame's current instruction
             # positions so the output code maps to the correct source line.
@@ -2105,6 +2110,7 @@ class InstructionTranslatorBase(
         loaded_vt = self.pop()
         loaded_vt.set_name_hint(name)
         self.symbolic_locals[name] = loaded_vt
+        self.deleted_fast_locals.discard(name)
         if name == IS_TRACING_RESUME_PROLOGUE_VARNAME:
             val = loaded_vt.as_python_constant()
             if type(val) is not bool:
@@ -2112,6 +2118,8 @@ class InstructionTranslatorBase(
             self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst: Instruction) -> None:
+        if inst.argval in self.f_locals:
+            self.deleted_fast_locals.add(inst.argval)
         var = self.symbolic_locals.get(inst.argval)
         if isinstance(var, TensorVariable):
             self._maybe_emit_sync_dealloc(var)
@@ -3632,6 +3640,41 @@ class InstructionTranslatorBase(
 
         return cg.get_instructions()
 
+    def _clear_deleted_resume_args(self) -> list[Instruction]:
+        resume_args_varname = self._boxed_resume_arg_name()
+        if (
+            resume_args_varname is None
+            or resume_args_varname not in self.deleted_fast_locals
+            or resume_args_varname not in self.f_locals
+            or resume_args_varname not in self.code_options["co_varnames"]
+        ):
+            return []
+
+        self._mark_resume_args_cleanup_emitted()
+        resume_args = self.f_locals[resume_args_varname]
+        if not isinstance(resume_args, list):
+            return [create_instruction("DELETE_FAST", argval=resume_args_varname)]
+
+        insts: list[Instruction] = []
+        for idx in reversed(range(len(resume_args))):
+            insts.extend(
+                [
+                    create_instruction("LOAD_FAST", argval=resume_args_varname),
+                    create_instruction("LOAD_CONST", argval=idx),
+                    create_instruction("DELETE_SUBSCR"),
+                ]
+            )
+        insts.append(create_instruction("DELETE_FAST", argval=resume_args_varname))
+        return insts
+
+    def _boxed_resume_arg_name(self) -> str | None:
+        return _boxed_resume_arg_name(self.f_code)
+
+    def _mark_resume_args_cleanup_emitted(self) -> None:
+        if resume_args_varname := self._boxed_resume_arg_name():
+            self.deleted_fast_locals.discard(resume_args_varname)
+            self.cleared_fast_locals.discard(resume_args_varname)
+
     @staticmethod
     def codegen_call_resume(
         resume_codes: list[types.CodeType], resume_names: list[str], cg: PyCodegen
@@ -3762,7 +3805,10 @@ class InstructionTranslatorBase(
         )
 
         # TOS: resume 1, [remaining resumes, frames, *(frame 1 stack + locals)]
-        cg.extend_output(create_call_function_ex(False, True))
+        if _is_boxed_resume_code(resume_codes[-1]):
+            cg.extend_output(create_call_function(1, True))
+        else:
+            cg.extend_output(create_call_function_ex(False, True))
 
     def should_compile_partial_graph(self) -> bool:
         if sys.version_info >= (3, 11):
@@ -3794,6 +3840,13 @@ class InstructionTranslatorBase(
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
+        source = getattr(obj, "source", None)
+        if (
+            self.is_tracing_resume_prologue
+            and isinstance(source, LocalSource)
+            and source.local_name == self._boxed_resume_arg_name()
+        ):
+            return
         # Check for tensor items using side-effect-free internal lookups
         # only. We avoid call_method("__getitem__") because it can execute
         # user code and add unwanted graph nodes.
@@ -5178,6 +5231,11 @@ class InstructionTranslatorBase(
         # used to keep cell/freevars alive after pruning symbolic_locals (prune_dead_locals)
         # in order to generate any nested closures
         self.post_prune_cell_and_freevars = None
+        self.deleted_fast_locals: set[str] = set()
+        self.cleared_fast_locals: set[str] = set()
+        resume_args_varname = _boxed_resume_arg_name(f_code)
+        if resume_args_varname is not None and resume_args_varname in f_locals:
+            self.cleared_fast_locals.add(resume_args_varname)
         self.stack: list[VariableTracker] = []
         self.instruction_pointer = 0
         self.start_point = None
