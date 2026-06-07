@@ -9,6 +9,7 @@
 #include <atomic>
 #include <memory>
 #include <type_traits>
+#include <vector>
 
 namespace c10 {
 
@@ -22,17 +23,80 @@ class KernelFunction;
 class KernelToken;
 class SafeKernelFunction;
 
+namespace detail {
+template <typename T>
+struct is_symint_vector : std::false_type {};
+
+template <>
+struct is_symint_vector<std::vector<c10::SymInt>> : std::true_type {};
+
+template <typename From, typename To>
+struct copy_cv {
+  using type = To;
+};
+
+template <typename From, typename To>
+struct copy_cv<const From, To> {
+  using type = const To;
+};
+
+template <typename From, typename To>
+struct copy_cv<volatile From, To> {
+  using type = volatile To;
+};
+
+template <typename From, typename To>
+struct copy_cv<const volatile From, To> {
+  using type = const volatile To;
+};
+
+template <typename From, typename To>
+using copy_cv_t = typename copy_cv<From, To>::type;
+
+template <typename From, typename To>
+struct copy_cvref {
+ private:
+  using MaybeCVTo = copy_cv_t<std::remove_reference_t<From>, To>;
+
+ public:
+  using type = std::conditional_t<
+      std::is_lvalue_reference_v<From>,
+      std::add_lvalue_reference_t<MaybeCVTo>,
+      std::conditional_t<
+          std::is_rvalue_reference_v<From>,
+          std::add_rvalue_reference_t<MaybeCVTo>,
+          MaybeCVTo>>;
+};
+
+template <typename From, typename To>
+using copy_cvref_t = typename copy_cvref<From, To>::type;
+
+} // namespace detail
+
 template <typename T>
 using has_symint = std::disjunction<
     std::is_same<c10::SymInt, T>,
     std::is_same<c10::SymIntArrayRef, T>,
     std::is_same<at::OptionalSymIntArrayRef, T>,
-    std::is_same<std::optional<c10::SymInt>, T>>;
+    std::is_same<std::optional<c10::SymInt>, T>,
+    detail::is_symint_vector<std::remove_cv_t<std::remove_reference_t<T>>>>;
 
 template <typename T>
 struct remove_symint {
-  using type = T;
+  using type = std::conditional_t<
+      detail::is_symint_vector<
+          std::remove_cv_t<std::remove_reference_t<T>>>::value,
+      detail::copy_cvref_t<T, std::vector<int64_t>>,
+      T>;
 };
+
+namespace detail {
+template <typename T>
+using unpacked_symint_arg_t = std::conditional_t<
+    is_symint_vector<std::remove_cv_t<std::remove_reference_t<T>>>::value,
+    std::vector<int64_t>,
+    typename remove_symint<T>::type>;
+} // namespace detail
 
 template <>
 struct remove_symint<c10::SymInt> {
