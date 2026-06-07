@@ -108,8 +108,18 @@ inline Return callUnboxedKernelFunction(
 // NB: keep this in sync with cloneWithRealTypes in function_schema.cpp
 
 template <typename T>
-inline typename remove_symint<T>::type unpackSymInt(T x) {
-  return x;
+inline detail::unpacked_symint_arg_t<T> unpackSymInt(T x) {
+  if constexpr (detail::is_symint_vector<
+                    std::remove_cv_t<std::remove_reference_t<T>>>::value) {
+    std::vector<int64_t> r;
+    r.reserve(x.size());
+    for (const auto& i : x) {
+      r.push_back(i.guard_int(__FILE__, __LINE__));
+    }
+    return r;
+  } else {
+    return x;
+  }
 }
 
 template <>
