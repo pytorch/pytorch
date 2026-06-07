@@ -2789,6 +2789,28 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x2.grad, x1.grad)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_vmap_custom_rule_error_falls_back_to_eager(self):
+        class BadVmap(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return torch.zeros(x.shape, device=x.device)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, x):
+                return torch.zeros(x.shape[1:], device=x.device), (None,)
+
+        def fn(x):
+            return torch.vmap(BadVmap.apply)(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
+            opt_fn(torch.randn(2, 3))
+
     def test_new_style_autograd_function_with_grad_no_compile(self):
         """Baseline: new-style autograd.Function works with torch.func.grad."""
 

@@ -1477,7 +1477,11 @@ class GetAttrVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
-        if isinstance(self.obj, AutogradFunctionVariable) and self.name == "apply":
+        if (
+            isinstance(self.obj, AutogradFunctionVariable)
+            and self.name == "apply"
+            and getattr(self.obj.fn_cls, "generate_vmap_rule", False)
+        ):
             return variables.ConstantVariable.create(
                 hasattr(self.obj.fn_cls.apply, name)
             )
