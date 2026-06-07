@@ -151,11 +151,13 @@
   dispatch:
     CPU: _assert_async_cpu
     CUDA: _assert_async_cuda
+    MPS: _assert_async_mps
 
 - func: _assert_async.msg(Tensor self, str assert_msg) -> ()
   dispatch:
     CPU: _assert_async_msg_cpu
     CUDA: _assert_async_msg_cuda
+    MPS: _assert_async_msg_mps
 
 - func: _assert_scalar(Scalar self, str assert_msg) -> ()
   dispatch:
