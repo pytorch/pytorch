@@ -1858,6 +1858,267 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_parameters_attr_assignment(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(5, 5))
+
+            def forward(self, x):
+                return x + self.param
+
+        opt_mod = torch.compile(MyModule(), backend="eager")
+
+        new_parameters = collections.OrderedDict()
+        for key, param in opt_mod._parameters.items():
+            new_parameters[key] = param
+        opt_mod._parameters = new_parameters
+
+        self.assertEqual(list(opt_mod._parameters), ["param"])
+        self.assertIs(opt_mod._parameters, opt_mod._orig_mod._parameters)
+        self.assertIs(opt_mod._orig_mod._parameters, new_parameters)
+
+    def test_buffers_attr_assignment(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buffer", torch.randn(5, 5))
+
+            def forward(self, x):
+                return x + self.buffer
+
+        opt_mod = torch.compile(MyModule(), backend="eager")
+
+        new_buffers = collections.OrderedDict()
+        for key, buffer in opt_mod._buffers.items():
+            new_buffers[key] = buffer
+        opt_mod._buffers = new_buffers
+
+        self.assertEqual(list(opt_mod._buffers), ["buffer"])
+        self.assertIs(opt_mod._buffers, opt_mod._orig_mod._buffers)
+        self.assertIs(opt_mod._orig_mod._buffers, new_buffers)
+
+    def test_buffers_attr_non_persistent_registration(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("persistent", torch.randn(5, 5))
+
+            def forward(self, x):
+                return x + self.persistent + self.transient
+
+        opt_mod = torch.compile(MyModule(), backend="eager")
+
+        opt_mod.register_buffer("transient", torch.ones(5, 5), persistent=False)
+
+        self.assertEqual(list(opt_mod._buffers), ["persistent", "transient"])
+        self.assertIs(
+            opt_mod._non_persistent_buffers_set,
+            opt_mod._orig_mod._non_persistent_buffers_set,
+        )
+        self.assertEqual(opt_mod._orig_mod._non_persistent_buffers_set, {"transient"})
+
+        state_dict = opt_mod.state_dict()
+        self.assertIn("_orig_mod.persistent", state_dict)
+        self.assertNotIn("_orig_mod.transient", state_dict)
+
+    def test_parameters_attr_preserves_traversal_and_state_dict(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(5, 5))
+                self.register_buffer("buffer", torch.randn(5, 5))
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x) + self.param + self.buffer
+
+        opt_mod = torch.compile(MyModule(), backend="eager")
+
+        self.assertEqual(list(opt_mod.named_parameters(recurse=False)), [])
+        self.assertEqual(list(opt_mod.named_buffers(recurse=False)), [])
+        self.assertEqual(
+            [name for name, _ in opt_mod.named_parameters()],
+            ["_orig_mod.param", "_orig_mod.linear.weight", "_orig_mod.linear.bias"],
+        )
+        self.assertEqual(
+            [name for name, _ in opt_mod.named_buffers()],
+            ["_orig_mod.buffer"],
+        )
+
+        state_dict = opt_mod.state_dict()
+        self.assertNotIn("param", state_dict)
+        self.assertNotIn("buffer", state_dict)
+        self.assertIn("_orig_mod.param", state_dict)
+        self.assertIn("_orig_mod.buffer", state_dict)
+        self.assertIn("_orig_mod.linear.weight", state_dict)
+        self.assertIn("_orig_mod.linear.bias", state_dict)
+
+    def test_parameters_attr_visible_during_named_parameters_iteration(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(5, 5))
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x) + self.param
+
+        opt_mod = torch.compile(MyModule(), backend="eager")
+
+        named_parameters = opt_mod.named_parameters()
+        name, _ = next(named_parameters)
+
+        self.assertEqual(name, "_orig_mod.param")
+        self.assertEqual(list(opt_mod._parameters), ["param"])
+
+        for _, _ in opt_mod.named_parameters():
+            self.assertEqual(list(opt_mod._parameters), ["param"])
+
+    def test_parameters_attr_preserves_strict_state_dict_load(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(5, 5))
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x) + self.param
+
+        opt_mod = torch.compile(MyModule(), backend="eager")
+        with torch.no_grad():
+            opt_mod._orig_mod.param.fill_(3)
+            opt_mod._orig_mod.linear.weight.fill_(4)
+            opt_mod._orig_mod.linear.bias.fill_(5)
+
+        state_dict = opt_mod.state_dict()
+        self.assertNotIn("param", state_dict)
+        self.assertIn("_orig_mod.param", state_dict)
+
+        new_opt_mod = torch.compile(MyModule(), backend="eager")
+        incompatible_keys = new_opt_mod.load_state_dict(state_dict, strict=True)
+
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertEqual(new_opt_mod._orig_mod.param, opt_mod._orig_mod.param)
+        self.assertEqual(
+            new_opt_mod._orig_mod.linear.weight,
+            opt_mod._orig_mod.linear.weight,
+        )
+        self.assertEqual(
+            new_opt_mod._orig_mod.linear.bias,
+            opt_mod._orig_mod.linear.bias,
+        )
+
+    def test_parameters_attr_apply_does_not_double_visit_parameters(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(5, 5))
+                self.register_buffer("buffer", torch.randn(5, 5))
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x) + self.param + self.buffer
+
+        opt_mod = torch.compile(MyModule(), backend="eager")
+        param = opt_mod._orig_mod.param
+        buffer = opt_mod._orig_mod.buffer
+        visits = 0
+        buffer_visits = 0
+
+        def count_param_visits(tensor):
+            nonlocal visits, buffer_visits
+            self.assertEqual(list(opt_mod._parameters), ["param"])
+            self.assertEqual(list(opt_mod._buffers), ["buffer"])
+            if tensor is param:
+                visits += 1
+            if tensor is buffer:
+                buffer_visits += 1
+            return tensor
+
+        opt_mod._apply(count_param_visits)
+
+        self.assertEqual(visits, 1)
+        self.assertEqual(buffer_visits, 1)
+
+        opt_mod.to(dtype=torch.float64)
+        self.assertEqual(opt_mod._orig_mod.param.dtype, torch.float64)
+        self.assertEqual(opt_mod._orig_mod.buffer.dtype, torch.float64)
+        self.assertEqual(opt_mod._orig_mod.linear.weight.dtype, torch.float64)
+        self.assertEqual(opt_mod._orig_mod.linear.bias.dtype, torch.float64)
+
+    def test_parameters_attr_load_state_dict_pre_hook_sees_orig_parameters(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(5, 5))
+                self.register_buffer("buffer", torch.randn(5, 5))
+
+            def forward(self, x):
+                return x + self.param + self.buffer
+
+        opt_mod = torch.compile(MyModule(), backend="eager")
+        hook_parameter_keys = []
+        hook_buffer_keys = []
+
+        def hook(module, *args):
+            self.assertIs(module, opt_mod)
+            hook_parameter_keys.append(list(module._parameters))
+            hook_buffer_keys.append(list(module._buffers))
+
+        opt_mod.register_load_state_dict_pre_hook(hook)
+        opt_mod.load_state_dict(opt_mod.state_dict(), strict=True)
+
+        self.assertEqual(hook_parameter_keys, [["param"]])
+        self.assertEqual(hook_buffer_keys, [["buffer"]])
+
+    def test_parameters_attr_preserves_orig_mod_parameter_name(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_parameter(
+                    "_orig_mod", torch.nn.Parameter(torch.randn(5, 5))
+                )
+
+            def forward(self, x):
+                return x + self._parameters["_orig_mod"]
+
+        mod = MyModule()
+        self.assertEqual(list(mod._parameters), ["_orig_mod"])
+
+        opt_mod = torch.compile(mod, backend="eager")
+
+        self.assertEqual(list(mod._parameters), ["_orig_mod"])
+        self.assertEqual(list(opt_mod._parameters), ["_orig_mod"])
+
+    def test_parameters_attr_replicate_does_not_mutate_orig_mod(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(5, 5))
+                self.register_buffer("buffer", torch.ones(5))
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x) + self.param + self.buffer
+
+        mod = MyModule()
+        opt_mod = torch.compile(mod, backend="eager")
+
+        replica = opt_mod._replicate_for_data_parallel()
+
+        self.assertEqual(list(mod._parameters), ["param"])
+        self.assertEqual(list(mod._buffers), ["buffer"])
+        self.assertEqual(list(mod._modules), ["linear"])
+        self.assertEqual(list(opt_mod._parameters), ["param"])
+        self.assertEqual(list(opt_mod._buffers), ["buffer"])
+        self.assertEqual(replica.__dict__["_parameters"], {})
+        self.assertEqual(list(replica.__dict__["_buffers"]), [])
+        self.assertEqual(list(replica.__dict__["_modules"]), ["_orig_mod"])
+        self.assertNotIn("_is_replica", mod.__dict__)
+        self.assertTrue(replica.__dict__["_is_replica"])
+
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_attr_precedence(self):
         class Mod(torch.nn.Module):
