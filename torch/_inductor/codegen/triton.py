@@ -3163,15 +3163,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             f"tl.full([{entry.block_size_str()}], True, tl.int1)[{suffix}]"
         )
 
+    def _should_track_contiguous_rdim(self) -> bool:
+        # This analysis is only needed for reduction kernels whose configs may
+        # be filtered. Use inside_reduction instead of num_reduction here
+        # because loads may be emitted before the reduction op increments
+        # num_reduction.
+        return (
+            config.deterministic
+            or config.test_configs.force_filter_reduction_configs
+            or (self.inside_reduction and self._has_activation_checkpoint_origins())
+        )
+
     @staticmethod
     def _has_stride1_on_rdim(index) -> bool:
-        # These analysis is only needed in deterministic mode so far
-        # to filter triton configs. Return false immediately to avoid
-        # increasing compilation time when the mode is off.
-        if not (
-            config.deterministic or config.test_configs.force_filter_reduction_configs
-        ):
-            return False
         support_vars = index.free_symbols
         reduce_vars = [
             var
@@ -4141,8 +4145,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ),
         )
 
-        if isinstance(indexing, IndexingOptions) and self._has_stride1_on_rdim(
-            indexing.index
+        if (
+            isinstance(indexing, IndexingOptions)
+            and self._should_track_contiguous_rdim()
+            and self._has_stride1_on_rdim(indexing.index)
         ):
             self.has_load_with_contiguous_rdim = True
 
@@ -4346,8 +4352,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             mask_constant_index=mode == "atomic_add",
         )
 
-        if isinstance(indexing, IndexingOptions) and self._has_stride1_on_rdim(
-            indexing.index
+        if (
+            isinstance(indexing, IndexingOptions)
+            and self._should_track_contiguous_rdim()
+            and self._has_stride1_on_rdim(indexing.index)
         ):
             self.stores_with_contiguous_rdim.append(name)
 
@@ -6229,6 +6237,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.has_load_with_contiguous_rdim
                 or self.has_store_with_contiguous_rdim
             )
+        if self._needs_activation_checkpoint_reduction_config_filtering():
+            # Combo kernels pass per-sub-kernel metadata through this helper.
+            # Keep checkpointed reductions on the same filtered config path
+            # there as well as in the standalone codegen_kernel() path.
+            out["force_filter_reduction_configs"] = True
+            out["dynamic_scale_rblock"] = False
+            out["has_loadstore_with_contiguous_rdim"] = (
+                self.has_load_with_contiguous_rdim
+                or self.has_store_with_contiguous_rdim
+            )
         if self.tma_min_block_sizes:
             out["tma_min_block_sizes"] = self.tma_min_block_sizes
         if self.tiling_scores:
@@ -6256,6 +6274,26 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if flops is not None:
                 out["kernel_flop"] = flops
         return out
+
+    @cache_on_self
+    def _has_activation_checkpoint_origins(self) -> bool:
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        for scheduler_node in self.features.scheduler_nodes():
+            node = scheduler_node.node
+            if node is None:
+                continue
+            for origin in node.get_origins():
+                meta = getattr(origin, "meta", None)
+                if meta is not None and meta.get("recompute") in (
+                    CheckpointPolicy.MUST_RECOMPUTE,
+                    CheckpointPolicy.PREFER_RECOMPUTE,
+                ):
+                    return True
+        return False
+
+    def _needs_activation_checkpoint_reduction_config_filtering(self) -> bool:
+        return self.num_reduction > 0 and self._has_activation_checkpoint_origins()
 
     @functools.cached_property
     def add_persistent_rblock(self) -> bool:
@@ -6443,6 +6481,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # every new node will increase the peak memory and our greedy approach would
         # introduce a lot of unnecessary cpu copies.
         optimize_mem = V.graph.is_inference or V.graph.is_backward
+        if self._needs_activation_checkpoint_reduction_config_filtering():
+            # Checkpointed forward reductions are compiled once in the training
+            # forward graph and again as recompute inside the backward graph.
+            # Treating the recompute copy like an arbitrary backward kernel can
+            # make it autotune under different mutation-preservation rules than
+            # the original forward. Keep these kernels on the forward-compatible
+            # autotune path so discrete downstream decisions, such as MoE routing,
+            # see the same low bits.
+            optimize_mem = False
 
         inductor_meta = {
             "grid_type": self._get_grid_type().__name__,
@@ -6452,6 +6499,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             **self.inductor_meta_per_kernel(),
             **self.inductor_meta_common(),
         }
+
+        if self._needs_activation_checkpoint_reduction_config_filtering():
+            # AC forward and recompute graphs are compiled independently. Keep
+            # reductions in checkpointed regions on the canonical filtered config
+            # path so downstream discrete decisions see the same low bits.
+            inductor_meta["force_filter_reduction_configs"] = True
+            # Dynamic R-block scaling depends on compiled register pressure. A
+            # recompute graph can legitimately materialize extra backward-needed
+            # outputs, so letting register pressure choose the reduction tree can
+            # make recompute numerics differ from the original forward.
+            inductor_meta["dynamic_scale_rblock"] = False
+            inductor_meta["has_loadstore_with_contiguous_rdim"] = (
+                self.has_load_with_contiguous_rdim
+                or self.has_store_with_contiguous_rdim
+            )
 
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
