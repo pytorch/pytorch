@@ -95,14 +95,12 @@ std::string simd_name(
       batched ? "b1" : "b0");
 }
 
-// (BM, BN, NSG) for the m5_tensor (matmul2d) kernel.
+// (BM, BN, NSG) for the mpp (matmul2d) kernel.
 struct TensorTile {
   int BM, BN, NSG;
 };
 
-// metalBLAS _pick_m5_tensor_tile (M5 Pro sweeps). Every tile returned here must
-// have a matching instantiation in Gemm.metal.
-TensorTile pick_m5_tensor_tile(int64_t M, int64_t N, int64_t K, c10::ScalarType dt) {
+TensorTile pick_mpp_tile(int64_t M, int64_t N, int64_t K, c10::ScalarType dt) {
   const int64_t mx = std::max(M, N);
   const bool is_lp = (dt != kFloat);
   const bool m_div_32 = (M % 32 == 0), m_div_64 = (M % 64 == 0);
@@ -146,7 +144,7 @@ TensorTile pick_m5_tensor_tile(int64_t M, int64_t N, int64_t K, c10::ScalarType 
   return {64, 64, 2};
 }
 
-std::string m5t_name(
+std::string mpp_name(
     const std::string& dt,
     TensorTile t,
     bool trans_a,
@@ -155,7 +153,7 @@ std::string m5t_name(
     at_gemm::GemmEpilogue epi,
     bool batched) {
   return fmt::format(
-      "gemm_m5t_{}_{}_{}_{}_ta{}_tb{}_{}_{}_{}",
+      "gemm_mpp_{}_{}_{}_{}_ta{}_tb{}_{}_{}_{}",
       dt,
       t.BM,
       t.BN,
@@ -580,13 +578,13 @@ std::vector<TensorTile> with_primary(
 
 // metalBLAS _mpp_tensor_tile_candidates: (candidates, margin). Candidate 0 is the
 // heuristic; a longer list marks an ambiguous regime. Every tile here must be an
-// instantiated untransposed m5t tile (Gemm.metal MB_M5T_* + MB_M5T_UNTRANS).
+// instantiated untransposed mpp tile (Gemm.metal MB_MPP_* + MB_MPP_UNTRANS).
 std::pair<std::vector<TensorTile>, double> mpp_tensor_tile_candidates(
     int64_t M,
     int64_t N,
     int64_t K,
     c10::ScalarType dt) {
-  TensorTile primary = pick_m5_tensor_tile(M, N, K, dt);
+  TensorTile primary = pick_mpp_tile(M, N, K, dt);
   if (dt == kFloat) {
     return {{primary}, kAutotuneMargin}; // fp32 wins everywhere - never probe
   }
@@ -627,7 +625,7 @@ std::pair<std::vector<TensorTile>, double> mpp_tensor_tile_candidates(
 // bigger tile (more K reuse) + NSG=4 over the 2-D heuristic's tiny tiles.
 TensorTile pick_bmm_tile(int64_t M, int64_t N, int64_t K, c10::ScalarType dt) {
   if (M == 1 || N == 1) {
-    return pick_m5_tensor_tile(M, N, K, dt);
+    return pick_mpp_tile(M, N, K, dt);
   }
   const int64_t mx = std::max(M, N), mn = std::min(M, N);
   if (K <= 128 && mx >= 512) {
@@ -655,13 +653,15 @@ std::vector<TensorTile> bmm_candidates(int64_t M, int64_t N, int64_t K, c10::Sca
   return with_primary(pick_bmm_tile(M, N, K, dt), extra);
 }
 
-// A resolved launch plan: an m5_tensor tile, or a split-K / 1x1-conv candidate
-// (deep-K / thin-N regimes the autotuner verifies against the m5_tensor result).
+// A resolved launch plan: an mpp tile, a split-K / 1x1-conv candidate
+// (deep-K / thin-N regimes the autotuner verifies against the mpp result),
+// or a thin-M gemv_bt spec (the autotuner times it against the mpp tiles).
 struct GemmPlan {
-  enum Backend { kM5T, kSplitK, kConv } backend = kM5T;
-  TensorTile tile{64, 64, 2}; // m5t tile, or split-K (BM, BN, NSG)
+  enum Backend { kMPP, kSplitK, kConv, kGemvBt } backend = kMPP;
+  TensorTile tile{64, 64, 2}; // mpp tile, or split-K (BM, BN, NSG)
   int G = 0; // split-K chunks
   int BMW = 0, BNO = 0, convNSG = 0; // conv
+  GemvBtSpec gbt{}; // valid only when backend == kGemvBt
 };
 
 // metalBLAS _is_splitk_regime / _is_conv_regime + spec families (low precision).
@@ -689,7 +689,7 @@ std::vector<SplitKSpec> splitk_specs(int64_t K) {
   return s;
 }
 // conv needs a COMPILE-TIME channel count (KCONST), so it is enabled only for the
-// precompiled K set (the AOT analog of metalBLAS's JIT-per-K); other K -> m5_tensor.
+// precompiled K set (the AOT analog of metalBLAS's JIT-per-K); other K -> mpp.
 bool conv_k_supported(int64_t K) {
   return K == 512 || K == 1024 || K == 2048 || K == 4096;
 }
@@ -788,6 +788,53 @@ void launch_conv(
   });
 }
 
+// Thin-M gemv_bt launch (row- or column-major B per spec.trans_b); encode-only.
+// Shared by the autotuner probe and the final dispatch, so the timed kernel is
+// exactly the one that runs. Caller supplies the GemvBtDims fields.
+void launch_gemv_bt(
+    const std::string& dt_str,
+    const GemvBtSpec& spec,
+    at_gemm::GemmEpilogue epi,
+    const Tensor& B,
+    const Tensor& X,
+    const Tensor& out,
+    const Tensor& self,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int32_t ldb,
+    int32_t ldx,
+    int32_t ldy,
+    int32_t self_r,
+    int32_t self_c,
+    int32_t batch_b,
+    int32_t batch_x,
+    int32_t batch_y,
+    int32_t batch_self,
+    const std::array<float, 2>& alpha_beta,
+    int64_t batch) {
+  // Field order must match at_gemm::GemvBtDims.
+  const std::array<int32_t, 12> bd = {
+      static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K),
+      ldb, ldx, ldy, self_r, self_c, batch_b, batch_x, batch_y, batch_self};
+  auto pso = lib.getPipelineStateForFunc(gemv_bt_name(dt_str, spec, epi));
+  const int per = spec.trans_b ? (spec.nwarps * spec.ncols) : (32 * spec.vec);
+  const int64_t ng = (N + per - 1) / per;
+  const NSUInteger tg = static_cast<NSUInteger>(spec.nwarps * 32);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "gemm_gemv_bt", {B, X});
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, B, X, out, bd, self, alpha_beta);
+      [enc dispatchThreadgroups:MTLSizeMake(ng, 1, batch)
+          threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+}
+
 struct PlanKey {
   c10::ScalarType dt;
   int64_t M, N, K;
@@ -810,9 +857,9 @@ struct PlanKeyHash {
 std::unordered_map<PlanKey, GemmPlan, PlanKeyHash> g_tile_cache;
 std::mutex g_tile_mutex;
 
-// Time each candidate (best-of-reps min) on scratch; candidate 0 (heuristic m5t) is
+// Time each candidate (best-of-reps min) on scratch; candidate 0 (heuristic mpp) is
 // kept unless beaten by > margin. split-K / conv candidates are verified against the
-// m5t reference before joining the probe (metalBLAS _autotune_mppt).
+// mpp reference before joining the probe (metalBLAS _autotune_mppt).
 GemmPlan autotune_plan(
     const std::string& dt_str,
     bool relaxed,
@@ -826,7 +873,8 @@ GemmPlan autotune_plan(
     const std::vector<TensorTile>& cands,
     double margin,
     const std::vector<SplitKSpec>& sk_specs,
-    const std::vector<ConvSpec>& conv_specs) {
+    const std::vector<ConvSpec>& conv_specs,
+    const GemvBtSpec& gbt) {
   auto stream = getCurrentMPSStream();
   Tensor scratch = batched ? at::empty({batch, M, N}, Av.options())
                            : at::empty({M, N}, Av.options());
@@ -841,9 +889,9 @@ GemmPlan autotune_plan(
       0};
   const std::array<float, 2> ab = {1.0f, 0.0f};
 
-  auto enqueue_m5t = [&](TensorTile t, const Tensor& o) {
+  auto enqueue_mpp = [&](TensorTile t, const Tensor& o) {
     const std::string fname =
-        m5t_name(dt_str, t, false, false, relaxed, at_gemm::GemmEpilogue::None, batched);
+        mpp_name(dt_str, t, false, false, relaxed, at_gemm::GemmEpilogue::None, batched);
     auto pso = lib.getPipelineStateForFunc(fname);
     const int64_t tiles_m = (M + t.BM - 1) / t.BM;
     const int64_t tiles_n = (N + t.BN - 1) / t.BN;
@@ -865,10 +913,26 @@ GemmPlan autotune_plan(
   };
   std::vector<Cand> cand;
   for (auto t : cands) {
-    cand.push_back({GemmPlan{GemmPlan::kM5T, t}, [&, t](const Tensor& o) { enqueue_m5t(t, o); }});
+    cand.push_back({GemmPlan{GemmPlan::kMPP, t}, [&, t](const Tensor& o) { enqueue_mpp(t, o); }});
+  }
+  // Thin-M gemv_bt joins the probe as a peer of the mpp tiles: correctness is
+  // already proven against mpp, so unlike split-K/conv it needs no match gate.
+  if (gbt.valid) {
+    GemmPlan p;
+    p.backend = GemmPlan::kGemvBt;
+    p.gbt = gbt;
+    cand.push_back({p, [&, gbt](const Tensor& o) {
+                      launch_gemv_bt(
+                          dt_str, gbt, at_gemm::GemmEpilogue::None, Bv, Av, o, Av,
+                          M, N, K, static_cast<int32_t>(N), static_cast<int32_t>(K),
+                          static_cast<int32_t>(N), 0, 0,
+                          batched ? static_cast<int32_t>(K * N) : 0,
+                          batched ? static_cast<int32_t>(M * K) : 0,
+                          batched ? static_cast<int32_t>(M * N) : 0, 0, ab, batch);
+                    }});
   }
 
-  // split-K / conv candidates: included only when their result matches the m5t
+  // split-K / conv candidates: included only when their result matches the mpp
   // reference everywhere, via an allclose-style per-element gate (not a global max-
   // abs, which a kernel wrong only at a few small outputs would slip past).
   if (!sk_specs.empty() || !conv_specs.empty()) {
@@ -877,7 +941,7 @@ GemmPlan autotune_plan(
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
     auto matches = [&](const Tensor& o) {
       // both kernels accumulate in fp32, so a correct candidate differs from the
-      // m5t reference only by bf16/fp16 rounding (~1 ULP); 5% rtol + small atol.
+      // mpp reference only by bf16/fp16 rounding (~1 ULP); 5% rtol + small atol.
       return o.sub(ref).abs().sub(ref.abs().mul(0.05)).max().item<double>() <= 0.05;
     };
     Tensor probe = at::empty({M, N}, Av.options());
@@ -931,9 +995,33 @@ GemmPlan autotune_plan(
     reps = std::max(reps, 5);
   }
 
+  // Bound the probe by wall-time, not FLOPs: thin shapes have tiny FLOPs but slow
+  // kernels (a 16x4096x4096 tile ~110us, a high-M gemv_bt ~850us), so the FLOP-scaled
+  // iters above would probe them for seconds. Warm once so every PSO compiles, then
+  // pilot the compiled kernel to scale warmup/iters per candidate to a few ms each
+  // (still capped by the FLOP budget, so genuinely tiny shapes keep full resolution).
+  // The warm pass matters: timing the cold first run would fold in the one-time
+  // compile, collapse itj to 1, and make the small-shape picks noisy.
   for (auto& c : cand) {
-    for (int w = 0; w < warmup; ++w) {
-      c.run(scratch);
+    c.run(scratch);
+  }
+  stream->synchronize(SyncType::COMMIT_AND_WAIT);
+
+  std::vector<double> pilot(cand.size(), 0.0);
+  for (size_t j = 0; j < cand.size(); ++j) {
+    auto t0 = std::chrono::steady_clock::now();
+    cand[j].run(scratch);
+    stream->synchronize(SyncType::COMMIT_AND_WAIT);
+    pilot[j] = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  }
+  auto budget = [](double per_call, double target_s, int cap) {
+    return std::max(1, std::min(cap, static_cast<int>(target_s / std::max(per_call, 1e-6))));
+  };
+
+  for (size_t j = 0; j < cand.size(); ++j) {
+    const int wj = budget(pilot[j], 3e-3, warmup);
+    for (int w = 0; w < wj; ++w) {
+      cand[j].run(scratch);
     }
   }
   stream->synchronize(SyncType::COMMIT_AND_WAIT);
@@ -941,13 +1029,14 @@ GemmPlan autotune_plan(
   std::vector<double> best(cand.size(), 1e30);
   for (int r = 0; r < reps; ++r) {
     for (size_t j = 0; j < cand.size(); ++j) {
+      const int itj = budget(pilot[j], 2e-3, iters);
       auto t0 = std::chrono::steady_clock::now();
-      for (int it = 0; it < iters; ++it) {
+      for (int it = 0; it < itj; ++it) {
         cand[j].run(scratch);
       }
       stream->synchronize(SyncType::COMMIT_AND_WAIT);
       const double dt =
-          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / iters;
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / itj;
       best[j] = std::min(best[j], dt);
     }
   }
@@ -963,7 +1052,7 @@ GemmPlan autotune_plan(
   return cand[0].plan;
 }
 
-// Resolve the launch plan: heuristic m5t for transposed / non-packed / autotune-off,
+// Resolve the launch plan: heuristic mpp for transposed / non-packed / autotune-off,
 // else the cached autotuned winner (probing once on first sight of the shape).
 GemmPlan choose_gemm_plan(
     c10::ScalarType dt,
@@ -976,10 +1065,11 @@ GemmPlan choose_gemm_plan(
     int64_t M,
     int64_t N,
     int64_t K,
-    int64_t batch) {
+    int64_t batch,
+    const GemvBtSpec& gbt) {
   if (!autotune_enabled() || !packed_untrans) {
     GemmPlan p;
-    p.tile = batched ? pick_bmm_tile(M, N, K, dt) : pick_m5_tensor_tile(M, N, K, dt);
+    p.tile = batched ? pick_bmm_tile(M, N, K, dt) : pick_mpp_tile(M, N, K, dt);
     return p;
   }
   const PlanKey key{dt, M, N, K, batched};
@@ -1010,23 +1100,29 @@ GemmPlan choose_gemm_plan(
     }
   }
   GemmPlan plan;
-  if (cands.size() > 1 || !sk.empty() || !cv.empty()) {
-    plan = autotune_plan(dt_str, relaxed, batched, Av, Bv, M, N, K, batch, cands, margin, sk, cv);
+  if (cands.size() > 1 || !sk.empty() || !cv.empty() || gbt.valid) {
+    plan = autotune_plan(
+        dt_str, relaxed, batched, Av, Bv, M, N, K, batch, cands, margin, sk, cv, gbt);
   } else {
-    plan.backend = GemmPlan::kM5T;
+    plan.backend = GemmPlan::kMPP;
     plan.tile = cands[0];
   }
   static const bool debug = c10::utils::has_env("PYTORCH_MPS_GEMM_DEBUG");
   if (debug) {
     const char* bk = plan.backend == GemmPlan::kSplitK ? "splitk"
         : plan.backend == GemmPlan::kConv             ? "conv"
-                                                      : "m5t";
+        : plan.backend == GemmPlan::kGemvBt           ? "gemv_bt"
+                                                      : "mpp";
     TORCH_WARN(
         "[mps_gemm] ",
         batched ? "bmm " : "",
         bk,
         " M=", M, " N=", N, " K=", K,
-        " tile=", plan.tile.BM, "x", plan.tile.BN, "x", plan.tile.NSG,
+        plan.backend == GemmPlan::kGemvBt
+            ? (" mrows=" + std::to_string(plan.gbt.mrows) + " vec=" +
+               std::to_string(plan.gbt.vec) + " nwarps=" + std::to_string(plan.gbt.nwarps))
+            : (" tile=" + std::to_string(plan.tile.BM) + "x" +
+               std::to_string(plan.tile.BN) + "x" + std::to_string(plan.tile.NSG)),
         plan.backend == GemmPlan::kSplitK ? (" G=" + std::to_string(plan.G)) : "",
         plan.backend == GemmPlan::kConv
             ? (" BMW=" + std::to_string(plan.BMW) + " BNO=" + std::to_string(plan.BNO))
@@ -1054,10 +1150,10 @@ bool gemm_use_mpp() {
   return ok;
 }
 
-// True only on the M5 tensor unit (Apple10+), where the simd kernels are competitive
-// for tiny shapes. On earlier GPUs (e.g. M2) matmul2d is ~20x faster even at small K,
-// so the dispatcher's "tiny shape -> simd" fallback is gated on this.
-static bool gemm_on_m5_tensor_unit() {
+// True only on GPUs with the NAX matrix unit (Apple10+), where the simd kernels are
+// competitive for tiny shapes. On earlier GPUs (e.g. M2) matmul2d is ~20x faster even
+// at small K, so the dispatcher's "tiny shape -> simd" fallback is gated on this.
+static bool gemm_has_nax_unit() {
   static const bool ok = [] {
     auto dev = MPSDevice::getInstance()->device();
     return dev != nil && [dev supportsFamily:MTLGPUFamilyApple10];
@@ -1201,58 +1297,33 @@ void mps_gemm(
     }
   }
 
-  // Thin-M batched GEMV (M in 2..16, half/bf16): recovers the GEMV bandwidth the
-  // matmul2d tile wastes on a few rows. M5-only; X (=A) must be row-major.
+  // Transposed-B thin-M GEMV (x @ W.t(), M in 2..16, half/bf16): the lm-head /
+  // vocab path the autotuner can't reach (it only probes untransposed tiles). The
+  // column-major gemv_bt_t kernel reduces over K with simd_sum and has no high-M
+  // cliff, so route it directly. Row-major B instead flows to the autotuner below,
+  // which times gemv_bt against the matmul tiles per shape (see choose_gemm_plan).
   static const bool gemv_bt_off = c10::utils::has_env("PYTORCH_MPS_NO_GEMV_BT");
-  if (!gemv_bt_off && (dt == kHalf || dt == kBFloat16) && gemm_use_mpp() &&
-      gemm_on_m5_tensor_unit() && !ra.trans && M >= 2 && M <= 16 && K >= 64 && N >= 16) {
-    const bool tb = rb.trans;
-    const int64_t ncap = tb ? 262144 : 8192; // column-major B reaches vocab scale
-    if (N <= ncap) {
-      // Column-major vectorizes X and B over K (needs ldx, ldb, offsets, batch
-      // strides); row-major reads X scalar and only vectorizes B over N.
-      const int64_t align = tb
-          ? (rb.ld | ra.ld | ra.view.storage_offset() | rb.view.storage_offset() |
-             (batched ? (ra.view.stride(0) | rb.view.stride(0)) : 0))
-          : (rb.ld | rb.view.storage_offset() | (batched ? rb.view.stride(0) : 0));
-      const GemvBtSpec spec = pick_gemv_bt(M, N, K, tb, align);
-      if (spec.valid) {
-        // Field order must match at_gemm::GemvBtDims (size asserted above).
-        const std::array<int32_t, 12> bd = {
-            static_cast<int32_t>(M),
-            static_cast<int32_t>(N),
-            static_cast<int32_t>(K),
-            static_cast<int32_t>(rb.ld),
-            static_cast<int32_t>(ra.ld),
-            static_cast<int32_t>(ldc),
-            static_cast<int32_t>(self_r),
-            static_cast<int32_t>(self_c),
-            batched ? static_cast<int32_t>(rb.view.stride(0)) : 0,
-            batched ? static_cast<int32_t>(ra.view.stride(0)) : 0,
-            batched ? static_cast<int32_t>(target.stride(0)) : 0,
-            static_cast<int32_t>(batch_self)};
-        const std::array<float, 2> ab = {
-            static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
-        auto pso = lib.getPipelineStateForFunc(gemv_bt_name(dt_str, spec, epi));
-        const int per = tb ? (spec.nwarps * spec.ncols) : (32 * spec.vec);
-        const int64_t ng = (N + per - 1) / per;
-        const NSUInteger tg = static_cast<NSUInteger>(spec.nwarps * 32);
-        dispatch_sync_with_rethrow(stream->queue(), ^() {
-          @autoreleasepool {
-            getMPSProfiler().beginProfileKernel(pso, "gemm_gemv_bt", {rb.view, ra.view});
-            auto enc = stream->commandEncoder();
-            [enc setComputePipelineState:pso];
-            mtl_setArgs(enc, rb.view, ra.view, target, bd, self_e, ab);
-            [enc dispatchThreadgroups:MTLSizeMake(ng, 1, batch)
-                threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-            getMPSProfiler().endProfileKernel(pso);
-          }
-        });
-        if (!target.is_same(out)) {
-          out.copy_(target);
-        }
-        return;
+  if (!gemv_bt_off && rb.trans && (dt == kHalf || dt == kBFloat16) && gemm_use_mpp() &&
+      gemm_has_nax_unit() && !ra.trans && M >= 2 && M <= 16 && K >= 64 &&
+      N >= 16 && N <= 262144) {
+    const int64_t align = rb.ld | ra.ld | ra.view.storage_offset() |
+        rb.view.storage_offset() |
+        (batched ? (ra.view.stride(0) | rb.view.stride(0)) : 0);
+    const GemvBtSpec spec = pick_gemv_bt(M, N, K, /*trans_b=*/true, align);
+    if (spec.valid) {
+      const std::array<float, 2> ab = {
+          static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
+      launch_gemv_bt(
+          dt_str, spec, epi, rb.view, ra.view, target, self_e, M, N, K,
+          static_cast<int32_t>(rb.ld), static_cast<int32_t>(ra.ld),
+          static_cast<int32_t>(ldc), self_r, self_c,
+          batched ? static_cast<int32_t>(rb.view.stride(0)) : 0,
+          batched ? static_cast<int32_t>(ra.view.stride(0)) : 0,
+          batched ? static_cast<int32_t>(target.stride(0)) : 0, batch_self, ab, batch);
+      if (!target.is_same(out)) {
+        out.copy_(target);
       }
+      return;
     }
   }
 
@@ -1303,30 +1374,49 @@ void mps_gemm(
   const bool want_relaxed = (dt != kFloat) || relaxed_fp32;
   const bool transposed = ra.trans || rb.trans;
   // K >= 64 sends small-K matmuls to the simd kernel; that is only worthwhile on
-  // the M5 tensor unit. Off it (e.g. M2) simd is ~20x slower, so use matmul2d for
+  // the NAX matrix unit. Off it (e.g. M2) simd is ~20x slower, so use matmul2d for
   // all K there (the kernel takes K as a runtime extent, so any K >= 1 is valid).
-  const bool use_m5t = use_mpp && M >= 2 && N >= 32 &&
-      (K >= 64 || !gemm_on_m5_tensor_unit());
+  const bool use_mpp_gemm = use_mpp && M >= 2 && N >= 32 &&
+      (K >= 64 || !gemm_has_nax_unit());
   const bool relaxed = want_relaxed;
 
-  if (use_m5t) {
+  if (use_mpp_gemm) {
     const bool packed_untrans = !transposed && ra.ld == K && rb.ld == N;
+    // Row-major thin-M (M in 2..16, half/bf16, NAX) enters the probe as a candidate
+    // against the matmul tiles; the autotuner caches the per-shape winner.
+    GemvBtSpec gbt{};
+    if (!gemv_bt_off && packed_untrans && gemm_has_nax_unit() &&
+        (dt == kHalf || dt == kBFloat16) && M >= 2 && M <= 16 && K >= 64 && N >= 16) {
+      const int64_t align =
+          rb.ld | rb.view.storage_offset() | (batched ? rb.view.stride(0) : 0);
+      gbt = pick_gemv_bt(M, N, K, /*trans_b=*/false, align);
+    }
     const GemmPlan plan = choose_gemm_plan(
-        dt, dt_str, relaxed, batched, packed_untrans, ra.view, rb.view, M, N, K, batch);
+        dt, dt_str, relaxed, batched, packed_untrans, ra.view, rb.view, M, N, K, batch, gbt);
     const bool epi_none = (epi == at_gemm::GemmEpilogue::None);
     const bool out_packed = (ldc == N) && (!batched || target.stride(0) == M * N);
     // split-K / conv only run for a bare (no-epilogue) packed-output mm; addmm or
-    // a cached sk/conv plan we cannot use here fall back to the m5t tile.
-    if (epi_none && out_packed && plan.backend == GemmPlan::kSplitK) {
+    // a cached sk/conv plan we cannot use here fall back to the mpp tile.
+    if (plan.backend == GemmPlan::kGemvBt) {
+      // Launch with this call's spec (alignment matches the actual operands); the
+      // cached plan.gbt only records the autotuner's pick on the first shape seen.
+      launch_gemv_bt(
+          dt_str, gbt.valid ? gbt : plan.gbt, epi, rb.view, ra.view, target, self_e, M, N, K,
+          static_cast<int32_t>(rb.ld), static_cast<int32_t>(ra.ld),
+          static_cast<int32_t>(ldc), self_r, self_c,
+          batched ? static_cast<int32_t>(rb.view.stride(0)) : 0,
+          batched ? static_cast<int32_t>(ra.view.stride(0)) : 0,
+          batched ? static_cast<int32_t>(target.stride(0)) : 0, batch_self, alpha_beta, batch);
+    } else if (epi_none && out_packed && plan.backend == GemmPlan::kSplitK) {
       launch_splitk(dt_str, ra.view, rb.view, target, M, N, K,
                     plan.tile.BM, plan.tile.BN, plan.tile.NSG, plan.G);
     } else if (epi_none && out_packed && plan.backend == GemmPlan::kConv) {
       launch_conv(dt_str, ra.view, rb.view, target, M, N, K, plan.BMW, plan.BNO, plan.convNSG);
     } else {
-      const TensorTile t = (plan.backend == GemmPlan::kM5T)
+      const TensorTile t = (plan.backend == GemmPlan::kMPP)
           ? plan.tile
-          : pick_m5_tensor_tile(M, N, K, dt);
-      const std::string fname = m5t_name(dt_str, t, ra.trans, rb.trans, relaxed, epi, batched);
+          : pick_mpp_tile(M, N, K, dt);
+      const std::string fname = mpp_name(dt_str, t, ra.trans, rb.trans, relaxed, epi, batched);
       auto pso = lib.getPipelineStateForFunc(fname);
       const int64_t tiles_m = (M + t.BM - 1) / t.BM;
       const int64_t tiles_n = (N + t.BN - 1) / t.BN;

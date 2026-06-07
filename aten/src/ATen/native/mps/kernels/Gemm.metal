@@ -223,15 +223,15 @@ MB_CGEMV(float2, float)
 MB_CGEMV(half2, half)
 
 // ---------------------------------------------------------------------------
-// m5_tensor_gemm (Metal 4 only): mpp::tensor_ops::matmul2d. Handles packed and
+// mpp_gemm (Metal 4 only): mpp::tensor_ops::matmul2d. Handles packed and
 // transposed/strided operands (strided tensor view + transpose flags). name:
-//   gemm_m5t_{dt}_{BM}_{BN}_{NSG}_ta{0|1}_tb{0|1}_{relaxed|full}_{none|ab}_{b0|b1}
+//   gemm_mpp_{dt}_{BM}_{BN}_{NSG}_ta{0|1}_tb{0|1}_{relaxed|full}_{none|ab}_{b0|b1}
 // ---------------------------------------------------------------------------
 #if __METAL_VERSION__ >= 400
-#define MB_M5T(DT, BM, BN, NSG, TAN, TAV, TBN, TBV, RXN, RXV, EN, EV, BTN, BTV) \
-  template [[host_name("gemm_m5t_" #DT "_" #BM "_" #BN "_" #NSG "_ta" #TAN      \
+#define MB_MPP(DT, BM, BN, NSG, TAN, TAV, TBN, TBV, RXN, RXV, EN, EV, BTN, BTV) \
+  template [[host_name("gemm_mpp_" #DT "_" #BM "_" #BN "_" #NSG "_ta" #TAN      \
                        "_tb" #TBN "_" #RXN "_" #EN "_" #BTN)]] kernel void      \
-  m5_tensor_gemm<DT, DT, BM, BN, NSG, TAV, TBV, RXV, GemmEpilogue::EV, BTV>(    \
+  mpp_gemm<DT, DT, BM, BN, NSG, TAV, TBV, RXV, GemmEpilogue::EV, BTV>(    \
       device DT*,                                                              \
       device DT*,                                                              \
       device DT*,                                                              \
@@ -241,33 +241,33 @@ MB_CGEMV(half2, half)
       uint3);
 
 // All (epilogue x batched) variants for one tile + transpose + precision combo.
-#define MB_M5T_EB(DT, BM, BN, NSG, TAN, TAV, TBN, TBV, RXN, RXV)            \
-  MB_M5T(DT, BM, BN, NSG, TAN, TAV, TBN, TBV, RXN, RXV, none, None, b0, false) \
-  MB_M5T(DT, BM, BN, NSG, TAN, TAV, TBN, TBV, RXN, RXV, none, None, b1, true)  \
-  MB_M5T(DT, BM, BN, NSG, TAN, TAV, TBN, TBV, RXN, RXV, ab, AlphaBeta, b0, false) \
-  MB_M5T(DT, BM, BN, NSG, TAN, TAV, TBN, TBV, RXN, RXV, ab, AlphaBeta, b1, true)
+#define MB_MPP_EB(DT, BM, BN, NSG, TAN, TAV, TBN, TBV, RXN, RXV)            \
+  MB_MPP(DT, BM, BN, NSG, TAN, TAV, TBN, TBV, RXN, RXV, none, None, b0, false) \
+  MB_MPP(DT, BM, BN, NSG, TAN, TAV, TBN, TBV, RXN, RXV, none, None, b1, true)  \
+  MB_MPP(DT, BM, BN, NSG, TAN, TAV, TBN, TBV, RXN, RXV, ab, AlphaBeta, b0, false) \
+  MB_MPP(DT, BM, BN, NSG, TAN, TAV, TBN, TBV, RXN, RXV, ab, AlphaBeta, b1, true)
 
 // Low precision (half/bf16): relaxed only, all 4 transpose combos.
-#define MB_M5T_LP(DT, BM, BN, NSG)                       \
-  MB_M5T_EB(DT, BM, BN, NSG, 0, false, 0, false, relaxed, true) \
-  MB_M5T_EB(DT, BM, BN, NSG, 1, true, 0, false, relaxed, true)  \
-  MB_M5T_EB(DT, BM, BN, NSG, 0, false, 1, true, relaxed, true)  \
-  MB_M5T_EB(DT, BM, BN, NSG, 1, true, 1, true, relaxed, true)
+#define MB_MPP_LP(DT, BM, BN, NSG)                       \
+  MB_MPP_EB(DT, BM, BN, NSG, 0, false, 0, false, relaxed, true) \
+  MB_MPP_EB(DT, BM, BN, NSG, 1, true, 0, false, relaxed, true)  \
+  MB_MPP_EB(DT, BM, BN, NSG, 0, false, 1, true, relaxed, true)  \
+  MB_MPP_EB(DT, BM, BN, NSG, 1, true, 1, true, relaxed, true)
 
 // fp32: every transpose combo gets relaxed (high/medium) + full (highest, the
 // default). set_float32_matmul_precision picks which at dispatch; full keeps
 // transposed fp32 on the tensor unit instead of falling back to the simd kernel.
-#define MB_M5T_FP(DT, BM, BN, NSG)                                  \
-  MB_M5T_EB(float, BM, BN, NSG, 0, false, 0, false, relaxed, true)  \
-  MB_M5T_EB(float, BM, BN, NSG, 0, false, 0, false, full, false)    \
-  MB_M5T_EB(float, BM, BN, NSG, 1, true, 0, false, relaxed, true)   \
-  MB_M5T_EB(float, BM, BN, NSG, 1, true, 0, false, full, false)     \
-  MB_M5T_EB(float, BM, BN, NSG, 0, false, 1, true, relaxed, true)   \
-  MB_M5T_EB(float, BM, BN, NSG, 0, false, 1, true, full, false)     \
-  MB_M5T_EB(float, BM, BN, NSG, 1, true, 1, true, relaxed, true)    \
-  MB_M5T_EB(float, BM, BN, NSG, 1, true, 1, true, full, false)
+#define MB_MPP_FP(DT, BM, BN, NSG)                                  \
+  MB_MPP_EB(float, BM, BN, NSG, 0, false, 0, false, relaxed, true)  \
+  MB_MPP_EB(float, BM, BN, NSG, 0, false, 0, false, full, false)    \
+  MB_MPP_EB(float, BM, BN, NSG, 1, true, 0, false, relaxed, true)   \
+  MB_MPP_EB(float, BM, BN, NSG, 1, true, 0, false, full, false)     \
+  MB_MPP_EB(float, BM, BN, NSG, 0, false, 1, true, relaxed, true)   \
+  MB_MPP_EB(float, BM, BN, NSG, 0, false, 1, true, full, false)     \
+  MB_MPP_EB(float, BM, BN, NSG, 1, true, 1, true, relaxed, true)    \
+  MB_MPP_EB(float, BM, BN, NSG, 1, true, 1, true, full, false)
 
-#define MB_M5T_TILES(MAC, DT) \
+#define MB_MPP_TILES(MAC, DT) \
   MAC(DT, 16, 128, 4)         \
   MAC(DT, 32, 128, 4)         \
   MAC(DT, 32, 32, 4)          \
@@ -279,26 +279,26 @@ MB_CGEMV(half2, half)
   MAC(DT, 64, 64, 2)          \
   MAC(DT, 64, 64, 4)
 
-MB_M5T_TILES(MB_M5T_LP, half)
-MB_M5T_TILES(MB_M5T_LP, bfloat)
-MB_M5T_TILES(MB_M5T_FP, float)
+MB_MPP_TILES(MB_MPP_LP, half)
+MB_MPP_TILES(MB_MPP_LP, bfloat)
+MB_MPP_TILES(MB_MPP_FP, float)
 
 // Extra autotuner-candidate tiles (untransposed only - the autotuner probes the
 // packed path). These complete the metalBLAS _mpp_tensor_tile_candidates /
-// _bmm_candidates union; the heuristic primary already comes from MB_M5T_TILES.
-#define MB_M5T_UNTRANS_LP(DT, BM, BN, NSG) \
-  MB_M5T_EB(DT, BM, BN, NSG, 0, false, 0, false, relaxed, true)
-#define MB_M5T_UNTRANS_FP(DT, BM, BN, NSG)                       \
-  MB_M5T_EB(DT, BM, BN, NSG, 0, false, 0, false, relaxed, true)  \
-  MB_M5T_EB(DT, BM, BN, NSG, 0, false, 0, false, full, false)
-#define MB_M5T_UNTRANS_TILES(MAC, DT)                       \
+// _bmm_candidates union; the heuristic primary already comes from MB_MPP_TILES.
+#define MB_MPP_UNTRANS_LP(DT, BM, BN, NSG) \
+  MB_MPP_EB(DT, BM, BN, NSG, 0, false, 0, false, relaxed, true)
+#define MB_MPP_UNTRANS_FP(DT, BM, BN, NSG)                       \
+  MB_MPP_EB(DT, BM, BN, NSG, 0, false, 0, false, relaxed, true)  \
+  MB_MPP_EB(DT, BM, BN, NSG, 0, false, 0, false, full, false)
+#define MB_MPP_UNTRANS_TILES(MAC, DT)                       \
   MAC(DT, 128, 32, 2) MAC(DT, 256, 32, 4) MAC(DT, 32, 128, 2) \
   MAC(DT, 32, 256, 4) MAC(DT, 64, 32, 2) MAC(DT, 128, 32, 4)   \
   MAC(DT, 192, 32, 2) MAC(DT, 128, 64, 4)
 
-MB_M5T_UNTRANS_TILES(MB_M5T_UNTRANS_LP, half)
-MB_M5T_UNTRANS_TILES(MB_M5T_UNTRANS_LP, bfloat)
-MB_M5T_UNTRANS_TILES(MB_M5T_UNTRANS_FP, float)
+MB_MPP_UNTRANS_TILES(MB_MPP_UNTRANS_LP, half)
+MB_MPP_UNTRANS_TILES(MB_MPP_UNTRANS_LP, bfloat)
+MB_MPP_UNTRANS_TILES(MB_MPP_UNTRANS_FP, float)
 
 // ---------------------------------------------------------------------------
 // split-K (Metal 4 only): deep-K / few-output-tile GEMM + fp32 reduction. Low
@@ -326,7 +326,7 @@ MB_SPLITK_ALL(bfloat)
 
 // ---------------------------------------------------------------------------
 // 1x1-conv (Metal 4 only): very-thin-N GEMM via convolution2d, low precision only.
-// KCONST must be compile-time, so common K values are precompiled (else -> m5t).
+// KCONST must be compile-time, so common K values are precompiled (else -> mpp).
 // name: conv1x1_gemm_{dt}_{BMW}_{BNO}_{NSG}_{KCONST}  (BNO = N channels: 32 | 64)
 // ---------------------------------------------------------------------------
 #define MB_CONV(DT, BMW, BNO, NSG, KC)                                            \
@@ -346,8 +346,8 @@ MB_CONV_ALL(half)
 MB_CONV_ALL(bfloat)
 
 // ---------------------------------------------------------------------------
-// gemv_bt (Metal 4 only): thin-M batched GEMV (M in 2..16), routed only on the M5
-// unit (kernels_40). The host requests a (MROWS, VEC, NCOLS) from this set.
+// gemv_bt (Metal 4 only): thin-M batched GEMV (M in 2..16), routed only on the NAX
+// matrix unit (kernels_40). The host requests a (MROWS, VEC, NCOLS) from this set.
 // names: gemv_bt_{dt}_{MR}_{VEC}_{none|ab}, gemv_bt_t_{dt}_{MR}_{VEC}_{NC}_{none|ab}
 // ---------------------------------------------------------------------------
 #define MB_GEMV_BT(DT, MR, VEC, EN, EV)                                  \

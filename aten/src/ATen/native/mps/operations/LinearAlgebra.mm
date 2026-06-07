@@ -296,7 +296,7 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   }
   // (The half "LORADOWN" GEMV padding workaround for #178056 was dropped: it
   // guarded the MPSGraph/MPSNDArray GEMV path, which float mm no longer uses - the
-  // hand-written gemv/simd/m5 kernels handle these shapes correctly.)
+  // hand-written gemv/simd/mpp kernels handle these shapes correctly.)
   return !is_macos_14_4_or_newer &&
       (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
        self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
@@ -665,7 +665,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
   }
 
   // Complex decomposes into four real GEMMs; integer + float/half/bfloat run the
-  // hand-written kernels (int_gemm / simd / m5_tensor). bool and legacy float edge
+  // hand-written kernels (int_gemm / simd / mpp). bool and legacy float edge
   // cases (use_metal_mm) use the naive-metal kernel; those workarounds skip integers.
   if (self.is_complex()) {
     mps_gemm_complex(self, other, output, std::nullopt, /*alpha=*/1, /*beta=*/0, at_gemm::GemmEpilogue::None);
@@ -729,7 +729,7 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
   }
 
   // baddbmm applies a per-batch epilogue and maps directly onto the batched GEMM
-  // kernel (integer via int_gemm, float/half/bfloat via simd/m5_tensor, complex
+  // kernel (integer via int_gemm, float/half/bfloat via simd/mpp, complex
   // via the decomposed real GEMMs).
   if (opType == BADDBMM_OP_TYPE && gemm_supported_dtype(batch1.scalar_type())) {
     mps_gemm(batch1, batch2, result, input, alpha, beta, at_gemm::GemmEpilogue::AlphaBeta);

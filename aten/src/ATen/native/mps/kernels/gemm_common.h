@@ -15,7 +15,7 @@ enum class GemmEpilogue : int {
   AlphaBeta = 1,
 };
 
-// Dims/strides for the strided kernels (simd_gemm, m5_tensor_gemm, int_gemm).
+// Dims/strides for the strided kernels (simd_gemm, mpp_gemm, int_gemm).
 // One constant buffer (one setBytes). All strides are ELEMENT strides; each
 // device pointer is pre-offset to its tensor's first element by the host binding.
 struct GemmDimsStrided {

@@ -25,7 +25,7 @@ template <
     bool RELAXED,
     GemmEpilogue EPI,
     bool BATCHED>
-kernel void m5_tensor_gemm(
+kernel void mpp_gemm(
     device IN_T* A [[buffer(0)]],
     device IN_T* B [[buffer(1)]],
     device OUT_T* C [[buffer(2)]],

@@ -1373,9 +1373,7 @@ class TestMPS(TestCaseMPS):
             output_cpu = torch.baddbmm(M_cpu, batch1_cpu, batch2_cpu, beta=beta, alpha=alpha)
             output_mps = torch.baddbmm(M_mps, batch1_mps, batch2_mps, beta=beta, alpha=alpha)
 
-            # MPS fp32 matmul now defaults to full precision (HIGHEST); only
-            # CPU-vs-MPS accumulation-order drift remains.
-            self.assertEqual(output_cpu, output_mps, atol=1e-5, rtol=1e-5)
+            self.assertEqual(output_cpu, output_mps)
             self.assertEqual(output_cpu.size(), output_mps.size())
 
         helper(input_shape=(3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
@@ -1383,9 +1381,6 @@ class TestMPS(TestCaseMPS):
         helper(input_shape=(1, 77, 77), batch1_shape=(8, 77, 64), batch2_shape=(8, 64, 77))
 
     def test_matmul_fp32_default_full_precision(self):
-        # Regression: fp32 matmul must default to full precision (matches CPU), not
-        # silently TF32-relaxed. HIGH/MEDIUM opt into relaxed tensor-unit math, which
-        # is hardware/OS-dependent (no matmul2d -> full simd), so it is not asserted.
         a, b = torch.randn(256, 2048), torch.randn(2048, 256)
         ref = a @ b
         self.assertEqual("highest", torch.get_float32_matmul_precision())
