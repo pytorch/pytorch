@@ -3,6 +3,7 @@
 import functools
 import inspect
 import itertools
+import sys
 import warnings
 import weakref
 from collections import namedtuple, OrderedDict
@@ -133,6 +134,17 @@ def _has_any_global_hook():
     )
 
 
+def _dynamo_module_state_changed(target: Any, name: str) -> None:
+    if "torch._dynamo.mutation_guard" in sys.modules:
+        from torch._dynamo.mutation_guard import on_mutation
+
+        on_mutation(target, name)
+
+
+def _dynamo_hook_dict_changed(hooks_dict: Any) -> None:
+    _dynamo_module_state_changed(hooks_dict, "hook dictionary")
+
+
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
 
 
@@ -241,8 +253,12 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = RemovableHandle(_global_forward_pre_hooks)
+    handle = RemovableHandle(
+        _global_forward_pre_hooks,
+        remove_callback=_dynamo_hook_dict_changed,
+    )
     _global_forward_pre_hooks[handle.id] = hook
+    _dynamo_module_state_changed(_global_forward_pre_hooks, "_global_forward_pre_hooks")
     return handle
 
 
@@ -283,13 +299,26 @@ def register_module_forward_hook(
     ``register_forward_hook``.
     """
     handle = RemovableHandle(
-        _global_forward_hooks, extra_dict=_global_forward_hooks_always_called
+        _global_forward_hooks,
+        extra_dict=[
+            _global_forward_hooks_always_called,
+            _global_forward_hooks_with_kwargs,
+        ],
+        remove_callback=_dynamo_hook_dict_changed,
     )
     _global_forward_hooks[handle.id] = hook
+    _dynamo_module_state_changed(_global_forward_hooks, "_global_forward_hooks")
     if with_kwargs:
         _global_forward_hooks_with_kwargs[handle.id] = True
+        _dynamo_module_state_changed(
+            _global_forward_hooks_with_kwargs, "_global_forward_hooks_with_kwargs"
+        )
     if always_call:
         _global_forward_hooks_always_called[handle.id] = True
+        _dynamo_module_state_changed(
+            _global_forward_hooks_always_called,
+            "_global_forward_hooks_always_called",
+        )
     return handle
 
 
@@ -317,8 +346,12 @@ def register_module_backward_hook(
 
     _global_is_full_backward_hook = False
 
-    handle = RemovableHandle(_global_backward_hooks)
+    handle = RemovableHandle(
+        _global_backward_hooks,
+        remove_callback=_dynamo_hook_dict_changed,
+    )
     _global_backward_hooks[handle.id] = hook
+    _dynamo_module_state_changed(_global_backward_hooks, "_global_backward_hooks")
     return handle
 
 
@@ -344,8 +377,14 @@ def register_module_full_backward_pre_hook(
             ``handle.remove()``
 
     """
-    handle = RemovableHandle(_global_backward_pre_hooks)
+    handle = RemovableHandle(
+        _global_backward_pre_hooks,
+        remove_callback=_dynamo_hook_dict_changed,
+    )
     _global_backward_pre_hooks[handle.id] = hook
+    _dynamo_module_state_changed(
+        _global_backward_pre_hooks, "_global_backward_pre_hooks"
+    )
     return handle
 
 
@@ -380,8 +419,12 @@ def register_module_full_backward_hook(
 
     _global_is_full_backward_hook = True
 
-    handle = RemovableHandle(_global_backward_hooks)
+    handle = RemovableHandle(
+        _global_backward_hooks,
+        remove_callback=_dynamo_hook_dict_changed,
+    )
     _global_backward_hooks[handle.id] = hook
+    _dynamo_module_state_changed(_global_backward_hooks, "_global_backward_hooks")
     return handle
 
 
@@ -1425,10 +1468,14 @@ class Module:
                 ``handle.remove()``
 
         """
-        handle = RemovableHandle(self._backward_pre_hooks)
+        handle = RemovableHandle(
+            self._backward_pre_hooks,
+            remove_callback=_dynamo_hook_dict_changed,
+        )
         self._backward_pre_hooks[handle.id] = hook
         if prepend:
             self._backward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        _dynamo_module_state_changed(self._backward_pre_hooks, "_backward_pre_hooks")
         return handle
 
     def register_backward_hook(
@@ -1453,8 +1500,12 @@ class Module:
 
         self._is_full_backward_hook = False
 
-        handle = RemovableHandle(self._backward_hooks)
+        handle = RemovableHandle(
+            self._backward_hooks,
+            remove_callback=_dynamo_hook_dict_changed,
+        )
         self._backward_hooks[handle.id] = hook
+        _dynamo_module_state_changed(self._backward_hooks, "_backward_hooks")
         return handle
 
     def register_full_backward_hook(
@@ -1517,10 +1568,14 @@ class Module:
 
         self._is_full_backward_hook = True
 
-        handle = RemovableHandle(self._backward_hooks)
+        handle = RemovableHandle(
+            self._backward_hooks,
+            remove_callback=_dynamo_hook_dict_changed,
+        )
         self._backward_hooks[handle.id] = hook
         if prepend:
             self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        _dynamo_module_state_changed(self._backward_hooks, "_backward_hooks")
         return handle
 
     def _get_backward_hooks(self):
@@ -1674,14 +1729,21 @@ class Module:
                 ``handle.remove()``
         """
         handle = RemovableHandle(
-            self._forward_pre_hooks, extra_dict=self._forward_pre_hooks_with_kwargs
+            self._forward_pre_hooks,
+            extra_dict=self._forward_pre_hooks_with_kwargs,
+            remove_callback=_dynamo_hook_dict_changed,
         )
         self._forward_pre_hooks[handle.id] = hook
         if with_kwargs:
             self._forward_pre_hooks_with_kwargs[handle.id] = True
+            _dynamo_module_state_changed(
+                self._forward_pre_hooks_with_kwargs,
+                "_forward_pre_hooks_with_kwargs",
+            )
 
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        _dynamo_module_state_changed(self._forward_pre_hooks, "_forward_pre_hooks")
         return handle
 
     def register_forward_hook(
@@ -1741,14 +1803,22 @@ class Module:
                 self._forward_hooks_with_kwargs,
                 self._forward_hooks_always_called,
             ],
+            remove_callback=_dynamo_hook_dict_changed,
         )
         self._forward_hooks[handle.id] = hook
         if with_kwargs:
             self._forward_hooks_with_kwargs[handle.id] = True
+            _dynamo_module_state_changed(
+                self._forward_hooks_with_kwargs, "_forward_hooks_with_kwargs"
+            )
         if always_call:
             self._forward_hooks_always_called[handle.id] = True
+            _dynamo_module_state_changed(
+                self._forward_hooks_always_called, "_forward_hooks_always_called"
+            )
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        _dynamo_module_state_changed(self._forward_hooks, "_forward_hooks")
         return handle
 
     def _slow_forward(self, *input, **kwargs):

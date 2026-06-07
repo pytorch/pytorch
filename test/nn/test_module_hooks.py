@@ -616,6 +616,26 @@ class TestStateDictHooks(TestCase):
         finally:
             gc.enable()
 
+    def test_removable_handle_does_not_keep_hook_dict_alive(self):
+        try:
+            gc.disable()
+            m = nn.Linear(10, 10)
+            handle = m.register_forward_hook(
+                lambda *args: None, with_kwargs=True, always_call=True
+            )
+            forward_hooks_ref = weakref.ref(m._forward_hooks)
+            with_kwargs_ref = weakref.ref(m._forward_hooks_with_kwargs)
+            always_called_ref = weakref.ref(m._forward_hooks_always_called)
+
+            del m
+
+            self.assertIsNone(forward_hooks_ref())
+            self.assertIsNone(with_kwargs_ref())
+            self.assertIsNone(always_called_ref())
+            handle.remove()
+        finally:
+            gc.enable()
+
     def test_pickled_hook(self):
         m = nn.Linear(10, 10)
         m.register_load_state_dict_pre_hook(_hook_to_pickle)
