@@ -525,9 +525,7 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
@@ -538,9 +536,7 @@ class GraphModule(torch.nn.Module):
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled_1 = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled_1 = None
-
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
-
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
         return (x,)
 """,
@@ -557,9 +553,7 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
@@ -570,9 +564,7 @@ class GraphModule(torch.nn.Module):
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled_1 = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled_1 = None
-
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
-
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
         return (x,)
 """,
@@ -613,9 +605,7 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
@@ -635,9 +625,7 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
@@ -666,9 +654,7 @@ class GraphModule(torch.nn.Module):
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
         return (x,)
 """,
@@ -689,13 +675,46 @@ class GraphModule(torch.nn.Module):
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
         return (x,)
 """,
             )
+
+    def test__enter__exit_autocast_graph_break_explicit_dtype(self):
+        def f(x):
+            m = torch.amp.autocast_mode._enter_autocast(
+                "cpu", torch.float16, True, True
+            )
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 2
+            torch.amp.autocast_mode._exit_autocast(m)
+            return x
+
+        prev_enabled = torch.is_autocast_enabled("cpu")
+        prev_dtype = torch.get_autocast_dtype("cpu")
+        prev_cache = torch.is_autocast_cache_enabled()
+        try:
+            torch.set_autocast_enabled("cpu", False)
+            torch.set_autocast_dtype("cpu", torch.bfloat16)
+            torch.set_autocast_cache_enabled(True)
+
+            opt_f = torch.compile(f, backend="eager", fullgraph=False)
+            x = torch.randn(3, 3, dtype=torch.float32)
+            out = f(x)
+            self.assertFalse(torch.is_autocast_enabled("cpu"))
+            self.assertEqual(torch.get_autocast_dtype("cpu"), torch.bfloat16)
+
+            opt_out = opt_f(x)
+            self.assertEqual(out, opt_out)
+            self.assertFalse(torch.is_autocast_enabled("cpu"))
+            self.assertEqual(torch.get_autocast_dtype("cpu"), torch.bfloat16)
+            self.assertTrue(torch.is_autocast_cache_enabled())
+        finally:
+            torch.set_autocast_enabled("cpu", prev_enabled)
+            torch.set_autocast_dtype("cpu", prev_dtype)
+            torch.set_autocast_cache_enabled(prev_cache)
 
     def test_autocast_low_level_api(self):
         def f(x, y):
@@ -817,9 +836,7 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
         x: "bf16[3, 3]" = l_l_x_ @ l_l_y_;  l_l_x_ = l_l_y_ = None
@@ -828,9 +845,7 @@ class GraphModule(torch.nn.Module):
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled_1 = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled_1 = None
-
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
-
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
         return (x,)
 """,
