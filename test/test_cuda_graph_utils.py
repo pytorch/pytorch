@@ -16,7 +16,7 @@ from torch.cuda._graph_annotations import (
     remap_to_exec_graph,
     resolve_pending_annotations,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
 
 
 TEST_CUDA = torch.cuda.is_available()
@@ -29,6 +29,8 @@ except ImportError:
     TEST_CUDA_BINDINGS = False
 
 
+# cuda.bindings is NVIDIA-only; graph annotation APIs have no ROCm equivalent.
+@skipIfRocm
 @unittest.skipUnless(TEST_CUDA, "CUDA not available")
 @unittest.skipUnless(TEST_CUDA_BINDINGS, "cuda.bindings not available")
 @unittest.skipIf(
@@ -493,6 +495,8 @@ class TestMarkKernels(TestCase):
             self.assertEqual(anns, [{"str": "tagged"}])
 
 
+# cuda.bindings is NVIDIA-only; get_graph_data has no ROCm equivalent.
+@skipIfRocm
 @unittest.skipUnless(TEST_CUDA, "CUDA not available")
 @unittest.skipUnless(TEST_CUDA_BINDINGS, "cuda.bindings not available")
 @unittest.skipIf(
