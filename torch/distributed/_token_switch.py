@@ -5,7 +5,7 @@ import abc
 from dataclasses import dataclass
 
 import torch
-from torch.distributed.distributed_c10d import ProcessGroup
+from torch.distributed.distributed_c10d import ProcessGroup  # noqa: TC001
 
 
 @dataclass(frozen=True)
@@ -77,15 +77,12 @@ class TokenSwitchNCCL(TokenSwitch):
                 "TokenSwitchNCCL requires a build with NCCL EP (USE_NCCL_EP)."
             )
         self._max_recv_tokens_per_rank = max_recv_tokens_per_rank
-        # NCCL_EP_AUTO (0) for qp count and channel count
         self._group = c10d._NcclEpGroup.create(
             process_group,
             num_experts,
             max_dispatch_tokens_per_rank,
             max_recv_tokens_per_rank,
             max_token_bytes,
-            0,
-            0,
         )
 
     def create_routing(
