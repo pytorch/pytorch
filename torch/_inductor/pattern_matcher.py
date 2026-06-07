@@ -604,21 +604,25 @@ class _TargetExpr(PatternExpr):
     @abstractmethod
     def op(self) -> str: ...
 
-    def fns_repr(self) -> str:
-        first_repr = self.fns[0]
-        if not isinstance(first_repr, str):
-            first_repr = first_repr.__name__
+    @staticmethod
+    def fn_repr(fn: FnsType) -> str:
+        if isinstance(fn, str):
+            return fn
 
-        if len(self.fns) > 1:
-            return f"[{first_repr}, ...]"
-        elif self.fns[0] is getattr(torch, first_repr, None):
-            return f"torch.{first_repr}"
-        elif self.fns[0] is getattr(operator, first_repr, None):
-            return f"operator.{first_repr}"
-        elif isinstance(self.fns[0], torch._ops.OpOverload):
-            return str(self.fns[0])
+        fn_name = fn.__name__
+        if fn is getattr(torch, fn_name, None):
+            return f"torch.{fn_name}"
+        elif fn is getattr(operator, fn_name, None):
+            return f"operator.{fn_name}"
+        elif isinstance(fn, torch._ops.OpOverload):
+            return str(fn)
         else:
-            return first_repr
+            return fn_name
+
+    def fns_repr(self) -> str:
+        if len(self.fns) > 1:
+            return f"[{', '.join(self.fn_repr(fn) for fn in self.fns)}]"
+        return self.fn_repr(self.fns[0])
 
     def __repr__(self) -> str:
         if self.users is MULTIPLE:
@@ -1103,7 +1107,7 @@ class PatternPrettyPrinter:
 
     def memoize(self, obj: _TargetArgsExpr) -> str:
         obj_str = obj.pretty_print(self)
-        obj_name = obj.fns_repr()
+        obj_name = obj.fn_repr(obj.fns[0])
         for prefix in ("aten.", "torch.", "prims."):
             obj_name = obj_name.replace(prefix, "")
 
@@ -2485,6 +2489,10 @@ def fx_to_pattern(
     scalar_workaround = scalar_workaround or {}
     inv_scalar_workaround = {v: k for k, v in scalar_workaround.items()}
     assert len(inv_scalar_workaround) == len(scalar_workaround)
+    scalar_tensor_overload_aliases: dict[Any, Any] = {
+        aten.div.Tensor: aten.div.Scalar,
+        aten.mul.Tensor: aten.mul.Scalar,
+    }
 
     def process_arg(
         x: T, ignore_types_override: Sequence[type[Any]] | None = None
@@ -2499,6 +2507,26 @@ def fx_to_pattern(
         if isinstance(x, list) and all(isinstance(y, Ignored) for y in x) and x:
             return Ignored()
         return x
+
+    def maybe_match_scalar_overload(
+        target: torch.fx.node.Target,
+        args: Sequence[Any],
+        kwargs: Mapping[str, Any],
+    ) -> torch.fx.node.Target | Sequence[Any]:
+        scalar_target = scalar_tensor_overload_aliases.get(target)
+        if scalar_target is None:
+            return target
+
+        def is_scalar_workaround_arg(x: Any) -> bool:
+            return isinstance(x, KeywordArg) and x.name in scalar_workaround
+
+        if any(
+            pytree.tree_leaves(
+                pytree.tree_map(is_scalar_workaround_arg, (args, kwargs))
+            )
+        ):
+            return [target, scalar_target]
+        return target
 
     argnum = itertools.count()
 
@@ -2557,7 +2585,8 @@ def fx_to_pattern(
                 # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
                 args = [process_arg_fn(a) for a in args]
                 kwargs = {k: process_arg_fn(a) for k, a in kwargs.items()}
-            return CallFunction(target, *args, **kwargs)
+            call_function_target = maybe_match_scalar_overload(target, args, kwargs)
+            return CallFunction(call_function_target, *args, **kwargs)
 
         def run_node(self, n: torch.fx.Node) -> Any:
             rv = super().run_node(n)

@@ -604,9 +604,9 @@ class <lambda>(torch.nn.Module):
 
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[10, 10]", arg1_1: "f32[10, 20]"):
-            mul: "f32[10, 10]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+            mul: "f32[10, 10]" = torch.ops.aten.mul.Scalar(arg0_1, 2);  arg0_1 = None
 
-            mul_1: "f32[10, 20]" = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+            mul_1: "f32[10, 20]" = torch.ops.aten.mul.Scalar(arg1_1, 2);  arg1_1 = None
 
             sum_1: "f32[]" = torch.ops.aten.sum.default(mul);  mul = None
             sum_2: "f32[]" = torch.ops.aten.sum.default(mul_1);  mul_1 = None
@@ -811,9 +811,9 @@ class <lambda>(torch.nn.Module):
 
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[10, 10]", arg1_1: "f32[10, 20]"):
-            mul: "f32[10, 10]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+            mul: "f32[10, 10]" = torch.ops.aten.mul.Scalar(arg0_1, 2);  arg0_1 = None
 
-            mul_1: "f32[10, 20]" = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+            mul_1: "f32[10, 20]" = torch.ops.aten.mul.Scalar(arg1_1, 2);  arg1_1 = None
 
             sum_1: "f32[]" = torch.ops.aten.sum.default(mul);  mul = None
             sum_2: "f32[]" = torch.ops.aten.sum.default(mul_1);  mul_1 = None
@@ -860,9 +860,9 @@ class <lambda>(torch.nn.Module):
 
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[10, 10]", arg1_1: "f32[10, 20]"):
-            mul: "f32[10, 10]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+            mul: "f32[10, 10]" = torch.ops.aten.mul.Scalar(arg0_1, 2);  arg0_1 = None
 
-            mul_1: "f32[10, 20]" = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+            mul_1: "f32[10, 20]" = torch.ops.aten.mul.Scalar(arg1_1, 2);  arg1_1 = None
 
             sum_1: "f32[]" = torch.ops.aten.sum.default(mul);  mul = None
             sum_2: "f32[]" = torch.ops.aten.sum.default(mul_1);  mul_1 = None

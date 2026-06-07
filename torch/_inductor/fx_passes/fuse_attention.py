@@ -2,9 +2,11 @@
 import functools
 import inspect
 import logging
+import numbers
 import warnings
 
 import torch
+from torch.types import py_sym_types
 from torch.utils._ordered_set import OrderedSet
 
 from ..._dynamo.utils import counters
@@ -20,6 +22,8 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 _scaled_dot_product_attention = aten.scaled_dot_product_attention
+_sfdp_div_scale_ops = (aten.div.Tensor, aten.div.Scalar)
+_sfdp_mul_scale_ops = (aten.mul.Tensor, aten.mul.Scalar)
 
 
 _INFERENCE_ONLY_SFDP_PATTERNS = frozenset(
@@ -987,11 +991,18 @@ def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
         ):
             return False
         if scale_factor_op is not None:
-            scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
+            scale_factor_ops = (
+                scale_factor_op
+                if isinstance(scale_factor_op, tuple)
+                else (scale_factor_op,)
+            )
+            scale_factor_node = next(
+                node for node in match.nodes if node.target in scale_factor_ops
+            )
             # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
             scale_factor = scale_factor_node.args[1]
-            # make sure the scale_factor a float/int. SymInt?
-            if not isinstance(scale_factor, (float, int)):
+            # make sure the scale_factor is a Python or symbolic scalar.
+            if not isinstance(scale_factor, (numbers.Number, *py_sym_types)):
                 return False
         return _sfdp_params_check(match)
 
@@ -1053,13 +1064,17 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
     m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
     # need 2d attn_mask to generate patterns with view op
     m_inp_2d = functools.partial(torch.empty, (2, 4), device=device)
-    # inv_scale
-    c_inp = functools.partial(torch.tensor, 2.0, device=device)
     # workaround https://github.com/pytorch/pytorch/issues/97894
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     d = {"dropout_p": 0.113377}
     s = {"inv_scale": 0.66666}
     sd = {"inv_scale": 0.66666, "dropout_p": 0.113377}
+    inv_scale_factor_dropout = {
+        "inv_scale_factor": 0.66666,
+        "dropout_p": 0.113377,
+    }
+    scale_factor = {"scale_factor": 0.66666}
+    scale_factor_dropout = {"scale_factor": 0.66666, "dropout_p": 0.113377}
 
     # we could also generate all these patterns in 3d.. TODO
     g_3d_inp = functools.partial(
@@ -1097,7 +1112,6 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
         m_float = functools.partial(m_inp, dtype=torch.float)
         m_bool = functools.partial(m_inp, dtype=torch.bool)
         m_2d = functools.partial(m_inp_2d, dtype=dtype)
-        c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
         g_bs1 = functools.partial(g_bs1_inp, dtype=dtype)
         gp = functools.partial(gp_inp, dtype=dtype)
@@ -1110,30 +1124,30 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
             (
                 _sfdp_pattern_1,
                 _sfdp_replacement_1,
-                [g(), g(), g(), c()],
-                {},
-                _sfdp_extra_check(aten.div.Tensor),
+                [g(), g(), g()],
+                s,
+                _sfdp_extra_check(_sfdp_div_scale_ops),
             ),
             (
                 _sfdp_pattern_2,
                 _sfdp_replacement_2,
-                [g(), g(), g(), c()],
-                {},
-                _sfdp_extra_check(aten.mul.Tensor),
+                [g(), g(), g()],
+                scale_factor,
+                _sfdp_extra_check(_sfdp_mul_scale_ops),
             ),
             (
                 _sfdp_pattern_3,
                 _sfdp_replacement_3,
-                [g(), g(), g(), c()],
-                d,
-                _sfdp_extra_check(aten.div.Tensor),
+                [g(), g(), g()],
+                inv_scale_factor_dropout,
+                _sfdp_extra_check(_sfdp_div_scale_ops),
             ),
             (
                 _sfdp_pattern_4,
                 _sfdp_replacement_4,
-                [g(), g(), g(), c()],
-                d,
-                _sfdp_extra_check(aten.mul.Tensor),
+                [g(), g(), g()],
+                scale_factor_dropout,
+                _sfdp_extra_check(_sfdp_mul_scale_ops),
             ),
             (
                 _sfdp_pattern_5,
@@ -1180,16 +1194,16 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
             (
                 _sfdp_pattern_11,
                 _sfdp_replacement_11,
-                [g(), g(), g(), c()],
-                {},
-                _sfdp_extra_check(aten.div.Tensor),
+                [g(), g(), g()],
+                s,
+                _sfdp_extra_check(_sfdp_div_scale_ops),
             ),
             (
                 _sfdp_pattern_12,
                 _sfdp_replacement_12,
-                [g(), g(), g(), c()],
-                d,
-                _sfdp_extra_check(aten.div.Tensor),
+                [g(), g(), g()],
+                inv_scale_factor_dropout,
+                _sfdp_extra_check(_sfdp_div_scale_ops),
             ),
             (
                 _sfdp_pattern_13,
@@ -1201,42 +1215,42 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
             (
                 _sfdp_pattern_14,
                 _sfdp_replacement_14,
-                [g(), g(), g(), m(), c()],
-                {},
-                _sfdp_extra_check(aten.div.Tensor),
+                [g(), g(), g(), m()],
+                s,
+                _sfdp_extra_check(_sfdp_div_scale_ops),
             ),
             (
                 _sfdp_pattern_15,
                 _sfdp_replacement_15,
-                [g(), g(), g(), m_2d(), c()],
-                {},
-                _sfdp_extra_check(aten.div.Tensor),
+                [g(), g(), g(), m_2d()],
+                s,
+                _sfdp_extra_check(_sfdp_div_scale_ops),
             ),
             # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
-                [g(), g(), g(), m(), c()],
-                d,
+                [g(), g(), g(), m()],
+                sd,
                 _sfdp_extra_check(
-                    aten.div.Tensor, disable_cuda=torch.version.hip is None
+                    _sfdp_div_scale_ops, disable_cuda=torch.version.hip is None
                 ),
             ),
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
-                [g_bs1(), g_bs1(), g_bs1(), m_bs1(), c()],
-                d,
+                [g_bs1(), g_bs1(), g_bs1(), m_bs1()],
+                sd,
                 _sfdp_extra_check(
-                    aten.div.Tensor, disable_cuda=torch.version.hip is None
+                    _sfdp_div_scale_ops, disable_cuda=torch.version.hip is None
                 ),
             ),
             (
                 _sfdp_pattern_17,
                 _sfdp_replacement_17,
-                [g(), g(), g(), m_2d(), c()],
-                d,
-                _sfdp_extra_check(aten.div.Tensor),
+                [g(), g(), g(), m_2d()],
+                sd,
+                _sfdp_extra_check(_sfdp_div_scale_ops),
             ),
             (
                 _sfdp_pattern_18,
@@ -1360,37 +1374,37 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
             (
                 _sfdp_pattern_28,
                 _sfdp_replacement_28,
-                [gn(), gn(), gn(), c()],
-                d,
-                _sfdp_extra_check(aten.mul.Tensor),
+                [gn(), gn(), gn()],
+                scale_factor_dropout,
+                _sfdp_extra_check(_sfdp_mul_scale_ops),
             ),
             (
                 _sfdp_pattern_29,
                 _sfdp_replacement_29,
                 [gp(), gp(), gp(), b()],
                 s,
-                _sfdp_extra_check(aten.mul.Scalar),
+                _sfdp_extra_check(_sfdp_mul_scale_ops),
             ),
             (
                 _sfdp_pattern_29,
                 _sfdp_replacement_29,
                 [gp_bs1(), gp_bs1(), gp_bs1(), b()],
                 s,
-                _sfdp_extra_check(aten.mul.Scalar),
+                _sfdp_extra_check(_sfdp_mul_scale_ops),
             ),
             (
                 _sfdp_pattern_30,
                 _sfdp_replacement_30,
                 [gp(), gp(), gp()],
                 s,
-                _sfdp_extra_check(aten.mul.Scalar),
+                _sfdp_extra_check(_sfdp_mul_scale_ops),
             ),
             (
                 _sfdp_pattern_30,
                 _sfdp_replacement_30,
                 [gp_bs1(), gp_bs1(), gp_bs1()],
                 s,
-                _sfdp_extra_check(aten.mul.Scalar),
+                _sfdp_extra_check(_sfdp_mul_scale_ops),
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
@@ -1400,11 +1414,11 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 (
                     _sfdp_pattern_16,
                     _sfdp_replacement_16,
-                    [g(), g(), g(), m_float(), c()],
-                    d,
+                    [g(), g(), g(), m_float()],
+                    sd,
                     # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
                     _sfdp_extra_check(
-                        aten.div.Tensor, disable_cuda=torch.version.hip is None
+                        _sfdp_div_scale_ops, disable_cuda=torch.version.hip is None
                     ),
                 )
             )
@@ -1412,11 +1426,11 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 (
                     _sfdp_pattern_16,
                     _sfdp_replacement_16,
-                    [g_bs1(), g_bs1(), g_bs1(), m_bs1_float(), c()],
-                    d,
+                    [g_bs1(), g_bs1(), g_bs1(), m_bs1_float()],
+                    sd,
                     # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
                     _sfdp_extra_check(
-                        aten.div.Tensor, disable_cuda=torch.version.hip is None
+                        _sfdp_div_scale_ops, disable_cuda=torch.version.hip is None
                     ),
                 )
             )
@@ -1456,8 +1470,9 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
             inference_workaround = {}
             if workaround:
                 assert len(workaround) <= 2
-                if "inv_scale" in workaround:
-                    inference_workaround["inv_scale"] = workaround["inv_scale"]
+                for scale_arg in ("inv_scale", "inv_scale_factor", "scale_factor"):
+                    if scale_arg in workaround:
+                        inference_workaround[scale_arg] = workaround[scale_arg]
                 if "dropout_p" in workaround:
                     # functools.partial insufficient because we look at signature downstream
                     pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
