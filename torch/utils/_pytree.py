@@ -2112,23 +2112,6 @@ def treespec_pprint(treespec: TreeSpec) -> str:
     return repr(dummy_tree)
 
 
-# TODO(angelayi): remove this function after OSS/internal stabilize
-@deprecated(
-    "`pytree_to_str` is deprecated. Please use `treespec_dumps` instead.",
-    category=FutureWarning,
-)
-def pytree_to_str(treespec: TreeSpec) -> str:
-    return treespec_dumps(treespec)
-
-
-# TODO(angelayi): remove this function after OSS/internal stabilize
-@deprecated(
-    "`str_to_pytree` is deprecated. Please use `treespec_loads` instead.",
-    category=FutureWarning,
-)
-def str_to_pytree(json: str) -> TreeSpec:
-    return treespec_loads(json)
-
 
 def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> list[Any]:
     """Get a flat list of arguments to this function
