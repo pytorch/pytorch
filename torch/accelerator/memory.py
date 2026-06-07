@@ -208,6 +208,8 @@ def reset_accumulated_memory_stats(device_index: _device_t = None, /) -> None:
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
     """
+    if not torch._C._accelerator_isAllocatorInitialized():
+        return
     device_index = _get_device_index(device_index, optional=True)
     return torch._C._accelerator_resetAccumulatedStats(device_index)
 
@@ -225,6 +227,8 @@ def reset_peak_memory_stats(device_index: _device_t = None, /) -> None:
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
     """
+    if not torch._C._accelerator_isAllocatorInitialized():
+        return
     device_index = _get_device_index(device_index, optional=True)
     return torch._C._accelerator_resetPeakStats(device_index)
 

@@ -9231,6 +9231,27 @@ def forward(self, primals_1, tangents_1):
         actual = self._run_with_compiled_autograd(run)
         self.assertEqual(actual, expected)
 
+    def test_backward_epilogue_compiled_autograd_unused_output(self):
+        @torch.compile(backend="aot_eager")
+        def f(x, y):
+            return x.sin(), y.sin()
+
+        x_base = torch.randn(4)
+        y_base = torch.randn(4)
+
+        def run(x_base, y_base):
+            x = x_base.detach().clone().requires_grad_()
+            y = y_base.detach().clone().requires_grad_()
+            out0, out1 = f(x, y)
+            out0.sum().backward()
+            self.assertIsNone(y.grad)
+            return x.grad, y.grad
+
+        expected = run(x_base, y_base)
+        torch._dynamo.reset()
+        actual = self._run_with_compiled_autograd(lambda: run(x_base, y_base))
+        self.assertEqual(actual, expected)
+
     def test_backward_epilogue_compiled_autograd_subclass(self):
         from torch.testing._internal.two_tensor import TwoTensor
 
@@ -12084,6 +12105,18 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         optout = run(optf)
 
         self.assertEqual(out, optout)
+
+    def test_lift_after_factory(self):
+        def f(low, high, size):
+            y = torch.randint(low=low, high=high, size=size)
+            return torch.ops.aten.lift.default(y)
+
+        torch.manual_seed(0)
+        out = f(0, 100, [2, 3])
+        torch.manual_seed(0)
+        opt_out = torch.compile(f, backend="aot_eager", fullgraph=True)(0, 100, [2, 3])
+
+        self.assertEqual(out, opt_out)
 
     def test_mutations_in_bw_detached_from_tangent(self):
         class AF(torch.autograd.Function):

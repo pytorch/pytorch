@@ -2644,10 +2644,25 @@ def _specializable_user_grad_output_indices(
     )
 
 
-def _grad_output_prototype(x: Any) -> torch.Tensor | None:
+@dataclass(frozen=True)
+class _GradOutputPrototype:
+    size: torch.Size
+    stride: tuple[int, ...]
+    dtype: torch.dtype
+    device: torch.device
+
+
+def _grad_output_prototype(x: Any) -> torch.Tensor | _GradOutputPrototype | None:
     if isinstance(x, TensorAlias):
         x = x.alias
     if isinstance(x, torch.Tensor):
+        if not is_traceable_wrapper_subclass(x) and x.layout is torch.strided:
+            return _GradOutputPrototype(
+                x.size(),
+                x.stride(),
+                x.dtype,
+                x.device,
+            )
         return x.detach()
     return None
 
@@ -2655,18 +2670,19 @@ def _grad_output_prototype(x: Any) -> torch.Tensor | None:
 def _grad_output_prototypes(
     raw_returns: Sequence[Any],
     num_grad_outputs: int,
-) -> tuple[torch.Tensor | None, ...]:
+) -> tuple[torch.Tensor | _GradOutputPrototype | None, ...]:
     return tuple(_grad_output_prototype(x) for x in raw_returns[:num_grad_outputs])
 
 
 def _materialize_missing_grad_outputs(
     flat_args: list[Any],
-    grad_output_prototypes: Sequence[torch.Tensor | None],
+    grad_output_prototypes: Sequence[torch.Tensor | _GradOutputPrototype | None],
     grad_output_indices: Sequence[int],
     skip_indices: Sequence[int],
+    tangent_metas: Sequence[PlainTensorMeta | SubclassCreationMeta] | None = None,
 ) -> None:
     skip_indices_set = set(skip_indices)
-    for idx in grad_output_indices:
+    for tangent_idx, idx in enumerate(grad_output_indices):
         if idx in skip_indices_set:
             continue
         if idx >= len(flat_args) or idx >= len(grad_output_prototypes):
@@ -2675,7 +2691,35 @@ def _materialize_missing_grad_outputs(
             continue
         prototype = grad_output_prototypes[idx]
         if prototype is not None:
-            flat_args[idx] = torch.zeros_like(prototype)
+            tangent_meta = (
+                tangent_metas[tangent_idx] if tangent_metas is not None else None
+            )
+            flat_args[idx] = _zeros_like_tangent_prototype(prototype, tangent_meta)
+
+
+def _zeros_like_tangent_prototype(
+    prototype: torch.Tensor | _GradOutputPrototype,
+    tangent_meta: PlainTensorMeta | SubclassCreationMeta | None,
+) -> torch.Tensor:
+    if isinstance(prototype, _GradOutputPrototype):
+        result = torch.empty_strided(
+            prototype.size,
+            prototype.stride,
+            dtype=prototype.dtype,
+            device=prototype.device,
+        )
+        return result.zero_()
+    if isinstance(tangent_meta, PlainTensorMeta) and is_traceable_wrapper_subclass(
+        prototype
+    ):
+        result = torch.empty_strided(
+            prototype.size(),
+            prototype.stride(),
+            dtype=prototype.dtype,
+            device=prototype.device,
+        )
+        return result.zero_()
+    return torch.zeros_like(prototype)
 
 
 def _materialize_missing_tangent_args(
@@ -2683,7 +2727,7 @@ def _materialize_missing_tangent_args(
     bw_module: torch.fx.GraphModule,
     fw_metadata: ViewAndMutationMeta,
     undefined_grad_out_indices: Sequence[int],
-    grad_output_prototypes: Sequence[torch.Tensor | None],
+    grad_output_prototypes: Sequence[torch.Tensor | _GradOutputPrototype | None],
 ) -> None:
     undefined_grad_out_indices_set = set(undefined_grad_out_indices)
     if not undefined_grad_out_indices_set:
@@ -2722,7 +2766,7 @@ def _materialize_missing_tangent_args(
             curr_flat_idx += arg_count
             continue
 
-        tangent = torch.zeros_like(prototype)
+        tangent = _zeros_like_tangent_prototype(prototype, tangent_meta)
         _, flat_tangents = AOTDispatchAutograd.process_runtime_tangent(
             tangent,
             tangent_meta,
@@ -3684,10 +3728,12 @@ def _codegen_backward_prologue(
 
     G["_materialize_missing_grad_outputs_"] = _materialize_missing_grad_outputs
     G["_materialize_grad_output_indices_"] = all_surviving
+    G["_materialize_tangent_metas_"] = fw_metadata.subclass_tangent_meta
     L.append("    _materialize_missing_grad_outputs_(")
     L.append("        flat_args, ctx_grad_output_prototypes,")
     L.append("        _materialize_grad_output_indices_,")
-    L.append("        skip_materialize_grad_output_indices)")
+    L.append("        skip_materialize_grad_output_indices,")
+    L.append("        _materialize_tangent_metas_)")
 
     if all_surviving:
         items = ", ".join(f"flat_args[{i}]" for i in all_surviving)
