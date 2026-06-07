@@ -1010,6 +1010,8 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         backend_autograd_python_kernel = (
             functionality_key == DispatchKey.AutogradFunctionality
+            and torch._C._to_functionality_key(final_key)  # type: ignore[attr-defined]
+            == DispatchKey.AutogradFunctionality
             and final_key != DispatchKey.Autograd
             and final_key in self.py_kernels
         )
@@ -1025,7 +1027,9 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
             if isinstance(
                 _get_current_dispatch_mode(), (FakeTensorMode, FunctionalTensorMode)
             ):
-                return DispatchKey.Autograd
+                return lambda *args, **kwargs: self._op_dk(
+                    DispatchKey.Autograd, *args, **kwargs
+                )
 
         # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
         cache_result = (
