@@ -9231,8 +9231,10 @@ class FallbackKernel(ExternKernelAlloc):
             wrapper.generate_fallback_kernel(self)
 
         self.codegen_unbacked_symbol_defs(wrapper)
-        # Runtime dispatch assertions are emitted by the proxy executor path.
-        if not self.use_runtime_dispatch and isinstance(self.layout, Layout):
+        # AOT runtime dispatch assertions are emitted by the proxy executor path.
+        if not (self.use_runtime_dispatch and V.graph.aot_mode) and isinstance(
+            self.layout, Layout
+        ):
             self.codegen_size_asserts(wrapper)
             self.codegen_alignment_asserts(wrapper)
             self.codegen_memory_tracking(wrapper)
