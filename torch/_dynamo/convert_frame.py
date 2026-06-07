@@ -162,6 +162,7 @@ from .utils import (
     gen_record_file_name,
     get_hook_for_recompile_user_context,
     get_metrics_context,
+    get_user_execution_state,
     increment_frame,
     is_namedtuple,
     istype,
@@ -169,6 +170,7 @@ from .utils import (
     maybe_disable_inference_mode,
     maybe_disable_inference_mode_for_fake_prop,
     orig_code_map,
+    preserve_user_execution_state,
     reset_graph_break_dup_checker,
     setup_compile_debug,
     to_int_us,
@@ -331,6 +333,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
+        user_execution_state = get_user_execution_state()
 
         # Just in case we get left in a bad dispatch state we want to restore
         # it. This can happen because the dispatch bits aren't a true
@@ -338,6 +341,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         # and leave.
         with (
             torch._C._PreserveDispatchKeyGuard(),
+            preserve_user_execution_state(user_execution_state),
             maybe_disable_inference_mode(),
             maybe_disable_inference_mode_for_fake_prop(),
         ):
