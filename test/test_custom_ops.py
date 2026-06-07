@@ -3899,6 +3899,15 @@ class TestCustomOpAPI(TestCase):
             out.copy_(x)
             return out
 
+        @torch.library.custom_op(
+            "_torch_testing::mutated_fastpath_default", mutates_args={"out"}
+        )
+        def mutated_fastpath_default(x: Tensor, out: Optional[Tensor] = None) -> Tensor:
+            if out is None:
+                return x.clone()
+            out.copy_(x)
+            return out
+
         x = torch.randn(3)
         args = [torch.randn(3) for _ in range(4)]
         ys = [torch.randn(3), torch.randn(3)]
@@ -3920,6 +3929,7 @@ class TestCustomOpAPI(TestCase):
                 ys=ys,
             )
             mutated_fastpath_out(x, out=out)
+            self.assertEqual(mutated_fastpath_default(x), x)
         new_versions = pytree.tree_map_only(
             torch.Tensor, lambda t: t._version, (x, ys, out)
         )

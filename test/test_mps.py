@@ -7477,6 +7477,24 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
+    def test_gelu_tanh_large_values(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/186278
+        for dtype in [torch.bfloat16, torch.float16, torch.float32]:
+            cpu_x = torch.arange(8, 16, 0.5, dtype=dtype, device='cpu')
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+            cpu_xg = cpu_x.detach().clone().requires_grad_()
+
+            mps_out = torch.nn.functional.gelu(x, approximate='tanh')
+            cpu_out = torch.nn.functional.gelu(cpu_xg, approximate='tanh')
+            self.assertFalse(torch.isnan(mps_out).any(), f"NaN in forward for {dtype}")
+            self.assertEqual(mps_out, cpu_out.to('mps'))
+
+            grad = torch.ones_like(mps_out)
+            mps_out.backward(gradient=grad)
+            cpu_out.backward(gradient=torch.ones_like(cpu_out))
+            self.assertFalse(torch.isnan(x.grad).any(), f"NaN in backward for {dtype}")
+            self.assertEqual(x.grad, cpu_xg.grad.to('mps'))
+
     # Test hardtanh
     def test_hardtanh(self):
         def helper(shape, min_val, max_val, inplace=False):
@@ -14365,11 +14383,11 @@ class TestFallbackWarning(TestCase):
         self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement 'lcm'
-        # Should return fn, args, kwargs, string_version
-        return (torch.lcm,
-                [torch.tensor([1], device='mps'), torch.tensor([2], device='mps')], {},
-                "torch.lcm(torch.tensor([1], device='mps'), torch.tensor([2], device='mps'))")
+        # Should return fn, args, kwargs, string_version. Uses an op with no MPS
+        # kernel; change it if 'special.airy_ai' ever gets one.
+        return (torch.special.airy_ai,
+                [torch.tensor([1.0], device='mps')], {},
+                "torch.special.airy_ai(torch.tensor([1.0], device='mps'))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
