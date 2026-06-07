@@ -265,9 +265,10 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
         - Both inputs and outputs must use pytree-compatible types. User-defined classes
           must be registered via :func:`torch.utils._pytree.register_pytree_node`,
           :func:`torch.utils._pytree.register_dataclass`, or
-          :func:`torch.utils._pytree.register_constant`. Tensors, Python primitives (int, float, bool, str),
-          symbolic types (SymInt, SymFloat, SymBool), and built-in containers (list,
-          tuple, dict) are already handled by default.
+          :func:`torch.utils._pytree.register_constant`. Tensors, ``None``,
+          Python primitives (int, float, bool, str), symbolic types (SymInt,
+          SymFloat, SymBool), and built-in containers (list, tuple, dict) are
+          already handled by default.
         - Primitive values and container structure are specialized per call site:
           each call site expects the same primitives and structure on every execution.
 

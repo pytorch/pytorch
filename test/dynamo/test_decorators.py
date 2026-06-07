@@ -272,6 +272,43 @@ class DecoratorTests(PytreeRegisteringTestCase):
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
 
+    def test_nonstrict_trace_none_inputs(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, maybe_y, payload):
+            torch._dynamo.graph_break()
+            if maybe_y is None and payload["bias"] is None:
+                return x + 1
+            return x + maybe_y + payload["bias"]
+
+        def fn(x):
+            return trace_me(x, None, {"bias": None}) * 2
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_none_outputs(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return x + 1, None, {"bias": None}
+
+        def fn(x):
+            y, maybe_y, payload = trace_me(x)
+            if maybe_y is None and payload["bias"] is None:
+                return y * 2
+            return y
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_nonstrict_trace_pre_existing_dict(self):
         @torch._dynamo.nonstrict_trace
         def trace_me(x, d):
