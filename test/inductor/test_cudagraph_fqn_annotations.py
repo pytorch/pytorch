@@ -315,7 +315,7 @@ class TestCudagraphFqnAnnotations(TestCase):
         recovered: dict[int, str] = {}
         for ke in kernel_events:
             args = ke.get("args", {})
-            raw = args.get("Graph Node Id")
+            raw = args.get("graph node id")
             if raw is None:
                 continue
             try:
