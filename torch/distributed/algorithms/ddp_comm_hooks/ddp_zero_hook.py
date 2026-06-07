@@ -418,7 +418,7 @@ def hook_with_zero_step_interleaved(
         r"""
         Return :class:`Future` that gives gradient bucket tensor and performs partial :class:`ZeroRedundancyOptimizer` :meth:`step`.
 
-        This function uses the gradients in gradient in given bucket to perform a partial
+        This function uses the gradients in the given bucket to perform a partial
         :class:`ZeroRedundancyOptimizer` :meth:`step`
 
         Arguments:
