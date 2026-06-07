@@ -8,7 +8,6 @@ import operator
 import unittest
 
 import numpy as np
-import pytest
 import sympy
 
 import torch
@@ -1580,7 +1579,7 @@ class f(torch.nn.Module):
         from torch._dynamo.source import EphemeralSource
 
         for construct_ephemeral_first in (False, True):
-            shape_env = ShapeEnv()
+            shape_env = ShapeEnv(duck_shape=True)
             shape = (5, 10)
             # use duck sizing here to ensure symbol reuse across x and y
             duck_dims = [DimDynamic.DUCK for _ in shape]
@@ -3866,7 +3865,6 @@ class TestUnbacked(TestCase):
         or IS_WINDOWS,
         "https://github.com/pytorch/pytorch/issues/163953",
     )
-    @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/163785")
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_do_not_guard_unbacked_inputs(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")

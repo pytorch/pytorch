@@ -208,6 +208,7 @@ _SYM_OPS = {
     torch.sym_ite,
     torch.sym_max,
     torch.sym_min,
+    torch.sym_sum,
     torch.sym_sqrt,
     operator.truediv,
     operator.and_,

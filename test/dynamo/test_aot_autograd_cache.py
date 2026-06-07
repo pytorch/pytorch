@@ -581,6 +581,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
+    @torch.fx.experimental._config.patch(use_duck_shape=True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_multi_graph_specialization(self):
         """
