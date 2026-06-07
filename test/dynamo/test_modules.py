@@ -1284,6 +1284,113 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         # model can be compiled without error
         y = model(x)
 
+    def test_deepcopy_to_fake_tensor_parented_parameters(self):
+        from collections import OrderedDict
+
+        from torch._dynamo.utils import deepcopy_to_fake_tensor
+        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake
+
+        class ZeROOrderedDict(OrderedDict):
+            __slots__ = ("slot_state",)
+
+            def __init__(self, parent_module, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._parent_module = parent_module
+                self.slot_state = "preserved"
+
+            def __getitem__(self, key):
+                raise AssertionError("custom __getitem__ should not be called")
+
+            def items(self):
+                raise AssertionError("custom items should not be called")
+
+        def inject_parameters(module, cls):
+            for m in module.modules():
+                new_param = cls(parent_module=m)
+
+                for key, param in m._parameters.items():
+                    OrderedDict.__setitem__(new_param, key, param)
+                m._parameters = new_param
+
+        model = ParametersModule5()
+        model.register_buffer("buf", torch.ones(1))
+        model._buffers = collections.defaultdict(list, model._buffers)
+        inject_parameters(model, ZeROOrderedDict)
+
+        fake_model = deepcopy_to_fake_tensor(model, FakeTensorMode())
+
+        self.assertIsInstance(fake_model._parameters, ZeROOrderedDict)
+        self.assertIs(fake_model._parameters._parent_module, fake_model)
+        self.assertEqual(fake_model._parameters.slot_state, "preserved")
+        self.assertIsInstance(fake_model.linear1._parameters, ZeROOrderedDict)
+        self.assertIs(fake_model.linear1._parameters._parent_module, fake_model.linear1)
+        self.assertEqual(fake_model.linear1._parameters.slot_state, "preserved")
+        self.assertIs(fake_model._buffers.default_factory, list)
+        self.assertEqual(fake_model._buffers["missing"], [])
+        self.assertTrue(is_fake(fake_model._buffers["buf"]))
+        self.assertTrue(
+            is_fake(OrderedDict.__getitem__(fake_model._parameters, "scale"))
+        )
+        self.assertTrue(
+            is_fake(OrderedDict.__getitem__(fake_model.linear1._parameters, "weight"))
+        )
+        self.assertIs(
+            OrderedDict.__getitem__(fake_model._parameters, "scale"),
+            OrderedDict.__getitem__(fake_model._parameters, "scale_dup"),
+        )
+
+    def test_deepcopy_to_fake_tensor_preserves_custom_copy_protocols(self):
+        from torch._dynamo.utils import deepcopy_to_fake_tensor
+        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake
+
+        class CustomDeepcopyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(2))
+                self.custom_deepcopy_used = False
+
+            def __deepcopy__(self, memo):
+                result = type(self)()
+                memo[id(self)] = result
+                result.weight = copy.deepcopy(self.weight, memo)
+                result.custom_deepcopy_used = True
+                return result
+
+        fake_model = deepcopy_to_fake_tensor(CustomDeepcopyModule(), FakeTensorMode())
+
+        self.assertTrue(fake_model.custom_deepcopy_used)
+        self.assertTrue(is_fake(fake_model.weight))
+
+        class RequiredParentOrderedDict(collections.OrderedDict):
+            def __init__(self, parent_module, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._parent_module = parent_module
+
+        class CustomReduceModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(2))
+                self.reduce_used = False
+                parameters = RequiredParentOrderedDict(self)
+                for key, param in self._parameters.items():
+                    parameters[key] = param
+                self._parameters = parameters
+
+            def __reduce_ex__(self, protocol):
+                weight = collections.OrderedDict.__getitem__(self._parameters, "weight")
+                return (rebuild_custom_reduce_module, (weight,))
+
+        def rebuild_custom_reduce_module(weight):
+            result = CustomReduceModule()
+            result.weight = weight
+            result.reduce_used = True
+            return result
+
+        fake_model = deepcopy_to_fake_tensor(CustomReduceModule(), FakeTensorMode())
+
+        self.assertTrue(fake_model.reduce_used)
+        self.assertTrue(is_fake(fake_model.weight))
+
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
         x = torch.rand([10, 10])
