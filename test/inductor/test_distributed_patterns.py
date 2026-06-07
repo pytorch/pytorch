@@ -3,6 +3,7 @@ import dataclasses
 import functools
 
 import torch
+import torch.distributed.fsdp._fully_shard._fsdp_param
 from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
