@@ -2646,6 +2646,16 @@
       ]
     }
   ],
+  "GB9552": [
+    {
+      "Gb_type": "setattr() on Parameter.data with different shape",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable parameters. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0187": [
     {
       "Gb_type": "functools.wraps",
