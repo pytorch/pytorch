@@ -993,7 +993,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   ErrorType getError() override;
 
   bool supportsShrinking() const override {
+#ifdef NCCL_HAS_COMM_SHRINK
     return true;
+#else
+    return false;
+#endif
   }
 
   // Backend-style shrink override that returns a Backend instance.
