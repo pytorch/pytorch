@@ -1497,6 +1497,9 @@ def trace_hop_function(
         if enable_side_effects_with_extra_outputs
         else contextlib.nullcontext()
     )
+    from torch._dynamo import trace_rules
+
+    trace_rules_ctx = trace_rules._ignore_torch_skipfile_rules()
 
     # For handling side effects, we can make an argument that we don't
     # have to do anything here. The side effects infra does a good job
@@ -1526,7 +1529,7 @@ def trace_hop_function(
         else contextlib.nullcontext()
     )
 
-    with autograd_ctx, side_effects_ctx, deferred_ctx:
+    with autograd_ctx, side_effects_ctx, deferred_ctx, trace_rules_ctx:
         output = f.call_function(tx, args, sub_kwargs)
 
     if restore_side_effects:
@@ -1567,8 +1570,11 @@ def trace_hop_function_with_auto_output_flattening(
         if not allow_side_effects
         else contextlib.nullcontext()
     )
+    from torch._dynamo import trace_rules
 
-    with autograd_ctx, side_effects_ctx, deferred_ctx:
+    trace_rules_ctx = trace_rules._ignore_torch_skipfile_rules()
+
+    with autograd_ctx, side_effects_ctx, deferred_ctx, trace_rules_ctx:
         output = f.call_function(tx, args, sub_kwargs)
 
     return output

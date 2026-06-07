@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import copy
 import math
+import os
 from dataclasses import dataclass
 
 import torch
@@ -217,6 +218,59 @@ class ContextMarkAndSave(torch.autograd.Function):
         return grad_output
 
 
+def _put_function_in_torch_skipfile(fn):
+    torch_dir = os.path.dirname(torch.__file__)
+    skipfile = os.path.join(
+        torch_dir, "nested", "_internal", "test_skipfile_autograd_function.py"
+    )
+    fn.__code__ = fn.__code__.replace(co_filename=skipfile)
+    return fn
+
+
+class TorchSkipfileAutogradFunction(torch.autograd.Function):
+    @staticmethod
+    @_put_function_in_torch_skipfile
+    def forward(ctx, x):
+        ctx.save_for_backward(x)
+        return x.sin()
+
+    @staticmethod
+    @_put_function_in_torch_skipfile
+    def backward(ctx, grad_output):
+        (x,) = ctx.saved_tensors
+        return grad_output * x.cos()
+
+
+@torch.compiler.disable
+def _disabled_helper(x):
+    return x.sin()
+
+
+class TorchSkipfileAutogradFunctionWithGraphBreak(torch.autograd.Function):
+    @staticmethod
+    @_put_function_in_torch_skipfile
+    def forward(ctx, x):
+        torch._dynamo.graph_break()
+        return x.sin()
+
+    @staticmethod
+    @_put_function_in_torch_skipfile
+    def backward(ctx, grad_output):
+        return grad_output
+
+
+class TorchSkipfileAutogradFunctionWithDisable(torch.autograd.Function):
+    @staticmethod
+    @_put_function_in_torch_skipfile
+    def forward(ctx, x):
+        return _disabled_helper(x)
+
+    @staticmethod
+    @_put_function_in_torch_skipfile
+    def backward(ctx, grad_output):
+        return grad_output
+
+
 class ModuleWithGradFunc(torch.nn.Module):
     def __init__(self, func):
         super().__init__()
@@ -253,6 +307,42 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                     res = opt_model(x)
                     self.assertTrue(torch.allclose(ref, res))
                 self.assertEqual(cnts.frame_count, 2)
+
+    def test_autograd_function_in_torch_skipfile(self):
+        def fn(x):
+            return TorchSkipfileAutogradFunction.apply(x).cos()
+
+        ref_x = torch.randn(10, requires_grad=True)
+        opt_x = ref_x.detach().clone().requires_grad_()
+
+        ref = fn(ref_x).sum()
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(opt_x).sum()
+
+        self.assertEqual(res, ref)
+        ref.backward()
+        res.backward()
+        self.assertEqual(opt_x.grad, ref_x.grad)
+
+    def test_autograd_function_in_torch_skipfile_preserves_explicit_skips(self):
+        def fn_with_graph_break(x):
+            return TorchSkipfileAutogradFunctionWithGraphBreak.apply(x)
+
+        def fn_with_disable(x):
+            return TorchSkipfileAutogradFunctionWithDisable.apply(x)
+
+        x = torch.randn(10, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "graph_break",
+        ):
+            torch.compile(fn_with_graph_break, backend="eager", fullgraph=True)(x)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "torch.compiler.disable",
+        ):
+            torch.compile(fn_with_disable, backend="eager", fullgraph=True)(x)
 
     def test_linear_setup_context(self):
         model = ModuleLinear()

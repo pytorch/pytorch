@@ -38,6 +38,7 @@ import typing
 import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -3894,6 +3895,42 @@ def _force_inline() -> Iterator[None]:
         _force_inline_flag = old_val
 
 
+_ignore_torch_skipfile_rules_flag: ContextVar[bool] = ContextVar(
+    "_ignore_torch_skipfile_rules_flag", default=False
+)
+
+
+def _is_ignoring_torch_skipfile_rules() -> bool:
+    return _ignore_torch_skipfile_rules_flag.get()
+
+
+def _is_ignorable_torch_skipfile(filename: str | None, reason: str | None) -> bool:
+    if (
+        not _ignore_torch_skipfile_rules_flag.get()
+        or filename is None
+        or reason is None
+    ):
+        return False
+    if not reason.startswith(
+        ("file matches MOD_SKIPLIST", "file is under skip directory")
+    ):
+        return False
+    return is_torch(filename)
+
+
+@contextlib.contextmanager
+def _ignore_torch_skipfile_rules() -> Iterator[None]:
+    """
+    Temporarily ignore torch skipfile decisions while preserving explicit skip
+    rules. Used when Dynamo is speculatively tracing a higher-order op body.
+    """
+    token = _ignore_torch_skipfile_rules_flag.set(True)
+    try:
+        yield
+    finally:
+        _ignore_torch_skipfile_rules_flag.reset(token)
+
+
 def check_verbose(
     obj: Any, is_inlined_call: bool = False, frame: Any | None = None
 ) -> SkipResult:
@@ -4201,6 +4238,14 @@ def _lookup_inner(
         filename = getfile(obj)
 
     skip_result = check_file(filename, is_direct_call)
+    if skip_result.skipped and _is_ignorable_torch_skipfile(
+        filename, skip_result.reason
+    ):
+        if reasons is not None:
+            reasons.add(
+                "Attempted skip but we are ignoring torch skipfiles while tracing a higher-order op"
+            )
+        return UserFunctionVariable
     if reasons is not None and skip_result.reason is not None:
         reasons.add(skip_result.reason)
     if skip_result.skipped:
