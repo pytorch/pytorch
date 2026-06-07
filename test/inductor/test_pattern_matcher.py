@@ -10,10 +10,11 @@ import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
 import torch._inductor.pattern_matcher as pattern_matcher
 import torch.nn.functional as F
-from torch._dynamo.utils import count_calls, counters
+from torch._dynamo.utils import count_calls, counters, detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
+from torch._inductor.fx_passes.replace_random import replace_random_passes
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -868,7 +869,9 @@ class TestPatternMatcher(TestCase):
     @parametrize(
         "input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls",
         [
-            (torch.float32, torch.float16, False, 1),
+            (torch.float32, torch.float16, False, 2),
+            (torch.float32, torch.bfloat16, False, 2),
+            (torch.float32, torch.float64, False, 1),
             (torch.float32, torch.float16, True, 2),
             (torch.float16, torch.float32, True, 1),
         ],
@@ -1527,6 +1530,10 @@ class TestPatternMatcher(TestCase):
             "keep_addmm_fused_for_half_dtypes": True,
         }
     )
+    @unittest.skipIf(
+        GPU_TYPE != "xpu",
+        "narrowing-cast unfuse is XPU-only; CUDA/ROCm keep addmm fused",
+    )
     def test_unfuse_bias_addmm_half_dtypes_narrowing_cast(self, dtype):
         # When bias is fp32 and cast to a half dtype (e.g. AMP), unfusing
         # lets the Triton pointwise kernel load the fp32 bias directly,
@@ -1842,14 +1849,24 @@ class TestPatternMatcher(TestCase):
         def test(x, y):
             return x + (y * 0)
 
-        x = torch.rand([256], device=GPU_TYPE)
-        y = torch.rand([256], device=GPU_TYPE)
-
-        test_c = torch.compile(test)
-
-        out, code = run_and_get_code(test_c, x, y)
+        # For integer dtypes, x * 0 is uniformly 0, so the multiply is folded
+        # away entirely and no kernel needs to run.
+        xi = torch.randint(0, 10, [256], device=GPU_TYPE)
+        yi = torch.randint(0, 10, [256], device=GPU_TYPE)
+        out, code = run_and_get_code(torch.compile(test), xi, yi)
         FileCheck().check_not(".run").run(code[0])
-        self.assertEqual(out, test(x, y))
+        self.assertEqual(out, test(xi, yi))
+
+        # For floating point dtypes, x * 0 must NOT be folded to 0: nan * 0 == nan
+        # and (+/-inf) * 0 == nan, so the multiply has to run to match eager.
+        xf = torch.rand([8], device=GPU_TYPE)
+        yf = torch.tensor(
+            [float("nan"), float("inf"), float("-inf"), 0.0, 1.0, -1.0, 2.0, -3.0],
+            device=GPU_TYPE,
+        )
+        out, code = run_and_get_code(torch.compile(test), xf, yf)
+        FileCheck().check(".run").run(code[0])
+        self.assertEqual(out, test(xf, yf))
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
@@ -2628,6 +2645,55 @@ class TestPatternMatcher(TestCase):
                 node.meta["nn_module_stack"] = {"test": ("m", "M")}
                 node.meta["_numeric_debug_handle"] = 42
                 node.meta["custom"] = {"test_key": "test_value"}
+
+    def test_replace_random_pass_preserves_stack_trace_on_rng_prims(self):
+        def fn(x):
+            return x + torch.randn(x.shape, device=x.device)
+
+        gm = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+
+        fake_inputs = [
+            node.meta.get("val") for node in gm.graph.nodes if node.op == "placeholder"
+        ]
+        fake_mode = detect_fake_mode(fake_inputs)
+        self.assertIsNotNone(fake_mode)
+
+        stack_trace = '  File "test_replace_random.py", line 1, in fn\n'
+        source_fn_stack = [("randn", torch.randn)]
+
+        randn_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.randn.default
+        )
+        randn_node.meta["stack_trace"] = stack_trace
+        randn_node.meta["source_fn_stack"] = source_fn_stack
+
+        with V.set_fake_mode(fake_mode):
+            replace_random_passes(gm)
+        gm.graph.lint()
+
+        for target in (
+            torch.ops.prims.inductor_seeds.default,
+            torch.ops.prims.inductor_lookup_seed.default,
+            torch.ops.prims.inductor_random.default,
+        ):
+            node = next(node for node in gm.graph.nodes if node.target == target)
+            self.assertEqual(
+                node.meta.get("stack_trace"), stack_trace, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta.get("source_fn_stack"),
+                source_fn_stack,
+                msg=f"{target}: {node.meta}",
+            )
+
+        seeds_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.prims.inductor_seeds.default
+        )
+        self.assertEqual(seeds_node.meta["val"].shape, torch.Size([1]))
 
     def test_metadata_propagation_register_replacement(self):
         """Verify metadata from matched nodes transfers to replacement nodes."""
