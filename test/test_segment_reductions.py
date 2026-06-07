@@ -8,6 +8,8 @@ import torch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
+    dtypesIfMPS,
+    onlyMPS,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -15,7 +17,6 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     parametrize,
 )
-
 
 reductions = ["max", "mean", "min", "sum", "prod"]
 
@@ -122,6 +123,12 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(
+        *product(
+            (torch.half, torch.bfloat16, torch.float),
+            (torch.int, torch.int64)
+        )
+    )
     def test_simple_1d(self, device, dtypes):
         val_dtype, length_type = dtypes
         lengths = [1, 2, 3, 0]
@@ -179,6 +186,12 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(
+        *product(
+            (torch.half, torch.bfloat16, torch.float),
+            (torch.int, torch.int64)
+        )
+    )
     def test_simple_zero_length(self, device, dtypes):
         val_dtype, length_type = dtypes
         lengths = [0, 0]
@@ -234,6 +247,12 @@ class TestSegmentReductions(TestCase):
         *product(
             (torch.half, torch.bfloat16, torch.float, torch.double),
             (torch.int, torch.int64),
+        )
+    )
+    @dtypesIfMPS(
+        *product(
+            (torch.half, torch.bfloat16, torch.float),
+            (torch.int, torch.int64)
         )
     )
     def test_multi_d_simple(self, device, dtypes):
@@ -364,6 +383,12 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(
+        *product(
+            (torch.half, torch.bfloat16, torch.float),
+            (torch.int, torch.int64)
+        )
+    )
     @parametrize("reduce", ['sum', 'prod', 'min', 'max', 'mean'])
     def test_pytorch_scatter_test_cases(self, device, dtypes, reduce):
         val_dtype, length_dtype = dtypes
@@ -486,6 +511,12 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(
+        *product(
+            (torch.half, torch.bfloat16, torch.float),
+            (torch.int, torch.int64)
+        )
+    )
     def test_multi_d(self, device, dtypes):
         val_dtype, _ = dtypes
         axis = 0
@@ -550,6 +581,156 @@ class TestSegmentReductions(TestCase):
                     check_backward,
                 )
 
+    @onlyMPS
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_mps_matches_cpu(self, device, dtype):
+        """MPS segment_reduce forward should match CPU."""
+        torch.manual_seed(0)
+
+        if dtype == torch.bfloat16:
+            rtol = 2e-2
+            atol = 2e-2
+        elif dtype == torch.float16:
+            rtol = 1e-3
+            atol = 1e-3
+        else:
+            rtol = 1e-5
+            atol = 1e-6
+
+        for reduction in reductions:
+            # 1D
+            data_cpu = torch.tensor([1, 2, 3, 4, 5, 6], dtype=dtype)
+            lengths = torch.tensor([1, 2, 3])
+            out_cpu = torch.segment_reduce(data_cpu, reduction, lengths=lengths)
+            out_mps = torch.segment_reduce(
+                data_cpu.to(device), reduction, lengths=lengths.to(device)
+            )
+            self.assertEqual(
+                out_mps.cpu(), out_cpu, rtol=rtol, atol=atol, msg=f"1D {reduction}"
+            )
+
+            # 2D axis=0
+            data_cpu = torch.randn(6, 4, dtype=dtype)
+            lengths = torch.tensor([1, 2, 3])
+            out_cpu = torch.segment_reduce(data_cpu, reduction, lengths=lengths, axis=0)
+            out_mps = torch.segment_reduce(
+                data_cpu.to(device), reduction, lengths=lengths.to(device), axis=0
+            )
+            self.assertEqual(
+                out_mps.cpu(), out_cpu, rtol=rtol, atol=atol, msg=f"2D axis=0 {reduction}"
+            )
+
+            # 2D axis=1
+            data_cpu = torch.randn(3, 6, dtype=dtype)
+            lengths = torch.tensor([[2, 4], [3, 3], [1, 5]])
+            out_cpu = torch.segment_reduce(data_cpu, reduction, lengths=lengths, axis=1)
+            out_mps = torch.segment_reduce(
+                data_cpu.to(device), reduction, lengths=lengths.to(device), axis=1
+            )
+            self.assertEqual(
+                out_mps.cpu(), out_cpu, rtol=rtol, atol=atol, msg=f"2D axis=1 {reduction}"
+            )
+
+            # 1D offsets variant (offsets is the cumsum of lengths)
+            data_cpu = torch.tensor([1, 2, 3, 4, 5, 6], dtype=dtype)
+            offsets = torch.tensor([0, 1, 3, 6])  # equivalent to lengths=[1, 2, 3]
+            out_cpu = torch.segment_reduce(data_cpu, reduction, offsets=offsets)
+            out_mps = torch.segment_reduce(
+                data_cpu.to(device), reduction, offsets=offsets.to(device)
+            )
+            self.assertEqual(
+                out_mps.cpu(), out_cpu, rtol=rtol, atol=atol, msg=f"1D offsets {reduction}"
+            )
+
+            # 2D axis=1 offsets variant
+            data_cpu = torch.randn(3, 6, dtype=dtype)
+            offsets = torch.tensor([[0, 2, 6], [0, 3, 6], [0, 1, 6]])  # equivalent to lengths=[[2, 4], [3, 3], [1, 5]]
+            out_cpu = torch.segment_reduce(data_cpu, reduction, offsets=offsets, axis=1)
+            out_mps = torch.segment_reduce(
+                data_cpu.to(device), reduction, offsets=offsets.to(device), axis=1
+            )
+            self.assertEqual(
+                out_mps.cpu(), out_cpu, rtol=rtol, atol=atol, msg=f"2D axis=1 offsets {reduction}"
+            )
+
+    @onlyMPS
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_mps_backward_matches_cpu(self, device, dtype):
+        """MPS segment_reduce backward should match CPU."""
+        torch.manual_seed(0)
+
+        if dtype == torch.bfloat16:
+            rtol = 2e-2
+            atol = 2e-2
+        elif dtype == torch.float16:
+            rtol = 1e-3
+            atol = 1e-3
+        else:
+            rtol = 1e-5
+            atol = 1e-6
+
+        for reduction in ['sum', 'mean', 'max', 'min', 'prod']:
+            # 1D
+            data_init = torch.tensor([1, 2, 3, 4, 5, 6], dtype=dtype)
+            lengths = torch.tensor([1, 2, 3])
+
+            data_cpu = data_init.clone().requires_grad_(True)
+            out_cpu = torch.segment_reduce(data_cpu, reduction, lengths=lengths)
+            out_cpu.sum().backward()
+
+            data_mps = data_init.clone().to(device).requires_grad_(True)
+            out_mps = torch.segment_reduce(data_mps, reduction, lengths=lengths.to(device))
+            out_mps.sum().backward()
+
+            self.assertEqual(data_mps.grad.cpu(), data_cpu.grad,
+                             rtol=rtol, atol=atol, msg=f"1D {reduction}")
+
+            # 2D axis=1
+            data_init = torch.randn(3, 6, dtype=dtype)
+            lengths = torch.tensor([[2, 4], [3, 3], [1, 5]])
+
+            data_cpu = data_init.clone().requires_grad_(True)
+            out_cpu = torch.segment_reduce(data_cpu, reduction, lengths=lengths, axis=1)
+            out_cpu.sum().backward()
+
+            data_mps = data_init.clone().to(device).requires_grad_(True)
+            out_mps = torch.segment_reduce(data_mps, reduction,
+                                           lengths=lengths.to(device), axis=1)
+            out_mps.sum().backward()
+
+            self.assertEqual(data_mps.grad.cpu(), data_cpu.grad,
+                             rtol=rtol, atol=atol, msg=f"2D axis=1 {reduction}")
+
+            # 1D offsets backward
+            data_init = torch.tensor([1, 2, 3, 4, 5, 6], dtype=dtype)
+            offsets = torch.tensor([0, 1, 3, 6])
+
+            data_cpu = data_init.clone().requires_grad_(True)
+            out_cpu = torch.segment_reduce(data_cpu, reduction, offsets=offsets)
+            out_cpu.sum().backward()
+
+            data_mps = data_init.clone().to(device).requires_grad_(True)
+            out_mps = torch.segment_reduce(data_mps, reduction, offsets=offsets.to(device))
+            out_mps.sum().backward()
+
+            self.assertEqual(data_mps.grad.cpu(), data_cpu.grad,
+                             rtol=rtol, atol=atol, msg=f"1D offsets {reduction}")
+
+            # 2D axis=1 offsets backward
+            data_init = torch.randn(3, 6, dtype=dtype)
+            offsets = torch.tensor([[0, 2, 6], [0, 3, 6], [0, 1, 6]])
+
+            data_cpu = data_init.clone().requires_grad_(True)
+            out_cpu = torch.segment_reduce(data_cpu, reduction, offsets=offsets, axis=1)
+            out_cpu.sum().backward()
+
+            data_mps = data_init.clone().to(device).requires_grad_(True)
+            out_mps = torch.segment_reduce(data_mps, reduction, offsets=offsets.to(device), axis=1)
+            out_mps.sum().backward()
+
+            self.assertEqual(data_mps.grad.cpu(), data_cpu.grad,
+                             rtol=rtol, atol=atol, msg=f"2D axis=1 offsets {reduction}")
+
     @dtypes(torch.int, torch.int64)
     def test_unsafe_flag(self, device, dtype):
         length_type = dtype
@@ -569,7 +750,7 @@ class TestSegmentReductions(TestCase):
 
 
 
-instantiate_device_type_tests(TestSegmentReductions, globals())
+instantiate_device_type_tests(TestSegmentReductions, globals(), allow_mps=True)
 
 if __name__ == "__main__":
     run_tests()
