@@ -4625,13 +4625,17 @@ class GraphModule(torch.nn.Module):
 
         cat: "f64[s64, 2*s55]" = torch.ops.aten.cat.default([clone, clone], 1);  clone = None
         add_2: "Sym(2*s55)" = primals_10 + primals_10
+
+        mul: "Sym(2*s55*s71)" = primals_2 * add_2
         return (
             cat,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_values')
             primals_5,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_offsets')
             primals_6,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_min_seqlen_tensor')
             primals_7,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_max_seqlen_tensor')
             primals_8,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
+            primals_2,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
             add_2,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=2)
+            mul,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
             add_2,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
             primals_8,  # SavedForBackwardsAOTOutput(idx=0)
             primals_10,  # SavedForBackwardsAOTOutput(idx=1)

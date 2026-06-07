@@ -1280,9 +1280,6 @@ class FxGraphHashDetails:
                         (kernel_source, constant_args, configs)
                     )
 
-        # Alignment checks
-        self.inputs_to_check = inputs_to_check
-
         no_tensor_inputs = not any(isinstance(x, torch.Tensor) for x in example_inputs)
         # This device index is usually already encoded by the device of the inputs
         # but fx graphs don't necessarily have tensor inputs. If there aren't any,

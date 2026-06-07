@@ -1356,11 +1356,7 @@ def aot_dispatch_subclass(
                 )
             # Don't need fw outs since we already have subclass metadata on them
             grad_inputs = wrapped_outs[1]
-            subclass_meta.grad_input_metas = create_subclass_meta(
-                grad_inputs,
-                include_nested_ints=True,
-                allowed_nested_int_ids=allowed_nested_int_ids,
-            )
+            subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
 
             # Add extra symints as outputs to the forward/backward graphs
             forward_outs, forward_outs_descs = unwrap_tensor_subclasses(
@@ -1374,8 +1370,6 @@ def aot_dispatch_subclass(
                 wrapped_outs[1],
                 wrapped_outs_descs[1],
                 append_symints=True,
-                include_nested_ints=True,
-                allowed_nested_int_ids=allowed_nested_int_ids,
             )
             return (
                 (forward_outs, backward_outs),

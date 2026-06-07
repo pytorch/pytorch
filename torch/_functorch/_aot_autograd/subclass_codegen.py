@@ -306,9 +306,11 @@ def _codegen_subclass_wrapper_source(
     result_exprs, num_args_tallied = _emit_output_wrapping(state, out_metas)
     result_tuple = f"({', '.join(result_exprs)},)" if result_exprs else "()"
     if num_fw_outs_saved_for_bw is not None:
-        state.emit(
-            f"return {result_tuple} + tuple(unwrapped_outs[{num_args_tallied}:])"
-        )
+        if num_fw_outs_saved_for_bw == 0:
+            saved_outs_expr = "()"
+        else:
+            saved_outs_expr = f"tuple(unwrapped_outs[-{num_fw_outs_saved_for_bw}:])"
+        state.emit(f"return {result_tuple} + {saved_outs_expr}")
     else:
         state.emit(f"return {result_tuple}")
 

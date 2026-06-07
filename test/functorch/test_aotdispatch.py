@@ -8897,6 +8897,27 @@ def forward(self, primals_1, tangents_1):
         fn([1, 2, 3])
         self.assertEqual(call_log, ["fast"])
 
+    def test_backward_epilogue_drops_metadata_only_symbolic_grads(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _codegen_backward_epilogue,
+        )
+        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+
+        fw_metadata = SimpleNamespace(
+            num_backward_tokens=0,
+            is_rng_op_functionalized=False,
+        )
+        subclass_meta = SimpleNamespace(grad_input_metas=[PlainTensorMeta(0)])
+        call_log = []
+
+        def fast_wrap(out):
+            call_log.append(out)
+            return out
+
+        fn = _codegen_backward_epilogue(fw_metadata, subclass_meta, fast_wrap)
+        fn([1, 2, None])
+        self.assertEqual(call_log, [(None,)])
+
     def test_backward_epilogue_make_subclass_override_slow_path(self):
         from torch._functorch._aot_autograd.runtime_wrappers import (
             _codegen_backward_epilogue,
@@ -11842,6 +11863,18 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         optout = run(optf)
 
         self.assertEqual(out, optout)
+
+    def test_lift_after_factory(self):
+        def f(low, high, size):
+            y = torch.randint(low=low, high=high, size=size)
+            return torch.ops.aten.lift.default(y)
+
+        torch.manual_seed(0)
+        out = f(0, 100, [2, 3])
+        torch.manual_seed(0)
+        opt_out = torch.compile(f, backend="aot_eager", fullgraph=True)(0, 100, [2, 3])
+
+        self.assertEqual(out, opt_out)
 
     def test_mutations_in_bw_detached_from_tangent(self):
         class AF(torch.autograd.Function):
