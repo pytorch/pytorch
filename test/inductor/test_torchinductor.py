@@ -15669,6 +15669,91 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaises(RuntimeError):
             torch.compile(fn)(x, source)
 
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    @config.patch({"cpp.threads": 1})
+    def test_index_add_out_of_bounds_indices(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU bounds check regression")
+
+        def fn(x, index, source):
+            out = x.clone()
+            out.index_add_(-1, index, source)
+            return out
+
+        x = torch.zeros(1, 4, 4, device=self.device)
+        source = torch.ones(1, 4, 4, device=self.device)
+        valid_index = torch.tensor([0, 1, 2, 3], device=self.device)
+        with torch._dynamo.config.patch(suppress_errors=True):
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            self.assertEqual(
+                compiled_fn(x, valid_index, source), fn(x, valid_index, source)
+            )
+
+            for bad_index in (
+                torch.tensor([0, 1, 4, 2], device=self.device),
+                torch.tensor([0, 1, -1, 2], device=self.device),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "index_add\\(\\): index out of bounds"
+                ):
+                    compiled_fn(x, bad_index, source)
+
+            def computed_bad_index_fn(x):
+                out = x.clone()
+                source = torch.ones_like(out)
+                index = torch.full((4,), 5, dtype=torch.long, device=out.device)
+                out.index_add_(-1, index, source)
+                return out
+
+            compiled_computed_bad_index_fn = torch.compile(
+                computed_bad_index_fn, backend="inductor", fullgraph=True
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "index_add\\(\\): index out of bounds"
+            ):
+                compiled_computed_bad_index_fn(x)
+
+            empty_source = torch.empty(1, 4, 0, device=self.device)
+            for dtype in (torch.float32, torch.bool, torch.int16):
+                bad_index = torch.empty(0, dtype=dtype, device=self.device)
+                with self.assertRaisesRegex(RuntimeError, "Expected dtype int32/int64"):
+                    fn(x, bad_index, empty_source)
+                with self.assertRaisesRegex(RuntimeError, "Expected dtype int32/int64"):
+                    compiled_fn(x, bad_index, empty_source)
+
+    @skip_if_halide  # cpp-only ComplexHalf coverage
+    @skip_if_pallas  # cpp-only ComplexHalf coverage
+    @skip_if_triton_cpu  # cpp-only ComplexHalf coverage
+    def test_index_add_complex_half(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU ComplexHalf regression")
+
+        def fn(x, index, source):
+            out = x.clone()
+            out.index_add_(0, index, source)
+            return out
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", "ComplexHalf support is experimental", UserWarning
+            )
+            warnings.filterwarnings(
+                "ignore",
+                "Torchinductor does not support code generation for complex operators",
+                UserWarning,
+            )
+            x = torch.zeros(4, dtype=torch.complex32, device=self.device)
+            source = torch.ones(2, dtype=torch.complex32, device=self.device)
+            index = torch.tensor([0, 2], device=self.device)
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            self.assertEqual(compiled_fn(x, index, source), fn(x, index, source))
+            with self.assertRaisesRegex(
+                RuntimeError, "index_add\\(\\): index out of bounds"
+            ):
+                compiled_fn(x, torch.tensor([0, -1], device=self.device), source)
+
     @skip_if_gpu_halide  # cuda error
     def test_mutations_loop_fusion(self):
         def fn(tensor, index, source):
