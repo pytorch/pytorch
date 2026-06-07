@@ -237,7 +237,7 @@ class TestCodegenRuntimeWrapper(TestCase):
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("if len(all_outs) != 3:", source)
+        self.assertIn("if len(all_outs) != 4:", source)
 
     @skipIfTorchDynamo("dynamo handles mutations in-graph")
     def test_split_index_baked(self):
