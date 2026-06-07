@@ -116,7 +116,10 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         )
 
         ts.dispatch(
-            routing, tokens, topk_weights, out_tokens, out_topk_weights, out_topk_idx
+            routing,
+            tokens,
+            topk_weights,
+            out=(out_tokens, out_topk_weights, out_topk_idx),
         )
         torch.cuda.synchronize()
 
@@ -157,7 +160,10 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         )
 
         ts.dispatch(
-            routing, tokens, topk_weights, out_tokens, out_topk_weights, out_topk_idx
+            routing,
+            tokens,
+            topk_weights,
+            out=(out_tokens, out_topk_weights, out_topk_idx),
         )
         torch.cuda.synchronize()
 
@@ -165,11 +171,125 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         combined = torch.zeros(
             (NUM_TOKENS, HIDDEN), dtype=torch.bfloat16, device=self.device
         )
-        ts.combine(routing, expert_tokens, combined)
+        ts.combine(routing, expert_tokens, out=combined)
         torch.cuda.synchronize()
 
         expected = torch.full((NUM_TOKENS, HIDDEN), token_val, dtype=torch.bfloat16)
         self.assertEqual(combined.cpu(), expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_dispatch_autograd_backward(self):
+        self._init()
+        ts = self.get_token_switch()
+        num_recv_tokens = self.world_size * NUM_TOKENS
+
+        topk_idx, topk_weights = _generate_topk(
+            self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
+        )
+        per_expert_counts = torch.zeros(
+            self.world_size, dtype=torch.int32, device=self.device
+        )
+        routing = ts.create_routing(topk_idx, per_expert_counts)
+
+        tokens = torch.full(
+            (NUM_TOKENS, HIDDEN),
+            float(self.rank + 1),
+            dtype=torch.bfloat16,
+            device=self.device,
+            requires_grad=True,
+        )
+        out_tokens, _out_weights, _out_idx = ts.dispatch(
+            routing, tokens, topk_weights, num_recv_tokens
+        )
+        out_tokens.sum().backward()
+        torch.cuda.synchronize()
+
+        # grad_out_tokens is all-ones; combine routes them back: each token gets 1.0 per top-k slot
+        self.assertIsNotNone(tokens.grad)
+        self.assertEqual(tokens.grad, torch.ones_like(tokens))
+
+    @skip_if_lt_x_gpu(2)
+    def test_combine_autograd_backward(self):
+        self._init()
+        ts = self.get_token_switch()
+        num_recv_tokens = self.world_size * NUM_TOKENS
+
+        topk_idx, topk_weights = _generate_topk(
+            self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
+        )
+        per_expert_counts = torch.zeros(
+            self.world_size, dtype=torch.int32, device=self.device
+        )
+        routing = ts.create_routing(topk_idx, per_expert_counts)
+
+        # Pre-dispatch so the routing handle is primed, then test combine autograd
+        tokens = torch.full(
+            (NUM_TOKENS, HIDDEN),
+            float(self.rank + 1),
+            dtype=torch.bfloat16,
+            device=self.device,
+        )
+        out_tokens_buf = torch.zeros(
+            num_recv_tokens, HIDDEN, dtype=torch.bfloat16, device=self.device
+        )
+        out_weights_buf = torch.zeros(
+            num_recv_tokens, TOP_K, dtype=torch.float32, device=self.device
+        )
+        out_idx_buf = torch.zeros(
+            num_recv_tokens, TOP_K, dtype=torch.int64, device=self.device
+        )
+        ts.dispatch(
+            routing,
+            tokens,
+            topk_weights,
+            out=(out_tokens_buf, out_weights_buf, out_idx_buf),
+        )
+        torch.cuda.synchronize()
+
+        expert_tokens = (
+            out_tokens_buf[:NUM_TOKENS].contiguous().detach().requires_grad_(True)
+        )
+        combined = ts.combine(routing, expert_tokens)
+        combined.sum().backward()
+        torch.cuda.synchronize()
+
+        # grad_out_tokens is all-ones; dispatch routes them back to expert ranks
+        self.assertIsNotNone(expert_tokens.grad)
+        self.assertEqual(expert_tokens.grad, torch.ones_like(expert_tokens))
+
+    @skip_if_lt_x_gpu(2)
+    def test_dispatch_combine_autograd_roundtrip(self):
+        self._init()
+        ts = self.get_token_switch()
+        num_recv_tokens = self.world_size * NUM_TOKENS
+
+        topk_idx, topk_weights = _generate_topk(
+            self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
+        )
+        per_expert_counts = torch.zeros(
+            self.world_size, dtype=torch.int32, device=self.device
+        )
+        routing = ts.create_routing(topk_idx, per_expert_counts)
+
+        token_val = float(self.rank + 1)
+        tokens = torch.full(
+            (NUM_TOKENS, HIDDEN),
+            token_val,
+            dtype=torch.bfloat16,
+            device=self.device,
+            requires_grad=True,
+        )
+        dispatched, _weights, _idx = ts.dispatch(
+            routing, tokens, topk_weights, num_recv_tokens
+        )
+        expert_out = dispatched[:NUM_TOKENS].contiguous()
+        combined = ts.combine(routing, expert_out)
+        combined.sum().backward()
+        torch.cuda.synchronize()
+
+        # With identity expert (no-op), gradient should round-trip back as all-ones
+        self.assertIsNotNone(tokens.grad)
+        self.assertEqual(tokens.grad, torch.ones_like(tokens))
 
     @skip_if_lt_x_gpu(2)
     def test_dispatch_combine_multiple_rounds(self):
@@ -210,14 +330,12 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
                 routing,
                 tokens,
                 topk_weights,
-                out_tokens,
-                out_topk_weights,
-                out_topk_idx,
+                out=(out_tokens, out_topk_weights, out_topk_idx),
             )
             torch.cuda.synchronize()
 
             expert_tokens = out_tokens[:NUM_TOKENS].contiguous()
-            ts.combine(routing, expert_tokens, combined)
+            ts.combine(routing, expert_tokens, out=combined)
             torch.cuda.synchronize()
 
         expected = torch.full(
