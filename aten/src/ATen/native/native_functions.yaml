@@ -9398,14 +9398,12 @@
 - func: multinomial.out(Tensor self, SymInt num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
-    CPU, CUDA: multinomial_out
-    MPS: multinomial_out_mps
+    CPU, CUDA, MPS: multinomial_out
 
 - func: multinomial(Tensor self, SymInt num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   variants: method, function
   dispatch:
-    CPU, CUDA: multinomial
-    MPS: multinomial_mps
+    CPU, CUDA, MPS: multinomial
   tags: nondeterministic_seeded
 
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
