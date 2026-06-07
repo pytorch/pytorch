@@ -16,12 +16,17 @@ from torch._dynamo.repro.after_aot import (
     _get_compile_args,
     InputReader,
     InputWriter,
+    repro_common,
     repro_minify,
     repro_run,
     save_graph_repro,
 )
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import (
+    find_symbol_binding_fx_nodes,
+    free_symbols,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
 from torch.utils._traceback import report_compile_source_on_error
@@ -500,6 +505,29 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         derived_expr = reader.symint_exprs.get(1)
         self.assertIsNotNone(derived_expr)
         self.assertIn("//", derived_expr)
+
+    def test_save_graph_repro_uses_symbolic_placeholder_metadata(self):
+        def f(n, x):
+            return (x + 1,)
+
+        inp = torch.randn(2)
+        gm = make_fx(f, tracing_mode="symbolic")(2, inp)
+
+        buf = io.StringIO()
+        save_graph_repro(buf, gm, [2, inp], "inductor", command="get_args")
+        repro_src = buf.getvalue()
+
+        self.assertIn("reader.symint(2, expr=", repro_src)
+        self.assertIn("tracing_mode='symbolic'", repro_src)
+
+        ns = {"__name__": "not_main", "__compile_source__": repro_src}
+        exec(compile(repro_src, "<test>", "exec"), ns)
+        options = SimpleNamespace(save_dir=None, tracing_mode="symbolic")
+        repro_gm, _ = repro_common(options, ns["mod"], ns["load_args"])
+        placeholders = [n for n in repro_gm.graph.nodes if n.op == "placeholder"]
+        bindings = find_symbol_binding_fx_nodes(repro_gm.graph)
+        tensor_symbols = free_symbols(placeholders[1].meta["val"])
+        self.assertTrue(set(tensor_symbols).issubset(bindings.keys()))
 
     @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode")
     def test_symint_expr_e2e_repro(self):
