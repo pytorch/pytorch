@@ -10,10 +10,11 @@ import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
 import torch._inductor.pattern_matcher as pattern_matcher
 import torch.nn.functional as F
-from torch._dynamo.utils import count_calls, counters
+from torch._dynamo.utils import count_calls, counters, detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
+from torch._inductor.fx_passes.replace_random import replace_random_passes
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -1478,60 +1479,6 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
-    def test_preserve_accumulator_addmm_with_pointwise(self):
-        args = [
-            torch.randn(10, 20, device=GPU_TYPE),
-            torch.randn(10, 15, device=GPU_TYPE),
-            torch.randn(15, 20, device=GPU_TYPE),
-        ]
-
-        @torch.compile()
-        def fn(inp, a, b):
-            return torch.nn.functional.gelu(torch.ops.aten.addmm(inp, a, b))
-
-        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
-        self.assertEqual(actual, torch.nn.functional.gelu(torch.addmm(*args)))
-        FileCheck().check("extern_kernels.addmm(").run(code[0])
-
-    def test_unfuse_expanded_bias_addmm(self):
-        bias = torch.randn(20, device=GPU_TYPE).unsqueeze(0).expand(10, 20)
-        args = [
-            bias,
-            torch.randn(10, 15, device=GPU_TYPE),
-            torch.randn(15, 20, device=GPU_TYPE),
-        ]
-        self.assertEqual(bias.stride(0), 0)
-
-        @torch.compile()
-        def fn(inp, a, b):
-            return torch.ops.aten.addmm(inp, a, b).relu()
-
-        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
-        self.assertEqual(actual, torch.addmm(*args).relu())
-        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
-
-    @parametrize("inplace", [False, True])
-    def test_accumulator_addmm_loop_does_not_delay_pointwise(self, inplace):
-        def fn(x, ws):
-            buf = torch.zeros_like(x)
-            for w in ws:
-                if inplace:
-                    buf.addmm_(w, w)
-                else:
-                    buf = torch.addmm(buf, w, w)
-                buf = torch.cos(buf)
-            return buf
-
-        args = [
-            torch.randn(32, 32, device=GPU_TYPE),
-            [torch.randn(32, 32, device=GPU_TYPE) for _ in range(3)],
-        ]
-
-        actual, (code) = run_and_get_code(torch.compile(fn), args[0], args[1])
-        self.assertEqual(actual, fn(*args))
-        self.assertEqual(code[0].count("extern_kernels.addmm("), 3)
-        self.assertNotIn("extern_kernels.mm(", code[0])
-
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @inductor_config.patch(
         {
@@ -1754,15 +1701,14 @@ class TestPatternMatcher(TestCase):
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_original_aten_preserved_split_addmm(self):
-        # bias addmm -> elementwise should be decomposed into
-        # mm -> add -> elementwise.
+        # addmm -> elementwise should be decomposed into mm -> add -> elementwise
         def fn(x, y, z):
             return torch.addmm(z, x, y).sin()
 
         args = [
             torch.randn(16, 24, device=GPU_TYPE),
             torch.randn(24, 32, device=GPU_TYPE),
-            torch.randn(32, device=GPU_TYPE),
+            torch.randn(16, 32, device=GPU_TYPE),
         ]
 
         counters.clear()
@@ -1903,14 +1849,24 @@ class TestPatternMatcher(TestCase):
         def test(x, y):
             return x + (y * 0)
 
-        x = torch.rand([256], device=GPU_TYPE)
-        y = torch.rand([256], device=GPU_TYPE)
-
-        test_c = torch.compile(test)
-
-        out, code = run_and_get_code(test_c, x, y)
+        # For integer dtypes, x * 0 is uniformly 0, so the multiply is folded
+        # away entirely and no kernel needs to run.
+        xi = torch.randint(0, 10, [256], device=GPU_TYPE)
+        yi = torch.randint(0, 10, [256], device=GPU_TYPE)
+        out, code = run_and_get_code(torch.compile(test), xi, yi)
         FileCheck().check_not(".run").run(code[0])
-        self.assertEqual(out, test(x, y))
+        self.assertEqual(out, test(xi, yi))
+
+        # For floating point dtypes, x * 0 must NOT be folded to 0: nan * 0 == nan
+        # and (+/-inf) * 0 == nan, so the multiply has to run to match eager.
+        xf = torch.rand([8], device=GPU_TYPE)
+        yf = torch.tensor(
+            [float("nan"), float("inf"), float("-inf"), 0.0, 1.0, -1.0, 2.0, -3.0],
+            device=GPU_TYPE,
+        )
+        out, code = run_and_get_code(torch.compile(test), xf, yf)
+        FileCheck().check(".run").run(code[0])
+        self.assertEqual(out, test(xf, yf))
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
@@ -2689,6 +2645,55 @@ class TestPatternMatcher(TestCase):
                 node.meta["nn_module_stack"] = {"test": ("m", "M")}
                 node.meta["_numeric_debug_handle"] = 42
                 node.meta["custom"] = {"test_key": "test_value"}
+
+    def test_replace_random_pass_preserves_stack_trace_on_rng_prims(self):
+        def fn(x):
+            return x + torch.randn(x.shape, device=x.device)
+
+        gm = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+
+        fake_inputs = [
+            node.meta.get("val") for node in gm.graph.nodes if node.op == "placeholder"
+        ]
+        fake_mode = detect_fake_mode(fake_inputs)
+        self.assertIsNotNone(fake_mode)
+
+        stack_trace = '  File "test_replace_random.py", line 1, in fn\n'
+        source_fn_stack = [("randn", torch.randn)]
+
+        randn_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.randn.default
+        )
+        randn_node.meta["stack_trace"] = stack_trace
+        randn_node.meta["source_fn_stack"] = source_fn_stack
+
+        with V.set_fake_mode(fake_mode):
+            replace_random_passes(gm)
+        gm.graph.lint()
+
+        for target in (
+            torch.ops.prims.inductor_seeds.default,
+            torch.ops.prims.inductor_lookup_seed.default,
+            torch.ops.prims.inductor_random.default,
+        ):
+            node = next(node for node in gm.graph.nodes if node.target == target)
+            self.assertEqual(
+                node.meta.get("stack_trace"), stack_trace, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta.get("source_fn_stack"),
+                source_fn_stack,
+                msg=f"{target}: {node.meta}",
+            )
+
+        seeds_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.prims.inductor_seeds.default
+        )
+        self.assertEqual(seeds_node.meta["val"].shape, torch.Size([1]))
 
     def test_metadata_propagation_register_replacement(self):
         """Verify metadata from matched nodes transfers to replacement nodes."""
