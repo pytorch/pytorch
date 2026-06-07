@@ -100,6 +100,7 @@ runner_mapping:
   # ---- Partner hardwares ----
 
   linux.idc.xpu: linux.idc.xpu
+  linux.google.tpuv7x.1: linux.google.tpuv7x.1
   linux.rocm.gpu.2: linux.rocm.gpu.2
   linux.rocm.gpu.mi210.1: linux.rocm.gpu.mi210.1
   linux.rocm.gpu.mi210.2: linux.rocm.gpu.mi210.2
