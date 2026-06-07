@@ -1,5 +1,4 @@
 from typing import Any
-
 from typing_extensions import assert_type
 
 from torch._dynamo.utils import istype
