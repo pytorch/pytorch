@@ -13,11 +13,16 @@ from ..exc import TYPE_CHECKING, unimplemented
 from ..graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
     get_external_object_by_index,
+    index_to_bytecode_constructor,
+    index_to_external_object_weakref,
     register_graph_created_object,
     register_user_object,
+    reserve_user_object_index,
     reset_user_object_tracking,
+    set_external_object_by_index,
 )
 from ..source import CurrentStreamSource
+from ..utils import set_example_value
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
@@ -43,8 +48,19 @@ def _device_module_is_initialized(device: torch.device) -> bool:
     return is_initialized()
 
 
+def _reserve_current_stream_index_if_needed() -> None:
+    if index_to_bytecode_constructor:
+        return
+    current_accelerator = torch.accelerator.current_accelerator(check_available=True)
+    if current_accelerator is None:
+        return
+    source = CurrentStreamSource(current_accelerator)
+    reserve_user_object_index(CURRENT_STREAM_INDEX, lambda cg: cg(source))
+
+
 def new_event(*args: Any, **kwargs: Any) -> int:
     event = torch.Event(*args, **kwargs)
+    _reserve_current_stream_index_if_needed()
     return register_graph_created_object(
         event,
         EventVariable.make_construct_in_graph_event_fn(
@@ -55,6 +71,7 @@ def new_event(*args: Any, **kwargs: Any) -> int:
 
 def new_stream(*args: tuple[Any], **kwargs: Any) -> int:
     stream = torch.Stream(*args, **kwargs)  # type: ignore[no-matching-overload,call-overload]
+    _reserve_current_stream_index_if_needed()
     return register_graph_created_object(
         stream,
         StreamVariable.make_construct_in_graph_stream_fn(
@@ -274,8 +291,6 @@ class SymbolicStreamState:
     """Track the currently entered stream if any"""
 
     def __init__(self) -> None:
-        from ..source import CurrentStreamSource
-
         cur_stack: list[StreamVariable] = []
         current_accelerator = torch.accelerator.current_accelerator(
             check_available=True
@@ -283,28 +298,65 @@ class SymbolicStreamState:
         if current_accelerator is not None and _device_module_is_initialized(
             current_accelerator
         ):
-            # Reset the registry so the current stream is guaranteed index 0.
+            cur_stack = [self._register_current_stream()]  # type: ignore[list-item]
+
+        self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque(
+            cur_stack
+        )
+
+    def _register_current_stream(
+        self,
+        device: torch.device | None = None,
+        tx: "InstructionTranslatorBase | None" = None,
+    ) -> "StreamVariable":
+        if not index_to_bytecode_constructor:
             reset_user_object_tracking()
-            stream = torch.accelerator.current_stream()
-            source = CurrentStreamSource(stream.device)
-            # Register the current stream so it gets index 0 (registry is
-            # fresh at tracing start).  The inductor wrapper updates this
-            # entry at runtime so cudagraph capture uses the capture stream
-            # instead of this stale trace-time stream.
-            index = register_user_object(stream, source)
-            if index != CURRENT_STREAM_INDEX:
-                raise AssertionError(
-                    f"Current stream must be registered at index {CURRENT_STREAM_INDEX}, "
-                    f"got {index}"
-                )
+
+        stream = torch.accelerator.current_stream(device)
+        source = CurrentStreamSource(stream.device)
+        if (
+            CURRENT_STREAM_INDEX in index_to_bytecode_constructor
+            and CURRENT_STREAM_INDEX not in index_to_external_object_weakref
+        ):
+            set_external_object_by_index(CURRENT_STREAM_INDEX, stream)
+            return self._make_stream_variable(stream, source, CURRENT_STREAM_INDEX, tx)
+
+        index = register_user_object(stream, source)
+        if index != CURRENT_STREAM_INDEX:
+            # Preserve any graph-created streams/events already registered
+            # before an explicit current_stream() call. Those graphs cannot use
+            # the cudagraph current-stream slot, but they still need stable
+            # external-object indices.
+            return self._make_stream_variable(stream, source, index, tx)
+
+        # The inductor wrapper updates index 0 at runtime so cudagraph capture
+        # uses the capture stream instead of this stale trace-time stream.
+        if stream.device != source.device:
+            raise AssertionError(
+                f"Current stream source device mismatch: {stream.device} vs {source.device}"
+            )
+        return self._make_stream_variable(stream, source, index, tx)
+
+    @staticmethod
+    def _make_stream_variable(
+        stream: torch.Stream,
+        source: CurrentStreamSource,
+        index: int,
+        tx: "InstructionTranslatorBase | None",
+    ) -> "StreamVariable":
+        if tx is None:
             stream_var = LazyVariableTracker.create(stream, source=source)
             # Set user_object_index as an instance attribute so accessing it
             # does NOT trigger LazyVariableTracker realization.
             stream_var.user_object_index = index  # type: ignore[union-attr]
-            cur_stack = [stream_var]  # type: ignore[list-item]
+            return stream_var  # type: ignore[return-value]
 
-        self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque(
-            cur_stack
+        stream_proxy = tx.output.create_proxy(
+            "call_function", get_external_object_by_index, (index,), {}
+        )
+        set_example_value(stream_proxy.node, stream)
+        return StreamVariable(
+            stream_proxy, stream, source=source, user_object_index=index
         )
 
     def enter_stream(self, stream: "StreamVariable") -> None:
@@ -313,11 +365,20 @@ class SymbolicStreamState:
     def exit_stream(self) -> None:
         self.cur_stream_stack.pop()
 
-    def cur_stream(self, device: torch.device | None = None) -> "StreamVariable":
+    def cur_stream(
+        self,
+        device: torch.device | None = None,
+        tx: "InstructionTranslatorBase | None" = None,
+    ) -> "StreamVariable":
         if device is not None:
             for stream in reversed(self.cur_stream_stack):
                 if stream.device == device:
                     return stream
+
+        if not self.cur_stream_stack:
+            stream = self._register_current_stream(device, tx)
+            self.cur_stream_stack.append(stream)
+            return stream
 
         return self.cur_stream_stack[-1]
 
@@ -739,7 +800,7 @@ class EventVariable(VariableTracker):
             stream_arg = kwargs.get("stream")
 
         if not stream_arg:
-            stream_var = tx.symbolic_stream_state.cur_stream()
+            stream_var = tx.symbolic_stream_state.cur_stream(tx=tx)
             return stream_var, stream_var.user_object_index  # type: ignore[return-value]
 
         return stream_arg, stream_arg.user_object_index  # type: ignore[return-value]

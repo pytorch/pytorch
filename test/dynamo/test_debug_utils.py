@@ -23,6 +23,30 @@ i32 = torch.int32
 
 
 class TestDebugUtils(TestCase):
+    def test_cuda_system_info_comment_uninitialized_is_not_cached(self):
+        with (
+            patch.object(torch.cuda, "is_available", return_value=True),
+            patch.object(torch.cuda, "is_initialized", return_value=False),
+        ):
+            self.assertIn(
+                "torch.cuda.is_initialized()==False",
+                debug_utils._cuda_system_info_comment(),
+            )
+
+        with (
+            patch.object(torch.cuda, "is_available", return_value=True),
+            patch.object(torch.cuda, "is_initialized", return_value=True),
+            patch.object(
+                debug_utils,
+                "_initialized_cuda_system_info_comment",
+                return_value="# initialized CUDA info\n",
+            ),
+        ):
+            self.assertEqual(
+                debug_utils._cuda_system_info_comment(),
+                "# initialized CUDA info\n",
+            )
+
     def test_cast_model_to_fp64_dtype_args(self):
         # Test that dtype arguments are converted to fp64
 

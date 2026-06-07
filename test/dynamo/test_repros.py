@@ -9389,6 +9389,38 @@ for backend in ("eager", "inductor"):
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_current_stream_initializes_cuda_when_requested(self):
+        script = """\
+import torch
+
+assert torch.cuda.is_available()
+assert not torch.cuda.is_initialized()
+
+def f():
+    return torch.cuda.current_stream().cuda_stream
+
+opt_f = torch.compile(f, backend="eager", fullgraph=True)
+assert not torch.cuda.is_initialized()
+compiled_stream = opt_f()
+assert torch.cuda.is_initialized()
+assert compiled_stream == torch.cuda.current_stream().cuda_stream
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env={**os.environ, "MKL_SERVICE_FORCE_INTEL": "1"},
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=(
+                f"subprocess failed:\nstdout:\n{result.stdout.decode()}\n"
+                f"stderr:\n{result.stderr.decode()}"
+            ),
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_graph_metadata_does_not_retain_cuda_fake_constants(self):
         def f():
             x = torch.tensor(5, dtype=torch.float32, device="cuda")

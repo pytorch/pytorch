@@ -273,6 +273,25 @@ class <lambda>(torch.nn.Module):
         compiled = torch.compile(fn_cuda_stream, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x), fn_cuda_stream(x))
 
+    @requires_cuda
+    def test_lazy_current_stream_preserves_existing_registry_entries(self):
+        def fn():
+            event = torch.cuda.Event()
+            stream = torch.cuda.current_stream()
+            stream.record_event(event)
+            return stream.cuda_stream
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
+    @requires_cuda
+    def test_lazy_current_stream_query(self):
+        def fn():
+            return torch.cuda.current_stream().query()
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
     @unittest.skipIf(not TEST_XPU, "XPU is not available")
     def test_xpu_current_stream_attrs(self):
         """Verify that torch.xpu.current_stream() attributes are accessible
