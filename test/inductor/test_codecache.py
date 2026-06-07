@@ -49,6 +49,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.custom_graph_pass import (
@@ -4121,6 +4122,79 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 class TestCudaCompileCommand(TestCase):
+    def setUp(self):
+        super().setUp()
+        cuda_compile_utils._cuda_driver_lib_dirs.cache_clear()
+        self.addCleanup(cuda_compile_utils._cuda_driver_lib_dirs.cache_clear)
+
+    def test_cuda_driver_lib_dirs_from_ldconfig(self):
+        ldconfig_output = (
+            b"\tlibcuda.so.1 (libc6,x86-64) => /usr/lib/x86_64-linux-gnu/libcuda.so.1\n"
+        )
+        with (
+            mock.patch("subprocess.check_output", return_value=ldconfig_output),
+            mock.patch.dict(os.environ, {"LD_LIBRARY_PATH": ""}),
+        ):
+            self.assertEqual(
+                cuda_compile_utils._cuda_driver_lib_dirs(),
+                ["/usr/lib/x86_64-linux-gnu"],
+            )
+
+    def test_cuda_driver_lib_dirs_from_ld_library_path(self):
+        with tempfile.TemporaryDirectory() as cuda_dir:
+            open(os.path.join(cuda_dir, "libcuda.so.1"), "w").close()
+            with (
+                mock.patch("subprocess.check_output", return_value=b""),
+                mock.patch.dict(os.environ, {"LD_LIBRARY_PATH": cuda_dir}),
+            ):
+                self.assertEqual(
+                    cuda_compile_utils._cuda_driver_lib_dirs(),
+                    [cuda_dir],
+                )
+
+    def test_cuda_lib_options_uses_versioned_driver_soname(self):
+        with (
+            mock.patch(
+                "torch.utils.cpp_extension.library_paths",
+                return_value=["/fake/cuda/lib64"],
+            ),
+            mock.patch.object(
+                cuda_compile_utils, "_transform_cuda_paths", lambda lpaths: None
+            ),
+            mock.patch.object(cuda_compile_utils, "is_linux", lambda: True),
+            mock.patch.object(
+                cuda_compile_utils,
+                "_cuda_driver_lib_dirs",
+                return_value=["/usr/lib/x86_64-linux-gnu"],
+            ),
+        ):
+            flags = cuda_compile_utils._cuda_lib_options()
+
+        self.assertIn("-L/usr/lib/x86_64-linux-gnu", flags)
+        self.assertIn("-l:libcuda.so.1", flags)
+        self.assertNotIn("-lcuda", flags)
+        self.assertIn("-lcudart", flags)
+
+    def test_cuda_lib_options_keeps_stub_fallback_without_driver_soname(self):
+        with (
+            mock.patch(
+                "torch.utils.cpp_extension.library_paths",
+                return_value=["/fake/cuda/lib64", "/fake/cuda/lib64/stubs"],
+            ),
+            mock.patch.object(
+                cuda_compile_utils, "_transform_cuda_paths", lambda lpaths: None
+            ),
+            mock.patch.object(cuda_compile_utils, "is_linux", lambda: True),
+            mock.patch.object(
+                cuda_compile_utils, "_cuda_driver_lib_dirs", return_value=[]
+            ),
+        ):
+            flags = cuda_compile_utils._cuda_lib_options()
+
+        self.assertIn("-lcuda", flags)
+        self.assertNotIn("-l:libcuda.so.1", flags)
+        self.assertIn("-lcudart", flags)
+
     @requires_cuda_and_triton
     def test_cuda_compile_command(self):
         cmd_no_extra_args: str = cuda_compile_command(
