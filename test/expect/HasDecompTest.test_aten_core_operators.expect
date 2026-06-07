@@ -12,6 +12,8 @@ aten::_to_copy
 aten::abs
 aten::acos
 aten::acosh
+aten::adaptive_max_pool2d
+aten::adaptive_max_pool3d
 aten::add.Scalar
 aten::add.Tensor
 aten::addmm
