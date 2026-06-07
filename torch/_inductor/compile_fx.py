@@ -29,6 +29,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from functorch.compile import min_cut_rematerialization_partition
 from torch import fx
+from torch._decomp.decompositions import lstm_impl
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import (
     compiled_autograd,
@@ -2705,8 +2706,6 @@ def _lstm_input_decomp_for_inductor(
 ):
     if input.device.type == "cuda":
         return NotImplemented
-
-    from torch._decomp.decompositions import lstm_impl
 
     return lstm_impl(
         input,
