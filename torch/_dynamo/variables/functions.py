@@ -2361,6 +2361,24 @@ class SkipFunctionVariable(VariableTracker):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         else:
+            from .misc import DebuggingVariable
+
+            if (
+                self.source is not None
+                and DebuggingVariable.is_default_reorderable_logging_function(
+                    self.value
+                )
+                and not DebuggingVariable.is_warning_capture_context_active(tx)
+                and DebuggingVariable.can_reorder_logs(self.value, args, kwargs)
+            ):
+                return DebuggingVariable(
+                    self.value,
+                    source=self.source,
+                    warning_location=DebuggingVariable.make_warning_location(
+                        tx, args, kwargs
+                    ),
+                ).call_function(tx, args, kwargs)
+
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
 

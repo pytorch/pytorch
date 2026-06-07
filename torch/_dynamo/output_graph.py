@@ -2432,11 +2432,54 @@ class OutputGraph(OutputGraphCommon):
 
         # TODO get debug_locals working for nested graph breaks
         # Return variables used for logging at the end
-        for debug_var, args in tx.debug_locals:
-            cg.add_push_null(lambda: cg(debug_var))
-            for arg in args:
-                cg(arg)
-            cg.extend_output(create_call_function(len(args), False))
+        for debug_var, args, kwargs in tx.debug_locals:
+            warning_location = getattr(debug_var, "warning_location", None)
+            if warning_location is not None:
+                filename, lineno, module, registry = cast(
+                    tuple[str, int, str | None, dict[Any, Any]], warning_location
+                )
+                cg.add_push_null(
+                    lambda: cg.load_import_from("warnings", "warn_explicit")
+                )
+                message = args[0] if args else kwargs["message"]
+                category = args[1] if len(args) >= 2 else kwargs.get("category")
+                source = args[3] if len(args) >= 4 else kwargs.get("source")
+                cg(message)
+                if category is None or (
+                    category.is_python_constant()
+                    and category.as_python_constant() is None
+                ):
+                    cg.load_import_from("builtins", "UserWarning")
+                else:
+                    cg(category)
+                cg(variables.ConstantVariable.create(filename))
+                cg(variables.ConstantVariable.create(lineno))
+                cg(variables.ConstantVariable.create(module))
+                registry_name = self.install_global_by_id("__warningregistry", registry)
+                cg.append_output(cg.create_load_global(registry_name, add=True))
+                kw_names = ["module", "registry"]
+                if source is not None:
+                    cg(source)
+                    kw_names.append("source")
+                cg.extend_output(
+                    cg.create_call_function_kw(
+                        4 + len(kw_names), tuple(kw_names), False
+                    )
+                )
+            else:
+                cg.add_push_null(lambda: cg(debug_var))
+                for arg in args:
+                    cg(arg)
+                for arg in kwargs.values():
+                    cg(arg)
+                if kwargs:
+                    cg.extend_output(
+                        cg.create_call_function_kw(
+                            len(args) + len(kwargs), tuple(kwargs.keys()), False
+                        )
+                    )
+                else:
+                    cg.extend_output(create_call_function(len(args), False))
             cg.extend_output([create_instruction("POP_TOP")])
 
         # codegen cells before we apply side effects

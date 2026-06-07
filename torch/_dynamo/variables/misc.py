@@ -27,6 +27,7 @@ import re
 import sys
 import traceback
 import types
+import warnings
 import weakref
 from collections.abc import Callable, Sequence
 from random import Random
@@ -2063,9 +2064,20 @@ class DebuggingVariable(VariableTracker):
     registered to config.reorderable_logging_functions.
     """
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    _nonvar_fields = {
+        "warning_location",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        value: Any,
+        warning_location: tuple[str, int, str | None, dict[Any, Any]] | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.value = value
+        self.warning_location = warning_location
 
     def python_type(self) -> type:
         return type(self.value)
@@ -2078,6 +2090,59 @@ class DebuggingVariable(VariableTracker):
             callable(obj)
             and isinstance(obj, (types.FunctionType, types.BuiltinFunctionType))
             and obj in torch._dynamo.config.reorderable_logging_functions
+        )
+
+    @staticmethod
+    def is_default_reorderable_logging_function(
+        obj: Any,
+    ) -> TypeGuard[types.FunctionType | types.BuiltinFunctionType]:
+        return (
+            callable(obj)
+            and isinstance(obj, (types.FunctionType, types.BuiltinFunctionType))
+            and obj is warnings.warn
+        )
+
+    @staticmethod
+    def is_warning_capture_context_active(tx: "InstructionTranslatorBase") -> bool:
+        from .ctx_manager import (
+            CatchWarningsCtxManagerVariable,
+            GenericContextWrappingVariable,
+        )
+
+        cur_tx: InstructionTranslatorBase | None = tx
+        while cur_tx is not None:
+            for block in cur_tx.block_stack:
+                ctx = block.with_context
+                if isinstance(ctx, CatchWarningsCtxManagerVariable):
+                    return True
+                if (
+                    isinstance(ctx, GenericContextWrappingVariable)
+                    and ctx.module_name() == "unittest.case"
+                    and ctx.fn_name() == "_AssertWarnsContext"
+                ):
+                    return True
+            cur_tx = cur_tx.parent
+        return False
+
+    @staticmethod
+    def make_warning_location(
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> tuple[str, int, str | None, dict[Any, Any]]:
+        cur_tx: InstructionTranslatorBase = tx
+
+        positions = cur_tx.current_instruction.positions
+        lineno = None if positions is None else positions.lineno
+        if lineno is None:
+            lineno = (
+                cur_tx.lineno if cur_tx.lineno >= 0 else cur_tx.f_code.co_firstlineno
+            )
+        return (
+            cur_tx.f_code.co_filename,
+            lineno,
+            cur_tx.f_globals.get("__name__"),
+            cur_tx.f_globals.setdefault("__warningregistry__", {}),
         )
 
     def call_function(
@@ -2101,7 +2166,10 @@ class DebuggingVariable(VariableTracker):
                 ],
             )
 
-        tx.debug_locals.append((self, list(args)))
+        cur_tx: InstructionTranslatorBase = tx
+        while cur_tx.parent is not None:
+            cur_tx = cur_tx.parent
+        cur_tx.debug_locals.append((self, list(args), dict(kwargs)))
         return ConstantVariable.create(None)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -2112,24 +2180,65 @@ class DebuggingVariable(VariableTracker):
         return self.source.reconstruct(codegen)
 
     @staticmethod
-    def can_reorder_logs(fn: Any, args: Sequence[Any], kwargs: dict[str, Any]) -> bool:
+    def _arg_involves_tensor_value(arg: VariableTracker) -> bool:
+        if isinstance(arg, (variables.TensorVariable, variables.SymNodeVariable)):
+            return True
+        if isinstance(arg, StringFormatVariable):
+            return any(
+                DebuggingVariable._arg_involves_tensor_value(value)
+                for value in itertools.chain(arg.sym_args, arg.sym_kwargs.values())
+            )
+        return False
+
+    @staticmethod
+    def _can_reorder_configured_log_arg(arg: VariableTracker) -> bool:
+        return arg.is_python_constant() or isinstance(
+            arg, (variables.TensorVariable, StringFormatVariable)
+        )
+
+    @staticmethod
+    def _can_reorder_default_log_arg(arg: VariableTracker) -> bool:
+        if DebuggingVariable._arg_involves_tensor_value(arg):
+            return False
+        return arg.is_python_constant() or isinstance(arg, StringFormatVariable)
+
+    @staticmethod
+    def _has_default_warning_stacklevel(
+        args: Sequence[VariableTracker], kwargs: dict[str, VariableTracker]
+    ) -> bool:
+        stacklevel_arg = args[2] if len(args) >= 3 else kwargs.get("stacklevel")
+        if stacklevel_arg is None:
+            return True
+        return (
+            stacklevel_arg.is_python_constant()
+            and stacklevel_arg.as_python_constant() == 1
+        )
+
+    @staticmethod
+    def can_reorder_logs(
+        fn: Any, args: Sequence[VariableTracker], kwargs: dict[str, VariableTracker]
+    ) -> bool:
         """
         Run some additional checks for what sort of function calls can we
         actually reorder.
         """
 
-        allowed_input_types = (
-            variables.TensorVariable,
-            variables.ConstantVariable,
-            StringFormatVariable,
-        )
-
         flat_args = pytree.tree_leaves([args, kwargs])
-        for arg in flat_args:
-            if not isinstance(arg, allowed_input_types):
-                return False
 
-        return True
+        if fn in torch._dynamo.config.reorderable_logging_functions:
+            return all(
+                DebuggingVariable._can_reorder_configured_log_arg(arg)
+                for arg in flat_args
+            )
+
+        if DebuggingVariable.is_default_reorderable_logging_function(fn):
+            if not DebuggingVariable._has_default_warning_stacklevel(args, kwargs):
+                return False
+            return all(
+                DebuggingVariable._can_reorder_default_log_arg(arg) for arg in flat_args
+            )
+
+        return False
 
 
 class IgnoredFunctionVariable(VariableTracker):
