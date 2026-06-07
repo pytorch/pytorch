@@ -2,11 +2,13 @@
 #include <ATen/autocast_mode.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/util/env.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/inductor/inductor_ops.h>
@@ -28,10 +30,16 @@
 #include <ATen/xpu/EmptyTensor.h>
 #endif
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <mutex>
+#include <optional>
 #include <sstream>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 // Certain CPython data structures are defined in `.c` files in earlier Python
 // versions, e.g., for TupleIteratorGetItemAccessor, we need a fast way to
@@ -75,12 +83,344 @@ typedef struct {
 
 namespace torch::dynamo {
 
+namespace {
+
+struct GuardLookupStats {
+  std::atomic<uint64_t> lookup_count{0};
+  std::atomic<uint64_t> lookup_total_ns{0};
+  std::atomic<uint64_t> backend_match_ns{0};
+  std::atomic<uint64_t> slow_guard_ns{0};
+  std::atomic<uint64_t> move_to_front_ns{0};
+  std::atomic<uint64_t> cache_entry_count_sum{0};
+  std::atomic<uint64_t> cache_entry_hit_index_sum{0};
+
+  std::atomic<uint64_t> root_guard_count{0};
+  std::atomic<uint64_t> root_guard_total_ns{0};
+  std::atomic<uint64_t> root_guard_lock_ns{0};
+  std::atomic<uint64_t> root_guard_local_state_ns{0};
+  std::atomic<uint64_t> root_guard_leaf_ns{0};
+  std::atomic<uint64_t> root_guard_accessor_ns{0};
+  std::atomic<uint64_t> root_guard_epilogue_ns{0};
+  std::atomic<uint64_t> root_guard_tls_ns{0};
+
+  std::atomic<uint64_t> unsafe_mock_guard_bypass_count{0};
+  std::atomic<uint64_t> unsafe_mock_guard_bypass_hit_index_sum{0};
+};
+
+struct GuardAccessorTypeStats {
+  uint64_t count{0};
+  uint64_t fail_count{0};
+  uint64_t inclusive_ns{0};
+};
+
+struct GuardAccessorDetailStats {
+  uint64_t count{0};
+  uint64_t fail_count{0};
+  uint64_t self_ns{0};
+  uint64_t child_ns{0};
+  uint64_t inclusive_ns{0};
+};
+
+constexpr size_t kGuardAccessorDetailStatsTopK = 64;
+
+GuardLookupStats& guard_lookup_stats() {
+  static GuardLookupStats stats;
+  return stats;
+}
+
+std::atomic<bool>& guard_lookup_stats_force_enabled() {
+  static std::atomic<bool> enabled{false};
+  return enabled;
+}
+
+void store_zero(std::atomic<uint64_t>& value) {
+  value.store(0, std::memory_order_relaxed);
+}
+
+uint64_t load_relaxed(const std::atomic<uint64_t>& value) {
+  return value.load(std::memory_order_relaxed);
+}
+
+void add_relaxed(std::atomic<uint64_t>& value, uint64_t delta) {
+  value.fetch_add(delta, std::memory_order_relaxed);
+}
+
+std::mutex& guard_accessor_type_stats_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::unordered_map<std::string, GuardAccessorTypeStats>&
+guard_accessor_type_stats() {
+  static std::unordered_map<std::string, GuardAccessorTypeStats> stats;
+  return stats;
+}
+
+std::mutex& guard_accessor_detail_stats_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::unordered_map<std::string, GuardAccessorDetailStats>&
+guard_accessor_detail_stats() {
+  static std::unordered_map<std::string, GuardAccessorDetailStats> stats;
+  return stats;
+}
+
+} // namespace
+
+bool guard_lookup_stats_enabled() {
+  static const bool env_enabled =
+      c10::utils::check_env("TORCHDYNAMO_GUARD_LOOKUP_STATS") == true;
+  const bool force_enabled =
+      guard_lookup_stats_force_enabled().load(std::memory_order_relaxed);
+  return C10_UNLIKELY(env_enabled) || C10_UNLIKELY(force_enabled);
+}
+
+bool unsafe_mock_guard_bypass_enabled() {
+  static const bool env_enabled =
+      c10::utils::check_env("TORCHDYNAMO_UNSAFE_MOCK_GUARD_BYPASS") == true;
+  return C10_UNLIKELY(env_enabled);
+}
+
+uint64_t guard_lookup_time_ns() {
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
+
+void reset_guard_lookup_stats() {
+  auto& stats = guard_lookup_stats();
+  store_zero(stats.lookup_count);
+  store_zero(stats.lookup_total_ns);
+  store_zero(stats.backend_match_ns);
+  store_zero(stats.slow_guard_ns);
+  store_zero(stats.move_to_front_ns);
+  store_zero(stats.cache_entry_count_sum);
+  store_zero(stats.cache_entry_hit_index_sum);
+  store_zero(stats.root_guard_count);
+  store_zero(stats.root_guard_total_ns);
+  store_zero(stats.root_guard_lock_ns);
+  store_zero(stats.root_guard_local_state_ns);
+  store_zero(stats.root_guard_leaf_ns);
+  store_zero(stats.root_guard_accessor_ns);
+  store_zero(stats.root_guard_epilogue_ns);
+  store_zero(stats.root_guard_tls_ns);
+  store_zero(stats.unsafe_mock_guard_bypass_count);
+  store_zero(stats.unsafe_mock_guard_bypass_hit_index_sum);
+  {
+    std::lock_guard<std::mutex> lock(guard_accessor_type_stats_mutex());
+    guard_accessor_type_stats().clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(guard_accessor_detail_stats_mutex());
+    guard_accessor_detail_stats().clear();
+  }
+  guard_lookup_stats_force_enabled().store(true, std::memory_order_relaxed);
+}
+
+py::dict get_guard_lookup_stats() {
+  auto& stats = guard_lookup_stats();
+  py::dict result;
+  result["lookup_count"] = load_relaxed(stats.lookup_count);
+  result["lookup_total_ns"] = load_relaxed(stats.lookup_total_ns);
+  result["backend_match_ns"] = load_relaxed(stats.backend_match_ns);
+  result["slow_guard_ns"] = load_relaxed(stats.slow_guard_ns);
+  result["move_to_front_ns"] = load_relaxed(stats.move_to_front_ns);
+  result["cache_entry_count_sum"] = load_relaxed(stats.cache_entry_count_sum);
+  result["cache_entry_hit_index_sum"] =
+      load_relaxed(stats.cache_entry_hit_index_sum);
+  result["root_guard_count"] = load_relaxed(stats.root_guard_count);
+  result["root_guard_total_ns"] = load_relaxed(stats.root_guard_total_ns);
+  result["root_guard_lock_ns"] = load_relaxed(stats.root_guard_lock_ns);
+  result["root_guard_local_state_ns"] =
+      load_relaxed(stats.root_guard_local_state_ns);
+  result["root_guard_leaf_ns"] = load_relaxed(stats.root_guard_leaf_ns);
+  result["root_guard_accessor_ns"] = load_relaxed(stats.root_guard_accessor_ns);
+  result["root_guard_epilogue_ns"] = load_relaxed(stats.root_guard_epilogue_ns);
+  result["root_guard_tls_ns"] = load_relaxed(stats.root_guard_tls_ns);
+  result["unsafe_mock_guard_bypass_enabled"] =
+      unsafe_mock_guard_bypass_enabled();
+  result["unsafe_mock_guard_bypass_count"] =
+      load_relaxed(stats.unsafe_mock_guard_bypass_count);
+  result["unsafe_mock_guard_bypass_hit_index_sum"] =
+      load_relaxed(stats.unsafe_mock_guard_bypass_hit_index_sum);
+  py::dict accessor_type_stats;
+  {
+    std::lock_guard<std::mutex> lock(guard_accessor_type_stats_mutex());
+    for (const auto& item : guard_accessor_type_stats()) {
+      py::dict item_stats;
+      item_stats["count"] = item.second.count;
+      item_stats["fail_count"] = item.second.fail_count;
+      item_stats["inclusive_ns"] = item.second.inclusive_ns;
+      accessor_type_stats[py::str(item.first)] = item_stats;
+    }
+  }
+  result["root_guard_accessor_type_stats"] = accessor_type_stats;
+  py::dict accessor_detail_stats;
+  {
+    std::vector<std::pair<std::string, GuardAccessorDetailStats>> items;
+    {
+      std::lock_guard<std::mutex> lock(guard_accessor_detail_stats_mutex());
+      items.reserve(guard_accessor_detail_stats().size());
+      for (const auto& item : guard_accessor_detail_stats()) {
+        items.emplace_back(item.first, item.second);
+      }
+    }
+    std::sort(
+        items.begin(),
+        items.end(),
+        [](const auto& a, const auto& b) {
+          return a.second.inclusive_ns > b.second.inclusive_ns;
+        });
+    const size_t limit =
+        std::min(items.size(), kGuardAccessorDetailStatsTopK);
+    for (size_t i = 0; i < limit; ++i) {
+      py::dict item_stats;
+      item_stats["count"] = items[i].second.count;
+      item_stats["fail_count"] = items[i].second.fail_count;
+      item_stats["self_ns"] = items[i].second.self_ns;
+      item_stats["child_ns"] = items[i].second.child_ns;
+      item_stats["inclusive_ns"] = items[i].second.inclusive_ns;
+      accessor_detail_stats[py::str(items[i].first)] = item_stats;
+    }
+  }
+  result["root_guard_accessor_detail_topk"] = accessor_detail_stats;
+  return result;
+}
+
+void record_guard_lookup_stats(
+    uint64_t total_ns,
+    uint64_t backend_match_ns,
+    uint64_t slow_guard_ns,
+    uint64_t move_to_front_ns,
+    uint64_t cache_entry_count,
+    uint64_t cache_entry_hit_index) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_lookup_stats();
+  add_relaxed(stats.lookup_count, 1);
+  add_relaxed(stats.lookup_total_ns, total_ns);
+  add_relaxed(stats.backend_match_ns, backend_match_ns);
+  add_relaxed(stats.slow_guard_ns, slow_guard_ns);
+  add_relaxed(stats.move_to_front_ns, move_to_front_ns);
+  add_relaxed(stats.cache_entry_count_sum, cache_entry_count);
+  add_relaxed(stats.cache_entry_hit_index_sum, cache_entry_hit_index);
+}
+
+void record_root_guard_stats(
+    uint64_t total_ns,
+    uint64_t lock_ns,
+    uint64_t local_state_ns,
+    uint64_t leaf_ns,
+    uint64_t accessor_ns,
+    uint64_t epilogue_ns,
+    uint64_t tls_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_lookup_stats();
+  add_relaxed(stats.root_guard_count, 1);
+  add_relaxed(stats.root_guard_total_ns, total_ns);
+  add_relaxed(stats.root_guard_lock_ns, lock_ns);
+  add_relaxed(stats.root_guard_local_state_ns, local_state_ns);
+  add_relaxed(stats.root_guard_leaf_ns, leaf_ns);
+  add_relaxed(stats.root_guard_accessor_ns, accessor_ns);
+  add_relaxed(stats.root_guard_epilogue_ns, epilogue_ns);
+  add_relaxed(stats.root_guard_tls_ns, tls_ns);
+}
+
+void record_unsafe_mock_guard_bypass_stats(uint64_t cache_entry_hit_index) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_lookup_stats();
+  add_relaxed(stats.unsafe_mock_guard_bypass_count, 1);
+  add_relaxed(
+      stats.unsafe_mock_guard_bypass_hit_index_sum, cache_entry_hit_index);
+}
+
+void record_guard_accessor_type_stats(
+    const std::string& name,
+    uint64_t inclusive_ns,
+    bool failed) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(guard_accessor_type_stats_mutex());
+  auto& stats = guard_accessor_type_stats()[name];
+  stats.count += 1;
+  stats.inclusive_ns += inclusive_ns;
+  if (failed) {
+    stats.fail_count += 1;
+  }
+}
+
+void record_guard_accessor_detail_stats(
+    const std::string& name,
+    uint64_t self_ns,
+    uint64_t child_ns,
+    uint64_t inclusive_ns,
+    bool failed) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(guard_accessor_detail_stats_mutex());
+  auto& stats = guard_accessor_detail_stats()[name];
+  stats.count += 1;
+  stats.self_ns += self_ns;
+  stats.child_ns += child_ns;
+  stats.inclusive_ns += inclusive_ns;
+  if (failed) {
+    stats.fail_count += 1;
+  }
+}
+
+std::string guard_accessor_stats_key(PyObject* key) {
+  if (key == nullptr) {
+    return "<unknown>";
+  }
+  if (key == Py_None) {
+    return "None";
+  }
+  if (key == Py_True) {
+    return "True";
+  }
+  if (key == Py_False) {
+    return "False";
+  }
+  if (PyUnicode_CheckExact(key)) {
+    const char* value = PyUnicode_AsUTF8(key);
+    if (value == nullptr) {
+      PyErr_Clear();
+      return "<str>";
+    }
+    return std::string("'") + value + "'";
+  }
+  if (PyLong_CheckExact(key)) {
+    long long value = PyLong_AsLongLong(key);
+    if (PyErr_Occurred()) {
+      PyErr_Clear();
+      return "<int>";
+    }
+    return std::to_string(value);
+  }
+  return "<unknown>";
+}
+
 // Macro to skip addition of duplicate guards like EQUALS_MATCH
 #define SKIP_IF_GUARD_ALREADY_PRESENT(name) \
   if (self.is_leaf_guard_present(name)) {   \
     return;                                 \
   }                                         \
   self.insert_leaf_guard(name);
+
+#define GUARD_ACCESSOR_STATS_NAME(name) \
+  const char* stats_name() const override { \
+    return #name;                           \
+  }
 
 TensorCheck::TensorCheck(
     const LocalState& state,
@@ -2167,6 +2507,35 @@ class GuardAccessor {
     // Could fallback to running check on the Python dict (lazily constructed)
     return check_nopybind((PyObject*)map->to_dict(), matches_dict_tag);
   }
+  virtual const char* stats_name() const {
+    return "GuardAccessor";
+  }
+  const std::string& stats_detail_name() {
+    if (_stats_detail_name.empty()) {
+      _stats_detail_name = stats_name();
+      _stats_detail_name += ":";
+      if (_source.empty()) {
+        _stats_detail_name += "key=";
+        _stats_detail_name += guard_accessor_stats_key(_accessor_key.ptr());
+      } else {
+        _stats_detail_name += _source;
+        const std::string key = guard_accessor_stats_key(_accessor_key.ptr());
+        if (key != "<unknown>") {
+          _stats_detail_name += "|key=";
+          _stats_detail_name += key;
+        }
+      }
+    }
+    return _stats_detail_name;
+  }
+  void record_detail_stats(
+      uint64_t self_ns,
+      uint64_t child_ns,
+      uint64_t inclusive_ns,
+      bool failed) {
+    record_guard_accessor_detail_stats(
+        stats_detail_name(), self_ns, child_ns, inclusive_ns, failed);
+  }
   virtual GuardDebugInfo check_verbose_nopybind(PyObject* obj) = 0;
   virtual std::string repr() const = 0;
 
@@ -2210,6 +2579,9 @@ class GuardAccessor {
   // A string that can be eval'd on f_locals or f_globals to access the variable
   // value. Only used for debugging.
   std::string _source;
+
+  // Lazily initialized only while guard lookup stats are enabled.
+  std::string _stats_detail_name;
 };
 
 /**
@@ -2422,10 +2794,21 @@ class GuardManager {
     }
 
     // Iterate over accessors.
+    const bool collect_stats = guard_lookup_stats_enabled();
     bool result = true;
     bool failed_on_first = true;
     for (const auto& accessor : _accessors) {
-      if (!accessor->check_nopybind(value, matches_dict_tag)) { // early exit
+      const uint64_t accessor_start_ns =
+          collect_stats ? guard_lookup_time_ns() : 0;
+      const bool accessor_result =
+          accessor->check_nopybind(value, matches_dict_tag);
+      if (collect_stats) {
+        record_guard_accessor_type_stats(
+            accessor->stats_name(),
+            guard_lookup_time_ns() - accessor_start_ns,
+            !accessor_result);
+      }
+      if (!accessor_result) { // early exit
         _fail_count += 1;
         result = false;
         // need to sort, so break the loop.
@@ -2674,51 +3057,128 @@ class RootGuardManager : public GuardManager {
   // Fast check function.
   template <typename T>
   bool check_nopybind_template(T* value) { // borrowed ref
+    const bool collect_stats = guard_lookup_stats_enabled();
+    const uint64_t total_start_ns =
+        collect_stats ? guard_lookup_time_ns() : 0;
+    uint64_t lock_ns = 0;
+    uint64_t local_state_ns = 0;
+    uint64_t leaf_ns = 0;
+    uint64_t accessor_ns = 0;
+    uint64_t epilogue_ns = 0;
+    uint64_t tls_ns = 0;
+    auto record_and_return = [&](bool result) {
+      if (collect_stats) {
+        record_root_guard_stats(
+            guard_lookup_time_ns() - total_start_ns,
+            lock_ns,
+            local_state_ns,
+            leaf_ns,
+            accessor_ns,
+            epilogue_ns,
+            tls_ns);
+      }
+      return result;
+    };
+
     // Check [Note on GIL interaction with mutex lock] for details on why we
     // need mutex and its interactions wth GIL.
     PyThreadState* _save = nullptr;
+    const uint64_t lock_start_ns =
+        collect_stats ? guard_lookup_time_ns() : 0;
     Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
+    if (collect_stats) {
+      lock_ns += guard_lookup_time_ns() - lock_start_ns;
+    }
 
     // Get the local state. This will be used for TENSOR_MATCH guards.
+    const uint64_t local_state_start_ns =
+        collect_stats ? guard_lookup_time_ns() : 0;
     if (_init_local_state) {
       LocalState state;
       _local_state = state;
     }
+    if (collect_stats) {
+      local_state_ns += guard_lookup_time_ns() - local_state_start_ns;
+    }
 
+    const uint64_t leaf_start_ns =
+        collect_stats ? guard_lookup_time_ns() : 0;
     if (!GuardManager::check_leaf_guards_nopybind(value)) {
+      if (collect_stats) {
+        leaf_ns += guard_lookup_time_ns() - leaf_start_ns;
+      }
       _reset_relational_guard_state();
-      return false;
+      return record_and_return(false);
+    }
+    if (collect_stats) {
+      leaf_ns += guard_lookup_time_ns() - leaf_start_ns;
     }
 
     // Run accessor guards without TorchFunction enabled
     // Dynamo should only be adding guards on values without
     // torch function at this point, because if there
     // was a torch function, we should've traced through it
+    const uint64_t tls_disable_start_ns =
+        collect_stats ? guard_lookup_time_ns() : 0;
     const at::impl::TorchFunctionDisabledState old_state =
         at::impl::PythonTorchFunctionTLS::get_disabled_state();
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    if (collect_stats) {
+      tls_ns += guard_lookup_time_ns() - tls_disable_start_ns;
+    }
 
+    const uint64_t accessor_start_ns =
+        collect_stats ? guard_lookup_time_ns() : 0;
     if (!GuardManager::check_accessors_nopybind(value)) {
+      if (collect_stats) {
+        accessor_ns += guard_lookup_time_ns() - accessor_start_ns;
+      }
+      const uint64_t tls_restore_start_ns =
+          collect_stats ? guard_lookup_time_ns() : 0;
       at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+      if (collect_stats) {
+        tls_ns += guard_lookup_time_ns() - tls_restore_start_ns;
+      }
       _reset_relational_guard_state();
-      return false;
+      return record_and_return(false);
+    }
+    if (collect_stats) {
+      accessor_ns += guard_lookup_time_ns() - accessor_start_ns;
     }
 
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
+      const uint64_t epilogue_start_ns =
+          collect_stats ? guard_lookup_time_ns() : 0;
       if (!guard->check_nopybind(value)) { // early exit
+        if (collect_stats) {
+          epilogue_ns += guard_lookup_time_ns() - epilogue_start_ns;
+        }
+        const uint64_t tls_restore_start_ns =
+            collect_stats ? guard_lookup_time_ns() : 0;
         at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+        if (collect_stats) {
+          tls_ns += guard_lookup_time_ns() - tls_restore_start_ns;
+        }
         _reset_relational_guard_state();
-        return false;
+        return record_and_return(false);
+      }
+      if (collect_stats) {
+        epilogue_ns += guard_lookup_time_ns() - epilogue_start_ns;
       }
     }
 
+    const uint64_t tls_restore_start_ns =
+        collect_stats ? guard_lookup_time_ns() : 0;
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+    if (collect_stats) {
+      tls_ns += guard_lookup_time_ns() - tls_restore_start_ns;
+    }
     _reset_relational_guard_state();
-    return true;
+    return record_and_return(true);
   }
 
   bool check_nopybind(PyObject* value) override {
@@ -3416,6 +3876,8 @@ class TENSOR_MATCH : public LeafGuard {
  */
 class GetAttrGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(GetAttrGuardAccessor)
+
   GetAttrGuardAccessor(
       RootGuardManager* root,
       py::str name,
@@ -3493,6 +3955,8 @@ class GetAttrGuardAccessor : public GuardAccessor {
  */
 class GenericGetAttrGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(GenericGetAttrGuardAccessor)
+
   GenericGetAttrGuardAccessor(
       RootGuardManager* root,
       py::str name,
@@ -3572,6 +4036,8 @@ class GenericGetAttrGuardAccessor : public GuardAccessor {
  */
 class GetGenericDictGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(GetGenericDictGuardAccessor)
+
   GetGenericDictGuardAccessor(
       RootGuardManager* root,
       py::str name,
@@ -3589,14 +4055,35 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    const bool collect_stats = guard_lookup_stats_enabled();
+    if (!collect_stats) {
+      PyObject* x = PyObject_GenericGetDict(obj, nullptr); // new ref
+      if (x == nullptr) {
+        // Attribute absent, clear the exception and return false.
+        PyErr_Clear();
+        return false;
+      }
+      bool result = _guard_manager->check_nopybind(x);
+      Py_DECREF(x);
+      return result;
+    }
+
+    const uint64_t total_start_ns = guard_lookup_time_ns();
     PyObject* x = PyObject_GenericGetDict(obj, nullptr); // new ref
+    const uint64_t self_ns = guard_lookup_time_ns() - total_start_ns;
     if (x == nullptr) {
       // Attribute absent, clear the exception and return false.
       PyErr_Clear();
+      record_detail_stats(
+          self_ns, 0, guard_lookup_time_ns() - total_start_ns, true);
       return false;
     }
+    const uint64_t child_start_ns = guard_lookup_time_ns();
     bool result = _guard_manager->check_nopybind(x);
+    const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
     Py_DECREF(x);
+    record_detail_stats(
+        self_ns, child_ns, guard_lookup_time_ns() - total_start_ns, !result);
     return result;
   }
 
@@ -3641,6 +4128,8 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
  */
 class GetItemGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(GetItemGuardAccessor)
+
   GetItemGuardAccessor(
       RootGuardManager* root,
       py::object name,
@@ -3659,13 +4148,33 @@ class GetItemGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    const bool collect_stats = guard_lookup_stats_enabled();
+    if (!collect_stats) {
+      PyObject* x = PyObject_GetItem(obj, _attr_name); // new ref
+      if (x == nullptr) {
+        PyErr_Clear();
+        return false;
+      }
+      bool result = _guard_manager->check_nopybind(x);
+      Py_DECREF(x);
+      return result;
+    }
+
+    const uint64_t total_start_ns = guard_lookup_time_ns();
     PyObject* x = PyObject_GetItem(obj, _attr_name); // new ref
+    const uint64_t self_ns = guard_lookup_time_ns() - total_start_ns;
     if (x == nullptr) {
       PyErr_Clear();
+      record_detail_stats(
+          self_ns, 0, guard_lookup_time_ns() - total_start_ns, true);
       return false;
     }
+    const uint64_t child_start_ns = guard_lookup_time_ns();
     bool result = _guard_manager->check_nopybind(x);
+    const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
     Py_DECREF(x);
+    record_detail_stats(
+        self_ns, child_ns, guard_lookup_time_ns() - total_start_ns, !result);
     return result;
   }
 
@@ -3718,6 +4227,8 @@ class GetItemGuardAccessor : public GuardAccessor {
  */
 class FrameLocalsGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(FrameLocalsGuardAccessor)
+
   FrameLocalsGuardAccessor(
       RootGuardManager* root,
       const py::tuple& key,
@@ -3740,17 +4251,39 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   bool check_nopybind(
       FrameLocalsMapping* obj,
       bool matches_dict_tag = false) override { // borrowed ref
+    const bool collect_stats = guard_lookup_stats_enabled();
     if (matches_dict_tag && _is_immutable_object) {
       // immutable object and dict tag matches, we can skip the guard subtree.
+      if (collect_stats) {
+        record_detail_stats(0, 0, 0, false);
+      }
       return true;
     }
 
+    if (!collect_stats) {
+      PyObject* x = obj->get(_framelocals_idx);
+      if (x == nullptr) {
+        PyErr_Clear();
+        return false;
+      }
+      return _guard_manager->check_nopybind(x);
+    }
+
+    const uint64_t total_start_ns = guard_lookup_time_ns();
     PyObject* x = obj->get(_framelocals_idx);
+    const uint64_t self_ns = guard_lookup_time_ns() - total_start_ns;
     if (x == nullptr) {
       PyErr_Clear();
+      record_detail_stats(
+          self_ns, 0, guard_lookup_time_ns() - total_start_ns, true);
       return false;
     }
-    return _guard_manager->check_nopybind(x);
+    const uint64_t child_start_ns = guard_lookup_time_ns();
+    bool result = _guard_manager->check_nopybind(x);
+    const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
+    record_detail_stats(
+        self_ns, child_ns, guard_lookup_time_ns() - total_start_ns, !result);
+    return result;
   }
 
   // Run as a result of calling check(), e.g. from Python
@@ -3765,17 +4298,39 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
           "FrameLocalsGuardAccessor check expected dict() input");
     }
 
+    const bool collect_stats = guard_lookup_stats_enabled();
     if (matches_dict_tag && _is_immutable_object) {
       // immutable object and dict tag matches, we can skip the guard subtree.
+      if (collect_stats) {
+        record_detail_stats(0, 0, 0, false);
+      }
       return true;
     }
 
+    if (!collect_stats) {
+      PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
+      if (x == nullptr) {
+        PyErr_Clear();
+        return false;
+      }
+      bool result = _guard_manager->check_nopybind(x);
+      return result;
+    }
+
+    const uint64_t total_start_ns = guard_lookup_time_ns();
     PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
+    const uint64_t self_ns = guard_lookup_time_ns() - total_start_ns;
     if (x == nullptr) {
       PyErr_Clear();
+      record_detail_stats(
+          self_ns, 0, guard_lookup_time_ns() - total_start_ns, true);
       return false;
     }
+    const uint64_t child_start_ns = guard_lookup_time_ns();
     bool result = _guard_manager->check_nopybind(x);
+    const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
+    record_detail_stats(
+        self_ns, child_ns, guard_lookup_time_ns() - total_start_ns, !result);
     return result;
   }
 
@@ -3842,6 +4397,8 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
  */
 class DictGetItemGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(DictGetItemGuardAccessor)
+
   DictGetItemGuardAccessor(
       RootGuardManager* root,
       py::object key,
@@ -3860,21 +4417,43 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) override {
+    const bool collect_stats = guard_lookup_stats_enabled();
     if (matches_dict_tag && _is_immutable_object &&
         _guard_manager->has_no_accessors()) {
       // immutable object and dict tag matches, we can skip the guard subtree.
       // NB: We only skip the subtree if there are no accessors in the subtree.
       // This is specificallly for tensors which are used in symbolic shape C++
       // guards, and therefore have accessors on the tensor GuardManager itself.
+      if (collect_stats) {
+        record_detail_stats(0, 0, 0, false);
+      }
       return true;
     }
 
+    if (!collect_stats) {
+      PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
+      if (x == nullptr) {
+        PyErr_Clear();
+        return false;
+      }
+      bool result = _guard_manager->check_nopybind(x);
+      return result;
+    }
+
+    const uint64_t total_start_ns = guard_lookup_time_ns();
     PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
+    const uint64_t self_ns = guard_lookup_time_ns() - total_start_ns;
     if (x == nullptr) {
       PyErr_Clear();
+      record_detail_stats(
+          self_ns, 0, guard_lookup_time_ns() - total_start_ns, true);
       return false;
     }
+    const uint64_t child_start_ns = guard_lookup_time_ns();
     bool result = _guard_manager->check_nopybind(x);
+    const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
+    record_detail_stats(
+        self_ns, child_ns, guard_lookup_time_ns() - total_start_ns, !result);
     return result;
   }
 
@@ -3929,6 +4508,8 @@ class DictGetItemGuardAccessor : public GuardAccessor {
  */
 class ListGetItemGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(ListGetItemGuardAccessor)
+
   ListGetItemGuardAccessor(
       RootGuardManager* root,
       const py::object& index,
@@ -3947,12 +4528,31 @@ class ListGetItemGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    const bool collect_stats = guard_lookup_stats_enabled();
+    if (!collect_stats) {
+      PyObject* x = PyList_GetItem(obj, _index); // borrowed ref
+      if (x == nullptr) {
+        PyErr_Clear();
+        return false;
+      }
+      bool result = _guard_manager->check_nopybind(x);
+      return result;
+    }
+
+    const uint64_t total_start_ns = guard_lookup_time_ns();
     PyObject* x = PyList_GetItem(obj, _index); // borrowed ref
+    const uint64_t self_ns = guard_lookup_time_ns() - total_start_ns;
     if (x == nullptr) {
       PyErr_Clear();
+      record_detail_stats(
+          self_ns, 0, guard_lookup_time_ns() - total_start_ns, true);
       return false;
     }
+    const uint64_t child_start_ns = guard_lookup_time_ns();
     bool result = _guard_manager->check_nopybind(x);
+    const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
+    record_detail_stats(
+        self_ns, child_ns, guard_lookup_time_ns() - total_start_ns, !result);
     return result;
   }
 
@@ -4001,6 +4601,8 @@ class ListGetItemGuardAccessor : public GuardAccessor {
  */
 class TupleGetItemGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(TupleGetItemGuardAccessor)
+
   TupleGetItemGuardAccessor(
       RootGuardManager* root,
       const py::object& index,
@@ -4019,12 +4621,31 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    const bool collect_stats = guard_lookup_stats_enabled();
+    if (!collect_stats) {
+      PyObject* x = PyTuple_GetItem(obj, _index); // borrowed ref
+      if (x == nullptr) {
+        PyErr_Clear();
+        return false;
+      }
+      bool result = _guard_manager->check_nopybind(x);
+      return result;
+    }
+
+    const uint64_t total_start_ns = guard_lookup_time_ns();
     PyObject* x = PyTuple_GetItem(obj, _index); // borrowed ref
+    const uint64_t self_ns = guard_lookup_time_ns() - total_start_ns;
     if (x == nullptr) {
       PyErr_Clear();
+      record_detail_stats(
+          self_ns, 0, guard_lookup_time_ns() - total_start_ns, true);
       return false;
     }
+    const uint64_t child_start_ns = guard_lookup_time_ns();
     bool result = _guard_manager->check_nopybind(x);
+    const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
+    record_detail_stats(
+        self_ns, child_ns, guard_lookup_time_ns() - total_start_ns, !result);
     return result;
   }
 
@@ -4093,6 +4714,8 @@ std::string to_string(TensorProperty prop) {
 template <TensorProperty _prop>
 class TensorPropertyGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(TensorPropertyGuardAccessor)
+
   TensorPropertyGuardAccessor(
       RootGuardManager* root,
       const py::object& index,
@@ -4221,6 +4844,8 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
  */
 class IndexedGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(IndexedGuardAccessor)
+
   IndexedGuardAccessor(
       RootGuardManager* root,
       py::int_ index,
@@ -4284,6 +4909,8 @@ class IndexedGuardAccessor : public GuardAccessor {
  */
 class GradGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(GradGuardAccessor)
+
   GradGuardAccessor(
       RootGuardManager* root,
       py::str name,
@@ -4354,6 +4981,8 @@ class GradGuardAccessor : public GuardAccessor {
  */
 class FuncDefaultsGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(FuncDefaultsGuardAccessor)
+
   FuncDefaultsGuardAccessor(
       RootGuardManager* root,
       py::object name,
@@ -4430,6 +5059,8 @@ class FuncDefaultsGuardAccessor : public GuardAccessor {
  */
 class FuncKwDefaultsGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(FuncKwDefaultsGuardAccessor)
+
   FuncKwDefaultsGuardAccessor(
       RootGuardManager* root,
       py::object name,
@@ -4508,6 +5139,8 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
  */
 class GlobalsGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(GlobalsGuardAccessor)
+
   GlobalsGuardAccessor(
       RootGuardManager* root,
       py::dict globals_dict,
@@ -4570,6 +5203,8 @@ class GlobalsGuardAccessor : public GuardAccessor {
  */
 class TypeGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(TypeGuardAccessor)
+
   // name = __type_accessor__, a unique string used as attribute name.
   TypeGuardAccessor(
       RootGuardManager* root,
@@ -4623,6 +5258,8 @@ class TypeGuardAccessor : public GuardAccessor {
  */
 class TupleIteratorGetItemAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(TupleIteratorGetItemAccessor)
+
   TupleIteratorGetItemAccessor(
       RootGuardManager* root,
       py::object index,
@@ -4703,6 +5340,8 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
  */
 class GlobalWeakRefGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(GlobalWeakRefGuardAccessor)
+
   GlobalWeakRefGuardAccessor(
       RootGuardManager* root,
       py::object global_name,
@@ -4815,6 +5454,8 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
  */
 class WeakRefCallGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(WeakRefCallGuardAccessor)
+
   WeakRefCallGuardAccessor(
       RootGuardManager* root,
       py::str name,
@@ -4901,6 +5542,8 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
  */
 class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(CallFunctionNoArgsGuardAccessor)
+
   CallFunctionNoArgsGuardAccessor(
       RootGuardManager* root,
       py::str name,
@@ -4983,6 +5626,8 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
  */
 class PythonLambdaGuardAccessor : public GuardAccessor {
  public:
+  GUARD_ACCESSOR_STATS_NAME(PythonLambdaGuardAccessor)
+
   PythonLambdaGuardAccessor(
       RootGuardManager* root,
       py::function accessor_fn,
@@ -6183,6 +6828,8 @@ PyObject* torch_c_dynamo_guards_init() {
       py::arg("symbolic") = true);
   py_m.def("install_symbolic_shape_guard", install_symbolic_shape_guard);
   py_m.def("profile_guard_manager", profile_guard_manager);
+  py_m.def("reset_guard_lookup_stats", reset_guard_lookup_stats);
+  py_m.def("get_guard_lookup_stats", get_guard_lookup_stats);
 
 // initialize dict_version_map watcher for 3.12
 #if IS_PYTHON_3_12_PLUS

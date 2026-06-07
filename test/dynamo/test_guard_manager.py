@@ -1,5 +1,10 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import json
+import os
+import subprocess
+import sys
+import textwrap
 import unittest
 import weakref
 
@@ -898,6 +903,162 @@ num_guards_executed=0)
 
             foo = (10.0, 11)
             opt_fn(x, foo, bar)
+
+    def test_guard_lookup_stats_api_records_cache_hits(self):
+        def fn(x, y, scale: int):
+            return (x + y) * scale
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        y = torch.randn(4)
+
+        opt_fn(x, y, 3)
+        guards.reset_guard_lookup_stats()
+        before = guards.get_guard_lookup_stats()
+        self.assertEqual(before["lookup_count"], 0)
+
+        opt_fn(x, y, 3)
+
+        after = guards.get_guard_lookup_stats()
+        self.assertGreater(after["lookup_count"], 0)
+        self.assertGreater(after["lookup_total_ns"], 0)
+        self.assertGreater(after["slow_guard_ns"], 0)
+        self.assertGreater(after["root_guard_count"], 0)
+        self.assertGreater(after["root_guard_total_ns"], 0)
+        self.assertFalse(after["unsafe_mock_guard_bypass_enabled"])
+        self.assertEqual(after["unsafe_mock_guard_bypass_count"], 0)
+
+    def test_guard_lookup_stats_records_accessor_types(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        foo = Foo(1)
+
+        guards.reset_guard_lookup_stats()
+
+        attr_root = RootGuardManager()
+        attr_root.getattr_manager("x", "x", 1, default_mgr_enum).add_lambda_guard(
+            functools.partial(equals_match, expected=1),
+            equals_match_verbose_code_parts(1),
+        )
+        self.assertTrue(attr_root.check(foo))
+
+        item_root = RootGuardManager()
+        item_root.getitem_manager(0, "", 1, default_mgr_enum).add_lambda_guard(
+            functools.partial(equals_match, expected=1),
+            equals_match_verbose_code_parts(1),
+        )
+        self.assertTrue(item_root.check([1]))
+
+        type_root = RootGuardManager()
+        type_root.getitem_manager("foo", "", foo, default_mgr_enum).type_manager(
+            "", type(foo), default_mgr_enum
+        ).add_lambda_guard(lambda x: x is type(foo), ["type(foo)"])
+        self.assertTrue(type_root.check({"foo": foo}))
+
+        generic_dict_root = RootGuardManager()
+        generic_dict_root.get_generic_dict_manager(
+            "foo.__dict__", foo.__dict__, default_mgr_enum
+        ).add_lambda_guard(lambda x: x["x"] == 1, ["foo.__dict__['x'] == 1"])
+        self.assertTrue(generic_dict_root.check(foo))
+
+        dict_root = RootGuardManager()
+        f_locals = {"d": {"a": 1}}
+        dict_mgr = dict_root.getitem_manager(
+            "d",
+            "",
+            f_locals["d"],
+            torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
+        )
+        dict_mgr.get_key_manager(0, "", "a", default_mgr_enum).add_equals_match_guard(
+            "a",
+            ["dict.keys()[0] == a"],
+        )
+        dict_mgr.get_value_manager(0, "", 1, default_mgr_enum).add_equals_match_guard(
+            1,
+            ["d[0] == 1"],
+        )
+        self.assertTrue(dict_root.check(f_locals))
+
+        accessor_stats = guards.get_guard_lookup_stats()[
+            "root_guard_accessor_type_stats"
+        ]
+        for name in (
+            "GetAttrGuardAccessor",
+            "GetItemGuardAccessor",
+            "TypeGuardAccessor",
+            "DictGetItemGuardAccessor",
+        ):
+            self.assertIn(name, accessor_stats)
+            self.assertGreater(accessor_stats[name]["count"], 0)
+            self.assertGreater(accessor_stats[name]["inclusive_ns"], 0)
+
+        detail_stats = guards.get_guard_lookup_stats()[
+            "root_guard_accessor_detail_topk"
+        ]
+        for name in (
+            "GetAttrGuardAccessor",
+            "GetItemGuardAccessor",
+            "GetGenericDictGuardAccessor",
+            "TypeGuardAccessor",
+            "DictGetItemGuardAccessor",
+        ):
+            matches = [
+                stats
+                for key, stats in detail_stats.items()
+                if key.startswith(f"{name}:")
+            ]
+            self.assertTrue(matches)
+            self.assertGreater(matches[0]["count"], 0)
+            self.assertGreater(matches[0]["inclusive_ns"], 0)
+            self.assertIn("self_ns", matches[0])
+            self.assertIn("child_ns", matches[0])
+
+    def test_unsafe_mock_guard_bypass_skips_slow_guard(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+def fn(x, y, scale: int):
+    return (x + y) * scale
+
+opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+x = torch.randn(4)
+y = torch.randn(4)
+
+opt_fn(x, y, 3)
+guards.reset_guard_lookup_stats()
+for _ in range(3):
+    opt_fn(x, y, 3)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "lookup_count": stats["lookup_count"],
+    "slow_guard_ns": stats["slow_guard_ns"],
+    "unsafe_mock_guard_bypass_enabled": stats[
+        "unsafe_mock_guard_bypass_enabled"
+    ],
+    "unsafe_mock_guard_bypass_count": stats[
+        "unsafe_mock_guard_bypass_count"
+    ],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_UNSAFE_MOCK_GUARD_BYPASS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["lookup_count"], 0)
+        self.assertTrue(stats["unsafe_mock_guard_bypass_enabled"])
+        self.assertGreater(stats["unsafe_mock_guard_bypass_count"], 0)
+        self.assertEqual(stats["slow_guard_ns"], 0)
 
 
 if __name__ == "__main__":
