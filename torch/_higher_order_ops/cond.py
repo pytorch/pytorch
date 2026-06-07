@@ -99,6 +99,7 @@ def _trace_branch_with_isolated_shape_env(fn, operands, name):
 
     guard_start = len(shape_env.guards)
     deferred_runtime_asserts_start = shape_env._snapshot_deferred_runtime_asserts()
+    var_to_range_start = dict(shape_env.var_to_range)
     with shape_env.isolate_branch_shape_env():
         graph = reenter_make_fx(fn)(*operands)
         shape_env._insert_branch_runtime_asserts(
@@ -106,6 +107,7 @@ def _trace_branch_with_isolated_shape_env(fn, operands, name):
             name,
             guard_start,
             deferred_runtime_asserts_start,
+            var_to_range_start,
         )
         return graph
 

@@ -2487,6 +2487,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             deferred_runtime_asserts_start = (
                 shape_env._snapshot_deferred_runtime_asserts()
             )
+            var_to_range_start = dict(shape_env.var_to_range)
             with tx.output.shape_env.isolate_branch_shape_env():
                 (
                     (ret_val, ret_spec),
@@ -2510,6 +2511,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     f"{self._HOP_NAME}_branch",
                     guard_start,
                     deferred_runtime_asserts_start,
+                    var_to_range_start,
                     export=tx.output.export,
                 )
 

@@ -4638,6 +4638,7 @@ class ShapeEnv:
         name: str,
         guard_start: int,
         deferred_runtime_asserts_start: dict[sympy.Symbol | None, int],
+        var_to_range_start: dict[sympy.Symbol, ValueRanges[sympy.Expr]],
         *,
         export: bool = False,
     ) -> None:
@@ -4661,6 +4662,48 @@ class ShapeEnv:
                     CapturedTraceback.extract(skip=1),
                 )
             )
+
+        def has_singleton_equality_assert(
+            symbol: sympy.Symbol, singleton: sympy.Expr
+        ) -> bool:
+            for asserts in branch_runtime_asserts.values():
+                for runtime_assert in asserts:
+                    expr = runtime_assert.expr
+                    if not isinstance(expr, sympy.Equality):
+                        continue
+                    lhs, rhs = expr.args
+                    if (lhs, rhs) in ((symbol, singleton), (singleton, symbol)):
+                        return True
+            return False
+
+        for symbol, branch_range in self.var_to_range.items():
+            parent_range = var_to_range_start.get(symbol)
+            if parent_range is None:
+                continue
+            if branch_range.is_singleton() and has_singleton_equality_assert(
+                symbol, branch_range.lower
+            ):
+                continue
+            for expr, changed in (
+                (
+                    sympy.Ge(symbol, branch_range.lower),
+                    branch_range.lower != parent_range.lower
+                    and branch_range.lower not in (-sympy.oo, -int_oo),
+                ),
+                (
+                    sympy.Le(symbol, branch_range.upper),
+                    branch_range.upper != parent_range.upper
+                    and branch_range.upper not in (sympy.oo, int_oo),
+                ),
+            ):
+                if changed:
+                    branch_runtime_asserts.setdefault(None, []).append(
+                        RuntimeAssert(
+                            expr,
+                            f"{name}: {expr}",
+                            CapturedTraceback.extract(skip=1),
+                        )
+                    )
 
         if not branch_runtime_asserts:
             return
