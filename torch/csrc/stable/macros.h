@@ -43,11 +43,11 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
   std::stringstream ss;
   ss << torch_exception_get_what_without_backtrace();
   ss << " (originally from " << call << " API call failed at " << file
-     << ", line " << line << ")";
+     << ", line " << line << ')';
 
   std::time_t t = std::time(nullptr);
   std::tm tm = *std::localtime(&t);
-  std::cerr << "[" << std::put_time(&tm, "%H:%M:%S") << " " << file << ":"
+  std::cerr << '[' << std::put_time(&tm, "%H:%M:%S") << ' ' << file << ':'
             << line << "] Exception across libtorch C API boundary: "
             << torch_exception_get_what();
   throw std::runtime_error(ss.str());
