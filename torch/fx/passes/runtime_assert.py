@@ -555,13 +555,17 @@ def insert_deferred_runtime_asserts(
                     # assert and also explicitly refine the range
                     # (refinement should not be necessary once runtime
                     # asserts cause refinement, but that's NYI)
-                    def convert(s: Any) -> int | None:
-                        if s in (int_oo, -int_oo):
+                    def convert(s: Any) -> int | float | None:
+                        if s in (sympy.oo, -sympy.oo, int_oo, -int_oo):
                             return None
                         try:
-                            return int(s)
-                        except TypeError:
+                            if vr.is_int:
+                                return int(s)
+                            if vr.is_float:
+                                return float(s)
+                        except (TypeError, OverflowError):
                             return None
+                        return None
 
                     with _set_node_metadata_hook(
                         gm,
