@@ -963,6 +963,28 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(opt_mod(x), x - 1)
                 self.assertEqual(cnt.frame_count, 1)
 
+    def test_compile_skip_code_fallback_handles_unhashable_consts(self):
+        from torch._dynamo import eval_frame
+        from torch._dynamo.types import FrameAction, FrameExecStrategy
+
+        def f():
+            return None
+
+        code = f.__code__.replace(co_consts=({},))
+        get_code_exec_strategy = eval_frame._get_code_exec_strategy
+        try:
+            eval_frame._get_code_exec_strategy = None
+            eval_frame.set_code_exec_strategy(
+                code, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+            )
+            self.assertTrue(eval_frame._is_code_skipped(code))
+
+            eval_frame.reset_code(code)
+            self.assertFalse(eval_frame._is_code_skipped(code))
+        finally:
+            eval_frame._get_code_exec_strategy = get_code_exec_strategy
+            eval_frame.reset_code(code)
+
     def test_isolate_recompiles_ignores_default_run_only(self):
         """Regression for the RUN_ONLY-bleed case: a prior non-isolated
         recompile-limit hit sets RUN_ONLY on extra->strategy. A later

@@ -381,22 +381,26 @@ DONT_WRAP_FILES = {
     join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
 
-_skipped_code_objects: weakref.WeakSet[types.CodeType] = weakref.WeakSet()
+_skipped_code_objects = utils.ExactWeakKeyDictionary()
 _get_code_exec_strategy = getattr(
     torch._C._dynamo.eval_frame, "get_code_exec_strategy", None
 )
 
 
+def _discard_skipped_code(code: types.CodeType) -> None:
+    _skipped_code_objects._remove_id(id(code))
+
+
 def reset_code(code: types.CodeType) -> None:
-    _skipped_code_objects.discard(code)
+    _discard_skipped_code(code)
     _reset_code(code)
 
 
 def set_code_exec_strategy(code: types.CodeType, strategy: FrameExecStrategy) -> None:
     if strategy.cur_action == FrameAction.SKIP:
-        _skipped_code_objects.add(code)
+        _skipped_code_objects[code] = True
     else:
-        _skipped_code_objects.discard(code)
+        _discard_skipped_code(code)
     _set_code_exec_strategy(code, strategy)
 
 
