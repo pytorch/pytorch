@@ -968,7 +968,7 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         finally:
             d.clear()
 
-    def test_live_cell_dict_keys_view_blocks_dict_mutation(self):
+    def test_live_cell_symbolic_dict_keys_view_reflects_dict_mutation(self):
         d = {}
 
         @torch.compile(backend="eager", fullgraph=True)
@@ -982,16 +982,14 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             return t + 1, inner()
 
         try:
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported,
-                "Dictionary mutation when a dict view is live",
-            ):
-                fn(torch.tensor([0.0]))
-            self.assertEqual(d, {})
+            out, keys = fn(torch.tensor([0.0]))
+            self.assertEqual(out, torch.tensor([1.0]))
+            self.assertEqual(list(keys), ["foo"])
+            self.assertEqual(d, {"foo": 1})
         finally:
             d.clear()
 
-    def test_live_cell_container_dict_keys_view_blocks_dict_mutation(self):
+    def test_live_cell_container_symbolic_dict_keys_view_reflects_dict_mutation(self):
         d = {}
 
         @torch.compile(backend="eager", fullgraph=True)
@@ -1005,12 +1003,52 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             return t + 1, inner()[0]
 
         try:
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported,
-                "Dictionary mutation when a dict view is live",
-            ):
-                fn(torch.tensor([0.0]))
-            self.assertEqual(d, {})
+            out, keys = fn(torch.tensor([0.0]))
+            self.assertEqual(out, torch.tensor([1.0]))
+            self.assertEqual(list(keys), ["foo"])
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_live_cell_symbolic_dict_items_view_reflects_dict_mutation(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            items = d.items()
+
+            def inner():
+                return items
+
+            d["foo"] = 1
+            return t + 1, inner()
+
+        try:
+            out, items = fn(torch.tensor([0.0]))
+            self.assertEqual(out, torch.tensor([1.0]))
+            self.assertEqual(list(items), [("foo", 1)])
+            self.assertEqual(d, {"foo": 1})
+        finally:
+            d.clear()
+
+    def test_live_cell_symbolic_dict_values_view_reflects_dict_mutation(self):
+        d = {}
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            values = d.values()
+
+            def inner():
+                return values
+
+            d["foo"] = 1
+            return t + 1, inner()
+
+        try:
+            out, values = fn(torch.tensor([0.0]))
+            self.assertEqual(out, torch.tensor([1.0]))
+            self.assertEqual(list(values), [1])
+            self.assertEqual(d, {"foo": 1})
         finally:
             d.clear()
 

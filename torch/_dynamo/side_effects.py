@@ -1034,9 +1034,6 @@ class SideEffects:
             self._dict_backing_mutation_versions.get(backing_id, 0) + 1
         )
 
-    def dict_backing_id_for_variable(self, var: VariableTracker) -> int | None:
-        return self._dict_backing_id_for_value_mutation(var)
-
     def _dict_backing_id(self, value: Any) -> int | None:
         backing_dict = utils.get_underlying_dict(value)
         if backing_dict is None:
@@ -1195,11 +1192,11 @@ class SideEffects:
 
         def collect_from_vt(var: VariableTracker) -> None:
             if isinstance(var, variables.DictViewVariable):
-                view_backing_id = getattr(var, "backing_dict_id", None)
+                view_backing_id = var.backing_dict_id
                 if view_backing_id is not None:
                     live_backing_ids.add(view_backing_id)
             elif isinstance(var, variables.DictKeySetVariable):
-                view_backing_id = getattr(var, "backing_dict_id", None)
+                view_backing_id = var.backing_dict_id
                 if view_backing_id is not None:
                     live_backing_ids.add(view_backing_id)
 

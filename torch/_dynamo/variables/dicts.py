@@ -552,28 +552,14 @@ class ConstDictVariable(VariableTracker):
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source)
-            backing_dict_id = tx.output.side_effects.dict_backing_id_for_variable(self)
-            return DictItemsVariable(
-                self,
-                backing_dict_id=backing_dict_id,
-                backing_dict_mutation_version=tx.output.side_effects.dict_backing_mutation_version(
-                    backing_dict_id
-                ),
-            )
+            return DictItemsVariable(self)
         elif name == "keys":
             if len(args):
                 raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source)
-            backing_dict_id = tx.output.side_effects.dict_backing_id_for_variable(self)
-            return DictKeysVariable(
-                self,
-                backing_dict_id=backing_dict_id,
-                backing_dict_mutation_version=tx.output.side_effects.dict_backing_mutation_version(
-                    backing_dict_id
-                ),
-            )
+            return DictKeysVariable(self)
         elif name == "__reversed__":
             # dict.__reversed__: reverse insertion-order key iterator.
             # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
@@ -604,14 +590,7 @@ class ConstDictVariable(VariableTracker):
                 tx.output.guard_on_key_order.add(self.source)
             if args or kwargs:
                 raise_observed_exception(TypeError, tx)
-            backing_dict_id = tx.output.side_effects.dict_backing_id_for_variable(self)
-            return DictValuesVariable(
-                self,
-                backing_dict_id=backing_dict_id,
-                backing_dict_mutation_version=tx.output.side_effects.dict_backing_mutation_version(
-                    backing_dict_id
-                ),
-            )
+            return DictValuesVariable(self)
         elif name == "copy":
             self.install_dict_keys_match_guard()
             if args or kwargs:
