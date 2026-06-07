@@ -3,7 +3,7 @@
 
 import torch
 import torch.distributed as dist
-from torch.distributed.token_switch import TokenSwitch, TokenSwitchNCCL
+from torch.distributed._token_switch import TokenSwitchNCCL
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     skip_if_lt_x_gpu,
@@ -96,7 +96,10 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
-        routing = ts.create_routing(topk_idx)
+        per_expert_counts = torch.zeros(
+            self.world_size, dtype=torch.int32, device=self.device
+        )
+        routing = ts.create_routing(topk_idx, per_expert_counts)
 
         token_val = float(self.rank + 1)
         tokens = torch.full(
@@ -113,7 +116,10 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         )
 
         ts.dispatch(
-            routing, tokens, topk_weights, out=(out_tokens, out_topk_weights, out_topk_idx)
+            routing,
+            tokens,
+            topk_weights,
+            out=(out_tokens, out_topk_weights, out_topk_idx),
         )
         torch.cuda.synchronize()
 
@@ -134,7 +140,10 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
-        routing = ts.create_routing(topk_idx)
+        per_expert_counts = torch.zeros(
+            self.world_size, dtype=torch.int32, device=self.device
+        )
+        routing = ts.create_routing(topk_idx, per_expert_counts)
 
         token_val = float(self.rank + 1)
         tokens = torch.full(
@@ -151,7 +160,10 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         )
 
         ts.dispatch(
-            routing, tokens, topk_weights, out=(out_tokens, out_topk_weights, out_topk_idx)
+            routing,
+            tokens,
+            topk_weights,
+            out=(out_tokens, out_topk_weights, out_topk_idx),
         )
         torch.cuda.synchronize()
 
@@ -174,13 +186,21 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
-        routing = ts.create_routing(topk_idx)
+        per_expert_counts = torch.zeros(
+            self.world_size, dtype=torch.int32, device=self.device
+        )
+        routing = ts.create_routing(topk_idx, per_expert_counts)
 
         tokens = torch.full(
-            (NUM_TOKENS, HIDDEN), float(self.rank + 1), dtype=torch.bfloat16, device=self.device,
+            (NUM_TOKENS, HIDDEN),
+            float(self.rank + 1),
+            dtype=torch.bfloat16,
+            device=self.device,
             requires_grad=True,
         )
-        out_tokens, _out_weights, _out_idx = ts.dispatch(routing, tokens, topk_weights, num_recv_tokens)
+        out_tokens, _out_weights, _out_idx = ts.dispatch(
+            routing, tokens, topk_weights, num_recv_tokens
+        )
         out_tokens.sum().backward()
         torch.cuda.synchronize()
 
@@ -197,19 +217,38 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
-        routing = ts.create_routing(topk_idx)
+        per_expert_counts = torch.zeros(
+            self.world_size, dtype=torch.int32, device=self.device
+        )
+        routing = ts.create_routing(topk_idx, per_expert_counts)
 
         # Pre-dispatch so the routing handle is primed, then test combine autograd
         tokens = torch.full(
-            (NUM_TOKENS, HIDDEN), float(self.rank + 1), dtype=torch.bfloat16, device=self.device
+            (NUM_TOKENS, HIDDEN),
+            float(self.rank + 1),
+            dtype=torch.bfloat16,
+            device=self.device,
         )
-        out_tokens_buf = torch.zeros(num_recv_tokens, HIDDEN, dtype=torch.bfloat16, device=self.device)
-        out_weights_buf = torch.zeros(num_recv_tokens, TOP_K, dtype=torch.float32, device=self.device)
-        out_idx_buf = torch.zeros(num_recv_tokens, TOP_K, dtype=torch.int64, device=self.device)
-        ts.dispatch(routing, tokens, topk_weights, out=(out_tokens_buf, out_weights_buf, out_idx_buf))
+        out_tokens_buf = torch.zeros(
+            num_recv_tokens, HIDDEN, dtype=torch.bfloat16, device=self.device
+        )
+        out_weights_buf = torch.zeros(
+            num_recv_tokens, TOP_K, dtype=torch.float32, device=self.device
+        )
+        out_idx_buf = torch.zeros(
+            num_recv_tokens, TOP_K, dtype=torch.int64, device=self.device
+        )
+        ts.dispatch(
+            routing,
+            tokens,
+            topk_weights,
+            out=(out_tokens_buf, out_weights_buf, out_idx_buf),
+        )
         torch.cuda.synchronize()
 
-        expert_tokens = out_tokens_buf[:NUM_TOKENS].contiguous().detach().requires_grad_(True)
+        expert_tokens = (
+            out_tokens_buf[:NUM_TOKENS].contiguous().detach().requires_grad_(True)
+        )
         combined = ts.combine(routing, expert_tokens)
         combined.sum().backward()
         torch.cuda.synchronize()
@@ -227,14 +266,22 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
-        routing = ts.create_routing(topk_idx)
+        per_expert_counts = torch.zeros(
+            self.world_size, dtype=torch.int32, device=self.device
+        )
+        routing = ts.create_routing(topk_idx, per_expert_counts)
 
         token_val = float(self.rank + 1)
         tokens = torch.full(
-            (NUM_TOKENS, HIDDEN), token_val, dtype=torch.bfloat16, device=self.device,
+            (NUM_TOKENS, HIDDEN),
+            token_val,
+            dtype=torch.bfloat16,
+            device=self.device,
             requires_grad=True,
         )
-        dispatched, _weights, _idx = ts.dispatch(routing, tokens, topk_weights, num_recv_tokens)
+        dispatched, _weights, _idx = ts.dispatch(
+            routing, tokens, topk_weights, num_recv_tokens
+        )
         expert_out = dispatched[:NUM_TOKENS].contiguous()
         combined = ts.combine(routing, expert_out)
         combined.sum().backward()
@@ -253,7 +300,10 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
-        routing = ts.create_routing(topk_idx)
+        per_expert_counts = torch.zeros(
+            self.world_size, dtype=torch.int32, device=self.device
+        )
+        routing = ts.create_routing(topk_idx, per_expert_counts)
 
         out_tokens = torch.zeros(
             (num_recv_tokens, HIDDEN), dtype=torch.bfloat16, device=self.device
@@ -277,7 +327,10 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
                 device=self.device,
             )
             ts.dispatch(
-                routing, tokens, topk_weights, out=(out_tokens, out_topk_weights, out_topk_idx)
+                routing,
+                tokens,
+                topk_weights,
+                out=(out_tokens, out_topk_weights, out_topk_idx),
             )
             torch.cuda.synchronize()
 
@@ -285,7 +338,9 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
             ts.combine(routing, expert_tokens, out=combined)
             torch.cuda.synchronize()
 
-        expected = torch.full((NUM_TOKENS, HIDDEN), token_val, dtype=torch.bfloat16, device=self.device)
+        expected = torch.full(
+            (NUM_TOKENS, HIDDEN), token_val, dtype=torch.bfloat16, device=self.device
+        )
         self.assertEqual(combined, expected)
 
 

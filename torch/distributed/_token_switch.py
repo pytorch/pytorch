@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
-from torch.distributed.distributed_c10d import ProcessGroup
+from torch.distributed.distributed_c10d import ProcessGroup  # noqa: TC001
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class _DispatchAutograd(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx: Any,
-        ts: "TokenSwitch",
+        ts: TokenSwitch,
         routing: Routing,
         tokens: torch.Tensor,
         topk_weights: torch.Tensor,
@@ -30,7 +30,9 @@ class _DispatchAutograd(torch.autograd.Function):
         out_tokens = tokens.new_zeros(max_recv_tokens, H)
         out_topk_weights = topk_weights.new_zeros(max_recv_tokens, K)
         out_topk_idx = routing.topk_idx.new_zeros(max_recv_tokens, K)
-        ts._dispatch(routing, tokens, topk_weights, out_tokens, out_topk_weights, out_topk_idx)
+        ts._dispatch(
+            routing, tokens, topk_weights, out_tokens, out_topk_weights, out_topk_idx
+        )
         ctx.ts = ts
         ctx.routing = routing
         ctx.tokens_shape = tokens.shape
@@ -52,7 +54,7 @@ class _CombineAutograd(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx: Any,
-        ts: "TokenSwitch",
+        ts: TokenSwitch,
         routing: Routing,
         expert_tokens: torch.Tensor,
     ) -> torch.Tensor:
@@ -157,7 +159,9 @@ class TokenSwitch(abc.ABC):
             return out
         if max_recv_tokens is None:
             raise ValueError("max_recv_tokens is required when out= is not provided")
-        return _DispatchAutograd.apply(self, routing, tokens, topk_weights, max_recv_tokens)  # type: ignore[return-value]
+        return _DispatchAutograd.apply(
+            self, routing, tokens, topk_weights, max_recv_tokens
+        )  # type: ignore[return-value]
 
     def combine(
         self,
@@ -195,15 +199,12 @@ class TokenSwitchNCCL(TokenSwitch):
                 "TokenSwitchNCCL requires a build with NCCL EP (USE_NCCL_EP)."
             )
         self._max_recv_tokens_per_rank = max_recv_tokens_per_rank
-        # NCCL_EP_AUTO (0) for qp count and channel count
         self._group = c10d._NcclEpGroup.create(
             process_group,
             num_experts,
             max_dispatch_tokens_per_rank,
             max_recv_tokens_per_rank,
             max_token_bytes,
-            0,
-            0,
         )
 
     def create_routing(
