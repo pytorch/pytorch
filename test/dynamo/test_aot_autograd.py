@@ -333,6 +333,20 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         self.assertEqual(cc.frame_count, 1)
         self.assertTrue(failure_reason is None)
 
+    def test_multi_output_views_of_input_individual_backward(self):
+        def check(fn, x):
+            opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            outs = opt_fn(x)
+            self.assertTrue(
+                all("CompiledFunctionBackward" not in str(out.grad_fn) for out in outs)
+            )
+            for out in outs:
+                out.sum().backward()
+            self.assertEqual(x.grad, torch.ones_like(x))
+
+        check(lambda x: torch.unbind(x, 0), torch.randn(5, requires_grad=True))
+        check(lambda x: torch.split(x, 2, 0), torch.randn(6, requires_grad=True))
+
     @torch._dynamo.config.patch(trace_autograd_ops=True)
     def test_double_backward_with_compile(self):
         # Remove this test after we get double backward to actually work
