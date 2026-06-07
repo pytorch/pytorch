@@ -1684,10 +1684,12 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
         )
 
     # TODO: subsume this path with the aot_stage2_graph_capture path
+    traced_gradient_input_indices: list[int] | None = None
     if trace_joint:
 
         @wraps(functional_call)
         def flattened_joint(*args: Any) -> Any:
+            nonlocal traced_gradient_input_indices
             # The idea here is that the joint graph that AOTAutograd creates has some strict properties:
             # (1) It accepts two arguments (primals, tangents), and pytree_flattens them
             # (2) It returns a tuple of (fw_outs, gradients)
@@ -1716,23 +1718,29 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
                     f"len(gradients)={len(gradients)} != len(args)={len(args)}"
                 )
             output_gradients = []
-            for a, grad in zip(args, gradients):
-                if isinstance(a, torch.Tensor) and a.requires_grad:
-                    if grad is None:
-                        raise AssertionError("""\
-Found a parameter that did not receive a gradient.
-"This is most likely a bug, but if this needs to be supported please comment on this Github issue:
-https://github.com/pytorch/pytorch/issues/101192
-""")
-                    output_gradients.append(grad)
-                else:
-                    if grad is not None:
+            current_gradient_input_indices = []
+            for i, (a, grad) in enumerate(zip(args, gradients)):
+                if grad is not None:
+                    if not (isinstance(a, torch.Tensor) and a.requires_grad):
                         raise AssertionError(
                             f"expected grad to be None for non-tensor or non-requires_grad input, got {type(grad)}"
                         )
+                    output_gradients.append(grad)
+                    current_gradient_input_indices.append(i)
+            if traced_gradient_input_indices is None:
+                traced_gradient_input_indices = current_gradient_input_indices
+            elif traced_gradient_input_indices != current_gradient_input_indices:
+                raise AssertionError(
+                    "Expected the same inputs to receive gradients across traces, "
+                    f"got {traced_gradient_input_indices} and {current_gradient_input_indices}"
+                )
             return *fw_outs, *output_gradients
 
         fx_g = make_fx(flattened_joint, record_module_stack=True)(*full_args)
+        if traced_gradient_input_indices is None:
+            raise AssertionError(
+                "Expected joint graph tracing to record gradient inputs"
+            )
 
     user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
     if out_spec is None:
@@ -1750,6 +1758,7 @@ https://github.com/pytorch/pytorch/issues/101192
         trace_joint=trace_joint,
         num_user_fw_outs=num_fw_outs,
         loss_index=output_loss_index,
+        traced_gradient_input_indices=traced_gradient_input_indices,
     )
 
 
