@@ -14383,11 +14383,11 @@ class TestFallbackWarning(TestCase):
         self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement 'lcm'
-        # Should return fn, args, kwargs, string_version
-        return (torch.lcm,
-                [torch.tensor([1], device='mps'), torch.tensor([2], device='mps')], {},
-                "torch.lcm(torch.tensor([1], device='mps'), torch.tensor([2], device='mps'))")
+        # Should return fn, args, kwargs, string_version. Uses an op with no MPS
+        # kernel; change it if 'special.airy_ai' ever gets one.
+        return (torch.special.airy_ai,
+                [torch.tensor([1.0], device='mps')], {},
+                "torch.special.airy_ai(torch.tensor([1.0], device='mps'))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
