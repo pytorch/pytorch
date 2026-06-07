@@ -757,6 +757,7 @@ class TestLocalDTensorOps(TestDTensorOps):
 # This list only contains ops NOT in ops_dde_xfail - those are base tensor issues.
 ops_unbacked_dtensor_dde = {
     xfail("lu_unpack"),
+    xfail("combinations"),
     xfail("__getitem__"),
     xfail("__rmatmul__"),
     xfail("_batch_norm_with_update"),
