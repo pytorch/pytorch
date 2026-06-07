@@ -182,11 +182,15 @@ def parse_backend_yaml(
                         f"but it is not defined as a structured operator in native_functions.yaml."
                     )
                 kernel_name = str(native_function.func.name).replace(".", "_")
+                # NB: do NOT append "_symint" here. For a structured op, kernel_name becomes the
+                # generated struct name (structured_<kernel>), which must match the hand-written
+                # TORCH_PRIVATEUSE1_IMPL_FUNC(<op>) symbol. SymInt is carried by the meta/impl
+                # signature, not the kernel name -- in-tree structured structs never carry a
+                # _symint suffix.
             else:
                 kernel_name = dispatcher.name(native_function.func)
-
-            if op in symint_ops:
-                kernel_name += "_symint"
+                if op in symint_ops:
+                    kernel_name += "_symint"
             # structured external backends is supported as structured
             m = BackendMetadata(
                 kernel=kernel_name,
