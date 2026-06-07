@@ -635,7 +635,17 @@ class ExceptionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__setattr__":
+        if name == "__init__":
+            if kwargs:
+                unimplemented(
+                    gb_type="Keyword args passed to exception __init__",
+                    context=f"{self} with kwargs {kwargs}",
+                    explanation="Dynamo does not know how to handle keyword args passed to exception __init__",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            self.args = args
+            return variables.ConstantVariable.create(None)
+        elif name == "__setattr__":
             name = args[0].as_python_constant()
             val = args[1]
             if name == "__context__":

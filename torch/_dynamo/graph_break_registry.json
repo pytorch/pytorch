@@ -4872,6 +4872,16 @@
       ]
     }
   ],
+  "GB9694": [
+    {
+      "Gb_type": "Keyword args passed to exception __init__",
+      "Context": "{self} with kwargs {kwargs}",
+      "Explanation": "Dynamo does not know how to handle keyword args passed to exception __init__",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9548": [
     {
       "Gb_type": "nb_absolute_impl not implemented",

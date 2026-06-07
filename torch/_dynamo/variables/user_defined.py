@@ -734,7 +734,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             isinstance(cls_attr, types.WrapperDescriptorType)
             and (
                 not is_torch_class(self.value)
-                or (name == "__init__" and issubclass(self.value, (dict, list)))
+                or (name == "__init__" and issubclass(self.value, (dict, list, set)))
             )
             and name not in ("__get__", "__set__", "__delete__")
         ):
@@ -1045,18 +1045,45 @@ class UserDefinedClassVariable(UserDefinedVariable):
             else:
                 args[0].call_method(tx, "__init__", args[1:], {})
             return variables.ConstantVariable.create(None)
+        elif issubclass(self.value, set) and name == "__init__" and args:
+            receiver = args[0]
+            if not issubclass(receiver.python_type(), set):
+                raise_type_error(
+                    tx,
+                    f"descriptor '__init__' requires a 'set' object but received a '{receiver.python_type_name()}'",
+                )
+            if kwargs:
+                raise_type_error(tx, "set() takes no keyword arguments")
+            if isinstance(receiver, variables.UserDefinedObjectVariable):
+                if receiver._base_vt is None:
+                    raise AssertionError(
+                        "UserDefinedObjectVariable._base_vt must not be None"
+                    )
+                receiver._base_vt.call_method(tx, "__init__", args[1:], {})
+            else:
+                receiver.call_method(tx, "__init__", args[1:], {})
+            return variables.ConstantVariable.create(None)
+        elif issubclass(self.value, BaseException) and name == "__init__" and args:
+            receiver = args[0]
+            init = self.lookup_cls_mro_attr("__init__")
+            owner = getattr(init, "__objclass__", BaseException)
+            if not issubclass(receiver.python_type(), owner):
+                raise_type_error(
+                    tx,
+                    f"descriptor '__init__' requires a '{owner.__name__}' object but received a '{receiver.python_type_name()}'",
+                )
+            if isinstance(receiver, variables.UserDefinedExceptionObjectVariable):
+                result = receiver.exc_vt.call_method(tx, "__init__", args[1:], kwargs)
+                receiver.init_args = args[1:]
+                return result
+            receiver.call_method(tx, "__init__", args[1:], kwargs)
+            return variables.ConstantVariable.create(None)
         elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_len
 
             return generic_len(tx, args[0])
         elif name == "__init__" and not kwargs:
             init = self.lookup_cls_mro_attr("__init__")
-            if (
-                args
-                and issubclass(self.value, BaseException)
-                and init in (BaseException.__init__, Exception.__init__)
-            ):
-                return variables.ConstantVariable.create(None)
             if len(args) == 1 and (
                 init is object.__init__
                 or (
@@ -4117,9 +4144,10 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             name == "__init__"
             and (method := self._maybe_get_baseclass_method(name))
             and inspect.ismethoddescriptor(method)
-            and len(kwargs) == 0
         ):
-            return variables.ConstantVariable.create(None)
+            result = self.exc_vt.call_method(tx, "__init__", args, kwargs)
+            self.init_args = args
+            return result
         elif (
             name == "__setattr__"
             and len(args) == 2

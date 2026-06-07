@@ -196,6 +196,131 @@ class TestUserDefinedObjectConstruction(TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             opt_fn(x)
 
+    def test_explicit_exception_init_updates_args(self):
+        class MyError(Exception):
+            pass
+
+        def fn(t):
+            e = MyError()
+            MyError.__init__(e, 1)
+            return t.sin() + len(e.args)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_exception_init_updates_escaped_args(self):
+        class MyError(Exception):
+            pass
+
+        def fn():
+            e = MyError()
+            MyError.__init__(e, 1)
+            return e
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn().args, fn().args)
+
+    def test_bound_exception_init_updates_args(self):
+        class MyError(Exception):
+            pass
+
+        def fn(t):
+            e = MyError(1)
+            e.__init__()
+            return t.sin() + len(e.args)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_bound_exception_init_updates_escaped_args(self):
+        class MyError(Exception):
+            pass
+
+        def fn():
+            e = MyError(1)
+            e.__init__()
+            return e
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn().args, fn().args)
+
+    def test_explicit_exception_init_with_wrong_receiver_not_supported(self):
+        class MyError(Exception):
+            pass
+
+        def fn():
+            values = []
+            MyError.__init__(values, 1)
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_exception_init_requires_descriptor_owner(self):
+        class MyError(Exception):
+            pass
+
+        def fn():
+            e = BaseException()
+            MyError.__init__(e, 1)
+            return e
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_set_init_with_kwargs_not_supported(self):
+        class MySet(set):
+            pass
+
+        def fn():
+            s = MySet()
+            MySet.__init__(s, iterable=[1])
+            return s
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_set_init_with_wrong_receiver_not_supported(self):
+        class MySet(set):
+            pass
+
+        def fn():
+            values = []
+            MySet.__init__(values, [1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_set_init_with_wrong_receiver_and_kwargs_not_supported(self):
+        class MySet(set):
+            pass
+
+        def fn():
+            values = []
+            MySet.__init__(values, iterable=[1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
     def test_instantiate_class_with_staticmethod_init(self):
         class Foo:
             def __new__(cls, *args):
