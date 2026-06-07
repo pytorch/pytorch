@@ -335,7 +335,6 @@ def dynamo_minifier_backend(
     try:
         compiled_gm = compiler_fn(gm, example_inputs)
         run_fwd_maybe_bwd(compiled_gm, example_inputs)  # type: ignore[arg-type]
-        raise ValueError("No issue was detected")
     except Exception as exc:
         orig_failure = str(exc)
         log.warning(
@@ -350,12 +349,19 @@ def dynamo_minifier_backend(
             compiler_fn=compiler_fn,
             orig_failure=orig_failure,
         )
-        minifier(
-            gm,
-            example_inputs,
-            module_fails=fails_fn,
-            dump_state=dump_state_fn,
-        )
+        try:
+            minifier(
+                gm,
+                example_inputs,
+                module_fails=fails_fn,
+                dump_state=dump_state_fn,
+            )
+        except RuntimeError as minifier_exc:
+            if str(minifier_exc) == "Input graph did not fail the tester":
+                raise exc from None
+            raise
+    else:
+        raise ValueError("No issue was detected")
     return gm
 
 
@@ -396,7 +402,7 @@ def backend_fails(
     gm: fx.GraphModule,
     example_inputs: Sequence[Any],
     compiler_fn: CompilerFn,
-    orig_failure: Sequence[Any],
+    orig_failure: str,
 ) -> bool:
     """
     Minifier uses this function to identify if the minified graph module fails
