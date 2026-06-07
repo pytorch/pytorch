@@ -885,6 +885,135 @@ class TestStatelessFunctionalAPI(TestCase):
         self.assertTrue(all(t1 is t2 for t1, t2 in zip(parameters, (weight,))))
         self.assertTrue(all(t1 is t2 for t1, t2 in zip(buffers, (module.buffer,))))
 
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_reparametrize_disable_parametrizations(self, functional_call):
+        import torch.nn.utils.parametrize as P
+        
+        class Symmetric(torch.nn.Module):
+            def forward(self, X):
+                return X.triu() + X.triu(1).T
+            def right_inverse(self, A):
+                return A.triu()
+                
+        # Create a module with nested structures
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(2, 2, bias=False)
+                
+            def forward(self, x):
+                return self.l1(x)
+                
+        class TopModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = SubModule()
+                
+            def forward(self, x):
+                return self.sub(x)
+                
+        # 1. Multiple parametrizations on the same attribute
+        # We register Symmetric twice on self.sub.l1.weight
+        top = TopModule()
+        P.register_parametrization(top.sub.l1, "weight", Symmetric())
+        P.register_parametrization(top.sub.l1, "weight", Symmetric())
+        
+        self.assertTrue(P.is_parametrized(top.sub.l1, "weight"))
+        
+        # Test passing regular name under strict=True (should disable all parametrizations)
+        new_w = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        x = torch.tensor([[0.0, 1.0]]) # output if disabled = x @ new_w.T = [2.0, 4.0]
+        
+        # Verify strict=True works with regular name override (disables parametrization)
+        res = functional_call(top, {"sub.l1.weight": new_w}, x, strict=True)
+        self.assertEqual(res, torch.tensor([[2.0, 4.0]]))
+        
+        # Verify that after the call, it is still parametrized
+        self.assertTrue(P.is_parametrized(top.sub.l1, "weight"))
+        
+        # 2. Test wrong-shape/dtype validation with unsafe=False
+        with self.assertRaisesRegex(ValueError, "Expected tensor of shape"):
+            functional_call(top, {"sub.l1.weight": torch.ones(3, 3)}, x, unsafe=False)
+            
+        with self.assertRaisesRegex(ValueError, "Expected tensor of dtype"):
+            functional_call(top, {"sub.l1.weight": new_w.to(torch.int32)}, x, unsafe=False)
+            
+        # 3. Test bypassing checks with unsafe=True
+        # Since unsafe=True bypasses the shape validation, it will fail during the forward pass itself
+        # (Linear shape mismatch) rather than early validation in _reparametrize_module
+        with self.assertRaisesRegex(RuntimeError, "shapes cannot be multiplied"):
+            functional_call(top, {"sub.l1.weight": torch.ones(3, 3)}, x, unsafe=True)
+
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_reparametrize_recovery_on_failure(self, functional_call):
+        import torch.nn.utils.parametrize as P
+        
+        class Symmetric(torch.nn.Module):
+            def forward(self, X):
+                return X.triu() + X.triu(1).T
+            def right_inverse(self, A):
+                return A.triu()
+                
+        module = torch.nn.Linear(2, 2, bias=False)
+        P.register_parametrization(module, "weight", Symmetric())
+        
+        new_w = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        
+        # We mock forward to fail
+        def failing_forward(x):
+            raise RuntimeError("intentional error")
+        
+        module.forward = failing_forward
+        
+        # If an error happens inside the functional_call yield block, the parametrization should still be restored.
+        with self.assertRaisesRegex(RuntimeError, "intentional error"):
+            functional_call(module, {"weight": new_w}, torch.ones(1, 2))
+        
+        # Restore module.forward
+        del module.forward
+        
+        # Verify parametrization is restored
+        self.assertTrue(P.is_parametrized(module, "weight"))
+
+    def test_reparametrize_vmap_grad(self):
+        import torch.nn.utils.parametrize as P
+        from torch.func import vmap, grad
+        
+        class Symmetric(torch.nn.Module):
+            def forward(self, X):
+                return X.triu() + X.triu(1).T
+            def right_inverse(self, A):
+                return A.triu()
+                
+        module = torch.nn.Linear(2, 2, bias=False)
+        P.register_parametrization(module, "weight", Symmetric())
+        
+        # We will use vmap over inputs and grad over weights
+        def compute_loss(weight_val, x, t):
+            # Pass regular name weight_val, which disables parametrization
+            y = torch.func.functional_call(module, {"weight": weight_val}, x)
+            return torch.nn.functional.mse_loss(y, t)
+            
+        weight_val = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
+        x = torch.randn(4, 2)
+        t = torch.randn(4, 2)
+        
+        # Verify gradient calculation
+        g = grad(compute_loss)(weight_val, x, t)
+        self.assertIsNotNone(g)
+        self.assertEqual(g.shape, weight_val.shape)
+        
+        # Verify vmap works
+        x_batched = torch.randn(3, 4, 2)
+        t_batched = torch.randn(3, 4, 2)
+        vmap_loss = vmap(compute_loss, in_dims=(None, 0, 0))(weight_val, x_batched, t_batched)
+        self.assertEqual(vmap_loss.shape, (3,))
 
 class TestStatelessDeprecation(TestCase):
     def test_private_stateless_warns(self):
