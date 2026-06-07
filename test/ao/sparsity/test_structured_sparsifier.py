@@ -12,7 +12,6 @@ from torch.ao.pruning._experimental.pruner import (
     SaliencyPruner,
 )
 from torch.nn.utils import parametrize
-from torch.testing._internal.common_device_type import dtypes, onlyCPU
 from torch.testing._internal.common_pruning import (
     Conv2dActivation,
     Conv2dBias,
@@ -34,6 +33,12 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+
+
+DEVICES = {
+    torch.device("cpu"),
+    torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
+}
 
 
 class SimplePruner(BaseStructuredSparsifier):
@@ -68,17 +73,12 @@ class BottomHalfLSTMPruner(BaseStructuredSparsifier):
 
 
 class TestSaliencyPruner(TestCase):
-    @dtypes(torch.float)
-    def test_saliency_pruner_update_mask(self, device, dtype):
+    def test_saliency_pruner_update_mask(self):
         """Test that we prune out the row with the lowest saliency (first row)"""
-        model = SimpleLinear().to(device)
+        model = SimpleLinear()
         with torch.no_grad():
             model.linear1.weight = nn.Parameter(
-                torch.tensor(
-                    [[1, 1, 1, 1], [2, 2, 2, 2], [3, 3, 3, 3], [4, 4, 4, 4]],
-                    dtype=dtype,
-                    device=device,
-                )
+                torch.Tensor([[1, 1, 1, 1], [2, 2, 2, 2], [3, 3, 3, 3], [4, 4, 4, 4]])
             )
         pruning_config = [{"tensor_fqn": "linear1.weight", "sparsity_level": 0.5}]
         pruner = SaliencyPruner({})
@@ -88,9 +88,7 @@ class TestSaliencyPruner(TestCase):
         pruner.step()
         pruned_model = pruner.prune()
 
-        expected = torch.tensor(
-            [[3, 3, 3, 3], [4, 4, 4, 4]], dtype=dtype, device=device
-        )
+        expected = torch.Tensor([[3, 3, 3, 3], [4, 4, 4, 4]])
         pruned = pruned_model.linear1.weight
 
         if expected.shape != pruned.shape:
@@ -98,24 +96,21 @@ class TestSaliencyPruner(TestCase):
         if not torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all():
             raise AssertionError("Expected and pruned tensors are not close")
 
-    @dtypes(torch.float)
-    def test_lstm_saliency_pruner_update_mask(self, device, dtype):
+    def test_lstm_saliency_pruner_update_mask(self):
         model = LSTMLinearModel(
             input_dim=2,
             hidden_dim=2,
             output_dim=2,
             num_layers=1,
-        ).to(device)
+        )
 
-        manual_weights = torch.tensor(
-            [[1, 1], [2, 2], [2, 2], [1, 1], [-1, -1], [-2, -2], [-2, -2], [-1, -1]],
-            dtype=dtype,
-            device=device,
+        manual_weights = torch.Tensor(
+            [[1, 1], [2, 2], [2, 2], [1, 1], [-1, -1], [-2, -2], [-2, -2], [-1, -1]]
         )
 
         with torch.no_grad():
             model.lstm.weight_ih_l0 = nn.Parameter(manual_weights)
-            model.lstm.weight_hh_l0 = nn.Parameter(manual_weights.clone())
+            model.lstm.weight_hh_l0 = nn.Parameter(torch.Tensor(manual_weights))
             model.lstm.bias_ih_l0 = nn.Parameter(manual_weights[:, 0])
             model.lstm.bias_hh_l0 = nn.Parameter(manual_weights[:, 0])
 
@@ -123,7 +118,7 @@ class TestSaliencyPruner(TestCase):
             {"tensor_fqn": "lstm.weight_ih_l0"},
             {"tensor_fqn": "lstm.weight_hh_l0"},
         ]
-        lstm_input = torch.ones((1, 2), device=device)
+        lstm_input = torch.ones((1, 2))
         fx_pruner = LSTMSaliencyPruner({"sparsity_level": 0.5})
         fx_pruner.prepare(model, config)
         fx_pruner.enable_mask_update = True
@@ -138,23 +133,21 @@ class TestSaliencyPruner(TestCase):
         pruned_model(lstm_input)
 
         # make sure lowest saliency rows are pruned
-        expected = torch.tensor(
-            [[2, 2], [2, 2], [-2, -2], [-2, -2]], dtype=dtype, device=device
-        )
+        expected = torch.Tensor([[2, 2], [2, 2], [-2, -2], [-2, -2]])
         pruned = model.lstm.weight_ih_l0
         if expected.shape != pruned.shape:
             raise AssertionError(f"Expected shape {expected.shape}, got {pruned.shape}")
         if not torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all():
             raise AssertionError("Expected and pruned tensors are not close")
 
-        expected = torch.tensor([[2], [2], [-2], [-2]], dtype=dtype, device=device)
+        expected = torch.Tensor([[2], [2], [-2], [-2]])
         pruned = model.lstm.weight_hh_l0
         if expected.shape != pruned.shape:
             raise AssertionError(f"Expected shape {expected.shape}, got {pruned.shape}")
         if not torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all():
             raise AssertionError("Expected and pruned tensors are not close")
 
-        expected = torch.tensor([2, 2, -2, -2], dtype=dtype, device=device)
+        expected = torch.Tensor([2, 2, -2, -2])
         for pruned in [model.lstm.bias_ih_l0, model.lstm.bias_hh_l0]:
             if expected.shape != pruned.shape:
                 raise AssertionError(
@@ -263,9 +256,10 @@ class TestBaseStructuredSparsifier(TestCase):
                 f"Expected test value 3, got {pruner.groups[0]['test']}"
             )
 
-    def test_constructor(self, device):
+    def test_constructor(self):
         model = SimpleLinear()
-        self._test_constructor_on_device(model, torch.device(device))
+        for device in DEVICES:
+            self._test_constructor_on_device(model, torch.device(device))
 
     def _test_prepare_linear_on_device(self, model, device):
         model = copy.deepcopy(model).to(device)
@@ -276,15 +270,16 @@ class TestBaseStructuredSparsifier(TestCase):
         if model(x).shape != (128, 10):
             raise AssertionError(f"Expected shape (128, 10), got {model(x).shape}")
 
-    def test_prepare_linear(self, device):
+    def test_prepare_linear(self):
         models = [
             SimpleLinear(),
             LinearBias(),
             LinearActivation(),
             LinearActivationFunctional(),
         ]  # without and with bias
-        for model in models:
-            self._test_prepare_linear_on_device(model, torch.device(device))
+        for device in DEVICES:
+            for model in models:
+                self._test_prepare_linear_on_device(model, torch.device(device))
 
     def _test_prepare_conv2d_on_device(self, model, expected_shape, config, device):
         x = torch.ones((1, 1, 28, 28), device=device)
@@ -296,7 +291,7 @@ class TestBaseStructuredSparsifier(TestCase):
                 f"Expected shape {expected_shape}, got {model(x).shape}"
             )
 
-    def test_prepare_conv2d(self, device):
+    def test_prepare_conv2d(self):
         models = [
             SimpleConv2d(),
             Conv2dBias(),
@@ -312,11 +307,12 @@ class TestBaseStructuredSparsifier(TestCase):
             (1, 52, 3, 3),
         ]
         configs = [None, None, None, None, None]
-        for model, shape, config in zip(models, shapes, configs):
-            model = model.to(device)
-            self._test_prepare_conv2d_on_device(
-                model, shape, config, torch.device(device)
-            )
+        for device in DEVICES:
+            for model, shape, config in zip(models, shapes, configs):
+                model = model.to(device)
+                self._test_prepare_conv2d_on_device(
+                    model, shape, config, torch.device(device)
+                )
 
     def _test_step_linear_on_device(self, model, device):
         model = model.to(device)
@@ -327,15 +323,16 @@ class TestBaseStructuredSparsifier(TestCase):
         pruner.step()
         self._check_pruner_valid_after_step(model, pruner, 1, device)
 
-    def test_step_linear(self, device):
+    def test_step_linear(self):
         models = [
             SimpleLinear(),
             LinearBias(),
             LinearActivation(),
             LinearActivationFunctional(),
         ]
-        for model in models:
-            self._test_step_linear_on_device(model, torch.device(device))
+        for device in DEVICES:
+            for model in models:
+                self._test_step_linear_on_device(model, torch.device(device))
 
     def _test_step_conv2d_on_device(self, model, expected_shape, config, device):
         model = model.to(device)
@@ -352,7 +349,7 @@ class TestBaseStructuredSparsifier(TestCase):
             )
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
-    def test_step_conv2d(self, device):
+    def test_step_conv2d(self):
         models = [
             SimpleConv2d(),
             Conv2dBias(),
@@ -368,8 +365,11 @@ class TestBaseStructuredSparsifier(TestCase):
             (1, 52, 3, 3),
         ]
         configs = [None, None, None, None, None]
-        for model, shape, config in zip(models, shapes, configs):
-            self._test_step_conv2d_on_device(model, shape, config, torch.device(device))
+        for device in DEVICES:
+            for model, shape, config in zip(models, shapes, configs):
+                self._test_step_conv2d_on_device(
+                    model, shape, config, torch.device(device)
+                )
 
     def _check_pruner_pruned(self, model, pruner, device):
         for config in pruner.groups:
@@ -418,7 +418,7 @@ class TestBaseStructuredSparsifier(TestCase):
                     f"Expected pruned params ({num_pruned_params}) < original ({num_original_params})"
                 )
 
-    def test_prune_linear_linear(self, device):
+    def test_prune_linear_linear(self):
         r"""test pruning linear-> linear modules"""
         configs, shapes = [], []
         configs.append(
@@ -447,17 +447,18 @@ class TestBaseStructuredSparsifier(TestCase):
             ]
         )
         shapes.append((128, 10))
-        for also_prune_bias in [True, False]:
-            for config, shape in zip(configs, shapes):
-                self._test_linear_on_device(
-                    SimpleLinear(),
-                    config,
-                    shape,
-                    torch.device(device),
-                    also_prune_bias,
-                )
+        for device in DEVICES:
+            for also_prune_bias in [True, False]:
+                for config, shape in zip(configs, shapes):
+                    self._test_linear_on_device(
+                        SimpleLinear(),
+                        config,
+                        shape,
+                        torch.device(device),
+                        also_prune_bias,
+                    )
 
-    def test_prune_linear_bias_linear(self, device):
+    def test_prune_linear_bias_linear(self):
         # linear(bias) -> linear(no bias)
         configs, shapes = [], []
         configs.append(
@@ -487,17 +488,18 @@ class TestBaseStructuredSparsifier(TestCase):
         )
         shapes.append((128, 10))
 
-        for also_prune_bias in [True, False]:
-            for config, shape in zip(configs, shapes):
-                self._test_linear_on_device(
-                    LinearBias(),
-                    config,
-                    shape,
-                    torch.device(device),
-                    also_prune_bias,
-                )
+        for device in DEVICES:
+            for also_prune_bias in [True, False]:
+                for config, shape in zip(configs, shapes):
+                    self._test_linear_on_device(
+                        LinearBias(),
+                        config,
+                        shape,
+                        torch.device(device),
+                        also_prune_bias,
+                    )
 
-    def test_prune_linear_activation_linear(self, device):
+    def test_prune_linear_activation_linear(self):
         config = [
             {"tensor_fqn": "seq.0.weight"},
             {"tensor_fqn": "seq.2.weight"},
@@ -506,23 +508,24 @@ class TestBaseStructuredSparsifier(TestCase):
         ]
         shape = (128, 10)
 
-        for also_prune_bias in [True, False]:
-            # test version with nn.Modules
-            self._test_linear_on_device(
-                LinearActivation(),
-                config,
-                shape,
-                torch.device(device),
-                also_prune_bias,
-            )
-            # test functional version
-            self._test_linear_on_device(
-                LinearActivationFunctional(),
-                config,
-                shape,
-                torch.device(device),
-                also_prune_bias,
-            )
+        for device in DEVICES:
+            for also_prune_bias in [True, False]:
+                # test version with nn.Modules
+                self._test_linear_on_device(
+                    LinearActivation(),
+                    config,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
+                # test functional version
+                self._test_linear_on_device(
+                    LinearActivationFunctional(),
+                    config,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
 
     def _test_conv2d_on_device(
         self, model, config, x, expected_shape, device, also_prune_bias
@@ -564,7 +567,7 @@ class TestBaseStructuredSparsifier(TestCase):
                     f"Expected pruned params ({num_pruned_params}) <= original ({num_original_params})"
                 )
 
-    def test_prune_conv2d_conv2d(self, device):
+    def test_prune_conv2d_conv2d(self):
         configs, shapes = [], []
         # all within sequential blocks
         configs.append(
@@ -583,19 +586,20 @@ class TestBaseStructuredSparsifier(TestCase):
         )
         shapes.append((1, 52, 20, 20))
 
-        x = torch.ones((1, 1, 28, 28), device=device)
-        for also_prune_bias in [True, False]:
-            for config, shape in zip(configs, shapes):
-                self._test_conv2d_on_device(
-                    SimpleConv2d(),
-                    config,
-                    x,
-                    shape,
-                    torch.device(device),
-                    also_prune_bias,
-                )
+        for device in DEVICES:
+            x = torch.ones((1, 1, 28, 28), device=device)
+            for also_prune_bias in [True, False]:
+                for config, shape in zip(configs, shapes):
+                    self._test_conv2d_on_device(
+                        SimpleConv2d(),
+                        config,
+                        x,
+                        shape,
+                        torch.device(device),
+                        also_prune_bias,
+                    )
 
-    def test_prune_conv2d_bias_conv2d(self, device):
+    def test_prune_conv2d_bias_conv2d(self):
         # Conv2d with Bias and no Activation
         configs, shapes = [], []
         # conv2d(bias) -> conv2d(bias)
@@ -627,19 +631,20 @@ class TestBaseStructuredSparsifier(TestCase):
         )
         shapes.append((1, 52, 18, 18))
 
-        x = torch.ones((1, 1, 28, 28), device=device)
-        for also_prune_bias in [True, False]:
-            for config, shape in zip(configs, shapes):
-                self._test_conv2d_on_device(
-                    Conv2dBias(),
-                    config,
-                    x,
-                    shape,
-                    torch.device(device),
-                    also_prune_bias,
-                )
+        for device in DEVICES:
+            x = torch.ones((1, 1, 28, 28), device=device)
+            for also_prune_bias in [True, False]:
+                for config, shape in zip(configs, shapes):
+                    self._test_conv2d_on_device(
+                        Conv2dBias(),
+                        config,
+                        x,
+                        shape,
+                        torch.device(device),
+                        also_prune_bias,
+                    )
 
-    def test_prune_conv2d_activation_conv2d(self, device):
+    def test_prune_conv2d_activation_conv2d(self):
         # Conv2d with Activation and no Bias
         configs, shapes = [], []
 
@@ -677,19 +682,20 @@ class TestBaseStructuredSparsifier(TestCase):
         )
         shapes.append((1, 52, 18, 18))
 
-        x = torch.ones((1, 1, 28, 28), device=device)
-        for also_prune_bias in [True, False]:
-            for config, shape in zip(configs, shapes):
-                self._test_conv2d_on_device(
-                    Conv2dActivation(),
-                    config,
-                    x,
-                    shape,
-                    torch.device(device),
-                    also_prune_bias,
-                )
+        for device in DEVICES:
+            x = torch.ones((1, 1, 28, 28), device=device)
+            for also_prune_bias in [True, False]:
+                for config, shape in zip(configs, shapes):
+                    self._test_conv2d_on_device(
+                        Conv2dActivation(),
+                        config,
+                        x,
+                        shape,
+                        torch.device(device),
+                        also_prune_bias,
+                    )
 
-    def test_prune_conv2d_padding_conv2d(self, device):
+    def test_prune_conv2d_padding_conv2d(self):
         # Conv2d with Padded layers after Bias layers
         configs, shapes = [], []
 
@@ -731,19 +737,20 @@ class TestBaseStructuredSparsifier(TestCase):
         )
         shapes.append((1, 52, 24, 24))
 
-        x = torch.ones((1, 1, 28, 28), device=device)
-        for also_prune_bias in [True, False]:
-            for config, shape in zip(configs, shapes):
-                self._test_conv2d_on_device(
-                    Conv2dPadBias(),
-                    config,
-                    x,
-                    shape,
-                    torch.device(device),
-                    also_prune_bias,
-                )
+        for device in DEVICES:
+            x = torch.ones((1, 1, 28, 28), device=device)
+            for also_prune_bias in [True, False]:
+                for config, shape in zip(configs, shapes):
+                    self._test_conv2d_on_device(
+                        Conv2dPadBias(),
+                        config,
+                        x,
+                        shape,
+                        torch.device(device),
+                        also_prune_bias,
+                    )
 
-    def test_prune_conv2d_pool_conv2d(self, device):
+    def test_prune_conv2d_pool_conv2d(self):
         # Conv2d with Pooling layers
         config = [
             {"tensor_fqn": "seq.0.weight"},
@@ -753,19 +760,20 @@ class TestBaseStructuredSparsifier(TestCase):
         ]
         shape = (1, 52, 3, 3)
 
-        x = torch.ones((1, 1, 28, 28), device=device)
-        for also_prune_bias in [True, False]:
-            self._test_conv2d_on_device(
-                Conv2dPool(),
-                config,
-                x,
-                shape,
-                torch.device(device),
-                also_prune_bias,
-            )
+        for device in DEVICES:
+            x = torch.ones((1, 1, 28, 28), device=device)
+            for also_prune_bias in [True, False]:
+                self._test_conv2d_on_device(
+                    Conv2dPool(),
+                    config,
+                    x,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
-    def test_complex_conv2d(self, device):
+    def test_complex_conv2d(self):
         """Test fusion for models that contain Conv2d & Linear modules.
         Currently supports: Conv2d-Pool2d-Flatten-Linear, Skip-add"""
         config = [
@@ -776,27 +784,27 @@ class TestBaseStructuredSparsifier(TestCase):
         ]
         shape = (1, 13)
 
-        x = torch.ones((1, 1, 28, 28), device=device)
-        for also_prune_bias in [True, False]:
-            self._test_conv2d_on_device(
-                Conv2dPoolFlattenFunctional(),
-                config,
-                x,
-                shape,
-                torch.device(device),
-                also_prune_bias,
-            )
-            self._test_conv2d_on_device(
-                Conv2dPoolFlatten(),
-                config,
-                x,
-                shape,
-                torch.device(device),
-                also_prune_bias,
-            )
+        for device in DEVICES:
+            x = torch.ones((1, 1, 28, 28), device=device)
+            for also_prune_bias in [True, False]:
+                self._test_conv2d_on_device(
+                    Conv2dPoolFlattenFunctional(),
+                    config,
+                    x,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
+                self._test_conv2d_on_device(
+                    Conv2dPoolFlatten(),
+                    config,
+                    x,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
 
-    @onlyCPU
-    def test_prune_lstm_linear_multiple_layer(self, device):
+    def test_prune_lstm_linear_multiple_layer(self):
         """
         Test fusion support for LSTM(multi-layer) -> Linear
         """
@@ -805,7 +813,7 @@ class TestBaseStructuredSparsifier(TestCase):
             hidden_dim=8,
             output_dim=8,
             num_layers=2,
-        ).to(device)
+        )
 
         config = [
             {"tensor_fqn": "lstm.weight_ih_l0"},
@@ -814,7 +822,7 @@ class TestBaseStructuredSparsifier(TestCase):
             {"tensor_fqn": "lstm.weight_hh_l1"},
         ]
 
-        lstm_input = torch.ones((1, 8), device=device)
+        lstm_input = torch.ones((1, 8))
         fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
         fx_pruner.prepare(model, config)
 
@@ -844,8 +852,7 @@ class TestBaseStructuredSparsifier(TestCase):
                 f"Expected all params deleted, but {len(expected_params)} remain"
             )
 
-    @onlyCPU
-    def test_prune_lstm_linear_single_layer(self, device):
+    def test_prune_lstm_linear_single_layer(self):
         """
         Test fusion support for LSTM (single-layer) -> Linear
         """
@@ -854,14 +861,14 @@ class TestBaseStructuredSparsifier(TestCase):
             hidden_dim=8,
             output_dim=8,
             num_layers=1,
-        ).to(device)
+        )
 
         config = [
             {"tensor_fqn": "lstm.weight_ih_l0"},
             {"tensor_fqn": "lstm.weight_hh_l0"},
         ]
 
-        lstm_input = torch.ones((1, 8), device=device)
+        lstm_input = torch.ones((1, 8))
         fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
         fx_pruner.prepare(model, config)
         fx_pruner.enable_mask_update = True
@@ -889,8 +896,7 @@ class TestBaseStructuredSparsifier(TestCase):
                 f"Expected shape {out_expected.shape}, got {out_pruned.shape}"
             )
 
-    @onlyCPU
-    def test_prune_lstm_layernorm_linear_multiple_layer(self, device):
+    def test_prune_lstm_layernorm_linear_multiple_layer(self):
         """
         Test fusion support for LSTM(multi-layer) -> Linear
         """
@@ -899,7 +905,7 @@ class TestBaseStructuredSparsifier(TestCase):
             output_dim=8,
             hidden_dim=8,
             num_layers=2,
-        ).to(device)
+        )
 
         config = [
             {"tensor_fqn": "lstm.weight_ih_l0"},
@@ -908,7 +914,7 @@ class TestBaseStructuredSparsifier(TestCase):
             {"tensor_fqn": "lstm.weight_hh_l1"},
         ]
 
-        lstm_input = torch.ones((1, 8), device=device)
+        lstm_input = torch.ones((1, 8))
         fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
         fx_pruner.prepare(model, config)
 
@@ -938,8 +944,7 @@ class TestBaseStructuredSparsifier(TestCase):
                 f"Expected all params deleted, but {len(expected_params)} remain"
             )
 
-    @onlyCPU
-    def test_prune_lstm_layernorm_linear_single_layer(self, device):
+    def test_prune_lstm_layernorm_linear_single_layer(self):
         """
         Test fusion support for LSTM (single-layer) -> Linear
         """
@@ -948,14 +953,14 @@ class TestBaseStructuredSparsifier(TestCase):
             hidden_dim=8,
             output_dim=8,
             num_layers=1,
-        ).to(device)
+        )
 
         config = [
             {"tensor_fqn": "lstm.weight_ih_l0"},
             {"tensor_fqn": "lstm.weight_hh_l0"},
         ]
 
-        lstm_input = torch.ones((1, 8), device=device)
+        lstm_input = torch.ones((1, 8))
         fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
         fx_pruner.prepare(model, config)
         fx_pruner.enable_mask_update = True
@@ -1023,15 +1028,14 @@ class TestFPGMPruner(TestCase):
             x = self.conv2d2(x)
             return x
 
-    @onlyCPU
-    def test_compute_distance(self, device):
+    def test_compute_distance(self, device="cpu"):
         """Test the distance computation function"""
         model = TestFPGMPruner.SimpleConvFPGM().to(device)
         pruner = FPGMPruner(0.3)
         dist_conv1 = pruner._compute_distance(model.conv2d1.weight)
 
         # compute the distance matrix using torch.cdist
-        flattened_filters = torch.tensor(
+        flattened_filters = torch.Tensor(
             [
                 [
                     3.0000,
@@ -1066,8 +1070,7 @@ class TestFPGMPruner(TestCase):
                     0.1000,
                     0.1000,
                 ],
-            ],
-            device=device,
+            ]
         )
 
         """
@@ -1172,15 +1175,18 @@ class TestFPGMPruner(TestCase):
         ).all():
             raise AssertionError("conv2d2 weight does not match expected")
 
-    def test_update_mask(self, device):
+    def test_update_mask(self):
         weights = torch.tensor([3.0, 0.1])
         expected_conv1 = torch.ones((2, 1, 3, 3)) * weights[:, None, None, None]
 
         weights = torch.tensor([7.0, 0.4])
         expected_conv2 = torch.ones((2, 2, 3, 3)) * weights[:, None, None, None]
 
-        self._test_update_mask_on_single_layer(expected_conv1, device)
-        self._test_update_mask_on_multiple_layer(expected_conv1, expected_conv2, device)
+        for device in DEVICES:
+            self._test_update_mask_on_single_layer(expected_conv1, device)
+            self._test_update_mask_on_multiple_layer(
+                expected_conv1, expected_conv2, device
+            )
 
 
 if __name__ == "__main__":
