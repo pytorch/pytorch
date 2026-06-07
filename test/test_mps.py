@@ -15677,6 +15677,287 @@ class TestMetalLibrary(TestCaseMPS):
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
 # to achieve this.
+
+class TestReduceOpsMetal(TestCaseMPS):
+    """Tests for Metal kernel reduce ops: prod, var/std, argmax/argmin, max/min."""
+
+    # =========================================================================
+    # Product reduction
+    # =========================================================================
+    def test_prod_metal_basic(self):
+        for shape in [(4,), (3, 4), (2, 3, 4), (2, 3, 4, 5)]:
+            for dtype in [torch.float32, torch.float16, torch.int32, torch.int64]:
+                if dtype in (torch.int32, torch.int64):
+                    cpu_x = torch.randint(1, 3, shape, device='cpu', dtype=dtype)
+                else:
+                    cpu_x = torch.randint(1, 4, shape, device='cpu', dtype=dtype)
+                mps_x = cpu_x.to('mps')
+                # Scalar prod
+                self.assertEqual(torch.prod(mps_x), torch.prod(cpu_x))
+                # Per-dim prod
+                for dim in range(len(shape)):
+                    self.assertEqual(torch.prod(mps_x, dim=dim), torch.prod(cpu_x, dim=dim))
+                    self.assertEqual(
+                        torch.prod(mps_x, dim=dim, keepdim=True),
+                        torch.prod(cpu_x, dim=dim, keepdim=True))
+
+    def test_prod_metal_dtype_promotion(self):
+        cpu_x = torch.tensor([1, 2, 3, 4], dtype=torch.int32, device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(
+            torch.prod(mps_x, dtype=torch.int64),
+            torch.prod(cpu_x, dtype=torch.int64))
+
+    def test_prod_metal_float_types(self):
+        cpu_x = torch.randn(8, 16, device='cpu', dtype=torch.float32)
+        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            cx = cpu_x.to(dtype)
+            mx = cx.to('mps')
+            self.assertEqual(torch.prod(mx, dim=1), torch.prod(cx, dim=1), atol=1e-2, rtol=1e-2)
+            self.assertEqual(torch.prod(mx, dim=0), torch.prod(cx, dim=0), atol=1e-2, rtol=1e-2)
+
+    def test_prod_metal_empty(self):
+        cpu_x = torch.empty(0, 3, device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.prod(mps_x), torch.prod(cpu_x))
+
+    def test_prod_metal_scalar(self):
+        cpu_x = torch.tensor(5.0, device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.prod(mps_x), torch.prod(cpu_x))
+
+    def test_prod_metal_bool(self):
+        cpu_x = torch.tensor([True, True, False, True], device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.prod(mps_x), torch.prod(cpu_x))
+        self.assertEqual(torch.prod(mps_x, dtype=torch.int64), torch.prod(cpu_x, dtype=torch.int64))
+
+    def test_prod_metal_large(self):
+        cpu_x = torch.randint(1, 3, (64, 128), device='cpu', dtype=torch.int32)
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.prod(mps_x, dim=0), torch.prod(cpu_x, dim=0))
+        self.assertEqual(torch.prod(mps_x, dim=1), torch.prod(cpu_x, dim=1))
+
+    def test_prod_metal_noncontiguous(self):
+        cpu_x = torch.randint(1, 4, (4, 6), device='cpu', dtype=torch.float32)
+        mps_x = cpu_x.to('mps')
+        # Transpose makes it non-contiguous
+        cpu_t = cpu_x.t()
+        mps_t = mps_x.t()
+        self.assertEqual(torch.prod(mps_t, dim=0), torch.prod(cpu_t, dim=0))
+        self.assertEqual(torch.prod(mps_t, dim=1), torch.prod(cpu_t, dim=1))
+
+    # =========================================================================
+    # Variance and standard deviation
+    # =========================================================================
+    def test_var_metal_basic(self):
+        for shape in [(8,), (4, 8), (2, 4, 8), (2, 3, 4, 5)]:
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float32)
+            mps_x = cpu_x.to('mps')
+            # Scalar var
+            self.assertEqual(torch.var(mps_x), torch.var(cpu_x), atol=1e-4, rtol=1e-4)
+            self.assertEqual(torch.var(mps_x, correction=0), torch.var(cpu_x, correction=0), atol=1e-4, rtol=1e-4)
+            # Per-dim
+            for dim in range(len(shape)):
+                self.assertEqual(
+                    torch.var(mps_x, dim=dim), torch.var(cpu_x, dim=dim), atol=1e-4, rtol=1e-4)
+                self.assertEqual(
+                    torch.var(mps_x, dim=dim, keepdim=True),
+                    torch.var(cpu_x, dim=dim, keepdim=True), atol=1e-4, rtol=1e-4)
+
+    def test_std_metal_basic(self):
+        for shape in [(8,), (4, 8), (2, 4, 8)]:
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float32)
+            mps_x = cpu_x.to('mps')
+            self.assertEqual(torch.std(mps_x), torch.std(cpu_x), atol=1e-4, rtol=1e-4)
+            for dim in range(len(shape)):
+                self.assertEqual(
+                    torch.std(mps_x, dim=dim), torch.std(cpu_x, dim=dim), atol=1e-4, rtol=1e-4)
+
+    def test_var_metal_correction(self):
+        cpu_x = torch.randn(10, 20, device='cpu')
+        mps_x = cpu_x.to('mps')
+        for corr in [0, 1, 2]:
+            self.assertEqual(
+                torch.var(mps_x, dim=1, correction=corr),
+                torch.var(cpu_x, dim=1, correction=corr), atol=1e-4, rtol=1e-4)
+
+    def test_var_metal_multidim(self):
+        cpu_x = torch.randn(3, 4, 5, device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(
+            torch.var(mps_x, dim=[0, 2]),
+            torch.var(cpu_x, dim=[0, 2]), atol=1e-4, rtol=1e-4)
+        self.assertEqual(
+            torch.var(mps_x, dim=[0, 2], keepdim=True),
+            torch.var(cpu_x, dim=[0, 2], keepdim=True), atol=1e-4, rtol=1e-4)
+
+    def test_var_metal_half(self):
+        cpu_x = torch.randn(16, 32, device='cpu', dtype=torch.float32)
+        for dtype in [torch.float16, torch.bfloat16]:
+            cx = cpu_x.to(dtype)
+            mx = cx.to('mps')
+            self.assertEqual(
+                torch.var(mx, dim=1),
+                torch.var(cx, dim=1), atol=1e-1, rtol=1e-1)
+
+    def test_var_metal_empty(self):
+        cpu_x = torch.randn(0, 5, device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.var(mps_x, dim=0).shape, torch.var(cpu_x, dim=0).shape)
+
+    def test_var_metal_scalar(self):
+        cpu_x = torch.tensor(3.14, device='cpu')
+        mps_x = cpu_x.to('mps')
+        # var of scalar with correction=1 is NaN (dof=0); test correction=0
+        self.assertTrue(torch.isnan(torch.var(mps_x)))
+        self.assertEqual(
+            torch.var(mps_x, correction=0), torch.var(cpu_x, correction=0))
+
+    # =========================================================================
+    # var_mean / std_mean (fused)
+    # =========================================================================
+    def test_var_mean_metal(self):
+        for shape in [(8,), (4, 8), (2, 4, 8)]:
+            cpu_x = torch.randn(shape, device='cpu')
+            mps_x = cpu_x.to('mps')
+            # Scalar
+            mv, mm = torch.var_mean(mps_x)
+            cv, cm = torch.var_mean(cpu_x)
+            self.assertEqual(mv, cv, atol=1e-4, rtol=1e-4)
+            self.assertEqual(mm, cm, atol=1e-4, rtol=1e-4)
+            # Per-dim
+            for dim in range(len(shape)):
+                mv, mm = torch.var_mean(mps_x, dim=dim)
+                cv, cm = torch.var_mean(cpu_x, dim=dim)
+                self.assertEqual(mv, cv, atol=1e-4, rtol=1e-4)
+                self.assertEqual(mm, cm, atol=1e-4, rtol=1e-4)
+
+    def test_std_mean_metal(self):
+        cpu_x = torch.randn(4, 8, device='cpu')
+        mps_x = cpu_x.to('mps')
+        ms, mm = torch.std_mean(mps_x, dim=1)
+        cs, cm = torch.std_mean(cpu_x, dim=1)
+        self.assertEqual(ms, cs, atol=1e-4, rtol=1e-4)
+        self.assertEqual(mm, cm, atol=1e-4, rtol=1e-4)
+
+    def test_var_mean_metal_keepdim(self):
+        cpu_x = torch.randn(3, 4, 5, device='cpu')
+        mps_x = cpu_x.to('mps')
+        mv, mm = torch.var_mean(mps_x, dim=1, keepdim=True)
+        cv, cm = torch.var_mean(cpu_x, dim=1, keepdim=True)
+        self.assertEqual(mv, cv, atol=1e-4, rtol=1e-4)
+        self.assertEqual(mm, cm, atol=1e-4, rtol=1e-4)
+
+    # =========================================================================
+    # Argmax / Argmin
+    # =========================================================================
+    def test_argmax_metal_basic(self):
+        for shape in [(8,), (4, 8), (2, 4, 8)]:
+            for dtype in [torch.float32, torch.int32, torch.int64, torch.float16]:
+                if dtype in [torch.float32, torch.float16]:
+                    cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+                else:
+                    n = 1
+                    for s in shape:
+                        n *= s
+                    cpu_x = torch.randperm(n, device='cpu', dtype=dtype).reshape(shape)
+                mps_x = cpu_x.to('mps')
+                # No dim
+                self.assertEqual(torch.argmax(mps_x), torch.argmax(cpu_x))
+                self.assertEqual(torch.argmin(mps_x), torch.argmin(cpu_x))
+                # Per dim
+                for dim in range(len(shape)):
+                    self.assertEqual(torch.argmax(mps_x, dim=dim), torch.argmax(cpu_x, dim=dim))
+                    self.assertEqual(torch.argmin(mps_x, dim=dim), torch.argmin(cpu_x, dim=dim))
+                    self.assertEqual(
+                        torch.argmax(mps_x, dim=dim, keepdim=True),
+                        torch.argmax(cpu_x, dim=dim, keepdim=True))
+
+    def test_argmax_metal_large(self):
+        cpu_x = torch.randn(256, 512, device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.argmax(mps_x, dim=0), torch.argmax(cpu_x, dim=0))
+        self.assertEqual(torch.argmax(mps_x, dim=1), torch.argmax(cpu_x, dim=1))
+        self.assertEqual(torch.argmin(mps_x, dim=0), torch.argmin(cpu_x, dim=0))
+        self.assertEqual(torch.argmin(mps_x, dim=1), torch.argmin(cpu_x, dim=1))
+
+    # =========================================================================
+    # Max / Min with dim (values + indices)
+    # =========================================================================
+    def test_max_dim_metal(self):
+        for shape in [(8,), (4, 8), (2, 4, 8)]:
+            for dtype in [torch.float32, torch.int32, torch.float16]:
+                if dtype == torch.float32 or dtype == torch.float16:
+                    cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+                else:
+                    cpu_x = torch.randint(-10, 10, shape, device='cpu', dtype=dtype)
+                mps_x = cpu_x.to('mps')
+                for dim in range(len(shape)):
+                    mv, mi = torch.max(mps_x, dim=dim)
+                    cv, ci = torch.max(cpu_x, dim=dim)
+                    self.assertEqual(mv, cv)
+                    self.assertEqual(mi, ci)
+                    mv, mi = torch.max(mps_x, dim=dim, keepdim=True)
+                    cv, ci = torch.max(cpu_x, dim=dim, keepdim=True)
+                    self.assertEqual(mv, cv)
+                    self.assertEqual(mi, ci)
+
+    def test_min_dim_metal(self):
+        cpu_x = torch.randn(4, 8, device='cpu')
+        mps_x = cpu_x.to('mps')
+        for dim in [0, 1]:
+            mv, mi = torch.min(mps_x, dim=dim)
+            cv, ci = torch.min(cpu_x, dim=dim)
+            self.assertEqual(mv, cv)
+            self.assertEqual(mi, ci)
+
+    def test_max_scalar_metal(self):
+        cpu_x = torch.randn(64, device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.max(mps_x), torch.max(cpu_x))
+        self.assertEqual(torch.min(mps_x), torch.min(cpu_x))
+
+    def test_max_min_metal_large(self):
+        cpu_x = torch.randn(128, 256, device='cpu')
+        mps_x = cpu_x.to('mps')
+        mv, mi = torch.max(mps_x, dim=0)
+        cv, ci = torch.max(cpu_x, dim=0)
+        self.assertEqual(mv, cv)
+        self.assertEqual(mi, ci)
+        mv, mi = torch.max(mps_x, dim=1)
+        cv, ci = torch.max(cpu_x, dim=1)
+        self.assertEqual(mv, cv)
+        self.assertEqual(mi, ci)
+
+    # =========================================================================
+    # Variable-length shapes (GNN / varlen workload simulation)
+    # =========================================================================
+    def test_reduce_variable_shapes(self):
+        """Verify Metal kernels handle changing shapes without cache swell."""
+        for n in [7, 13, 31, 64, 100, 255]:
+            cpu_x = torch.randn(n, 16, device='cpu')
+            mps_x = cpu_x.to('mps')
+            self.assertEqual(torch.prod(mps_x, dim=0), torch.prod(cpu_x, dim=0))
+            self.assertEqual(
+                torch.var(mps_x, dim=0), torch.var(cpu_x, dim=0), atol=1e-4, rtol=1e-4)
+            mv, mi = torch.max(mps_x, dim=0)
+            cv, ci = torch.max(cpu_x, dim=0)
+            self.assertEqual(mv, cv)
+            self.assertEqual(mi, ci)
+
+    def test_reduce_noncontiguous_input(self):
+        cpu_x = torch.randn(8, 16, device='cpu')
+        mps_x = cpu_x.to('mps')
+        # Slice creates non-contiguous view
+        cpu_s = cpu_x[:, ::2]
+        mps_s = mps_x[:, ::2]
+        self.assertEqual(torch.var(mps_s, dim=1), torch.var(cpu_s, dim=1), atol=1e-4, rtol=1e-4)
+        self.assertEqual(torch.argmax(mps_s, dim=1), torch.argmax(cpu_s, dim=1))
+
+
+instantiate_parametrized_tests(TestReduceOpsMetal)
+
 instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
