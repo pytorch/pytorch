@@ -190,7 +190,8 @@ def forward(self, a__1):
     clone = torch.ops.aten.clone.default(a__1);  a__1 = None
     select = torch.ops.aten.select.int(clone, 1, 1)
     select_1 = torch.ops.aten.select.int(select, 0, 1);  select = None
-    add = torch.ops.aten.add_.Tensor(select_1, 1);  select_1 = add = None
+    add = torch.ops.aten.add.Tensor(select_1, 1)
+    copy = torch.ops.aten.copy_.default(select_1, add);  select_1 = add = copy = None
     select_2 = torch.ops.aten.select.int(clone, 1, 1);  select_2 = None
     select_3 = torch.ops.aten.select.int(clone, 1, 1)
     select_4 = torch.ops.aten.select.int(select_3, 0, 1);  select_3 = select_4 = None

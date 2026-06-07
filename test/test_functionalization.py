@@ -614,8 +614,9 @@ def forward(self, arg0_1):
 
 def forward(self, arg0_1):
     as_strided = torch.ops.aten.as_strided.default(arg0_1, [2], [2], 1)
-    add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(arg0_1, add, [2], [2], 1);  add = None
+    add = torch.ops.aten.add.Tensor(as_strided, 1)
+    copy = torch.ops.aten.copy.default(as_strided, add);  as_strided = add = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(arg0_1, copy, [2], [2], 1);  copy = None
     as_strided_1 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [2], 1);  as_strided_1 = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, as_strided_scatter);  arg0_1 = copy_ = None
     return as_strided_scatter
@@ -2283,6 +2284,20 @@ def forward(self, arg0_1):
             lifted = torch.ops.aten.lift_fresh.default(unlifted)
 
         self.assertNotEqual(unlifted.untyped_storage(), lifted.untyped_storage())
+
+    def test_python_functionalization_lift_functional_tensor(self):
+        def f(x):
+            tmp = x + 1
+            return torch.ops.aten.lift.default(tmp)
+
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(
+            f, reapply_views=True, crossref=False, skip_input_mutations=True
+        )(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test_cpp)
 
     def test_python_functionalization_lift_fresh(self):
         def f(x):
