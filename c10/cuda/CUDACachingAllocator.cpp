@@ -34,6 +34,7 @@
 #include <c10/util/Exception.h>
 #include <cuda_runtime_api.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
@@ -42,6 +43,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <ranges>
 #include <regex>
 #include <set>
 #include <stack>
@@ -791,8 +793,8 @@ struct ExpandableSegment {
     return max_handles_ * segment_size_;
   }
 
-  cudaStream_t getStream() {
-    return *stream_;
+  std::optional<cudaStream_t> getStream() const {
+    return stream_;
   }
 
   size_t getMappedSize() const {
@@ -860,13 +862,13 @@ struct ExpandableSegment {
   void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
 #if defined(USE_ROCM) && (ROCM_VERSION >= 70200)
     constexpr int num_desc = 2;
-    CUmemAccessDesc desc[num_desc];
+    std::array<CUmemAccessDesc, num_desc> desc;
     desc[1].location.type = CU_MEM_LOCATION_TYPE_HOST;
     desc[1].location.id = 0; // ignored
     desc[1].flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
 #else
     constexpr int num_desc = 1;
-    CUmemAccessDesc desc[num_desc];
+    std::array<CUmemAccessDesc, num_desc> desc;
 #endif
     desc[0].location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
@@ -876,14 +878,14 @@ struct ExpandableSegment {
     C10_CUDA_CHECK(hipMemSetAccess(
         ptr() + begin * segment_size_,
         (end - begin) * segment_size_,
-        &desc[0],
-        num_desc));
+        desc.data(),
+        desc.size()));
 #else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
         ptr_ + begin * segment_size_,
         (end - begin) * segment_size_,
-        &desc[0],
-        num_desc));
+        desc.data(),
+        desc.size()));
 #endif
   }
 
@@ -951,7 +953,7 @@ struct ExpandableSegment {
     trimHandles();
   }
   void trimHandles() {
-    auto it = std::find_if(
+    auto it = std::ranges::find_if(
         handles_.rbegin(),
         handles_.rend(),
         [](const std::optional<Handle>& opt) { return opt.has_value(); });
@@ -1047,8 +1049,8 @@ struct ExpandableSegment {
   size_t size() const {
     return 0;
   }
-  cudaStream_t getStream() {
-    return nullptr;
+  std::optional<cudaStream_t> getStream() const {
+    return std::nullopt;
   }
 
   size_t getMappedSize() const {
@@ -1635,7 +1637,7 @@ class DeviceCachingAllocator {
       TORCH_INTERNAL_ASSERT(b != nullptr);
       TORCH_INTERNAL_ASSERT(b->pool != nullptr);
       if (b->allocated && b->pool->owner_PrivatePool == pool) {
-        if (!expected_live_allocations.count(b->ptr)) {
+        if (!expected_live_allocations.contains(b->ptr)) {
           return false;
         }
 
@@ -2362,12 +2364,11 @@ class DeviceCachingAllocator {
     if (graph_reuse_context.find(info.capture_id) ==
         graph_reuse_context.end()) {
       bool found = false;
-      // Use the reverse iterator to search allocation_scopes_ in LIFO order.
-      for (auto it = allocation_scopes_.rbegin();
-           it != allocation_scopes_.rend();
-           ++it) {
-        if (it->second(stream)) {
-          auto graph_pool = graph_pools.find(it->first);
+      // Search allocation_scopes_ in LIFO order.
+      for (const auto& [mempool_id, filter] :
+           allocation_scopes_ | std::views::reverse) {
+        if (filter(stream)) {
+          auto graph_pool = graph_pools.find(mempool_id);
           TORCH_INTERNAL_ASSERT(
               graph_pool != graph_pools.end(),
               "Could not find graph pool for capture.");
@@ -2574,11 +2575,12 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     std::vector<StreamSegmentSize> sizes;
     for (auto& segment : expandable_segments_) {
-      if (!segment->getStream()) {
+      auto stream = segment->getStream();
+      if (!stream) {
         continue;
       }
       sizes.emplace_back(
-          segment->getStream(),
+          *stream,
           segment->getSegmentSize() == kSmallBuffer,
           segment->getMappedSize());
     }
@@ -3654,12 +3656,11 @@ class DeviceCachingAllocator {
     // warmup). When non-empty we route allocations into the matching private
     // pool. It is usually empty, so we can short-circuit on the common path.
     if (C10_UNLIKELY(!allocation_scopes_.empty())) {
-      // Use the reverse iterator to search allocation_scopes_ in LIFO order.
-      for (auto it = allocation_scopes_.rbegin();
-           it != allocation_scopes_.rend();
-           ++it) {
-        if (it->second(stream)) {
-          auto it1 = graph_pools.find(it->first);
+      // Search allocation_scopes_ in LIFO order.
+      for (const auto& [mempool_id, filter] :
+           allocation_scopes_ | std::views::reverse) {
+        if (filter(stream)) {
+          auto it1 = graph_pools.find(mempool_id);
           TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
           if (size <= kSmallSize) {
             return it1->second->small_blocks;
@@ -3789,9 +3790,13 @@ class DeviceCachingAllocator {
     // Unlike release_cached_blocks(), this does not enforce synchronization and
     // therefore should be of less overheads.
 
+    if (!allowed_memory_maximum.has_value()) {
+      return;
+    }
+    const size_t memory_maximum = *allowed_memory_maximum;
     size_t gc_threshold = static_cast<size_t>(
         AcceleratorAllocatorConfig::garbage_collection_threshold() *
-        static_cast<double>(allowed_memory_maximum.value()));
+        static_cast<double>(memory_maximum));
     // No need to trigger GC yet
     if (total_allocated_memory <= gc_threshold) {
       return;
