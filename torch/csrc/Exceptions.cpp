@@ -142,8 +142,8 @@ namespace torch {
 
 static void processErrorMsgInplace(std::string& str) {
   // Translate Aten types to their respective pytorch ones
-  constexpr std::array<std::pair<std::string_view, std::string_view>, 32>
-      changes{{
+  static constexpr auto changes =
+      std::to_array<std::pair<std::string_view, std::string_view>>({
           {"SparseCUDAByteType", "torch.cuda.sparse.ByteTensor"},
           {"SparseCUDACharType", "torch.cuda.sparse.CharTensor"},
           {"SparseCUDADoubleType", "torch.cuda.sparse.DoubleTensor"},
@@ -176,7 +176,7 @@ static void processErrorMsgInplace(std::string& str) {
           {"CPULongType", "torch.LongTensor"},
           {"CPUShortType", "torch.ShortTensor"},
           {"CPUHalfType", "torch.HalfTensor"},
-      }};
+      });
 
   // Avoid doing any work if no types need translated
   if (str.find("Type") == str.npos) {

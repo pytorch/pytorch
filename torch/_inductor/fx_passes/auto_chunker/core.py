@@ -41,7 +41,7 @@ def set_chunking_meta(
 
 def update_chunking_meta(node: Node, **kwargs: Any) -> bool:
     """
-    Unlike set_chunking_mete, this function keeps the existing chunking
+    Unlike set_chunking_meta, this function keeps the existing chunking
     metadata if it's not overridden.
     """
     changed = False
@@ -64,7 +64,7 @@ def set_chunking_meta_if_none(
     filter_for_nop: Callable[[Node], bool] | None = None,
 ) -> bool:
     """
-    If filter_fop_nop returns true for a node, we set the chunking
+    If filter_for_nop returns true for a node, we set the chunking
     meta to nop instead.
     """
     changed = False

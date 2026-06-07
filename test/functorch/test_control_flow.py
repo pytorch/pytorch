@@ -1880,9 +1880,7 @@ def forward(self, pred_1, x_1):
                 self.assertEqual(result, result_exp)
                 if not reverse:
                     result_exp_PT = op_pt(x, rnd_scan_dim)
-                    res_list = list(result)
-                    res_list[1] = res_list[1].movedim(0, rnd_scan_dim)
-                    self.assertEqual(res_list[1], result_exp_PT)
+                    self.assertEqual(result[1], result_exp_PT)
 
                 if autograd:
                     self.check_autograd(result, result_exp, (init, x))
@@ -2194,7 +2192,6 @@ def forward(self, pred_1, x_1):
                 dim=1,
                 reverse=reverse,
             )
-            o1 = pytree.tree_map(lambda t: t.movedim(0, 1), o1)
             o2 = scan(
                 get_scan_combine_fn("add", False),
                 init2,
@@ -2213,7 +2210,6 @@ def forward(self, pred_1, x_1):
             dim=1,
             reverse=reverse,
         )[1]
-        xs = pytree.tree_map(lambda t: t.movedim(0, 1), xs)
         expected_result = _fake_scan(
             get_scan_combine_fn("add", False),
             init=init2,
@@ -2675,8 +2671,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result, result_exp)
         if not reverse:
             result_exp_PT = op_pt(x, dim)
-            result = list(result)
-            result[1] = pytree.tree_map(lambda t: torch.movedim(t, 0, dim), result[1])
             self.assertEqual(result[1], result_exp_PT)
 
         if autograd:
@@ -2943,9 +2937,8 @@ class GraphModule(torch.nn.Module):
             dim=dim,
             reverse=False,
         )
-        result_cmp = [result[0], torch.movedim(result[1], 0, dim)]
-        self.assertEqual(result_cmp[0], expected_result_state)
-        self.assertEqual(result_cmp[1], expected_result_out)
+        self.assertEqual(result[0], expected_result_state)
+        self.assertEqual(result[1], expected_result_out)
 
         if autograd:
             result_flat = pytree.tree_leaves(result)
@@ -3125,7 +3118,7 @@ class GraphModule(torch.nn.Module):
                     return [t.clone() for t in hs_list], input.clone()
 
                 _, all_outputs_scan = scan(step, initial, input_sequence, dim=1)
-                return all_outputs_scan.transpose(0, 1)
+                return all_outputs_scan
 
         class RNNScanTensor(nn.Module):
             def __init__(self):
@@ -3153,7 +3146,7 @@ class GraphModule(torch.nn.Module):
 
                 hs_stacked = torch.stack(initial, dim=1)
                 _, all_outputs_scan = scan(step, hs_stacked, input_sequence, dim=1)
-                return all_outputs_scan.transpose(0, 1)
+                return all_outputs_scan
 
         def run_test_and_get_grads_loss(model, initial_hs, inputs):
             for param in model.parameters():
@@ -3478,7 +3471,7 @@ class GraphModule(torch.nn.Module):
                 f_2,
                 h_2,
                 o1[1],
-                dim=0,
+                dim=1,
                 reverse=reverse,
             )
             return o2
@@ -3623,6 +3616,24 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_input_mutation, init, x, dim=0)
+
+    @requires_cuda
+    def test_scan_additional_input_mutation(self):
+        device = torch.device("cuda")
+        buf = torch.randn(2, 2, device=device)
+
+        def fct_additional_input_mutation(x, y):
+            buf.add_(1)
+            return x + y, x + y + 2
+
+        x = torch.randn(3, 2, 2, device=device)
+        init = torch.randn(2, 2, device=device)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
+        ):
+            scan(fct_additional_input_mutation, init, x, dim=0)
 
     @requires_cuda
     def test_scan_input_carry_alias(self):
@@ -10407,6 +10418,109 @@ class TestHopSchema(TestCase):
             str(schema),
             """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1) -> (Tensor, Tensor, Tensor, Tensor)""",
         )
+
+    def test_scan_gen_schema_with_additional_input_mutation(self):
+        def combine_fn(carry, x, buf):
+            buf.add_(x)
+            return carry + x, carry * x
+
+        schema = torch.ops.higher_order.scan.gen_schema(
+            combine_fn,
+            (torch.randn(3, 4),),
+            (torch.randn(5, 3, 4),),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor(a3!) additional_input0) -> (Tensor, Tensor)""",
+        )
+
+    def test_scan_gen_schema_with_multiple_additional_input_mutation(self):
+        n_init, n_xs = 1, 1
+
+        def make_combine_fn(n_buf, mutated):
+            def combine_fn(carry, x, *bufs):
+                assert len(bufs) == n_buf  # noqa: S101
+                for i in mutated:
+                    bufs[i].add_(x)
+                return carry + x, carry * x
+
+            return combine_fn
+
+        def expected_schema(n_buf, mutated):
+            mutated_set = set(mutated)
+            parts = []
+            for i in range(n_buf):
+                if i in mutated_set:
+                    # combine_fn occupies arg_idx 0
+                    # then n_init inits
+                    # then n_xs xs
+                    # then additional_inputs
+                    aidx = 1 + n_init + n_xs + i
+                    parts.append(f"Tensor(a{aidx}!) additional_input{i}")
+                else:
+                    parts.append(f"Tensor additional_input{i}")
+            return (
+                "scan(Any combine_fn, Tensor init0, Tensor xs0, "
+                + ", ".join(parts)
+                + ") -> (Tensor, Tensor)"
+            )
+
+        cases = [
+            # 2 buffers: only first, only second (the case aorenste flagged),
+            # and both — covers all non-empty subsets at this size.
+            (2, (0,)),
+            (2, (1,)),
+            (2, (0, 1)),
+            # 3 buffers: only middle, only last, first+last (non-contiguous),
+            # and all — distinguishes start/middle/end positions and mixed
+            # selections that a constant offset would mismatch.
+            (3, (1,)),
+            (3, (2,)),
+            (3, (0, 2)),
+            (3, (0, 1, 2)),
+        ]
+        for n_buf, mutated in cases:
+            with self.subTest(n_buf=n_buf, mutated=mutated):
+                schema = torch.ops.higher_order.scan.gen_schema(
+                    make_combine_fn(n_buf, mutated),
+                    (torch.randn(3, 4),),
+                    (torch.randn(5, 3, 4),),
+                    tuple(torch.randn(3, 4) for _ in range(n_buf)),
+                )
+                self.assertEqual(str(schema), expected_schema(n_buf, mutated))
+
+    def test_scan_gen_schema_init_mutation_raises(self):
+        def combine_fn(carry, x):
+            carry.add_(x)
+            return carry, carry * x
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "For scan, combine_fn can only mutate additional_inputs",
+        ):
+            torch.ops.higher_order.scan.gen_schema(
+                combine_fn,
+                (torch.randn(3, 4),),
+                (torch.randn(5, 3, 4),),
+                (),
+            )
+
+    def test_scan_gen_schema_xs_mutation_raises(self):
+        def combine_fn(carry, x):
+            x.add_(1)
+            return carry + x, carry * x
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "For scan, combine_fn can only mutate additional_inputs",
+        ):
+            torch.ops.higher_order.scan.gen_schema(
+                combine_fn,
+                (torch.randn(3, 4),),
+                (torch.randn(5, 3, 4),),
+                (),
+            )
 
     def test_associative_scan_gen_schema_tensor_inputs(self):
         def combine_fn(x, y):
