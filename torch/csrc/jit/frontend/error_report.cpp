@@ -78,7 +78,7 @@ static std::string get_stacked_errors(const std::vector<Call>& error_stack) {
     for (auto it = error_stack.rbegin(); it != error_stack.rend() - 1; ++it) {
       auto callee = it + 1;
 
-      msg << "'" << it->fn_name
+      msg << '\'' << it->fn_name
           << "' is being compiled since it was called from '" << callee->fn_name
           << "'\n";
       callee->caller_range.highlight(msg);

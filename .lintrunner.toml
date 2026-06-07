@@ -67,6 +67,7 @@ include_patterns = [
     'aten/src/ATen/native/**/Foreach*.*',
     'aten/src/ATen/native/cuda/fused*.*',
     'aten/src/ATen/native/cuda/Fused*.cu',
+    'aten/src/ATen/native/cuda/group_norm_kernel.cu',
     'aten/src/ATen/native/cudnn/*.h',
     'aten/src/ATen/native/cudnn/*.cpp',
     'aten/src/ATen/native/mkldnn/xpu/**/*.h',
@@ -176,10 +177,6 @@ include_patterns = [
     'torch/csrc/**/*.cpp',
     'torch/csrc/jit/serialization/*.h',
     'torch/csrc/jit/serialization/*.cpp',
-    'torch/nativert/*.h',
-    'torch/nativert/*.cpp',
-    'torch/nativert/**/*.h',
-    'torch/nativert/**/*.cpp',
     'torch/headeronly/**/*.h',
 ]
 exclude_patterns = [
