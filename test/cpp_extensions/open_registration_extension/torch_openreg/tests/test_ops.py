@@ -684,7 +684,7 @@ class TestStructuredCodegen(TestCase):
         self.assertEqual(out.cpu(), torch.tensor([1.0, 2.0, 3.0]))
 
     # div.out is registered non-structured (out-as-primary only): the backend
-    # supplies div_out via TORCH_PRIV1_FUNC and torchgen derives the functional
+    # supplies div_out via TORCH_PRIVATEUSE1_FUNC and torchgen derives the functional
     # and inplace variants from it.
     def test_div_out_as_primary_functional(self):
         """Functional variant: allocates an out and reuses it (no temp-copy)."""
