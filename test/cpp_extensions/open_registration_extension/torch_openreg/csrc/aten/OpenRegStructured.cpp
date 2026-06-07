@@ -24,19 +24,19 @@
 namespace at::native::openreg {
 
 // structured: true, native meta -- only impl() is needed.
-TORCH_PRIV1_IMPL_FUNC(maximum_out)
+TORCH_PRIVATEUSE1_IMPL_FUNC(maximum_out)
 (const at::Tensor& self, const at::Tensor& other, const at::Tensor& out) {
   out.copy_(at::maximum(self.cpu(), other.cpu()));
 }
 
 // structured: true + ext_structured_meta: true -- the backend provides its own
 // meta(); here we just reuse the native logic through the generated `base` alias.
-TORCH_PRIV1_META_FUNC(minimum_out)
+TORCH_PRIVATEUSE1_META_FUNC(minimum_out)
 (const at::Tensor& self, const at::Tensor& other) {
   base::meta(self, other);
 }
 
-TORCH_PRIV1_IMPL_FUNC(minimum_out)
+TORCH_PRIVATEUSE1_IMPL_FUNC(minimum_out)
 (const at::Tensor& self, const at::Tensor& other, const at::Tensor& out) {
   out.copy_(at::minimum(self.cpu(), other.cpu()));
 }
@@ -44,7 +44,7 @@ TORCH_PRIV1_IMPL_FUNC(minimum_out)
 // Non-structured out-as-primary: no native meta is run, so the backend's
 // op_out must size the output itself. torchgen routes the functional and
 // inplace variants of div through this single function.
-at::Tensor& TORCH_PRIV1_FUNC(div_out)(
+at::Tensor& TORCH_PRIVATEUSE1_FUNC(div_out)(
     const at::Tensor& self,
     const at::Tensor& other,
     at::Tensor& out) {
