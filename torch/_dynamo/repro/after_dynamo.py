@@ -53,6 +53,7 @@ from torch.hub import tqdm
 from .. import config
 from ..backends.registry import CompilerFn, lookup_backend, register_debug_backend
 from ..debug_utils import clone_inputs_retaining_gradness
+from ..utils import DynamoExecutionState, get_user_execution_state
 
 
 log = logging.getLogger(__name__)
@@ -189,6 +190,7 @@ def generate_dynamo_fx_repro_string(
     stable_output: bool = False,
     save_dir: str | None = None,
     command: str = "run",
+    execution_state: DynamoExecutionState | None = None,
 ) -> str:
     """
     Generate a repro string for backend-agnostic minified version.
@@ -207,6 +209,25 @@ def generate_dynamo_fx_repro_string(
         else:
             raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
     load_args = "\n".join(writer.lines())
+    repro_call = (
+        f"run_repro(mod, load_args, accuracy={check_accuracy!r}, command={command!r},\n"
+        f"    save_dir={save_dir!r}, autocast={torch.is_autocast_enabled()!r}, backend={compiler_name!r})\n"
+    )
+
+    if execution_state is None:
+        execution_state = get_user_execution_state()
+
+    context_managers: list[str] = []
+    if execution_state.inference_mode_enabled:
+        context_managers.append("torch.inference_mode()")
+        if execution_state.grad_enabled:
+            context_managers.append("torch.enable_grad()")
+    elif not execution_state.grad_enabled:
+        context_managers.append("torch.no_grad()")
+
+    if context_managers:
+        repro_call = f"with {', '.join(context_managers)}:\n{textwrap.indent(repro_call, '    ')}"
+    repro_call = textwrap.indent(repro_call, "    ")
 
     return textwrap.dedent(
         f"""
@@ -230,8 +251,7 @@ mod = Repro()
 
 if __name__ == '__main__':
     from torch._dynamo.repro.after_dynamo import run_repro
-    run_repro(mod, load_args, accuracy={check_accuracy!r}, command={command!r},
-        save_dir={save_dir!r}, autocast={torch.is_autocast_enabled()!r}, backend={compiler_name!r})
+{repro_call}
 """
     )
 

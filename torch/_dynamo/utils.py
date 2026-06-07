@@ -5653,6 +5653,51 @@ def get_optimize_ddp_mode() -> str:
     return mode
 
 
+@dataclasses.dataclass(frozen=True)
+class DynamoExecutionState:
+    grad_enabled: bool
+    inference_mode_enabled: bool
+
+
+_user_execution_state_tls = threading.local()
+
+
+def get_current_execution_state() -> DynamoExecutionState:
+    return DynamoExecutionState(
+        grad_enabled=torch.is_grad_enabled(),
+        inference_mode_enabled=torch.is_inference_mode_enabled(),
+    )
+
+
+def get_user_execution_state() -> DynamoExecutionState:
+    stack: list[DynamoExecutionState] | None = getattr(
+        _user_execution_state_tls, "stack", None
+    )
+    if stack:
+        return stack[-1]
+    return get_current_execution_state()
+
+
+@contextmanager
+def preserve_user_execution_state(
+    state: DynamoExecutionState,
+) -> Generator[None, None, None]:
+    stack: list[DynamoExecutionState] | None = getattr(
+        _user_execution_state_tls, "stack", None
+    )
+    if stack is None:
+        stack = []
+        _user_execution_state_tls.stack = stack
+
+    stack.append(state)
+    try:
+        yield
+    finally:
+        stack.pop()
+        if not stack:
+            del _user_execution_state_tls.stack
+
+
 @contextmanager
 def maybe_disable_inference_mode() -> Generator[None, None, None]:
     """
