@@ -2280,6 +2280,80 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
+    def test_evt_silu_fusion(self):
+        """Test that SiLU activation can be fused into GEMM epilogue via EVT."""
+
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.nn.functional.silu(a @ b)
+
+        M, N = 1024, 512
+        a = torch.randn(M, N, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(N, N, device=GPU_TYPE, dtype=torch.float16).t()
+        model = TestModel().to(GPU_TYPE)
+
+        result = torch.compile(model)(a, b)
+        ref_result = model(a, b)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result, atol=1e-2, rtol=1e-2)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    def test_evt_llama_mlp_pattern(self):
+        """Test the Llama MLP pattern: silu(x @ gate.T) * (x @ up.T)."""
+
+        class LlamaMLP(torch.nn.Module):
+            def forward(self, x, gate_w, up_w):
+                return torch.nn.functional.silu(x @ gate_w.t()) * (x @ up_w.t())
+
+        M, K, N = 256, 256, 256
+        x = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        gate_w = torch.randn(N, K, device=GPU_TYPE, dtype=torch.float16)
+        up_w = torch.randn(N, K, device=GPU_TYPE, dtype=torch.float16)
+        model = LlamaMLP().to(GPU_TYPE)
+
+        ref_result = model(x, gate_w, up_w)
+        result = torch.compile(model)(x, gate_w, up_w)
+
+        self.assertGreaterEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result, atol=1e-2, rtol=1e-2)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    def test_evt_aux_load_mul(self):
+        """Test that multiplying GEMM output with an external buffer uses AuxLoad."""
+
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, aux):
+                return (a @ b) * aux
+
+        M, N, K = 256, 256, 256
+        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+        aux = torch.randn(M, N, device=GPU_TYPE, dtype=torch.float16)
+        model = TestModel().to(GPU_TYPE)
+
+        result = torch.compile(model)(a, b, aux)
+        ref_result = model(a, b, aux)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result, atol=1e-2, rtol=1e-2)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
     @evt_all_ops
     def test_evt_mixed_dtypes(self, op):
         M = 1024
