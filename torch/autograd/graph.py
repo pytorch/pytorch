@@ -982,4 +982,8 @@ def _engine_run_backward(
     finally:
         if attach_logging_hooks:
             unregister_hooks()  # type: ignore[possibly-undefined]
-        torch._C._stash_obj_in_tls("context", None)
+        # Erase rather than overwrite-with-None so the thread_local map is
+        # truly empty.  SafePyObject's destructor needs the GIL; if a thread
+        # exits while a SafePyObject is still in its thread_local,
+        # __call_tls_dtors fires the destructor → take_gil → deadlock.
+        torch._C._remove_obj_from_tls("context")
