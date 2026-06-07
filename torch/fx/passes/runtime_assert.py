@@ -152,6 +152,21 @@ def insert_deferred_runtime_asserts(
             )
         )
 
+    existing_assert_messages: dict[sympy.Expr, str] = {}
+    for node in graph.nodes:
+        if node.target is not torch.ops.aten._assert_scalar.default:
+            continue
+        if not node.args:
+            continue
+        cond, *rest = node.args
+        if (
+            isinstance(cond, fx.Node)
+            and rest
+            and isinstance(message := rest[0], str)
+            and (assert_expr := _get_sym_val(cond)) is not None
+        ):
+            existing_assert_messages.setdefault(assert_expr, message)
+
     # Figure out what key to use, val or example_value
     val_key = "val"
     for node in graph.nodes:
@@ -244,6 +259,8 @@ def insert_deferred_runtime_asserts(
 
     def render_assert_message(ra: RuntimeAssert, node: fx.Node) -> str:
         if ra.error_message is None:
+            if (message := existing_assert_messages.get(ra.expr)) is not None:
+                return message
             return f"Runtime assertion failed for expression {ra.expr} on node '{node}'"
         return str(ra.error_message)
 
@@ -311,9 +328,7 @@ def insert_deferred_runtime_asserts(
         upper: int | None = None,
     ) -> str:
         for ra in ras:
-            if ra.error_message is not None and matches_bound_assert(
-                ra.expr, symbol, lower=lower, upper=upper
-            ):
+            if matches_bound_assert(ra.expr, symbol, lower=lower, upper=upper):
                 return render_assert_message(ra, node)
         return f"Runtime assertion failed for expression {bound_expr} on node '{node}'"
 
