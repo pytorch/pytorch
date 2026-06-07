@@ -13,7 +13,7 @@ import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.exc import TorchRuntimeError, Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
-from torch._dynamo.testing import EagerAndRecordGraphs
+from torch._dynamo.testing import EagerAndRecordGraphs, skipIfNotPy311
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
@@ -731,6 +731,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
             opt_fn(torch.randn(2, 3))
 
+    @skipIfNotPy311
     def test_fake_tensor_runtime_error_sys_exception(self):
         @torch.library.custom_op("test_dynamo::runtime_error_message", mutates_args=())
         def runtime_error_message(t: torch.Tensor) -> torch.Tensor:
