@@ -61,7 +61,27 @@ def pyset_check(obj: VariableTracker) -> bool:
     return issubclass(obj.python_type(), set)
 
 
+def set_copy(obj: VariableTracker) -> VariableTracker:
+    """Mirrors CPython's internal `set_copy` (Objects/setobject.c).
+
+    Always allocates a fresh set/frozenset with a shallow-copied items dict.
+    Distinct from the user-visible `.copy()` method, which preserves identity
+    for exact frozenset (`frozenset_copy`).  Use this for binary-op scratch
+    storage so mutations don't bleed into the input.
+    """
+    base = obj._base_vt if isinstance(obj, variables.UserDefinedSetVariable) else obj
+    if base is None:
+        raise AssertionError("_base_vt must not be None")
+    return base.clone(
+        items=base.items.copy(),  # type: ignore[missing-attribute]
+        mutation_type=ValueMutationNew(),
+        source=None,
+    )
+
+
 def _is_removable_handle_id_key(vt: VariableTracker) -> bool:
+    if isinstance(vt, variables.LazyVariableTracker) and not vt.is_realized():
+        return False
     # Local import avoids a circular import with user_defined.py.
     from .user_defined import RemovableHandleIdVariable
 
@@ -69,6 +89,8 @@ def _is_removable_handle_id_key(vt: VariableTracker) -> bool:
 
 
 def _removable_handle_id_value(vt: VariableTracker) -> int | None:
+    if isinstance(vt, variables.LazyVariableTracker) and not vt.is_realized():
+        return None
     # Local import avoids a circular import with user_defined.py.
     from .user_defined import RemovableHandleIdVariable
 
@@ -702,9 +724,7 @@ class SetVariable(VariableTracker):
                     "0 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            return self.clone(
-                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
-            )
+            return set_copy(self)
         elif name == "clear":
             if args or kwargs:
                 raise_args_mismatch(
@@ -747,7 +767,7 @@ class SetVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
 
         self_._check_removable_handle_id_set_op(tx, other_)  # type: ignore[attr-defined]
-        result = self_.call_method(tx, "copy", [], {})
+        result = set_copy(self_)
         if self_ is other_:
             return result
         result.items.update(other_.items)  # type: ignore[missing-attribute]
@@ -778,7 +798,7 @@ class SetVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
 
         self_._check_removable_handle_id_set_op(tx, other_)  # type: ignore[attr-defined]
-        result = self_.call_method(tx, "copy", [], {})
+        result = set_copy(self_)
         for k in list(other_.items.keys()):  # type: ignore[missing-attribute]
             result.items.pop(k, None)  # type: ignore[missing-attribute]
         return result
@@ -796,6 +816,54 @@ class SetVariable(VariableTracker):
             self.items.pop(k, None)
         return self
 
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1506-L1518 (set_and)
+        self_, other_ = (other, self) if reverse else (self, other)
+
+        if not pyanyset_check(self_) or not pyanyset_check(other_):
+            return ConstantVariable.create(NotImplemented)
+
+        return self_.call_method(tx, "intersection", [other_], {})
+
+    def nb_inplace_and_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1520-L1536 (set_iand)
+        if not pyanyset_check(other):
+            return ConstantVariable.create(NotImplemented)
+
+        self.call_method(tx, "intersection_update", [other], {})
+        return self
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1984-L1990 (set_xor)
+        self_, other_ = (other, self) if reverse else (self, other)
+
+        if not pyanyset_check(self_) or not pyanyset_check(other_):
+            return ConstantVariable.create(NotImplemented)
+
+        return self_.call_method(tx, "symmetric_difference", [other_], {})
+
+    def nb_inplace_xor_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1992-L2004 (set_ixor)
+        if not pyanyset_check(other):
+            return ConstantVariable.create(NotImplemented)
+
+        self.call_method(tx, "symmetric_difference_update", [other], {})
+        return self
+
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
 
@@ -809,16 +877,21 @@ class SetVariable(VariableTracker):
 
         https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L2097
         CPython uses PyAnySet_Check: only accepts set/frozenset (not dict views).
-        We also accept SetVariable subclasses (e.g. OrderedSetVariable) which
-        are not literal set/frozenset but have compatible set_items.
         """
         if not isinstance(other, SetVariable):
-            try:
-                other_type = other.python_type()
-            except NotImplementedError:
-                return ConstantVariable.create(NotImplemented)
-            if not issubclass(other_type, (set, frozenset)):
-                return ConstantVariable.create(NotImplemented)
+            if isinstance(other, variables.UserDefinedSetVariable):
+                if other._base_vt is None:
+                    raise AssertionError("expected _base_vt to be set")
+                other = other._base_vt
+            else:
+                try:
+                    other_type = other.python_type()
+                except NotImplementedError:
+                    return ConstantVariable.create(NotImplemented)
+                if not issubclass(other_type, (set, frozenset)):
+                    return ConstantVariable.create(NotImplemented)
+        if not isinstance(other, SetVariable):
+            return ConstantVariable.create(NotImplemented)
 
         # Accessing set_items directly is correct: CPython's set_richcompare
         # operates on the internal C struct (PySet_GET_SIZE, set_next,
@@ -958,6 +1031,26 @@ class OrderedSetVariable(SetVariable):
         # won't work due to the PyAnySet_Check
         return super().call_method(tx, "union", [other], {})
 
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # OrderedSet does not inherit from Python set, so SetVariable.nb_and_impl
+        # won't work due to the PyAnySet_Check
+        return super().call_method(tx, "intersection", [other], {})
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # OrderedSet does not inherit from Python set, so SetVariable.nb_xor_impl
+        # won't work due to the PyAnySet_Check
+        return super().call_method(tx, "symmetric_difference", [other], {})
+
     def nb_subtract_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1039,8 +1132,18 @@ class FrozensetVariable(SetVariable):
         elif name == "__init__":
             # frozenset is immutable. Calling __init__ again shouldn't have any effect
             return ConstantVariable.create(None)
+        elif name == "copy":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            if type(self) is FrozensetVariable:
+                return self
+            return super().call_method(tx, name, args, kwargs)
         elif name in (
-            "copy",
             "difference",
             "intersection",
             "symmetric_difference",
