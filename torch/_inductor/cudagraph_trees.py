@@ -2239,10 +2239,10 @@ class CUDAGraphTreeManager:
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
         if self.in_recording:
-            self.try_end_curr_recording(function_id)
+            self.try_end_curr_recording(function_id, new_inputs)
 
         if self.in_warmup:
-            self.try_end_curr_warmup(function_id)
+            self.try_end_curr_warmup(function_id, new_inputs)
 
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
@@ -2566,7 +2566,60 @@ class CUDAGraphTreeManager:
     def in_new_torch_compile_invocation(self) -> bool:
         return self.current_gen != self.get_curr_generation()
 
-    def try_end_curr_recording(self, function_id: FunctionID) -> None:
+    def _preserve_inputs_that_alias_current_path(self, inputs: list[InputType]) -> None:
+        assert self.current_node is not None
+
+        live_storage_data_ptrs = OrderedSet(
+            [
+                storage_ref.data_ptr()
+                for storage_ref in self.current_node.path_live_weakrefs()
+            ]
+        )
+        if not live_storage_data_ptrs:
+            return
+
+        preserved_storages: dict[int, UntypedStorage] = {}
+        for i, inp in enumerate(inputs):
+            if not isinstance(inp, torch.Tensor):
+                continue
+
+            data_ptr = inp.untyped_storage().data_ptr()
+            if data_ptr not in live_storage_data_ptrs:
+                continue
+
+            # Keep the next invocation's source valid after the old path is
+            # invalidated and before normal cudagraph input copying runs. Copy
+            # each aliased storage once, then recreate all input views from it.
+            preserved_storage = preserved_storages.get(data_ptr)
+            if preserved_storage is None:
+                preserved_bytes = torch.empty(
+                    inp.untyped_storage().nbytes(),
+                    dtype=torch.uint8,
+                    device=inp.device,
+                )
+                preserved_storage = preserved_bytes.untyped_storage()
+                preserved_storage.copy_(inp.untyped_storage())
+                preserved_storages[data_ptr] = preserved_storage
+
+            preserved_input = torch.empty(0, dtype=inp.dtype, device=inp.device).set_(
+                preserved_storage,
+                inp.storage_offset(),
+                inp.size(),
+                inp.stride(),
+            )
+            if inp.is_conj():
+                torch._C._set_conj(preserved_input, True)
+            if inp.is_neg():
+                torch._C._set_neg(preserved_input, True)
+            inputs[i] = preserved_input
+
+    def remove_current_path_cached_tensors(self) -> None:
+        if isinstance(self.current_node, CUDAGraphNode):
+            self.current_node.remove_path_cached_tensors()
+
+    def try_end_curr_recording(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> None:
         """
         Check if the current recording can be terminated, either because all outputs of the
         previously recorded node are dead or because it was executed in a different
@@ -2577,6 +2630,9 @@ class CUDAGraphTreeManager:
 
         # multiple invocations, allow overwriting the previous generation
         if self.can_start_new_generation():
+            if self.user_invoked_mark_step():
+                self._preserve_inputs_that_alias_current_path(new_inputs)
+            self.remove_current_path_cached_tensors()
             self.dealloc_current_path_weakrefs()
             self.clear_current_path_state_and_set_to_none()
             return
@@ -2605,8 +2661,13 @@ class CUDAGraphTreeManager:
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
 
-    def try_end_curr_warmup(self, function_id: FunctionID) -> None:
+    def try_end_curr_warmup(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> None:
         if self.can_start_new_generation():
+            if self.user_invoked_mark_step():
+                self._preserve_inputs_that_alias_current_path(new_inputs)
+            self.remove_current_path_cached_tensors()
             self.dealloc_current_path_weakrefs()
             self.current_node = None
             return
