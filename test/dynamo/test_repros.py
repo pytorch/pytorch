@@ -2407,6 +2407,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref.shape, res.shape)
         self.assertTrue(same(ref, res))
 
+    def test_tensor_ctor_numpy_producer_with_device_none(self):
+        def fn():
+            return torch.Tensor([np.sin(np.asarray([1.0]))], device=None)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            ref = fn()
+            res = opt_fn()
+
+        self.assertEqual(ref.shape, res.shape)
+        self.assertTrue(same(ref, res))
+
+    def test_tensor_ctor_numpy_producer_extra_positional_arg_error(self):
+        def fn():
+            return torch.Tensor([np.sin(np.asarray([1.0]))], "ignored")
+
+        msg = "new\\(\\) received an invalid combination of arguments"
+        with self.assertRaisesRegex(TypeError, msg):
+            fn()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            opt_fn()
+
     def test_tensor_ctor_nonscalar_tensor_leaves_error(self):
         def fn(x):
             return torch.Tensor([x, x + 1])

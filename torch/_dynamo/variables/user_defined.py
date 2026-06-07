@@ -1449,9 +1449,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             data_arg = None
             fwd_kwargs = dict(kwargs)
-            if args:
+            tensor_ctor_has_valid_arity = len(args) <= 1
+            if len(args) == 1:
                 data_arg = args[0]
-            elif "data" in fwd_kwargs:
+            elif not args and "data" in fwd_kwargs:
                 data_arg = fwd_kwargs.pop("data")
 
             has_numpy_ndarray = False
@@ -1468,10 +1469,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             explicit_device_is_known = "device" not in fwd_kwargs
             if "device" in fwd_kwargs:
                 try:
-                    explicit_device = torch.device(
-                        fwd_kwargs["device"].as_python_constant()
-                    )
+                    device_arg = fwd_kwargs["device"].as_python_constant()
                     explicit_device_is_known = True
+                    if device_arg is not None:
+                        explicit_device = torch.device(device_arg)
                 except AsPythonConstantNotImplementedError:
                     pass
                 except (TypeError, RuntimeError):
@@ -1480,6 +1481,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if (
                 self.value is torch.Tensor
                 and data_arg is not None
+                and tensor_ctor_has_valid_arity
                 and not data_arg.is_tensor()
                 and "dtype" not in fwd_kwargs
                 and all(k == "device" for k in fwd_kwargs)
@@ -2555,6 +2557,52 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
         return self.call_method(tx, "__ior__", [other], {})
+
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9472 (slot_nb_and)
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__and__",
+            "__rand__",
+            nb_slot=PyNumberSlots.NB_AND,
+            reverse=reverse,
+        )
+
+    def nb_inplace_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__iand__", [other], {})
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9473 (slot_nb_xor)
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__xor__",
+            "__rxor__",
+            nb_slot=PyNumberSlots.NB_XOR,
+            reverse=reverse,
+        )
+
+    def nb_inplace_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__ixor__", [other], {})
 
     def nb_add_impl(
         self,
