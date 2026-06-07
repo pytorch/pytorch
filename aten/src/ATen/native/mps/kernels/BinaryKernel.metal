@@ -496,10 +496,10 @@ DEFINE_BINARY_COMPARISON_FUNCTOR(gt, >);
 DEFINE_BINARY_COMPARISON_FUNCTOR(ge, >=);
 
 #define REGISTER_INTEGER_BINARY_OP_NO_BOOL(NAME) \
-  REGISTER_BINARY_OP(NAME, long, long);           \
-  REGISTER_BINARY_OP(NAME, int, int);             \
-  REGISTER_BINARY_OP(NAME, short, short);         \
-  REGISTER_BINARY_OP(NAME, uchar, uchar);         \
+  REGISTER_BINARY_OP(NAME, long, long);          \
+  REGISTER_BINARY_OP(NAME, int, int);            \
+  REGISTER_BINARY_OP(NAME, short, short);        \
+  REGISTER_BINARY_OP(NAME, uchar, uchar);        \
   REGISTER_BINARY_OP(NAME, char, char)
 
 #define REGISTER_INTEGER_BINARY_OP(NAME)    \
