@@ -387,6 +387,7 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 def _broadcast_shapes(*_shapes):
     from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
         guarding_hint_or_throw,
         has_guarding_hint,
         is_nested_int,
@@ -420,7 +421,7 @@ def _broadcast_shapes(*_shapes):
             if is_nested_int(shape[idx]):
                 # Broadcasting is allowed for (j0, 1) or (j0, j0);
                 # not (j0, j1), (j0, 5), etc.
-                if is_nested_int(common_shape[idx]) and statically_known_true(
+                if is_nested_int(common_shape[idx]) and guard_or_false(
                     shape[idx] == common_shape[idx]
                 ):
                     continue
@@ -445,6 +446,14 @@ def _broadcast_shapes(*_shapes):
                         torch._check(shape[idx] == 1)
                     if b == 1 and a != 1:
                         torch._check(common_shape[idx] == 1)
+                if statically_known_true(common_shape[idx] == 1):
+                    if shape[idx] < 0:
+                        raise ValueError(
+                            "Attempting to broadcast a dimension with negative length!"
+                        )
+                    common_shape[idx] = shape[idx]
+                    continue
+
                 if statically_known_true(shape[idx] == common_shape[idx]):
                     continue
 
@@ -477,34 +486,15 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
     )
 
     def should_expand(a: ShapeType, b: ShapeType) -> bool:
-        from torch.fx.experimental.symbolic_shapes import (
-            statically_known_true,
-            sym_and,
-            sym_or,
-        )
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
 
         if len(a) != len(b):
             return True
 
         for x, y in zip(a, b):
-            if statically_known_true(x != y):
-                # We know they are not the same.
-                return True
-
-            # They are the same or we do not know if they are the same or not.
-            # 1==1 no-broadcast
-            # u0==1 and 1==u0 cases. We broadcast!
-            if statically_known_true(sym_and(x == 1, y == 1)):
-                pass
-            elif statically_known_true(sym_or(x == 1, y == 1)):
-                # assume broadcasting.
-                return True
-
-            # u0==u1 assume the same, no broadcasting!
-            torch._check(
-                x == y,
-                lambda: "sizes assumed to be the same due to unbacked broadcasting semantics",
-            )
+            if statically_known_true(x == y):
+                continue
+            return True
 
         return False
 
@@ -3963,23 +3953,26 @@ def _reshape_view_helper_core_alg(
             idx = idx + 1
             continue
 
-        # Skips dimensions that are already the correct length. Use static
-        # reasoning here so reshape metadata does not specialize on 0/1 hints.
-        if statically_known_true(length == a_.shape[idx]):
+        # A target dimension of length 1 can always be produced by splitting
+        # the current source dimension with an outer length of 1. Do this
+        # before equality checks so symbolic source sizes do not specialize on
+        # whether they are 1.
+        if statically_known_true(length == 1):
+            a_ = prims.split_dim(a_, idx, 1)
             idx = idx + 1
             continue
 
-        # A target dimension of length 1 can always be produced by splitting
-        # the current source dimension with an outer length of 1. Avoid
-        # branching on whether the source dimension is also currently 1.
-        if statically_known_true(length == 1):
-            a_ = prims.split_dim(a_, idx, 1)
+        # Skips dimensions that are already the correct length without
+        # guard-producing equality checks.
+        if statically_known_true(length == a_.shape[idx]):
             idx = idx + 1
             continue
 
         accum = a_.shape[idx]
         end = idx
         while not statically_known_true(accum % length == 0):
+            if end + 1 >= a_.ndim:
+                break
             end += 1
             accum *= a_.shape[end]
         if end != idx:
@@ -6962,6 +6955,16 @@ def _internal_new_from_data(
         tensor = _recursive_build(inferred_scalar_type, data)
 
         tensor = tensor.to(device, inferred_scalar_type, non_blocking=False, copy=False)
+        if pin_memory and torch.device(device).type == "cpu":
+            pinned_tensor = torch.empty_strided(
+                tensor.shape,
+                tensor.stride(),
+                dtype=tensor.dtype,
+                device=tensor.device,
+                pin_memory=True,
+            )
+            pinned_tensor.copy_(tensor)
+            tensor = pinned_tensor
 
     # NB: lift_fresh is not needed, because we built the tensor from scalars
     # guaranteeing a fresh tensor in this case

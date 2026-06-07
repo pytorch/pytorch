@@ -217,9 +217,6 @@ def constructors(
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    if "names" in kwargs:
-        # REASON: "torch.compile doesn't support named tensors"
-        raise UnsupportedOperatorException(func)
 
     if func in _like_tensor_constructors:
         default_device = new_kwargs["input"].device
@@ -739,17 +736,21 @@ def _compute_stride(
     new_shape: Sequence[IntLikeType],
     size_oblivious: bool = False,
 ) -> list[IntLikeType] | None:
-    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        sym_eq,
+    )
 
     def maybe_guard_or_false(x: Any) -> Any:
         if size_oblivious:
-            return statically_known_true(x)
+            return guard_or_false(x)
 
         return x
 
     def maybe_guard_or_true(x: Any) -> Any:
         if size_oblivious:
-            return statically_known_true(x)
+            return guard_or_true(x)
 
         return x
 
@@ -782,40 +783,21 @@ def _compute_stride(
     for tensor_d in range(len(old_shape) - 1, -1, -1):
         tensor_numel *= old_shape[tensor_d]
 
-        if size_oblivious:
-            is_boundary = tensor_d == 0 or not (
-                statically_known_true(old_shape[tensor_d - 1] == 1)
-                or statically_known_true(
-                    old_stride[tensor_d - 1] == tensor_numel * chunk_base_stride
-                )
+        if tensor_d == 0 or (
+            maybe_guard_or_true(old_shape[tensor_d - 1] != 1)
+            and maybe_guard_or_true(
+                old_stride[tensor_d - 1] != tensor_numel * chunk_base_stride
             )
-        else:
-            is_boundary = tensor_d == 0 or (
-                maybe_guard_or_true(old_shape[tensor_d - 1] != 1)
-                and maybe_guard_or_true(
-                    old_stride[tensor_d - 1] != tensor_numel * chunk_base_stride
-                )
-            )
-
-        if is_boundary:
+        ):
             while view_d >= 0 and (
                 maybe_guard_or_true(view_numel < tensor_numel)
                 or maybe_guard_or_false(new_shape[view_d] == 1)
-                or (
-                    size_oblivious
-                    and statically_known_true(
-                        view_numel * new_shape[view_d] == tensor_numel
-                    )
-                )
             ):
                 new_stride[view_d] = view_numel * chunk_base_stride
                 view_numel *= new_shape[view_d]
                 view_d -= 1
 
-            if size_oblivious:
-                if not statically_known_true(view_numel == tensor_numel):
-                    return None
-            elif maybe_guard_or_true(view_numel != tensor_numel):
+            if maybe_guard_or_true(view_numel != tensor_numel):
                 return None
 
             if tensor_d > 0:
@@ -1701,7 +1683,14 @@ def nyi(fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any) 
         raise AssertionError(f"NYI: {func}")
 
 
-@register_op_impl([aten.convolution.default, aten.convolution_backward.default])
+@register_op_impl(
+    [
+        aten.convolution.default,
+        aten._convolution.default,
+        aten._convolution.deprecated,
+        aten.convolution_backward.default,
+    ]
+)
 def conv(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> FakeTensor | tuple[FakeTensor | None, FakeTensor | None, FakeTensor | None]:
@@ -1713,7 +1702,12 @@ def conv(
     # Internal passes such as Inductor freezing may run fake propagation over
     # folded convs that do not need to match eager's public input checks.
     if (
-        func is aten.convolution.default
+        func
+        in (
+            aten.convolution.default,
+            aten._convolution.default,
+            aten._convolution.deprecated,
+        )
         and input_.dtype != weight.dtype
         and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
@@ -1784,7 +1778,11 @@ def conv(
     with in_kernel_invocation_manager(fake_mode):
         out = func(**new_kwargs)
 
-        if func is aten.convolution.default:
+        if func in (
+            aten.convolution.default,
+            aten._convolution.default,
+            aten._convolution.deprecated,
+        ):
             return convert(out, mem_fmt)  # type: ignore[return]
         else:
             return (
@@ -1815,7 +1813,13 @@ def bincount(
 
     _constrain_range_for_size(new_size)
     torch._check(new_size >= minlength)
-    return inputs.new_empty(new_size)  # type: ignore[return]
+
+    if weights is None:
+        return inputs.new_empty(new_size, dtype=torch.long)  # type: ignore[return]
+    elif weights.dtype == torch.float32:
+        return inputs.new_empty(new_size, dtype=torch.float32)  # type: ignore[return]
+    else:
+        return inputs.new_empty(new_size, dtype=torch.float64)  # type: ignore[return]
 
 
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)
@@ -1869,7 +1873,10 @@ def register_fast_op_impl(
 def infer_size(
     a: Sequence[IntLikeType], b: Sequence[IntLikeType]
 ) -> tuple[IntLikeType, ...]:
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        statically_known_true,
+    )
 
     dimsA = len(a)
     dimsB = len(b)
@@ -1881,6 +1888,16 @@ def infer_size(
         dimB = dimsB - 1 - offset
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
+
+        if statically_known_true(sizeA == sizeB):
+            expandedSizes[i] = sizeA
+            continue
+        if statically_known_true(sizeA == 1):
+            expandedSizes[i] = sizeB
+            continue
+        if statically_known_true(sizeB == 1):
+            expandedSizes[i] = sizeA
+            continue
 
         # NB: It is very important to test for broadcasting, before testing
         # sizeA == sizeB.  This is because the broadcasting tests are likely
@@ -1894,14 +1911,12 @@ def infer_size(
         # were not the case, we'd need to write this using torch.sym_or() or
         # something like that).
         torch._check(
-            statically_known_true(sizeA == 1)
-            or statically_known_true(sizeB == 1)
-            or sizeA == sizeB,
+            guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
             f"at non-singleton dimension {i})",
         )
-        expandedSizes[i] = sizeB if statically_known_true(sizeA == 1) else sizeA
+        expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
     return tuple(expandedSizes)
 
 

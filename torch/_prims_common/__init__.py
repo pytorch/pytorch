@@ -342,24 +342,28 @@ def is_channels_last_contiguous_2d(a: Tensor, false_if_dde=False) -> bool:
     if a.ndim != 4:
         return False
 
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_true,
+        statically_known_true,
+    )
 
     def eval_eager(x):
         return bool(x)
 
-    maybe_guard_or_false = statically_known_true if false_if_dde else eval_eager
+    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
+    maybe_size_one = statically_known_true if false_if_dde else eval_eager
+
     expected_stride = 1
     for idx in (1, 3, 2, 0):
         length = a.shape[idx]
-        if maybe_guard_or_false(length == 1):
+        if maybe_size_one(length == 1):
             continue
 
         stride = a.stride()[idx]
-        if false_if_dde:
-            stride_mismatch = not statically_known_true(stride == expected_stride)
-        else:
-            stride_mismatch = eval_eager(stride != expected_stride)
-        if stride_mismatch:
+        if false_if_dde and not statically_known_true(stride == expected_stride):
+            return False
+
+        if not false_if_dde and maybe_guard_or_true(stride != expected_stride):
             return False
 
         expected_stride *= length
@@ -372,25 +376,28 @@ def is_channels_last_contiguous_3d(a: Tensor, false_if_dde=False) -> bool:
     if a.ndim != 5:
         return False
 
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_true,
+        statically_known_true,
+    )
 
     def eval_eager(x):
         return bool(x)
 
-    maybe_guard_or_false = statically_known_true if false_if_dde else eval_eager
+    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
+    maybe_size_one = statically_known_true if false_if_dde else eval_eager
 
     expected_stride = 1
     for idx in (1, 4, 3, 2, 0):
         length = a.shape[idx]
-        if maybe_guard_or_false(length == 1):
+        if maybe_size_one(length == 1):
             continue
 
         stride = a.stride()[idx]
-        if false_if_dde:
-            stride_mismatch = not statically_known_true(stride == expected_stride)
-        else:
-            stride_mismatch = eval_eager(stride != expected_stride)
-        if stride_mismatch:
+        if false_if_dde and not statically_known_true(stride == expected_stride):
+            return False
+
+        if not false_if_dde and maybe_guard_or_true(stride != expected_stride):
             return False
 
         expected_stride *= length

@@ -923,9 +923,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         if get_node_storage(mutated_arg) is None:
             return False
 
-        if torch._debug_has_internal_overlap(mutated_arg.meta["val"]) == 1:
-            return False
-
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
 
         # Only keep tensor that might overlap with mutated_arg.
