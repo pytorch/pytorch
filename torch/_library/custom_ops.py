@@ -812,12 +812,14 @@ class CustomOpDef:
             after_ADInplaceOrView_keyset = _C._after_ADInplaceOrView_keyset
 
         def adinplaceorview_impl(keyset, *args, **kwargs):
-            all_args, all_kwargs = utils.fill_defaults(schema, args, kwargs)
-
+            # The dispatcher normalizes non-keyword-only arguments into args.
+            # Avoid filling defaults for every schema argument on this hot path.
             for idx in mutated_idxs:
-                increment_version(all_args[idx])
+                if idx < len(args):
+                    increment_version(args[idx])
             for key in mutated_keys:
-                increment_version(all_kwargs[key])
+                if key in kwargs:
+                    increment_version(kwargs[key])
             if is_view:
                 # View ops need the C++ fallback for aliasing tracking
                 return original_kernel.call_boxed(keyset, *args, **kwargs)
