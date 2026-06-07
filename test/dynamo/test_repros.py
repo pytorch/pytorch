@@ -3113,6 +3113,50 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 100)
 
+    @torch._dynamo.config.patch(max_loop_unroll_nodes=8)
+    def test_loop_unroll_limit_skips_frame(self):
+        def fn(x):
+            for _ in range(32):
+                x = x + 1
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.zeros(())
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.op_count, 0)
+
+    @torch._dynamo.config.patch(max_loop_unroll_nodes=8)
+    def test_loop_unroll_limit_skips_while_frame(self):
+        def fn(x):
+            i = 0
+            while i < 32:
+                x = x + 1
+                i += 1
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.zeros(())
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.op_count, 0)
+
+    @torch._dynamo.config.patch(max_loop_unroll_nodes=0)
+    def test_loop_unroll_limit_can_be_disabled(self):
+        def fn(x):
+            for _ in range(32):
+                x = x + 1
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(())
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 32)
+
     def test_avoid_dupe_specialization(self):
         def f(x, y):
             return (x + y) * 1
