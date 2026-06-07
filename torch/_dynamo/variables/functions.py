@@ -2361,7 +2361,12 @@ class SkipFunctionVariable(VariableTracker):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         else:
-            if config.dont_skip_tracing:
+            from .. import trace_rules
+
+            if (
+                config.dont_skip_tracing
+                or trace_rules._is_ignoring_torch_skipfile_rules()
+            ):
                 from .builder import SourcelessBuilder
 
                 # re-build the function, attempting to not skip
