@@ -14792,6 +14792,7 @@
     CPU, NestedTensorCPU: _fused_sdp_choice_cpp
     CUDA, NestedTensorCUDA: _fused_sdp_choice_cuda
     XPU: _fused_sdp_choice_xpu
+    MPS: _fused_sdp_choice_mps
   tags: nondeterministic_seeded
 
 - func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None, bool enable_gqa=False) -> (Tensor, Tensor)
@@ -14807,6 +14808,7 @@
   dispatch:
     CUDA: _scaled_dot_product_flash_attention_cuda
     XPU: _scaled_dot_product_flash_attention_xpu
+    MPS: _scaled_dot_product_flash_attention_mps
     NestedTensorCUDA: _scaled_dot_product_flash_attention_nestedtensor_cuda
   tags: nondeterministic_seeded
 
@@ -14849,6 +14851,7 @@
 - func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_cuda
+    MPS: _scaled_dot_product_efficient_attention_mps
     NestedTensorCUDA: _scaled_dot_product_efficient_attention_nestedtensor_cuda
   tags: nondeterministic_seeded
 

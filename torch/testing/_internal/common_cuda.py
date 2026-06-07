@@ -5,7 +5,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU, TEST_MPS
 import inspect
 import contextlib
 import os
@@ -80,6 +80,8 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     if TEST_XPU:
         return True
+    if TEST_MPS:
+        return True
     return False
 
 def evaluate_platform_supports_ck_sdpa():
@@ -97,6 +99,8 @@ def evaluate_platform_supports_efficient_attention():
     if TEST_CUDA:
         return True
     if TEST_XPU:
+        return True
+    if TEST_MPS:
         return True
     return False
 

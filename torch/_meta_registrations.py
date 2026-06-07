@@ -6503,16 +6503,20 @@ def meta__scaled_dot_product_efficient_attention(
     is_causal: bool = False,
     scale: float | None = None,
 ):
-    query = query.transpose(1, 2)
-    key = key.transpose(1, 2)
-    value = value.transpose(1, 2)
-
     B = query.size(0)
-    M = query.size(1)
-    num_heads = query.size(-2)
+    num_heads = query.size(1)
+    M = query.size(2)
     Kv = value.size(-1)
 
-    res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
+    # CUDA's mem_eff_attention writes output as [B, M, H, Kv]-contiguous and
+    # presents it as [B, H, M, Kv] via a transpose. MPS kernels write
+    # [B, H, M, Kv]-contiguous natively
+    if device_hint(query) == "mps":
+        res = torch.empty(B, num_heads, M, Kv, dtype=query.dtype, device=query.device)
+    else:
+        res = torch.empty(
+            B, M, num_heads, Kv, dtype=query.dtype, device=query.device
+        ).transpose(1, 2)
 
     if torch.version.hip and torch.cuda.is_available():
         """Please see: https://github.com/pytorch/pytorch/issues/146848
@@ -6527,8 +6531,6 @@ def meta__scaled_dot_product_efficient_attention(
         dtype=torch.float,
         device=query.device,
     )
-
-    res = res.transpose(1, 2)
 
     # See Note [Seed and Offset]:
     seed = torch.empty((), dtype=torch.long, device="meta")

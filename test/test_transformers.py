@@ -17,7 +17,7 @@ from unittest.mock import patch, MagicMock, ANY
 import math
 import itertools
 import torch.optim as optim
-from torch.testing._internal.common_device_type import expectedFailureMPS, instantiate_device_type_tests, onlyCUDA, largeTensorTest
+from torch.testing._internal.common_device_type import expectedFailureMPS, instantiate_device_type_tests, onlyCUDA, onlyOn, largeTensorTest
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -1599,7 +1599,7 @@ class TestSDPAFailureModes(NNTestCase):
             else:
                 flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, dropout_p, False)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "mps"])
     def test_dispatch_fails_no_backend(self, device):
         dtype = torch.float16
         with sdpa_kernel(backends=[SDPBackend.ERROR]):
@@ -1710,7 +1710,7 @@ class TestSDPAFailureModes(NNTestCase):
         result = compiled_func(q, k, v)
         self.assertEqual(result.shape, (2, 2, 0, 8))
 
-    @onlyCUDA
+    @onlyOn(["cuda", "mps"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
     def test_invalid_last_dim_stride(self, device, kernel: SDPBackend):
@@ -1768,7 +1768,7 @@ class TestSDPAFailureModes(NNTestCase):
                     F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0,
                                                    is_causal=False, enable_gqa=True)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "mps"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not flash_attention fused scaled dot product attention")
     @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
     def test_invalid_fused_inputs_head_dim(self, device, kernel: SDPBackend):
@@ -1798,7 +1798,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @onlyCUDA
+    @onlyOn(["cuda", "mps"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION])
     def test_invalid_fused_inputs_attn_mask_present(self, device, kernel: SDPBackend):

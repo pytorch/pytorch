@@ -8982,8 +8982,6 @@ GPU_TEST_FAILURES = {
 }
 
 MPS_TEST_FAILURES = {
-    # aten::_scaled_dot_product_efficient_attention is not currently implemented for the MPS device.
-    "test_scaled_dot_product_efficient_attention": fail_mps(),
     # aten::_int_mm is not implemented for MPS backend
     "test__int_mm": fail_mps(),
     # MPS doesn't support float64
@@ -8992,8 +8990,6 @@ MPS_TEST_FAILURES = {
     # MPS doesn't support float8
     "test_fp8": fail_mps(),
     "test_fp8_view_of_param": fail_mps(),
-    # cannot initialize a parameter of type 'double' with an rvalue of type 'std::nullptr_t'
-    "test_fallback_kernel_with_symexpr_output": fail_mps(),
     # correctness issue
     "test_index_put_with_none_index": fail_mps(),
     # Error device may not be nil

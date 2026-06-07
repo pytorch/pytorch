@@ -13871,7 +13871,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             foo_opt = torch.compile(foo, backend="inductor")
             code = run_and_get_triton_code(foo_opt, *inps)
             have_block_ptr = code.count("tl.make_block_ptr") > 0
-            if not is_halide_backend(self.device):
+            if not is_halide_backend(self.device) and not is_mps_backend(self.device):
                 self.assertEqual(have_block_ptr, use_block_ptr)
 
     @requires_gpu()

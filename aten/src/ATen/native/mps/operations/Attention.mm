@@ -7,6 +7,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/transformers/attention.h>
+#include <ATen/native/transformers/mps/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -14,6 +15,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
+#include <ATen/ops/_scaled_dot_product_efficient_attention_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
 #include <ATen/ops/empty_native.h>
 #endif
 
@@ -526,21 +529,6 @@ inline PrefillBlockShape prefill_block_shape_for_head_dim(int64_t head_dim) {
   }
 }
 
-inline bool prefill_attention_supports_head_dim(int64_t head_dim) {
-  switch (head_dim) {
-    case 32:
-    case 64:
-    case 72:
-    case 80:
-    case 96:
-    case 128:
-    case 256:
-      return true;
-    default:
-      return false;
-  }
-}
-
 } // namespace
 
 static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
@@ -681,15 +669,15 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
   return {std::move(final_out), std::move(final_out)};
 }
 
-std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
-                                                                  const Tensor& key_,
-                                                                  const Tensor& value_,
-                                                                  const std::optional<Tensor>& attn_mask,
-                                                                  double dropout_p,
-                                                                  bool is_causal,
-                                                                  const std::optional<Tensor>& dropout_mask,
-                                                                  std::optional<double> scale,
-                                                                  bool enable_gqa) {
+static std::tuple<Tensor, Tensor> sdpa_fused_dispatch_mps(const Tensor& query,
+                                                          const Tensor& key_,
+                                                          const Tensor& value_,
+                                                          const std::optional<Tensor>& attn_mask,
+                                                          double dropout_p,
+                                                          bool is_causal,
+                                                          const std::optional<Tensor>& dropout_mask,
+                                                          std::optional<double> scale,
+                                                          bool enable_gqa) {
   TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(query.scalar_type()),
                               "scaled_dot_product_attention for MPS does not support dtype ",
                               query.scalar_type());
@@ -700,9 +688,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
                               "scaled_dot_product_attention for MPS does not support dtype ",
                               value_.scalar_type());
   TORCH_CHECK_NOT_IMPLEMENTED(dropout_p == 0.0f, "scaled_dot_product_attention for MPS does not support dropout.");
-  const auto any_nested = query.is_nested() || key_.is_nested() || value_.is_nested();
-  const auto all_contiguous =
-      query.is_contiguous_or_false() && key_.is_contiguous_or_false() && value_.is_contiguous_or_false();
   // The kernel paths (vector fast / 2pass / prefill) all broadcast K/V across
   // GQA groups internally via their gqa_factor parameter, so we leave K/V at
   // their original [B, H_kv, L, D] shape here. sdpa_general_mps expands K/V
@@ -766,7 +751,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   bool prefill_mask_compatible =
       !mask_.has_value() || (mask_.value().dtype() == at::kBool || mask_.value().dtype() == q_.dtype());
   bool prefill_head_dim_supported =
-      (query_head_dim == value_head_dim) && prefill_attention_supports_head_dim(query_head_dim);
+      (query_head_dim == value_head_dim) && mps::prefill_attention_supports_head_dim(query_head_dim);
   // For very short Q (qL <= 8) the BQ=16/32 prefill tile is mostly empty and
   // the existing MPSGraph fallback gives similar throughput with tighter
   // numerical accuracy at small head counts. Skip prefill there so we don't
@@ -799,5 +784,94 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
         q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
   }
 }
+
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
+                                                                  const Tensor& key_,
+                                                                  const Tensor& value_,
+                                                                  const std::optional<Tensor>& attn_mask,
+                                                                  double dropout_p,
+                                                                  bool is_causal,
+                                                                  const std::optional<Tensor>& dropout_mask,
+                                                                  std::optional<double> scale,
+                                                                  bool enable_gqa) {
+  return sdpa_fused_dispatch_mps(query, key_, value_, attn_mask, dropout_p, is_causal, dropout_mask, scale, enable_gqa);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor>
+_scaled_dot_product_flash_attention_mps(const Tensor& query,
+                                        const Tensor& key,
+                                        const Tensor& value,
+                                        double dropout_p,
+                                        bool is_causal,
+                                        [[maybe_unused]] bool return_debug_mask,
+                                        std::optional<double> scale) {
+  C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_mps");
+  const bool any_grad =
+      at::GradMode::is_enabled() && (query.requires_grad() || key.requires_grad() || value.requires_grad());
+  TORCH_CHECK(!any_grad,
+              "_scaled_dot_product_flash_attention on MPS is forward-only; "
+              "use sdpa_kernel([MATH]) when grad is required.");
+
+  auto output = std::get<0>(sdpa_fused_dispatch_mps(query,
+                                                    key,
+                                                    value,
+                                                    /*attn_mask=*/std::nullopt,
+                                                    dropout_p,
+                                                    is_causal,
+                                                    /*dropout_mask=*/std::nullopt,
+                                                    scale,
+                                                    /*enable_gqa=*/false));
+
+  c10::SymInt max_q = query.sym_size(-2);
+  c10::SymInt max_k = key.sym_size(-2);
+  // Dropout is unsupported and backward is gated off, so RNG-state outputs
+  // are unused scalar placeholders required only to satisfy the op schema.
+  auto empty_long = at::empty({}, query.options().dtype(at::kLong));
+  return std::make_tuple(std::move(output),
+                         /*logsumexp=*/Tensor(),
+                         /*cum_seq_q=*/Tensor(),
+                         /*cum_seq_k=*/Tensor(),
+                         std::move(max_q),
+                         std::move(max_k),
+                         /*rng_state=*/empty_long,
+                         /*unused=*/empty_long,
+                         /*debug_attn_mask=*/Tensor());
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_mps(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& attn_bias,
+    [[maybe_unused]] bool compute_log_sumexp,
+    double dropout_p,
+    bool is_causal,
+    std::optional<double> scale) {
+  C10_LOG_API_USAGE_ONCE("torch.sdpa.efficient_attention_mps");
+  const bool any_grad =
+      at::GradMode::is_enabled() && (query.requires_grad() || key.requires_grad() || value.requires_grad());
+  TORCH_CHECK(!any_grad,
+              "_scaled_dot_product_efficient_attention on MPS is forward-only; "
+              "use sdpa_kernel([MATH]) when grad is required.");
+
+  auto output = std::get<0>(sdpa_fused_dispatch_mps(query,
+                                                    key,
+                                                    value,
+                                                    attn_bias,
+                                                    dropout_p,
+                                                    is_causal,
+                                                    /*dropout_mask=*/std::nullopt,
+                                                    scale,
+                                                    /*enable_gqa=*/false));
+
+  // Dropout is unsupported and backward is gated off, so philox seed/offset
+  // are unused scalar placeholders required only to satisfy the op schema.
+  auto empty_long = at::empty({}, query.options().dtype(at::kLong));
+  return std::make_tuple(std::move(output),
+                         /*log_sumexp=*/Tensor(),
+                         /*philox_seed=*/empty_long,
+                         /*philox_offset=*/empty_long);
+}
+
 } // namespace native
 } // namespace at
