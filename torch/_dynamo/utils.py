@@ -3424,7 +3424,184 @@ def deepcopy_to_fake_tensor(
     obj: Any, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
 ) -> Any:
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
-        return wrap_fake_exception(lambda: copy.deepcopy(obj))
+        return wrap_fake_exception(lambda: _deepcopy_to_fake_tensor(obj))
+
+
+def _deepcopy_to_fake_tensor(obj: Any, memo: dict[int, Any] | None = None) -> Any:
+    if memo is None:
+        memo = {}
+    if (
+        isinstance(obj, torch.nn.Module)
+        and _has_custom_module_mappings(obj)
+        and not _has_custom_deepcopy_protocol(obj)
+    ):
+        return _deepcopy_nn_module_to_fake_tensor(obj, memo)
+    return copy.deepcopy(obj, memo)
+
+
+def _type_has_custom_attr(cls: type, name: str, ignored: tuple[type, ...]) -> bool:
+    for base in cls.__mro__:
+        if base in ignored:
+            continue
+        if name in base.__dict__:
+            return True
+    return False
+
+
+def _has_custom_deepcopy_protocol(obj: torch.nn.Module) -> bool:
+    return any(
+        _type_has_custom_attr(type(obj), name, ignored=(torch.nn.Module, object))
+        for name in (
+            "__deepcopy__",
+            "__reduce_ex__",
+            "__reduce__",
+            "__getnewargs_ex__",
+            "__getnewargs__",
+            "__getstate__",
+            "__setstate__",
+        )
+    )
+
+
+def _has_custom_module_mappings(
+    obj: torch.nn.Module, seen: set[int] | None = None
+) -> bool:
+    if seen is None:
+        seen = set()
+    obj_id = id(obj)
+    if obj_id in seen:
+        return False
+    seen.add(obj_id)
+
+    state = object.__getattribute__(obj, "__dict__")
+    for key in ("_parameters", "_buffers", "_modules"):
+        value = state.get(key)
+        if isinstance(value, dict) and not istype(value, (dict, OrderedDict)):
+            return True
+
+    modules = state.get("_modules")
+    if isinstance(modules, dict):
+        for _, submodule in get_items_from_dict(modules):
+            if isinstance(submodule, torch.nn.Module) and _has_custom_module_mappings(
+                submodule, seen
+            ):
+                return True
+
+    return False
+
+
+def _mapping_state(obj: dict[Any, Any]) -> Any:
+    if _type_has_custom_attr(type(obj), "__getstate__", ignored=(object,)):
+        return obj.__getstate__()
+    return _object_getstate(obj)
+
+
+def _slot_name(cls: type, name: str) -> str:
+    if name.startswith("__") and not name.endswith("__"):
+        return f"_{cls.__name__.lstrip('_')}{name}"
+    return name
+
+
+def _object_getstate(obj: Any) -> Any:
+    object_getstate = getattr(object, "__getstate__", None)
+    if object_getstate is not None:
+        return object_getstate(obj)
+
+    state = getattr(obj, "__dict__", None)
+    if state is not None:
+        state = state.copy()
+
+    slotstate: dict[str, Any] = {}
+    for cls in type(obj).__mro__:
+        slots = cls.__dict__.get("__slots__")
+        if slots is None:
+            continue
+        if isinstance(slots, str):
+            slots = (slots,)
+        for slot in slots:
+            if slot in ("__dict__", "__weakref__"):
+                continue
+            slot = _slot_name(cls, slot)
+            try:
+                slotstate[slot] = getattr(obj, slot)
+            except AttributeError:
+                pass
+
+    if slotstate:
+        return state, slotstate
+    return state
+
+
+def _set_mapping_state(obj: dict[Any, Any], state: Any, memo: dict[int, Any]) -> None:
+    if state is None:
+        return
+
+    state = copy.deepcopy(state, memo)
+    if hasattr(obj, "__setstate__"):
+        obj.__setstate__(state)
+        return
+
+    if isinstance(state, tuple) and len(state) == 2:
+        state, slotstate = state
+    else:
+        slotstate = None
+
+    if state is not None:
+        obj.__dict__.update(state)
+    if slotstate is not None:
+        for key, value in slotstate.items():
+            setattr(obj, key, value)
+
+
+def _deepcopy_module_mapping_to_fake_tensor(
+    obj: dict[Any, Any], memo: dict[int, Any]
+) -> dict[Any, Any]:
+    obj_id = id(obj)
+    if obj_id in memo:
+        return memo[obj_id]
+
+    if isinstance(obj, OrderedDict):
+        result = OrderedDict.__new__(type(obj))
+    else:
+        result = dict.__new__(type(obj))
+
+    memo[obj_id] = result
+    if isinstance(obj, collections.defaultdict) and isinstance(
+        result, collections.defaultdict
+    ):
+        result.default_factory = copy.deepcopy(obj.default_factory, memo)
+    _set_mapping_state(result, _mapping_state(obj), memo)
+
+    for key, value in get_items_from_dict(obj):
+        key_copy = copy.deepcopy(key, memo)
+        value_copy = _deepcopy_to_fake_tensor(value, memo)
+        if isinstance(result, OrderedDict):
+            OrderedDict.__setitem__(result, key_copy, value_copy)
+        else:
+            dict.__setitem__(result, key_copy, value_copy)
+    return result
+
+
+def _deepcopy_nn_module_to_fake_tensor(
+    obj: torch.nn.Module, memo: dict[int, Any]
+) -> torch.nn.Module:
+    obj_id = id(obj)
+    if obj_id in memo:
+        return memo[obj_id]
+
+    result = nn_module_new(type(obj))
+    memo[obj_id] = result
+
+    state = obj.__getstate__()
+    result_state = {}
+    for key, value in state.items():
+        if key in ("_parameters", "_buffers", "_modules") and isinstance(value, dict):
+            result_state[key] = _deepcopy_module_mapping_to_fake_tensor(value, memo)
+        else:
+            result_state[key] = copy.deepcopy(value, memo)
+
+    result.__setstate__(result_state)
+    return result
 
 
 def rmse(ref: torch.Tensor, res: torch.Tensor) -> torch.Tensor:
