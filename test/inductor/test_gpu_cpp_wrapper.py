@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import itertools
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -93,10 +94,15 @@ def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
 
-    def _assert_cpp_wrapper_debug_sync_code(self, code):
-        self.assertRegex(
-            code,
-            r"AOTI_RUNTIME_CUDA_CHECK\((cuda|hip)DeviceSynchronize\(\)\);",
+    def _assert_cpp_wrapper_debug_sync_code(self, code, expected_count=1):
+        self.assertGreaterEqual(
+            len(
+                re.findall(
+                    r"AOTI_RUNTIME_CUDA_CHECK\((cuda|hip)DeviceSynchronize\(\)\);",
+                    code,
+                )
+            ),
+            expected_count,
         )
         self.assertNotIn("torch.cuda.synchronize()", code)
 
@@ -137,7 +143,7 @@ class TestGpuWrapper(InductorTestCase):
         with torch.utils._device.DeviceContext(self.device):
             result, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
         self.assertEqual(result, x * 2)
-        self._assert_cpp_wrapper_debug_sync_code(code)
+        self._assert_cpp_wrapper_debug_sync_code(code, expected_count=2)
 
     def test_debug_sync_kernel(self):
         if not RUN_GPU:

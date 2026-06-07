@@ -993,6 +993,7 @@ class CppWrapperGpu(CppWrapperCpu):
             return super().generate(is_inference)
 
     def _codegen_entry_impl_prologue(self):
+        super()._codegen_entry_impl_prologue()
         self.prefix.writeline(
             _LazyTritonCompileKickoffLine(
                 self._lazy_kernel_names, "ensure_triton_kernel_compiles_started();"
