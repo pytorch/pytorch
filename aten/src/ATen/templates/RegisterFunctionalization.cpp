@@ -19,6 +19,7 @@
 // See Note [functionalizating copy_() and not preserving strides]
 #include <ATen/ops/to_ops.h>
 #include <ATen/ops/expand_copy_ops.h>
+#include <ATen/ops/_unsafe_view_ops.h>
 
 $ops_headers
 #endif
