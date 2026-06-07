@@ -79,7 +79,7 @@ def index(
     from itertools import islice
 
     for i, elem in islice(enumerate(iterator), start, end):
-        if item == elem:
+        if elem is item or elem == item:
             return i
     # This will not run in dynamo
     raise ValueError(f"{item} is not in {type(iterator)}")

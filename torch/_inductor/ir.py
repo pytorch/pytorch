@@ -8912,8 +8912,28 @@ class FallbackKernel(ExternKernelAlloc):
         return read_writes
 
     def codegen_unbacked_symbol_defs(self, wrapper: PythonWrapperCodegen) -> None:
+        unbacked_bindings = getattr(self, "unbacked_bindings", None)
+        if V.graph.cpp_wrapper and unbacked_bindings:
+            resolved = resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, unbacked_bindings
+            )
+            assert resolved is not None
+            unbacked_bindings = resolved
+            direct_symbol_outputs = OrderedSet(
+                [
+                    output
+                    for output in pytree.tree_leaves(self.outputs)
+                    if isinstance(output, sympy.Symbol)
+                ]
+            )
+            if direct_symbol_outputs:
+                unbacked_bindings = {
+                    k: v
+                    for k, v in unbacked_bindings.items()
+                    if k not in direct_symbol_outputs
+                }
         return wrapper.codegen_unbacked_symbol_defs_for_outputs(
-            self.get_name(), self.outputs, getattr(self, "unbacked_bindings", None)
+            self.get_name(), self.outputs, unbacked_bindings
         )
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:

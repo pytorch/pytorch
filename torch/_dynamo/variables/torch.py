@@ -2142,10 +2142,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     return x.realize()
                 return x
 
+            def is_traceable_data_ptr(x: VariableTracker) -> bool:
+                return isinstance(x, DataPtrVariable) and x.method_name == "data_ptr"
+
             def check_any_unspec(x: VariableTracker) -> bool:
                 x = realize(x)
                 # NB: This includes UnspecializedPythonVariable
-                if x.is_tensor() or isinstance(x, (DataPtrVariable, SymNodeVariable)):
+                if (
+                    x.is_tensor()
+                    or isinstance(x, SymNodeVariable)
+                    or is_traceable_data_ptr(x)
+                ):
                     return True
                 elif isinstance(x, (ListVariable, TupleVariable)):
                     return any(check_any_unspec(y) for y in x.items)
@@ -2156,7 +2163,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             def check_any_data_ptr(x: VariableTracker) -> bool:
                 x = realize(x)
-                if isinstance(x, DataPtrVariable):
+                if is_traceable_data_ptr(x):
                     return True
                 elif isinstance(x, (ListVariable, TupleVariable)):
                     return any(check_any_data_ptr(y) for y in x.items)
@@ -2165,7 +2172,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             def materialize_data_ptr(x: VariableTracker) -> VariableTracker:
                 x = realize(x)
-                if isinstance(x, DataPtrVariable):
+                if isinstance(x, DataPtrVariable) and x.method_name == "data_ptr":
                     return x.as_sym_node(tx)
                 elif isinstance(x, (ListVariable, TupleVariable)):
                     return x.modified([materialize_data_ptr(y) for y in x.items])
@@ -2207,7 +2214,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             data_arg = args[0] if args else kwargs.get("s")
             if isinstance(data_arg, LazyVariableTracker):
                 data_arg = data_arg.realize()
-            if not isinstance(data_arg, DataPtrVariable):
+            if not (
+                isinstance(data_arg, DataPtrVariable)
+                and data_arg.method_name == "data_ptr"
+            ):
                 return None
 
             sym_node = data_arg.as_sym_node(tx)
