@@ -431,12 +431,12 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::detach(
   const auto pre_dispatch_key_is_active =
       c10::impl::tls_is_dispatch_key_included(DispatchKey::PreDispatch) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::PreDispatch);
-  if (pre_dispatch_key_is_active) {
+  if (pre_dispatch_key_is_active && !self->key_set().has(DispatchKey::Python)) {
     if (has_pre_dispatch_torch_dispatch_mode()) {
       out = call_detach_op();
     } else {
-      c10::impl::ExcludeDispatchKeyGuard no_pre_dispatch(
-          c10::DispatchKeySet(DispatchKey::PreDispatch));
+      c10::impl::ExcludeDispatchKeyGuard no_pre_dispatch{
+          c10::DispatchKeySet(DispatchKey::PreDispatch)};
       out = call_detach_op();
     }
   } else {

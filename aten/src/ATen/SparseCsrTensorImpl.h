@@ -115,9 +115,11 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
       bool allow_tensor_metadata_change) const {
     if (auto* interpreter = pyinterpreter_for_shallow_copy_and_detach()) {
       auto r = (*interpreter)->detach(this);
-      r->set_version_counter(std::forward<VariableVersion>(version_counter));
-      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      return r;
+      if (r) {
+        r->set_version_counter(std::forward<VariableVersion>(version_counter));
+        r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+        return r;
+      }
     }
     // otherwise just copy the SparseTensorImpl and not the PyObject.
     auto impl = c10::make_intrusive<SparseCsrTensorImpl>(
