@@ -41,6 +41,7 @@ from torch._dynamo.debug_utils import (
     NNModuleToString,
     NopInputReader,
 )
+from torch._functorch.fx_minifier import is_uninitialized_tensor_factory_node
 from torch.export import ExportedProgram
 from torch.hub import tqdm
 
@@ -475,6 +476,9 @@ def repro_minify(
         skip_offload=options.skip_saving_eager_intermediates,
         skip_sanity=options.skip_sanity,
         max_granularity=options.max_granularity,
+        skip_output_node=is_uninitialized_tensor_factory_node
+        if options.accuracy != ""
+        else None,
     )
 
 

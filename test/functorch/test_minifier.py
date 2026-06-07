@@ -4,10 +4,55 @@ import torch
 from functorch import make_fx
 from functorch.compile import minifier
 from torch._functorch.compile_utils import get_outputs, get_placeholders
+from torch._functorch.fx_minifier import is_uninitialized_tensor_factory_node
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestMinifier(TestCase):
+    def _only_output_node(self, fx_g):
+        output_node = next(n for n in fx_g.graph.nodes if n.op == "output")
+        output = output_node.args[0]
+        if isinstance(output, (list, tuple)) and len(output) == 1:
+            output = output[0]
+        return output
+
+    def _assert_minifier_skips_uninitialized_output(
+        self, failing_f, inps, uninitialized_targets
+    ):
+        found_uninitialized_target = False
+        for node in failing_f.graph.nodes:
+            if node.target in uninitialized_targets:
+                found_uninitialized_target = True
+                self.assertTrue(is_uninitialized_tensor_factory_node(node))
+        self.assertTrue(found_uninitialized_target)
+
+        def module_fails(fx_g, inps):
+            output = self._only_output_node(fx_g)
+            if (
+                isinstance(output, torch.fx.Node)
+                and output.target in uninitialized_targets
+            ):
+                return True
+            return torch.ops.aten.relu.default in (n.target for n in fx_g.graph.nodes)
+
+        min_f, inps = minifier(
+            failing_f,
+            inps,
+            module_fails,
+            max_granularity=1,
+            skip_output_node=is_uninitialized_tensor_factory_node,
+        )
+
+        output = self._only_output_node(min_f)
+        self.assertFalse(
+            isinstance(output, torch.fx.Node) and output.target in uninitialized_targets
+        )
+        self.assertTrue(
+            torch.ops.aten.relu.default in (n.target for n in min_f.graph.nodes)
+        )
+        self.assertEqual(len(min_f.graph.nodes), 3)
+        self.assertEqual(len(inps), 1)
+
     def test_has_mul_minifier(self):
         def failing_f(x, y):
             y = y / 3
@@ -67,6 +112,46 @@ class TestMinifier(TestCase):
         min_f, inps = minifier(failing_f, inps, inputs_returned)
         self.assertEqual(len(min_f.graph.nodes), 2)
         self.assertEqual(len(inps), 1)
+
+    def test_skip_uninitialized_suffix_outputs(self):
+        def f(x):
+            y = x.new_empty((10,))
+            y.fill_(0)
+            r = torch.relu(x)
+            return (y, r)
+
+        inps = [torch.randn(3)]
+        failing_f = make_fx(f)(*inps)
+
+        self._assert_minifier_skips_uninitialized_output(
+            failing_f, inps, {torch.ops.aten.new_empty.default}
+        )
+
+    def test_skip_prims_empty_strided_suffix_outputs(self):
+        def empty_strided_decomp(
+            size, stride, *, dtype, device, layout=None, pin_memory=False
+        ):
+            return torch.ops.prims.empty_strided.default(
+                size, stride, dtype=dtype, device=device, requires_grad=False
+            )
+
+        def f(x):
+            y = torch.empty_strided((10,), (1,), dtype=x.dtype, device=x.device)
+            y.fill_(0)
+            r = torch.relu(x)
+            return (y, r)
+
+        inps = [torch.randn(3)]
+        failing_f = make_fx(
+            f,
+            decomposition_table={
+                torch.ops.aten.empty_strided.default: empty_strided_decomp
+            },
+        )(*inps)
+
+        self._assert_minifier_skips_uninitialized_output(
+            failing_f, inps, {torch.ops.prims.empty_strided.default}
+        )
 
     def test_tup_use(self):
         def f(a, b):
