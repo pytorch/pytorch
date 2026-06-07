@@ -17,7 +17,13 @@ from unittest.mock import patch, MagicMock, ANY
 import math
 import itertools
 import torch.optim as optim
-from torch.testing._internal.common_device_type import expectedFailureMPS, instantiate_device_type_tests, onlyCUDA, largeTensorTest
+from torch.testing._internal.common_device_type import (
+    expectedFailureMPS,
+    instantiate_device_type_tests,
+    onlyCUDA,
+    onlyMPS,
+    largeTensorTest,
+)
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -1612,6 +1618,267 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
                                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
 
+    @onlyMPS
+    def test_fused_sdp_choice_mps_prefill_flash(self, device):
+        torch.manual_seed(0)
+        dtype = torch.float16
+        size = (1, 2, 16, 64)
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+
+        self.assertEqual(torch._fused_sdp_choice(q, k, v), SDPBackend.FLASH_ATTENTION.value)
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        torch.mps.synchronize()
+        self.assertEqual(out.device.type, "mps")
+        self.assertTrue(torch.isfinite(out).all().item())
+
+    @onlyMPS
+    def test_fused_sdp_choice_mps_prefill_flash_matches_math(self, device):
+        torch.manual_seed(0)
+        dtype = torch.float16
+        cases = []
+
+        q = torch.randn((1, 4, 16, 64), device=device, dtype=dtype)
+        k = torch.randn((1, 2, 16, 64), device=device, dtype=dtype)
+        v = torch.randn((1, 2, 16, 64), device=device, dtype=dtype)
+        cases.append((q, k, v, None, {"is_causal": True, "scale": 0.5, "enable_gqa": True}))
+
+        q = torch.randn((1, 2, 16, 64), device=device, dtype=dtype)
+        k = torch.randn((1, 2, 16, 64), device=device, dtype=dtype)
+        v = torch.randn((1, 2, 16, 64), device=device, dtype=dtype)
+        attn_mask = torch.zeros((1, 2, 16, 16), device=device, dtype=dtype)
+        attn_mask[..., 8:] = -3.0
+        cases.append((q, k, v, attn_mask, {"attn_mask": attn_mask, "scale": 0.75}))
+
+        for q, k, v, attn_mask, kwargs in cases:
+            self.assertEqual(torch._fused_sdp_choice(
+                q, k, v, attn_mask, 0.0, kwargs.get("is_causal", False),
+                scale=kwargs.get("scale"), enable_gqa=kwargs.get("enable_gqa", False)),
+                SDPBackend.FLASH_ATTENTION.value)
+            with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+                flash_out = torch.nn.functional.scaled_dot_product_attention(q, k, v, **kwargs)
+            torch.mps.synchronize()
+            cpu_kwargs = dict(kwargs)
+            if attn_mask is not None:
+                cpu_kwargs["attn_mask"] = attn_mask.cpu()
+            cpu_out = torch.nn.functional.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), **cpu_kwargs)
+            torch.testing.assert_close(flash_out.cpu(), cpu_out, atol=2e-2, rtol=2e-2)
+
+    @onlyMPS
+    def test_fused_sdp_choice_mps_flash_only_rejects_prefill_ineligible(self, device):
+        dtype = torch.float16
+
+        def make_qkv(size, requires_grad=False):
+            return tuple(torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
+                         for _ in range(3))
+
+        cases = [
+            (*make_qkv((1, 2, 8, 64)), {}),
+            (*make_qkv((1, 2, 16, 23)), {}),
+            (*make_qkv((1, 2, 16, 64)), {"dropout_p": 0.1}),
+            (*make_qkv((1, 2, 16, 64), requires_grad=True), {}),
+        ]
+
+        for q, k, v, kwargs in cases:
+            dropout_p = kwargs.get("dropout_p", 0.0)
+            is_causal = kwargs.get("is_causal", False)
+            self.assertEqual(
+                torch._fused_sdp_choice(q, k, v, kwargs.get("attn_mask"), dropout_p, is_causal),
+                SDPBackend.MATH.value)
+            with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "No viable backend for scaled_dot_product_attention was found.",
+                    lambda: torch._fused_sdp_choice(q, k, v, kwargs.get("attn_mask"), dropout_p, is_causal))
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "No viable backend for scaled_dot_product_attention was found.",
+                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v, **kwargs))
+
+    @onlyMPS
+    def test_fused_sdp_choice_mps_flash_only_rejects_prefill_shape_contract(self, device):
+        dtype = torch.float32
+        cases = [
+            (
+                torch.randn((1, 2, 16, 64), device=device, dtype=dtype),
+                torch.randn((1, 2, 16, 32), device=device, dtype=dtype),
+                torch.randn((1, 2, 16, 64), device=device, dtype=dtype),
+                {},
+            ),
+            (
+                torch.randn((1, 4, 16, 64), device=device, dtype=dtype),
+                torch.randn((1, 2, 16, 64), device=device, dtype=dtype),
+                torch.randn((1, 3, 16, 64), device=device, dtype=dtype),
+                {"enable_gqa": False},
+            ),
+            (
+                torch.randn((2, 2, 16, 64), device=device, dtype=dtype),
+                torch.randn((1, 2, 16, 64), device=device, dtype=dtype),
+                torch.randn((2, 2, 16, 64), device=device, dtype=dtype),
+                {},
+            ),
+        ]
+
+        for q, k, v, kwargs in cases:
+            self.assertEqual(
+                torch._fused_sdp_choice(q, k, v, enable_gqa=kwargs.get("enable_gqa", False)),
+                SDPBackend.MATH.value)
+            with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "No viable backend for scaled_dot_product_attention was found.",
+                    lambda: torch._fused_sdp_choice(q, k, v, enable_gqa=kwargs.get("enable_gqa", False)))
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "No viable backend for scaled_dot_product_attention was found.",
+                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v, **kwargs))
+
+    @onlyMPS
+    def test_fused_sdp_choice_mps_default_rejects_prefill_shape_contract(self, device):
+        dtype = torch.float32
+
+        q = torch.randn((1, 2, 16, 64), device=device, dtype=dtype)
+        k = torch.randn((1, 2, 16, 32), device=device, dtype=dtype)
+        v = torch.randn((1, 2, 16, 64), device=device, dtype=dtype)
+        self.assertEqual(torch._fused_sdp_choice(q, k, v), SDPBackend.MATH.value)
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu()))
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
+
+        q = torch.randn((2, 2, 16, 64), device=device, dtype=dtype)
+        k = torch.randn((1, 2, 16, 64), device=device, dtype=dtype)
+        v = torch.randn((2, 2, 16, 64), device=device, dtype=dtype)
+        self.assertEqual(torch._fused_sdp_choice(q, k, v), SDPBackend.MATH.value)
+        mps_out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        torch.mps.synchronize()
+        cpu_out = torch.nn.functional.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu())
+        torch.testing.assert_close(mps_out.cpu(), cpu_out, atol=2e-4, rtol=2e-4)
+
+        q = torch.randn((1, 2, 16, 64), device=device, dtype=dtype)
+        k = torch.randn((2, 2, 16, 64), device=device, dtype=dtype)
+        v = torch.randn((2, 2, 16, 64), device=device, dtype=dtype)
+        self.assertEqual(torch._fused_sdp_choice(q, k, v), SDPBackend.MATH.value)
+        mps_out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        torch.mps.synchronize()
+        cpu_out = torch.nn.functional.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu())
+        torch.testing.assert_close(mps_out.cpu(), cpu_out, atol=2e-4, rtol=2e-4)
+
+    @onlyMPS
+    def test_fused_sdp_choice_mps_rejects_nonbroadcastable_same_product_batch(self, device):
+        dtype = torch.float32
+        q = torch.randn((2, 3, 2, 16, 64), device=device, dtype=dtype)
+        k = torch.randn((3, 2, 2, 16, 64), device=device, dtype=dtype)
+        v = torch.randn((3, 2, 2, 16, 64), device=device, dtype=dtype)
+
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu()))
+        self.assertEqual(torch._fused_sdp_choice(q, k, v), SDPBackend.MATH.value)
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            self.assertRaisesRegex(
+                RuntimeError,
+                "No viable backend for scaled_dot_product_attention was found.",
+                lambda: torch._fused_sdp_choice(q, k, v))
+            self.assertRaisesRegex(
+                RuntimeError,
+                "No viable backend for scaled_dot_product_attention was found.",
+                lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
+
+    @onlyMPS
+    def test_fused_sdp_choice_mps_rank5_singleton_batch_broadcast(self, device):
+        code = """
+import torch
+import torch.nn.functional as F
+torch.manual_seed(0)
+shapes = [
+    ((1, 3, 2, 16, 64), (2, 3, 2, 16, 64), (2, 3, 2, 16, 64)),
+    ((2, 3, 2, 16, 64), (1, 3, 2, 16, 64), (1, 3, 2, 16, 64)),
+]
+for q_shape, k_shape, v_shape in shapes:
+    q = torch.randn(q_shape, device="mps")
+    k = torch.randn(k_shape, device="mps")
+    v = torch.randn(v_shape, device="mps")
+    choice = torch._fused_sdp_choice(q, k, v)
+    assert choice == torch.nn.attention.SDPBackend.MATH.value, choice
+    mps_out = F.scaled_dot_product_attention(q, k, v)
+    torch.mps.synchronize()
+    cpu_out = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu())
+    torch.testing.assert_close(mps_out.cpu(), cpu_out, atol=2e-4, rtol=2e-4)
+print("RANK5_OK")
+"""
+        stdout, stderr = self.run_process_no_exception(code)
+        output = (stdout + stderr).decode("utf-8", errors="replace")
+        self.assertIn("RANK5_OK", output)
+
+    @onlyMPS
+    def test_fused_sdp_choice_mps_rejects_grad_mask_prefill(self, device):
+        dtype = torch.float32
+        size = (1, 2, 16, 64)
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+        attn_mask = torch.zeros((1, 2, 16, 16), device=device, dtype=dtype, requires_grad=True)
+
+        self.assertEqual(torch._fused_sdp_choice(q, k, v, attn_mask), SDPBackend.MATH.value)
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            self.assertRaisesRegex(
+                RuntimeError,
+                "No viable backend for scaled_dot_product_attention was found.",
+                lambda: torch._fused_sdp_choice(q, k, v, attn_mask))
+            self.assertRaisesRegex(
+                RuntimeError,
+                "No viable backend for scaled_dot_product_attention was found.",
+                lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask))
+
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        self.assertTrue(out.requires_grad)
+        out.sum().backward()
+        torch.mps.synchronize()
+        self.assertIsNotNone(attn_mask.grad)
+        self.assertTrue(torch.isfinite(attn_mask.grad).all().item())
+
+    @onlyMPS
+    def test_fused_sdp_choice_mps_flash_only_rejects_causal_with_explicit_mask(self, device):
+        dtype = torch.float16
+        size = (1, 2, 16, 64)
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+        attn_mask = torch.ones((16, 16), device=device, dtype=torch.bool).tril()
+
+        self.assertEqual(
+            torch._fused_sdp_choice(q, k, v, attn_mask, 0.0, True),
+            SDPBackend.MATH.value)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Explicit attn_mask should not be set when is_causal=True",
+            lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=True))
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            self.assertRaisesRegex(
+                RuntimeError,
+                "No viable backend for scaled_dot_product_attention was found.",
+                lambda: torch._fused_sdp_choice(q, k, v, attn_mask, 0.0, True))
+            self.assertRaisesRegex(
+                RuntimeError,
+                "No viable backend for scaled_dot_product_attention was found.",
+                lambda: torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=True))
+
+    @onlyMPS
+    def test_dispatch_fails_no_backend_with_mps_chooser(self, device):
+        dtype = torch.float16
+        size = (1, 2, 16, 64)
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+
+        with sdpa_kernel(backends=[SDPBackend.ERROR]):
+            self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
+                                   lambda: torch._fused_sdp_choice(q, k, v))
+            self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
+                                   lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
+
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize(
@@ -2361,6 +2628,63 @@ class TestSDPA(NNTestCase):
 
         # Should not crash during export with unbacked symbolic mask batch dim
         torch.export.export(model, args=(x,))
+
+    @onlyMPS
+    def test_sdpa_export_prefill_eligible_mps_public_api(self, device):
+        """Public MPS SDPA export should not run the concrete-size chooser on symbolic inputs."""
+
+        class Model(nn.Module):
+            def forward(self, q, k, v):
+                return F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
+
+        model = Model().eval().to(device)
+        seq = torch.export.Dim("seq", min=9, max=64)
+        q = torch.randn(1, 4, 16, 64, device=device, dtype=torch.float32)
+        k = torch.randn(1, 4, 16, 64, device=device, dtype=torch.float32)
+        v = torch.randn(1, 4, 16, 64, device=device, dtype=torch.float32)
+
+        ep = torch.export.export(
+            model,
+            args=(q, k, v),
+            dynamic_shapes={"q": {2: seq}, "k": {2: seq}, "v": {2: seq}},
+            strict=True,
+        )
+
+        q2 = torch.randn(1, 4, 24, 64, device=device, dtype=torch.float32)
+        k2 = torch.randn(1, 4, 24, 64, device=device, dtype=torch.float32)
+        v2 = torch.randn(1, 4, 24, 64, device=device, dtype=torch.float32)
+        out = ep.module()(q2, k2, v2)
+        torch.mps.synchronize()
+        self.assertEqual(out.shape, (1, 4, 24, 64))
+        self.assertEqual(out.device.type, "mps")
+        self.assertTrue(torch.isfinite(out).all().item())
+
+    @onlyMPS
+    def test_sdpa_export_forced_error_mps_public_api(self, device):
+        class Model(nn.Module):
+            def forward(self, q, k, v):
+                with sdpa_kernel(backends=[SDPBackend.ERROR]):
+                    return F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
+
+        model = Model().eval().to(device)
+        seq = torch.export.Dim("seq", min=9, max=64)
+        q = torch.randn(1, 4, 16, 64, device=device, dtype=torch.float32)
+        k = torch.randn(1, 4, 16, 64, device=device, dtype=torch.float32)
+        v = torch.randn(1, 4, 16, 64, device=device, dtype=torch.float32)
+
+        try:
+            ep = torch.export.export(
+                model,
+                args=(q, k, v),
+                dynamic_shapes={"q": {2: seq}, "k": {2: seq}, "v": {2: seq}},
+                strict=True,
+            )
+        except RuntimeError as exc:
+            self.assertIn("No viable backend for scaled_dot_product_attention was found.", str(exc))
+            return
+
+        with self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found."):
+            ep.module()(q, k, v)
 
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """

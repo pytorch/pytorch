@@ -1,5 +1,6 @@
 #include <string>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ExpandUtils.h>
 #include <fmt/format.h>
 #include <iostream>
 #include <optional>
@@ -13,6 +14,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_fused_sdp_choice_native.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
 #include <ATen/ops/empty_native.h>
 #endif
@@ -543,6 +545,224 @@ inline bool prefill_attention_supports_head_dim(int64_t head_dim) {
 
 } // namespace
 
+static bool prefill_attention_disabled() {
+  static const bool disabled = []() {
+    auto val = c10::utils::get_env("PYTORCH_MPS_DISABLE_PREFILL_ATTENTION");
+    return val.has_value() && val != "0";
+  }();
+  return disabled;
+}
+
+static bool mps_prefill_inputs_require_grad(const Tensor& query,
+                                            const Tensor& key,
+                                            const Tensor& value,
+                                            const std::optional<Tensor>& attn_mask) {
+  const bool any_inputs_require_grad =
+      query.requires_grad() || key.requires_grad() || value.requires_grad() ||
+      (attn_mask.has_value() && attn_mask->requires_grad());
+  return any_inputs_require_grad && at::GradMode::is_enabled();
+}
+
+static bool mps_prefill_leading_batch_dims_broadcastable(const Tensor& query, const Tensor& key, const Tensor& value) {
+  auto dims_broadcast_to_query = [](IntArrayRef query_dims, IntArrayRef other_dims) {
+    if (other_dims.size() > query_dims.size()) {
+      return false;
+    }
+    const auto offset = query_dims.size() - other_dims.size();
+    for (const auto i : c10::irange(other_dims.size())) {
+      const auto query_size = query_dims[offset + i];
+      const auto other_size = other_dims[i];
+      if (other_size != 1 && other_size != query_size) {
+        return false;
+      }
+    }
+    return true;
+  };
+  const auto q_batch_dims = query.sizes().slice(0, query.dim() - 3);
+  return dims_broadcast_to_query(q_batch_dims, key.sizes().slice(0, key.dim() - 3)) &&
+      dims_broadcast_to_query(q_batch_dims, value.sizes().slice(0, value.dim() - 3));
+}
+
+static bool mps_leading_batch_dims_broadcastable(const Tensor& query, const Tensor& key, const Tensor& value) {
+  auto dims_broadcastable = [](IntArrayRef a, IntArrayRef b) {
+    const auto ndim = std::max(a.size(), b.size());
+    for (const auto i : c10::irange(ndim)) {
+      const auto a_size = i < a.size() ? a[a.size() - 1 - i] : 1;
+      const auto b_size = i < b.size() ? b[b.size() - 1 - i] : 1;
+      if (a_size != b_size && a_size != 1 && b_size != 1) {
+        return false;
+      }
+    }
+    return true;
+  };
+  const auto q_batch_dims = query.sizes().slice(0, query.dim() - 3);
+  const auto k_batch_dims = key.sizes().slice(0, key.dim() - 3);
+  const auto v_batch_dims = value.sizes().slice(0, value.dim() - 3);
+  return dims_broadcastable(q_batch_dims, k_batch_dims) && dims_broadcastable(q_batch_dims, v_batch_dims) &&
+      dims_broadcastable(k_batch_dims, v_batch_dims);
+}
+
+static Tensor mps_expand_to_leading_batch_shape(const Tensor& tensor, IntArrayRef leading_batch_shape) {
+  std::vector<int64_t> expand_shape(leading_batch_shape.begin(), leading_batch_shape.end());
+  expand_shape.insert(expand_shape.end(), {tensor.size(-3), tensor.size(-2), tensor.size(-1)});
+  if (tensor.sizes().vec() == expand_shape) {
+    return tensor;
+  }
+  auto expanded = tensor.expand(expand_shape);
+  return tensor.dim() > 4 ? expanded.contiguous() : expanded;
+}
+
+static std::tuple<Tensor, Tensor, Tensor> mps_broadcast_leading_batch_dims(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value) {
+  const auto q_batch_dims = query.sizes().slice(0, query.dim() - 3);
+  const auto k_batch_dims = key.sizes().slice(0, key.dim() - 3);
+  const auto v_batch_dims = value.sizes().slice(0, value.dim() - 3);
+  auto leading_batch_shape = at::infer_size(q_batch_dims, k_batch_dims);
+  leading_batch_shape = at::infer_size(IntArrayRef(leading_batch_shape), v_batch_dims);
+  return {
+      mps_expand_to_leading_batch_shape(query, leading_batch_shape),
+      mps_expand_to_leading_batch_shape(key, leading_batch_shape),
+      mps_expand_to_leading_batch_shape(value, leading_batch_shape)};
+}
+
+static bool can_use_mps_prefill_attention(const Tensor& query,
+                                          const Tensor& key,
+                                          const Tensor& value,
+                                          const std::optional<Tensor>& attn_mask,
+                                          double dropout,
+                                          bool is_causal,
+                                          bool enable_gqa) {
+  if (prefill_attention_disabled() || dropout != 0.0 ||
+      mps_prefill_inputs_require_grad(query, key, value, attn_mask)) {
+    return false;
+  }
+
+  if (query.is_nested() || key.is_nested() || value.is_nested()) {
+    return false;
+  }
+
+  if (query.dim() < 3 || key.dim() < 3 || value.dim() < 3) {
+    return false;
+  }
+
+  if (is_causal && attn_mask.has_value()) {
+    return false;
+  }
+
+  if (!mps_prefill_leading_batch_dims_broadcastable(query, key, value)) {
+    return false;
+  }
+
+  if (!(query.scalar_type() == key.scalar_type() && query.scalar_type() == value.scalar_type())) {
+    return false;
+  }
+
+  const auto dtype = query.scalar_type();
+  const bool prefill_supported_dtype = dtype == at::kFloat || dtype == at::kHalf || dtype == at::kBFloat16;
+  if (!prefill_supported_dtype) {
+    return false;
+  }
+
+  auto query_tuple = ensure_4d(query);
+  Tensor q = std::get<0>(query_tuple);
+  Tensor k = std::get<0>(ensure_4d(key));
+  Tensor v = std::get<0>(ensure_4d(value));
+
+  if (q.size(0) != k.size(0) || q.size(0) != v.size(0)) {
+    return false;
+  }
+
+  const auto q_heads = q.size(1);
+  const auto k_heads = k.size(1);
+  const auto v_heads = v.size(1);
+  if (k_heads == 0 || k_heads != v_heads) {
+    return false;
+  }
+  if (enable_gqa) {
+    if (q_heads % k_heads != 0) {
+      return false;
+    }
+  } else if (q_heads != k_heads) {
+    return false;
+  }
+
+  const auto query_head_dim = q.size(3);
+  const auto key_head_dim = k.size(3);
+  const auto value_head_dim = v.size(3);
+  const bool prefill_head_dim_supported =
+      query_head_dim == key_head_dim && query_head_dim == value_head_dim &&
+      prefill_attention_supports_head_dim(query_head_dim);
+  const bool prefill_q_long_enough = q.size(2) > 8;
+  const bool key_seq_nonzero = k.size(2) > 0;
+  if (!prefill_head_dim_supported || !prefill_q_long_enough || !key_seq_nonzero) {
+    return false;
+  }
+
+  if (attn_mask) {
+    auto maskExpandedDims = query.sizes().vec();
+    maskExpandedDims[maskExpandedDims.size() - 1] = k.size(2);
+    Tensor mask = attn_mask->expand(maskExpandedDims);
+    std::tie(mask, std::ignore) = ensure_4d(mask);
+    if (!(mask.scalar_type() == at::kBool || mask.scalar_type() == dtype)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+static bool can_use_mps_prefill_attention(sdp::sdp_params const& params) {
+  return can_use_mps_prefill_attention(
+      params.query,
+      params.key,
+      params.value,
+      params.attn_mask,
+      params.dropout,
+      params.is_causal,
+      params.enable_gqa);
+}
+
+static sdp::SDPBackend select_sdp_backend_mps(sdp::sdp_params const& params) {
+  auto& ctx = at::globalContext();
+  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP()) {
+    return sdp::SDPBackend::error;
+  }
+
+  if (ctx.userEnabledFlashSDP() && can_use_mps_prefill_attention(params)) {
+    // MPS maps its existing native prefill attention route onto the public
+    // Flash backend selector only for supported forward inference cases. The
+    // eligibility gate above rejects dropout and grad-requiring inputs until an
+    // MPS training-capable fused attention path exists.
+    return sdp::SDPBackend::flash_attention;
+  }
+
+  if (ctx.userEnabledMathSDP()) {
+    return sdp::SDPBackend::math;
+  }
+
+  return sdp::SDPBackend::error;
+}
+
+int64_t _fused_sdp_choice_mps(const Tensor& query,
+                              const Tensor& key,
+                              const Tensor& value,
+                              const std::optional<Tensor>& attn_mask,
+                              double dropout_p,
+                              bool is_causal,
+                              std::optional<double> scale,
+                              bool enable_gqa) {
+  sdp::sdp_params params{query, key, value, attn_mask, dropout_p, is_causal, enable_gqa};
+  auto backend = select_sdp_backend_mps(params);
+  if (backend == sdp::SDPBackend::error) {
+    TORCH_CHECK(false,
+                "No viable backend for scaled_dot_product_attention was found. ",
+                "This is likely due to turning off both the math kernel and the fused kernels.");
+  }
+  return static_cast<int64_t>(backend);
+}
+
 static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
                                                    const Tensor& k_,
                                                    const Tensor& v_,
@@ -714,27 +934,39 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
                 "For GQA, the query tensor's head dimension (" + std::to_string(q_heads) +
                     ") must be divisible by the key tensor's head dimension (" + std::to_string(k_heads) + ").");
   }
+  TORCH_CHECK(
+      mps_leading_batch_dims_broadcastable(query, key_, value_),
+      "Expected query, key, and value leading batch dimensions to be broadcastable.");
 
-  auto query_tuple = ensure_4d(query);
+  auto [query_expanded, key_expanded, value_expanded] = mps_broadcast_leading_batch_dims(query, key_, value_);
+
+  auto query_tuple = ensure_4d(query_expanded);
   Tensor q_ = std::get<0>(query_tuple);
   bool unsqueezed = std::get<1>(query_tuple);
 
-  auto key_tuple = ensure_4d(key_);
+  auto key_tuple = ensure_4d(key_expanded);
   Tensor k_ = std::get<0>(key_tuple);
 
-  auto value_tuple = ensure_4d(value_);
+  auto value_tuple = ensure_4d(value_expanded);
   Tensor v_ = std::get<0>(value_tuple);
 
   std::optional<Tensor> mask_;
   if (attn_mask) {
-    auto maskExpandedDims = query.sizes().vec();
+    auto maskExpandedDims = query_expanded.sizes().vec();
     maskExpandedDims[maskExpandedDims.size() - 1] = k_.size(2);
     mask_ = attn_mask->expand(maskExpandedDims);
     std::tie(*mask_, std::ignore) = ensure_4d(*mask_);
   }
 
   int query_head_dim = q_.size(3);
+  int key_head_dim = k_.size(3);
   int value_head_dim = v_.size(3);
+  TORCH_CHECK(
+      query_head_dim == key_head_dim,
+      "Expected query and key to have the same head dimension, but got query.size(-1) = ",
+      query_head_dim,
+      " and key.size(-1) = ",
+      key_head_dim);
 
   // For a vector fast implementation support {64, 96, 128, 256} and for full support {64, 80, 128} head_dims
   bool sdpa_vector_supported_head_dim = (query_head_dim == value_head_dim) &&
@@ -752,31 +984,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   // boolean to decide if we can use kernel paths
   bool supports_fast_sdpa = supports_sdpa_vector && !(is_causal && mask_.has_value());
 
-  // Prefill kernel: long-Q path. Requires Q/K/V to share the same
-  // head dim, the head dim to be one of the instantiated shapes, the dtype to
-  // be float/half/bfloat, and any mask to be either bool or matching the
-  // query dtype. Set PYTORCH_MPS_DISABLE_PREFILL_ATTENTION=1 to fall back to
-  // MPSGraph for benchmarking / debugging.
-  static const bool prefill_attention_disabled = []() {
-    auto val = c10::utils::get_env("PYTORCH_MPS_DISABLE_PREFILL_ATTENTION");
-    return val.has_value() && val != "0";
-  }();
-  bool prefill_supported_dtype =
-      q_.scalar_type() == at::kFloat || q_.scalar_type() == at::kHalf || q_.scalar_type() == at::kBFloat16;
-  bool prefill_mask_compatible =
-      !mask_.has_value() || (mask_.value().dtype() == at::kBool || mask_.value().dtype() == q_.dtype());
-  bool prefill_head_dim_supported =
-      (query_head_dim == value_head_dim) && prefill_attention_supports_head_dim(query_head_dim);
-  // For very short Q (qL <= 8) the BQ=16/32 prefill tile is mostly empty and
-  // the existing MPSGraph fallback gives similar throughput with tighter
-  // numerical accuracy at small head counts. Skip prefill there so we don't
-  // regress the existing decode-style tests.
-  bool prefill_q_long_enough = query_seq_len > 8;
-  bool supports_prefill = !prefill_attention_disabled && !supports_fast_sdpa && prefill_supported_dtype &&
-      prefill_mask_compatible && prefill_head_dim_supported && prefill_q_long_enough && (k_.size(2) > 0);
+  bool supports_prefill = !supports_fast_sdpa &&
+      can_use_mps_prefill_attention(query, key_, value_, attn_mask, dropout_p, is_causal, enable_gqa);
 
   if (!supports_fast_sdpa && !supports_prefill) {
-    return sdpa_general_mps(q_, k_, v_, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
+    return sdpa_general_mps(
+        q_, k_, v_, mask_, dropout_p, is_causal, dropout_mask, scale, query_expanded, unsqueezed);
   }
 
   // Kernels load head-dim elements linearly, so stride(-1) == 1 is the only hard requirement
@@ -787,17 +1000,19 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   Tensor v_contig = can_use_kernel_strides(v_) ? v_ : v_.contiguous();
 
   if (supports_prefill) {
-    return sdpa_prefill_mps(q_contig, k_contig, v_contig, mask_, is_causal, scale, query, unsqueezed);
+    return sdpa_prefill_mps(q_contig, k_contig, v_contig, mask_, is_causal, scale, query_expanded, unsqueezed);
   }
 
   // for short sequences, differentiate based on key sequence length
   if ((k_.size(2) >= 1024) || (k_.size(1) < q_.size(1) && k_.size(2) >= 4096)) {
     return sdpa_vector_2pass_mps(
-        q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
+        q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query_expanded, unsqueezed);
   } else {
     return sdpa_vector_fast_mps(
-        q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
+        q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query_expanded, unsqueezed);
   }
 }
+
+REGISTER_MPS_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_mps)
 } // namespace native
 } // namespace at

@@ -14788,6 +14788,7 @@
     Meta: _fused_sdp_choice_meta
     CPU, NestedTensorCPU: _fused_sdp_choice_cpp
     CUDA, NestedTensorCUDA: _fused_sdp_choice_cuda
+    MPS: _fused_sdp_choice_mps
     XPU: _fused_sdp_choice_xpu
   tags: nondeterministic_seeded
 

@@ -744,13 +744,25 @@ Tensor scaled_dot_product_attention(
     auto out = at::zeros_symint(output_shape, query_.options());
     return out + (query_.sum() + key.sum() + value.sum()) * 0;
   }
+  const auto query_device_type = query_.device().type();
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
-  if (_fused_sdp_choice_stub.is_device_supported(query_.device().type())) {
-    choice_int = _fused_sdp_choice_stub(query_.device().type(),
+  const bool has_symbolic_mps_inputs = query_device_type == c10::kMPS &&
+      (query_.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+       key.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+       value.unsafeGetTensorImpl()->has_symbolic_sizes_strides());
+  if (has_symbolic_mps_inputs) {
+    TORCH_CHECK(
+        at::globalContext().userEnabledMathSDP(),
+        "No viable backend for scaled_dot_product_attention was found. ",
+        "This is likely due to turning off both the math kernel and the fused kernels.");
+  } else if (_fused_sdp_choice_stub.is_device_supported(query_device_type)) {
+    choice_int = _fused_sdp_choice_stub(query_device_type,
           query_, key, value, attn_mask_, dropout_p, is_causal, scale, enable_gqa);
   }
-  const auto query_device_type = query_.device().type();
   const auto backend = static_cast<SDPBackend>(choice_int);
+  const bool any_inputs_require_grad =
+      query_.requires_grad() || key.requires_grad() || value.requires_grad() ||
+      (attn_mask_.has_value() && attn_mask_->requires_grad());
   auto attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
     case SDPBackend::cudnn_attention: {
@@ -760,6 +772,22 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case SDPBackend::flash_attention: {
+      if (query_device_type == c10::kMPS && !(at::GradMode::is_enabled() && any_inputs_require_grad)) {
+        return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
+            query_,
+            key,
+            value,
+            attn_mask,
+            dropout_p,
+            is_causal,
+            std::nullopt, /*dropout_mask*/
+            scale,
+            enable_gqa));
+      }
+      TORCH_CHECK(
+          query_device_type != c10::kMPS,
+          "MPS flash attention is only available for forward inference inputs; ",
+          "grad-requiring MPS inputs must use the math backend.");
       if(query_device_type == DeviceType::CUDA ||
          query_device_type == DeviceType::XPU) {
         c10::SymInt og_size = query_.sym_size(-1);
@@ -792,7 +820,6 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case SDPBackend::math: {
-      const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
       if (query_device_type == c10::kMPS && !(at::GradMode::is_enabled() && any_inputs_require_grad)) {
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
