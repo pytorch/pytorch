@@ -56,6 +56,8 @@ def make_halide(cls):
         (config, "halide.scan_kernels", True),
         (config, "cpu_backend", "halide"),
         (config, "cuda_backend", "halide"),
+        (config, "test_configs.runtime_triton_dtype_assert", False),
+        (config, "test_configs.runtime_triton_shape_assert", False),
         xfail_prop="_expected_failure_halide",
     )
 
