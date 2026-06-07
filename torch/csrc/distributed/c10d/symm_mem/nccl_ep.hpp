@@ -40,9 +40,7 @@ TORCH_API c10::intrusive_ptr<NcclEpGroup> nccl_ep_create_group(
     int64_t num_experts,
     int64_t max_dispatch_tokens_per_rank,
     int64_t max_recv_tokens_per_rank,
-    int64_t max_token_bytes,
-    int64_t num_qp_per_rank,
-    int64_t num_channels);
+    int64_t max_token_bytes);
 
 TORCH_API c10::intrusive_ptr<NcclEpHandle> nccl_ep_create_handle(
     const c10::intrusive_ptr<NcclEpGroup>& group,
