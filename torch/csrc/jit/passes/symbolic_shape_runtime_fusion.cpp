@@ -592,7 +592,7 @@ static RegisterOperators reg_guard({
                   sym_dim_index = sym_dim_flat_index[value];
                 }
                 // TODO: potential optimization - if there is a Symbolic
-                // Sym with only one use we dont need to test anything
+                // Sym with only one use we don't need to test anything
                 flattened_input_dims.push_back(
                     static_cast<int64_t>(sym_dim_index));
               }
@@ -608,14 +608,7 @@ static RegisterOperators reg_guard({
                   flattened_input_dims,
                   flattened_input_striding,
                   num_symbolic_dims](Stack& stack) {
-            // Copy inputs out before dropping. drop() = stack.erase(...),
-            // which destroys the IValues; iterating last(stack, num_inputs)
-            // afterwards dereferences destroyed elements (Tensor refcount
-            // use-after-free; ASAN flags it as container-overflow at the
-            // toTensor() call below).
-            // TODO - smallvector here ?
-            std::vector<IValue> inputs(stack.end() - num_inputs, stack.end());
-            drop(stack, num_inputs);
+            auto inputs = pop(stack, num_inputs);
             // each invocation we need to reset what value of each symbolic
             // symbol is.
             // TODO: could this be a reference and not allocated on

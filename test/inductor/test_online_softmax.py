@@ -91,6 +91,24 @@ class TestOnlineSoftmax(TestCase):
 
         self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("use_log_softmax", [False, True])
+    def test_codegen_online_softmax_unbacked_non_reduction_dim(self, use_log_softmax):
+        def f(x, n):
+            x = x[: n.item(), :]
+            if use_log_softmax:
+                return torch.log_softmax(x, dim=-1)
+            else:
+                return torch.softmax(x, dim=-1)
+
+        x = torch.randn(1024, 2048, dtype=torch.bfloat16, device=GPU_TYPE)
+        n = torch.tensor(1024)
+        _, source_codes = run_and_get_code(torch.compile(f, fullgraph=True), x, n)
+        wrapper_code = "\n".join(source_codes)
+
+        self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
+        self.assertTrue("online_softmax_reduce" in wrapper_code)
+
     def test_no_online_softmax_for_cpu(self):
         code = self.get_softmax_wrapper(V=2048, device="cpu")
 
@@ -163,21 +181,43 @@ class TestOnlineSoftmax(TestCase):
 
     def test_split_reduction(self):
         """
-        We don't split online_softmax_reduce for now. Check
-        'Split online_softmax_reduce' note in the code.
-
-        When a split is promsing, we fallback for now.
-
-        This is just a manual example rather than something we
-        see in practice.
+        Split online_softmax_reduce into partial max/sum tuples and combine
+        the partials with another online_softmax_reduce.
         """
         # tensor shape to trigger split reduction
-        x = torch.randn(1, 2**20, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(1, 2**20 + 13, dtype=torch.bfloat16, device=GPU_TYPE)
         ref = torch.softmax(x, dim=-1)
         act, (code,) = run_and_get_code(torch.compile(torch.softmax), x, dim=-1)
         self.assertTrue(torch.allclose(ref, act, atol=1e-3, rtol=1e-3))
         self.assertTrue(code.count("def triton") >= 2)
-        self.assertTrue("online_softmax_reduce" not in code)
+        self.assertTrue("online_softmax_reduce" in code)
+        self.assertTrue("online_softmax_combine_with_sum" in code)
+
+    def test_kl_div_log_softmax_backward_split_reduction(self):
+        logits = torch.randn(
+            1, 2**20, dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+        )
+        targets = F.softmax(torch.randn_like(logits), dim=-1)
+        ref_logits = logits.detach().clone().requires_grad_()
+        ref_targets = targets.detach().clone()
+
+        def f(logits, targets):
+            return F.kl_div(
+                F.log_softmax(logits, dim=-1), targets, reduction="batchmean"
+            )
+
+        ref = f(ref_logits, ref_targets)
+        ref.backward()
+
+        opt_f = torch.compile(f)
+        act, codes = run_and_get_code(opt_f, logits, targets)
+        act.backward()
+        code = "\n".join(codes)
+
+        self.assertEqual(ref, act)
+        self.assertEqual(ref_logits.grad, logits.grad)
+        self.assertTrue("online_softmax_reduce" in code)
+        self.assertTrue("online_softmax_combine_with_sum" in code)
 
     @parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
     def test_prepare_softmax_acc_with_fp64(self, dtype):
