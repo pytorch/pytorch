@@ -4938,6 +4938,30 @@
       "Hints": []
     }
   ],
+  "GB7811": [
+    {
+      "Gb_type": "Unsupported ambiguous autograd.Function vmap",
+      "Context": "call_apply {self} {args} {kwargs}",
+      "Explanation": "Dynamo does not support tracing `torch.autograd.Function` subclasses that set `generate_vmap_rule=True` and define a custom `vmap` staticmethod.",
+      "Hints": [
+        "Set `generate_vmap_rule=False` or remove the custom ",
+        "`vmap` staticmethod.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3449": [
+    {
+      "Gb_type": "Unsupported autograd.Function vmap",
+      "Context": "call_apply {self} {args} {kwargs}",
+      "Explanation": "Dynamo only supports tracing `torch.autograd.Function` under vmap when `generate_vmap_rule=True`.",
+      "Hints": [
+        "Set `generate_vmap_rule=True` if generated vmap ",
+        "rules are valid for this autograd.Function.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0335": [
     {
       "Gb_type": "hints_wrapper: improper args/kwargs",

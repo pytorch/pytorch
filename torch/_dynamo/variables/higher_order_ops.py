@@ -4700,12 +4700,20 @@ class AutogradFunctionApplyVariable(VariableTracker):
     _ALLOW_FALLBACK_TO_EAGER = True
 
     def __init__(
-        self, fwd_fn: Any, bwd_fn: Any, parent_source: Source | None, **kwargs: Any
+        self,
+        fwd_fn: Any,
+        bwd_fn: Any,
+        parent_source: Source | None,
+        generate_vmap_rule: bool,
+        has_custom_vmap: bool,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.fwd_fn = fwd_fn
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
+        self.generate_vmap_rule = generate_vmap_rule
+        self.has_custom_vmap = has_custom_vmap
 
     def richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
@@ -4818,11 +4826,15 @@ class AutogradFunctionApplyVariable(VariableTracker):
         non_differentiable_idx = []
         if ctx.non_differentiable is not None:
             non_differentiable_set = set(ctx.non_differentiable)
-            if not isinstance(fwd_out, variables.BaseListVariable):
-                raise AssertionError("Expected fwd_out to be a BaseListVariable")
-            for i, x in enumerate(fwd_out.items):
-                if x.is_tensor() and x.as_proxy() in non_differentiable_set:
-                    non_differentiable_idx.append(i)
+            if fwd_out.is_tensor():
+                if fwd_out.as_proxy() in non_differentiable_set:
+                    non_differentiable_idx.append(0)
+            else:
+                if not isinstance(fwd_out, variables.BaseListVariable):
+                    raise AssertionError("Expected fwd_out to be a BaseListVariable")
+                for i, x in enumerate(fwd_out.items):
+                    if x.is_tensor() and x.as_proxy() in non_differentiable_set:
+                        non_differentiable_idx.append(i)
 
         dirty_idx: list[int] = []
         if ctx.dirty_tensors is not None:
@@ -4895,10 +4907,14 @@ class AutogradFunctionApplyVariable(VariableTracker):
             bwd_node,
             *list(fwd_freevars.keys()),
         )
-        kwargs_for_fn = {
+        kwargs_for_fn: dict[str, Any] = {
             "non_differentiable_idx": non_differentiable_idx,
             "saved_for_backward_idx": saved_for_backward_idx,
         }
+        if self.generate_vmap_rule:
+            kwargs_for_fn["generate_vmap_rule"] = self.generate_vmap_rule
+        if self.has_custom_vmap:
+            kwargs_for_fn["has_custom_vmap"] = self.has_custom_vmap
         # Preserve the existing HOP call shape for the common no-mark_dirty case.
         if dirty_idx:
             kwargs_for_fn["dirty_idx"] = dirty_idx
