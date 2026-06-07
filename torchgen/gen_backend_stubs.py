@@ -40,9 +40,7 @@ ParsedExternalYaml = namedtuple(
 )
 
 # Per-op keys in a supported-op dict entry; every other key is the operator name.
-_SUPPORTED_OP_OPTION_KEYS = frozenset(
-    {"structured", "ext_structured_meta", "device_guard"}
-)
+_SUPPORTED_OP_OPTION_KEYS = frozenset({"structured", "define_meta", "device_guard"})
 
 
 def parse_backend_yaml(
@@ -151,7 +149,7 @@ def parse_backend_yaml(
         metadata: dict[OperatorName, BackendMetadata] = {}
         for op in backend_ops:
             structured = False
-            ext_structured_meta = False
+            define_meta = False
             device_guard = use_device_guard
             if isinstance(op, dict):
                 # An op with options is a single-key mapping whose value is the option dict
@@ -175,11 +173,11 @@ def parse_backend_yaml(
                         f"Supported option keys: {sorted(_SUPPORTED_OP_OPTION_KEYS)}."
                     )
                 structured = opts.get("structured", False)
-                ext_structured_meta = opts.get("ext_structured_meta", False)
+                define_meta = opts.get("define_meta", False)
                 device_guard = opts.get("device_guard", use_device_guard)
-                if ext_structured_meta and not structured:
+                if define_meta and not structured:
                     raise AssertionError(
-                        f"Operator '{_op}' has 'ext_structured_meta: True' but 'structured: False'. "
+                        f"Operator '{_op}' has 'define_meta: True' but 'structured: False'. "
                         "Custom meta functions require a structured kernel."
                     )
                 op = _op
@@ -209,7 +207,7 @@ def parse_backend_yaml(
                 kernel=kernel_name,
                 structured=structured,
                 cpp_namespace=cpp_namespace,
-                ext_structured_meta=ext_structured_meta,
+                define_meta=define_meta,
                 device_guard=device_guard,
             )
             metadata[op_name] = m
