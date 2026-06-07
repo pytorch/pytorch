@@ -331,15 +331,11 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             @staticmethod
             def forward(ctx, x):
                 # Emulate AutoDispatchBelowADInplaceOrView, which is not bound into python
-                guard = torch._C._AutoDispatchBelowAutograd()
-                guard2 = torch._C.ExcludeDispatchKeyGuard(
-                    torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
-                )
-                try:
-                    return op(x)
-                finally:
-                    del guard
-                    del guard2
+                with torch._C._AutoDispatchBelowAutograd():
+                    with torch._C._ExcludeDispatchKeyGuard(
+                        torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
+                    ):
+                        return op(x)
 
             @staticmethod
             def backward(ctx, gx):
