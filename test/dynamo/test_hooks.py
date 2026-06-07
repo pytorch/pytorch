@@ -574,6 +574,73 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(x0.grad, x1.grad)
         self.assertEqual(x0.grad, x2.grad)
 
+    def test_output_hook_on_dependent_output_after_return_aot_eager(self):
+        def fn(x):
+            y = x * x
+            z = y * x * x * x
+            return y, z
+
+        x0 = torch.tensor(1.0, requires_grad=True)
+        y0, z0 = fn(x0)
+        y0.register_hook(lambda grad: 3.14 * grad)
+        (expected,) = torch.autograd.grad(z0, x0)
+
+        x1 = torch.tensor(1.0, requires_grad=True)
+        y1, z1 = torch.compile(fn, backend="aot_eager")(x1)
+        y1.register_hook(lambda grad: 3.14 * grad)
+        (result,) = torch.autograd.grad(z1, x1)
+
+        self.assertEqual(result, expected)
+
+    def test_output_hook_on_dependent_output_gm_wrapper_aot_autograd(self):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.utils import GmWrapper
+
+        def fn(xs):
+            x = xs[0]
+            y = x * x
+            z = y * x * x * x
+            return y, z
+
+        def grad_with_hook(compiled_fn, x):
+            y, z = compiled_fn([x])
+            y.register_hook(lambda grad: 3.14 * grad)
+            (result,) = torch.autograd.grad(z, x)
+            return result
+
+        x0 = torch.tensor(1.0, requires_grad=True)
+        expected = grad_with_hook(fn, x0)
+
+        gm = torch.fx.symbolic_trace(fn)
+
+        x1 = torch.tensor(1.0, requires_grad=True)
+        compiled = aot_autograd(fw_compiler=nop)(gm, ([x1],))
+        result = grad_with_hook(compiled, x1)
+        self.assertEqual(result, expected)
+
+        x2 = torch.tensor(1.0, requires_grad=True)
+        wrapped_gm = GmWrapper(gm, lambda flat_args: ([flat_args[0]],))
+        boxed_compiled = aot_autograd(fw_compiler=nop)(wrapped_gm, [x2])
+        result = grad_with_hook(boxed_compiled, x2)
+        self.assertEqual(result, expected)
+
+    def test_output_hook_on_dependent_output_after_graph_break_aot_eager(self):
+        def fn(x):
+            y = x * x
+            z = y * x * x * x
+            torch._dynamo.graph_break()
+            y.register_hook(lambda grad: grad if grad is None else 3.14 * grad)
+            (result,) = torch.autograd.grad(z, x)
+            return result
+
+        x0 = torch.tensor(1.0, requires_grad=True)
+        expected = fn(x0)
+
+        x1 = torch.tensor(1.0, requires_grad=True)
+        result = torch.compile(fn, backend="aot_eager")(x1)
+
+        self.assertEqual(result, expected)
+
     def test_input_hooks_same(self):
         backends = ["eager", "aot_eager", "inductor"]
         for backend in backends:
