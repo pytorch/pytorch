@@ -84,6 +84,7 @@ _side_effectful_need_to_be_preserved_pre_dispatch: list[Callable[..., Any]] = [
     torch._C._set_grad_enabled,
     torch.amp._enter_autocast,
     torch.amp._exit_autocast,
+    torch.Tensor.requires_grad_,
 ]
 
 # TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
