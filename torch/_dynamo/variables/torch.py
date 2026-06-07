@@ -109,7 +109,7 @@ from .torch_function import (
 )
 from .torch_schema import (
     torch_function_inplace_param_names,
-    torch_function_mutated_first_arg_infos,
+    torch_function_mutated_arg_infos,
 )
 from .user_defined import UserDefinedTupleVariable
 
@@ -151,9 +151,7 @@ def _is_true_constant(var: VariableTracker) -> bool:
     return var.is_python_constant() and bool(var.as_python_constant())
 
 
-def _matches_mutated_first_arg_schema(
-    var: VariableTracker, is_tensor_list: bool
-) -> bool:
+def _matches_mutated_arg_schema(var: VariableTracker, is_tensor_list: bool) -> bool:
     if is_tensor_list:
         return isinstance(var, (TupleVariable, ListVariable))
     return var.is_tensor()
@@ -3235,40 +3233,29 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
         if is_reconstructing_generator:
-            mutated_first_arg_infos = torch_function_mutated_first_arg_infos(fn_)
-            mutated_first_arg = None
-            if mutated_first_arg_infos:
-                if args:
-                    candidate = args[0]
-                    if any(
-                        _matches_mutated_first_arg_schema(candidate, is_tensor_list)
-                        for _, is_tensor_list in mutated_first_arg_infos
-                    ):
-                        mutated_first_arg = candidate
-                for name, is_tensor_list in mutated_first_arg_infos:
-                    if (
-                        mutated_first_arg is None
-                        and name in kwargs
-                        and _matches_mutated_first_arg_schema(
-                            kwargs[name], is_tensor_list
-                        )
-                    ):
-                        mutated_first_arg = kwargs[name]
-                        break
-            if mutated_first_arg is not None:
-                _check_generator_reconstruction_tensor_mutation_arg(
-                    tx, mutated_first_arg
-                )
+            mutated_arg_infos = torch_function_mutated_arg_infos(fn_)
+            mutated_arg = None
+            for idx, name, is_tensor_list, kwarg_only in mutated_arg_infos:
+                candidate = kwargs.get(name)
+                if candidate is None and not kwarg_only and len(args) > idx:
+                    candidate = args[idx]
+                if candidate is not None and _matches_mutated_arg_schema(
+                    candidate, is_tensor_list
+                ):
+                    mutated_arg = candidate
+                    break
+            if mutated_arg is not None:
+                _check_generator_reconstruction_tensor_mutation_arg(tx, mutated_arg)
             elif inplace_param_info := torch_function_inplace_param_names(fn_):
                 input_name, inplace_name, inplace_idx = inplace_param_info
                 inplace_arg = kwargs.get(inplace_name)
                 if inplace_arg is None and len(args) > inplace_idx:
                     inplace_arg = args[inplace_idx]
                 if inplace_arg is not None and _is_true_constant(inplace_arg):
-                    mutated_first_arg = args[0] if args else kwargs.get(input_name)
-                    if mutated_first_arg is not None:
+                    mutated_arg = args[0] if args else kwargs.get(input_name)
+                    if mutated_arg is not None:
                         _check_generator_reconstruction_tensor_mutation_arg(
-                            tx, mutated_first_arg
+                            tx, mutated_arg
                         )
 
         with ctx():

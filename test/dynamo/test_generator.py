@@ -659,6 +659,21 @@ class GraphModule(torch.nn.Module):
         ):
             self._compile_check(fn)
 
+    def test_reconstruct_generator_tensor_mutation_op_overload_non_first_arg(self):
+        def whoo(t, noise):
+            yield torch.ops.aten.rrelu_with_noise.default(t, noise, 0.1, 0.3, True)
+            yield noise
+
+        def fn(t, noise):
+            gen = whoo(t, noise)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn, args=(torch.randn(2), torch.randn(2)))
+
     def test_reconstruct_generator_tensor_mutation_out_kwarg(self):
         def whoo(t):
             yield torch.sin(t, out=t)
