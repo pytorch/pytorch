@@ -14,7 +14,11 @@ from torchgen.gen import (
     get_grouped_native_functions,
     parse_native_yaml,
 )
-from torchgen.gen_backend_stubs import parse_backend_yaml, run
+from torchgen.gen_backend_stubs import (
+    gen_define_meta_registrations,
+    parse_backend_yaml,
+    run,
+)
 from torchgen.model import NativeFunctionsGroup, OperatorName
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, Target
@@ -524,6 +528,10 @@ supported:
             )
         )
 
+    def define_meta_registrations(self, supported: str) -> str:
+        groups, backend_index, class_name = self._parse(supported)
+        return gen_define_meta_registrations(groups, backend_index, class_name)
+
     # use_out_as_primary: a non-structured op (div.out) generates an out wrapper
     # that returns the impl _out call directly (note the at::priv1::native 3-level
     # namespace), a functional wrapper that allocates an empty out and reuses it,
@@ -702,6 +710,61 @@ supported:
             header = (Path(out_dir) / "PrivateUse1NativeFunctions.h").read_text()
         self.assertIn("maximum_meta.h", header)
         self.assertNotIn("div_meta.h", header)
+
+    # define_meta: true also registers the backend's meta() under the aten Meta key, so
+    # torch.compile / FakeTensor uses the backend's shapes. The generated Meta kernel derives
+    # from the backend's structured class (so the backend's overridden meta() runs) and allocates
+    # meta tensors in set_output. (Emission-verified; not yet runtime-tested under torch.compile.)
+    def test_define_meta_registers_aten_meta_key(self) -> None:
+        out = self.define_meta_registrations(
+            "- minimum.out:\n    structured: true\n    define_meta: true"
+        )
+        self.assertExpectedInline(
+            out,
+            """\
+namespace {
+struct structured_minimum_out_define_meta final : public at::priv1::native::PrivateUse1NativeFunctions::structured_minimum_out {
+    void set_output_raw_strided(
+        int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
+        at::TensorOptions options, at::DimnameList names
+    ) override {
+        outputs_[output_idx] = strides.empty()
+            ? at::detail::empty_meta(sizes, options.device(at::kMeta))
+            : at::detail::empty_strided_meta(sizes, strides, options.device(at::kMeta));
+        if (!names.empty()) {
+            at::namedinference::propagate_names(outputs_[output_idx], names);
+        }
+        at::meta::structured_minimum::set_output_raw_strided(output_idx, sizes, strides, options, names);
+    }
+    void set_output_strided(
+        int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
+        at::TensorOptions options, at::DimnameList names
+    ) override {
+        set_output_raw_strided(output_idx, sizes, strides, options, names);
+    }
+    const at::Tensor & maybe_get_output(int64_t output_idx) override {
+        return outputs_[output_idx];
+    }
+    std::array<at::Tensor, 1> outputs_;
+};
+at::Tensor wrapper_Meta_define_minimum(const at::Tensor & self, const at::Tensor & other) {
+    structured_minimum_out_define_meta op;
+    op.meta(self, other);
+    return std::move(op.outputs_[0]);
+}
+}  // anonymous namespace
+TORCH_LIBRARY_IMPL(aten, Meta, m) {
+    m.impl("minimum", TORCH_FN(wrapper_Meta_define_minimum));
+}
+""",
+        )
+
+    # define_meta on a non-structured op (no aten structured meta) is not yet supported by the
+    # registration generator; it requires emitting a structured-style class with no aten base.
+    def test_define_meta_only_structured_for_now(self) -> None:
+        # div.out is non-structured here, so no Meta registration is emitted.
+        out = self.define_meta_registrations("- div.out")
+        self.assertEqual(out, "")
 
 
 if __name__ == "__main__":
