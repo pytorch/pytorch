@@ -448,7 +448,7 @@ class TestOrigami(TestCase):
                     fresh_cache(),
                     config.patch(patch_config),
                     mock.patch(
-                        "torch._inductor.template_heuristics.triton.origami",
+                        "torch._inductor.heuristics.template.triton.origami",
                         None,
                     ),
                 ):
