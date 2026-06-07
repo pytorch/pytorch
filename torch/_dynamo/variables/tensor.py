@@ -1798,12 +1798,48 @@ class TensorVariable(VariableTracker):
         if value is not None and config.enable_dynamo_decompositions:
             from torch._inductor import inductor_prims
 
+            orig_self = self
+            orig_dtype = self.dtype
+            work_self: VariableTracker = self
+            work_tensor1: VariableTracker = tensor1
+            work_tensor2: VariableTracker = tensor2
+            work_value: VariableTracker = value
+            use_cuda_opmath = self._should_use_cuda_opmath_for_addc_ops()
+            if use_cuda_opmath:
+                work_self = TensorVariable._to_dtype_var(tx, self, torch.float32)
+                work_tensor1 = TensorVariable._to_dtype_var(tx, tensor1, torch.float32)
+                work_tensor2 = TensorVariable._to_dtype_var(tx, tensor2, torch.float32)
+                if value.is_tensor():
+                    work_value = TensorVariable._to_dtype_var(tx, value, torch.float32)
+
             mul_var = variables.TorchInGraphFunctionVariable(torch.mul)
             fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
-            product = mul_var.call_function(tx, [tensor1, tensor2], {})
-            result = fma_var.call_function(tx, [product, value, self], {})
-            return self.call_method(tx, "copy_", [result], {})
+            product = mul_var.call_function(tx, [work_tensor1, work_tensor2], {})
+            result = fma_var.call_function(tx, [product, work_value, work_self], {})
+            if use_cuda_opmath and orig_dtype is not None:
+                result = TensorVariable._to_dtype_var(tx, result, orig_dtype)
+            return orig_self.call_method(tx, "copy_", [result], {})
         return None
+
+    def _should_use_cuda_opmath_for_addc_ops(self) -> bool:
+        return (
+            self.dtype in (torch.float16, torch.bfloat16)
+            and isinstance(self.device, torch.device)
+            and self.device.type in {"cuda", "xpu"}
+        )
+
+    @staticmethod
+    def _to_dtype_var(
+        tx: "InstructionTranslatorBase",
+        var: VariableTracker,
+        dtype: torch.dtype,
+    ) -> VariableTracker:
+        return var.call_method(
+            tx,
+            "to",
+            [],
+            {"dtype": VariableTracker.build(tx, dtype)},
+        )
 
     def method___setitem__(
         self,
@@ -1942,14 +1978,30 @@ class TensorVariable(VariableTracker):
         value: VariableTracker | None = None,
     ) -> VariableTracker | None:
         if value is not None and config.enable_dynamo_decompositions:
+            orig_self = self
+            orig_dtype = self.dtype
+            work_self: VariableTracker = self
+            work_tensor1: VariableTracker = tensor1
+            work_tensor2: VariableTracker = tensor2
+            work_value = value
+            use_cuda_opmath = self._should_use_cuda_opmath_for_addc_ops()
+            if use_cuda_opmath:
+                work_self = TensorVariable._to_dtype_var(tx, self, torch.float32)
+                work_tensor1 = TensorVariable._to_dtype_var(tx, tensor1, torch.float32)
+                work_tensor2 = TensorVariable._to_dtype_var(tx, tensor2, torch.float32)
+                if value.is_tensor():
+                    work_value = TensorVariable._to_dtype_var(tx, value, torch.float32)
+
             result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
-                tx, [tensor1, tensor2], {}
+                tx, [work_tensor1, work_tensor2], {}
             )
             from torch._inductor import inductor_prims
 
             fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
-            fma_result = fma_var.call_function(tx, [result, value, self], {})
-            return self.call_method(tx, "copy_", [fma_result], {})
+            fma_result = fma_var.call_function(tx, [result, work_value, work_self], {})
+            if use_cuda_opmath and orig_dtype is not None:
+                fma_result = TensorVariable._to_dtype_var(tx, fma_result, orig_dtype)
+            return orig_self.call_method(tx, "copy_", [fma_result], {})
         return None
 
     def sq_contains(

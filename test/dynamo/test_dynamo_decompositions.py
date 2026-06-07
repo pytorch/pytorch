@@ -602,6 +602,43 @@ class TestDynamoDecompositionsNumerics(TestCase):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addc_ops_low_precision_cuda_opmath(self, device):
+        if torch.device(device).type != "cuda":
+            self.skipTest("requires CUDA")
+
+        def addcmul_scalar(x, tensor1, tensor2, value):
+            return x.addcmul_(tensor1, tensor2, value=0.5)
+
+        def addcmul_tensor(x, tensor1, tensor2, value):
+            return x.addcmul_(tensor1, tensor2, value=value)
+
+        def addcdiv_scalar(x, tensor1, tensor2, value):
+            return x.addcdiv_(tensor1, tensor2, value=-0.01)
+
+        def addcdiv_tensor(x, tensor1, tensor2, value):
+            return x.addcdiv_(tensor1, tensor2, value=value)
+
+        for dtype in (torch.float16, torch.bfloat16):
+            torch.manual_seed(42)
+            x = torch.randn(128, device=device, dtype=dtype)
+            tensor1 = torch.randn(128, device=device, dtype=dtype)
+            tensor2 = torch.randn(128, device=device, dtype=dtype).abs() + 0.1
+            value = torch.tensor(-0.01)
+
+            for fn in (
+                addcmul_scalar,
+                addcmul_tensor,
+                addcdiv_scalar,
+                addcdiv_tensor,
+            ):
+                expected = fn(x.clone(), tensor1, tensor2, value)
+                actual = torch.compile(fn, backend="eager", fullgraph=True)(
+                    x.clone(), tensor1, tensor2, value
+                )
+                self.assertEqual(expected, actual, atol=0, rtol=0)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
     def test_addcmul__backward(self, device):
         """Compiled addcmul_ backward matches eager backward."""
 
