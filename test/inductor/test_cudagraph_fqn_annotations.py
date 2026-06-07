@@ -293,12 +293,14 @@ class TestCudagraphFqnAnnotations(TestCase):
                 torch.cuda.synchronize()
 
         # Export to Chrome trace JSON and read kernel events.  The CUPTI field
-        # "Graph Node Id" carries the same graphNodeId that keyed our annotations.
+        # "graph node id" carries the same graphNodeId that keyed our annotations.
         # Write to /artifacts/ when available (CI), otherwise use a temp file.
         import os
 
         artifacts_dir = "/artifacts"
-        if os.path.isdir(artifacts_dir) and os.access(artifacts_dir, os.W_OK):
+        use_artifacts = os.path.isdir(artifacts_dir) and os.access(artifacts_dir, os.W_OK)
+
+        if use_artifacts:
             trace_path = os.path.join(artifacts_dir, "cuda_graph_fqn_profiler_trace.json")
             prof.export_chrome_trace(trace_path)
             with open(trace_path) as f:
@@ -308,6 +310,12 @@ class TestCudagraphFqnAnnotations(TestCase):
                 prof.export_chrome_trace(fname)
                 with open(fname) as f:
                     trace = json.load(f)
+
+        # Save annotations (graph_node_id -> [{str: fqn}]) for post-processing.
+        if use_artifacts:
+            annotations_path = os.path.join(artifacts_dir, "cuda_graph_fqn_annotations.json")
+            with open(annotations_path, "w") as f:
+                json.dump({str(k): v for k, v in annotations.items()}, f, indent=2)
 
         kernel_events = [
             e for e in trace.get("traceEvents", []) if e.get("cat") == "kernel"
