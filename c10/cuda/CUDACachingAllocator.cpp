@@ -142,7 +142,7 @@ namespace Native {
  */
 
 // counter to track order for Mempool Registration
-std::atomic<int32_t> registration_counter_global{-1};
+static std::atomic<int32_t> registration_counter_global{-1};
 
 static char SHAREABLE_HANDLE_VERSION = 3;
 enum ShareableHandleType : char {
@@ -536,7 +536,10 @@ struct ExpandableSegment {
         C10_CUDA_DRIVER_CHECK(status);
 #endif
       }
-      handles_.at(i) = Handle{handle, std::nullopt};
+      handles_.at(i) = Handle{
+          .handle = handle,
+          .shareable_handle = std::nullopt,
+      };
     }
     mapAndSetAccess(begin, end);
     return rangeFromHandles(begin, end);
@@ -740,7 +743,10 @@ struct ExpandableSegment {
 #endif
         LOG(INFO) << "use posix fd to import expandable segments.";
         close(static_cast<int>(myfd));
-        segment->handles_.emplace_back(Handle{handle, std::nullopt});
+        segment->handles_.emplace_back(Handle{
+            .handle = handle,
+            .shareable_handle = std::nullopt,
+        });
       }
       close(static_cast<int>(pidfd));
 #endif // !_WIN32
@@ -765,7 +771,10 @@ struct ExpandableSegment {
             get_nvml_fabric_info(device),
             "}");
         LOG(INFO) << "use fabric handle to import expandable segments.";
-        segment->handles_.emplace_back(Handle{handle, std::nullopt});
+        segment->handles_.emplace_back(Handle{
+            .handle = handle,
+            .shareable_handle = std::nullopt,
+        });
       }
 #endif
     }
@@ -3246,10 +3255,8 @@ class DeviceCachingAllocator {
 
   void addPeerAccess(c10::DeviceIndex dev_to_access) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    if (std::find(
-            devices_with_peer_access_.begin(),
-            devices_with_peer_access_.end(),
-            dev_to_access) != devices_with_peer_access_.end()) {
+    if (std::ranges::find(devices_with_peer_access_, dev_to_access) !=
+        devices_with_peer_access_.end()) {
       return;
     }
     devices_with_peer_access_.push_back(dev_to_access);
@@ -3871,21 +3878,25 @@ class DeviceCachingAllocator {
     // configured limit. This prevents fatal HSA/driver aborts by throwing
     // OutOfMemoryError instead.
     if (CUDAAllocatorConfig::throw_on_cudamalloc_oom()) {
-      size_t device_total = static_cast<size_t>(device_prop.totalGlobalMem);
+      const size_t device_total = device_prop.totalGlobalMem;
+      const auto memory_fraction =
+          CUDAAllocatorConfig::per_process_memory_fraction();
       size_t max_allowed = static_cast<size_t>(
-          CUDAAllocatorConfig::per_process_memory_fraction() *
-          static_cast<double>(device_total));
+          memory_fraction * static_cast<double>(device_total));
       if (total_allocated_memory + size > max_allowed) {
         stats.num_oom_rejections++;
         p.oom_rejection_info = {
-            true, size, total_allocated_memory, device_total};
+            .rejected = true,
+            .alloc_size = size,
+            .total_allocated = total_allocated_memory,
+            .device_total = device_total,
+        };
         C10_LOG_EVERY_MS(WARNING, 60000)
             << "Preemptively rejecting allocation: requested "
             << format_size(size) << " but total_allocated_memory ("
             << format_size(total_allocated_memory)
             << ") + requested size would exceed memory limit ("
-            << format_size(max_allowed) << " = "
-            << CUDAAllocatorConfig::per_process_memory_fraction() * 100
+            << format_size(max_allowed) << " = " << memory_fraction * 100
             << "% of " << format_size(device_total)
             << "). Set throw_on_cudamalloc_oom:false to disable.";
         p.err = cudaErrorMemoryAllocation;
@@ -4107,10 +4118,8 @@ class DeviceCachingAllocator {
         block->size == block->expandable_segment_->size(),
         "block disagrees with segment");
     TORCH_INTERNAL_ASSERT(!block->mapped);
-    auto it = std::find(
-        expandable_segments_.begin(),
-        expandable_segments_.end(),
-        block->expandable_segment_);
+    auto it =
+        std::ranges::find(expandable_segments_, block->expandable_segment_);
     TORCH_INTERNAL_ASSERT(it != expandable_segments_.end());
     expandable_segments_.erase(it);
     block->pool->unmapped.erase(block);
@@ -4539,10 +4548,10 @@ class NativeCachingAllocator : public CUDAAllocator {
   std::array<AlignedMutex, kNumMutexShard> mutex;
 
   // allocated blocks by device pointer
-  std::array<ska::flat_hash_map<void*, Block*>, kNumMutexShard>
+  std::array<ska::flat_hash_map<const void*, Block*>, kNumMutexShard>
       allocated_blocks;
 
-  static size_t get_mutex_shard_id(void* ptr) {
+  static size_t get_mutex_shard_id(const void* ptr) {
     return twang_mix64(reinterpret_cast<uintptr_t>(ptr)) % kNumMutexShard;
   }
 
@@ -4561,7 +4570,7 @@ class NativeCachingAllocator : public CUDAAllocator {
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
 
-  Block* get_allocated_block(void* ptr, bool remove = false) {
+  Block* get_allocated_block(const void* ptr, bool remove = false) {
     const auto mutex_shard_id = get_mutex_shard_id(ptr);
     std::lock_guard<std::mutex> lock(mutex[mutex_shard_id].m);
     auto it = allocated_blocks[mutex_shard_id].find(ptr);
@@ -4770,7 +4779,7 @@ class NativeCachingAllocator : public CUDAAllocator {
 
   std::shared_ptr<GatheredContext> getContextForPointer(
       const void* ptr) override {
-    Block* block = get_allocated_block(const_cast<void*>(ptr));
+    Block* block = get_allocated_block(ptr);
     if (!block) {
       return nullptr;
     }
