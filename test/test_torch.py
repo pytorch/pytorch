@@ -2073,7 +2073,8 @@ class TestTorchDeviceType(TestCase):
                           lambda: torch.randperm(20000, device=device),
                           lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
                           lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
-                          lambda: torch.any(y))
+                          lambda: torch.any(y),
+                          lambda: torch.normal(x, x))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
                        lambda: _ind_get_fn(x, mask),
