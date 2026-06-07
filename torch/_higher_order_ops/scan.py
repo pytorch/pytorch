@@ -26,12 +26,12 @@ from torch._higher_order_ops.utils import (
     mask_list,
     materialize_as_graph,
     reenter_make_fx,
+    register_fake,
     split_into_chunks,
     unique_graph_id,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -269,11 +269,38 @@ class ScanOp(HigherOrderOperator):
             mutated_inputs,
             outputs,
         ) = check_input_alias_and_mutation_return_outputs(combine_gm)
-        if len(mutated_inputs) > 0:
+
+        # Mutation semantics for scan:
+        # - additional_inputs is mutable: loop-invariant tensor identity
+        #   across sequential iterations, same semantics as while_loop's
+        #   additional_inputs (CUDA-graph-friendly lifted / pre-allocated
+        #   buffers such as KV caches or workspace scratch).
+        # - init is NOT mutable: init is only the *initial* carry,
+        #   thus an in-place update to init only affects step 0.
+        # - xs is NOT mutable: each iteration sees a fresh, storage-disjoint
+        #   slice (xs[t] and xs[t+1] share no storage), so a mutation on
+        #   xs[t] cannot be observed by iteration t+1. The only externally-
+        #   observable effect is "write-back to xs's t-th slice", which is
+        #   already expressible via the ys output path at no extra cost.
+        #   If xs-like in-place updates are required, pass the buffer via
+        #   additional_inputs and index into it inside combine_fn.
+        n_init = len(init)
+        n_xs = len(xs)
+        init_mutated = [i for i in mutated_inputs if i < n_init]
+        xs_mutated = [i for i in mutated_inputs if n_init <= i < n_init + n_xs]
+        if init_mutated or xs_mutated:
+            parts = []
+            if init_mutated:
+                parts.append(f"init {init_mutated}")
+            if xs_mutated:
+                parts.append(f"xs {[i - n_init for i in xs_mutated]}")
             raise RuntimeError(
-                "For scan, combine_fn cannot have in-place mutations but found "
-                f"{mutated_inputs}-th inputs are mutated."
+                "For scan, combine_fn can only mutate additional_inputs, "
+                f"but found mutations at: {', '.join(parts)}. Update the "
+                "carry via the combine_fn return value; for in-place lifted "
+                "buffers use additional_inputs."
             )
+        mutated_set = set(mutated_inputs)
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("combine_fn", combine_gm)
@@ -285,7 +312,11 @@ class ScanOp(HigherOrderOperator):
             schema_gen.add_arg(f"xs{idx}", arg)
 
         for idx, arg in enumerate(additional_inputs):
-            schema_gen.add_arg(f"additional_input{idx}", arg)
+            schema_gen.add_arg(
+                f"additional_input{idx}",
+                arg,
+                is_mutated=(n_init + n_xs + idx) in mutated_set,
+            )
 
         for out in outputs:
             schema_gen.add_output(out)
@@ -848,23 +879,22 @@ def scan_proxy_mode(mode, combine_fn, init, xs, additional_inputs):
     return trace_scan(mode, scan_op, combine_fn, init, xs, additional_inputs)
 
 
-@scan_op.py_impl(FakeTensorMode)
-def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
-    with mode:
-        scan_length = xs[0].shape[0]
-        carry, outputs = _extract_carry_and_out(
-            combine_fn(
-                *init,
-                *[first_slice_copy(inp) for inp in xs],
-                *additional_inputs,
-            ),
-            len(init),
-        )
-        out = (
-            *carry,
-            *(stack_y(t, scan_length) for t in outputs),
-        )
-        return out
+@register_fake(scan_op, skip_cache=True)
+def scan_fake_tensor_mode(combine_fn, init, xs, additional_inputs):
+    scan_length = xs[0].shape[0]
+    carry, outputs = _extract_carry_and_out(
+        combine_fn(
+            *init,
+            *[first_slice_copy(inp) for inp in xs],
+            *additional_inputs,
+        ),
+        len(init),
+    )
+    out = (
+        *carry,
+        *(stack_y(t, scan_length) for t in outputs),
+    )
+    return out
 
 
 @scan_op.py_functionalize_impl
