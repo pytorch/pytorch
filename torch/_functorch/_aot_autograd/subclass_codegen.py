@@ -139,16 +139,18 @@ def _codegen_wrap_subclass(
     """Emit code to reconstruct one subclass output. Returns the variable name."""
     inner_dict_var = state.fresh_name("_out_inner")
     entries: list[str] = []
+    attr_exprs: dict[str, str] = {}
 
     for attr, attr_meta in meta.attrs.items():
         match attr_meta:
             case PlainTensorMeta() | OpaqueMeta():
                 idx = out_idx_ref[0]
                 out_idx_ref[0] += 1
-                entries.append(f"{attr!r}: unwrapped_outs[{idx}]")
+                attr_expr = f"unwrapped_outs[{idx}]"
             case SubclassCreationMeta():
-                nested_var = _codegen_wrap_subclass(state, attr_meta, out_idx_ref)
-                entries.append(f"{attr!r}: {nested_var}")
+                attr_expr = _codegen_wrap_subclass(state, attr_meta, out_idx_ref)
+        attr_exprs[attr] = attr_expr
+        entries.append(f"{attr!r}: {attr_expr}")
 
     state.emit(f"{inner_dict_var} = {{{', '.join(entries)}}}")
 
@@ -171,8 +173,22 @@ def _codegen_wrap_subclass(
             return f"({parts[0]},)"
         return f"({', '.join(parts)})"
 
-    size_expr = _build_tuple(meta.outer_size, size_placeholders)
-    stride_expr = _build_tuple(meta.outer_stride, stride_placeholders)
+    def _consume_placeholders(placeholders: list[bool]) -> None:
+        out_idx_ref[0] += sum(placeholders)
+
+    outer_size_from_attr = getattr(meta, "outer_size_from_attr", None)
+    outer_stride_from_attr = getattr(meta, "outer_stride_from_attr", None)
+    if outer_size_from_attr is not None:
+        _consume_placeholders(size_placeholders)
+        size_expr = f"{attr_exprs[outer_size_from_attr]}.size()"
+    else:
+        size_expr = _build_tuple(meta.outer_size, size_placeholders)
+
+    if outer_stride_from_attr is not None:
+        _consume_placeholders(stride_placeholders)
+        stride_expr = f"{attr_exprs[outer_stride_from_attr]}.stride()"
+    else:
+        stride_expr = _build_tuple(meta.outer_stride, stride_placeholders)
 
     type_name = state.add_global(
         state.fresh_name("_subclass_type"),

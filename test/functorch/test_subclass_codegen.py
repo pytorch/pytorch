@@ -71,7 +71,7 @@ def inner_fn(args):
     args.clear()
     unwrapped_outs = compiled_fn(unwrapped_args)
     _out_inner_2 = {'a': unwrapped_outs[0], 'b': unwrapped_outs[1]}
-    _out_5 = _subclass_type_3.__tensor_unflatten__(_out_inner_2, _meta_4, (4,), (1,))
+    _out_5 = _subclass_type_3.__tensor_unflatten__(_out_inner_2, _meta_4, unwrapped_outs[0].size(), unwrapped_outs[0].stride())
     return (_out_5,)""",
         )
 
@@ -116,11 +116,11 @@ def inner_fn(args):
     args.clear()
     unwrapped_outs = compiled_fn(unwrapped_args)
     _out_inner_5 = {'a': unwrapped_outs[0], 'b': unwrapped_outs[1]}
-    _out_8 = _subclass_type_6.__tensor_unflatten__(_out_inner_5, _meta_7, (4,), (1,))
+    _out_8 = _subclass_type_6.__tensor_unflatten__(_out_inner_5, _meta_7, unwrapped_outs[0].size(), unwrapped_outs[0].stride())
     _out_inner_9 = {'a': unwrapped_outs[2], 'b': unwrapped_outs[3]}
-    _out_12 = _subclass_type_10.__tensor_unflatten__(_out_inner_9, _meta_11, (4,), (1,))
+    _out_12 = _subclass_type_10.__tensor_unflatten__(_out_inner_9, _meta_11, unwrapped_outs[2].size(), unwrapped_outs[2].stride())
     _out_inner_4 = {'a': _out_8, 'b': _out_12}
-    _out_15 = _subclass_type_13.__tensor_unflatten__(_out_inner_4, _meta_14, (4,), (1,))
+    _out_15 = _subclass_type_13.__tensor_unflatten__(_out_inner_4, _meta_14, _out_8.size(), _out_8.stride())
     return (_out_15,)""",
         )
 
