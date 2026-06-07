@@ -1026,8 +1026,8 @@ def assert_scalar_meta(val, assert_msg):
         val = val != 0
 
     if isinstance(val, SymBool):
-        if val.node.shape_env.has_branch_local_shape_refinement():
-            val.node.shape_env.assume_branch_local_shape_expr(val.node.expr)
+        if val.node.shape_env._has_branch_local_shape_refinement():
+            val.node.shape_env._assume_branch_local_shape_expr(val.node.expr)
             return
 
         from torch.fx.experimental.symbolic_shapes import expect_true

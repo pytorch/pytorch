@@ -2493,7 +2493,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                         if branch
                         else sympy.Not(pred_expr.node.expr)
                     )
-                    tx.output.shape_env.assume_branch_local_shape_expr(branch_expr)
+                    tx.output.shape_env._assume_branch_local_shape_expr(branch_expr)
 
                 (
                     (ret_val, ret_spec),

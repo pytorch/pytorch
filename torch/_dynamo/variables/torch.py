@@ -2509,22 +2509,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             if isinstance(predicate_vt, SymNodeVariable):
                 sym_expr = predicate_vt.sym_num
-                if tx.output.shape_env.has_branch_local_shape_refinement():
+                if tx.output.shape_env._has_branch_local_shape_refinement():
+                    assert_msg = (
+                        "Expected cond to be True, but got False. "
+                        f"Runtime assertion failed for expression {sym_expr}"
+                    )
                     tx.output.create_proxy(
                         "call_function",
                         torch.ops.aten._assert_scalar.default,
                         *proxy_args_kwargs(
                             (
                                 predicate_vt,
-                                ConstantVariable.create(
-                                    "Expected cond to be True, but got False."
-                                ),
+                                ConstantVariable.create(assert_msg),
                             ),
                             {},
                         ),
                     )
                     if isinstance(sym_expr, torch.SymBool):
-                        tx.output.shape_env.assume_branch_local_shape_expr(
+                        tx.output.shape_env._assume_branch_local_shape_expr(
                             sym_expr.node.expr
                         )
                     return ConstantVariable.create(None)

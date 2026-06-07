@@ -1721,9 +1721,9 @@ def _check_with(
 
     if (
         isinstance(cond, SymBool)
-        and cond.node.shape_env.has_branch_local_shape_refinement()
+        and cond.node.shape_env._has_branch_local_shape_refinement()
     ):
-        cond.node.shape_env.assume_branch_local_shape_expr(cond.node.expr)
+        cond.node.shape_env._assume_branch_local_shape_expr(cond.node.expr)
         return
 
     if expect_true(cond):

@@ -10327,7 +10327,7 @@ class Conditional(ExternKernel):
                         if branch
                         else sympy.Not(fake_pred.node.expr)
                     )
-                    shape_env.assume_branch_local_shape_expr(expr)
+                    shape_env._assume_branch_local_shape_expr(expr)
                     yield
 
             return ctx()

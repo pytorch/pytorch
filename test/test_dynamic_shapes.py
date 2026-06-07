@@ -8,7 +8,6 @@ import operator
 import unittest
 
 import numpy as np
-import pytest
 import sympy
 
 import torch
@@ -304,7 +303,7 @@ class TestPySymInt(TestCase):
         shape_env._set_replacement(a, b, "test")
 
         with shape_env.branch_local_shape_refinement():
-            self.assertTrue(shape_env.assume_branch_local_shape_expr(sympy.Eq(b, 1)))
+            self.assertTrue(shape_env._assume_branch_local_shape_expr(sympy.Eq(b, 1)))
             self.assertEqual(shape_env.simplify(a), sympy.Integer(1))
 
         self.assertEqual(shape_env.replacements[a], b)
@@ -323,7 +322,7 @@ class TestPySymInt(TestCase):
         target_exprs = set(shape_env.validator._target_exprs)
 
         with shape_env.branch_local_shape_refinement():
-            self.assertTrue(shape_env.assume_branch_local_shape_expr(sympy.Eq(b, 1)))
+            self.assertTrue(shape_env._assume_branch_local_shape_expr(sympy.Eq(b, 1)))
             self.assertEqual(shape_env.simplify(a), sympy.Integer(1))
 
         self.assertEqual(shape_env.validator._target_exprs, target_exprs)
@@ -3898,7 +3897,6 @@ class TestUnbacked(TestCase):
         or IS_WINDOWS,
         "https://github.com/pytorch/pytorch/issues/163953",
     )
-    @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/163785")
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_do_not_guard_unbacked_inputs(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")

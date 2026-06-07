@@ -4254,9 +4254,8 @@ class ShapeEnv:
                 self.replacements.pop(k, None)
             self.frozen = False
 
-    @contextmanager
-    def branch_local_shape_refinement(self) -> Generator[None, None, None]:
-        """Temporarily add counterfactual shape facts while tracing a HOP branch."""
+    @record_shapeenv_event()
+    def _branch_local_shape_refinement_enter(self) -> None:
         self._branch_local_shape_refinement_stack.append(
             (
                 self.axioms.copy(),
@@ -4272,56 +4271,89 @@ class ShapeEnv:
                 self.symbol_guard_counter.copy(),
             )
         )
+
+    @record_shapeenv_event()
+    def _branch_local_shape_refinement_exit(self) -> None:
+        (
+            old_axioms,
+            old_replacements,
+            old_var_to_range,
+            old_var_to_range_sloc,
+            old_guard_len,
+            old_deferred_runtime_assert_lens,
+            old_num_deferred_runtime_asserts,
+            old_symbol_guard_counter,
+        ) = self._branch_local_shape_refinement_stack.pop()
+
+        old_range_symbols = set(old_var_to_range)
+        new_var_to_range = {
+            k: v for k, v in self.var_to_range.items() if k not in old_var_to_range
+        }
+        new_var_to_range_sloc = {
+            k: v
+            for k, v in self.var_to_range_sloc.items()
+            if k not in old_var_to_range_sloc
+        }
+        new_deferred_runtime_asserts = {
+            k: v
+            for k, v in self.deferred_runtime_asserts.items()
+            if k not in old_deferred_runtime_assert_lens
+            and not (isinstance(k, sympy.Symbol) and k in old_range_symbols)
+        }
+
+        changed = (
+            self.axioms != old_axioms
+            or self.replacements != old_replacements
+            or self.var_to_range != old_var_to_range
+            or self.var_to_range_sloc != old_var_to_range_sloc
+        )
+        self.axioms = old_axioms
+        self.replacements = old_replacements
+        self.var_to_range = old_var_to_range
+        self.var_to_range.update(new_var_to_range)
+        self.var_to_range_sloc = old_var_to_range_sloc
+        self.var_to_range_sloc.update(new_var_to_range_sloc)
+        if len(self.guards) != old_guard_len:
+            del self.guards[old_guard_len:]
+            changed = True
+        for k in list(self.deferred_runtime_asserts):
+            old_len = old_deferred_runtime_assert_lens.get(k)
+            if old_len is None:
+                self.deferred_runtime_asserts.pop(k)
+                changed = True
+            elif len(self.deferred_runtime_asserts[k]) != old_len:
+                del self.deferred_runtime_asserts[k][old_len:]
+                changed = True
+        self.deferred_runtime_asserts.update(new_deferred_runtime_asserts)
+
+        new_num_deferred_runtime_asserts = old_num_deferred_runtime_asserts + sum(
+            len(v) for v in new_deferred_runtime_asserts.values()
+        )
+        if self.num_deferred_runtime_asserts != new_num_deferred_runtime_asserts:
+            self.num_deferred_runtime_asserts = new_num_deferred_runtime_asserts
+            changed = True
+        if self.symbol_guard_counter != old_symbol_guard_counter:
+            self.symbol_guard_counter = old_symbol_guard_counter
+            changed = True
+        if changed:
+            self._replacements_version_counter += 1
+            self._update_version_counter()
+            self._version_counter += 1
+            self._maybe_evaluate_static.cache_clear()
+
+    @contextmanager
+    def branch_local_shape_refinement(self) -> Generator[None, None, None]:
+        """Temporarily add counterfactual shape facts while tracing a HOP branch."""
+        self._branch_local_shape_refinement_enter()
         try:
             yield
         finally:
-            (
-                old_axioms,
-                old_replacements,
-                old_var_to_range,
-                old_var_to_range_sloc,
-                old_guard_len,
-                old_deferred_runtime_assert_lens,
-                old_num_deferred_runtime_asserts,
-                old_symbol_guard_counter,
-            ) = self._branch_local_shape_refinement_stack.pop()
-            changed = (
-                self.axioms != old_axioms
-                or self.replacements != old_replacements
-                or self.var_to_range != old_var_to_range
-                or self.var_to_range_sloc != old_var_to_range_sloc
-            )
-            self.axioms = old_axioms
-            self.replacements = old_replacements
-            self.var_to_range = old_var_to_range
-            self.var_to_range_sloc = old_var_to_range_sloc
-            if len(self.guards) != old_guard_len:
-                del self.guards[old_guard_len:]
-                changed = True
-            for k in list(self.deferred_runtime_asserts):
-                old_len = old_deferred_runtime_assert_lens.get(k)
-                if old_len is None:
-                    self.deferred_runtime_asserts.pop(k)
-                    changed = True
-                elif len(self.deferred_runtime_asserts[k]) != old_len:
-                    del self.deferred_runtime_asserts[k][old_len:]
-                    changed = True
-            if self.num_deferred_runtime_asserts != old_num_deferred_runtime_asserts:
-                self.num_deferred_runtime_asserts = old_num_deferred_runtime_asserts
-                changed = True
-            if self.symbol_guard_counter != old_symbol_guard_counter:
-                self.symbol_guard_counter = old_symbol_guard_counter
-                changed = True
-            if changed:
-                self._replacements_version_counter += 1
-                self._update_version_counter()
-                self._version_counter += 1
-                self._maybe_evaluate_static.cache_clear()
+            self._branch_local_shape_refinement_exit()
 
-    def has_branch_local_shape_refinement(self) -> bool:
+    def _has_branch_local_shape_refinement(self) -> bool:
         return bool(self._branch_local_shape_refinement_stack)
 
-    def assume_branch_local_shape_expr(self, expr: SympyBoolean) -> bool:
+    def _assume_branch_local_shape_expr(self, expr: SympyBoolean) -> bool:
         if not self._branch_local_shape_refinement_stack:
             return False
 

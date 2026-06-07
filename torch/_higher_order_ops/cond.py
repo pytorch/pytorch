@@ -49,7 +49,7 @@ def _branch_refinement_context(pred, branch):
 
         with pred.node.shape_env.branch_local_shape_refinement():
             expr = pred.node.expr if branch else sympy.Not(pred.node.expr)
-            pred.node.shape_env.assume_branch_local_shape_expr(expr)
+            pred.node.shape_env._assume_branch_local_shape_expr(expr)
             yield
 
     return ctx()
@@ -494,6 +494,8 @@ def _merge_output(
                 s0.node.expr,
                 torch.utils._sympy.value_ranges.ValueRanges.unknown(),
             )
+            if r is None:
+                r = torch.utils._sympy.value_ranges.ValueRanges.unknown()
             return r.lower if lower_bound else r.upper
 
         return min(_bound(s0, True), _bound(s1, True)), max(
