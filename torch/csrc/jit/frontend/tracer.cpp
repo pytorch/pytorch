@@ -981,7 +981,7 @@ void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
        << "that also reference this data will not reflect this change in the trace! "
        << "On the other hand, if all other views use the same memory chunk, but are disjoint (e.g. "
        << "are outputs of torch.split), this might still be safe.";
-    warn(ss.str().c_str());
+    warn(std::move(ss).str().c_str());
   }
 }
 void ensureUniqueIfOutOfPlaced(

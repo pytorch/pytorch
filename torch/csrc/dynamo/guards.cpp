@@ -253,23 +253,23 @@ std::string TensorCheck::check_verbose(
     fail_reason << "dispatch key set mismatch. expected "
                 << c10::DispatchKeySet(c10::DispatchKeySet::RAW, dispatch_key_)
                 << ", actual " << state.apply(v.key_set());
-    return fail_reason.str();
+    return std::move(fail_reason).str();
   } else if (dtype_ != v.dtype().toScalarType()) {
     // return fmt::format("tensor dtype mismatch. expected {}, actual {}",
     // dtype_, v.dtype().toScalarType());
     fail_reason << "dtype mismatch. expected " << dtype_ << ", actual "
                 << v.dtype().toScalarType();
-    return fail_reason.str();
+    return std::move(fail_reason).str();
   } else if (device_index_ != v.device().index()) {
     fail_reason << "Tensor device index mismatch. Expected device index to be "
                 << device_index_ << ", actual " << v.device().index();
-    return fail_reason.str();
+    return std::move(fail_reason).str();
   } else if (requires_grad_ != v.requires_grad()) {
     // return fmt::format("tensor requires_grad mismatch. expected {}",
     // requires_grad_);
     fail_reason << "requires_grad mismatch. expected requires_grad="
                 << requires_grad_;
-    return fail_reason.str();
+    return std::move(fail_reason).str();
   }
   auto ndim = v.ndimension();
   if (ndim != dim_) {
@@ -277,7 +277,7 @@ std::string TensorCheck::check_verbose(
     // sizes_.size(), ndim);
     fail_reason << "rank mismatch. expected " << sizes_.size() << ", actual "
                 << ndim;
-    return fail_reason.str();
+    return std::move(fail_reason).str();
   }
   const auto& sizes = v.sym_sizes();
   for (auto i : c10::irange(ndim)) {
@@ -285,7 +285,7 @@ std::string TensorCheck::check_verbose(
     if (known_size.has_value() && (known_size.value() != sizes[i])) {
       fail_reason << "size mismatch at index " << i << ". expected "
                   << known_size.value() << ", actual " << sizes[i];
-      return fail_reason.str();
+      return std::move(fail_reason).str();
     }
   }
   const bool supports_stride =
@@ -297,7 +297,7 @@ std::string TensorCheck::check_verbose(
       if (known_stride.has_value() && known_stride.value() != strides[i]) {
         fail_reason << "stride mismatch at index " << i << ". expected "
                     << known_stride.value() << ", actual " << strides[i];
-        return fail_reason.str();
+        return std::move(fail_reason).str();
       }
     }
   }
@@ -546,7 +546,7 @@ PyObject* TensorGuards_check_verbose(
         fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
         Py_DECREF(type_str);
       }
-      return Py_BuildValue("s", fail_reason.str().c_str());
+      return Py_BuildValue("s", std::move(fail_reason).str().c_str());
     }
 
     auto insertion = unique_tensors.insert({item, nullptr});
@@ -555,7 +555,7 @@ PyObject* TensorGuards_check_verbose(
       fail_reason << "Duplicate tensor found where not expected! ";
       fail_reason << tensor_check_names[i]
                   << "should not alias to anything, but is aliased";
-      return Py_BuildValue("s", fail_reason.str().c_str());
+      return Py_BuildValue("s", std::move(fail_reason).str().c_str());
     }
     std::string fail_reason = checks[i].check_verbose(
         state, THPVariable_Unpack(item), tensor_check_names[i]);
@@ -947,7 +947,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     if (op_name) {
       msg << " for op: " << op_name;
     }
-    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
+    PyErr_SetString(PyExc_TypeError, std::move(msg).str().c_str());
     return nullptr;
   }
   if (!PyTuple_CheckExact(size) || !PyTuple_CheckExact(stride)) {
@@ -956,7 +956,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     if (op_name) {
       msg << " for op: " << op_name;
     }
-    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
+    PyErr_SetString(PyExc_TypeError, std::move(msg).str().c_str());
     return nullptr;
   }
   at::Tensor tensor = THPVariable_Unpack(item);
@@ -967,7 +967,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     if (op_name) {
       msg << " for op: " << op_name;
     }
-    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    PyErr_SetString(PyExc_AssertionError, std::move(msg).str().c_str());
     return nullptr;
   }
 
@@ -1002,7 +1002,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     msg << "\nThis error most often comes from a incorrect fake (aka meta) kernel for a custom op.";
     msg << "\nUse torch.library.opcheck to test your custom op.";
     msg << "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck";
-    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    PyErr_SetString(PyExc_AssertionError, std::move(msg).str().c_str());
     return nullptr;
   }
 
@@ -1027,7 +1027,7 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
     if (op_name) {
       msg << " for op: " << op_name;
     }
-    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
+    PyErr_SetString(PyExc_TypeError, std::move(msg).str().c_str());
     return nullptr;
   }
   if (alignment == 0) {
@@ -1036,7 +1036,7 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
     if (op_name) {
       msg << " in op: " << op_name;
     }
-    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    PyErr_SetString(PyExc_AssertionError, std::move(msg).str().c_str());
     return nullptr;
   }
 
@@ -1052,7 +1052,7 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
     msg << "\nExpect the tensor to be " << alignment
         << " bytes aligned. Fail due to storage_offset=" << storage_offset
         << " itemsize=" << itemsize;
-    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    PyErr_SetString(PyExc_AssertionError, std::move(msg).str().c_str());
     return nullptr;
   }
 
@@ -1630,7 +1630,7 @@ class GuardDebugInfo {
        << "verbose_code_parts=" << verbose_code_parts << ",\n"
        << "num_guards_executed=" << num_guards_executed << ",\n"
        << "user_stack=" << user_stack << ")\n";
-    return ss.str();
+    return std::move(ss).str();
   }
 
   // Whether the guard passed or failed.
@@ -5068,7 +5068,7 @@ class TENSOR_MATCH : public LeafGuard {
         fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
         Py_DECREF(type_str);
       }
-      return GuardDebugInfo(false, fail_reason.str(), 0);
+      return GuardDebugInfo(false, std::move(fail_reason).str(), 0);
     }
 
     std::string fail_reason = _tensor_check->check_verbose(
