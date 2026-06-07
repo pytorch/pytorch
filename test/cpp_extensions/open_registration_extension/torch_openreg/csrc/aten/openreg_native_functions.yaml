@@ -4,11 +4,11 @@ use_out_as_primary: true
 device_guard: true
 supported:
   - maximum.out:
-    structured: true
+      structured: true
   - minimum.out:
-    structured: true
-    ext_structured_meta: true
+      structured: true
+      ext_structured_meta: true
   # Non-structured op: out-as-primary only (no native structured kernel). The
-  # backend supplies div_out via TORCH_PRIV1_FUNC and torchgen derives the
+  # backend supplies div_out via TORCH_PRIVATEUSE1_FUNC and torchgen derives the
   # functional/inplace variants from it.
   - div.out

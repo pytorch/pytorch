@@ -154,16 +154,29 @@ def parse_backend_yaml(
             ext_structured_meta = False
             device_guard = use_device_guard
             if isinstance(op, dict):
-                names = [k for k in op if k not in _SUPPORTED_OP_OPTION_KEYS]
-                if len(names) != 1:
+                # An op with options is a single-key mapping whose value is the option dict
+                # (the "nested" form):
+                #   - minimum.out:
+                #       structured: true
+                # The "flat" form (options as siblings of the op name) is rejected: it is a
+                # footgun -- one extra space silently turns an option into the op's value.
+                if len(op) != 1:
                     raise AssertionError(
-                        f"Expected exactly one operator name per entry, but got {names} in "
-                        f"{sorted(op)}. Supported option keys: {sorted(_SUPPORTED_OP_OPTION_KEYS)}."
+                        f"Each 'supported' entry must be a single operator mapping whose value "
+                        f"holds the options, but got keys {sorted(op)}. Indent the options under "
+                        f"the operator name."
                     )
-                _op = names[0]
-                structured = op.get("structured", False)
-                ext_structured_meta = op.get("ext_structured_meta", False)
-                device_guard = op.get("device_guard", use_device_guard)
+                _op, opts = next(iter(op.items()))
+                opts = opts or {}
+                unknown = set(opts) - _SUPPORTED_OP_OPTION_KEYS
+                if unknown:
+                    raise AssertionError(
+                        f"Operator '{_op}' has unknown option keys {sorted(unknown)}. "
+                        f"Supported option keys: {sorted(_SUPPORTED_OP_OPTION_KEYS)}."
+                    )
+                structured = opts.get("structured", False)
+                ext_structured_meta = opts.get("ext_structured_meta", False)
+                device_guard = opts.get("device_guard", use_device_guard)
                 if ext_structured_meta and not structured:
                     raise AssertionError(
                         f"Operator '{_op}' has 'ext_structured_meta: True' but 'structured: False'. "
@@ -436,12 +449,15 @@ def gen_dispatchkey_nativefunc_headers(
     backend_index = backend_indices[backend_dispatch_key]
     meta_includes = []
 
-    # Generate {op}_meta.h for each structured op for PrivateUse1
+    # Generate {op}_meta.h for each op this backend registered as *structured*. We must gate on
+    # the op's own metadata.structured (not just g.structured, the aten-native structured-ness):
+    # an op can be structured in aten but registered non-structured here (out-as-primary only),
+    # in which case the generated struct does not inherit at::meta::structured_X and the meta
+    # header would be an unused include leaking into the generated header.
     for g in grouped_native_functions:
-        # NativeFunctionsGroup and defined as structured in aten native
         if isinstance(g, NativeFunctionsGroup) and g.structured:
-            # Check if 'out', which is primary in aten native, is implemented in PrivateUse1
-            if backend_index.has_kernel(g.out):
+            metadata = backend_index.get_kernel(g.out)
+            if metadata is not None and metadata.structured:
                 base_name = g.functional.func.name.name.base
                 meta_includes.append(f"#include <ATen/ops/{base_name}_meta.h>")
 
