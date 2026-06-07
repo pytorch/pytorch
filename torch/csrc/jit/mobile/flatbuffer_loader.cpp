@@ -323,7 +323,13 @@ mobile::Module FlatbufferLoader::parseModule(
   for (const auto& f : all_functions_) {
     uint32_t class_index =
         ivalues->Get(f.first)->val_as_Function()->class_type();
-    ClassTypePtr class_type = all_types_[class_index];
+    // class_index is parsed from the (untrusted) flatbuffer and is not
+    // range-checked by VerifyModuleBuffer; validate it before indexing.
+    ClassTypePtr class_type = getType(class_index);
+    TORCH_CHECK(
+        class_type != nullptr,
+        "Parsing flatbuffer module: function references uninitialized class type at index ",
+        class_index);
     class_type->addMethod(f.second);
   }
 
@@ -744,7 +750,13 @@ void FlatbufferLoader::extractJitSourceAndConstants(
     if (f.first >= mobile_ivalue_size_) {
       uint32_t class_index =
           ivalues->Get(f.first)->val_as_Function()->class_type();
-      ClassTypePtr class_type = all_types_[class_index];
+      // See note in parseModule: class_index is untrusted and must be
+      // validated before indexing all_types_.
+      ClassTypePtr class_type = getType(class_index);
+      TORCH_CHECK(
+          class_type != nullptr,
+          "Parsing flatbuffer module: function references uninitialized class type at index ",
+          class_index);
       class_type->addMethod(f.second);
     }
   }
