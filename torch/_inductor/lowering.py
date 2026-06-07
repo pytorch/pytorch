@@ -50,7 +50,6 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_unbacked_symbols,
     resolve_unbacked_bindings,
-    SymTypes,
 )
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
@@ -1035,7 +1034,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
-        return fallback_handler(aten.view.dtype)(x, dtype)
+        x_cont = ir.ExternKernel.require_contiguous_strides(x)
+        return fallback_handler(aten.view.dtype)(x_cont, dtype)
     else:
         return TensorBox(DtypeView.create(x, dtype))
 
@@ -2904,7 +2904,7 @@ make_fallback(torch.ops.streams.synchronize_device.default)
 def rand(*args, **kwargs):
     if kwargs.get("generator") is not None:
         return fallback_rand_generator(*args, **kwargs)
-    elif config.fallback_random:
+    elif config.fallback_random or kwargs.get("pin_memory"):
         kwargs.pop("generator", None)
         return fallback_rand_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
@@ -2914,7 +2914,7 @@ def rand(*args, **kwargs):
 def randn(*args, **kwargs):
     if kwargs.get("generator") is not None:
         return fallback_randn_generator(*args, **kwargs)
-    elif config.fallback_random:
+    elif config.fallback_random or kwargs.get("pin_memory"):
         kwargs.pop("generator", None)
         return fallback_randn_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
@@ -2922,7 +2922,7 @@ def randn(*args, **kwargs):
 
 @register_lowering(inductor_prims.force_stride_order, type_promotion_kind=None)
 def inductor_force_stride_order(input_tensor, stride):
-    stride_order = ir.get_stride_order(stride, V.graph.sizevars.shape_env)
+    stride_order = ir.get_stride_order(stride)
     return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
 
 
@@ -3048,8 +3048,8 @@ def inductor_randint(
         return ops.randint64(
             seed_loader([]),
             ops.index_expr(random_pos(index), torch.int32),
-            ops.index_expr(low, torch.int64),
-            ops.index_expr(high, torch.int64),
+            ops.value_expr(low, torch.int64),
+            ops.value_expr(high, torch.int64),
         )
 
     return Pointwise.create(
@@ -3530,7 +3530,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
 # WIP
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
-make_fallback(aten.adaptive_max_pool3d)  # @isuruf
+make_fallback(aten.adaptive_max_pool3d, override_decomp=True)
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 
 
@@ -3689,9 +3689,6 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
 
-# Needs dimname support
-make_fallback(aten.zeros.names)
-
 # 6) Pattern-matched
 make_fallback(
     aten._scaled_dot_product_efficient_attention.default,
@@ -3774,19 +3771,32 @@ def copy(self, src, non_blocking=False):
 
     if self.get_size() != src.get_size():
         out = expand(x, self.get_size())
-        return clone(out)
-    return clone(x)
+        result = clone(out)
+    else:
+        result = clone(x)
+
+    self_layout = self.maybe_get_layout()
+    if self_layout is not None and self_layout.is_pinned:
+        _realize_as_pinned(result)
+    return result
 
 
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=None):
-    # TODO(jansel): memory format
+    # Don't materialize the layout here based on memory_format,
+    # as we want to give the scheduler opportunity to perform layout optimization.
+    # Let the downstream op handle the input stride as needed.
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=x.make_loader(),
         ranges=list(x.get_size()),
     )
+
+
+def _realize_as_pinned(result):
+    result.realize()
+    result.data.data.get_layout().is_pinned = True
 
 
 def clone_preserve_reinterpret_view(x):
@@ -3810,8 +3820,18 @@ def clone_preserve_reinterpret_view(x):
     return x
 
 
+def lift_fresh_copy(x):
+    result = clone(x)
+    input_layout = x.maybe_get_layout()
+    if input_layout is not None and input_layout.is_pinned:
+        # torch.tensor(..., pin_memory=True) constants reach Inductor as a
+        # pinned constant followed by lift_fresh_copy.
+        _realize_as_pinned(result)
+    return result
+
+
 if hasattr(aten, "lift_fresh_copy"):
-    register_lowering(aten.lift_fresh_copy)(clone)
+    register_lowering(aten.lift_fresh_copy)(lift_fresh_copy)
 
 
 @register_lowering(prims.iota)
@@ -3976,7 +3996,6 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     if layout == torch.jagged:
         layout = torch.strided
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
-    assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
     else:
@@ -4019,15 +4038,20 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 
     else:
         return V.graph.add_tensor_constant(
-            torch.tensor(data, dtype=dtype, device=device)
+            torch.tensor(
+                data, dtype=dtype, device=device, pin_memory=pin_memory or False
+            )
         )
 
-    return Pointwise.create(
+    result = Pointwise.create(
         device=decode_device(device),
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=ranges,
     )
+    if pin_memory:
+        _realize_as_pinned(result)
+    return result
 
 
 @register_lowering(torch.as_tensor)
@@ -4146,14 +4170,12 @@ def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
     def inner(
         *size,
-        names=None,
         dtype=None,
         device=None,
         layout=None,
         pin_memory=False,
         memory_format=None,
     ):
-        assert_nyi(names is None, "named tensors")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         assert_nyi(not memory_format, "memory_format")
         device = decode_device(device)
@@ -4168,9 +4190,7 @@ def tensor_constructor(fill_value):
         full_pointwise = _full(fill_value, decode_device(device), dtype, size)
 
         if pin_memory:
-            # Realize the buffer
-            full_pointwise.realize()
-            full_pointwise.data.data.get_layout().is_pinned = True
+            _realize_as_pinned(full_pointwise)
 
         return full_pointwise
 
@@ -4180,14 +4200,12 @@ def tensor_constructor(fill_value):
 @register_lowering([torch.empty, aten.empty])
 def empty(
     *size,
-    names=None,
     dtype=None,
     layout=None,
     device=None,
     pin_memory=None,
     memory_format=None,
 ):
-    assert_nyi(names is None, "named tensors")
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
@@ -7149,129 +7167,8 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     return (var,)
 
 
-def var_mean_aten_welford_order_(x, axis, *, correction, keepdim, return_mean):
-    """Match ATen CUDA's low-precision var_mean Welford reduction order."""
-    assert return_mean
-    if correction is None:
-        correction = 1
-
-    kwargs = _make_reduction_inner(
-        x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
-    )
-    reduction_ranges = kwargs["reduction_ranges"]
-    if len(reduction_ranges) != 1:
-        return None
-    reduction_numel = sympy_product(reduction_ranges)
-    if not isinstance(reduction_numel, sympy.Integer):
-        return None
-    reduction_numel = int(reduction_numel)
-    # This path models ATen's CUDA warp reduction order by explicitly
-    # unrolling the reduced dimension into pointwise IR. Keep this correctness
-    # path bounded by a fixed cap so config changes cannot accidentally generate
-    # very large expressions or disable the reported 384-wide repro.
-    max_exact_order_unroll_numel = 1024
-    if (
-        reduction_numel < 128
-        or reduction_numel >= max_exact_order_unroll_numel
-        or reduction_numel % 64 != 0
-    ):
-        return None
-
-    loader = kwargs["inner_fn"]
-    dtype = x.get_dtype()
-
-    def zero():
-        return ops.constant(0, dtype)
-
-    def const(value):
-        return ops.constant(value, dtype)
-
-    def reduce_one(acc, value):
-        mean, m2, count = acc
-        if count == 0:
-            return value, zero(), 1
-        new_count = count + 1
-        delta = value - mean
-        new_mean = mean + ops.div_rn(delta, const(new_count))
-        return new_mean, m2 + delta * (value - new_mean), new_count
-
-    def combine(lhs, rhs):
-        lhs_mean, lhs_m2, lhs_count = lhs
-        rhs_mean, rhs_m2, rhs_count = rhs
-        if lhs_count == 0:
-            return rhs
-        if rhs_count == 0:
-            return lhs
-        new_count = lhs_count + rhs_count
-        delta = rhs_mean - lhs_mean
-        rhs_count_over_total = ops.div_rn(const(rhs_count), const(new_count))
-        mean_delta = ops.mul_rn(delta, rhs_count_over_total)
-        return (
-            lhs_mean + mean_delta,
-            lhs_m2 + rhs_m2 + delta * delta * const(lhs_count) * rhs_count_over_total,
-            new_count,
-        )
-
-    def compute_welford(index):
-        lane_results = []
-        for lane in range(32):
-            even = (zero(), zero(), 0)
-            odd = (zero(), zero(), 0)
-            offset = lane * 2
-            while offset + 1 < reduction_numel:
-                even = reduce_one(even, loader(index, [sympy.Integer(offset)]))
-                odd = reduce_one(odd, loader(index, [sympy.Integer(offset + 1)]))
-                offset += 64
-            lane_results.append(combine(even, odd))
-
-        offset = 16
-        while offset > 0:
-            for lane in range(offset):
-                lane_results[lane] = combine(
-                    lane_results[lane], lane_results[lane + offset]
-                )
-            offset //= 2
-        return lane_results[0]
-
-    def mean_fn(index):
-        mean, _, _ = compute_welford(index)
-        return mean
-
-    def m2_fn(index):
-        _, m2, _ = compute_welford(index)
-        return m2
-
-    mean = Pointwise.create(
-        device=kwargs["device"],
-        dtype=dtype,
-        inner_fn=mean_fn,
-        ranges=kwargs["ranges"],
-    )
-    m2 = Pointwise.create(
-        device=kwargs["device"],
-        dtype=dtype,
-        inner_fn=m2_fn,
-        ranges=kwargs["ranges"],
-    )
-
-    def scale_fn(data):
-        denominator = max(reduction_numel - correction, 0)
-        return ops.div_rn(data, const(denominator))
-
-    var = make_pointwise(scale_fn)(m2)
-    mean.realize()
-    return var, mean
-
-
 def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
     out_dtype = x.get_dtype()
-    device = x.get_device()
-    use_aten_welford_order = (
-        return_mean
-        and device is not None
-        and device.type == "cuda"
-        and out_dtype in (torch.float16, torch.bfloat16)
-    )
     compute_dtype = get_computation_dtype(out_dtype)
     x = to_dtype(x, compute_dtype, copy=False)
     kwargs = dict(
@@ -7281,22 +7178,10 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
         keepdim=keepdim,
         return_mean=return_mean,
     )
-    output = (
-        var_mean_sum_(**kwargs)
-        if (
-            not use_aten_welford_order
-            and (
-                config.mtia.disable_welford_reduction
-                or use_two_step_variance(
-                    x, axis=axis, keepdim=keepdim, input_dtype=out_dtype
-                )
-            )
-        )
-        else (
-            var_mean_aten_welford_order_(**kwargs) if use_aten_welford_order else None
-        )
-        or var_mean_welford_(**kwargs)
+    use_two_step = config.mtia.disable_welford_reduction or use_two_step_variance(
+        x, axis=axis, keepdim=keepdim, input_dtype=out_dtype
     )
+    output = var_mean_sum_(**kwargs) if use_two_step else var_mean_welford_(**kwargs)
     output = tuple(to_dtype(x, out_dtype, copy=False) for x in output)
     return output[0] if not return_mean else output
 
@@ -7310,6 +7195,17 @@ def var_(x, axis=None, *, correction=None, keepdim=False):
 
 @register_lowering(aten.var_mean)
 def var_mean(x, axis=None, *, correction=None, keepdim=False):
+    device = x.get_device()
+    if (
+        device is not None
+        and device.type == "cuda"
+        and x.get_dtype() in (torch.float16, torch.bfloat16)
+        and V.graph.current_node.target is aten.var_mean.correction
+    ):
+        return fallback_handler(aten.var_mean.correction, add_to_fallback_set=False)(
+            x, axis, correction=correction, keepdim=keepdim
+        )
+
     return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
     )
@@ -8293,7 +8189,21 @@ reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
 sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
-register_pointwise(aten.signbit, override_return_dtype=torch.bool)
+
+
+@register_lowering(aten.signbit)
+def signbit(x):
+    if x.get_dtype() in (
+        torch.bool,
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+    ):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("signbit")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
 
 register_lowering(aten._neg_view)(neg)
 
@@ -8521,31 +8431,8 @@ def sym_numel(a):
     return a.get_numel()
 
 
-def _unwrap_symbolic_magic_arg(x):
-    if isinstance(x, SymTypes):
-        return x.node.expr
-    if isinstance(x, (int, float, bool)):
-        return sympy.sympify(x)
-    return x
-
-
 for method, func in magic_methods.items():
-
-    @register_lowering(method_to_operator(method))
-    def wrapped(*args, _func=func, **kwargs):
-        node = V.graph.current_node
-        meta_val = node.meta.get("val") if node is not None else None
-        if isinstance(meta_val, SymTypes):
-            return meta_val.node.expr
-        if any(
-            isinstance(x, (SymTypes, sympy.Basic))
-            for x in itertools.chain(args, kwargs.values())
-        ):
-            return _func(
-                *(_unwrap_symbolic_magic_arg(x) for x in args),
-                **{k: _unwrap_symbolic_magic_arg(v) for k, v in kwargs.items()},
-            )
-        return _func(*args, **kwargs)
+    register_lowering(method_to_operator(method))(func)  # type: ignore[arg-type]
 
 
 @register_lowering(torch.sym_sum)

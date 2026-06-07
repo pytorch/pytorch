@@ -34,7 +34,7 @@ class TestVarianceReductionHeuristic(TestCase):
             dtypes.append(torch.bfloat16)
         return dtypes
 
-    def test_var_mean_keeps_welford_for_large_lowp_reductions(self):
+    def test_var_mean_lowp_uses_aten_for_exact_eager_numerics(self):
         self._skip_if_not_cuda()
 
         def fn(x):
@@ -48,8 +48,8 @@ class TestVarianceReductionHeuristic(TestCase):
             )
 
             self.assertEqual(result, expected)
-            self.assertIn("welford_", source_code)
-            self.assertNotIn("tl.sum", source_code)
+            self.assertIn("torch.ops.aten.var_mean.correction", source_code)
+            self.assertNotIn("triton_", source_code)
 
     def test_var_mean_keeps_welford_for_float32_reductions(self):
         self._skip_if_not_cuda()
@@ -65,7 +65,7 @@ class TestVarianceReductionHeuristic(TestCase):
         self.assertIn("welford_", source_code)
 
     @config.patch("triton.force_cooperative_reductions", True)
-    def test_var_mean_keeps_welford_for_small_reductions(self):
+    def test_var_mean_lowp_uses_aten_for_small_reductions(self):
         self._skip_if_not_cuda()
 
         def fn(x):
@@ -79,7 +79,8 @@ class TestVarianceReductionHeuristic(TestCase):
             )
 
             self.assertEqual(result, expected)
-            self.assertIn("welford_", source_code)
+            self.assertIn("torch.ops.aten.var_mean.correction", source_code)
+            self.assertNotIn("triton_", source_code)
 
     @config.patch(
         {
@@ -88,7 +89,7 @@ class TestVarianceReductionHeuristic(TestCase):
             "triton.use_two_step_variance_threshold": 2_000_000,
         }
     )
-    def test_var_mean_keeps_welford_for_split_reductions(self):
+    def test_var_mean_lowp_uses_aten_for_split_reductions(self):
         self._skip_if_not_cuda()
 
         def fn(x):
@@ -102,7 +103,8 @@ class TestVarianceReductionHeuristic(TestCase):
             )
 
             self.assertEqual(result, expected)
-            self.assertIn("welford_", source_code)
+            self.assertIn("torch.ops.aten.var_mean.correction", source_code)
+            self.assertNotIn("triton_", source_code)
 
 
 class _TestingHeuristics(InductorChoices):
@@ -255,6 +257,9 @@ class CooperativeReductionTests(TestCase):
     )
     @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
     def test_reduction_fns(self, name, dtype):
+        if name == "var_mean" and dtype == torch.float16:
+            self.skipTest("low-precision CUDA var_mean uses ATen for eager numerics")
+
         def fn(x, y):
             return reduction_fn(x + y, dim=-1)
 

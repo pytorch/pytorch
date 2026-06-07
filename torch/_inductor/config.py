@@ -316,22 +316,14 @@ pre_grad_custom_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = No
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
 _pre_fusion_custom_pass: (
-    Callable[
-        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
-        list["torch._inductor.scheduler.BaseSchedulerNode"],
-    ]
-    | None
+    torch._inductor.custom_graph_pass.CustomSchedulerPassCallable | None
 ) = None
 
 # Registers a custom pass to be run right after fusion in Inductor scheduler.
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
 _post_fusion_custom_pass: (
-    Callable[
-        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
-        list["torch._inductor.scheduler.BaseSchedulerNode"],
-    ]
-    | None
+    torch._inductor.custom_graph_pass.CustomSchedulerPassCallable | None
 ) = None
 
 # Deprecated
@@ -1325,6 +1317,10 @@ class aten_distributed_optimizations:
     # Multiplier on the empirical saturation model's output.
     # With the empirical profiles this should be 1.0; kept for manual tuning.
     pre_bucketing_fsdp_collectives_saturation_calibration_multiplier: float = 1.0
+
+    # Decompose collective patterns when mathematically equivalent local
+    # computation exists. See torch/_inductor/fx_passes/decomp_comms.py.
+    allow_comms_decompositions: bool = False
 
 
 def parallel_compile_enabled_internally() -> bool:
