@@ -14,7 +14,7 @@ import typing
 import warnings
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, TypeVar
 from unittest.mock import patch
 
@@ -58,6 +58,9 @@ from .descriptors import (
     PhiloxForwardSeedAOTInput,
     PhiloxUpdatedBackwardOffsetAOTOutput,
     PhiloxUpdatedForwardOffsetAOTOutput,
+    SubclassGetAttrAOTInput,
+    SubclassSizeAOTInput,
+    SubclassStrideAOTInput,
 )
 from .functional_utils import (
     _check_if_mutation_can_be_in_graph,
@@ -71,6 +74,7 @@ from .functional_utils import (
     to_fun,
     was_inductor_storage_resized,
 )
+from .input_output_analysis import has_aliased_input_mutation
 from .logging_utils import setup_stacktrace_preservation_hooks
 from .schemas import (
     AOTConfig,
@@ -1304,11 +1308,65 @@ def handle_effect_tokens_fn(
 # - fw_only: this is *always* the forward-only function.
 #   Why do we need this? We need to collect updated ViewAndMutationMeta on our new dense -> dense functions.
 #   In particular, we need this to tell the partitioner how many dense forward outputs there are.
+def _get_outer_subclass_input_desc(desc: AOTInput) -> AOTInput:
+    while isinstance(
+        desc,
+        (SubclassGetAttrAOTInput, SubclassSizeAOTInput, SubclassStrideAOTInput),
+    ):
+        desc = desc.base
+    return desc
+
+
+def _remap_unwrapped_subclass_input_sources(
+    aot_config: AOTConfig,
+    outer_input_descs: list[AOTInput],
+    unwrapped_input_descs: list[AOTInput],
+) -> list[Any] | None:
+    if aot_config.aot_autograd_arg_pos_to_source is None:
+        return None
+
+    if len(outer_input_descs) != len(aot_config.aot_autograd_arg_pos_to_source):
+        raise AssertionError(
+            "expected outer input descriptors and aot_autograd sources to match, "
+            f"got {len(outer_input_descs)} and "
+            f"{len(aot_config.aot_autograd_arg_pos_to_source)}"
+        )
+
+    outer_desc_to_source: dict[AOTInput, Any] = {}
+    for outer_desc, source in zip(
+        outer_input_descs, aot_config.aot_autograd_arg_pos_to_source, strict=True
+    ):
+        if outer_desc in outer_desc_to_source:
+            raise AssertionError(f"duplicate outer input descriptor: {outer_desc}")
+        outer_desc_to_source[outer_desc] = source
+
+    remapped_sources: list[Any] = []
+    for desc in unwrapped_input_descs:
+        outer_desc = _get_outer_subclass_input_desc(desc)
+        if outer_desc not in outer_desc_to_source:
+            raise AssertionError(
+                f"expected {outer_desc} to be present in outer input descriptors"
+            )
+        remapped_sources.append(outer_desc_to_source[outer_desc])
+
+    return remapped_sources
+
+
+def _raise_subclass_aliased_input_mutation_error() -> None:
+    raise RuntimeError(
+        """\
+Encountered aliased inputs that are mutated in the graph, but at least one input/output
+to the graph is a tensor subclass. This is not supported today. You can try to
+remove the aliasing yourself as a workaround, or otherwise file an issue on github."""
+    )
+
+
 def aot_dispatch_subclass(
     flat_fn_maybe_joint: JointTraceFn | TraceFn,
     args: list[FxValue] | tuple[list[FxValue], list[FxValue]],
     args_descs: list[AOTInput] | tuple[list[AOTInput], list[AOTInput]],
     *,
+    aot_config: AOTConfig,
     is_joint_structure: bool,
     meta: ViewAndMutationMeta,
     fw_only: Callable[..., Any],
@@ -1400,10 +1458,9 @@ def aot_dispatch_subclass(
         return inner_fn(inner_fw_only, primals, use_trace_joint=False)
 
     if is_joint_structure:
-        primals_wrapped: list[FxValue] = typing.cast(list[FxValue], args[0])
-        primals_wrapped_descs: list[AOTInput] = typing.cast(
-            list[AOTInput], args_descs[0]
-        )
+        primals_wrapped = typing.cast(list[FxValue], args[0])
+        primals_wrapped_descs = typing.cast(list[AOTInput], args_descs[0])
+        outer_primal_descs = typing.cast(list[AOTInput], args_descs[0])
         tangents_wrapped: list[FxValue] = typing.cast(list[FxValue], args[1])
         tangents_wrapped_descs: list[AOTInput] = typing.cast(
             list[AOTInput], args_descs[1]
@@ -1430,12 +1487,13 @@ def aot_dispatch_subclass(
             meta.static_input_indices,  # type: ignore[arg-type]
         )
 
-        primals_unwrapped = args_unwrapped[0]  # type: ignore[assignment]
-        primals_unwrapped_descs = args_descs_unwrapped[0]  # type: ignore[assignment]
+        primals_unwrapped = typing.cast(list[Any], args_unwrapped[0])
+        primals_unwrapped_descs = typing.cast(list[AOTInput], args_descs_unwrapped[0])
         fn_to_trace = joint_fn  # type: ignore[assignment]
     else:
-        primals_wrapped: list[FxValue] = typing.cast(list[FxValue], args)
-        primals_wrapped_descs: list[AOTInput] = typing.cast(list[AOTInput], args_descs)
+        primals_wrapped = typing.cast(list[FxValue], args)
+        primals_wrapped_descs = typing.cast(list[AOTInput], args_descs)
+        outer_primal_descs = typing.cast(list[AOTInput], args_descs)
 
         args_unwrapped, args_descs_unwrapped = unwrap_tensor_subclasses(  # type: ignore[assignment]
             primals_wrapped,
@@ -1447,9 +1505,21 @@ def aot_dispatch_subclass(
             meta.static_input_indices,  # type: ignore[arg-type]
         )
 
-        primals_unwrapped = args_unwrapped  # type: ignore[assignment]
-        primals_unwrapped_descs = args_descs_unwrapped  # type: ignore[assignment]
+        primals_unwrapped = typing.cast(list[Any], args_unwrapped)
+        primals_unwrapped_descs = typing.cast(list[AOTInput], args_descs_unwrapped)
         fn_to_trace = fw_fn  # type: ignore[assignment]
+
+    primals_unwrapped_aot_config = aot_config
+    primals_unwrapped_sources = _remap_unwrapped_subclass_input_sources(
+        aot_config,
+        outer_primal_descs,
+        primals_unwrapped_descs,
+    )
+    if primals_unwrapped_sources is not None:
+        primals_unwrapped_aot_config = replace(
+            aot_config,
+            aot_autograd_arg_pos_to_source=primals_unwrapped_sources,
+        )
 
     # Note: [Partitioner handling for Subclasses, Part 1]
     # The way the partitioner works is that:
@@ -1476,6 +1546,14 @@ def aot_dispatch_subclass(
         keep_input_mutations=meta.keep_input_mutations,
         # pyrefly: ignore [not-iterable]
     )(*primals_unwrapped)
+
+    # The top-level duplicate/synthetic-base wrappers run before wrapper
+    # subclasses are flattened. Distinct subclass inputs can therefore expose
+    # aliased dense tensors only after desugaring, which we must reject.
+    if has_aliased_input_mutation(
+        primals_unwrapped_aot_config, primals_unwrapped, meta_updated.input_info
+    ):
+        _raise_subclass_aliased_input_mutation_error()
 
     subclass_meta.fw_metadata = meta_updated
 
