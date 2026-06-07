@@ -220,12 +220,18 @@ class TestCodegenRuntimeWrapper(TestCase):
         """
         The expected output arity should be baked into the generated code
         as a constant, not computed at runtime.
+
+        The function returns an aliased output (x.view(-1)) to ensure the
+        non-trivial epilogue path is taken (is_trivial=False). The compiled
+        function returns 3 non-aliased outputs; the aliased view is
+        reconstructed by _replay_aliases_ in the epilogue. The arity check
+        `if len(all_outs) != 3:` verifies that 3 is baked as a constant.
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
-                return x + 1, x * 2, x - 1
+                return x + 1, x * 2, x - 1, x.view(-1)
 
             f(torch.randn(4))
 
