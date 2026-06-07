@@ -583,8 +583,6 @@ if torch.backends.mps.is_available():
             # sign-flip encode + ulong atomic_min/max bracket and work fine.
             # bool prod/mean are excluded via dtypesIfMPS in the OpInfo itself.
             "scatter_reduceprod": [torch.int64],
-            "_segment_reducelengths": None,
-            "_segment_reduceoffsets": None,
             "sparse.sampled_addmm": None,
             "sparse.mmreduce": None,
             "special.airy_ai": None,
