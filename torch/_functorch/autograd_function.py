@@ -819,11 +819,49 @@ class AutogradFunctionApply(HigherOrderOperator):
         saved_values: Iterable[Any] | None = None
         dirty_idx = fwd_kwargs.get("dirty_idx", [])
         dirty_idx_set = set(dirty_idx)
+        apply_generate_vmap_rule = fwd_kwargs.get("generate_vmap_rule", False)
+        apply_has_custom_vmap = fwd_kwargs.get("has_custom_vmap", False)
         non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
         saved_for_backward_idx = fwd_kwargs["saved_for_backward_idx"]
+        current_functorch_interpreter = torch._C._functorch.peek_interpreter_stack()
+        is_under_vmap = (
+            current_functorch_interpreter is not None
+            and current_functorch_interpreter.key()
+            is torch._C._functorch.TransformType.Vmap
+        ) or any(
+            torch._C._functorch.is_batchedtensor(arg)
+            for arg in fwd_args
+            if isinstance(arg, torch.Tensor)
+        )
+        if is_under_vmap:
+            if apply_generate_vmap_rule and apply_has_custom_vmap:
+                raise RuntimeError(
+                    "You tried to vmap over ApplyTemplate, but it has both "
+                    "generate_vmap_rule=True and an overridden vmap staticmethod."
+                )
+            if not apply_generate_vmap_rule:
+                if apply_has_custom_vmap:
+                    raise RuntimeError(
+                        "Dynamo does not support tracing torch.autograd.Function "
+                        "subclasses that define a custom vmap staticmethod."
+                    )
+                raise RuntimeError(
+                    "You tried to vmap over ApplyTemplate, but it does not have "
+                    "vmap support. Please override and implement the vmap "
+                    "staticmethod or set generate_vmap_rule=True."
+                )
 
         class ApplyTemplate(torch.autograd.Function):
-            generate_vmap_rule = True
+            generate_vmap_rule = apply_generate_vmap_rule
+
+            if apply_has_custom_vmap:
+
+                @staticmethod
+                def vmap(*args: Any, **kwargs: Any) -> Any:
+                    raise RuntimeError(
+                        "Dynamo does not support tracing torch.autograd.Function "
+                        "subclasses that define a custom vmap staticmethod."
+                    )
 
             @staticmethod
             def forward(*args: Any, **kwargs: Any) -> Any:

@@ -2889,6 +2889,62 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         result.sum().backward()
         self.assertEqual(x.grad, torch.full_like(x, 2))
 
+    def test_autograd_function_without_vmap_support_compiled(self):
+        class NewStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return NewStyleOp.apply(x)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        compiled_fn(x[0])
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "generate_vmap_rule=True"
+        ):
+            torch.vmap(compiled_fn)(x)
+
+    def test_autograd_function_custom_vmap_compiled_unsupported(self):
+        class NewStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+            @staticmethod
+            def vmap(info, in_dims, x):
+                return x * 2, in_dims[0]
+
+        def fn(x):
+            return NewStyleOp.apply(x)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        compiled_fn(x[0])
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "generate_vmap_rule=True"
+        ):
+            torch.vmap(compiled_fn)(x)
+
     def test_old_style_autograd_function_with_grad_compiled(self):
         """Old-style autograd.Function compiled should work with torch.func.grad.
 
