@@ -3999,6 +3999,14 @@ class DispatchKeySetVariable(BaseTorchVariable):
 
         return python_constant_richcompare_impl(self, tx, other, op)
 
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self._nb_binop_impl(tx, other, "__and__", "__rand__", reverse)
+
     def is_constant_fold_method(self, name: str) -> bool:
         return name == "has"
 
