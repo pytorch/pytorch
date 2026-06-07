@@ -913,6 +913,7 @@ def torch_key() -> bytes:
                 # a hash representing the state of the source code.
                 extra_files = (
                     "codegen/aoti_runtime/interface.cpp",
+                    "codegen/aoti_runtime/streams.h",
                     "script.ld",
                 )
                 inductor_root = os.path.dirname(__file__)
@@ -1870,8 +1871,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         local: bool,
         remote_cache: RemoteCache[JsonDataTy] | None,
         constants: CompiledFxGraphConstants,
-        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
-        | None = None,
+        evaluate_guards: (
+            Callable[[str, list[int] | list[torch.SymInt]], bool] | None
+        ) = None,
     ) -> tuple[CompiledFxGraph | None, CacheInfo]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -2103,8 +2105,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         remote_cache: RemoteCache[JsonDataTy] | None,
         is_backward: bool,
         constants: CompiledFxGraphConstants,
-        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
-        | None = None,
+        evaluate_guards: (
+            Callable[[str, list[int] | list[torch.SymInt]], bool] | None
+        ) = None,
     ) -> tuple[CompiledFxGraph | None, CacheInfo]:
         """
         Lookup the graph with the given key, and return results and metadata.
@@ -4077,9 +4080,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
         return [
             f"halide_buffer_t {name};",
-            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
-            if len(dims) > 0
-            else f"halide_dimension_t * {name}_dims = nullptr;",
+            (
+                f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
+                if len(dims) > 0
+                else f"halide_dimension_t * {name}_dims = nullptr;"
+            ),
             f"{name}.device = {device};",
             f"{name}.device_interface = {device_interface};",
             f"{name}.host = {host};",

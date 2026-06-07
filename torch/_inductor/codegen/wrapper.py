@@ -796,19 +796,10 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
 
     def codegen(self, code: IndentedBuffer) -> None:
         """Generate context switching and stream retrieval code."""
-        if V.graph.cpp_wrapper:
-            super().codegen(code)
-        else:
-            super().codegen(code)
-            code.writeline(f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}")
-
-            if self.num_streams > 1:
-                for i in range(1, self.num_streams):
-                    user_obj_idx = self.stream_idx_to_user_obj_idx[i]
-                    code.writeline(
-                        f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
-                        f"= get_external_object_by_index({user_obj_idx})",
-                    )
+        super().codegen(code)
+        V.graph.wrapper_code.codegen_stream_info_prologue(
+            code, self.num_streams, self.stream_idx_to_user_obj_idx
+        )
 
 
 @dataclasses.dataclass
@@ -833,13 +824,16 @@ class EnterCudaStreamContextLine(WrapperLine):
 
     Attributes:
         stream_idx: The index number for the entering device stream context.
+
+    Subclasses of ``PythonWrapperCodegen`` override
+    ``codegen_enter_cuda_stream_context`` to emit language-specific code
+    (Python stream contexts vs C++ ``CUDAStreamGuard``).
     """
 
     stream_idx: int
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.writeline(f"with {get_stream_name(self.stream_idx)}:")
-        code.do_indent()
+        V.graph.wrapper_code.codegen_enter_cuda_stream_context(code, self.stream_idx)
 
 
 @dataclasses.dataclass
@@ -847,7 +841,7 @@ class ExitCudaStreamContextLine(WrapperLine):
     """Generate code to exit the current stream context."""
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.do_unindent()
+        V.graph.wrapper_code.codegen_exit_cuda_stream_context(code)
 
 
 class EfficientPeakEstimate:
@@ -1831,12 +1825,6 @@ class PythonWrapperCodegen(CodeGen):
     ) -> None:
         if num_streams > 1:
             assert stream_idx_to_user_obj_idx is not None
-            import_line = (
-                "from torch._dynamo.graph_bytecode_inputs import "
-                "get_external_object_by_index"
-            )
-            if not self.imports.contains(import_line):
-                self.imports.writeline(import_line)
             self.writeline(
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
@@ -1902,6 +1890,52 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_cuda_stream_exit(self) -> None:
         """Generate data structure for exiting a CUDA Stream context."""
         self.writeline(ExitCudaStreamContextLine())
+
+    def codegen_enter_cuda_stream_context(
+        self, code: IndentedBuffer, stream_idx: int
+    ) -> None:
+        """Emit code to enter a CUDA stream context. Override in cpp wrappers."""
+        code.writeline(f"with {get_stream_name(stream_idx)}:")
+        code.do_indent()
+
+    def codegen_exit_cuda_stream_context(self, code: IndentedBuffer) -> None:
+        """Emit code to exit a CUDA stream context. Override in cpp wrappers."""
+        code.do_unindent()
+
+    def codegen_stream_info_prologue(
+        self,
+        code: IndentedBuffer,
+        num_streams: int,
+        stream_idx_to_user_obj_idx: dict[int, int],
+    ) -> None:
+        """Emit prologue declaring the default stream and any aux stream
+        objects after the device context guard is set up. Override in cpp
+        wrappers to emit equivalent C++ initialization.
+
+        Aux streams may be either user-provided (registered in
+        ``stream_idx_to_user_obj_idx`` by ``_populate_stream_assignments``)
+        or compiler-allocated by the ``compile_streams`` pass. Compiler-
+        allocated indices have no user object backing — instantiate them
+        as fresh ``torch.cuda.Stream()`` objects.
+        """
+        code.writeline(f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}")
+        if num_streams > 1:
+            if any(i in stream_idx_to_user_obj_idx for i in range(1, num_streams)):
+                import_line = (
+                    "from torch._dynamo.graph_bytecode_inputs import "
+                    "get_external_object_by_index"
+                )
+                if not self.imports.contains(import_line):
+                    self.imports.writeline(import_line)
+            for i in range(1, num_streams):
+                name = STREAM_NAME_TEMPLATE.format(stream_idx=i)
+                if i in stream_idx_to_user_obj_idx:
+                    user_obj_idx = stream_idx_to_user_obj_idx[i]
+                    code.writeline(
+                        f"{name} = get_external_object_by_index({user_obj_idx})"
+                    )
+                else:
+                    code.writeline(f"{name} = torch.cuda.Stream()")
 
     def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
@@ -2491,17 +2525,20 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_alloc_from_pool(
         self, name, offset, dtype, shape, stride
     ) -> tuple[str, list[str]]:
-        return "alloc_from_pool({})".format(
-            ", ".join(
-                [
-                    name,
-                    pexpr(offset),  # bytes not numel
-                    str(dtype),
-                    self.codegen_python_shape_tuple(shape),
-                    self.codegen_python_shape_tuple(stride),
-                ]
-            )
-        ), []
+        return (
+            "alloc_from_pool({})".format(
+                ", ".join(
+                    [
+                        name,
+                        pexpr(offset),  # bytes not numel
+                        str(dtype),
+                        self.codegen_python_shape_tuple(shape),
+                        self.codegen_python_shape_tuple(stride),
+                    ]
+                )
+            ),
+            [],
+        )
 
     def codegen_reinterpret_view(
         self,
@@ -4035,9 +4072,12 @@ class PythonWrapperCodegen(CodeGen):
                         # In this case, we strip the first key path away.
                         return go(
                             outputs[0].get_name(),
-                            keypath[1:]
-                            if isinstance(out, ir.MultiOutput) and len(out.indices) != 0
-                            else keypath,
+                            (
+                                keypath[1:]
+                                if isinstance(out, ir.MultiOutput)
+                                and len(out.indices) != 0
+                                else keypath
+                            ),
                         )
                     else:
                         assert isinstance(keypath[0], pytree.SequenceKey)

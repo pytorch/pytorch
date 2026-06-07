@@ -427,6 +427,12 @@ def _wrap_sync_node(
                 args=(control_deps_node, i + 1),  # +1 because index 0 is sync result
             )
             getitem_node.meta.update(dep.meta)
+            # The getitem is a passthrough projection of an existing value, not
+            # a node that *produces* an unbacked symbol — the original ``dep``
+            # (still inside the subgraph) is the binding site. Leaving the
+            # binding on the getitem trips Inductor's run_node assertion that
+            # ``new_unbacked_defs >= renamed_unbacked_bindings``.
+            getitem_node.meta.pop("unbacked_bindings", None)
             replacements[dep] = getitem_node
             visited.add(getitem_node)
 
