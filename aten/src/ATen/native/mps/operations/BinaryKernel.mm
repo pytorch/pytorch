@@ -313,10 +313,16 @@ static void bitwise_xor_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void bitwise_left_shift_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isIntegralType(iter.common_dtype(), /*includeBool=*/false),
+                              "bitwise_left_shift not implemented for ",
+                              iter.common_dtype());
   lib.exec_binary_kernel(iter, "bitwise_left_shift");
 }
 
 static void bitwise_right_shift_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isIntegralType(iter.common_dtype(), /*includeBool=*/false),
+                              "bitwise_right_shift not implemented for ",
+                              iter.common_dtype());
   lib.exec_binary_kernel(iter, "bitwise_right_shift");
 }
 
