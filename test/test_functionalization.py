@@ -2190,6 +2190,29 @@ def forward(self, x_1):
         self.assertIn(torch.ops.aten.sub.Tensor, ops)
         self.assertNotIn(torch.ops.aten.sub_.Tensor, ops)
 
+    def test_export_decomposition_cast_does_not_emit_metadata_assert(self):
+        def f(x):
+            return torch.neg(x)
+
+        def neg_decomp(x):
+            x = x.to(x.dtype)
+            out = torch.zeros_like(x)
+            out.sub_(x)
+            return out
+
+        mode = FunctionalTensorMode(
+            export=True,
+            decomposition_table={torch.ops.aten.neg.default: neg_decomp},
+        )
+        x = torch.randn(4)
+        fx_g = make_fx(dispatch_functionalize(f, mode))(x)
+
+        self.assertEqual(fx_g(x), f(x))
+        ops = {node.target for node in fx_g.graph.nodes if node.op == "call_function"}
+        self.assertNotIn(torch.ops.aten._assert_tensor_metadata.default, ops)
+        self.assertIn(torch.ops.aten.sub.Tensor, ops)
+        self.assertNotIn(torch.ops.aten.sub_.Tensor, ops)
+
     def test_python_functionalization_is_conj(self):
         def f(x):
             out = x.conj()
@@ -2297,6 +2320,20 @@ def forward(self, arg0_1):
             lifted = torch.ops.aten.lift_fresh.default(unlifted)
 
         self.assertNotEqual(unlifted.untyped_storage(), lifted.untyped_storage())
+
+    def test_python_functionalization_lift_functional_tensor(self):
+        def f(x):
+            tmp = x + 1
+            return torch.ops.aten.lift.default(tmp)
+
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(
+            f, reapply_views=True, crossref=False, skip_input_mutations=True
+        )(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test_cpp)
 
     def test_python_functionalization_lift_fresh(self):
         def f(x):

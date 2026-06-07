@@ -1183,11 +1183,15 @@ def proxy_call(
         )
         return NotImplemented
 
-    r = maybe_handle_decomp(
-        proxy_mode, func, args, kwargs, record_pointwise_barrier=True
+    skip_nested_alias_decomp = proxy_mode.functional_decomp_layers > 0 and any(
+        arg.alias_info for arg in func._schema.arguments
     )
-    if r is not NotImplemented:
-        return r
+    if not skip_nested_alias_decomp:
+        r = maybe_handle_decomp(
+            proxy_mode, func, args, kwargs, record_pointwise_barrier=True
+        )
+        if r is not NotImplemented:
+            return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
     if (
@@ -1877,7 +1881,6 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 # pyrefly: ignore [bad-argument-type]
                 func(*args, **kwargs)
             return node
-
         # We need more complicated handling here because the inputs
         # to these functions are sometimes tensors or symints where
         # we need to fetch the proxies properly.
@@ -1989,6 +1992,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             Mapping[OpOverload, Callable[..., Any]]
         ] = []
         self.decomp_layers: int = 0
+        self.functional_decomp_layers: int = 0
         # See invoke_subgraph
         self._invoke_subgraph_names: set[str] = set()
         self._invoke_subgraph_cache: dict[

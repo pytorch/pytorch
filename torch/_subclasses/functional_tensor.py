@@ -85,6 +85,12 @@ def _can_decompose_fast(
     return None
 
 
+def _must_decompose_for_functionalization(func: OpOverload) -> bool:
+    from torch._decomp import _should_decompose_because_unsafe_op
+
+    return _should_decompose_because_unsafe_op(func) or func._schema.is_mutable
+
+
 def _assert_functionalize_not_active(msg: str) -> None:
     is_included = torch._C._dispatch_tls_is_dispatch_key_included(
         torch._C.DispatchKey.Functionalize
@@ -345,7 +351,8 @@ class FunctionalTensor(torch.Tensor):
             return [elem.tolist() for elem in self.elem]
 
     def to(self, *args: Any, **kwargs: Any) -> torch.Tensor:
-        if _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL).export:
+        functional_mode = _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+        if functional_mode.export and functional_mode._decomposition_layers == 0:
             torch.ops.aten._assert_tensor_metadata(
                 self,
                 dtype=self.dtype,
@@ -433,6 +440,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         self._decomposition_table_stack: list[
             tuple[Mapping[OpOverload, Callable[..., Any]], bool]
         ] = []
+        # Track decompositions that this mode is actively running so inner ops
+        # still use the existing functionalization path.
+        self._decomposition_layers = 0
 
         self._storage_to_base: weakref.WeakKeyDictionary[
             torch.storage.UntypedStorage, FunctionalTensor | None
@@ -493,10 +503,17 @@ class FunctionalTensorMode(TorchDispatchMode):
     ) -> Any:
         if func in FunctionalTensor.metadata_fns:
             return NotImplemented
+        if _must_decompose_for_functionalization(func):
+            return NotImplemented
 
         decomp_table = self.decomposition_table
         proxy_mode = _detect_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
         if proxy_mode is not None:
+            if (
+                self._decomposition_layers > 0
+                or proxy_mode.functional_decomp_layers > 0
+            ) and any(arg.alias_info for arg in func._schema.arguments):
+                return NotImplemented
             proxy_decomp_table = proxy_mode.decomposition_table
             # Reuse the proxy table for ordinary make_fx(..., decomposition_table=...)
             # unless the functional mode was given its own explicit table.
@@ -513,21 +530,31 @@ class FunctionalTensorMode(TorchDispatchMode):
             from torch.fx.experimental.proxy_tensor import maybe_handle_decomp
 
             with self:
-                return maybe_handle_decomp(
-                    proxy_mode,
-                    func,
-                    args,
-                    kwargs,
-                    decomposition_table=decomp_table,
-                    record_pointwise_barrier=True,
-                )
+                self._decomposition_layers += 1
+                proxy_mode.functional_decomp_layers += 1
+                try:
+                    return maybe_handle_decomp(
+                        proxy_mode,
+                        func,
+                        args,
+                        kwargs,
+                        decomposition_table=decomp_table,
+                        record_pointwise_barrier=True,
+                    )
+                finally:
+                    proxy_mode.functional_decomp_layers -= 1
+                    self._decomposition_layers -= 1
 
         decomp_fn = decomp_table.get(func)
         if decomp_fn is None:
             return NotImplemented
 
         with self:
-            return decomp_fn(*args, **kwargs)
+            self._decomposition_layers += 1
+            try:
+                return decomp_fn(*args, **kwargs)
+            finally:
+                self._decomposition_layers -= 1
 
     def __torch_dispatch__(
         self,

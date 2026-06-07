@@ -9633,6 +9633,117 @@ class TestAOTDispatch(AOTTestCase):
         self.assertIn(torch.ops.aten.sub.Tensor, ops)
         self.assertNotIn(torch.ops.aten.sub_.Tensor, ops)
 
+    def test_nested_decomposition_mutation_runs_under_functionalization(self):
+        fw_graphs = []
+
+        def fw_compiler(gm, _):
+            fw_graphs.append(gm)
+            return gm.forward
+
+        def f(x):
+            return torch.clone(x)
+
+        def clone_decomp(x):
+            return torch.abs(x)
+
+        def abs_decomp(x):
+            out = torch.zeros_like(x)
+            out.add_(x)
+            return out
+
+        inp = torch.randn(4).abs()
+        compiled_f = aot_function(
+            f,
+            fw_compiler=fw_compiler,
+            decompositions={
+                torch.ops.aten.clone.default: clone_decomp,
+                torch.ops.aten.abs.default: abs_decomp,
+            },
+        )
+
+        self.assertEqual(compiled_f(inp), f(inp))
+        self.assertEqual(len(fw_graphs), 1)
+
+        ops = {
+            node.target
+            for node in fw_graphs[0].graph.nodes
+            if node.op == "call_function"
+        }
+        self.assertNotIn(torch.ops.aten.clone.default, ops)
+        self.assertNotIn(torch.ops.aten.abs.default, ops)
+        self.assertIn(torch.ops.aten.add.Tensor, ops)
+        self.assertNotIn(torch.ops.aten.add_.Tensor, ops)
+
+    def test_aliasing_op_decomposition_does_not_escape_functionalization(self):
+        fw_graphs = []
+
+        def fw_compiler(gm, _):
+            fw_graphs.append(gm)
+            return gm.forward
+
+        def f(x):
+            return x.detach()
+
+        def detach_decomp(x):
+            out = torch.zeros_like(x)
+            out.add_(x)
+            return out
+
+        inp = torch.randn(4)
+        compiled_f = aot_function(
+            f,
+            fw_compiler=fw_compiler,
+            decompositions={torch.ops.aten.detach.default: detach_decomp},
+        )
+
+        self.assertEqual(compiled_f(inp), f(inp))
+        self.assertEqual(len(fw_graphs), 1)
+
+        ops = {
+            node.target
+            for node in fw_graphs[0].graph.nodes
+            if node.op == "call_function"
+        }
+        self.assertNotIn(torch.ops.aten.add_.Tensor, ops)
+
+    def test_nested_aliasing_op_decomposition_does_not_escape_functionalization(self):
+        fw_graphs = []
+
+        def fw_compiler(gm, _):
+            fw_graphs.append(gm)
+            return gm.forward
+
+        def f(x):
+            return torch.clone(x)
+
+        def clone_decomp(x):
+            return x.detach()
+
+        def detach_decomp(x):
+            out = torch.zeros_like(x)
+            out.add_(x)
+            return out
+
+        inp = torch.randn(4)
+        compiled_f = aot_function(
+            f,
+            fw_compiler=fw_compiler,
+            decompositions={
+                torch.ops.aten.clone.default: clone_decomp,
+                torch.ops.aten.detach.default: detach_decomp,
+            },
+        )
+
+        self.assertEqual(compiled_f(inp), f(inp))
+        self.assertEqual(len(fw_graphs), 1)
+
+        ops = {
+            node.target
+            for node in fw_graphs[0].graph.nodes
+            if node.op == "call_function"
+        }
+        self.assertNotIn(torch.ops.aten.add_.Tensor, ops)
+
     def test_aot_dispatch_simple(self):
         # a is a subclass, b is not
         def f(a, b):
@@ -11875,6 +11986,18 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         optout = run(optf)
 
         self.assertEqual(out, optout)
+
+    def test_lift_after_factory(self):
+        def f(low, high, size):
+            y = torch.randint(low=low, high=high, size=size)
+            return torch.ops.aten.lift.default(y)
+
+        torch.manual_seed(0)
+        out = f(0, 100, [2, 3])
+        torch.manual_seed(0)
+        opt_out = torch.compile(f, backend="aot_eager", fullgraph=True)(0, 100, [2, 3])
+
+        self.assertEqual(out, opt_out)
 
     def test_mutations_in_bw_detached_from_tangent(self):
         class AF(torch.autograd.Function):
