@@ -2413,6 +2413,52 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
         return self.call_method(tx, "__ior__", [other], {})
 
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9472 (slot_nb_and)
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__and__",
+            "__rand__",
+            nb_slot=PyNumberSlots.NB_AND,
+            reverse=reverse,
+        )
+
+    def nb_inplace_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__iand__", [other], {})
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9473 (slot_nb_xor)
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__xor__",
+            "__rxor__",
+            nb_slot=PyNumberSlots.NB_XOR,
+            reverse=reverse,
+        )
+
+    def nb_inplace_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__ixor__", [other], {})
+
     def nb_add_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -4712,6 +4758,14 @@ class DefaultDictVariable(UserDefinedDictVariable):
         new.call_method(tx, "update", [right], {})
         return new
 
+    def nb_inplace_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        self.call_method(tx, "update", [other], {})
+        return self
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -4752,6 +4806,15 @@ class DefaultDictVariable(UserDefinedDictVariable):
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             return self._missing_impl(tx, args[0])
+        elif name == "__ior__":
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return self.nb_inplace_or_impl(tx, args[0])
         elif name == "copy":
             # defaultdict.copy() creates a new defaultdict with same factory
             # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2282
