@@ -1866,6 +1866,17 @@
       ]
     }
   ],
+  "GB6790": [
+    {
+      "Gb_type": "Packed sequence data-dependent output shape",
+      "Context": "str(self.value)",
+      "Explanation": "Operator `{self.value.__name__}`'s output shape depends on input Tensor data.",
+      "Hints": [
+        "Move this operator outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0136": [
     {
       "Gb_type": "Unsupported attribute for range() object",
