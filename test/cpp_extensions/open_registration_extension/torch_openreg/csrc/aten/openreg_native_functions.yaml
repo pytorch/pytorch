@@ -7,7 +7,7 @@ supported:
       structured: true
   - minimum.out:
       structured: true
-      ext_structured_meta: true
+      define_meta: true
   # Non-structured op: out-as-primary only (no native structured kernel). The
   # backend supplies div_out via TORCH_PRIVATEUSE1_FUNC and torchgen derives the
   # functional/inplace variants from it.
