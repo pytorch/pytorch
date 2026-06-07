@@ -135,7 +135,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     host, port = parse_rendezvous_endpoint(params.endpoint, default_port=DEFAULT_PORT)
 
     cfg_is_host = params.get_as_bool("is_host")
-    # If the user has explicitly specified whether our process should host the
+    # If the user has explicitly specified whether our process should host
     # the store, respect it.
     if cfg_is_host is not None:
         is_host = cfg_is_host
