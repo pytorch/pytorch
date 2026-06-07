@@ -2687,6 +2687,80 @@ if HAS_CUDA_AND_TRITON:
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
+        def test_mark_step_live_output_as_next_input(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            x = torch.ones([4], device="cuda")
+            for _ in range(4):
+                torch.compiler.cudagraph_mark_step_begin()
+                x = foo(x)
+
+            self.assertEqual(x, torch.full([4], 5.0, device="cuda"))
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
+        def test_mark_step_aliased_live_output_views_as_next_inputs(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            @torch.compile(mode="reduce-overhead")
+            def bar(x, y):
+                return x[1:] + y
+
+            x = torch.arange(5, device="cuda", dtype=torch.float32)
+            y = foo(x)
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                z = bar(y, y[1:])
+
+                expected = torch.tensor([4.0, 6.0, 8.0, 10.0], device="cuda")
+                self.assertEqual(z, expected)
+                y = foo(x)
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
+        def test_mark_step_strided_live_output_as_next_input(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return (x + 1)[1::2]
+
+            @torch.compile(mode="reduce-overhead")
+            def bar(x):
+                return x * 2
+
+            x = torch.arange(8, device="cuda", dtype=torch.float32)
+            y = foo(x)
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                self.assertEqual(y.stride(), (2,))
+                z = bar(y)
+
+                expected = torch.tensor([4.0, 8.0, 12.0, 16.0], device="cuda")
+                self.assertEqual(z, expected)
+                y = foo(x)
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
+        def test_mark_step_conj_live_output_as_next_input(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return (x + (1 + 1j)).conj()
+
+            @torch.compile(mode="reduce-overhead")
+            def bar(x):
+                return x + (1 + 0j)
+
+            x = torch.ones(4, device="cuda", dtype=torch.complex64) * (1 + 1j)
+            y = foo(x)
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                z = bar(y)
+
+                expected = torch.full([4], 3 - 2j, device="cuda", dtype=torch.complex64)
+                self.assertEqual(z, expected)
+                y = foo(x)
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
         @torch._dynamo.config.patch("capture_scalar_outputs", True)
         def test_incompatible_cudagraph_ops_item(self):
             @torch.compile(mode="reduce-overhead")
