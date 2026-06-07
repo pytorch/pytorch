@@ -4077,6 +4077,21 @@ def sample_inputs_conv_transpose3d(op_info, device, dtype, requires_grad, **kwar
         ), kwargs=kwargs)
 
 
+def error_inputs_conv_transpose(opinfo, device, *, dim, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+    error_regex = "output padding must be smaller than either stride or dilation"
+
+    # error inputs for output_padding not smaller than either stride or dilation
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1) + (4,) * dim), args=(make_arg((1, 1) + (3,) * dim),),
+                    kwargs={'stride': 2, 'output_padding': 2}),
+        error_regex=error_regex)
+    yield ErrorInput(
+        SampleInput(make_arg((0, 1) + (4,) * dim), args=(make_arg((1, 1) + (3,) * dim),),
+                    kwargs={'stride': 2, 'output_padding': 2}),
+        error_regex=error_regex)
+
+
 def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -16591,6 +16606,7 @@ op_db: list[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose1d,
+           error_inputs_func=partial(error_inputs_conv_transpose, dim=1),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -16642,6 +16658,7 @@ op_db: list[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose2d,
+           error_inputs_func=partial(error_inputs_conv_transpose, dim=2),
            # Runs very slowly on slow-gradcheck for complex.
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -16696,6 +16713,7 @@ op_db: list[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(
                torch.float16, torch.chalf, torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose3d,
+           error_inputs_func=partial(error_inputs_conv_transpose, dim=3),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
