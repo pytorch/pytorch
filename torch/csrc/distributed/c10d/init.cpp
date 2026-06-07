@@ -55,7 +55,9 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.hpp>
 #endif
 
+#ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_ep.hpp>
+#endif
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -1301,6 +1303,11 @@ Example:
           py::arg("val"),
           py::arg("count") = 1);
 
+  // nccl_ep.cu (which defines these symbols) is only compiled into torch_cuda
+  // for CUDA + NCCL distributed builds; guard the registration with the same
+  // condition so non-NCCL builds of libtorch_python don't reference undefined
+  // symbols (e.g. typeinfo for c10d::nccl_ep::NcclEpGroup).
+#ifdef USE_C10D_NCCL
   using NcclEpGroup = ::c10d::nccl_ep::NcclEpGroup;
   using NcclEpHandle = ::c10d::nccl_ep::NcclEpHandle;
 
@@ -1313,9 +1320,7 @@ Example:
           py::arg("num_experts"),
           py::arg("max_dispatch_tokens_per_rank"),
           py::arg("max_recv_tokens_per_rank"),
-          py::arg("max_token_bytes"),
-          py::arg("num_qp_per_rank") = 0,
-          py::arg("num_channels") = 0);
+          py::arg("max_token_bytes"));
 
   py::class_<NcclEpHandle, c10::intrusive_ptr<NcclEpHandle>>(
       module, "_NcclEpHandle")
@@ -1345,6 +1350,7 @@ Example:
       py::arg("handle"),
       py::arg("expert_tokens"),
       py::arg("out_tokens"));
+#endif // USE_C10D_NCCL
 
   auto store =
       py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
