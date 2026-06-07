@@ -315,7 +315,7 @@ at::Tensor abs(const at::Tensor & self)
 
     # The per-op dict form (PrivateUse1 out-of-tree structured/out-as-primary
     # feature) lets an op opt into a structured kernel. The op name and its
-    # options (structured/ext_structured_meta/device_guard) are siblings, so the
+    # options (structured/define_meta/device_guard) are siblings, so the
     # options must sit at the same indentation as the "- op:" key.
 
     # structured: true reuses the native structured kernel for the op.
@@ -330,8 +330,8 @@ supported:
     structured: true"""
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
-    # ext_structured_meta: true (with structured: true) opts into a custom meta.
-    def test_valid_per_op_ext_structured_meta(self) -> None:
+    # define_meta: true (with structured: true) opts into a custom meta.
+    def test_valid_per_op_define_meta(self) -> None:
         yaml_str = """\
 backend: PrivateUse1
 cpp_namespace: at::priv1::native
@@ -340,7 +340,7 @@ device_guard: true
 supported:
 - sub.out:
     structured: true
-    ext_structured_meta: true"""
+    define_meta: true"""
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
     # An op may use the out-as-primary redirection without a structured kernel,
@@ -380,16 +380,16 @@ device_guard: true
 supported:
 - sub.out:
     structured: true
-    ext_structured_meta: true
+    define_meta: true
 - mul.out:
     structured: true
-    ext_structured_meta: false
+    define_meta: false
 - div.out:
     device_guard: false"""
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
-    # ext_structured_meta: true requires structured: true.
-    def test_ext_structured_meta_without_structured(self) -> None:
+    # define_meta: true requires structured: true.
+    def test_define_meta_without_structured(self) -> None:
         yaml_str = """\
 backend: PrivateUse1
 cpp_namespace: at::priv1::native
@@ -397,11 +397,11 @@ use_out_as_primary: true
 device_guard: true
 supported:
 - mul.out:
-    ext_structured_meta: true"""
+    define_meta: true"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """Operator 'mul.out' has 'ext_structured_meta: True' but 'structured: False'. Custom meta functions require a structured kernel.""",
+            """Operator 'mul.out' has 'define_meta: True' but 'structured: False'. Custom meta functions require a structured kernel.""",
         )
 
     # structured: true is only valid on ops that are structured in native_functions.yaml.
@@ -434,7 +434,7 @@ supported:
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """Operator 'mul.out' has unknown option keys ['structred']. Supported option keys: ['device_guard', 'ext_structured_meta', 'structured'].""",  # codespell:ignore structred
+            """Operator 'mul.out' has unknown option keys ['structred']. Supported option keys: ['define_meta', 'device_guard', 'structured'].""",  # codespell:ignore structred
         )
 
     # The flat dict form (options as siblings of the op name) is a footgun -- one extra space
@@ -576,12 +576,12 @@ void impl(const at::Tensor & self, const at::Tensor & other, const at::Tensor & 
 """,
         )
 
-    # ext_structured_meta: true additionally emits `using base` and a custom
+    # define_meta: true additionally emits `using base` and a custom
     # `void meta(...)` declaration in the struct; without it, neither appears.
     def test_structured_custom_meta_declaration(self) -> None:
         self.assertExpectedInline(
             self.native_function_declaration(
-                "- sub.out:\n    structured: true\n    ext_structured_meta: true"
+                "- sub.out:\n    structured: true\n    define_meta: true"
             ),
             """\
 struct structured_sub_out : public at::meta::structured_sub_Tensor {
