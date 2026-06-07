@@ -435,21 +435,16 @@ inline bool should_use_onednn_quant(
 #if !defined(__linux__)
   return false;
 #else
-#if defined(__powerpc__) || defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__powerpc__)
   constexpr auto vnni_available = true;
 #else
   const auto vnni_available = cpuinfo_has_x86_avx512vnni();
-#endif
-#if defined(__aarch64__) || defined(_M_ARM64)
-  const auto valid_type = weight.scalar_type() == at::kQInt8;
-#else
-  constexpr auto valid_type = true;
 #endif
   bool w_sym_quant =
       is_weight_symmetric_quant(weight, is_transposed_conv);
   bool opad_all_zero =
       std::all_of(output_padding.begin(), output_padding.end(), [](int i) { return i==0; });
-  return vnni_available && (groups <= 100) && w_sym_quant && opad_all_zero && valid_type;
+  return vnni_available && (groups <= 100) && w_sym_quant && opad_all_zero;
 #endif
 }
 
