@@ -1073,8 +1073,16 @@ class AutogradFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch.autograd.function import _is_setup_context_defined
+
         args, kwargs = self._bind_default_args_for_setup_context(tx, args, kwargs)
-        functorch_transforms_active = torch._C._are_functorch_transforms_active()
+        is_setup_ctx_defined = _is_setup_context_defined(self.fn_cls.setup_context)
+        has_custom_vmap = self.fn_cls.vmap is not torch.autograd.Function.vmap
+        functorch_transforms_active = (
+            is_setup_ctx_defined
+            and has_custom_vmap
+            and torch._C._are_functorch_transforms_active()
+        )
         if kwargs:
             resolved = self._resolve_kwargs(args, kwargs)
             if resolved is None:
@@ -1086,6 +1094,9 @@ class AutogradFunctionVariable(VariableTracker):
                 )
             args = resolved
             kwargs = {}
+
+        if functorch_transforms_active:
+            return self._call_custom_function_call(tx, args, kwargs)
 
         requires_grad = False
 
@@ -1107,11 +1118,9 @@ class AutogradFunctionVariable(VariableTracker):
             from torch._functorch.autograd_function import (
                 autograd_function_forward_rewritten,
             )
-            from torch.autograd.function import _is_setup_context_defined
 
             forward_fn = self.fn_cls.forward
 
-            is_setup_ctx_defined = _is_setup_context_defined(self.fn_cls.setup_context)
             if is_setup_ctx_defined:
                 # If setup_context is defined, we generate a new forward function which includes
                 # the original forward and setup_context function, and trace the new forward function.
@@ -1172,9 +1181,6 @@ class AutogradFunctionVariable(VariableTracker):
                 install_guard(setup_ctx_src.make_guard(GuardBuilder.CLOSURE_MATCH))
 
             return val
-
-        if functorch_transforms_active:
-            return self._call_custom_function_call(tx, args, kwargs)
 
         if self.source:
             source = AttrSource(self.source, "forward")

@@ -1834,6 +1834,22 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(ks1, ks2)
         self.assertEqual(result, expected)
 
+    def test_dispatch_key_set_binary_ops(self):
+        from torch._C import DispatchKey, DispatchKeySet
+
+        def fn(a, b):
+            return (
+                (a & b).has(DispatchKey.CPU),
+                (a | b).has(DispatchKey.CUDA),
+                (a - b).has(DispatchKey.CPU),
+            )
+
+        ks1 = DispatchKeySet(DispatchKey.CPU) | DispatchKeySet(DispatchKey.CUDA)
+        ks2 = DispatchKeySet(DispatchKey.CUDA)
+        expected = fn(ks1, ks2)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(ks1, ks2)
+        self.assertEqual(result, expected)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

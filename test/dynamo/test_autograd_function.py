@@ -2899,6 +2899,45 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
         self.assertEqual(x_test.grad, x_ref.grad)
 
+    def test_vmap_uses_custom_rule_when_unbatched_input_requires_grad(self):
+        class ScaleWithCustomVmap(torch.autograd.Function):
+            @staticmethod
+            def forward(x, scale):
+                return x * scale
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                x, scale = inputs
+                ctx.save_for_backward(x, scale)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, scale = ctx.saved_tensors
+                return grad_output * scale, (grad_output * x).sum()
+
+            @staticmethod
+            def vmap(info, in_dims, x, scale):
+                return x * scale + 1, in_dims[0]
+
+        def fn(x, scale):
+            return torch.vmap(lambda y: ScaleWithCustomVmap.apply(y, scale))(x)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        scale = torch.randn((), requires_grad=True)
+        eager_inputs = [t.detach().clone().requires_grad_(True) for t in (x, scale)]
+        compiled_inputs = [t.detach().clone().requires_grad_(True) for t in (x, scale)]
+
+        ref = fn(*eager_inputs)
+        ref.sum().backward()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(*compiled_inputs)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        for compiled, eager in zip(compiled_inputs, eager_inputs):
+            self.assertEqual(compiled.grad, eager.grad)
+
     def test_vmap_custom_rule_binds_default_args(self):
         class ScaleDefault(torch.autograd.Function):
             @staticmethod
