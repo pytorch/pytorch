@@ -1835,20 +1835,77 @@ def _pack_padded_sequence(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    new_batch_size = fake_mode.shape_env.create_unbacked_symint()
+    packed_data_length = fake_mode.shape_env.create_unbacked_symint()
+    batch_sizes_length = fake_mode.shape_env.create_unbacked_symint()
 
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
-    _constrain_range_for_size(new_batch_size)
+    _constrain_range_for_size(packed_data_length)
+    _constrain_range_for_size(batch_sizes_length)
 
     if not batch_first:
-        # Inputs should have shape (batch_size, seq_len, *)
+        # Normalize inputs to shape (batch_size, seq_len, *).
         inputs = inputs.transpose(0, 1)  # type: ignore[assignment]
 
-    res_size = inputs.shape[1:]
-    packed_data = inputs.new_empty(res_size)
-    batch_size = inputs.new_empty((new_batch_size,))
-    return (packed_data, batch_size)  # type: ignore[return]
+    packed_data_size = (packed_data_length, *inputs.shape[2:])
+    packed_data = inputs.new_empty(packed_data_size)
+    batch_sizes = lengths.new_empty((batch_sizes_length,), dtype=torch.int64)
+    return (packed_data, batch_sizes)  # type: ignore[return]
+
+
+@register_op_impl(torch.ops.aten.lstm.data)
+def lstm_data(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    hx: list[FakeTensor],
+    params: list[FakeTensor],
+    has_biases: bool,
+    num_layers: int,
+    dropout: float,
+    train: bool,
+    bidirectional: bool,
+) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
+    torch._check(len(hx) == 2, lambda: f"lstm expects two hidden states, got {len(hx)}")
+    num_directions = 2 if bidirectional else 1
+    out = data.new_empty((data.shape[0], hx[0].shape[2] * num_directions))
+    hy = hx[0].new_empty(hx[0].shape)
+    cy = hx[1].new_empty(hx[1].shape)
+    return out, hy, cy  # type: ignore[return-value]
+
+
+@register_op_impl(torch.ops.aten._pad_packed_sequence.default)
+def _pad_packed_sequence(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    batch_first: bool,
+    padding_value: float,
+    total_length: int,
+) -> tuple[FakeTensor, FakeTensor]:
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        raise DynamicOutputShapeException(func)
+
+    max_batch_size = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(max_batch_size)
+
+    max_seq_length = batch_sizes.shape[0] if total_length <= 0 else total_length
+    output_size = (
+        (max_batch_size, max_seq_length, *data.shape[1:])
+        if batch_first
+        else (max_seq_length, max_batch_size, *data.shape[1:])
+    )
+    output = data.new_empty(output_size)
+    lengths = batch_sizes.new_empty((max_batch_size,), dtype=torch.int64)
+    return output, lengths  # type: ignore[return-value]
 
 
 # pyrefly: ignore [implicit-any]

@@ -1484,6 +1484,60 @@ graph():
         dynamic_shapes = {"x": (dim0_x, dim1_x)}
         export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
 
+    def test_export_packed_lstm_data_dependent_lengths(self):
+        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+
+        class PackedLSTM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(
+                    3, 4, num_layers=2, batch_first=True, bidirectional=True
+                )
+
+            def forward(self, x, lengths, h0, c0):
+                packed = pack_padded_sequence(
+                    x, lengths.cpu(), batch_first=True, enforce_sorted=False
+                )
+                packed, (h, c) = self.lstm(packed, (h0, c0))
+                out, _ = pad_packed_sequence(
+                    packed, batch_first=True, total_length=lengths.max()
+                )
+                return out, h, c
+
+        mod = PackedLSTM().eval()
+        inputs = (
+            torch.zeros(2, 5, 3),
+            torch.tensor([5, 3]),
+            torch.zeros(4, 2, 4),
+            torch.zeros(4, 2, 4),
+        )
+        ref = mod(*inputs)
+        with self.assertWarnsRegex(
+            UserWarning,
+            r"The tensor attributes self\.lstm\._flat_weights\[0\].*",
+        ):
+            ep = export(mod, inputs)
+
+        preserved_ops = {
+            node.target
+            for node in ep.graph.nodes
+            if node.op == "call_function"
+            and node.target
+            in {
+                torch.ops.aten._pack_padded_sequence.default,
+                torch.ops.aten.lstm.data,
+                torch.ops.aten._pad_packed_sequence.default,
+            }
+        }
+        self.assertExpectedInline(
+            "\n".join(sorted(str(op) for op in preserved_ops)),
+            """\
+aten._pack_padded_sequence.default
+aten._pad_packed_sequence.default
+aten.lstm.data""",
+        )
+        self.assertEqual(ep.module()(*inputs), ref)
+
     def test_dynamic_lstm(self):
         # Disable mkldnn so eager uses the same pure-PyTorch LSTM/GRU as the
         # while-loop decomposition, avoiding numerical divergence from the
