@@ -868,18 +868,6 @@ class FakeTensor(Tensor):
     # that have dispatch keys which are higher than the "meta" key:
     # https://github.com/pytorch/pytorch/blob/main/c10/core/DispatchKey.h#L189
 
-    # We don't support named tensors; graph break
-    @property
-    # pyrefly: ignore [bad-override]
-    def names(self) -> list[str]:
-        raise UnsupportedFakeTensorException(
-            "torch.compile doesn't support named tensors"
-        )
-
-    @names.setter
-    def names(self, _: list[str]) -> None:
-        raise NotImplementedError
-
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
         """Normalize device by initializing GPU context and setting device index."""
@@ -1233,7 +1221,7 @@ class TensorMetadata:
     is_coalesced: bool | None
     dense_dim: int | None
     sparse_dim: int | None
-    dispatch_keys: int
+    extra_dispatch_keys: int
 
     def _flatten_into(
         self,
@@ -1292,7 +1280,16 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         t.is_coalesced() if t.is_sparse else None,
         t.dense_dim() if is_sparse_any(t) else None,
         t.sparse_dim() if is_sparse_any(t) else None,
-        torch._C._dispatch_keys(t).raw_repr(),
+        (
+            extra_dispatch_keys.raw_repr()
+            if (
+                extra_dispatch_keys := _extra_autocast_dispatch_keys(
+                    t.device, torch._C._dispatch_keys(t)
+                )
+            )
+            is not None
+            else 0
+        ),
     )
 
 
@@ -2248,7 +2245,9 @@ class FakeTensorMode(TorchDispatchMode):
             self,
             empty,
             metadata.device,
-            dispatch_keys=torch._C.DispatchKeySet.from_raw_repr(metadata.dispatch_keys),
+            dispatch_keys=torch._C.DispatchKeySet.from_raw_repr(
+                metadata.extra_dispatch_keys
+            ),
         )
 
     def _output_from_cache_entry(
@@ -3174,14 +3173,14 @@ class FakeTensorMode(TorchDispatchMode):
                     if arg.dispatch_keys is not None
                     else torch._C._dispatch_keys(arg)
                 )
-                if (
-                    _extra_autocast_dispatch_keys(output_device, arg_dispatch_keys)
-                    is None
-                ):
+                arg_extra_dispatch_keys = _extra_autocast_dispatch_keys(
+                    output_device, arg_dispatch_keys
+                )
+                if arg_extra_dispatch_keys is None:
                     continue
-                if found_keys is not None and found_keys != arg_dispatch_keys:
+                if found_keys is not None and found_keys != arg_extra_dispatch_keys:
                     return None
-                found_keys = arg_dispatch_keys
+                found_keys = arg_extra_dispatch_keys
 
             return found_keys
 

@@ -527,6 +527,63 @@ class FakeTensorTest(TestCase):
         eager_out = model.forward(x, w, b)
         self.assertEqual(fake_out.stride(), eager_out.stride())
 
+    def test_private_convolution_symint(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        x = fake_mode.from_tensor(
+            torch.randn(1, 3, 16, 16),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[
+                    DimDynamic.DYNAMIC,
+                    DimDynamic.STATIC,
+                    DimDynamic.DYNAMIC,
+                    DimDynamic.DYNAMIC,
+                ],
+                constraint_sizes=[None, None, None, None],
+            ),
+        )
+        w = fake_mode.from_tensor(torch.randn(32, 3, 3, 3), static_shapes=True)
+
+        with fake_mode:
+            out_default = aten._convolution.default(
+                x,
+                w,
+                None,
+                [2, 2],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                False,
+                False,
+                True,
+                True,
+            )
+            out_deprecated = aten._convolution.deprecated(
+                x,
+                w,
+                None,
+                [2, 2],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                False,
+                False,
+                True,
+            )
+
+        for out in (out_default, out_deprecated):
+            self.assertEqual(out.shape[:2], (1, 32))
+            self.assertTrue(
+                statically_known_true(out.shape[2] == (x.shape[2] - 3) // 2 + 1)
+            )
+            self.assertTrue(
+                statically_known_true(out.shape[3] == (x.shape[3] - 3) // 2 + 1)
+            )
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         with FakeTensorMode() as mode:
@@ -2887,6 +2944,7 @@ class FakeTensorDispatchCache(TestCase):
             z = torch.randn(4, 3, requires_grad=True)
             self._test_cache_key(fm, x, y, z)
 
+    @skipIfTorchDynamo("mutates private dispatch key state")
     def test_cache_key_is_conj(self):
         with FakeTensorMode() as fm:
             x = torch.randn(4, 3, dtype=torch.complex64)
@@ -2895,6 +2953,7 @@ class FakeTensorDispatchCache(TestCase):
             torch._C._set_conj(z, not z.is_conj())
             self._test_cache_key(fm, x, y, z)
 
+    @skipIfTorchDynamo("mutates private dispatch key state")
     def test_cache_key_is_neg(self):
         with FakeTensorMode() as fm:
             x = torch.randn(4, 3, dtype=torch.complex64)
