@@ -862,13 +862,13 @@ struct ExpandableSegment {
   void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
 #if defined(USE_ROCM) && (ROCM_VERSION >= 70200)
     constexpr int num_desc = 2;
-    std::array<CUmemAccessDesc, num_desc> desc;
+    std::array<CUmemAccessDesc, num_desc> desc{};
     desc[1].location.type = CU_MEM_LOCATION_TYPE_HOST;
     desc[1].location.id = 0; // ignored
     desc[1].flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
 #else
     constexpr int num_desc = 1;
-    std::array<CUmemAccessDesc, num_desc> desc;
+    std::array<CUmemAccessDesc, num_desc> desc{};
 #endif
     desc[0].location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
@@ -2420,7 +2420,9 @@ class DeviceCachingAllocator {
     }
   }
 
-  void free_locked(Block* block, std::shared_ptr<GatheredContext> context) {
+  void free_locked(
+      Block* block,
+      const std::shared_ptr<GatheredContext>& context) {
     block->allocated = false;
 
     // following logic might modifying underlying Block, causing the size
@@ -2485,7 +2487,7 @@ class DeviceCachingAllocator {
     std::shared_ptr<GatheredContext> context =
         maybeGatherContext(RecordContext::ALL);
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    free_locked(block, std::move(context));
+    free_locked(block, context);
   }
 
   void* getBaseAllocation(Block* block, size_t* outSize) {
@@ -2530,7 +2532,10 @@ class DeviceCachingAllocator {
           SegmentRange(block->ptr, block->size), ss);
       offset = static_cast<const char*>(block->ptr) - full_range.ptr;
     }
-    return ShareableHandle{offset, ss.str()};
+    return ShareableHandle{
+        .offset = offset,
+        .handle = std::move(ss).str(),
+    };
   }
 
   void recordStream(Block* block, cuda::CUDAStream stream) {
@@ -2579,8 +2584,12 @@ class DeviceCachingAllocator {
       if (!stream) {
         continue;
       }
+      cudaStream_t raw_stream = *stream;
+      if (!raw_stream) {
+        continue;
+      }
       sizes.emplace_back(
-          *stream,
+          raw_stream,
           segment->getSegmentSize() == kSmallBuffer,
           segment->getMappedSize());
     }
@@ -3019,12 +3028,9 @@ class DeviceCachingAllocator {
       total_active += segment_info.active_size;
     }
 
-    std::sort(
-        result.begin(),
-        result.end(),
-        [](const SegmentInfo& a, const SegmentInfo& b) {
-          return a.address < b.address;
-        });
+    std::ranges::sort(result, [](const SegmentInfo& a, const SegmentInfo& b) {
+      return a.address < b.address;
+    });
 
     record_trace(
         TraceEntry::SNAPSHOT, 0, total_active, nullptr, 0, mempool_id, nullptr);
