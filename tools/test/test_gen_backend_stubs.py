@@ -327,7 +327,7 @@ use_out_as_primary: true
 device_guard: true
 supported:
 - mul.out:
-  structured: true"""
+    structured: true"""
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
     # ext_structured_meta: true (with structured: true) opts into a custom meta.
@@ -339,8 +339,8 @@ use_out_as_primary: true
 device_guard: true
 supported:
 - sub.out:
-  structured: true
-  ext_structured_meta: true"""
+    structured: true
+    ext_structured_meta: true"""
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
     # An op may use the out-as-primary redirection without a structured kernel,
@@ -353,7 +353,7 @@ use_out_as_primary: true
 device_guard: true
 supported:
 - div.out:
-  device_guard: false"""
+    device_guard: false"""
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
     # Per-op dict entries may be mixed with plain string entries in one list.
@@ -366,7 +366,7 @@ device_guard: true
 supported:
 - abs
 - mul.out:
-  structured: true"""
+    structured: true"""
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
     # The full case study from the PR description: structured + custom meta,
@@ -379,13 +379,13 @@ use_out_as_primary: true
 device_guard: true
 supported:
 - sub.out:
-  structured: true
-  ext_structured_meta: true
+    structured: true
+    ext_structured_meta: true
 - mul.out:
-  structured: true
-  ext_structured_meta: false
+    structured: true
+    ext_structured_meta: false
 - div.out:
-  device_guard: false"""
+    device_guard: false"""
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
     # ext_structured_meta: true requires structured: true.
@@ -397,7 +397,7 @@ use_out_as_primary: true
 device_guard: true
 supported:
 - mul.out:
-  ext_structured_meta: true"""
+    ext_structured_meta: true"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
@@ -413,7 +413,7 @@ use_out_as_primary: true
 device_guard: true
 supported:
 - abs:
-  structured: true"""
+    structured: true"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
@@ -430,11 +430,28 @@ use_out_as_primary: true
 device_guard: true
 supported:
 - mul.out:
-  structred: true"""  # codespell:ignore structred
+    structred: true"""  # codespell:ignore structred
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """Expected exactly one operator name per entry, but got ['mul.out', 'structred'] in ['mul.out', 'structred']. Supported option keys: ['device_guard', 'ext_structured_meta', 'structured'].""",  # codespell:ignore structred
+            """Operator 'mul.out' has unknown option keys ['structred']. Supported option keys: ['device_guard', 'ext_structured_meta', 'structured'].""",  # codespell:ignore structred
+        )
+
+    # The flat dict form (options as siblings of the op name) is a footgun -- one extra space
+    # silently turns an option into the op's value -- and is rejected. Options must be nested
+    # under the operator name.
+    def test_flat_dict_shape_rejected(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+supported:
+- mul.out:
+  structured: true"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertExpectedInline(
+            output_error,
+            """Each 'supported' entry must be a single operator mapping whose value holds the options, but got keys ['mul.out', 'structured']. Indent the options under the operator name.""",
         )
 
 
@@ -551,7 +568,7 @@ at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor
     # native meta parent and declares only impl().
     def test_structured_native_meta_declaration(self) -> None:
         self.assertExpectedInline(
-            self.native_function_declaration("- mul.out:\n  structured: true"),
+            self.native_function_declaration("- mul.out:\n    structured: true"),
             """\
 struct structured_mul_out : public at::meta::structured_mul_Tensor {
 void impl(const at::Tensor & self, const at::Tensor & other, const at::Tensor & out);
@@ -564,7 +581,7 @@ void impl(const at::Tensor & self, const at::Tensor & other, const at::Tensor & 
     def test_structured_custom_meta_declaration(self) -> None:
         self.assertExpectedInline(
             self.native_function_declaration(
-                "- sub.out:\n  structured: true\n  ext_structured_meta: true"
+                "- sub.out:\n    structured: true\n    ext_structured_meta: true"
             ),
             """\
 struct structured_sub_out : public at::meta::structured_sub_Tensor {
@@ -575,7 +592,7 @@ void impl(const at::Tensor & self, const at::Tensor & other, const at::Scalar & 
 };
 """,
         )
-        native = self.native_function_declaration("- sub.out:\n  structured: true")
+        native = self.native_function_declaration("- sub.out:\n    structured: true")
         self.assertNotIn("using base", native)
         self.assertNotIn("void meta(", native)
 
@@ -585,7 +602,7 @@ void impl(const at::Tensor & self, const at::Tensor & other, const at::Scalar & 
     def test_per_op_device_guard_override(self) -> None:
         guard = "const OptionalDeviceGuard device_guard(device_of(self));"
         self.assertIn(guard, self.anonymous_definitions("- div.out"))
-        off = self.anonymous_definitions("- div.out:\n  device_guard: false")
+        off = self.anonymous_definitions("- div.out:\n    device_guard: false")
         self.assertNotIn(guard, off)
         self.assertExpectedInline(
             off,
@@ -650,7 +667,7 @@ symint:
 - upsample_nearest1d.out
 supported:
 - upsample_nearest1d.out:
-  structured: true"""
+    structured: true"""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml") as fp:
             fp.write(yaml_str)
             fp.flush()
@@ -660,6 +677,31 @@ supported:
         self.assertTrue(metadata.structured)
         self.assertNotIn("_symint", metadata.kernel)
         self.assertEqual(metadata.kernel, "upsample_nearest1d_out")
+
+    # The <ATen/ops/{op}_meta.h> include is gated on the op's own metadata.structured, not just
+    # the aten-native structured-ness. An aten-structured op (div) registered non-structured
+    # (out-as-primary only) does not inherit at::meta::structured_div, so its meta header must
+    # not be emitted; a structured op (maximum) keeps its include.
+    def test_meta_include_gated_on_per_op_structured(self) -> None:
+        global _GLOBAL_PARSE_NATIVE_YAML_CACHE
+        _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+device_guard: true
+supported:
+- maximum.out:
+    structured: true
+- div.out"""
+        with tempfile.TemporaryDirectory() as out_dir:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml") as fp:
+                fp.write(yaml_str)
+                fp.flush()
+                run(fp.name, out_dir, False)
+            header = (Path(out_dir) / "PrivateUse1NativeFunctions.h").read_text()
+        self.assertIn("maximum_meta.h", header)
+        self.assertNotIn("div_meta.h", header)
 
 
 if __name__ == "__main__":
