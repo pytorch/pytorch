@@ -11,7 +11,7 @@
 #if IS_PYTHON_3_14_PLUS
 
 #define Py_BUILD_CORE
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 #include <internal/pycore_stackref.h>
 #include <torch/csrc/dynamo/stackref_bridge.h>
 #undef Py_BUILD_CORE

@@ -1,4 +1,4 @@
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 
 #include <vector>
 #include <map>

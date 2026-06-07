@@ -4,7 +4,7 @@
 #include <pybind11/complex.h>
 #include <torch/csrc/utils/pybind.h>
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 
 namespace torch::dynamo {
 void initDynamoBindings(PyObject* torch);

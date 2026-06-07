@@ -24,7 +24,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/ops/from_blob.h>
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 #include <fmt/format.h>
 #include <pybind11/pybind11.h>
 #include <utility>

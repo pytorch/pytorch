@@ -1,7 +1,7 @@
 #ifndef THP_STORAGE_SHARING_INC
 #define THP_STORAGE_SHARING_INC
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 
 PyMethodDef* THPStorage_getSharingMethods();
 

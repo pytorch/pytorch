@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 #include <stddef.h>               // offsetof()
 
 // Python 3.11.0b4 added PyFrame_Back() to Python.h

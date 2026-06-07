@@ -1,7 +1,7 @@
 #ifndef THP_STORAGE_INC
 #define THP_STORAGE_INC
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 #include <c10/core/Storage.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Export.h>

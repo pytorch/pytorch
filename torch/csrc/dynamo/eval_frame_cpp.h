@@ -1,5 +1,5 @@
 #pragma once
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/extra_state.h>
