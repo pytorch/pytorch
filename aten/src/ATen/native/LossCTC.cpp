@@ -123,7 +123,7 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
       std::move(neg_log_likelihood),
       std::move(log_alpha),
       tg_target_stride,
-      tg_batch_offsets);
+      std::move(tg_batch_offsets));
 }
 
 // This kernel is a relatively straightforward implementation of the alpha calculation in the forward backward algorithm (section 4.1).
