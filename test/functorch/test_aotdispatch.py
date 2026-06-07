@@ -2019,7 +2019,8 @@ def forward(self, primals_1):
             out_test2[0].grad_fn
 
     def test_output_aliases_input_multi_output_view(self):
-        # All aliased outs are from multi-output views, so AOTAutograd will hide the aliasing from autograd.
+        # When multi-output views alias inputs, AOTAutograd regenerates the views
+        # instead of sending them through a compiled autograd.Function.
         def f1(a):
             return list(a.unbind(0))
 
@@ -2029,16 +2030,19 @@ def forward(self, primals_1):
 
         out_ref = f1(inp_ref)
         out_test = f1_compiled(inp)
-        # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
-        # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
-        self.assertTrue(
-            all("CompiledFunctionBackward" in str(o.grad_fn) for o in out_test)
-        )
+        # Assert that we replay the multi-output view, instead of giving all
+        # outputs a shared CompiledFunctionBackward node.
+        self.assertTrue(all("UnbindBackward" in str(o.grad_fn) for o in out_test))
 
         sum(out_ref).sum().backward()
         sum(out_test).sum().backward()
         self.assertEqual(inp_ref.grad, inp.grad)
+
+        inp = torch.ones(3, 3, requires_grad=True)
+        out_test = f1_compiled(inp)
+        for out in out_test:
+            out.sum().backward()
+        self.assertEqual(inp.grad, torch.ones_like(inp))
 
         # Several of the outputs are from multi-output views.
         # However: they are part of the same alias set as "a", and "a.view(out.shape)",
