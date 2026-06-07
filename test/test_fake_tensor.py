@@ -210,9 +210,10 @@ class FakeTensorTest(TestCase):
             self.skipTest("propagate_real_tensors resolves the real nnz")
 
         with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()) as mode:
-            out = torch.sparse.spdiags(
-                torch.randn(2, 100), torch.tensor([-1, -2]), (100, 2)
+            dynamic_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, torch.tensor([-1, -2]), make_constant=False
             )
+            out = torch.sparse.spdiags(torch.randn(2, 100), dynamic_offsets, (100, 2))
 
         nnz = out._values().shape[0]
         nnz_range = mode.shape_env.var_to_range[nnz.node.expr]
@@ -526,6 +527,63 @@ class FakeTensorTest(TestCase):
             fake_out = model.forward(x, w, b)
         eager_out = model.forward(x, w, b)
         self.assertEqual(fake_out.stride(), eager_out.stride())
+
+    def test_private_convolution_symint(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        x = fake_mode.from_tensor(
+            torch.randn(1, 3, 16, 16),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[
+                    DimDynamic.DYNAMIC,
+                    DimDynamic.STATIC,
+                    DimDynamic.DYNAMIC,
+                    DimDynamic.DYNAMIC,
+                ],
+                constraint_sizes=[None, None, None, None],
+            ),
+        )
+        w = fake_mode.from_tensor(torch.randn(32, 3, 3, 3), static_shapes=True)
+
+        with fake_mode:
+            out_default = aten._convolution.default(
+                x,
+                w,
+                None,
+                [2, 2],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                False,
+                False,
+                True,
+                True,
+            )
+            out_deprecated = aten._convolution.deprecated(
+                x,
+                w,
+                None,
+                [2, 2],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                False,
+                False,
+                True,
+            )
+
+        for out in (out_default, out_deprecated):
+            self.assertEqual(out.shape[:2], (1, 32))
+            self.assertTrue(
+                statically_known_true(out.shape[2] == (x.shape[2] - 3) // 2 + 1)
+            )
+            self.assertTrue(
+                statically_known_true(out.shape[3] == (x.shape[3] - 3) // 2 + 1)
+            )
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):

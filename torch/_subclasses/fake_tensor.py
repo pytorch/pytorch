@@ -814,18 +814,6 @@ class FakeTensor(Tensor):
     # that have dispatch keys which are higher than the "meta" key:
     # https://github.com/pytorch/pytorch/blob/main/c10/core/DispatchKey.h#L189
 
-    # We don't support named tensors; graph break
-    @property
-    # pyrefly: ignore [bad-override]
-    def names(self) -> list[str]:
-        raise UnsupportedFakeTensorException(
-            "torch.compile doesn't support named tensors"
-        )
-
-    @names.setter
-    def names(self, _: list[str]) -> None:
-        raise NotImplementedError
-
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
         """Normalize device by initializing GPU context and setting device index."""
@@ -2019,7 +2007,10 @@ class FakeTensorMode(TorchDispatchMode):
         _BypassDispatchCache if the output tensor has characteristics that
         prevent caching it.
         """
-        from torch._higher_order_ops.utils import registered_hop_fake_fns
+        from torch._higher_order_ops.utils import (
+            hops_that_skip_faketensor_cache,
+            registered_hop_fake_fns,
+        )
         from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
         self._validate_cache_key(func, args, kwargs)
@@ -2029,22 +2020,26 @@ class FakeTensorMode(TorchDispatchMode):
         # caching.
         # NB: Note that the HOPs that sta alive till FakeTensor are functional,
         # once they support mutations, we will have to revisit this logic.
+        # Skipping caching for HOPs that used to be registered with @py.impl(FakeTensorMode)
+        # to preserve original behaviour
         if (
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
         ):
-            if not isinstance(output, tuple) and output is not None:
-                raise AssertionError(
-                    f"Expected tuple output for HOP {func}, got {type(output)}"
-                )
-            if output is not None:
-                non_cacheable = any(
+            outs = output if isinstance(output, tuple) else (output,)
+            non_cacheable = (
+                any(
                     isinstance(o, (torch.Tensor, torch.SymInt))
                     and has_free_unbacked_symbols(o)
-                    for o in output  # pyrefly: ignore[not-iterable]
+                    for o in outs
                 )
-                if non_cacheable:
-                    raise _BypassDispatchCache(f"unbacked symbol in HOP {func} output")
+                or func in hops_that_skip_faketensor_cache
+            )
+            if non_cacheable:
+                raise _BypassDispatchCache(
+                    f"unbacked symbol in HOP {func} output \
+                    or {func} in hops_that_skip_faketensor_cache"
+                )
 
         if isinstance(output, (int, torch.SymInt, type(None))):
             output_info = _DispatchCacheEntryOutputInfo(
@@ -2622,6 +2617,9 @@ class FakeTensorMode(TorchDispatchMode):
             # and constants are used purely for their values, not autograd.
             and (
                 torch.Tag.inplace_view not in func.tags or func is aten.detach_.default
+            )
+            and not func.name().startswith(
+                "device_mesh::_runtime_compute_coordinate_on_dim"
             )
             and all_constant
             and len(flat_arg_fake_tensors) != 0

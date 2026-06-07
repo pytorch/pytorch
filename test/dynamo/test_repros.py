@@ -1175,11 +1175,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # In the future, we could reduce the frame_count down to 1
         # by guarding on the exact values of `Tensor repeats` arg
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """4""")
-            self.assertExpectedInline(cnt.op_count, """10""")
+            self.assertExpectedInline(cnt.frame_count, """2""")
+            self.assertExpectedInline(cnt.op_count, """12""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """4""")
-            self.assertExpectedInline(cnt.op_count, """14""")
+            self.assertExpectedInline(cnt.frame_count, """2""")
+            self.assertExpectedInline(cnt.op_count, """16""")
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -7577,6 +7577,83 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         compiled_model = torch.compile(model, backend="eager")
 
         self.assertEqual(model(*inputs), compiled_model(*inputs))
+
+    # https://github.com/pytorch/pytorch/issues/152307
+    def test_fp8_qdq_repeated_modules_no_recompile(self):
+        class FP8QDQLinear(torch.nn.Module):
+            def __init__(self, in_features, out_features):
+                super().__init__()
+                weight = torch.randn(out_features, in_features).abs().add(0.01)
+                scale = weight.amax() / torch.finfo(torch.float8_e4m3fn).max
+                self.register_buffer(
+                    "qweight",
+                    torch.clamp(
+                        weight / scale,
+                        torch.finfo(torch.float8_e4m3fn).min,
+                        torch.finfo(torch.float8_e4m3fn).max,
+                    ).to(torch.float8_e4m3fn),
+                )
+                self.register_buffer("weight_scale", scale)
+                self.register_buffer("bias", torch.randn(out_features))
+                self.scale = 1 / torch.finfo(torch.float8_e4m3fn).max
+
+            def forward(self, x):
+                from torch.ao.quantization.fx._decomposed import (
+                    dequantize_per_tensor,
+                    quantize_per_tensor,
+                )
+
+                weight = dequantize_per_tensor(
+                    self.qweight,
+                    self.weight_scale,
+                    0,
+                    torch.finfo(torch.float8_e4m3fn).min,
+                    torch.finfo(torch.float8_e4m3fn).max,
+                    self.qweight.dtype,
+                    out_dtype=torch.float,
+                )
+                qx = quantize_per_tensor(
+                    x,
+                    self.scale,
+                    0,
+                    torch.finfo(torch.float8_e4m3fn).min,
+                    torch.finfo(torch.float8_e4m3fn).max,
+                    torch.float8_e4m3fn,
+                )
+                dx = dequantize_per_tensor(
+                    qx,
+                    self.scale,
+                    0,
+                    torch.finfo(torch.float8_e4m3fn).min,
+                    torch.finfo(torch.float8_e4m3fn).max,
+                    qx.dtype,
+                    out_dtype=torch.float,
+                )
+                return torch.nn.functional.linear(dx, weight, self.bias)
+
+        class Block(torch.nn.Module):
+            def __init__(self, in_features, out_features):
+                super().__init__()
+                self.linear = FP8QDQLinear(in_features, out_features)
+
+            def forward(self, input):
+                return torch.relu(self.linear(input))
+
+        model = torch.nn.Sequential(
+            Block(13, 512),
+            Block(512, 256),
+            Block(256, 128),
+        ).eval()
+        x = torch.randn(8, 13)
+
+        with torch.no_grad(), torch._dynamo.config.patch(error_on_recompile=True):
+            expected = model(x)
+            opt_model = torch.compile(model, backend="eager")
+            result = opt_model(x)
+            result_second_call = opt_model(x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(result_second_call, expected)
 
     # https://github.com/pytorch/pytorch/issues/144080
     def test_pad_sequence_mixed_dtype_padding_value(self):
