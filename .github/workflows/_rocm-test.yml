@@ -275,6 +275,59 @@ jobs:
           # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
           docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
 
+      - name: Capture host-side kernel stacks on hang (MI355 triage)
+        # Runs on the RUNNER HOST (not in the container). After the Test step times out /
+        # fails, the wedged child is D-state = unkillable, so it still exists here; the host
+        # can read its symbolized /proc/<pid>/stack (works in D-state) which the in-container
+        # faulthandler cannot. Emits a one-line VERDICT classifying the cause. Best-effort.
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          cid="${{ env.CONTAINER_NAME }}"
+          [ -z "$cid" ] && { echo "no container"; exit 0; }
+          SUDO=""; sudo -n true 2>/dev/null && SUDO="sudo -n"
+          root=$(docker inspect -f '{{.State.Pid}}' "$cid" 2>/dev/null)
+          { [ -z "$root" ] || [ "$root" = "0" ]; } && { echo "container not running"; exit 0; }
+          out="${RUNNER_TEMP}/host_hang_capture.txt"
+          # walk the container process tree (host PID view)
+          pids="$root"; frontier="$root"
+          while [ -n "$frontier" ]; do
+            next=""
+            for f in $frontier; do
+              for k in $($SUDO cat /proc/$f/task/*/children 2>/dev/null); do
+                case " $pids " in *" $k "*) ;; *) pids="$pids $k"; next="$next $k";; esac
+              done
+            done
+            frontier="$next"
+          done
+          {
+            echo "===== HOST HANG CAPTURE container=$cid $(date -u) ====="
+            for p in $pids; do
+              st=$($SUDO awk '{print $3}' /proc/$p/stat 2>/dev/null)
+              cm=$($SUDO cat /proc/$p/comm 2>/dev/null)
+              wc=$($SUDO cat /proc/$p/wchan 2>/dev/null)
+              [ "$st" = "R" ] && continue   # skip actively-running procs
+              echo "--- pid=$p comm=$cm state=$st wchan=$wc ---"
+              stk=$($SUDO cat /proc/$p/stack 2>/dev/null)
+              echo "$stk"
+              echo "  syscall: $($SUDO cat /proc/$p/syscall 2>/dev/null)"
+              $SUDO ls -l /proc/$p/fd 2>/dev/null | grep -iE 'kfd|renderD' | sed 's/^/  fd: /'
+              if [ "$st" = "D" ] && printf '%s %s' "$stk" "$wc" | grep -qiE 'amdgpu|kfd|ttm|svm_range|dma_fence|drm_'; then
+                echo "  VERDICT: CONFIRMED amdgpu/kfd D-state wedge (pid=$p comm=$cm)"
+              elif [ "$st" = "D" ] && printf '%s %s' "$stk" "$wc" | grep -qiE 'mem_cgroup|reclaim|mmu_notifier|__alloc_pages'; then
+                echo "  VERDICT: memory/mmu-notifier reclaim D-state (pid=$p comm=$cm)"
+              fi
+            done
+            echo "--- dmesg (amdgpu/kfd/hung_task) ---"
+            $SUDO dmesg --ctime 2>/dev/null | grep -iE 'amdgpu|kfd|svm_range|userptr|hung_task|blocked for more|gpu reset' | tail -120
+            echo "--- rocm-smi ---"; rocm-smi --showpids --showuse 2>/dev/null
+          } | tee "$out"
+          # surface the verdicts in the job log + copy into test-reports for artifact upload
+          grep -h 'VERDICT:' "$out" || echo "no D-state wedge verdict (see $out)"
+          docker exec -t "$cid" sh -c 'mkdir -p /var/lib/jenkins/pytorch/test/test-reports' 2>/dev/null
+          docker cp "$out" "$cid":/var/lib/jenkins/pytorch/test/test-reports/host_hang_capture.txt 2>/dev/null || true
+
       - name: Save test results
         if: always()
         run: |

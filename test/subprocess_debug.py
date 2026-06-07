@@ -354,6 +354,7 @@ def install() -> None:
     subprocess.run = _traced_run
     subprocess.call = _traced_call
     _INSTALLED = True
+    _start_watchdog()
 
 
 def _read_file(path: str) -> str:
@@ -407,12 +408,54 @@ def _descendants(pid: int) -> list[int]:
     return [p for p in seen if p != pid]
 
 
+def _proc_state_char(pid: int) -> str:
+    # Single-char task state (R/S/D/Z/T) from /proc/<pid>/stat field 3. D = the
+    # uninterruptible kernel wedge we are trying to confirm.
+    try:
+        data = _read_file(f"/proc/{pid}/stat")
+        return data[data.rfind(")") + 2]
+    except Exception:
+        return "?"
+
+
+def _gpu_fds(pid: int) -> list[str]:
+    # fds pointing at the GPU driver nodes — the concrete link that makes a hang
+    # "GPU related" even for a non-GPU process (it inherited them from a torch parent).
+    found: list[str] = []
+    try:
+        for name in os.listdir(f"/proc/{pid}/fd"):
+            tgt = _read_link(f"/proc/{pid}/fd/{name}")
+            if "/dev/kfd" in tgt or "/dev/dri/render" in tgt or "/dev/dri/card" in tgt:
+                found.append(f"{name} -> {tgt}")
+    except Exception:
+        pass
+    return found
+
+
+def _kernel_stacks(pid: int) -> str:
+    # THE DECISIVE datum: per-thread kernel stack, readable even for a D-state task.
+    # Needs CAP_SYS_ADMIN (root / --cap-add=SYS_ADMIN); best-effort otherwise (the
+    # wchan/syscall/state above already classify the cause without it).
+    lines: list[str] = []
+    try:
+        tids = sorted(os.listdir(f"/proc/{pid}/task"))
+    except Exception:
+        tids = [str(pid)]
+    for tid in tids:
+        lines.append(f"[tid {tid}] {_read_file(f'/proc/{pid}/task/{tid}/stack')}")
+    return "\n".join(lines)
+
+
 def _dump_proc_state(pid: int, out: Any) -> None:
     print(f"--- /proc state for pid={pid} ---", file=out)
     print(f"cmdline: {_read_cmdline(pid)}", file=out)
     print(f"cwd: {_read_link(f'/proc/{pid}/cwd')}", file=out)
+    print(f"state: {_proc_state_char(pid)}", file=out)
     print(f"wchan: {_read_file(f'/proc/{pid}/wchan')}", file=out)
     print(f"syscall: {_read_file(f'/proc/{pid}/syscall')}", file=out)
+    gpu = _gpu_fds(pid)
+    print(f"gpu_fds: {gpu if gpu else 'none'}", file=out)
+    print(f"kernel_stack:\n{_kernel_stacks(pid)}", file=out)
     print(_read_file(f"/proc/{pid}/status"), file=out)
 
 
@@ -503,3 +546,206 @@ def dump_recent_subprocess_traces(
         for child in _descendants(pid):
             _dump_proc_state(child, out)
     print("===== PYTORCH SUBPROCESS DEBUG END =====\n", file=out, flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Kernel-level hang classification + proactive watchdog (added for MI355 triage)
+#
+# WHY: the Python-stack dump above (a) only ever shows Python frames, so it cannot
+# say *why* a child is stuck, and (b) only fires when something sends SIGUSR1 / on a
+# run_test.py per-file timeout -- but the worst MI355 hang
+# (inductor/test_torchinductor_opinfo_properties) gets NO per-file timeout and nothing
+# sends SIGUSR1, so it produced zero useful data and just burned the 270-min job.
+#
+# This watchdog PROACTIVELY detects a stuck/D-state traced child and captures the
+# KERNEL evidence (task state + wchan + syscall + GPU fds + per-thread kernel stack
+# + dmesg + rocm-smi) and emits a one-line VERDICT classifying the cause:
+#   amdgpu/kfd driver D-state wedge  vs  memory/mmu-notifier reclaim  vs
+#   IPC pipe / sccache socket  vs  userspace futex lock  vs  spinning.
+# That verdict is what lets a CI hang be attributed to (or ruled out as) the
+# amdgpu/kfd hypothesis. State/wchan/gpu-fds ARE readable as the non-root `jenkins`
+# CI user and ALREADY classify the cause (e.g. wchan=amdgpu_fill_buffer / kfd_* /
+# svm_range_* + state=D => CONFIRMED). The full kernel stack needs CAP_SYS_ADMIN
+# *effective*, which the non-root container user does not have (CapEff=0 even with
+# --cap-add), so it is best-effort here and is instead grabbed by the runner-host
+# step in _rocm-test.yml (root); classification does NOT depend on it.
+# ---------------------------------------------------------------------------
+
+_HANG_CAPTURED: set[int] = set()
+_DSTATE_SAMPLES: dict[int, int] = {}
+_CPU_LAST: dict[int, tuple[int, float]] = {}
+_WATCH_INTERVAL = float(os.environ.get("PYTORCH_HANG_WATCH_INTERVAL", "20"))
+_WATCH_D_SAMPLES = int(os.environ.get("PYTORCH_HANG_D_SAMPLES", "2"))
+_WATCH_STUCK_SECS = float(os.environ.get("PYTORCH_HANG_STUCK_SECS", "180"))
+
+# First matching family wins. amdgpu/kfd first so a GPU wedge is never mis-bucketed.
+_CLASSIFY_RULES = [
+    ("amdgpu_kfd_driver_wedge",
+     ("amdgpu", "kfd_", "kgd2kfd", "amdttm", "ttm_bo", "svm_range", "dma_fence",
+      "drm_sched", "drm_gem", "amdgpu_mn")),
+    ("memory_or_mmu_notifier_reclaim",
+     ("mem_cgroup", "try_to_free_pages", "shrink_", "__alloc_pages",
+      "mmu_notifier", "mn_invl", "do_swap_page", "handle_over_high")),
+    ("ipc_pipe_or_sccache_socket",
+     ("pipe_read", "pipe_write", "sk_wait_data", "tcp_recvmsg", "inet_recvmsg",
+      "unix_stream_read", "do_select", "ep_poll", "do_poll")),
+    ("userspace_futex_lock", ("futex",)),
+    ("filesystem_io", ("wait_on_page", "folio_wait", "__lock_page", "jbd2", "nfs")),
+]
+
+
+def _cpu_ticks(pid: int) -> int:
+    try:
+        data = _read_file(f"/proc/{pid}/stat")
+        parts = data[data.rfind(")") + 2:].split()
+        return int(parts[11]) + int(parts[12])  # utime + stime
+    except Exception:
+        return -1
+
+
+def classify_hang(pid: int) -> tuple[str, str]:
+    """Return (verdict, evidence) for a suspected-stuck pid from kernel /proc state.
+
+    Decision: D-state AND (amdgpu/kfd/ttm/svm in wchan|kernel-stack, OR blocked in an
+    ioctl while holding a /dev/kfd|renderD fd) => the claimed amdgpu/kfd driver wedge.
+    """
+    state = _proc_state_char(pid)
+    wchan = _read_file(f"/proc/{pid}/wchan")
+    stack = _kernel_stacks(pid)
+    syscall = _read_file(f"/proc/{pid}/syscall")
+    gpu_fds = _gpu_fds(pid)
+    blob = f"{wchan}\n{stack}".lower()
+
+    bucket = None
+    for name, needles in _CLASSIFY_RULES:
+        if any(n in blob for n in needles):
+            bucket = name
+            break
+    # Fallback when wchan/stack are unhelpful: a D-state task blocked in ioctl(2)
+    # while holding a /dev/kfd|renderD fd is the amdgpu/kfd wedge signature.
+    # /proc/<pid>/syscall reports the syscall NUMBER (16 == ioctl on x86_64), not its name.
+    sc = syscall.strip()
+    blocked_in_ioctl = sc.startswith("16 ") or "ioctl" in sc.lower()
+    if bucket is None and state == "D" and gpu_fds and blocked_in_ioctl:
+        bucket = "amdgpu_kfd_driver_wedge"
+    if bucket is None:
+        bucket = "spinning" if state == "R" else f"unknown(state={state})"
+
+    confirmed = state == "D" and bucket == "amdgpu_kfd_driver_wedge"
+    verdict = ("CONFIRMED amdgpu/kfd driver D-state wedge" if confirmed
+               else f"NOT-this-cause: {bucket} (state={state})")
+    evidence = (f"state={state} wchan={wchan!r} syscall={syscall!r} "
+                f"gpu_fds={gpu_fds or 'none'} bucket={bucket}")
+    return verdict, evidence
+
+
+def capture_hang(pid: int, reason: str) -> None:
+    """Dump full kernel evidence + a cause VERDICT for a stuck pid (once per pid)."""
+    if pid in _HANG_CAPTURED:
+        return
+    _HANG_CAPTURED.add(pid)
+    verdict, evidence = classify_hang(pid)
+    path = os.path.join(_debug_dir(), f"HANG_CAPTURE_{pid}_{int(time.time())}.txt")
+    try:
+        f: Any = open(path, "w", encoding="utf-8")
+        opened = True
+    except Exception:
+        f = sys.__stderr__ or sys.stderr
+        opened = False
+    try:
+        print(f"===== PYTORCH HANG CAPTURE pid={pid} reason={reason} =====", file=f)
+        print(f"VERDICT: {verdict}", file=f)
+        print(f"evidence: {evidence}\n", file=f)
+        _dump_proc_state(pid, f)
+        for child in _descendants(pid):
+            _dump_proc_state(child, f)
+        for label, cmd in (("dmesg", ["dmesg", "--ctime"]),
+                           ("rocm-smi", ["rocm-smi", "--showpids", "--showuse"])):
+            try:
+                res = _ORIGINAL_RUN(cmd, capture_output=True, text=True, timeout=15)
+                text = res.stdout
+                if label == "dmesg":
+                    text = "\n".join(
+                        ln for ln in text.splitlines()
+                        if any(k in ln.lower() for k in
+                               ("amdgpu", "kfd", "svm_range", "userptr", "hung_task",
+                                "blocked for more than", "gpu reset", "ring", "watchdog"))
+                    )[-8000:]
+                print(f"\n--- {label} ---\n{text}", file=f)
+            except Exception as exc:
+                print(f"\n--- {label} unavailable: {exc!r} ---", file=f)
+    finally:
+        if opened:
+            try:
+                f.close()
+            except Exception:
+                pass
+    err = sys.__stderr__ or sys.stderr
+    print(f"[hang-watchdog] pid={pid} {verdict} | {evidence} | full={path}",
+          file=err, flush=True)
+
+
+def _watchdog_active_pids() -> list[int]:
+    # Children spawned by THIS process (its own trace log), still alive & unfinished.
+    starts: dict[str, int] = {}
+    finished: set[str] = set()
+    try:
+        with open(_log_path(), encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                tid, cpid = r.get("trace_id"), r.get("child_pid")
+                if not isinstance(tid, str) or not isinstance(cpid, int):
+                    continue
+                if r.get("event") == "start":
+                    starts[tid] = cpid
+                elif r.get("event") == "finish":
+                    finished.add(tid)
+    except Exception:
+        return []
+    return [c for t, c in starts.items() if t not in finished and _process_exists(c)]
+
+
+def _watchdog_loop() -> None:
+    while True:
+        time.sleep(_WATCH_INTERVAL)
+        try:
+            now = time.time()
+            live = set(_watchdog_active_pids())
+            for pid in live:
+                if pid in _HANG_CAPTURED:
+                    continue
+                state = _proc_state_char(pid)
+                if state == "D":
+                    _DSTATE_SAMPLES[pid] = _DSTATE_SAMPLES.get(pid, 0) + 1
+                    if _DSTATE_SAMPLES[pid] >= _WATCH_D_SAMPLES:
+                        capture_hang(pid, f"Dstate_x{_DSTATE_SAMPLES[pid]}")
+                        continue
+                else:
+                    _DSTATE_SAMPLES.pop(pid, None)
+                cpu = _cpu_ticks(pid)
+                last = _CPU_LAST.get(pid)
+                if last is None or last[0] != cpu:
+                    _CPU_LAST[pid] = (cpu, now)
+                elif now - last[1] >= _WATCH_STUCK_SECS:
+                    capture_hang(pid, f"flatCPU_{int(now - last[1])}s")
+            for d in list(_DSTATE_SAMPLES):
+                if d not in live:
+                    _DSTATE_SAMPLES.pop(d, None)
+            for d in list(_CPU_LAST):
+                if d not in live:
+                    _CPU_LAST.pop(d, None)
+        except Exception:
+            pass
+
+
+def _start_watchdog() -> None:
+    if os.environ.get("PYTORCH_HANG_WATCHDOG", "1") == "0":
+        return
+    try:
+        threading.Thread(target=_watchdog_loop, name="pytorch-hang-watchdog",
+                         daemon=True).start()
+    except Exception:
+        pass
