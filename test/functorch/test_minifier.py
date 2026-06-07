@@ -4,6 +4,10 @@ import torch
 from functorch import make_fx
 from functorch.compile import minifier
 from torch._functorch.compile_utils import get_outputs, get_placeholders
+from torch.fx.experimental.symbolic_shapes import (
+    find_symbol_binding_fx_nodes,
+    free_symbols,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -67,6 +71,27 @@ class TestMinifier(TestCase):
         min_f, inps = minifier(failing_f, inps, inputs_returned)
         self.assertEqual(len(min_f.graph.nodes), 2)
         self.assertEqual(len(inps), 1)
+
+    def test_unused_symint_binding_input_preserved(self):
+        def f(n, x):
+            return x + 1
+
+        inp = torch.randn(2)
+        failing_f = make_fx(f, tracing_mode="symbolic")(2, inp)
+
+        def has_add(fx_g, inps):
+            return torch.ops.aten.add.Tensor in (i.target for i in fx_g.graph.nodes)
+
+        min_f, inps = minifier(
+            failing_f, [2, inp], has_add, dump_state=lambda fx_g, inps: None
+        )
+
+        self.assertEqual(len(inps), 2)
+        placeholders = list(get_placeholders(min_f.graph))
+        self.assertEqual(len(placeholders), 2)
+        bindings = find_symbol_binding_fx_nodes(min_f.graph)
+        tensor_symbols = free_symbols(placeholders[1].meta["val"])
+        self.assertTrue(set(tensor_symbols).issubset(bindings.keys()))
 
     def test_tup_use(self):
         def f(a, b):
