@@ -350,7 +350,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_dtype = torch.get_default_dtype()
             torch_rng_state = torch.random.get_rng_state()
             cuda_rng_state = None
-            if torch.cuda.is_available():
+            if torch.cuda.is_initialized():
                 with torch._C.DisableTorchFunction():
                     cuda_rng_state = torch.cuda.get_rng_state()
             cuda_matmul_fp32_prec = torch._C._get_fp32_precision_getter(

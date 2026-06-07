@@ -43,6 +43,20 @@ def has_triton_package() -> bool:
         return False
 
 
+def has_initialized_accelerator() -> bool:
+    import torch
+
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
+    if accelerator is None:
+        return False
+
+    device_module = torch.get_device_module(accelerator)
+    is_initialized = getattr(device_module, "is_initialized", None)
+    if is_initialized is None:
+        return True
+    return is_initialized()
+
+
 @functools.cache
 def get_triton_version(fallback: tuple[int, int] = (0, 0)) -> tuple[int, int]:
     try:
