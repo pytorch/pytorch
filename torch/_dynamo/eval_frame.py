@@ -428,8 +428,8 @@ def _get_total_cache_entry_count(
     return torch._C._dynamo.eval_frame._get_total_cache_entry_count(code)
 
 
-_use_wrapper_parameters_for_module_methods_ctx = contextvars.ContextVar(
-    "use_wrapper_parameters_for_module_methods", default=False
+_use_wrapper_module_registries_for_module_methods_ctx = contextvars.ContextVar(
+    "use_wrapper_module_registries_for_module_methods", default=False
 )
 
 
@@ -468,7 +468,7 @@ class OptimizedModule(torch.nn.Module):
         self._super_module_initialized = True
 
         # Installs the params/buffer
-        with self._use_wrapper_parameters_for_module_methods():
+        with self._use_wrapper_module_registries_for_module_methods():
             self._orig_mod = mod  # `super().__setattr__` will register this module
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
@@ -589,31 +589,33 @@ class OptimizedModule(torch.nn.Module):
         self._initialize()
 
     def __getattribute__(self, name: str) -> Any:
-        if name == "_parameters":
+        if name in {"_parameters", "_buffers", "_non_persistent_buffers_set"}:
             try:
                 attrs = object.__getattribute__(self, "__dict__")
-                if _use_wrapper_parameters_for_module_methods_ctx.get():
-                    return attrs["_parameters"]
+                if _use_wrapper_module_registries_for_module_methods_ctx.get():
+                    return attrs[name]
 
                 modules = attrs.get("_modules")
                 if modules is not None and "_orig_mod" in modules:
-                    return modules["_orig_mod"]._parameters
+                    return getattr(modules["_orig_mod"], name)
 
                 orig_mod = attrs.get("_orig_mod")
                 if orig_mod is not None:
-                    return orig_mod._parameters
+                    return getattr(orig_mod, name)
             except AttributeError:
                 pass
 
         return super().__getattribute__(name)
 
     @contextlib.contextmanager
-    def _use_wrapper_parameters_for_module_methods(self) -> Generator[None, None, None]:
-        token = _use_wrapper_parameters_for_module_methods_ctx.set(True)
+    def _use_wrapper_module_registries_for_module_methods(
+        self,
+    ) -> Generator[None, None, None]:
+        token = _use_wrapper_module_registries_for_module_methods_ctx.set(True)
         try:
             yield
         finally:
-            _use_wrapper_parameters_for_module_methods_ctx.reset(token)
+            _use_wrapper_module_registries_for_module_methods_ctx.reset(token)
 
     def named_parameters(
         self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
@@ -624,7 +626,23 @@ class OptimizedModule(torch.nn.Module):
             remove_duplicate=remove_duplicate,
         )
         while True:
-            with self._use_wrapper_parameters_for_module_methods():
+            with self._use_wrapper_module_registries_for_module_methods():
+                try:
+                    item = next(iterator)
+                except StopIteration:
+                    return
+            yield item
+
+    def named_buffers(
+        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+    ):
+        iterator = super().named_buffers(
+            prefix=prefix,
+            recurse=recurse,
+            remove_duplicate=remove_duplicate,
+        )
+        while True:
+            with self._use_wrapper_module_registries_for_module_methods():
                 try:
                     item = next(iterator)
                 except StopIteration:
@@ -633,21 +651,21 @@ class OptimizedModule(torch.nn.Module):
 
     def _apply(self, fn, recurse=True):
         def fn_with_proxied_parameters(*args, **kwargs):
-            token = _use_wrapper_parameters_for_module_methods_ctx.set(False)
+            token = _use_wrapper_module_registries_for_module_methods_ctx.set(False)
             try:
                 return fn(*args, **kwargs)
             finally:
-                _use_wrapper_parameters_for_module_methods_ctx.reset(token)
+                _use_wrapper_module_registries_for_module_methods_ctx.reset(token)
 
-        with self._use_wrapper_parameters_for_module_methods():
+        with self._use_wrapper_module_registries_for_module_methods():
             return super()._apply(fn_with_proxied_parameters, recurse=recurse)
 
     def _replicate_for_data_parallel(self):
-        with self._use_wrapper_parameters_for_module_methods():
+        with self._use_wrapper_module_registries_for_module_methods():
             return super()._replicate_for_data_parallel()
 
     def _save_to_state_dict(self, destination, prefix, keep_vars) -> None:
-        with self._use_wrapper_parameters_for_module_methods():
+        with self._use_wrapper_module_registries_for_module_methods():
             return super()._save_to_state_dict(destination, prefix, keep_vars)
 
     def _load_from_state_dict(
@@ -678,7 +696,7 @@ class OptimizedModule(torch.nn.Module):
         # `_orig_mod`, then hide them from the inherited load path to avoid
         # invoking them a second time under the internal wrapper-parameter view.
         load_state_dict_pre_hooks.clear()
-        with self._use_wrapper_parameters_for_module_methods():
+        with self._use_wrapper_module_registries_for_module_methods():
             try:
                 return super()._load_from_state_dict(
                     state_dict,
@@ -711,9 +729,10 @@ class OptimizedModule(torch.nn.Module):
         return getattr(self._orig_mod, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if _use_wrapper_parameters_for_module_methods_ctx.get() and name in {
+        if _use_wrapper_module_registries_for_module_methods_ctx.get() and name in {
             "_parameters",
             "_buffers",
+            "_non_persistent_buffers_set",
             "_modules",
             "_is_replica",
         }:
@@ -728,9 +747,10 @@ class OptimizedModule(torch.nn.Module):
         return setattr(self._orig_mod, name, value)
 
     def __delattr__(self, name: str) -> None:
-        if _use_wrapper_parameters_for_module_methods_ctx.get() and name in {
+        if _use_wrapper_module_registries_for_module_methods_ctx.get() and name in {
             "_parameters",
             "_buffers",
+            "_non_persistent_buffers_set",
             "_modules",
             "_is_replica",
         }:
