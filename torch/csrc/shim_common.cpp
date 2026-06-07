@@ -1,5 +1,6 @@
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKey.h>
+#include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
@@ -135,8 +136,11 @@ static StableIValue from_ivalue(
         return torch::stable::detail::_from(
             std::nullopt, extension_build_version);
       }
-      StableIValue* sivp = new StableIValue(
-          from_ivalue(inner_type, ivalue, extension_build_version));
+      const StableIValue value =
+          from_ivalue(inner_type, ivalue, extension_build_version);
+      StableIValue* sivp = nullptr;
+      TORCH_ERROR_CODE_CHECK(torch_new_stable_ivalue(&sivp));
+      *sivp = value;
       return torch::stable::detail::_from(sivp, extension_build_version);
     }
     case c10::TypeKind::ListType: {
@@ -245,10 +249,10 @@ static c10::IValue to_ivalue(
           torch::stable::detail::_from(std::nullopt, extension_build_version)) {
         return c10::IValue();
       }
-      auto sivp = torch::stable::detail::_to<StableIValue*>(
+      StableIValue* sivp = torch::stable::detail::_to<StableIValue*>(
           stable_ivalue, extension_build_version);
       auto ival = to_ivalue(inner_type, *sivp, extension_build_version);
-      delete sivp;
+      TORCH_ERROR_CODE_CHECK(torch_delete_stable_ivalue(sivp));
       return ival;
     }
     case c10::TypeKind::ListType: {
@@ -751,6 +755,37 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     reinterpret_cast<torch::Library*>(self)->set_python_module(
         pymodule, context);
+  });
+}
+
+AOTITorchError torch_new_stable_ivalue(StableIValue** ret_value) {
+  // Check if ret_value can be dereferenced, if not it is a failure.
+  if (ret_value == nullptr) {
+    return AOTI_TORCH_FAILURE;
+  }
+  // Ensure the ret_value is set to a nullptr in case the allocation fails.
+  *ret_value = nullptr;
+
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_value = new StableIValue(0); });
+}
+
+AOTITorchError torch_delete_stable_ivalue(StableIValue* value) {
+  if (value == nullptr) {
+    // Freeing a nullptr is invalid.
+    return AOTI_TORCH_FAILURE;
+  } else {
+    delete value;
+    return AOTI_TORCH_SUCCESS;
+  }
+}
+
+AOTITorchError torch_stream_native_handle(
+    StreamHandle stream,
+    void** ret_native_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::Stream* stream_ptr = reinterpret_cast<c10::Stream*>(stream);
+    *ret_native_handle = stream_ptr->native_handle();
   });
 }
 

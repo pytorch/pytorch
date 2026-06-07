@@ -270,6 +270,7 @@ class BoolTest(CPythonTestCase):
         self.assertNotIsInstance(True ^ 1, bool)
         self.assertIs(True ^ True, False)
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_fileclosed(self):
         try:
             with open(os_helper.TESTFN, "w", encoding="utf-8") as f:
