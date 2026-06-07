@@ -22,6 +22,7 @@ from torch._dynamo.repro.after_aot import (
 )
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
 from torch.utils._traceback import report_compile_source_on_error
@@ -348,8 +349,8 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         # Second element should be a SymInt (not a concrete int)
         self.assertIsInstance(result[1], torch.SymInt)
 
-    def test_get_compile_args_preserves_shapes(self):
-        """_get_compile_args preserves symbolic shape info from traced graph."""
+    def test_get_compile_args_preserves_symbolic_tensor_shapes(self):
+        """_get_compile_args preserves tensor-only symbolic shape info."""
 
         def f(x):
             return (x * 2,)
@@ -357,8 +358,34 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         args = [torch.randn(4, 8)]
         gm = make_fx(f, tracing_mode="symbolic")(*args)
         result = _get_compile_args(gm, args)
-        # FakeTensor should preserve the shape
+        self.assertIsNot(result, args)
+        self.assertIsInstance(result[0], torch._subclasses.FakeTensor)
+        self.assertTrue(has_free_symbols(result[0]))
         self.assertEqual(result[0].shape, torch.Size([4, 8]))
+
+    def test_save_graph_repro_uses_symbolic_tensor_metadata(self):
+        """save_graph_repro uses symbolic placeholder metadata with real data."""
+
+        def f(x):
+            return (x * 2,)
+
+        args = [torch.arange(32, dtype=torch.float32).reshape(4, 8)]
+        gm = make_fx(f, tracing_mode="symbolic")(*args)
+
+        with tempfile.TemporaryDirectory() as d:
+            buf = io.StringIO()
+            save_graph_repro(buf, gm, args, "inductor", save_dir=d)
+            repro_src = buf.getvalue()
+
+            self.assertIn("tracing_mode='symbolic'", repro_src)
+            self.assertRegex(repro_src, r"reader\.tensor\(buf0, \(s\d+, s\d+\)")
+
+            ns = {"__name__": "test_save_graph_repro"}
+            exec(compile(repro_src, "<test_save_graph_repro>", "exec"), ns)
+            reader = InputReader(d)
+            ns["load_args"](reader)
+
+        self.assertEqual(reader.args[0], args[0])
 
     def test_get_compile_args_real_tracing_returns_concrete(self):
         """_get_compile_args returns original args for real-mode tracing.
