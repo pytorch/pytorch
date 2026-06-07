@@ -1377,6 +1377,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 flat_fn,
                 flat_args,
                 flat_args_descs,
+                aot_config=aot_config,
                 is_joint_structure=self.trace_joint,
                 meta=fw_metadata,
                 fw_only=self.fw_only,  # type: ignore[arg-type]

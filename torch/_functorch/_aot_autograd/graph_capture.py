@@ -240,6 +240,7 @@ def _prepare_graph_capture_tracing(
         fn_to_trace,
         updated_flat_args,
         updated_flat_args_descs,
+        aot_config=aot_config,
         is_joint_structure=trace_joint,
         meta=fw_metadata,
         fw_only=flat_fn,
