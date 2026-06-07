@@ -2577,6 +2577,14 @@
       ]
     }
   ],
+  "GB8338": [
+    {
+      "Gb_type": "torch.Tensor with traced NumPy arrays and non-CPU default device",
+      "Context": "torch.Tensor(data) where data contains traced NumPy arrays",
+      "Explanation": "Dynamo does not currently lower this legacy constructor case when the default device is not CPU.",
+      "Hints": []
+    }
+  ],
   "GB0183": [
     {
       "Gb_type": "failed to call dict.fromkeys()",
