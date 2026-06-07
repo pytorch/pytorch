@@ -319,6 +319,25 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(x_compiled.grad, x_eager.grad)
 
+    def test_register_hook_identity_alias_fullgraph(self):
+        def fn(x):
+            y = x * x
+            y.register_hook(lambda grad: grad)
+            return y.sum()
+
+        x = torch.randn([2, 2], requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+
+        expected = fn(x_ref)
+        expected.backward()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        actual = opt_fn(x)
+        actual.backward()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(x.grad, x_ref.grad)
+
     def test_hook_on_intermediate_with_container(self):
         glb_list = []
         glb_dict = {}
