@@ -15,7 +15,7 @@ from torchgen.gen import (
     parse_native_yaml,
 )
 from torchgen.gen_backend_stubs import parse_backend_yaml, run
-from torchgen.model import NativeFunctionsGroup
+from torchgen.model import NativeFunctionsGroup, OperatorName
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, Target
 
@@ -519,6 +519,7 @@ supported:
             anon,
             """\
 at::Tensor wrapper_PrivateUse1_Tensor_div(const at::Tensor & self, const at::Tensor & other) {
+  const OptionalDeviceGuard device_guard(device_of(self));
   auto out = at::empty({0}, self.options());
 
   at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, out);
@@ -538,6 +539,7 @@ at::Tensor & wrapper_PrivateUse1_out_div_out(const at::Tensor & self, const at::
 } // anonymous namespace
 
 at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor & other) {
+  const OptionalDeviceGuard device_guard(device_of(self));
 
   at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, self);
   return self;
@@ -589,6 +591,7 @@ void impl(const at::Tensor & self, const at::Tensor & other, const at::Scalar & 
             off,
             """\
 at::Tensor wrapper_PrivateUse1_Tensor_div(const at::Tensor & self, const at::Tensor & other) {
+  // DeviceGuard omitted
   auto out = at::empty({0}, self.options());
 
   at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, out);
@@ -608,12 +611,55 @@ at::Tensor & wrapper_PrivateUse1_out_div_out(const at::Tensor & self, const at::
 } // anonymous namespace
 
 at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor & other) {
+  // DeviceGuard omitted
 
   at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, self);
   return self;
 }
 """,
         )
+
+    # TensorList out (runtime-dependent count) can't be pre-allocated to derive the
+    # functional, so we emit only the plain out wrapper and leave the functional to the
+    # composite (in-tree: split_with_sizes_copy.out works the same way on CUDA).
+    def test_out_as_primary_tensorlist_falls_back_to_composite(self) -> None:
+        out = self.anonymous_definitions("- unbind_copy.int_out")
+        self.assertIn(
+            "PrivateUse1NativeFunctions::unbind_copy_out(self, dim, out)", out
+        )
+        # no derived functional: a Tensor[] output is never allocated as a single empty Tensor
+        self.assertNotIn("at::empty", out)
+
+    # A structured op that is also a symint op must NOT get a "_symint" suffix on its kernel
+    # name: kernel_name becomes the generated struct name (structured_<kernel>), which must
+    # match the hand-written TORCH_PRIVATEUSE1_IMPL_FUNC(<op>). SymInt is carried by the
+    # meta/impl signature -- in-tree structured structs never carry the suffix.
+    def test_structured_symint_kernel_name_has_no_suffix(self) -> None:
+        global _GLOBAL_PARSE_NATIVE_YAML_CACHE
+        _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
+        native = Path(__file__).absolute().parents[2] / "aten/src/ATen/native"
+        parsed = parse_native_yaml(
+            str(native / "native_functions.yaml"), str(native / "tags.yaml")
+        )
+        grouped = get_grouped_native_functions(parsed.native_functions)
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+symint:
+- upsample_nearest1d.out
+supported:
+- upsample_nearest1d.out:
+  structured: true"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml") as fp:
+            fp.write(yaml_str)
+            fp.flush()
+            backend_yaml = parse_backend_yaml(fp.name, grouped, parsed.backend_indices)
+        backend_index = backend_yaml.backend_indices[backend_yaml.backend_key]
+        metadata = backend_index.index[OperatorName.parse("upsample_nearest1d.out")]
+        self.assertTrue(metadata.structured)
+        self.assertNotIn("_symint", metadata.kernel)
+        self.assertEqual(metadata.kernel, "upsample_nearest1d_out")
 
 
 if __name__ == "__main__":

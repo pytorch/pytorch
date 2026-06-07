@@ -488,8 +488,29 @@ class RegisterDispatchKey:
                 f"{out_meta.cpp_namespace}::{self.class_method_name}::{out_meta.kernel}"
             )
 
+        # Guard like gen_unstructured (only the out wrapper was guarded before): pick the device
+        # from the first tensor-like arg, self_arg -> out -> flat_positional.
+        device_guard = "// DeviceGuard omitted"
+        if f.device_guard and self.backend_index.device_guard and out_meta.device_guard:
+            self_arg = (
+                [f.func.arguments.self_arg.argument]
+                if f.func.arguments.self_arg is not None
+                else []
+            )
+            candidate_args = itertools.chain(
+                self_arg, f.func.arguments.out, f.func.arguments.flat_positional
+            )
+            device_of = next(
+                (a.name for a in candidate_args if a.type.is_tensor_like()), None
+            )
+            if device_of is not None:
+                device_guard = (
+                    f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
+                )
+
         return f"""\
 {sig.defn()} {{
+  {device_guard}
 {allocation_logic}
   {impl_name}({", ".join(call_args)});
   {return_statement}
@@ -560,6 +581,9 @@ class RegisterDispatchKey:
                     and g is not None
                     and (f.func.kind() is not SchemaKind.out)
                     and (self.backend_index.has_kernel(g.out))
+                    # TensorList out has a runtime count: can't pre-allocate to derive the
+                    # functional, so leave it to the composite like in-tree (split_with_sizes_copy.out).
+                    and not any(a.type.is_list_like() for a in g.out.func.arguments.out)
                 ):
                     gets_func_inplace_wrapper = True
                 else:
