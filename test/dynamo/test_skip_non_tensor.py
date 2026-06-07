@@ -8,10 +8,12 @@ import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list, reset_code
 from torch._dynamo.testing import CompileCounter
+from torch._dynamo.utils import CleanupHook, CleanupManager
 
 
 _variable = 0
 _variable_2 = 0
+_condition_dependent_skip_flag = False
 _P = ParamSpec("_P")
 _paramspec_module = ModuleType("_paramspec_module")
 _paramspec_module._P = ParamSpec("_paramspec_module._P")  # type: ignore[attr-defined]
@@ -259,6 +261,43 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
             preexisting_builtins_keys,
         )
 
+    def test_condition_dependent_skip_cleanup_hooks_are_idempotent(self):
+        def fn():
+            pass
+
+        scope = {}
+        cleanup_count = CleanupManager.count
+        hook = CleanupHook.create(scope, "__tmp_cleanup", object())
+        self.assertEqual(CleanupManager.count, cleanup_count + 1)
+
+        key = fn.__code__.replace(co_varnames=fn.__code__.co_varnames)
+        CleanupManager.instance[key] = [hook, hook]
+        CleanupManager.instance.cleanup(key)
+        CleanupManager.instance.cleanup(key)
+
+        self.assertNotIn("__tmp_cleanup", scope)
+        self.assertEqual(CleanupManager.count, cleanup_count)
+
+    def test_explicit_skip_frame_cleans_failed_trace_globals(self):
+        def fn(x):
+            try:
+                torch._dynamo.skip_frame()
+            finally:
+                pass
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+        x = torch.ones(3)
+        preexisting_builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict___")
+        }
+
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(
+            {name for name in fn.__globals__ if name.startswith("__builtins_dict___")},
+            preexisting_builtins_keys,
+        )
+
     def test_condition_dependent_skip_paramspec_guard_detection(self):
         from torch._dynamo.convert_frame import _guard_targets_paramspec_attr
 
@@ -328,6 +367,34 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn([x]), x + 1)
         self.assertEqual(counter.frame_count, 1)
 
+    def test_condition_dependent_skip_with_global_guard(self):
+        global _condition_dependent_skip_flag
+
+        def fn(x):
+            if _condition_dependent_skip_flag:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+
+        try:
+            _condition_dependent_skip_flag = True
+            self.assertEqual(opt_fn(x), x - 1)
+            self.assertEqual(counter.frame_count, 0)
+
+            _condition_dependent_skip_flag = False
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(counter.frame_count, 1)
+        finally:
+            _condition_dependent_skip_flag = False
+
     def test_backend_skip_frame_preserves_fullgraph_failure(self):
         def backend(gm, args):
             raise torch._dynamo.exc.SkipFrame("backend skip")
@@ -348,6 +415,27 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
             {name for name in fn.__globals__ if name.startswith("__builtins_dict___")},
             preexisting_builtins_keys,
         )
+
+    def test_backend_skip_frame_still_skips_code_object(self):
+        backend_calls = 0
+
+        def backend(gm, args):
+            nonlocal backend_calls
+            backend_calls += 1
+            raise torch._dynamo.exc.SkipFrame("backend skip")
+
+        def fn(x, n):
+            if n == 0:
+                return x + 1
+            return x + 2
+
+        opt_fn = torch.compile(fn, backend=backend, dynamic=False)
+        x = torch.ones(2)
+
+        self.assertEqual(opt_fn(x, 0), x + 1)
+        self.assertEqual(backend_calls, 1)
+        self.assertEqual(opt_fn(x, 1), x + 2)
+        self.assertEqual(backend_calls, 1)
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_recursive_list(self):

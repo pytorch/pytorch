@@ -162,6 +162,7 @@ from .utils import (
     gen_record_file_name,
     get_hook_for_recompile_user_context,
     get_metrics_context,
+    guarded_eager_fallback_codes,
     increment_frame,
     is_namedtuple,
     istype,
@@ -381,6 +382,7 @@ def _guarded_eager_fallback(
 
         if output.cleanups:
             CleanupManager.instance[fallback_code] = output.cleanups
+            guarded_eager_fallback_codes[fallback_code] = True
 
         orig_code_map[fallback_code] = code
         output_codes.add(fallback_code)
@@ -418,10 +420,10 @@ def _has_condition_dependent_skip_guards(
             "SEQUENCE_LENGTH",
         }:
             continue
-        if not guard.source.is_local():
-            continue
         name = guard.name
-        if name.startswith(("L['___", "L['__nested_")):
+        if not name.startswith(("L[", "G[")):
+            continue
+        if name.startswith(("L['___", "L['__nested_", "G['___", "G['__nested_")):
             continue
         return True
     return False
@@ -512,7 +514,7 @@ def _contains_tensor_related_value(value: object, seen: set[int] | None = None) 
 
 
 def _cleanup_skipped_tracer_output(tracer_output: DynamoTracerOutput) -> None:
-    output = tracer_output.output_graph
+    output = tracer_output.output_graph or tracer_output.output_graph_for_cleanup
     if output is not None:
         for cleanup in output.cleanups:
             cleanup()
@@ -1171,8 +1173,10 @@ def trace_frame(
         e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer)  # type: ignore[attr-defined]
         raise
     except Exception as e:
-        preserve_output_graph = isinstance(e, (Unsupported, UserError)) and getattr(
-            e, "skip_frame", False
+        preserve_output_graph = (
+            isinstance(e, (Unsupported, UserError))
+            and getattr(e, "skip_frame", False)
+            and getattr(e, "gb_type", None) == "Call to `torch._dynamo.graph_break()`"
         )
         e._torch_dynamo_tracer_output = DynamoTracerOutput(  # type: ignore[attr-defined]
             tracer, error=not preserve_output_graph
@@ -1981,6 +1985,13 @@ def _compile(
                     ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason),
                     e._torch_dynamo_tracer_output,
                 )
+            output = e._torch_dynamo_tracer_output.output_graph
+            if output is not None and output.count_calls() > 0:
+                _cleanup_skipped_tracer_output(e._torch_dynamo_tracer_output)
+                return (
+                    ConvertFrameReturn(skip_reason=skip_reason),
+                    e._torch_dynamo_tracer_output,
+                )
             return (
                 _guarded_eager_fallback(
                     code,
@@ -2372,6 +2383,8 @@ def _compile(
             if (
                 isinstance(e, (Unsupported, UserError))
                 and getattr(e, "skip_frame", False)
+                and getattr(e, "gb_type", None)
+                == "Call to `torch._dynamo.graph_break()`"
                 and not one_graph
                 and not error_on_graph_break
             ):
@@ -2385,6 +2398,12 @@ def _compile(
                     package,
                 )
                 return guarded_code
+            if (
+                isinstance(e, (Unsupported, UserError))
+                and getattr(e, "skip_frame", False)
+                and tracer_output
+            ):
+                _cleanup_skipped_tracer_output(tracer_output)
             if isinstance(
                 e,
                 (

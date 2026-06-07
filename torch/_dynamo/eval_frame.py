@@ -118,6 +118,7 @@ from .utils import (
     CleanupManager,
     common_constant_types,
     compile_times,
+    guarded_eager_fallback_codes,
 )
 
 
@@ -378,7 +379,9 @@ def _reset_guarded_backend_cache() -> None:
 
 def reset_code(code: types.CodeType) -> None:
     for entry in _debug_get_cache_entry_list(code):
-        CleanupManager.instance.cleanup(entry.code)
+        if entry.code in guarded_eager_fallback_codes:
+            CleanupManager.instance.cleanup(entry.code)
+            guarded_eager_fallback_codes._remove_id(id(entry.code))
     CleanupManager.instance.cleanup(code)
     _reset_code(code)
 
