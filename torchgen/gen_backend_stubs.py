@@ -507,6 +507,94 @@ def gen_dispatchkey_nativefunc_headers(
     )
 
 
+def gen_define_meta_registrations(
+    grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
+    backend_index: BackendIndex,
+    class_name: str,
+) -> str:
+    """Register a backend's custom meta() under the aten ``Meta`` dispatch key for every op marked
+    ``define_meta``, so that ``torch.compile`` / FakeTensor shape propagation uses the backend's
+    meta (not aten's). The generated kernel derives from the backend's structured class -- so the
+    backend's overridden ``meta()`` runs -- and allocates *meta* tensors in ``set_output`` (the
+    shape/stride bookkeeping is delegated to ``at::meta::structured_X`` via the inherited base).
+
+    Mirrors the in-tree structured ``Meta`` kernel (``RegisterMeta.cpp``); only the parent class
+    differs (the backend's class instead of ``at::meta::structured_X``). NB: the ``Meta`` key is
+    device-agnostic, so this is a *global* override of aten's meta for the op (it shadows aten's
+    Meta kernel for all devices) -- only safe when the custom meta is logical-shape-faithful to aten.
+    """
+    import torchgen.api.meta as meta_api
+
+    blocks: list[str] = []
+    registrations: list[str] = []
+    for g in grouped_native_functions:
+        if not isinstance(g, NativeFunctionsGroup):
+            continue
+        metadata = backend_index.get_kernel(g.out)
+        if metadata is None or not metadata.define_meta:
+            continue
+        meta_name = meta_api.name(g)
+        backend_struct = (
+            f"{metadata.cpp_namespace}::{class_name}::structured_{metadata.kernel}"
+        )
+        sig = DispatcherSignature.from_schema(g.functional.func)
+        num_out = len(g.functional.func.returns)
+        arg_names = ", ".join(a.name for a in sig.arguments())
+        struct_name = f"structured_{metadata.kernel}_define_meta"
+        wrapper_name = f"wrapper_Meta_define_{meta_name}"
+        # The set_output_* signature depends on the structured meta base: ops that inherit
+        # TensorIteratorBase take a trailing at::DimnameList names; MetaBase-derived ops do not.
+        uses_names = g.out.structured_inherits == "TensorIteratorBase"
+        names_param = ", at::DimnameList names" if uses_names else ""
+        names_arg = ", names" if uses_names else ""
+        propagate = (
+            "\n        if (!names.empty()) {\n"
+            "            at::namedinference::propagate_names(outputs_[output_idx], names);\n"
+            "        }"
+            if uses_names
+            else ""
+        )
+        blocks.append(
+            f"""\
+namespace {{
+struct {struct_name} final : public {backend_struct} {{
+    void set_output_raw_strided(
+        int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
+        at::TensorOptions options{names_param}
+    ) override {{
+        outputs_[output_idx] = strides.empty()
+            ? at::detail::empty_meta(sizes, options.device(at::kMeta))
+            : at::detail::empty_strided_meta(sizes, strides, options.device(at::kMeta));{propagate}
+        at::meta::structured_{meta_name}::set_output_raw_strided(output_idx, sizes, strides, options{names_arg});
+    }}
+    void set_output_strided(
+        int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
+        at::TensorOptions options{names_param}
+    ) override {{
+        set_output_raw_strided(output_idx, sizes, strides, options{names_arg});
+    }}
+    const at::Tensor & maybe_get_output(int64_t output_idx) override {{
+        return outputs_[output_idx];
+    }}
+    std::array<at::Tensor, {num_out}> outputs_;
+}};
+{sig.defn(name=wrapper_name)} {{
+    {struct_name} op;
+    op.meta({arg_names});
+    return std::move(op.outputs_[0]);
+}}
+}}  // anonymous namespace
+"""
+        )
+        registrations.append(
+            f'    m.impl("{g.functional.func.name}", TORCH_FN({wrapper_name}));'
+        )
+    if not registrations:
+        return ""
+    reg = "TORCH_LIBRARY_IMPL(aten, Meta, m) {\n" + "\n".join(registrations) + "\n}\n"
+    return "\n".join(blocks) + reg
+
+
 def gen_dispatcher_registrations(
     fm: FileManager,
     output_dir: str,
@@ -578,6 +666,32 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
             dispatch_registrations_body=dispatch_registrations_body,
         )
 
+    anonymous_definitions = list(
+        concatMap(
+            dest.RegisterDispatchKey(
+                backend_index,
+                Target.ANONYMOUS_DEFINITION,
+                selector,
+                rocm=False,
+                symint=True,
+                class_method_name=f"{class_name}",
+                skip_dispatcher_op_registration=False,
+            ),
+            grouped_native_functions,
+        )
+    )
+    # Register the backend's custom meta() under the aten Meta key for every op marked
+    # define_meta, so torch.compile / FakeTensor shape propagation uses the backend's meta.
+    # Emit only for the primary backend key (not the autograd key).
+    if dispatch_key == backend_dispatch_key:
+        define_meta_block = gen_define_meta_registrations(
+            grouped_native_functions, backend_index, class_name
+        )
+        if define_meta_block:
+            anonymous_definitions = anonymous_definitions + define_meta_block.split(
+                newline
+            )
+
     fm.write_with_template(
         f"Register{dispatch_key}.cpp",
         "RegisterDispatchKey.cpp",
@@ -602,20 +716,7 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
                     "deferred_dispatch_registrations": deferred_dispatch_registrations,
                     "dispatch_namespace": dispatch_key.lower(),
                     "dispatch_namespaced_definitions": "",
-                    "dispatch_anonymous_definitions": list(
-                        concatMap(
-                            dest.RegisterDispatchKey(
-                                backend_index,
-                                Target.ANONYMOUS_DEFINITION,
-                                selector,
-                                rocm=False,
-                                symint=True,
-                                class_method_name=f"{class_name}",
-                                skip_dispatcher_op_registration=False,
-                            ),
-                            grouped_native_functions,
-                        )
-                    ),
+                    "dispatch_anonymous_definitions": anonymous_definitions,
                 },
             ).split(newline),
         },
