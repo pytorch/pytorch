@@ -972,6 +972,52 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.visit(visit, (args, kwargs))
 
+        has_custom_vmap = self.fn_cls.vmap is not torch.autograd.Function.vmap
+        current_functorch_interpreter = torch._C._functorch.peek_interpreter_stack()
+        has_batched_tensor_arg = False
+
+        def visit_batched_tensor_arg(vt: VariableTracker) -> None:
+            nonlocal has_batched_tensor_arg
+            if vt.is_tensor():
+                example_value = vt.as_proxy().node.meta["example_value"]
+                if torch._C._functorch.is_batchedtensor(example_value):
+                    has_batched_tensor_arg = True
+
+        VariableTracker.visit(visit_batched_tensor_arg, (args, kwargs))
+        is_under_vmap = (
+            current_functorch_interpreter is not None
+            and current_functorch_interpreter.key()
+            is torch._C._functorch.TransformType.Vmap
+        ) or has_batched_tensor_arg
+        if is_under_vmap:
+            if self.fn_cls.generate_vmap_rule and has_custom_vmap:
+                unimplemented(
+                    gb_type="Unsupported ambiguous autograd.Function vmap",
+                    context=f"call_apply {self} {args} {kwargs}",
+                    explanation="Dynamo does not support tracing "
+                    "`torch.autograd.Function` subclasses that set "
+                    "`generate_vmap_rule=True` and define a custom `vmap` "
+                    "staticmethod.",
+                    hints=[
+                        "Set `generate_vmap_rule=False` or remove the custom "
+                        "`vmap` staticmethod.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+            if not self.fn_cls.generate_vmap_rule:
+                unimplemented(
+                    gb_type="Unsupported autograd.Function vmap",
+                    context=f"call_apply {self} {args} {kwargs}",
+                    explanation="Dynamo only supports tracing "
+                    "`torch.autograd.Function` under vmap when "
+                    "`generate_vmap_rule=True`.",
+                    hints=[
+                        "Set `generate_vmap_rule=True` if generated vmap "
+                        "rules are valid for this autograd.Function.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+
         if requires_grad and torch.is_grad_enabled():
             source = self.source
 
@@ -1034,6 +1080,8 @@ class AutogradFunctionVariable(VariableTracker):
                 forward_fn,
                 self.fn_cls.backward,
                 source,
+                self.fn_cls.generate_vmap_rule,
+                has_custom_vmap,
                 source=apply_source,
             ).call_function(tx, args, kwargs)
             if self.source and is_setup_ctx_defined:

@@ -3677,9 +3677,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # Just checking that it runs
         func(q, k, v)
 
-        # expectedFailure
-        # This doesn't work due to vmap + autograd.Function + torch.compile not composing
-        # self.run_test(score_mod)
+        self.run_test(score_mod, q.dtype, device)
 
     @supported_platform
     def test_causal_block(self, device):
