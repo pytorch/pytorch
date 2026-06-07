@@ -527,6 +527,63 @@ class FakeTensorTest(TestCase):
         eager_out = model.forward(x, w, b)
         self.assertEqual(fake_out.stride(), eager_out.stride())
 
+    def test_private_convolution_symint(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        x = fake_mode.from_tensor(
+            torch.randn(1, 3, 16, 16),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[
+                    DimDynamic.DYNAMIC,
+                    DimDynamic.STATIC,
+                    DimDynamic.DYNAMIC,
+                    DimDynamic.DYNAMIC,
+                ],
+                constraint_sizes=[None, None, None, None],
+            ),
+        )
+        w = fake_mode.from_tensor(torch.randn(32, 3, 3, 3), static_shapes=True)
+
+        with fake_mode:
+            out_default = aten._convolution.default(
+                x,
+                w,
+                None,
+                [2, 2],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                False,
+                False,
+                True,
+                True,
+            )
+            out_deprecated = aten._convolution.deprecated(
+                x,
+                w,
+                None,
+                [2, 2],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                False,
+                False,
+                True,
+            )
+
+        for out in (out_default, out_deprecated):
+            self.assertEqual(out.shape[:2], (1, 32))
+            self.assertTrue(
+                statically_known_true(out.shape[2] == (x.shape[2] - 3) // 2 + 1)
+            )
+            self.assertTrue(
+                statically_known_true(out.shape[3] == (x.shape[3] - 3) // 2 + 1)
+            )
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         with FakeTensorMode() as mode:
@@ -1642,7 +1699,6 @@ def forward(self, x_1):
         self.assertIsInstance(r, FakeTensor)
         self.assertEqual(r.size(), [3])
 
-    @expectedFailurePropagateRealTensors
     def test_forward_ad_batch_norm(self):
         fwAD = torch.autograd.forward_ad
 
@@ -1664,6 +1720,22 @@ def forward(self, x_1):
         self.assertIsInstance(primal, FakeTensor)
         self.assertIsInstance(tangent, FakeTensor)
         self.assertEqual(out.size(), [2, 3])
+
+    def test_zerotensor_views_remain_fake(self):
+        view_fns = (
+            lambda x: x.view(1, 3),
+            lambda x: x.reshape(1, 3),
+            lambda x: x.as_strided((1, 3), (3, 1), 0),
+        )
+
+        with FakeTensorMode():
+            x = torch._efficientzerotensor(3)
+            ys = [view_fn(x) for view_fn in view_fns]
+
+        for y in ys:
+            self.assertIsInstance(y, FakeTensor)
+            self.assertTrue(y._is_zerotensor())
+            self.assertEqual(y.size(), [1, 3])
 
     @parametrize("reverse", [False, True])
     def test_scan(self, reverse):
@@ -3050,21 +3122,61 @@ class FakeTensorDispatchCache(TestCase):
             z1 = x1.mul_(2)
             self.assertFalse(z1._is_view())
 
-    def test_cache_dispatch_key_set(self):
+    def test_cache_zerotensor_view_op(self):
         """
-        Test that operations that change the dispatch key set bypass caching.
+        Test that ZeroTensor view ops preserve aliasing when served from cache.
+        """
+        with FakeTensorMode():
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            x1 = torch._efficientzerotensor(10)
+            self.assertHitsMisses(0, 1)
+            y1 = x1.as_strided((3,), (1,), 2)
+            self.assertTrue(y1._is_zerotensor())
+            self.assertTrue(torch._C._is_alias_of(x1, y1))
+            self.assertEqual(
+                y1.untyped_storage().nbytes(), x1.untyped_storage().nbytes()
+            )
+            self.assertHitsMisses(0, 2)
+
+            x2 = torch._efficientzerotensor(10)
+            self.assertHitsMisses(1, 2)
+            y2 = x2.as_strided((3,), (1,), 2)
+            self.assertTrue(y2._is_zerotensor())
+            self.assertTrue(torch._C._is_alias_of(x2, y2))
+            self.assertEqual(
+                y2.untyped_storage().nbytes(), x2.untyped_storage().nbytes()
+            )
+            self.assertHitsMisses(2, 2)
+            self.assertBypasses("zerotensor dtype-changing view", 0)
+
+            x3 = torch._efficientzerotensor(4, dtype=torch.float32)
+            self.assertHitsMisses(2, 3)
+            y3 = x3.view(torch.int32)
+            self.assertEqual(y3.dtype, torch.int32)
+            self.assertTrue(y3._is_zerotensor())
+            self.assertTrue(torch._C._is_alias_of(x3, y3))
+            self.assertBypasses("zerotensor dtype-changing view", 1)
+
+    def test_cache_zerotensor_dispatch_key_set(self):
+        """
+        Test that cached ZeroTensor factory outputs keep their dispatch key set.
         """
         with FakeTensorMode():
             FakeTensorMode.cache_clear()
             self.assertBypasses("dispatch_key_set mismatch", 0)
+            self.assertHitsMisses(0, 0)
 
             x = torch._efficientzerotensor(3)
             self.assertTrue(x._is_zerotensor())
-            self.assertBypasses("dispatch_key_set mismatch", 1)
+            self.assertBypasses("dispatch_key_set mismatch", 0)
+            self.assertHitsMisses(0, 1)
 
             y = torch._efficientzerotensor(3)
             self.assertTrue(y._is_zerotensor())
-            self.assertBypasses("dispatch_key_set mismatch", 2)
+            self.assertBypasses("dispatch_key_set mismatch", 0)
+            self.assertHitsMisses(1, 1)
 
     def test_fft_hfft2_issue145522(self):
         with FakeTensorMode():
