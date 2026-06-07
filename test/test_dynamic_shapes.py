@@ -3744,6 +3744,36 @@ class TestUnbacked(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.tensor([5]))
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_symfloat_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
+        def func(a, b):
+            torch._check(b.item() * 2 == 11)
+            return b * 10
+
+        with fresh_cache():
+            self.assertEqual(
+                func(torch.tensor([100]), torch.tensor([5.5])), torch.tensor([55.0])
+            )
+            with self.assertRaisesRegex(RuntimeError, r"Eq\(2\.0\*zuf\d+, 11\.0\)"):
+                func(torch.tensor([5]), torch.tensor([1.8]))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_symfloat_eq_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
+        def func(a, b):
+            torch._check(b.item() == 5.5)
+            return a * 10
+
+        with fresh_cache():
+            self.assertEqual(
+                func(torch.tensor([5]), torch.tensor([5.5])), torch.tensor([50])
+            )
+            with self.assertRaisesRegex(RuntimeError, r"zuf\d+ >= 5\.5"):
+                func(torch.tensor([100]), torch.tensor([1.5]))
+
     # Test a situation where we generate a runtime assert i.e: u1==s1, then we specialize s1
     # later on to a constant.
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
