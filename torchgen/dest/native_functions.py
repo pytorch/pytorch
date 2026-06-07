@@ -53,7 +53,7 @@ def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> list
 
     # 1. Define the meta-declaration only if requested
     meta_decl = ""
-    if metadata.ext_structured_meta:
+    if metadata.define_meta:
         # Get the arguments for the meta function (usually same as impl but without 'out')
         meta_args = structured.meta_arguments(g)
         meta_decl = (

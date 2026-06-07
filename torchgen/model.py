@@ -1364,7 +1364,7 @@ class BackendMetadata:
     # meta logic. When True, the generator declares a 'meta' override in the
     # backend-specific structured kernel class, allowing the backend to provide
     # custom shape validation, tiling logic, or memory alignment checks.
-    ext_structured_meta: bool = False
+    define_meta: bool = False
 
     # Whether to generate a DeviceGuard in the registration wrapper for this operator.
     # When True, it ensures that the active device context is switched to the
