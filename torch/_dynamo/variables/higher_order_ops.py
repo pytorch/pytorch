@@ -2290,7 +2290,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             ],
         )
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
 
         return python_constant_richcompare_impl(self, tx, other, op)
@@ -3797,6 +3799,8 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.hints_wrapper"
     _ALLOW_FALLBACK_TO_EAGER = False
+    # Override WrapHigherOrderVariable's permissive defaults: hints_wrapper's
+    # functionalization path rejects body input mutation and output aliasing.
     supports_input_mutation = False
     supports_aliasing = False
 
@@ -3934,8 +3938,6 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.strict_mode"
     _ALLOW_FALLBACK_TO_EAGER = False
-    supports_input_mutation = False
-    supports_aliasing = False
 
     def _call_function(
         self,
@@ -3982,8 +3984,6 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             self._HOP_NAME,
             source_target=self.value,
             should_flatten_outputs=True,
-            supports_input_mutation=self.supports_input_mutation,
-            supports_aliasing=self.supports_aliasing,
         )
 
         strict_mode_nn_modules = dict(tx.output.nn_modules)
@@ -4243,8 +4243,6 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_attention_backward"
-    supports_input_mutation = False
-    supports_aliasing = False
 
     @staticmethod
     def _uses_pretraced_graphs(
@@ -4323,7 +4321,6 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
                 description=f"{self._HOP_NAME}: {fn_name}",
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
-                supports_input_mutation=self.supports_input_mutation,
                 supports_aliasing=(fn_name == "score_mod"),
             )
 
@@ -4549,8 +4546,6 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
 
 class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_attention"
-    supports_input_mutation = False
-    supports_aliasing = False
 
     @staticmethod
     def normalize_to_args(
@@ -4617,7 +4612,6 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 description=f"{self._HOP_NAME}: {fn_name}",
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
-                supports_input_mutation=self.supports_input_mutation,
                 supports_aliasing=(fn_name == "score_mod"),
             )
 
@@ -4725,7 +4719,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
