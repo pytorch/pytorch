@@ -124,6 +124,19 @@ class TestAutograd(TestCase):
         torch.autograd._force_original_view_tracking(False)
         super(TestCase, self).tearDown()
 
+    def test_ldexp_backward_negative_exponents(self):
+        x = torch.zeros(6, dtype=torch.double, requires_grad=True)
+        e = torch.tensor([-3, -2, -1, 0, 1, 2], dtype=torch.int32)
+
+        y = torch.ldexp(x, e)
+        grad_out = torch.ones_like(x)
+
+        (grad,) = torch.autograd.grad(y, x, grad_out)
+        expected = torch.ldexp(torch.ones_like(x), e)
+
+        self.assertEqual(grad, expected)
+
+
     def test_copy_slices_graph_task_updates(self):
         def f1(x, y):
             out = x.clone().view(-1)
