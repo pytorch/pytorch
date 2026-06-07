@@ -352,6 +352,107 @@ T = TypeVar("T")
 DimList = list
 
 
+class _UnavailableTritonJITFunction:
+    pass
+
+
+class _UnavailableTritonAutotuner:
+    pass
+
+
+def _unavailable_create_1d_tma_descriptor(*args: Any, **kwargs: Any) -> None:
+    pass
+
+
+def _unavailable_create_2d_tma_descriptor(*args: Any, **kwargs: Any) -> None:
+    pass
+
+
+class _UnavailableTritonTensorDescriptor:
+    @staticmethod
+    def from_tensor(*args: Any, **kwargs: Any) -> None:
+        pass
+
+
+def _unavailable_triton_set_allocator(*args: Any, **kwargs: Any) -> None:
+    pass
+
+
+@functools.cache
+def _get_triton_builder_symbols() -> tuple[
+    type[Any],
+    type[Any],
+    Callable[..., Any],
+    Callable[..., Any],
+    type[Any],
+    Callable[..., Any],
+]:
+    from torch.utils._triton import has_triton_package
+
+    jit_function_cls: type[Any] = _UnavailableTritonJITFunction
+    autotuner_cls: type[Any] = _UnavailableTritonAutotuner
+    create_1d_tma_descriptor: Callable[..., Any] = _unavailable_create_1d_tma_descriptor
+    create_2d_tma_descriptor: Callable[..., Any] = _unavailable_create_2d_tma_descriptor
+    tensor_descriptor_cls: type[Any] = _UnavailableTritonTensorDescriptor
+    set_allocator: Callable[..., Any] = _unavailable_triton_set_allocator
+
+    if not has_triton_package():
+        return (
+            jit_function_cls,
+            autotuner_cls,
+            create_1d_tma_descriptor,
+            create_2d_tma_descriptor,
+            tensor_descriptor_cls,
+            set_allocator,
+        )
+
+    try:
+        from triton.runtime.autotuner import Autotuner
+
+        autotuner_cls = Autotuner
+    except ImportError:
+        pass
+    try:
+        from triton.runtime.jit import JITFunction
+
+        jit_function_cls = JITFunction
+    except ImportError:
+        pass
+    try:
+        import triton as triton_mod
+
+        set_allocator = getattr(
+            triton_mod, "set_allocator", _unavailable_triton_set_allocator
+        )
+    except ImportError:
+        pass
+    try:
+        from triton.tools.experimental_descriptor import (
+            create_1d_tma_descriptor as create_1d,
+            create_2d_tma_descriptor as create_2d,
+        )
+
+        create_1d_tma_descriptor = create_1d
+        create_2d_tma_descriptor = create_2d
+    except ImportError:
+        pass
+    try:
+        from triton.tools.tensor_descriptor import TensorDescriptor
+
+        tensor_descriptor_cls = TensorDescriptor
+    except ImportError:
+        pass
+
+    return (
+        jit_function_cls,
+        autotuner_cls,
+        create_1d_tma_descriptor,
+        create_2d_tma_descriptor,
+        tensor_descriptor_cls,
+        set_allocator,
+    )
+
+
 def safe_has_grad(t: object) -> bool:
     with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         return hasattr(t, "grad")
@@ -978,57 +1079,20 @@ class VariableBuilder:
         return result
 
     def _wrap(self, value: Any) -> VariableTracker:
-        # import here to avoid circular dependencies
-        from torch.utils._triton import (
-            has_triton,
-            has_triton_experimental_host_tma,
-            has_triton_tensor_descriptor_host_tma,
-        )
-
         from ..decorators import (
             CudagraphOverrideContextManager,
             DynamoConfigPatchProxy,
             ErrorOnGraphBreakDecoratorContextManager,
         )
 
-        if has_triton():
-            from triton.runtime.autotuner import Autotuner
-            from triton.runtime.jit import JITFunction
-        else:
-
-            class JITFunction:
-                pass
-
-            class Autotuner:
-                pass
-
-        # default implementations, in case we don't have triton (or the wrong triton version)
-        def create_1d_tma_descriptor() -> None:
-            pass
-
-        def create_2d_tma_descriptor() -> None:
-            pass
-
-        class TensorDescriptor:
-            @staticmethod
-            def from_tensor() -> None:
-                pass
-
-        def set_allocator() -> None:
-            pass
-
-        if has_triton_experimental_host_tma():
-            from triton.tools.experimental_descriptor import (
-                create_1d_tma_descriptor,
-                create_2d_tma_descriptor,
-            )
-        if has_triton_tensor_descriptor_host_tma():
-            from triton.tools.tensor_descriptor import TensorDescriptor
-        if has_triton():
-            import triton as triton_mod
-
-            if hasattr(triton_mod, "set_allocator"):
-                set_allocator = triton_mod.set_allocator
+        (
+            JITFunction,
+            Autotuner,
+            create_1d_tma_descriptor,
+            create_2d_tma_descriptor,
+            TensorDescriptor,
+            set_allocator,
+        ) = _get_triton_builder_symbols()
 
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
