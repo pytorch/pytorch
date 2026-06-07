@@ -66,6 +66,11 @@ import torch.fx as fx
 import torch.nn as nn
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
+    _dtype_or_default,
+    _is_leaf_or_default,
+    _requires_grad_or_default,
+    _storage_offset_or_default,
+    _stride_or_default,
     AccuracyError,
     backend_accuracy_fails,
     BuckTargetWriter,
@@ -93,6 +98,8 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     fx_placeholder_targets,
     has_free_symbols,
+    statically_known_true,
+    sym_eq,
 )
 from torch.hub import tqdm
 
@@ -370,7 +377,10 @@ def wrap_compiler_debug(
             if config.repro_level == 3:
                 # Always dump the original module in case we have segfaults
                 dump_to_minify(
-                    fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                    fx.GraphModule(gm, orig_graph),
+                    real_inputs,
+                    compiler_name,
+                    symbolic_args=example_inputs,
                 )
 
             if config.repro_level == 4:
@@ -394,11 +404,13 @@ def wrap_compiler_debug(
                         fx.GraphModule(gm, orig_graph),
                         real_inputs,
                         f"{compiler_name}_accuracy",
+                        symbolic_args=example_inputs,
                     )
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
                         real_inputs,
                         f"{compiler_name}_accuracy",
+                        symbolic_args=example_inputs,
                     )
                     raise AccuracyError("Bad accuracy detected")
                 else:
@@ -424,12 +436,14 @@ def wrap_compiler_debug(
                             fx.GraphModule(gm, orig_graph),
                             copy_tensor_attrs,
                             compiler_name,
+                            symbolic_args=example_inputs,
                         )
                     elif config.repro_level == 2:
                         dump_to_minify(
                             fx.GraphModule(gm, orig_graph),
                             copy_tensor_attrs,
                             compiler_name,
+                            symbolic_args=example_inputs,
                         )
                     raise
 
@@ -517,6 +531,72 @@ def generate_custom_triton_kernel(kernel: Any) -> str:
     return res
 
 
+def _get_symbolic_args(
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    symbolic_args: Sequence[Any] | None,
+) -> list[Any | None]:
+    if symbolic_args is not None:
+        return [
+            *symbolic_args[: len(args)],
+            *([None] * (len(args) - len(symbolic_args))),
+        ]
+
+    placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
+    result: list[Any | None] = []
+    for node, _arg in zip(placeholders, args):
+        val = node.meta.get("val")
+        result.append(val if _has_free_symbols(val) else None)
+    result.extend(None for _ in range(len(args) - len(result)))
+    return result
+
+
+def _has_free_symbols(val: Any) -> bool:
+    return (
+        val is not None
+        and not isinstance(val, FakeScriptObject)
+        and has_free_symbols(val)
+    )
+
+
+def _write_tensor_with_symbolic_metadata(
+    writer: InputWriter,
+    name: str,
+    real_tensor: torch.Tensor,
+    symbolic_tensor: torch.Tensor,
+) -> None:
+    storage = writer.storage(
+        real_tensor.untyped_storage(),
+        dtype_hint=real_tensor.dtype,
+        device_hint=real_tensor.device,
+    )
+    shape = symbolic_tensor.shape
+    stride = symbolic_tensor.stride()
+    args = []
+    if not statically_known_true(sym_eq(_stride_or_default(None, shape=shape), stride)):
+        args.append(str(tuple(stride)))
+    if _dtype_or_default(None) != real_tensor.dtype:
+        args.append(f"dtype={real_tensor.dtype!r}")
+    storage_offset = symbolic_tensor.storage_offset()
+    if not statically_known_true(
+        sym_eq(_storage_offset_or_default(None), storage_offset)
+    ):
+        args.append(f"storage_offset={storage_offset!r}")
+    tensor_metadata = torch._utils.get_tensor_metadata(real_tensor)
+    if tensor_metadata:
+        args.extend(f"{k}={v!r}" for k, v in tensor_metadata.items())
+    if _requires_grad_or_default(None) != real_tensor.requires_grad:
+        args.append(f"requires_grad={real_tensor.requires_grad!r}")
+    is_leaf = torch._subclasses.meta_utils.safe_is_leaf(real_tensor)
+    if _is_leaf_or_default(None) != is_leaf:
+        args.append(f"is_leaf={is_leaf!r}")
+    writer._lines.append(
+        "reader.tensor("
+        + ", ".join([storage, str(tuple(shape)), *args])
+        + f")  # {name}"
+    )
+
+
 def generate_compiler_repro_string(
     gm: torch.fx.GraphModule,
     args: Sequence[Any],
@@ -525,6 +605,7 @@ def generate_compiler_repro_string(
     save_dir: str | None = None,
     stable_hash: bool = False,
     has_distributed_ops: bool = False,
+    symbolic_args: Sequence[Any] | None = None,
 ) -> str:
     if save_dir is not None:
         save_dir = normalize_path_separator(save_dir)
@@ -687,15 +768,29 @@ if "__compile_source__" in globals():
     writer = InputWriter(save_dir, stable_hash=stable_hash)
     # pyrefly: ignore [implicit-any]
     used_syms = {}
+    symbolic_args = _get_symbolic_args(gm, args, symbolic_args)
 
     # Extract from graph placeholders and their corresponding arguments
     placeholder_targets = fx_placeholder_targets(gm)
-    for placeholder, arg in zip(placeholder_targets, args):
+    for placeholder, arg, symbolic_arg in zip(placeholder_targets, args, symbolic_args):
         if isinstance(arg, (int, torch.SymInt)):
-            writer.symint(placeholder, arg)
+            writer.symint(
+                placeholder,
+                symbolic_arg
+                if isinstance(symbolic_arg, torch.SymInt)
+                and _has_free_symbols(symbolic_arg)
+                else arg,
+            )
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
-            writer.tensor(placeholder, arg)
+            if isinstance(symbolic_arg, torch.Tensor) and _has_free_symbols(
+                symbolic_arg
+            ):
+                _write_tensor_with_symbolic_metadata(
+                    writer, placeholder, arg, symbolic_arg
+                )
+            else:
+                writer.tensor(placeholder, arg)
         elif arg is None:
             writer.const(placeholder)
         elif isinstance(arg, FakeScriptObject):
@@ -706,25 +801,26 @@ if "__compile_source__" in globals():
             writer.unsupported(placeholder, arg)
 
         # Extract symbolic variables from the same arguments
+        symbol_source = symbolic_arg if _has_free_symbols(symbolic_arg) else arg
 
         if (
-            isinstance(arg, torch.SymInt)
+            isinstance(symbol_source, torch.SymInt)
             # By checking sympy.Symbol, we are excluding any symbolic expressions.
             # TODO: we may need to solve expressions to extract symbol definitions.
-            and isinstance(arg.node.expr, sympy.Symbol)
-            and arg.node.hint is not None
+            and isinstance(symbol_source.node.expr, sympy.Symbol)
+            and symbol_source.node.hint is not None
         ):
-            used_syms[str(arg.node)] = arg.node.hint
-        elif isinstance(arg, torch.Tensor):
+            used_syms[str(symbol_source.node)] = symbol_source.node.hint
+        elif isinstance(symbol_source, torch.Tensor):
             # Extract symbolic variables from tensor shapes and strides
-            for dim in arg.shape:
+            for dim in symbol_source.shape:
                 if (
                     isinstance(dim, torch.SymInt)
                     and isinstance(dim.node.expr, sympy.Symbol)
                     and dim.node.hint is not None
                 ):
                     used_syms[str(dim.node)] = dim.node.hint
-            for stride in arg.stride():
+            for stride in symbol_source.stride():
                 if (
                     isinstance(stride, torch.SymInt)
                     and isinstance(stride.node.expr, sympy.Symbol)
@@ -732,7 +828,7 @@ if "__compile_source__" in globals():
                 ):
                     used_syms[str(stride.node)] = stride.node.hint
             # Extract symbols from storage nbytes (can be a symbolic expression)
-            storage = arg.untyped_storage()
+            storage = symbol_source.untyped_storage()
             nbytes = storage.nbytes()
             if isinstance(nbytes, torch.SymInt):
                 expr = nbytes.node.expr
@@ -797,6 +893,7 @@ def save_graph_repro(
     tracing_mode: str | None = None,
     check_str: str | None = None,
     stable_hash: bool = False,
+    symbolic_args: Sequence[Any] | None = None,
 ) -> None:
     if any(
         isinstance(arg, torch.fx.experimental._backward_state.BackwardState)
@@ -813,6 +910,7 @@ def save_graph_repro(
     # Extract distributed info from the graph
     distributed_info = _extract_distributed_info(gm)
     has_distributed_ops = len(distributed_info) > 0
+    symbolic_args = _get_symbolic_args(gm, args, symbolic_args)
 
     fd.write(
         generate_compiler_repro_string(
@@ -822,15 +920,14 @@ def save_graph_repro(
             save_dir=save_dir,
             stable_hash=stable_hash,
             has_distributed_ops=has_distributed_ops,
+            symbolic_args=symbolic_args,
         )
     )
     if accuracy is None:
         accuracy = "_accuracy" in compiler_name
     if tracing_mode is None:
         tracing_mode = "real"
-        if any(
-            has_free_symbols(a) for a in args if not isinstance(a, FakeScriptObject)
-        ):
+        if any(_has_free_symbols(a) for a in (*args, *symbolic_args)):
             tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
@@ -863,6 +960,7 @@ def dump_compiler_graph_state(
     compiler_name: str,
     *,
     accuracy: str | bool | None = None,
+    symbolic_args: Sequence[Any] | None = None,
 ) -> None:
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
@@ -873,7 +971,13 @@ def dump_compiler_graph_state(
     )
     with open(file_name, "w") as fd:
         save_graph_repro(
-            fd, gm, args, compiler_name, save_dir=subdir, accuracy=accuracy
+            fd,
+            gm,
+            args,
+            compiler_name,
+            save_dir=subdir,
+            accuracy=accuracy,
+            symbolic_args=symbolic_args,
         )
     curdir = os.getcwd()
     repro_path = os.path.join(curdir, "repro.py")
@@ -892,14 +996,26 @@ def dump_compiler_graph_state(
 
 
 def dump_to_minify(
-    gm: torch.fx.GraphModule, args: Sequence[Any], compiler_name: str
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    compiler_name: str,
+    *,
+    symbolic_args: Sequence[Any] | None = None,
 ) -> None:
     out = io.StringIO()
     # TODO: factor this out
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    save_graph_repro(out, gm, args, compiler_name, save_dir=subdir, command="minify")
+    save_graph_repro(
+        out,
+        gm,
+        args,
+        compiler_name,
+        save_dir=subdir,
+        command="minify",
+        symbolic_args=symbolic_args,
+    )
     return helper_for_dump_minify(out.getvalue())
 
 
@@ -1194,21 +1310,22 @@ def _get_compile_args(mod: torch.fx.GraphModule, args: Sequence[Any]) -> Sequenc
     compile_fx_inner needs these (not the concrete args) so that Inductor
     generates proper symbolic-size bindings in the output code.
 
-    For tracing_mode='real', concrete args are fine — we must NOT extract
+    For tracing_mode='real', concrete args are fine -- we must NOT extract
     FakeTensor metadata because different nodes may have FakeTensors from
     different FakeTensorModes, causing a FakeTensorMode mismatch assertion
-    in Inductor.  We detect symbolic tracing by checking for SymInt values,
-    which only exist when tracing_mode='symbolic'.
+    in Inductor.  We detect symbolic tracing by checking whether placeholder
+    metadata contains free symbols.
     """
     placeholders = [n for n in mod.graph.nodes if n.op == "placeholder"]
     if not placeholders:
         return args
     # Only extract metadata if the graph was traced with symbolic mode.
-    # SymInt values in placeholder metadata are the reliable indicator —
-    # FakeTensors appear in both real and symbolic modes, but only symbolic
-    # tracing creates SymInts for integer inputs.
-    has_symint = any(isinstance(n.meta.get("val"), torch.SymInt) for n in placeholders)
-    if not has_symint:
+    # FakeTensors appear in both real and symbolic modes, but symbolic tracing
+    # records free symbols in tensor shapes/strides and scalar SymInt values.
+    has_symbolic_metadata = any(
+        _has_free_symbols(n.meta.get("val")) for n in placeholders
+    )
+    if not has_symbolic_metadata:
         return args
     return [n.meta.get("val", a) for n, a in zip(placeholders, args)]
 
