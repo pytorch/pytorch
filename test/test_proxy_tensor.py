@@ -1161,6 +1161,18 @@ def forward(self, x_1, y_1):
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
         self.assertExpectedInline(show_guards(gm), """L['x'].size()[0] <= 19""")
 
+    def test_mod_guard_simplifies_to_divisor_lower_bound(self):
+        def f(x):
+            assert x.shape[0] > 2  # noqa: S101
+            assert 1 % (x.shape[0] // 2) != 0  # noqa: S101
+            assert (  # noqa: S101
+                32 * (x.shape[0] // 2) ** 2 - 16 * (x.shape[0] // 2) != 0
+            )
+            return x.cos()
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.ones(6, 2))
+        self.assertExpectedInline(show_guards(gm), """4 <= L['x'].size()[0]""")
+
     def test_repeat_interleave(self):
         def f(src_tokens, beam_size_src):
             return src_tokens.repeat_interleave(beam_size_src.size(0), 0)
