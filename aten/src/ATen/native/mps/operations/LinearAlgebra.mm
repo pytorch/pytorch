@@ -1520,20 +1520,23 @@ static void svd_kernel_mps(const Tensor& A,
   const int64_t k = std::min(m, n);
   const int64_t batch = c10::multiply_integers(A.sizes().slice(0, A.dim() - 2));
 
-  // Staging the wm x k matrix must fit the threadgroup-memory limit, else CPU.
   const int64_t elem_size = A.element_size();
   const int64_t wmax = std::max(m, n);
   const int64_t staging_bytes = wmax * k * elem_size;
   const int64_t tg_limit = static_cast<int64_t>([MPSDevice::getInstance()->device() maxThreadgroupMemoryLength]);
-  // Stage the V accumulator too when A+V fit (avoids re-streaming V from DRAM).
   const int64_t v_staging_bytes = k * k * elem_size;
   const bool stage_v = compute_uv && (staging_bytes + v_staging_bytes <= tg_limit);
-  if (staging_bytes > tg_limit) {
-    TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
-                    staging_bytes,
-                    " > ",
-                    tg_limit,
-                    " bytes); falling back to CPU.");
+  const bool too_large = (staging_bytes > tg_limit);
+  const bool too_small = (batch * m * n < 8192);
+
+  if (too_large || too_small) {
+    if (too_large) {
+      TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
+                      staging_bytes,
+                      " > ",
+                      tg_limit,
+                      " bytes); falling back to CPU.");
+    }
     auto [U_cpu, S_cpu, Vh_cpu] = at::linalg_svd(A.to(at::kCPU), full_matrices, driver);
     if (compute_uv) {
       const_cast<Tensor&>(U).copy_(U_cpu.to(at::kMPS));
@@ -1661,24 +1664,18 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
   const int64_t elem_size = eigenvectors.element_size();
   const int64_t staging_bytes = n * n * elem_size;
   const int64_t tg_limit = static_cast<int64_t>([MPSDevice::getInstance()->device() maxThreadgroupMemoryLength]);
-  const bool fits = (2 * staging_bytes) <= tg_limit; // stage A and Q
+  const bool fits = (2 * staging_bytes) <= tg_limit;
+  const bool unsupported_dtype = (dtype != kFloat && dtype != kComplexFloat);
+  const bool too_small = (batch * n * n < 12288);
 
-  // CPU fallback: no Metal double, or staged matrices exceed the tg-memory limit.
-  if (dtype != kFloat && dtype != kComplexFloat) {
-    auto [L_cpu, V_cpu] = at::_linalg_eigh(eigenvectors.to(at::kCPU), upper ? "U" : "L", compute_eigenvectors);
-    const_cast<Tensor&>(eigenvalues).copy_(L_cpu);
-    if (compute_eigenvectors) {
-      const_cast<Tensor&>(eigenvectors).copy_(V_cpu);
+  if (unsupported_dtype || !fits || too_small) {
+    if (!fits) {
+      TORCH_WARN_ONCE("linalg.eigh: matrix too large to stage in MPS threadgroup memory (",
+                      2 * staging_bytes,
+                      " > ",
+                      tg_limit,
+                      " bytes); falling back to CPU.");
     }
-    const_cast<Tensor&>(infos).zero_();
-    return;
-  }
-  if (!fits) {
-    TORCH_WARN_ONCE("linalg.eigh: matrix too large to stage in MPS threadgroup memory (",
-                    2 * staging_bytes,
-                    " > ",
-                    tg_limit,
-                    " bytes); falling back to CPU.");
     auto [L_cpu, V_cpu] = at::_linalg_eigh(eigenvectors.to(at::kCPU), upper ? "U" : "L", compute_eigenvectors);
     const_cast<Tensor&>(eigenvalues).copy_(L_cpu);
     if (compute_eigenvectors) {

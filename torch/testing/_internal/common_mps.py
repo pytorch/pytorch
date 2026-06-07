@@ -868,8 +868,6 @@ if torch.backends.mps.is_available():
             "_upsample_bicubic2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
             "sparse.mmreduce": [torch.float32],  # csr not supported
             "linalg.householder_product": None,
-            "linalg.normsubgradients_at_zero": [torch.float32],
-            "linalg.pinvhermitian": None,
             "linalg.lstsq": [torch.float32],
             "linalg.lstsqgrad_oriented": [torch.float32],
             "unique_consecutive": [torch.float16, torch.float32],
