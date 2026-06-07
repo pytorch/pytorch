@@ -561,6 +561,7 @@
   ufunc_inner_loop:
     Generic: add (AllAndComplex, BFloat16, Half, ComplexHalf)
     ScalarOnly: add (Bool)
+    CPUScalar: add (UInt16, UInt32, UInt64)
   dispatch:
     SparseCPU, SparseMeta: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda

@@ -82,6 +82,9 @@ device_type = (
 )
 
 _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
+_unsigned_int_add_sub_ufuncs = tuple(
+    op for op in binary_ufuncs if op.name in ("add", "sub")
+)
 
 
 # TODO: update to use opinfos consistently
@@ -4709,10 +4712,26 @@ def generate_not_implemented_tests(cls):
 
 
 generate_not_implemented_tests(TestBinaryUfuncsDevice)
+
+
+class TestUnsignedIntBinaryUfuncs(TestCase):
+    @ops(_unsigned_int_add_sub_ufuncs, dtypes=_unsigned_int_types)
+    def test_add_sub(self, device, dtype, op):
+        lhs = torch.tensor([10, 20, 30], device=device, dtype=dtype)
+        rhs = torch.tensor([1, 2, 3], device=device, dtype=dtype)
+
+        for alpha in (1, 2):
+            expected = torch.from_numpy(
+                op.ref(lhs.numpy(), rhs.numpy(), alpha=alpha)
+            ).to(dtype)
+            self.assertEqual(op(lhs, rhs, alpha=alpha), expected)
+
+
 instantiate_device_type_tests(
     TestBinaryUfuncsDevice, globals(), allow_xpu=True, except_for="cpu"
 )
 instantiate_device_type_tests(TestBinaryUfuncsCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(TestUnsignedIntBinaryUfuncs, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
