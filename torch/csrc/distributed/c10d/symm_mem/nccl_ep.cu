@@ -70,9 +70,7 @@ c10::intrusive_ptr<NcclEpGroup> nccl_ep_create_group(
     int64_t num_experts,
     int64_t max_dispatch_tokens_per_rank,
     int64_t max_recv_tokens_per_rank,
-    int64_t max_token_bytes,
-    int64_t num_qp_per_rank,
-    int64_t num_channels) {
+    int64_t max_token_bytes) {
     ncclComm_t comm = get_nccl_comm(pg);
 
     ncclEpGroupConfig_t config = NCCL_EP_GROUP_CONFIG_INIT;
@@ -84,8 +82,8 @@ c10::intrusive_ptr<NcclEpGroup> nccl_ep_create_group(
         static_cast<unsigned int>(max_recv_tokens_per_rank);
     config.max_token_bytes = static_cast<unsigned int>(max_token_bytes);
     config.rdma_buffer_size = NCCL_EP_AUTO;
-    config.num_qp_per_rank = static_cast<unsigned int>(num_qp_per_rank);
-    config.num_channels = static_cast<unsigned int>(num_channels);
+    config.num_qp_per_rank = NCCL_EP_AUTO;
+    config.num_channels = NCCL_EP_AUTO;
 
     ncclEpGroup_t ep_group = nullptr;
     NCCL_EP_CHECK(ncclEpCreateGroup(&ep_group, comm, &config));
@@ -213,7 +211,7 @@ static void not_supported() {
 
 c10::intrusive_ptr<NcclEpGroup> nccl_ep_create_group(
     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-    int64_t, int64_t, int64_t, int64_t, int64_t, int64_t) {
+    int64_t, int64_t, int64_t, int64_t) {
     not_supported();
 }
 
