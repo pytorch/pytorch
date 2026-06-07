@@ -2219,6 +2219,58 @@ TEST(OperatorRegistrationTest, TestSymSymRefCompatibility) {
   }, "doesn't match the expected function schema");
 }
 
+Tensor symint_vector_op(
+    const Tensor& self,
+    const std::vector<c10::SymInt>& lengths) {
+  return self.clone();
+}
+
+static_assert(std::is_same_v<
+              c10::remove_symint<const std::vector<c10::SymInt>&>::type,
+              const std::vector<int64_t>&>);
+
+TEST(OperatorRegistrationTest, TestSymIntVectorSchemaCompatibility) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::symint_vector_op(Tensor self, SymInt[] lengths) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+  m_cpu.impl(
+      "symint_vector_op", c10::DispatchKey::CPU, TORCH_FN(symint_vector_op));
+
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow(
+      "_test::symint_vector_op", "");
+  opHandle
+      .typed<Tensor(const Tensor&, const std::vector<c10::SymInt>&)>()
+      .call(
+          dummyTensor(c10::DispatchKey::CPU),
+          std::vector<c10::SymInt>{c10::SymInt(2), c10::SymInt(3)});
+}
+
+Tensor int_vector_op(
+    const Tensor& self,
+    const std::vector<int64_t>& lengths) {
+  EXPECT_EQ(2, lengths.size());
+  if (lengths.size() == 2) {
+    EXPECT_EQ(2, lengths[0]);
+    EXPECT_EQ(3, lengths[1]);
+  }
+  return self.clone();
+}
+
+TEST(OperatorRegistrationTest, TestSymIntVectorCanCallNonSymIntVectorKernel) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::int_vector_op(Tensor self, int[] lengths) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+  m_cpu.impl("int_vector_op", c10::DispatchKey::CPU, TORCH_FN(int_vector_op));
+
+  auto opHandle =
+      c10::Dispatcher::singleton().findSchemaOrThrow("_test::int_vector_op", "");
+  opHandle
+      .typed<Tensor(const Tensor&, const std::vector<c10::SymInt>&)>()
+      .call(
+          dummyTensor(c10::DispatchKey::CPU),
+          std::vector<c10::SymInt>{c10::SymInt(2), c10::SymInt(3)});
+}
+
 }
 
 #pragma GCC diagnostic pop
