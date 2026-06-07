@@ -588,8 +588,6 @@ if torch.backends.mps.is_available():
             "segment.reduce": None,
             "segment_reduce_offsets": None,
             "_segment_reduce_offsets": None,
-            "_segment_reduce_lengths": None,
-            "_segment_reducelengths": None,
             "_segment_reduceoffsets": None,
             "sparse.mm": None,
             "sparse.sampled_addmm": None,
