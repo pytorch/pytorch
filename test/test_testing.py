@@ -967,6 +967,7 @@ class TestAssertClose(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
             torch.testing.assert_close(actual, expected)
+
     def test_tensor_to_int_scalar(self):
         actual = torch.ones(())
         expected = 1

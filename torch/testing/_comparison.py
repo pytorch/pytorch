@@ -711,6 +711,9 @@ class TensorLikePair(Pair):
         check_stride: bool = False,
         **other_parameters: Any,
     ):
+        self._has_python_scalar = isinstance(actual, (int, float, complex)) or isinstance(
+            expected, (int, float, complex)
+        )
         actual, expected = self._process_inputs(
             actual, expected, id=id, allow_subclasses=allow_subclasses
         )
@@ -836,7 +839,7 @@ class TensorLikePair(Pair):
         if self.check_device and actual.device != expected.device:
             raise_mismatch_error("device", actual.device, expected.device)
 
-        if self.check_dtype and actual.dtype != expected.dtype:
+        if self.check_dtype and actual.dtype != expected.dtype and not self._has_python_scalar:
             raise_mismatch_error("dtype", actual.dtype, expected.dtype)
 
     def _equalize_attributes(
