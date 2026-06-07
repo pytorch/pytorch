@@ -3007,17 +3007,25 @@ class VariableBuilder:
                 if readonly:
                     from torch._prims_common import compute_required_storage_length
 
+                    # Dynamo returns a writable array for readonly numpy inputs.
+                    # Preserve the original numpy strides for guards, but copy
+                    # through a flattened storage view so broadcasted outputs do
+                    # not have an aliasing _base.
                     needed_size = compute_required_storage_length(
                         tensor_value.size(),
                         tensor_value.stride(),
                         tensor_value.storage_offset(),
                     )
-                    tensor_value = torch.as_strided(
-                        torch.as_strided(tensor_value, (needed_size,), (1,), 0).clone(),
+                    result = torch.empty_strided(
                         tensor_value.size(),
                         tensor_value.stride(),
-                        tensor_value.storage_offset(),
+                        dtype=tensor_value.dtype,
+                        device=tensor_value.device,
                     )
+                    result.as_strided((needed_size,), (1,), 0).copy_(
+                        tensor_value.as_strided((needed_size,), (1,), 0)
+                    )
+                    tensor_value = result
             except NotImplementedError as e:
                 # failed to convert to tensor, graph break
                 unimplemented(

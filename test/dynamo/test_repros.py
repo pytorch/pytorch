@@ -5138,6 +5138,56 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
 
     # https://github.com/pytorch/pytorch/issues/140171
+    @parametrize("op", ["slice", "select"])
+    @parametrize("dynamic", [False, True])
+    @parametrize("return_view", [False, True])
+    def test_view_scatter_returned_view_input_storage_observation_inductor(
+        self, op, dynamic, return_view
+    ):
+        def foo(x, src):
+            if op == "slice":
+                y = torch.slice_scatter(x, src, 0, 5, 10)
+            else:
+                y = torch.select_scatter(x, src, 0, 5)
+            return y[:5] if return_view else y
+
+        base = torch.arange(20)
+        src = torch.arange(5) if op == "slice" else torch.tensor(99)
+        expected = foo(base[:10], src)
+
+        with fresh_cache():
+            actual = torch.compile(foo, backend="inductor", dynamic=dynamic)(
+                base[:10], src
+            )
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(
+            expected.untyped_storage().size(), actual.untyped_storage().size()
+        )
+        self.assertEqual(
+            expected.as_strided((15,), (1,), 0),
+            actual.as_strided((15,), (1,), 0),
+        )
+
+    # https://github.com/pytorch/pytorch/issues/140171
+    def test_as_strided_mutation_with_aliased_inputs(self):
+        def foo(x, y):
+            x.as_strided((10,), (1,), storage_offset=5).add_(1)
+            y.add_(10)
+            return x, y
+
+        base_ref = torch.arange(20)
+        foo(base_ref[:10], base_ref[10:20])
+
+        base = torch.arange(20)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "encountered a mutation on a view chain of length 2, where view 1 was an as_strided",
+        ):
+            torch.compile(foo, backend="aot_eager")(base[:10], base[10:20])
+        self.assertEqual(torch.arange(20), base)
+
+    # https://github.com/pytorch/pytorch/issues/140171
     @parametrize("backend", ["aot_eager", "inductor"])
     def test_as_strided_scatter_overlapping_input(self, backend):
         def foo(base, src):

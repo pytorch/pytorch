@@ -2251,8 +2251,16 @@ def merge_view_inputs(
         # have overlapping memory.
         # I don't bother with that case for now: here, we only bail out earlier if we detect that **every** pair
         # of tensors in the current group that shares a storage is non-overlapping.
-        aliased_input_indices_no_false_sharing = compute_overlapping_inputs(
-            aot_config, fwd_inputs, aliased_input_indices
+        has_storage_copy_mutation = any(
+            mutated_input_info[inpt_idx].mutation_requires_storage_copy
+            for inpt_idx in aliased_input_indices
+        )
+        aliased_input_indices_no_false_sharing = (
+            set(aliased_input_indices)
+            if has_storage_copy_mutation
+            else compute_overlapping_inputs(
+                aot_config, fwd_inputs, aliased_input_indices
+            )
         )
         if len(aliased_input_indices_no_false_sharing) <= 1:
             other_args.extend(

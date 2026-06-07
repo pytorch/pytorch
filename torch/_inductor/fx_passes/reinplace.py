@@ -12,6 +12,7 @@ import torch
 import torch.fx.node
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.source import NumpyTensorSource, Source
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._guards import detect_fake_mode, StorageMetadata, TracingContext
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -589,6 +590,14 @@ def _source_from_aot_input_desc(desc: Any):
     return None
 
 
+def _is_valid_storage_metadata_guard_source(source: Source | None) -> bool:
+    return (
+        source is not None
+        and not isinstance(source, NumpyTensorSource)
+        and "___from_numpy(" not in source.name
+    )
+
+
 def _add_storage_metadata_guard_for_scatter_input(
     inp: torch.fx.Node, storage_size: int, storage_offset: int
 ) -> None:
@@ -597,7 +606,7 @@ def _add_storage_metadata_guard_for_scatter_input(
         return
 
     source = _source_from_aot_input_desc(inp.meta.get("desc"))
-    if source is None:
+    if not _is_valid_storage_metadata_guard_source(source):
         return
 
     tracing_context.guards_context.aotautograd_guards.append(
@@ -605,16 +614,15 @@ def _add_storage_metadata_guard_for_scatter_input(
     )
 
 
-# Native view_scatter ops clone_preserve_strides(input) before updating the
-# selected view. Use the mutating decomposition for all of them so compiled
-# outputs preserve backing storage/offset semantics when that storage is later
-# observed.
+# Native as_strided_scatter and diagonal_scatter clone_preserve_strides(input)
+# before updating the selected view. Use the mutating decomposition for these
+# ops to preserve backing storage/offset semantics. Slice/select scatter stay on
+# the usual profitability heuristic unless the scatter output's storage is
+# observed; forcing all of them through mutation regresses dynamic codegen.
 _ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
     [
         aten.as_strided.default,
         aten.diagonal.default,
-        aten.select.int,
-        aten.slice.Tensor,
     ]
 )
 
@@ -624,6 +632,45 @@ def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
         view.target in _ALWAYS_MUTATING_SCATTER_OPS
         for view in _decode_view_ops(cast(EncodedViewOps, tuple(node.args[2:])))
     )
+
+
+def scatter_input_has_observable_storage(node: torch.fx.Node) -> bool:
+    inp = node.args[0]
+    if not isinstance(inp, torch.fx.Node):
+        return False
+    inp_val = inp.meta.get("val")
+    if not isinstance(inp_val, torch.Tensor):
+        return False
+    if torch._debug_has_internal_overlap(inp_val) == 1:
+        return False
+    storage_size = guarding_hint_or_throw(
+        clone_preserve_strides_storage_length(inp_val)
+    )
+    return not statically_known_true(sym_eq(storage_size, inp_val.numel()))
+
+
+def scatter_output_storage_is_observed(node: torch.fx.Node) -> bool:
+    def visit(user: torch.fx.Node, seen: OrderedSet[torch.fx.Node]) -> bool:
+        if user in seen:
+            return False
+        seen.add(user)
+        if user.op == "output" and scatter_input_has_observable_storage(node):
+            return True
+        if user.op == "call_method" and user.target == "as_strided":
+            return True
+        if user.op == "call_function" and user.target in (
+            torch.as_strided,
+            aten.as_strided.default,
+        ):
+            return True
+        if _is_view_op(user.target):
+            return any(visit(next_user, seen) for next_user in user.users)
+        return False
+
+    for user in node.users:
+        if visit(user, OrderedSet()):
+            return True
+    return False
 
 
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
@@ -637,7 +684,7 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     inp = node.args[0]
 
     # Mutating scatter ops unconditionally realize input and output
-    if scatter_always_uses_mutation(node):
+    if scatter_always_uses_mutation(node) or scatter_output_storage_is_observed(node):
         return True
 
     if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
@@ -663,6 +710,7 @@ def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
         use_mutation = (
             node.target is _inplace_generalized_scatter
             or scatter_always_uses_mutation(node)
+            or scatter_output_storage_is_observed(node)
         )
 
         with graph.inserting_before(node):

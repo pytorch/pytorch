@@ -610,6 +610,9 @@ def _is_copyback_only_scatter(node: torch.fx.Node) -> bool:
 
 
 def _needs_storage_metadata_for_cache_key(gm: torch.fx.GraphModule) -> bool:
+    if not isinstance(gm, torch.fx.GraphModule):
+        return False
+
     method_targets = (
         "as_strided",
         "as_strided_scatter",
@@ -1375,9 +1378,6 @@ class FxGraphHashDetails:
                     self.user_defined_triton_source.append(
                         (kernel_source, constant_args, configs)
                     )
-
-        # Alignment checks
-        self.inputs_to_check = inputs_to_check
 
         no_tensor_inputs = not any(isinstance(x, torch.Tensor) for x in example_inputs)
         # This device index is usually already encoded by the device of the inputs

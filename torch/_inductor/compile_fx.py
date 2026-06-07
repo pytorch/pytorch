@@ -39,6 +39,7 @@ from torch._dynamo import (
 from torch._dynamo.backends import common as dynamo_common
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.repro.after_aot import wrap_compiler_debug
+from torch._dynamo.source import NumpyTensorSource, Source
 from torch._dynamo.utils import (
     chromium_event_timed,
     CompileEventLogger,
@@ -853,14 +854,7 @@ def compile_fx_inner(
 
 
 def _source_from_aot_input_desc(desc: Any):
-    from torch._functorch._aot_autograd.descriptors import (
-        PlainAOTInput,
-        SyntheticBaseAOTInput,
-        ViewBaseAOTInput,
-    )
-
-    while isinstance(desc, (SyntheticBaseAOTInput, ViewBaseAOTInput)):
-        desc = desc.base_of
+    from torch._functorch._aot_autograd.descriptors import PlainAOTInput
 
     if isinstance(desc, PlainAOTInput):
         tracing_context = TracingContext.try_get()
@@ -874,10 +868,21 @@ def _source_from_aot_input_desc(desc: Any):
     return None
 
 
+def _is_valid_storage_metadata_guard_source(source: Source | None) -> bool:
+    # NumpyTensorSource reconstructs through ___from_numpy(...), which can warn
+    # or produce ephemeral tensors while evaluating guards. Regular tensor
+    # guards already cover numpy shape/stride metadata.
+    return (
+        source is not None
+        and not isinstance(source, NumpyTensorSource)
+        and "___from_numpy(" not in source.name
+    )
+
+
 def _guarding_int(value: Any) -> int:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RuntimeError):
         return int(guarding_hint_or_throw(value))
 
 
@@ -894,7 +899,7 @@ def _add_storage_metadata_guards_for_cache_sensitive_ops(
         if not isinstance(arg, torch.Tensor):
             continue
         source = _source_from_aot_input_desc(node.meta.get("desc"))
-        if source is None:
+        if not _is_valid_storage_metadata_guard_source(source):
             continue
         tracing_context.guards_context.aotautograd_guards.append(
             StorageMetadata(

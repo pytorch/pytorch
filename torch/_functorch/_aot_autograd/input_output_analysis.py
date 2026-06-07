@@ -196,7 +196,10 @@ def create_synthetic_base_metadata(
                 else m.input_info[outer_indices[0]].mutates_storage_metadata
             ),
             mutation_requires_storage_copy=(
-                False
+                any(
+                    m.input_info[x].mutation_requires_storage_copy
+                    for x in outer_indices
+                )
                 if len(outer_indices) > 1
                 else m.input_info[outer_indices[0]].mutation_requires_storage_copy
             ),
