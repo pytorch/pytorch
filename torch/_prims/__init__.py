@@ -1281,6 +1281,7 @@ def _broadcast_in_dim_meta(
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
         guard_or_true,
+        has_guarding_hint,
         sym_or,
     )
 
@@ -1348,7 +1349,11 @@ def _broadcast_in_dim_meta(
                     new_strides.append(stride)
                 else:
                     new_strides.append(0)
-            elif backed_so:
+            elif (
+                backed_so
+                and has_guarding_hint(input_size)
+                and has_guarding_hint(output_size)
+            ):
                 torch._check(
                     input_size == output_size,
                     lambda: f"non-broadcasting semantics require {input_size} == {output_size}",
