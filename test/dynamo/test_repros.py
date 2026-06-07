@@ -6396,6 +6396,67 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(ref, res)
 
+    def test_deepspeed_zero3_partitioned_parameter_hooks(self):
+        class FakeZeRO:
+            def install(self, module):
+                for child in module.modules():
+                    child.register_forward_pre_hook(self._pre_forward_module_hook)
+                    child.register_forward_hook(self._post_forward_module_hook)
+
+            def _pre_forward_module_hook(self, module, args):
+                self.pre_sub_module_forward_function(module)
+
+            def _post_forward_module_hook(self, module, args, output):
+                self.post_sub_module_forward_function(module)
+
+            def pre_sub_module_forward_function(self, sub_module):
+                for param in sub_module.parameters(recurse=False):
+                    if param.ds_status == "NOT_AVAILABLE":
+                        param.data = param.ds_tensor.narrow(0, 0, param.ds_numel).view(
+                            param.ds_shape
+                        )
+                        param.ds_status = "AVAILABLE"
+
+            def post_sub_module_forward_function(self, sub_module):
+                for param in sub_module.parameters(recurse=False):
+                    if param.ds_status == "AVAILABLE":
+                        param.ds_tensor = param.detach().clone().flatten()
+                        param.data = torch.empty(0, dtype=param.dtype)
+                        param.ds_status = "NOT_AVAILABLE"
+
+        class MLP(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gate_proj = torch.nn.Linear(4, 8)
+                self.up_proj = torch.nn.Linear(4, 8)
+                self.down_proj = torch.nn.Linear(8, 4)
+
+            def forward(self, x):
+                return self.down_proj(
+                    torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
+                )
+
+        def partition_parameters(module):
+            for param in module.parameters():
+                param.ds_shape = param.shape
+                param.ds_numel = param.numel()
+                param.ds_tensor = param.detach().clone().flatten()
+                param.ds_status = "NOT_AVAILABLE"
+                param.data = torch.empty(0, dtype=param.dtype)
+
+        model = MLP()
+        ref_model = copy.deepcopy(model)
+        partition_parameters(model)
+        FakeZeRO().install(model)
+
+        x = torch.randn(2, 4)
+        expected = ref_model(x)
+        actual = torch.compile(model, backend="aot_eager")(x)
+
+        self.assertEqual(actual, expected)
+        for param in model.parameters():
+            self.assertEqual(param.shape, torch.Size([0]))
+
     def test_os_fspath(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):

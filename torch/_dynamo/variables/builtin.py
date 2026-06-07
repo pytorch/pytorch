@@ -3355,6 +3355,24 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                     # [Note: set_data_on_scoped_tensor]
                     # TODO(azahed98): The plan of record is to introduce a set_data op, entirely subsume the
                     # operation into a call_function in the fx graph, and let aot_autograd handle it.
+                    if (
+                        isinstance(obj, TensorVariable)
+                        and isinstance(val, TensorVariable)
+                        and obj.python_type() is torch.nn.Parameter
+                        and obj.requires_grad
+                        and obj.valid_size()
+                        and val.valid_size()
+                        and obj.size != val.size
+                    ):
+                        unimplemented(
+                            gb_type="setattr() on Parameter.data with different shape",
+                            context=f"setattr({obj}, {name}, {val})",
+                            explanation="Dynamo does not trace shape-changing "
+                            "`.data` mutations on differentiable parameters. "
+                            "AOTAutograd assumes graph input metadata is stable "
+                            "while building the backward graph.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
                     if obj.source is None:
                         unimplemented(
                             gb_type="Failed to mutate tensor data attribute",
