@@ -29,6 +29,10 @@ FLEX_GEMM_OPS = {
     torch.ops.aten.mm.default: FlexGemmOpInfo("mm", 0, 1),
     torch.ops.aten.addmm.default: FlexGemmOpInfo("addmm", 1, 2),
 }
+FLEX_GEMM_OP_ALIASES = {
+    torch.mm: torch.ops.aten.mm.default,
+    torch.addmm: torch.ops.aten.addmm.default,
+}
 _SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
 
 
@@ -37,13 +41,6 @@ def supported_flex_gemm_op_names() -> str:
 
 
 _SUPPORTED_FLEX_GEMM_OP_NAMES = supported_flex_gemm_op_names()
-
-
-def _normalize_flex_gemm_op(gemm_op: Callable[..., Any]) -> Callable[..., Any]:
-    return {
-        torch.mm: torch.ops.aten.mm.default,
-        torch.addmm: torch.ops.aten.addmm.default,
-    }.get(gemm_op, gemm_op)
 
 
 class FlexGemm(HigherOrderOperator):
@@ -107,7 +104,7 @@ class FlexGemm(HigherOrderOperator):
         )
 
 
-_flex_gemm = FlexGemm()
+flex_gemm_hop = FlexGemm()
 
 
 def flex_gemm(
@@ -122,13 +119,13 @@ def flex_gemm(
         gemm_kwargs = {}
     if kernel_options is None:
         kernel_options = {}
-    gemm_op = cast(torch._ops.OpOverload, _normalize_flex_gemm_op(gemm_op))
+    gemm_op = cast(torch._ops.OpOverload, FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op))
 
     def body_fn(*args: Any, **body_kwargs: Any) -> Any:
         return epilogue_fn(gemm_op(*args, **body_kwargs))
 
     body_fn._flex_gemm_accepts_kwargs = True  # type: ignore[attr-defined]
-    return _flex_gemm(gemm_op, body_fn, gemm_args, gemm_kwargs, kernel_options)
+    return flex_gemm_hop(gemm_op, body_fn, gemm_args, gemm_kwargs, kernel_options)
 
 
 def _body_accepts_kwargs(body_fn: Callable[..., Any], kwargs: Any) -> bool:
@@ -146,21 +143,23 @@ def _call_flex_gemm_body(body_fn: Callable[..., Any], args: Any, kwargs: Any) ->
     return body_fn(*args)
 
 
-@_flex_gemm.py_impl(DispatchKey.CompositeExplicitAutograd)
+@flex_gemm_hop.py_impl(DispatchKey.CompositeExplicitAutograd)
 def flex_gemm_dense(gemm_op, body_fn, args, kwargs, kernel_options):
     return _call_flex_gemm_body(body_fn, args, kwargs)
 
 
-_flex_gemm.py_autograd_impl(autograd_not_implemented(_flex_gemm, deferred_error=True))
+flex_gemm_hop.py_autograd_impl(
+    autograd_not_implemented(flex_gemm_hop, deferred_error=True)
+)
 
 
-@_flex_gemm.py_impl(FakeTensorMode)
+@flex_gemm_hop.py_impl(FakeTensorMode)
 def flex_gemm_fake_tensor_mode(mode, gemm_op, body_fn, args, kwargs, kernel_options):
     with mode:
         return _call_flex_gemm_body(body_fn, tuple(args), {})
 
 
-@_flex_gemm.py_functionalize_impl
+@flex_gemm_hop.py_functionalize_impl
 def flex_gemm_functionalize(ctx, gemm_op, body_fn, args, kwargs, kernel_options):
     unwrapped_args = ctx.unwrap_tensors(args)
     with ctx.redispatch_to_next():
@@ -171,7 +170,7 @@ def flex_gemm_functionalize(ctx, gemm_op, body_fn, args, kwargs, kernel_options)
             hasattr(ctx, "mode") and ctx.mode.pre_dispatch,
         )
         return ctx.wrap_tensors(
-            _flex_gemm(
+            flex_gemm_hop(
                 gemm_op,
                 ctx.functionalize(body_fn),
                 unwrapped_args,
@@ -181,7 +180,7 @@ def flex_gemm_functionalize(ctx, gemm_op, body_fn, args, kwargs, kernel_options)
         )
 
 
-@_flex_gemm.py_impl(ProxyTorchDispatchMode)
+@flex_gemm_hop.py_impl(ProxyTorchDispatchMode)
 def flex_gemm_proxy_torch_dispatch_mode(
     proxy_mode, gemm_op, body_fn, args, kwargs, kernel_options
 ):
@@ -200,7 +199,7 @@ def flex_gemm_proxy_torch_dispatch_mode(
         )
         out_proxy = proxy_mode.tracer.create_proxy(
             "call_function",
-            _flex_gemm,
+            flex_gemm_hop,
             proxy_args,
             {},
             name="flex_gemm",
@@ -211,4 +210,4 @@ def flex_gemm_proxy_torch_dispatch_mode(
             constant=None,
             tracer=proxy_mode.tracer,
         )
-    return _flex_gemm(gemm_op, body_fn, args, kwargs, kernel_options)
+    return flex_gemm_hop(gemm_op, body_fn, args, kwargs, kernel_options)

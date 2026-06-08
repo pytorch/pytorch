@@ -29,8 +29,8 @@ from torch._functorch._aot_autograd.descriptors import (
 )
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.flex_gemm import (
-    _flex_gemm,
     _SUPPORTED_FLEX_GEMM_OP_NAMES,
+    flex_gemm_hop,
     FLEX_GEMM_OPS,
 )
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
@@ -8683,7 +8683,7 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
     return output
 
 
-@register_lowering(_flex_gemm, type_promotion_kind=None)
+@register_lowering(flex_gemm_hop, type_promotion_kind=None)
 def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     if kernel_options.get("backend", "TRITON") != "QUACK":
         return process_subgraph_nodes(subgraph.graph_module, list(args))

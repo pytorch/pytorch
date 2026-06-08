@@ -42,7 +42,7 @@ from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.script_object import TorchScriptObjectVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
 from torch._guards import Source
-from torch._higher_order_ops.flex_gemm import _normalize_flex_gemm_op
+from torch._higher_order_ops.flex_gemm import FLEX_GEMM_OP_ALIASES
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 from torch._ops import HigherOrderOperator
 from torch.fx.graph_module import GraphModule
@@ -3866,8 +3866,9 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
         )
 
         body_node = p_args[0]
+        gemm_op = args[0].as_python_constant()
         p_args = (
-            _normalize_flex_gemm_op(args[0].as_python_constant()),
+            FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op),
             body_node,
             tuple(p_args[1:]),
             fn_kwargs,
