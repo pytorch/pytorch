@@ -120,7 +120,8 @@ static std::tuple<Tensor, std::optional<int64_t>> linspace_logspace_batch_rule_h
   start_ = moveBatchDimToFront(start_, start_bdim);
   end_ = moveBatchDimToFront(end_, end_bdim);
 
-  auto tensor_options = at::TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  auto result_dtype = dtype.value_or(c10::typeMetaToScalarType(c10::get_default_dtype()));
+  auto tensor_options = at::TensorOptions().dtype(result_dtype).layout(layout).device(device).pinned_memory(pin_memory);
   auto denom = (steps - 1).max(1);
   auto step_range = at::arange(0, steps, tensor_options).unsqueeze_(1);
   auto result = (start_ + step_range * (end_ - start_) / denom).transpose(0, 1);
