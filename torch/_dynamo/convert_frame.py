@@ -134,7 +134,12 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .output_graph import CodeOptions, DynamoTracerOutput, OutputGraphCommon
+from .output_graph import (
+    carry_cudagraph_annotation_across_restart,
+    CodeOptions,
+    DynamoTracerOutput,
+    OutputGraphCommon,
+)
 from .pgo import (
     _log_size_mismatch_recompile,
     log_frame_dynamic_whitelist,
@@ -941,6 +946,16 @@ def trace_frame(
             exc.TensorifyScalarRestartAnalysis,
             exc.SkipFrame,
         ):
+            # Stash the override_cudagraphs annotation before the `finally`
+            # below runs call_cleanup_hooks(), which resets it to None. The
+            # next OutputGraph rehydrates this in its __init__.
+            if (
+                tracer.output is not None
+                and tracer.output.cudagraph_annotation is not None
+            ):
+                carry_cudagraph_annotation_across_restart(
+                    tracer.output.cudagraph_annotation
+                )
             raise
         except Exception:
             if translation_validation_enabled():
@@ -1545,6 +1560,9 @@ def compile_frame(  # type: ignore[return]
     """
     # This is shared across restarts
     speculation_log = SpeculationLog()
+    # Clear any carry left over from a previous compile that didn't consume it
+    # (e.g. it failed before constructing the next OutputGraph).
+    carry_cudagraph_annotation_across_restart(None)
 
     def transform(
         instructions: list[Instruction], code_options: dict[str, Any]
@@ -1606,6 +1624,20 @@ def compile_frame(  # type: ignore[return]
             # Clean up the failed tracer output's graph to break reference cycles
             failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
             if failed_tracer_output:
+                # Carry the `override_cudagraphs` annotation across the restart
+                # so the retry OutputGraph rehydrates it. Without this, a
+                # disabled call inside the CM-wrapped frame silently drops the
+                # override on every retry, and the eventually-finalized OG
+                # never reaches gm.meta["cudagraph_annotation"].
+                # NOTE: on error, DynamoTracerOutput nulls `output_graph` and
+                # stashes the actual instance on `output_graph_for_cleanup`.
+                failed_og = getattr(
+                    failed_tracer_output, "output_graph", None
+                ) or getattr(failed_tracer_output, "output_graph_for_cleanup", None)
+                if failed_og is not None:
+                    carry_cudagraph_annotation_across_restart(
+                        getattr(failed_og, "cudagraph_annotation", None)
+                    )
                 failed_tracer_output._cleanup_output_graph()
             # If restart reason is None just log the type of the exception
             restart_reasons.add(e.restart_reason or str(type(e)))
