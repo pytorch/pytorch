@@ -6640,10 +6640,57 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.cse.invalidate(self.outside_loop_vars)
                 tree.cache_clear()
         else:
-            self.body.splice(self.indexing_code)
-            self.body.splice(self.loads)
-            self.body.splice(self.compute)
-            self.body.splice(self.stores)
+            # Check if we need a pointwise loop for chunk pattern after DisableReduction
+            if hasattr(self, "pointwise_loop_numel") and self.pointwise_loop_numel is not None:
+                # Generate a loop over the pointwise inner dimension (e.g., 4096 for chunk)
+                # This is similar to a reduction loop but without reduction semantics
+                r_tree = None
+                for tree in self.range_trees:
+                    if tree.prefix.startswith("r"):
+                        r_tree = tree
+                        break
+
+                if r_tree is not None:
+                    # Generate loop structure exactly like reduction loop
+                    prefix = r_tree.prefix
+                    loop_start = "0"
+                    loop_end = self.index_to_str(self.pointwise_loop_numel)
+                    block_size = f"{prefix.upper()}BLOCK"
+
+                    # Hoist loop-invariant base computation outside the loop
+                    # Generate: r0_base = tl.arange(0, R0_BLOCK)[None, :]
+                    self.body.writeline(
+                        f"{prefix}base = {self.iteration_ranges_ranges_code(r_tree)}"
+                    )
+
+                    # Write the loop header
+                    self.body.writeline(
+                        f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {block_size}):"
+                    )
+                    # Write the loop body with proper indentation
+                    with self.body.indent():
+                        # Generate: r0_index = r0_offset + r0_base
+                        self.body.writeline(f"{r_tree.name} = {prefix}offset + {prefix}base")
+                        # Generate: r0_mask = r0_index < loop_numel
+                        self.body.writeline(
+                            f"{r_tree.mask_name()} = {r_tree.name} < {loop_end}"
+                        )
+                        # Splice the pointwise code inside the loop
+                        self.body.splice(self.indexing_code)
+                        self.body.splice(self.loads)
+                        self.body.splice(self.compute)
+                        self.body.splice(self.stores)
+                else:
+                    # Fallback if no r_tree found
+                    self.body.splice(self.indexing_code)
+                    self.body.splice(self.loads)
+                    self.body.splice(self.compute)
+                    self.body.splice(self.stores)
+            else:
+                self.body.splice(self.indexing_code)
+                self.body.splice(self.loads)
+                self.body.splice(self.compute)
+                self.body.splice(self.stores)
         self.body.splice(self.post_loop_combine)
         if self.cooperative_reduction and (
             self.post_loop_combine or self.post_loop_store

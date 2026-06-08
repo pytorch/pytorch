@@ -298,11 +298,19 @@ def get_pw_red_splits(
             (n._body.reduce_vars, n._body.sizes[1]),
         )  # type: ignore[return-value]
 
-    if get_hint(sympy_product(n._body.sizes[0])) != get_hint(
-        pointwise_numel * red_numel  # type: ignore[operator]
-    ):
-        raise AssertionError(
-            "expected pointwise sizes to match pointwise_numel * red_numel"
+    node_numel = get_hint(sympy_product(n._body.sizes[0]))
+    expected_numel = get_hint(pointwise_numel * red_numel)  # type: ignore[operator]
+
+    # Handle chunk pattern: pointwise consumer with different iteration space
+    # E.g., reduction output [2048] consumed by pointwise [2048, 4096]
+    # where 4096 < 8192 (reduction dim)
+    if node_numel != expected_numel:
+        if none_if_not_divisible:
+            return None
+        # If not allowing None return, assert as before
+        assert node_numel == expected_numel, (
+            f"Node size {node_numel} doesn't match expected {expected_numel} "
+            f"(pointwise_numel={pointwise_numel}, red_numel={red_numel})"
         )
     i = len(n._body.sizes[0]) - 1
     prod = 1
@@ -591,9 +599,14 @@ def extract_normalized_read_writes(
         if not n_reads and not n_writes:
             continue
 
-        (iter_vars, n_pw_splits), (red_vars, n_red_splits) = get_pw_red_splits(
-            n, pointwise_numel, red_numel
+        maybe_splits = get_pw_red_splits(
+            n, pointwise_numel, red_numel, none_if_not_divisible=True
         )
+        if maybe_splits is None:
+            # Chunk pattern: node has incompatible iteration space
+            # Skip normalization for this node
+            continue
+        (iter_vars, n_pw_splits), (red_vars, n_red_splits) = maybe_splits
 
         groups = pw_splits + red_splits
         lengths = (n_pw_splits, (n_red_splits))

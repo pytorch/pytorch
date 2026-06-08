@@ -75,7 +75,9 @@ from .block_analysis import BlockPatternMatcher
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import MultiKernel, SizeHintMultiKernel
 from .simd_kernel_features import (
+    DisablePointwiseLoop,
     DisableReduction,
+    EnablePointwiseLoop,
     EnableReduction,
     NodeScheduleEntry,
     NodeScheduleMarker,
@@ -567,6 +569,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # Info to enable multiple store_output calls for epilogue subtiling
         self.store_output_ctr = itertools.count()
         self.is_native_matmul = False
+        # Track if we need a pointwise loop after DisableReduction (chunk pattern)
+        self.pointwise_loop_numel: sympy.Expr | None = None
         if config.triton.native_matmul:
             for node in self.features.node_schedule:
                 if (
@@ -963,15 +967,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
+        # Check if all dimensions were successfully split
         if not all(V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining):
-            # Non-unit leftover extents mean the node's iteration space does not
-            # tile onto the kernel groups -- e.g. fusing an epilogue whose row
-            # count is a strict sub-multiple of a template's tiling ([s, N] into
-            # [K*s, N]). Raise CantSplit (consistent with the divisibility exits
-            # in add_range above) so callers like is_compatible and
-            # Scheduler.speedup_by_fusion skip this fusion and fall back to
-            # unfused codegen instead of hard-failing the whole compile.
-            raise CantSplit(remaining, lengths)
+            # Chunk pattern: pointwise with different iteration space than reduction
+            # Cannot split into expected groups - raise CantSplit to try alternative tilings
+            raise CantSplit(
+                sympy_product(remaining),
+                sympy.S.One,
+            )
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
@@ -1069,9 +1072,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         ):
             return set_ranges(*lengths)
 
-        new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
-        itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
-        return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
+        try:
+            new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
+            itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
+            return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
+        except CantSplit:
+            # Chunk pattern: node has incompatible iteration space with kernel groups
+            # Use node's ranges directly instead of trying to fit kernel tiling
+            return set_ranges(*lengths)
 
     def is_indirect_indexing(self, index: sympy.Expr) -> bool:
         # tmpX  means indirect indexing
@@ -2230,6 +2238,26 @@ class SIMDScheduling(BaseScheduling):
                     return is_reduction_tiling_valid
                 return True
 
+            # NEW: Check if node1 (pointwise) consumes node2 (reduction) output with compatible indices
+            # This enables fusion for patterns like RMSNorm reduction followed by chunked gating
+            reduction_writes = list(node2.read_writes.writes)
+            pointwise_reads = list(node1.read_writes.reads)
+
+            reduction_output_names = {w.name for w in reduction_writes}
+            consuming_reads = [r for r in pointwise_reads if r.name in reduction_output_names]
+
+            if consuming_reads:
+                # Verify index compatibility for each consuming read
+                for read_dep in consuming_reads:
+                    write_dep = next(w for w in reduction_writes if w.name == read_dep.name)
+
+                    if not self._check_index_compatibility(write_dep, read_dep):
+                        why("index incompatibility between reduction output and pointwise consumer")
+                        return False
+
+                return True  # All indices compatible - fusion legal!
+
+            # Fall back to exact numel match for other cases (broadcast pattern)
             if numel1 != numel2:
                 why("nodes numel incompatibility")
             return numel1 == numel2
@@ -2243,6 +2271,53 @@ class SIMDScheduling(BaseScheduling):
 
     can_fuse_vertical = can_fuse
     can_fuse_horizontal = can_fuse
+
+    def _check_index_compatibility(self, write_dep, read_dep):
+        """
+        Check if write and read indices are compatible for fusion.
+
+        Rule: For each variable in the index expression, consumer's range
+        must be <= producer's range (read_range <= write_range).
+
+        Only checks variables USED IN THE INDEX, not all ranges.
+
+        Example:
+          - Write: variance[d0] with ranges={d0: 2048, d1: 8192}
+          - Read: variance[d0] with ranges={d0: 2048, d1: 4096}
+          - Check: d0 used in index → compare ranges[d0]: 2048 <= 2048 ✓
+          - Skip: d1 not in index → ignore mismatch 4096 != 8192
+        """
+        write_idx = write_dep.index
+        read_idx = read_dep.index
+
+        # Extract variables actually used in indices
+        write_idx_vars = write_idx.free_symbols
+        read_idx_vars = read_idx.free_symbols
+
+        write_ranges = write_dep.ranges
+        read_ranges = read_dep.ranges
+
+        # Check each variable used in write index
+        for write_var in write_idx_vars:
+            write_range = write_ranges[write_var]
+
+            # Find corresponding variable in read (positional mapping)
+            var_position = list(write_ranges.keys()).index(write_var)
+            if var_position >= len(read_ranges):
+                return False  # Read has fewer dimensions
+
+            read_var = list(read_ranges.keys())[var_position]
+
+            if read_var not in read_idx_vars:
+                return False  # Read doesn't use this dimension
+
+            read_range = read_ranges[read_var]
+
+            # Subset check: read_range <= write_range (consumer ⊆ producer)
+            if not V.graph.sizevars.statically_known_leq(read_range, write_range):
+                return False
+
+        return True
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule: list[Any] = []
@@ -2261,7 +2336,19 @@ class SIMDScheduling(BaseScheduling):
 
         def fits_outside_reduction(n):
             _, (node_numel, node_rnumel) = n.group
-            return node_numel == numel and node_rnumel == 1 and rnumel != 1
+            # Original check: exact numel match
+            if node_numel == numel and node_rnumel == 1 and rnumel != 1:
+                return True
+
+            # NEW: Allow chunk pattern - pointwise that consumes reduction output
+            # with smaller iteration space (e.g., [2048, 4096] consuming reduction [2048])
+            # Already verified index-compatible in fusion check
+            if node_rnumel == 1 and rnumel != 1:
+                # Check if this node consumes a reduction output (will be in not_ready_yet_nodes)
+                if not_ready_yet_nodes & n.ancestors:
+                    return True
+
+            return False
 
         def expect_improved_memory_usage(n):
             for read in n.read_writes.reads:
@@ -2338,7 +2425,22 @@ class SIMDScheduling(BaseScheduling):
                 schedule_node_in_loop(node)
             elif fits_outside_reduction(node):
                 with end_current_reduction_loop():
-                    node_schedule.append(node)
+                    # Check if this node has multi-dim pointwise range (chunk pattern)
+                    node_ranges = node.get_ranges()
+                    # node_ranges format: (pointwise_dims, reduction_dims)
+                    # e.g., ((2048, 4096), ()) for chunk pattern
+                    pointwise_dims = node_ranges[0] if len(node_ranges) > 0 else ()
+                    if len(pointwise_dims) > 1:
+                        # Multi-dim pointwise range like (2048, 4096)
+                        # Need to enable pointwise loop for the inner dimensions
+                        inner_dims = pointwise_dims[1:]  # (4096, ...)
+                        inner_numel = V.graph.sizevars.simplify(sympy_product(inner_dims))
+
+                        node_schedule.append(EnablePointwiseLoop(inner_numel))
+                        node_schedule.append(node)
+                        node_schedule.append(DisablePointwiseLoop)
+                    else:
+                        node_schedule.append(node)
             else:
                 raise NotImplementedError(
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
@@ -3264,9 +3366,26 @@ class SIMDScheduling(BaseScheduling):
                     stack.enter_context(kernel.disable_reduction())
                 elif node is EnableReduction:
                     stack.close()
+                elif isinstance(node, EnablePointwiseLoop):
+                    # Enable pointwise loop mode - no indexing to collect
+                    kernel.pointwise_loop_numel = node.loop_numel
+                elif node is DisablePointwiseLoop:
+                    # Disable pointwise loop mode - no indexing to collect
+                    kernel.pointwise_loop_numel = None
                 else:
                     node.decide_inplace_update()
-                    index_vars = kernel.split_and_set_ranges(node.get_ranges())
+                    node_ranges = node.get_ranges()
+
+                    # For nodes in pointwise loop mode, split ranges appropriately
+                    if hasattr(kernel, "pointwise_loop_numel") and kernel.pointwise_loop_numel is not None:
+                        # Split ranges: [[outer], [inner]] to use reduction tree for looping
+                        outer_dim = node_ranges[0][0]
+                        inner_dims = node_ranges[0][1:]
+                        modified_ranges = [[outer_dim], inner_dims]
+                        index_vars = kernel.split_and_set_ranges(modified_ranges)
+                    else:
+                        index_vars = kernel.split_and_set_ranges(node_ranges)
+
                     all_indexing.update(
                         dict.fromkeys(
                             node._body.indexing_from_args(index_vars).values()
@@ -3281,11 +3400,30 @@ class SIMDScheduling(BaseScheduling):
                     stack.enter_context(kernel.disable_reduction())
                 elif node is EnableReduction:
                     stack.close()
+                    # Clear pointwise loop flag AFTER context closes (which calls codegen_body)
+                    if hasattr(kernel, "pointwise_loop_numel"):
+                        kernel.pointwise_loop_numel = None
+                elif isinstance(node, EnablePointwiseLoop):
+                    # Enable pointwise loop mode with the specified loop size
+                    kernel.pointwise_loop_numel = node.loop_numel
+                elif node is DisablePointwiseLoop:
+                    # Marker only - flag cleared by EnableReduction
+                    pass
                 else:
                     # TODO - use split ranges ?
                     indexing_dtype_strength_reduction(node._body)
-                    convert_index_expr_to_value_expr(node._body)
-                    index_vars = kernel.split_and_set_ranges(node.get_ranges())
+                    node_ranges = node.get_ranges()
+
+                    # For nodes in pointwise loop mode, split ranges appropriately
+                    if hasattr(kernel, "pointwise_loop_numel") and kernel.pointwise_loop_numel is not None:
+                        # Split ranges: [[outer], [inner]] to use reduction tree for looping
+                        outer_dim = node_ranges[0][0]
+                        inner_dims = node_ranges[0][1:]
+                        modified_ranges = [[outer_dim], inner_dims]
+                        index_vars = kernel.split_and_set_ranges(modified_ranges)
+                    else:
+                        index_vars = kernel.split_and_set_ranges(node_ranges)
+
                     node.codegen(index_vars)
 
     def _codegen_single_template(
