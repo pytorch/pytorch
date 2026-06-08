@@ -718,9 +718,7 @@ def convolution(
 
     # Fallback when no choices are available (e.g., unsupported TRITON config)
     # Only fallback if the user didn't explicitly request zero backends ("")
-    if torch._inductor.utils._use_conv_autotune_backend("ATEN") or (
-        not choices and torch._inductor.config.max_autotune_conv_backends != ""
-    ):
+    if not choices and torch._inductor.config.max_autotune_conv_backends != "":
         choices.append(
             aten_convolution.bind(
                 args,
