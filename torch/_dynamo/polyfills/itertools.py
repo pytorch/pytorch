@@ -391,7 +391,7 @@ if sys.version_info >= (3, 12):
 
         iterable, n = args
         strict = kwargs.get("strict", False)
-        n = int(n)
+        n = operator.index(n)
         if n < 1:
             raise ValueError("n must be at least one")
 
