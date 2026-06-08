@@ -276,3 +276,7 @@ class LazyModuleMixin:
             "Modules with uninitialized parameters can't be used with `DataParallel`. "
             "Run a dummy forward pass to correctly initialize the modules"
         )
+
+
+def _to_concrete_int(value):
+    return int(value) if isinstance(value, torch.SymInt) else value
