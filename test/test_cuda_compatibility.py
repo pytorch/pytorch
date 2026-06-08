@@ -8,6 +8,7 @@ import torch.cuda
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
+@patch("torch.version.cuda", "12.6")
 class TestCodeCompatibleWithDevice(TestCase):
     def test_compatible_cases(self):
         self.assertTrue(
