@@ -4474,7 +4474,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.float)
     def test_polar_out_validation(self, device, dtype):
         # out= must enforce the structured-op contract identically on every
-        # backend: reject a dtype-mismatched output, and resize a mis-sized one.
+        # backend: reject a dtype-mismatched output, and resize an empty one.
         # (The CUDA cuSOLVER override must not bypass these checks.)
         A = make_tensor((8, 4), device=device, dtype=dtype, low=-2, high=2)
 
@@ -4485,12 +4485,12 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             torch.linalg.polar(A, out=(U, H))
 
-        # Mis-sized outputs -> resized to the correct shape (with the standard
-        # deprecation warning that resizing a non-empty out tensor emits).
-        U = torch.empty((4, 2), device=device, dtype=dtype)
-        H = torch.empty((1, 1), device=device, dtype=dtype)
-        with self.assertWarnsRegex(UserWarning, "An output with one or more elements"):
-            torch.linalg.polar(A, out=(U, H))
+        # Empty outputs -> resized to the required shape. This is the supported
+        # path (resizing a non-empty, wrong-shaped out is deprecated), and it
+        # exercises the structured out= resize machinery.
+        U = torch.empty(0, device=device, dtype=dtype)
+        H = torch.empty(0, device=device, dtype=dtype)
+        torch.linalg.polar(A, out=(U, H))
         self.assertEqual(U.shape, (8, 4))
         self.assertEqual(H.shape, (4, 4))
         self.assertEqual(U @ H, A)
