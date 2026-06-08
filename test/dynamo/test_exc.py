@@ -349,6 +349,31 @@ User code traceback:
         # check for record existence
         self.getRecord(records, "Graph break in user code")
 
+    @make_logging_test(graph_breaks=True)
+    def test_reraised_observed_exception_graph_break_log(self, records):
+        def inner(d):
+            return d["abc"]
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(d):
+            try:
+                inner(d)
+            except Exception:  # noqa: TRY203
+                raise
+
+        with self.assertRaisesRegex(KeyError, "abc"):
+            fn({"def": torch.randn(3, 4)})
+
+        full_records = [
+            r for r in records if "Graph break in user code" in r.getMessage()
+        ]
+        self.assertEqual(len(full_records), 1)
+
+        msg = full_records[0].getMessage()
+        self.assertIn('return d["abc"]', msg)
+        self.assertNotIn("\n    raise\n", msg)
+        self.assertNotIn("During handling of the above exception", msg)
+
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_backend_suppress_line(self):
         def fn001(x):
