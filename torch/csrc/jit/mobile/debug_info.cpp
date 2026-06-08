@@ -220,7 +220,7 @@ std::pair<std::string, std::string> MobileDebugTable::
     for (const auto debug_handle : debug_handles) {
       debug_handles_string += std::to_string(debug_handle);
     }
-    debug_handles_string += "}";
+    debug_handles_string += '}';
     debug_handles_string = debugHandlesNotFoundMessage(debug_handles_string);
     return {debug_handles_string, debug_handles_string};
   }
