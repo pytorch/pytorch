@@ -28,12 +28,36 @@ std::string get_cuda_error_help(cudaError_t error) noexcept {
   return help_text;
 }
 
+namespace {
+
+inline auto get_cuda_blocking_enabled() {
+#ifndef USE_ROCM
+  static auto device_blocking_flag = c10::utils::check_env("CUDA_LAUNCH_BLOCKING");
+  return device_blocking_flag.value_or(false);
+#else
+  static auto device_blocking_flag = c10::utils::get_env("AMD_SERIALIZE_KERNEL");
+  static auto effective_flag = device_blocking_flag.value_or("0");
+  if (effective_flag == "0") {
+    return false;
+  }
+  if (effective_flag == "3") {
+    return true;
+  }
+  if (effective_flag == "1" || effective_flag == "2") {
+    TORCH_WARN_ONCE("AMD_SERIALIZE_KERNEL=3 waits for completion before AND after kernel enqueue"
+                    ". 1/2 Only waits before or after enqueue.");
+    return true;
+  }
+  TORCH_WARN_ONCE("Unsupported AMD_SERIALIZE_KERNEL value ", device_blocking_flag);
+  return false;
+#endif
+}
+
+}
+
 // NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
 const char* get_cuda_check_suffix() noexcept {
-  static auto device_blocking_flag =
-      c10::utils::check_env("CUDA_LAUNCH_BLOCKING");
-  static bool blocking_enabled =
-      (device_blocking_flag.has_value() && device_blocking_flag.value());
+  static auto blocking_enabled = get_cuda_blocking_enabled();
   if (blocking_enabled) {
     return "";
   } else {
@@ -53,9 +77,7 @@ const char* get_cuda_async_error_suffix(cudaError_t error) noexcept {
     case cudaErrorMisalignedAddress:
 #endif
     {
-      static auto device_blocking_flag =
-          c10::utils::check_env("CUDA_LAUNCH_BLOCKING");
-      static bool blocking_enabled = device_blocking_flag.value_or(false);
+      static auto blocking_enabled = get_cuda_blocking_enabled();
       if (!blocking_enabled) {
         return "\nCUDA kernel errors might be asynchronously reported at some"
                " other API call, so the stacktrace below might be incorrect."
