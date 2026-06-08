@@ -385,6 +385,27 @@ class FakeTensorConverter:
 
         del self.constant_storage_mapping[weak_st]
 
+    def clear_non_cpu_constants(self) -> None:
+        """Clear non-CPU constants while keeping cheap CPU constants for folding."""
+        for weak_st, weak_tensor_refs in list(self.constant_storage_mapping.items()):
+            live_tensor_refs: list[ReferenceType[FakeTensor]] = []
+            constant: Tensor | None = None
+            for weak_tensor_ref in weak_tensor_refs:
+                ten = weak_tensor_ref()
+                if ten is None or ten.constant is None:
+                    continue
+
+                live_tensor_refs.append(weak_tensor_ref)
+                if constant is None:
+                    constant = ten.constant
+
+            if constant is None:
+                del self.constant_storage_mapping[weak_st]
+            elif constant.device.type == "cpu":
+                self.constant_storage_mapping[weak_st] = live_tensor_refs
+            else:
+                self.invalidate_constant_aliases(constant)
+
     def _get_memo(self, t: Tensor) -> FakeTensor | None:
         tid = self.meta_converter.describer.lookup_tensor.get(t)
         if tid is None:
@@ -790,18 +811,6 @@ class FakeTensor(Tensor):
     # NOTE: this probably will not do the right thing for backends
     # that have dispatch keys which are higher than the "meta" key:
     # https://github.com/pytorch/pytorch/blob/main/c10/core/DispatchKey.h#L189
-
-    # We don't support named tensors; graph break
-    @property
-    # pyrefly: ignore [bad-override]
-    def names(self) -> list[str]:
-        raise UnsupportedFakeTensorException(
-            "torch.compile doesn't support named tensors"
-        )
-
-    @names.setter
-    def names(self, _: list[str]) -> None:
-        raise NotImplementedError
 
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
@@ -1996,7 +2005,10 @@ class FakeTensorMode(TorchDispatchMode):
         _BypassDispatchCache if the output tensor has characteristics that
         prevent caching it.
         """
-        from torch._higher_order_ops.utils import registered_hop_fake_fns
+        from torch._higher_order_ops.utils import (
+            hops_that_skip_faketensor_cache,
+            registered_hop_fake_fns,
+        )
         from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
         self._validate_cache_key(func, args, kwargs)
@@ -2006,22 +2018,26 @@ class FakeTensorMode(TorchDispatchMode):
         # caching.
         # NB: Note that the HOPs that sta alive till FakeTensor are functional,
         # once they support mutations, we will have to revisit this logic.
+        # Skipping caching for HOPs that used to be registered with @py.impl(FakeTensorMode)
+        # to preserve original behaviour
         if (
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
         ):
-            if not isinstance(output, tuple) and output is not None:
-                raise AssertionError(
-                    f"Expected tuple output for HOP {func}, got {type(output)}"
-                )
-            if output is not None:
-                non_cacheable = any(
+            outs = output if isinstance(output, tuple) else (output,)
+            non_cacheable = (
+                any(
                     isinstance(o, (torch.Tensor, torch.SymInt))
                     and has_free_unbacked_symbols(o)
-                    for o in output  # pyrefly: ignore[not-iterable]
+                    for o in outs
                 )
-                if non_cacheable:
-                    raise _BypassDispatchCache(f"unbacked symbol in HOP {func} output")
+                or func in hops_that_skip_faketensor_cache
+            )
+            if non_cacheable:
+                raise _BypassDispatchCache(
+                    f"unbacked symbol in HOP {func} output \
+                    or {func} in hops_that_skip_faketensor_cache"
+                )
 
         if isinstance(output, (int, torch.SymInt, type(None))):
             output_info = _DispatchCacheEntryOutputInfo(

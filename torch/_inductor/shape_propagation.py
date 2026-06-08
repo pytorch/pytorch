@@ -134,6 +134,11 @@ class ShapePropagationOpsHandler:
         return None
 
     @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> BlockShapeType:
+        # shape is implicitly embedded in expr.
+        return None
+
+    @staticmethod
     def load_seed(name: str, offset: int) -> BlockShapeType:
         return ()
 
