@@ -3978,6 +3978,65 @@ class CommonTemplate:
             b_neg = torch.full_like(a, -divisor)
             self.common(fn, (a, b_neg))
 
+    def test_floordiv_int_min_neg_one_cpu(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/184406
+        if not is_cpp_backend(self.device):
+            raise unittest.SkipTest("cpp backend required")
+
+        def fn(a, b):
+            return torch.floor_divide(a, b)
+
+        for dtype in [torch.int32, torch.int64]:
+            min_value = torch.iinfo(dtype).min
+            a = torch.tensor([min_value], dtype=dtype, device=self.device)
+            b = torch.tensor([-1], dtype=dtype, device=self.device)
+            self.common(fn, (a, b))
+
+            a = torch.full((128,), min_value, dtype=dtype, device=self.device)
+            b = torch.full((128,), -1, dtype=dtype, device=self.device)
+            self.common(fn, (a, b))
+
+    def test_floordiv_div_by_zero_int_cpu_inductor_raises_error(self):
+        if not is_cpp_backend(self.device):
+            raise unittest.SkipTest("cpp backend required")
+
+        code = """
+import torch
+
+def fn(a, b):
+    return torch.floor_divide(a, b)
+
+opt = torch.compile(fn, backend="inductor", fullgraph=True)
+for dtype in (torch.int32, torch.int64):
+    cases = [
+        (torch.arange(1, 11, dtype=dtype), torch.tensor([1, 1, 1, 0, 1, 1, 1, 1, 1, 1], dtype=dtype)),
+        (torch.tensor([1], dtype=dtype), torch.tensor([0], dtype=dtype)),
+    ]
+    for a, b in cases:
+        try:
+            opt(a, b)
+        except RuntimeError as exc:
+            if "ZeroDivisionError" not in str(exc):
+                raise
+        else:
+            raise AssertionError("expected ZeroDivisionError")
+"""
+        env = os.environ.copy()
+        env.setdefault("TORCHINDUCTOR_CPP_CACHE_PRECOMPILE_HEADERS", "0")
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            # Avoid importing the source tree's ungenerated torch package in CI.
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+
     @skip_if_cpu
     def test_floordiv_div_by_zero_int(self):
         # Integer floor division by zero is undefined behavior on CUDA/Triton.
@@ -4471,6 +4530,17 @@ class CommonTemplate:
         vec = torch.tensor([], dtype=torch.int32)
         with torch.no_grad():
             self.assertEqual(cfn(input, mat, vec), fn(input, mat, vec))
+
+    def test_addmv_mixed_dtype_errors(self):
+        def fn(a, b, c):
+            return torch.addmv(a, b, c)
+
+        cfn = torch.compile(backend="inductor")(fn)
+        input = torch.tensor([2.7], dtype=torch.float32, device=self.device)
+        mat = torch.tensor([[1, 2], [3, 4]], dtype=torch.int32, device=self.device)
+        vec = torch.tensor([1, 2], dtype=torch.int32, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "same dtype"):
+            cfn(input, mat, vec)
 
     # https://github.com/pytorch/pytorch/issues/98979
     @skipCUDAIf(True, "cuda failed for float64 linear")
@@ -5412,7 +5482,6 @@ class CommonTemplate:
         with config.patch({"triton.use_block_ptr": use_block_ptr}):
             self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
-    @xfail_if_mps  # aten::full with zero-sized dim triggers AcceleratorError on MPS
     def test_max_unpool_empty_output(self):
         class Unpool1d(nn.Module):
             def __init__(self):
@@ -7252,6 +7321,48 @@ class CommonTemplate:
         folder.run()
 
         self.assertNotIn(view_node, folder.node_replacements)
+
+    def test_uniform_value_mul_by_zero(self):
+        # x * 0 is uniformly 0 only for non-floating-point dtypes. For float and
+        # complex, nan * 0 == nan and (+/-inf) * 0 == nan, so the uniform-value
+        # peephole must not fold x * 0 -> 0 (it would drop NaN/Inf when x is not
+        # known to be finite). Integer/bool x * 0 is still folded.
+        import torch.fx as fx
+        from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
+
+        for dtype, should_fold in (
+            (torch.float32, False),
+            (torch.float16, False),
+            (torch.bfloat16, False),
+            (torch.complex64, False),
+            (torch.int32, True),
+            (torch.int64, True),
+        ):
+            graph = fx.Graph()
+            x = graph.placeholder("x")
+            x.meta["val"] = torch.empty([4], dtype=dtype, device=self.device)
+            mul_node = graph.call_function(torch.ops.aten.mul.Tensor, args=(x, 0))
+            mul_node.meta["val"] = torch.empty([4], dtype=dtype, device=self.device)
+            graph.output(mul_node)
+            gm = fx.GraphModule(torch.nn.Module(), graph)
+
+            folder = UniformValueConstantFolder(gm)
+            folder.run()
+
+            self.assertEqual(
+                mul_node in folder.node_replacements,
+                should_fold,
+                msg=f"unexpected fold decision for dtype={dtype}",
+            )
+
+    def test_mul_by_zero_extremal(self):
+        # End-to-end: x * 0 must preserve NaN/Inf to match eager (nan*0=nan,
+        # inf*0=nan); folding x * 0 -> 0 would drop them. Via CommonTemplate this
+        # also runs on CPU (CpuTests) by default.
+        def fn(a):
+            return (a * 0,)
+
+        self.common(fn, [torch.tensor([np.nan, np.inf, -np.inf, 0.0, 1.0, -1.0])])
 
     def test_uniform(self):
         def fn(x):

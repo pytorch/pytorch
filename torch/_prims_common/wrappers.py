@@ -92,10 +92,12 @@ def _maybe_broadcast_for_strides(args):
     for arg in args:
         if isinstance(arg, TensorLike):
             shape = tuple(arg.shape)
+            if any(isinstance(dim, torch.SymInt) for dim in shape):
+                return None
         elif isinstance(arg, Number):
             shape = ()
         else:
-            return None
+            continue
 
         try:
             common_shape = (

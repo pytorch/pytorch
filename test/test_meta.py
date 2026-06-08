@@ -1879,14 +1879,15 @@ class TestMeta(TestCase):
             self.assertEqual(ref_out.stride(), fake_out.stride())
 
         with self.subTest(ref_requires_grad=True):
+            ref_input = complex_input.detach().requires_grad_()
+            ref_scalar = torch.ones(
+                (), device=device, dtype=torch.float32
+            ).expand_as(complex_input)
+            ref_out = torch.add(ref_scalar, ref_input)
             with FakeTensorMode() as mode:
-                fake_input = mode.from_tensor(complex_input.requires_grad_())
-                fake_scalar = mode.from_tensor(
-                    torch.ones((), device=device, dtype=torch.float32).expand_as(
-                        complex_input
-                    )
-                )
-                fake_out = torch._refs.add(fake_scalar, fake_input)
+                fake_input = mode.from_tensor(ref_input)
+                fake_scalar = mode.from_tensor(ref_scalar)
+                fake_out = torch._refs.add(fake_scalar, fake_input, alpha=None)
 
             self.assertTrue(fake_out.requires_grad)
             self.assertEqual(ref_out.size(), fake_out.size())
@@ -2195,6 +2196,24 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(eigvecs.stride(), eigvecs_fake.stride())
         self.assertEqual(eigvecs.shape, eigvecs_fake.shape)
         self.assertEqual(eigvecs.dtype, eigvecs_fake.dtype)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_zero_preserves_input_strides(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        x = torch.randn(5, 4).t()
+        cpu_result = torch.ops.aten.zero.default(x)
+
+        meta_x = torch.empty_strided(x.shape, x.stride(), device="meta")
+        meta_result = torch.ops.aten.zero.default(meta_x)
+        self.assertEqual(cpu_result.shape, meta_result.shape)
+        self.assertEqual(cpu_result.stride(), meta_result.stride())
+
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(x)
+            fake_result = torch.ops.aten.zero.default(fake_x)
+        self.assertEqual(cpu_result.shape, fake_result.shape)
+        self.assertEqual(cpu_result.stride(), fake_result.stride())
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_randint_like_tensor_dtype_kwarg(self):
