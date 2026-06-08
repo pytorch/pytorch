@@ -409,6 +409,16 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     _kernel_annotations.update(remapped)
 
 
+def resolve_and_remap(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
+    """Resolve any pending scopes and remap one graph in a single call.
+
+    Shorthand for ``resolve_pending_annotations()`` followed by
+    ``remap_to_exec_graph(graph)``, the pair normally run after a capture.
+    """
+    resolve_pending_annotations()
+    remap_to_exec_graph(torch_cuda_graph)
+
+
 def get_kernel_annotations() -> dict[int, list[Any]]:
     """Return the current kernel annotation map (toolsId -> annotations)."""
     return _kernel_annotations
