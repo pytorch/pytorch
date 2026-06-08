@@ -627,7 +627,12 @@ class CppOverrides(OpOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        if use_compute_types and dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+        if (
+            use_compute_types
+            and dtype in DTYPE_LOWP_FP
+            and src_dtype == torch.float
+            and not config.emulate_precision_casts
+        ):
             """
             https://github.com/pytorch/pytorch/issues/115260
             For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
@@ -658,6 +663,10 @@ class CppOverrides(OpOverrides):
                 store(buf, node1_output_lowp)
                 node2_input_lowp = node_output_lowp # hit store cache
                 node2_input = node1_output # hit cse cache
+
+            This cache trick skips the lowp->fp32 round-trip rounding, so it is
+            disabled under emulate_precision_casts, where that rounding must be
+            preserved (e.g. an explicit fp32->fp16->fp32 user cast). See #185337.
             """
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
@@ -671,7 +680,11 @@ class CppOverrides(OpOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype, rounding=True)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("round_to_int", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+        if (
+            dtype in DTYPE_LOWP_FP
+            and src_dtype == torch.float
+            and not config.emulate_precision_casts
+        ):
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
 
@@ -794,9 +807,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def floordiv(a, b):
         # a and b are integer type
-        quot = f"{a} / {b}"
-        rem = f"{a} % {b}"
-        return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
+        return f"floor_divide_integral({a}, {b})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -971,6 +982,12 @@ class CppOverrides(OpOverrides):
             V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
         )
         return ops.to_dtype(var, dtype)
+
+    @staticmethod
+    def value_expr(expr, dtype):
+        # C++ index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
+        return CppOverrides.index_expr(expr, dtype)
 
     @staticmethod
     def masked(mask, body, other):
@@ -1209,6 +1226,7 @@ class CppVecOverrides(CppOverrides):
             if getattr(method, "__class__", None) is staticmethod and name not in [
                 "masked",
                 "index_expr",
+                "value_expr",
             ]:
                 setattr(self, name, wrap(method.__func__))
 
@@ -1579,22 +1597,15 @@ class CppVecOverrides(CppOverrides):
         else:
             assert all(is_integer_dtype(item.dtype) for item in [a, b])
             # a and b are integer type
-            _t = f"decltype({a})"
-            if V.kernel._get_raw_num_vectors(b.dtype) < 1:
-                # Doing blend to set the remaining bits of b to non-zero
-                b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
-            quot = f"{a} / {b}"
-            has_rem = f"({a} % {b} != {_t}(0))"
-            is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
-            return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
+            _t = f"decltype({b})"
+            b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
+            return f"floor_divide_integral({a}, {b})"
 
     @staticmethod
     def truncdiv(a, b):
         # a and b are integer type
-        if V.kernel._get_raw_num_vectors(b.dtype) < 1:
-            # Doing blend to set the remaining bits of b to non-zero
-            _t = f"decltype({b})"
-            b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+        _t = f"decltype({b})"
+        b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
         return f"{a} / {b}"
 
     @staticmethod
@@ -1666,7 +1677,12 @@ class CppVecOverrides(CppOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        if use_compute_types and dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+        if (
+            use_compute_types
+            and dtype in DTYPE_LOWP_FP
+            and src_dtype == torch.float
+            and not config.emulate_precision_casts
+        ):
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
 
@@ -1682,7 +1698,11 @@ class CppVecOverrides(CppOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype, rounding=True)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("round_to_int", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+        if (
+            dtype in DTYPE_LOWP_FP
+            and src_dtype == torch.float
+            and not config.emulate_precision_casts
+        ):
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
 
@@ -1801,6 +1821,12 @@ class CppVecOverrides(CppOverrides):
         # pyrefly: ignore [missing-attribute]
         csevar.update_on_args("index_expr", (expr, dtype), {})
         return csevar
+
+    @staticmethod
+    def value_expr(expr, dtype):
+        # C++ index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
+        return CppVecOverrides.index_expr(expr, dtype)
 
     @staticmethod
     def frexp(x):
@@ -1937,6 +1963,12 @@ class CppTile2DOverrides(CppVecOverrides):
         assert isinstance(V.kernel, CppTile2DKernel)
         expr = V.kernel.transform_indexing(expr)
         return CppVecOverrides.index_expr(expr, dtype)
+
+    @staticmethod
+    def value_expr(expr, dtype):
+        # C++ index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
+        return CppTile2DOverrides.index_expr(expr, dtype)
 
 
 class CppKernel(Kernel):
@@ -3847,6 +3879,7 @@ def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[torch.dtype | None, bool]:
             if _node.op == "placeholder" or _node.target in (
                 "get_index",
                 "index_expr",
+                "value_expr",
             ):
                 continue
 
@@ -3977,9 +4010,18 @@ class TilingSelect:
                     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
                     for sub_block in sub_blocks:
                         for _node in sub_block.graph.nodes:
-                            if _node.target in ["index_expr", "load", "store"]:
+                            if _node.target in [
+                                "index_expr",
+                                "value_expr",
+                                "load",
+                                "store",
+                            ]:
                                 # get the index and replace prefix from z to x
-                                arg_idx = 1 if _node.target == "index_expr" else 2
+                                arg_idx = (
+                                    1
+                                    if _node.target in ("index_expr", "value_expr")
+                                    else 2
+                                )
                                 index = sub_block.body.indexing_from_args(
                                     (vars, reduction_vars)
                                 )[_node.args[arg_idx].args[0]]
@@ -3989,7 +4031,7 @@ class TilingSelect:
                                     )
                                     if (
                                         stride is None
-                                        if _node.target == "index_expr"
+                                        if _node.target in ("index_expr", "value_expr")
                                         else stride not in [0, 1]
                                     ):
                                         _update_negative_op_count(
@@ -4021,7 +4063,7 @@ class TilingSelect:
                     and non_contig_indexing_op_num / op_num
                     >= stats.OVERHEAD_RATIO_THRESHOLD
                 ):
-                    # Too many non-contiguous load/store/index_expr which hurts the
+                    # Too many non-contiguous load/store/index/value_expr which hurts the
                     # vectorization performance. Disable vectorization when exceeding
                     # the thresholds.
                     return [], [], stats
@@ -4177,7 +4219,12 @@ class CppKernelProxy(CppKernel):
                 if node.target == "load":
                     assert len(node.args) == 3
                     return V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
-                elif node.target in ["to_dtype", "constant", "index_expr"]:
+                elif node.target in [
+                    "to_dtype",
+                    "constant",
+                    "index_expr",
+                    "value_expr",
+                ]:
                     return node.args[-1]  # type: ignore[return-value]
                 elif node.target == "to_dtype_bitcast":
                     return node.args[2]  # type: ignore[return-value]
@@ -4212,7 +4259,7 @@ class CppKernelProxy(CppKernel):
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if (
-                    _node.target in ["load", "index_expr"]
+                    _node.target in ["load", "index_expr", "value_expr"]
                     and (dt := get_output_dtype(_node)) in DTYPE_LOWP_FP
                 ):
                     # No need to promote to float if all users are ops that accepts lowp fp input
@@ -5171,7 +5218,6 @@ class CppScheduling(BaseScheduling):
         num_div = 0
         div_expr_ = None
         match_div = False
-        matched_node = None
         matched_index_size = None
 
         # Collect node info for later compatibility check
@@ -5208,7 +5254,6 @@ class CppScheduling(BaseScheduling):
                         split_var = div_expr.args[0]
                         split_number = div_expr.args[1]
                         match_div = True
-                        matched_node = node
                         matched_index_size = index_size
 
         # Only one node contains a division, and the split dimension is contiguous in all other indexing_exprs.
@@ -5228,8 +5273,6 @@ class CppScheduling(BaseScheduling):
             if len(index_size) != matched_num_dims:
                 return nodes
 
-        extra_indexing_constraints = None
-
         def loop_split(sizes, body, vars):
             index_size, reduce_size = sizes
             index_vars, reduce_vars = vars
@@ -5246,28 +5289,44 @@ class CppScheduling(BaseScheduling):
             body = ir.LoopBody(
                 body, [iter_vars, reduce_vars], var_ranges, new_index_vars, reduce_vars
             )
-            nonlocal extra_indexing_constraints
-            if not extra_indexing_constraints:
-                extra_indexing_constraints = (
-                    body.var_ranges,
-                    list(body.indexing_exprs.values()),
-                )
             return (
                 (new_index_size, reduce_size),
                 body,
                 (new_index_vars, reduce_vars),
             )
 
-        # Here decide the final loop order
+        extra_indexing_ranges = None
+        extra_indexing_exprs = OrderedSet[Any]()
+        for _, sizes_body in node_bodies:
+            _, split_body, _ = loop_split(*sizes_body)
+            if extra_indexing_ranges is None:
+                extra_indexing_ranges = split_body.var_ranges
+            assert extra_indexing_ranges == split_body.var_ranges, (
+                extra_indexing_ranges,
+                split_body.var_ranges,
+            )
+            extra_indexing_exprs.update(split_body.indexing_exprs.values())
+
+        assert extra_indexing_ranges is not None
+        extra_indexing_constraints = (
+            extra_indexing_ranges,
+            list(extra_indexing_exprs),
+        )
+
+        snapshots = [(node, node.snapshot_loop_state()) for node in nodes]
         for node in nodes:
-            if node == matched_node:
-                node.recompute_size_and_body(recompute_sizes_body_func=loop_split)
-        for node in nodes:
-            if node != matched_node:
-                node.recompute_size_and_body(
-                    extra_indexing_constraints=extra_indexing_constraints,
-                    recompute_sizes_body_func=loop_split,
-                )
+            node.recompute_size_and_body(
+                extra_indexing_constraints=extra_indexing_constraints,
+                recompute_sizes_body_func=loop_split,
+            )
+
+        # Keep the post-split leaves compatible with CppKernelProxy.codegen_functions.
+        # If simplification still picks different loop factorizations, skip this
+        # optional optimization and codegen the original fused pointwise group.
+        group = nodes[0].group[1]
+        if any(node.group[1] != group for node in nodes[1:]):
+            for node, state in reversed(snapshots):
+                node.restore_loop_state(state)
 
         return nodes
 
@@ -5479,7 +5538,7 @@ class CppScheduling(BaseScheduling):
         node: OuterLoopFusedSchedulerNode | FusedSchedulerNode | SchedulerNode,
     ):
         """
-        Turn an set of pre-fused nodes into a C++ kernel.
+        Turn a set of pre-fused nodes into a C++ kernel.
         """
         kernel_group = self.kernel_group
 

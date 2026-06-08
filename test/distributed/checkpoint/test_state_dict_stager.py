@@ -19,7 +19,11 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.checkpoint._state_dict_stager import StateDictStager
-from torch.distributed.checkpoint.staging import _ReplicationStager
+from torch.distributed.checkpoint.staging import (
+    _ReplicationStager,
+    DefaultStager,
+    StagingOptions,
+)
 from torch.distributed.checkpoint.state_dict_saver import async_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
 from torch.testing._internal.common_distributed import (
@@ -838,6 +842,33 @@ class TestStateDictStager(TestCase):
                         cpu_tensor2.storage().is_shared(),
                         "When share_memory=False, tensor storage should not be shared",
                     )
+
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    def test_async_save_can_reuse_default_stager(self):
+        state_dict = {
+            "weight": torch.randn(4, 4, device=device_type),
+            "step": 42,
+        }
+        stager = DefaultStager(
+            StagingOptions(
+                use_pinned_memory=False,
+                use_shared_memory=False,
+                use_async_staging=False,
+                use_non_blocking_copy=False,
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for step in range(2):
+                metadata = async_save(
+                    state_dict,
+                    checkpoint_id=os.path.join(temp_dir, f"step_{step}"),
+                    async_stager=stager,
+                    no_dist=True,
+                ).result()
+                self.assertIsNotNone(metadata)
+
+        stager.close()
 
 
 class TestDTensorStateDictStager(DTensorTestBase):
