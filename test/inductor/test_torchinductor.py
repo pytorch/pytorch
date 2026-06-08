@@ -6856,10 +6856,8 @@ class CommonTemplate:
 
     @config.patch(fallback_batch_norm=True)
     def test_fallback_batch_norm_skips_decomp(self):
-        # With fallback_batch_norm on, BN is not decomposed: no welford_reduce
-        # / triton_red_fused__native_batch_norm_* kernel; instead an extern
-        # aten._native_batch_norm_legit_functional call. Output must stay
-        # within standard bf16 autocast tolerance of eager.
+        # BN should fall back to the extern aten call instead of a fused
+        # Triton var_mean kernel, and stay within bf16 autocast tolerance.
         if self.device == "cpu":
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 

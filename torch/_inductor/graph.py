@@ -1371,10 +1371,7 @@ class GraphLowering(torch.fx.Interpreter):
                 config.fallback_batch_norm
                 and target in torch._inductor.decomposition.extra_batch_norm_decomps
             ):
-                # Honor fallback_batch_norm even when implicit_fallbacks is off:
-                # the flag's whole purpose is to opt into the ATen kernel for
-                # parity, so it must succeed in environments (e.g. the inductor
-                # test suite) that disable implicit fallbacks by default.
+                # Honor fallback_batch_norm even when implicit_fallbacks is off.
                 make_fallback(
                     target,
                     warn=False,
