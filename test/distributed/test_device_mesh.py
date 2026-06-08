@@ -35,7 +35,6 @@ from torch.testing._internal.common_device_type import onlyAccelerator
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DEVICE_COUNT,
     DTensorTestBase,
     with_comms,
 )
@@ -429,7 +428,7 @@ class DeviceMeshTest(DTensorTestBase):
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
     def world_size(self):
-        return min(8, DEVICE_COUNT)
+        return min(8, device_count)
 
     @with_comms
     @skip_if_lt_x_gpu(8)
@@ -637,7 +636,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
 class InitDeviceMeshTest(DTensorTestBase):
     @property
     def world_size(self):
-        return min(8, DEVICE_COUNT)
+        return min(8, device_count)
 
     @with_comms
     def test_init_device_mesh(self):
@@ -793,7 +792,7 @@ class InitDeviceMeshTest(DTensorTestBase):
 class TestDeviceMeshGetItem(DTensorTestBase):
     @property
     def world_size(self):
-        return min(8, DEVICE_COUNT)
+        return min(8, device_count)
 
     @with_comms
     def test_raises_no_mesh_dim_found(self):
@@ -1193,7 +1192,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 class TestMeshEnv(DTensorTestBase):
     @property
     def world_size(self):
-        return min(8, DEVICE_COUNT)
+        return min(8, device_count)
 
     @with_comms
     def test_get_root_mesh(self):
@@ -1282,7 +1281,7 @@ class TestMeshEnv(DTensorTestBase):
 class DeviceMeshCollectiveTest(DTensorTestBase):
     @property
     def world_size(self):
-        return min(8, DEVICE_COUNT)
+        return min(8, device_count)
 
     @with_comms
     def test_broadcast_1d(self):
