@@ -636,7 +636,7 @@ std::string _format_non_converging_batches(const std::vector<int64_t>& batches) 
     ss << "and other " << batches.size() - too_long << " batches";
   }
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 // This function returns V, not V^H.

@@ -248,7 +248,7 @@ void TestToString() {
   std::stringstream s;
   s << b << '\n';
   std::string expect = "1e-07 *";
-  ASSERT_EQ_RESOLVED(s.str().substr(0, expect.size()), expect);
+  ASSERT_EQ_RESOLVED(std::move(s).str().substr(0, expect.size()), expect);
 }
 
 void TestIndexingByScalar() {

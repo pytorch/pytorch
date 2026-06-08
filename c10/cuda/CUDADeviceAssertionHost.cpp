@@ -186,7 +186,7 @@ std::string c10_retrieve_device_side_assertion_info() {
       }
     }
   }
-  return oss.str();
+  return std::move(oss).str();
 #else
   return "";
 #endif

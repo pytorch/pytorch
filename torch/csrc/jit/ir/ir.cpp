@@ -886,7 +886,7 @@ Value* Value::setDebugName(const std::string& name) {
       ss.imbue(c_locale);
 #endif
       ss << name_base << '.' << suffix++;
-      replacement_name = ss.str();
+      replacement_name = std::move(ss).str();
     } while (names.count(replacement_name) > 0);
 
     names_suffixes[name_base] = suffix;

@@ -337,7 +337,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
        << dim;
     ss << " and source slice shape: " << sourceSlicedSizes
        << " at dimension 0.";
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   TORCH_CHECK_INDEX(
       source.dim() == 0 || numIndices == source.size(dim),

@@ -1489,7 +1489,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           std::stringstream ss;
           ss << "Cannot input a tensor of type " << tensor.scalar_type()
              << " as an integral argument";
-          throw std::runtime_error(ss.str());
+          throw std::runtime_error(std::move(ss).str());
         }
         pnode->Output(0) = at::native::item(tensor).toInt();
       };

@@ -135,7 +135,7 @@ std::string sanitizeName(const std::string& input_name) {
       sanitized_name << '_';
     }
   }
-  return sanitized_name.str();
+  return std::move(sanitized_name).str();
 }
 
 class VarNameSanitizer : public IRMutator {
