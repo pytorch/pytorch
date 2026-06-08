@@ -208,25 +208,29 @@ def forward(self, a_1):
         self.assertEqual(a1.grad, a2.grad)
 
     def test_pre_dispatch_requires_grad_(self):
-        def f(a):
-            b = a.clone()
-            b.requires_grad_()
-            return b.sin()
+        for requires_grad in (True, False):
+            with self.subTest(requires_grad=requires_grad):
+                def f(a):
+                    b = a.clone()
+                    b.requires_grad_(requires_grad)
+                    return b.sin()
 
-        inp = torch.randn(4)
-        fx_g = make_fx(f, pre_dispatch=True)(inp)
-        requires_grad_nodes = [
-            node
-            for node in fx_g.graph.nodes
-            if node.target is torch.Tensor.requires_grad_
-        ]
-        self.assertEqual(len(requires_grad_nodes), 1)
-        sin_nodes = [
-            node for node in fx_g.graph.nodes if node.target is torch.ops.aten.sin.default
-        ]
-        self.assertEqual(len(sin_nodes), 1)
-        self.assertIs(sin_nodes[0].args[0], requires_grad_nodes[0])
-        self.assertTrue(fx_g(inp).requires_grad)
+                inp = torch.randn(4)
+                fx_g = make_fx(f, pre_dispatch=True)(inp)
+                requires_grad_nodes = [
+                    node
+                    for node in fx_g.graph.nodes
+                    if node.target is torch.Tensor.requires_grad_
+                ]
+                self.assertEqual(len(requires_grad_nodes), 1)
+                sin_nodes = [
+                    node
+                    for node in fx_g.graph.nodes
+                    if node.target is torch.ops.aten.sin.default
+                ]
+                self.assertEqual(len(sin_nodes), 1)
+                self.assertIs(sin_nodes[0].args[0], requires_grad_nodes[0])
+                self.assertEqual(fx_g(inp).requires_grad, requires_grad)
 
     def test_make_fx_simple(self):
         def f(x):
@@ -2101,7 +2105,6 @@ only_fake_tensor_failures = {
 fake_tensor_failures = set()
 
 symbolic_tensor_failures = {
-    xfail('combinations', ''),
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
