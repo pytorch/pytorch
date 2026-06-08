@@ -189,6 +189,7 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("nn.functional.softplus"),
     xfail("nn.functional.softshrink"),
     xfail("ormqr"),
+    xfail("qr"),
     xfail("renorm"),
     xfail("round"),
     xfail("round", "decimals_0"),
@@ -2729,7 +2730,6 @@ fake_backward_skips = {
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     skip("nn.functional.ctc_loss"),
-    xfail("index_fill"),
     skip("bmm", variant_name="triton_optimized"),
 }
 
