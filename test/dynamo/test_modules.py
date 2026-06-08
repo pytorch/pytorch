@@ -1814,6 +1814,54 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(torch.allclose(ref3, res3))
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
+    def test_mutating_module_list_subclass_dynamic_index_graph_breaks(self):
+        class CycleModuleList(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Linear(4, 4) for _ in range(10)])
+                self._pos = 0
+
+            def forward(self, x):
+                y = self[self._pos](x)
+                self._pos = (self._pos + 1) % len(self)
+                return y
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = CycleModuleList()
+
+            def forward(self, x):
+                x = x + 1
+                x = self.layers(x)
+                return x + 2
+
+        mod = Mod()
+        opt_mod = copy.deepcopy(mod)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(opt_mod, backend=cnt)
+        x = torch.randn(2, 4)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            direct_cnt = torch._dynamo.testing.CompileCounter()
+            opt_layers = torch.compile(copy.deepcopy(mod.layers), backend=direct_cnt)
+            for _ in range(20):
+                self.assertTrue(torch.allclose(mod.layers(x), opt_layers(x)))
+
+            for _ in range(20):
+                self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+
+        self.assertEqual(direct_cnt.frame_count, 0)
+        self.assertEqual(direct_cnt.op_count, 0)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 2)
+        self.assertTrue(
+            any(
+                "Unspecialized nn.Module container indexed by nn.Module attribute"
+                in msg
+                for msg in torch._dynamo.utils.counters["graph_break"]
+            )
+        )
+
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
     @expectedFailureDynamic
