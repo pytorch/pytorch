@@ -1835,7 +1835,12 @@ def _export_to_aten_ir_make_fx(
                             for mode in torch_function_mode_stack:
                                 if isinstance(mode, PreDispatchTorchFunctionMode):
                                     tracer = mode.tracer
-                                    proxy = get_proxy_slot(self, tracer).proxy
+                                    proxy_tensor = get_proxy_slot(self, tracer, None)
+                                    if proxy_tensor is None:
+                                        continue
+                                    if get_proxy_slot(out, tracer, None) is not None:
+                                        continue
+                                    proxy = proxy_tensor.proxy
                                     inner_proxy = tracer.create_proxy(
                                         "call_function",
                                         torch.ops.export.access_subclass_inner_tensor.default,
@@ -1907,10 +1912,16 @@ def _export_to_aten_ir_make_fx(
                 finally:
                     torch._C._set_grad_enabled(old_state)
 
+            tensor_constants = tuple(
+                a for a in constant_attrs if isinstance(a, torch.Tensor)
+            )
+
             try:
                 with (
                     ctx,
-                    override_getattribute_for_subclasses(flat_args),
+                    override_getattribute_for_subclasses(
+                        (*flat_args, *tensor_constants)
+                    ),
                     _maybe_restore_grad_state(),
                 ):
                     gm = make_fx(
