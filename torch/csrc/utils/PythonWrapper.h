@@ -4,10 +4,7 @@
 // #pragma comment(lib, "python3XX_d.lib") and exposes debug-only CPython APIs.
 // When building against a release Python (no Py_DEBUG), this causes link errors.
 // This header temporarily undefines _DEBUG around #include <Python.h>,
-// matching the same approach used by pybind11 and pythoncapi_compat.h.
-//
-// Use this header instead of directly including <Python.h> in files that
-// cannot include <torch/csrc/python_headers.h>.
+// matching the same approach used by pybind11.
 
 #pragma once
 
