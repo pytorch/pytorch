@@ -7980,7 +7980,7 @@ def forward(self, primals_1, tangents_1):
     # --- CompiledFunction.forward codegen tests ---
 
     def test_compiled_forward_codegen_emitted(self):
-        with capture_codegen_source("compiled_function_forward") as captured:
+        with capture_codegen_source("compiled_fn_wrapper") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7994,9 +7994,60 @@ def forward(self, primals_1, tangents_1):
         self.assertIn("def _compiled_forward(", source)
         self.assertIn("if isinstance(fw_outs, tuple):", source)
         self.assertIn("elif not isinstance(fw_outs, list):", source)
+        self.assertNotIn("_save_", source)
+        self.assertNotIn("_finalize_", source)
+
+    def test_compiled_forward_elides_empty_saved_state(self):
+        with capture_codegen_source("compiled_fn_wrapper") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("save_for_backward", source)
+        self.assertNotIn("mark_non_differentiable", source)
+        self.assertIn("ctx.symints = ()", source)
+        self.assertIn("ctx.opaque_objects = ()", source)
+
+    def test_compiled_forward_mutated_input_debug_assert(self):
+        def f(x, y):
+            x.add_(1)
+            return y * 2
+
+        with capture_codegen_source("compiled_fn_wrapper") as captured:
+            compiled_f = aot_function(f, nop)
+            x = torch.randn(4, requires_grad=True)
+            y = torch.randn(4, requires_grad=True)
+            compiled_f(x, y).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("if _config_.debug_assert:", source)
+        self.assertIn("_user_mutated_inputs_raw = raw_returns[0:1]", source)
+        self.assertIn("len(_user_mutated_inputs_raw) != 1", source)
+
+    def test_compiled_forward_saves_needed_tensors(self):
+        with capture_codegen_source("compiled_fn_wrapper") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x.sin()
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("ctx.save_for_backward(_saved_0)", source)
+        self.assertNotIn("_save_", source)
 
     def test_compiled_forward_elides_backward_state(self):
-        with capture_codegen_source("compiled_function_forward") as captured:
+        with capture_codegen_source("compiled_fn_wrapper") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -8010,7 +8061,7 @@ def forward(self, primals_1, tangents_1):
         self.assertNotIn("BackwardState", source)
 
     def test_compiled_forward_elides_amp(self):
-        with capture_codegen_source("compiled_function_forward") as captured:
+        with capture_codegen_source("compiled_fn_wrapper") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -8024,7 +8075,7 @@ def forward(self, primals_1, tangents_1):
         self.assertNotIn("DisableAutocast", source)
 
     def test_compiled_forward_includes_amp_when_active(self):
-        with capture_codegen_source("compiled_function_forward") as captured:
+        with capture_codegen_source("compiled_fn_wrapper") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -8039,7 +8090,7 @@ def forward(self, primals_1, tangents_1):
         self.assertIn("_DisableAutocast_", source)
 
     def test_compiled_forward_no_codegen_for_inference(self):
-        with capture_codegen_source("compiled_function_forward") as captured:
+        with capture_codegen_source("compiled_fn_wrapper") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -8050,7 +8101,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(captured), 0)
 
     def test_compiled_forward_elides_rng_when_off(self):
-        with capture_codegen_source("compiled_function_forward") as captured:
+        with capture_codegen_source("compiled_fn_wrapper") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -8069,7 +8120,7 @@ def forward(self, primals_1, tangents_1):
         # requires recomputable RNG ops (e.g. from activation checkpointing).
         from torch.utils.checkpoint import checkpoint
 
-        with capture_codegen_source("compiled_function_forward") as captured:
+        with capture_codegen_source("compiled_fn_wrapper") as captured:
 
             def gn(x):
                 return torch.rand_like(x) * x
@@ -8273,7 +8324,11 @@ def forward(self, primals_1, tangents_1):
         )
 
         bwd_fn = _codegen_compiled_backward(
-            num_rng=0, num_tensors_no_vc_check=None, inputs_require_grad=False
+            num_rng=0,
+            num_tensors_no_vc_check=None,
+            num_symints_saved_for_bw=0,
+            num_opaque_objects_saved_for_bw=0,
+            inputs_require_grad=False,
         )
 
         def noop(*a, **kw):
