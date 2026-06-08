@@ -56,7 +56,6 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
-    skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
 )
@@ -725,7 +724,6 @@ class TestOpInfoProperties(TestCase):
     # Run-to-Run Determinism Tests
     # =========================================================================
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180040")
     @onlyCUDA
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
@@ -798,14 +796,6 @@ class TestOpInfoProperties(TestCase):
     # Bitwise Equivalence with Eager Mode Tests
     # =========================================================================
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180057")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180056")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180055")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180045")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180044")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180043")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180042")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180041")
     @onlyCUDA
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
@@ -844,14 +834,6 @@ class TestOpInfoProperties(TestCase):
     # Exhaustive/Sampled Unary Ufunc Tests
     # =========================================================================
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179940")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180071")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179942")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180067")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180066")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180419")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180061")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180058")
     @onlyCUDA
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_unary_ops, allowed_dtypes=DTYPES)
