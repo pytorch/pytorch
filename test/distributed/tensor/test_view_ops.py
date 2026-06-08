@@ -280,6 +280,18 @@ class TestViewOps(DTensorContinuousTestBase):
         with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
             shard.view(8, 2, -1)
 
+    def test_split_flatten_non_first_shard_falls_back_to_replicate(self):
+        rule = view_groups((32, 4), (4, 32))
+        input_tgt, output = propagate_shape_and_sharding(
+            [Shard(1)],
+            (32, 4),
+            rule,
+            (4,),
+            strict_view=True,
+        )
+        self.assertEqual(input_tgt, [Replicate()])
+        self.assertEqual(output, [Replicate()])
+
     def test_double_shard_split_validation(self):
         """[Shard(0), Shard(0)] through Split correctly validates divisibility."""
         # Compatible: reshape (24,)→(6,4) with [Shard(0), Shard(0)] on mesh (2,3)
@@ -736,12 +748,43 @@ class TestViewOps(DTensorContinuousTestBase):
             view_shapes.extend(trailing_dims)
         return tuple(view_shapes)
 
+    def _split_flatten_replicate_fallback_mesh_dims(self, rules, placements):
+        fallback_mesh_dims = []
+        for mesh_dim, placement in enumerate(placements):
+            if not isinstance(placement, Shard):
+                continue
+
+            for rule in rules:
+                if not (
+                    isinstance(rule, Split) and isinstance(rule.input_dim, Flatten)
+                ):
+                    continue
+
+                input_dims = rule.input_dim.input_dims
+                if not all(isinstance(input_dim, InputDim) for input_dim in input_dims):
+                    raise AssertionError(f"Expected InputDim list, got {input_dims}")
+                flattened_dims = cast(list[InputDim], input_dims)
+                if any(
+                    input_dim.input_dim == placement.dim for input_dim in flattened_dims
+                ):
+                    first_dim = flattened_dims[0].input_dim
+                    if placement.dim != first_dim:
+                        fallback_mesh_dims.append(mesh_dim)
+                    break
+        return fallback_mesh_dims
+
     def _test_dtensor_flatten_split_case(self, in_shape, out_shape, placements, mesh):
         """Test a single Split(Flatten) view case.
 
-        Representable cases must produce zero communication and correct output.
-        Unrepresentable cases must raise RuntimeError with a specific message.
+        Representable cases must produce zero communication and correct output. Cases
+        that require sharding a non-first flattened input dim fall back to Replicate
+        with communication, because the plain Shard is not exactly representable.
+        Other unrepresentable cases must raise RuntimeError with a specific message.
         """
+        rules = view_groups(list(in_shape), list(out_shape))
+        fallback_mesh_dims = self._split_flatten_replicate_fallback_mesh_dims(
+            rules, placements
+        )
         nelem = math.prod(in_shape)
         global_tensor = torch.arange(nelem).view(in_shape)
         in_dt = distribute_tensor(global_tensor, mesh, placements, src_data_rank=None)
@@ -756,9 +799,14 @@ class TestViewOps(DTensorContinuousTestBase):
                 r"|is not evenly divisible by mesh dimension",
             )
             return
-        self.assertEqual(comm_mode.get_total_counts(), 0)
         expected = global_tensor.view(list(out_shape))
         self.assertEqual(out_dt.full_tensor(), expected)
+        if fallback_mesh_dims:
+            self.assertGreater(comm_mode.get_total_counts(), 0)
+            for mesh_dim in fallback_mesh_dims:
+                self.assertIsInstance(out_dt.placements[mesh_dim], Replicate)
+        else:
+            self.assertEqual(comm_mode.get_total_counts(), 0)
 
     def test_dtensor_flatten_split_multi_mesh(self):
         """Test views producing Split(Flatten) rules.
@@ -2852,9 +2900,25 @@ class TestViewOps(DTensorContinuousTestBase):
         result = view_groups([4, u9], [4, u10])
         self.assertEqual(result, (InputDim(0), InputDim(1)))
 
+        # Splitting a product by a concrete prefix should not guard on
+        # unbacked divisibility such as ``8 % (8 * u0) == 0``.
+        u11 = fresh_sym()
+        self.assertEqual(
+            view_groups([8 * u11, 256], [8, u11, 256]),
+            (
+                Split(InputDim(0), (8, u11), 0),
+                Split(InputDim(0), (8, u11), 1),
+                InputDim(1),
+            ),
+        )
+
     def test_view_groups_unbacked_sharding_propagation(self):
         """Test that sharding is correctly propagated through view_groups with symbolic shapes."""
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.fx.experimental.symbolic_shapes import (
+            free_symbols,
+            optimization_hint,
+            ShapeEnv,
+        )
 
         shape_env = ShapeEnv()
 
@@ -2908,6 +2972,48 @@ class TestViewOps(DTensorContinuousTestBase):
             input_placements, from_shape, rule, mesh_sizes
         )
         self.assertEqual(out_plc, [Shard(0), Replicate()])
+
+        # Strict view with a non-leftmost shard needs _StridedShard. Preserve
+        # the symbolic split_factor as semantic placement metadata; list-based
+        # lowering can still use the explicit hint as a guarded unroll count.
+        u4_hint = fresh_sym()
+        torch._dynamo.override_optimization_hint(u4_hint, 4)
+        from_shape = (u4_hint, 16, 8)
+        to_shape = (u4_hint * 16, 8)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(1), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes, strict_view=True
+        )
+        self.assertIsInstance(out_plc[0], _StridedShard)
+        self.assertEqual(out_plc[0].dim, 0)
+        self.assertEqual(out_plc[1], Replicate())
+        self.assertEqual(free_symbols(out_plc[0].split_factor), free_symbols(u4_hint))
+        self.assertEqual(optimization_hint(out_plc[0].split_factor), 4)
+        self.assertTrue(free_symbols(u4_hint))
+
+        u4_unhinted = fresh_sym()
+        from_shape = (u4_unhinted, 16, 8)
+        to_shape = (u4_unhinted * 16, 8)
+        rule = view_groups(from_shape, to_shape)
+        with self.assertRaisesRegex(RuntimeError, "symbolic _StridedShard"):
+            propagate_shape_and_sharding(
+                input_placements, from_shape, rule, mesh_sizes, strict_view=True
+            )
+
+        # Unflattening a symbolic _StridedShard should match the Split prefix
+        # factor by guarded hint without specializing the symbol.
+        u5_hint = fresh_sym()
+        torch._dynamo.override_optimization_hint(u5_hint, 8)
+        from_shape = (u5_hint * 2048, 256)
+        to_shape = (u5_hint, 2048, 256)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [_StridedShard(0, split_factor=u5_hint), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes, strict_view=True
+        )
+        self.assertEqual(out_plc, [Shard(1), Replicate()])
+        self.assertTrue(free_symbols(u5_hint))
 
         # Flatten [16, u] -> [16*u] with Shard(1) on unbacked dim (non-leftmost):
         # should force replicate since non-leftmost dims can't propagate through flatten
