@@ -841,6 +841,7 @@ _BYTECODE_RUNTIME_ERROR_CONTEXT_KEY = "bytecode_runtime_error_context"
 @dataclass(frozen=True)
 class BytecodeRuntimeErrorContext:
     graph_break: bool
+    has_replayed_side_effects: bool
     filename: str
     name: str
     firstlineno: int
@@ -1841,7 +1842,12 @@ def _compile(
 
         code_context.get_context(out_code)[_BYTECODE_RUNTIME_ERROR_CONTEXT_KEY] = (
             BytecodeRuntimeErrorContext(
-                graph_break=output.compile_subgraph_reason.graph_break,
+                graph_break=(
+                    output.compile_subgraph_reason.graph_break or is_resumption_frame
+                ),
+                has_replayed_side_effects=bool(
+                    output.get_replayed_side_effect_source_refs()
+                ),
                 filename=code.co_filename,
                 name=code.co_name,
                 firstlineno=code.co_firstlineno,

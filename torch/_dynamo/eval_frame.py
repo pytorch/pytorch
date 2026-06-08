@@ -162,7 +162,7 @@ def _maybe_wrap_dynamo_generated_runtime_error(
         tb = tb.tb_next
 
     context = convert_frame.get_bytecode_runtime_error_context(tb.tb_frame.f_code)
-    if context is None or context.graph_break:
+    if context is None or context.graph_break or context.has_replayed_side_effects:
         return None
 
     msg = (
