@@ -435,6 +435,12 @@ def main() -> None:
     if os.environ.get("LIBTORCH_CONFIG") == "debug":
         env_out["DEBUG"] = "1"
         env_out["CMAKE_BUILD_TYPE"] = "Debug"
+        # Propagate DEBUG into os.environ now, not just env_out: setup_cuda()
+        # reads os.environ["DEBUG"] to choose the debug vs release MAGMA
+        # archive, and it runs before os.environ.update(env_out) below.
+        # Without this a debug CUDA build links the release MAGMA (/MD) into
+        # /MDd torch_cuda and fails with LNK2038 RuntimeLibrary mismatch.
+        os.environ["DEBUG"] = "1"
         print("Debug-wheel mode: DEBUG=1, CMAKE_BUILD_TYPE=Debug")
 
     # Locate vcvarsall.bat up front so XPU can hand the VS install root to
