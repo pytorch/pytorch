@@ -1658,6 +1658,179 @@ print(json.dumps({
             stats["reasons"].get("unsupported_leaf:LAMBDA_GUARD", 0), 1
         )
 
+    def test_guard_fast_plan_tensor_match_token_hits_and_checks_metadata(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+model = torch.nn.Sequential(torch.nn.Linear(4, 4))
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+linear_mgr = modules_mgr.getitem_manager(
+    "0",
+    "L['self']._modules['0']",
+    model[0],
+    GuardManagerType.GUARD_MANAGER,
+)
+linear_dict_mgr = linear_mgr.get_generic_dict_manager(
+    "L['self']._modules['0'].__dict__",
+    model[0].__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+parameters_mgr = linear_dict_mgr.getitem_manager(
+    "_parameters",
+    "L['self']._modules['0']._parameters",
+    model[0]._parameters,
+    GuardManagerType.GUARD_MANAGER,
+)
+weight_mgr = parameters_mgr.getitem_manager(
+    "weight",
+    "L['self']._modules['0']._parameters['weight']",
+    model[0].weight,
+    GuardManagerType.GUARD_MANAGER,
+)
+weight_mgr.add_tensor_match_guard(
+    model[0].weight,
+    list(model[0].weight.size()),
+    list(model[0].weight.stride()),
+    "L['self']._modules['0']._parameters['weight']",
+    ["check_tensor(weight)"],
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+with torch.no_grad():
+    model[0].weight.add_(1)
+assert root.check(f_locals)
+
+model[0].weight.requires_grad_(False)
+assert not root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "tensor_shadow": stats["guard_fastplan_tensor_token_shadow"],
+    "tensor_hit": stats["guard_fastplan_tensor_token_hit"],
+    "tensor_miss": stats["guard_fastplan_tensor_token_miss"],
+    "miss_reasons": stats["guard_fastplan_tensor_token_miss_reasons"],
+    "fastplan_miss": stats["guard_fastplan_miss"],
+    "disabled_reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["tensor_shadow"], 0)
+        self.assertGreater(stats["tensor_hit"], 0)
+        self.assertGreater(stats["tensor_miss"], 0)
+        self.assertGreater(stats["fastplan_miss"], 0)
+        self.assertGreater(
+            stats["miss_reasons"].get("requires_grad", 0), 0
+        )
+        self.assertEqual(
+            stats["disabled_reasons"].get("unsupported_leaf:TENSOR_MATCH", 0),
+            0,
+        )
+
+    def test_guard_fast_plan_tensor_match_token_skips_attr_sources(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self._cached_tensor = torch.ones(2)
+
+model = Mod()
+container = torch.nn.Module()
+container.child = model
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", container, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", container.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    container._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_mgr = modules_mgr.getitem_manager(
+    "child",
+    "L['self']._modules['child']",
+    model,
+    GuardManagerType.GUARD_MANAGER,
+)
+cached_mgr = child_mgr.getattr_manager(
+    "_cached_tensor",
+    "L['self']._modules['child']._cached_tensor",
+    model._cached_tensor,
+    GuardManagerType.GUARD_MANAGER,
+)
+cached_mgr.add_tensor_match_guard(
+    model._cached_tensor,
+    list(model._cached_tensor.size()),
+    list(model._cached_tensor.stride()),
+    "L['self']._modules['child']._cached_tensor",
+    ["check_tensor(cached)"],
+)
+
+f_locals = {"self": container}
+guards.reset_guard_lookup_stats()
+for _ in range(4):
+    assert root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "tensor_shadow": stats["guard_fastplan_tensor_token_shadow"],
+    "disabled_reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertEqual(stats["tensor_shadow"], 0)
+        self.assertGreater(
+            stats["disabled_reasons"].get("unsupported_leaf:TENSOR_MATCH", 0),
+            0,
+        )
+
     def test_guard_fast_plan_subtree_memo_miss_disables_and_falls_back(self):
         script = r"""
 import json

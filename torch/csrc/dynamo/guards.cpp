@@ -119,6 +119,7 @@ enum class GuardSubtreeProbeTokenKind : uint8_t {
   ExactDict,
   ExactList,
   ExactTuple,
+  TensorMatch,
 };
 
 enum class GuardFastPlanCandidateKind : uint8_t {
@@ -126,6 +127,21 @@ enum class GuardFastPlanCandidateKind : uint8_t {
   None,
   TopModules,
   NestedModules,
+};
+
+enum class GuardFastPlanTensorTokenMissReason : uint8_t {
+  None,
+  MissingLocalState,
+  Object,
+  Type,
+  NotTensor,
+  DispatchKey,
+  DType,
+  Device,
+  RequiresGrad,
+  Dim,
+  Size,
+  Stride,
 };
 
 struct GuardSubtreeProbeStats {
@@ -141,6 +157,7 @@ struct GuardSubtreeProbeStats {
   std::atomic<uint64_t> token_exact_dict{0};
   std::atomic<uint64_t> token_exact_list{0};
   std::atomic<uint64_t> token_exact_tuple{0};
+  std::atomic<uint64_t> token_tensor_match{0};
 };
 
 struct GuardFastPlanStats {
@@ -168,6 +185,23 @@ struct GuardFastPlanStats {
   std::atomic<uint64_t> token_count_sum{0};
   std::atomic<uint64_t> token_check_ns{0};
   std::atomic<uint64_t> slow_check_ns{0};
+  std::atomic<uint64_t> token_cap_disabled{0};
+  std::atomic<uint64_t> tensor_token_shadow{0};
+  std::atomic<uint64_t> tensor_token_hit{0};
+  std::atomic<uint64_t> tensor_token_miss{0};
+  std::atomic<uint64_t> tensor_token_check_ns{0};
+  std::atomic<uint64_t> tensor_token_count_sum{0};
+  std::atomic<uint64_t> tensor_token_miss_missing_local_state{0};
+  std::atomic<uint64_t> tensor_token_miss_object{0};
+  std::atomic<uint64_t> tensor_token_miss_type{0};
+  std::atomic<uint64_t> tensor_token_miss_not_tensor{0};
+  std::atomic<uint64_t> tensor_token_miss_dispatch_key{0};
+  std::atomic<uint64_t> tensor_token_miss_dtype{0};
+  std::atomic<uint64_t> tensor_token_miss_device{0};
+  std::atomic<uint64_t> tensor_token_miss_requires_grad{0};
+  std::atomic<uint64_t> tensor_token_miss_dim{0};
+  std::atomic<uint64_t> tensor_token_miss_size{0};
+  std::atomic<uint64_t> tensor_token_miss_stride{0};
 };
 
 struct GuardFastPlanDisabledPathStats {
@@ -202,11 +236,13 @@ struct GuardSubtreeProbePathStats {
   uint64_t token_exact_dict{0};
   uint64_t token_exact_list{0};
   uint64_t token_exact_tuple{0};
+  uint64_t token_tensor_match{0};
 };
 
 constexpr size_t kGuardAccessorDetailStatsTopK = 64;
 constexpr size_t kGuardSubtreeProbeTopK = 64;
 constexpr size_t kGuardFastPlanDisabledTopK = 64;
+constexpr size_t kGuardFastPlanMaxTokens = 1024;
 
 struct GuardSubtreeMemoSupportAnalysis {
   std::string reason;
@@ -409,6 +445,7 @@ void reset_guard_lookup_stats() {
   store_zero(subtree_stats.token_exact_dict);
   store_zero(subtree_stats.token_exact_list);
   store_zero(subtree_stats.token_exact_tuple);
+  store_zero(subtree_stats.token_tensor_match);
   store_zero(fastplan_stats.candidate);
   store_zero(fastplan_stats.candidate_top);
   store_zero(fastplan_stats.candidate_nested);
@@ -433,6 +470,23 @@ void reset_guard_lookup_stats() {
   store_zero(fastplan_stats.token_count_sum);
   store_zero(fastplan_stats.token_check_ns);
   store_zero(fastplan_stats.slow_check_ns);
+  store_zero(fastplan_stats.token_cap_disabled);
+  store_zero(fastplan_stats.tensor_token_shadow);
+  store_zero(fastplan_stats.tensor_token_hit);
+  store_zero(fastplan_stats.tensor_token_miss);
+  store_zero(fastplan_stats.tensor_token_check_ns);
+  store_zero(fastplan_stats.tensor_token_count_sum);
+  store_zero(fastplan_stats.tensor_token_miss_missing_local_state);
+  store_zero(fastplan_stats.tensor_token_miss_object);
+  store_zero(fastplan_stats.tensor_token_miss_type);
+  store_zero(fastplan_stats.tensor_token_miss_not_tensor);
+  store_zero(fastplan_stats.tensor_token_miss_dispatch_key);
+  store_zero(fastplan_stats.tensor_token_miss_dtype);
+  store_zero(fastplan_stats.tensor_token_miss_device);
+  store_zero(fastplan_stats.tensor_token_miss_requires_grad);
+  store_zero(fastplan_stats.tensor_token_miss_dim);
+  store_zero(fastplan_stats.tensor_token_miss_size);
+  store_zero(fastplan_stats.tensor_token_miss_stride);
   {
     std::lock_guard<std::mutex> lock(guard_accessor_type_stats_mutex());
     guard_accessor_type_stats().clear();
@@ -506,6 +560,8 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(subtree_stats.token_exact_list);
   subtree_token_kind_counts["ExactTuple"] =
       load_relaxed(subtree_stats.token_exact_tuple);
+  subtree_token_kind_counts["TensorMatch"] =
+      load_relaxed(subtree_stats.token_tensor_match);
   result["guard_subtree_probe_token_kind_counts"] =
       subtree_token_kind_counts;
   auto& fastplan_stats = guard_fastplan_stats();
@@ -553,6 +609,43 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(fastplan_stats.token_check_ns);
   result["guard_fastplan_slow_check_ns"] =
       load_relaxed(fastplan_stats.slow_check_ns);
+  result["guard_fastplan_token_cap_disabled"] =
+      load_relaxed(fastplan_stats.token_cap_disabled);
+  result["guard_fastplan_tensor_token_shadow"] =
+      load_relaxed(fastplan_stats.tensor_token_shadow);
+  result["guard_fastplan_tensor_token_hit"] =
+      load_relaxed(fastplan_stats.tensor_token_hit);
+  result["guard_fastplan_tensor_token_miss"] =
+      load_relaxed(fastplan_stats.tensor_token_miss);
+  result["guard_fastplan_tensor_token_check_ns"] =
+      load_relaxed(fastplan_stats.tensor_token_check_ns);
+  result["guard_fastplan_tensor_token_count_sum"] =
+      load_relaxed(fastplan_stats.tensor_token_count_sum);
+  py::dict tensor_token_miss_reasons;
+  tensor_token_miss_reasons["missing_local_state"] =
+      load_relaxed(fastplan_stats.tensor_token_miss_missing_local_state);
+  tensor_token_miss_reasons["object"] =
+      load_relaxed(fastplan_stats.tensor_token_miss_object);
+  tensor_token_miss_reasons["type"] =
+      load_relaxed(fastplan_stats.tensor_token_miss_type);
+  tensor_token_miss_reasons["not_tensor"] =
+      load_relaxed(fastplan_stats.tensor_token_miss_not_tensor);
+  tensor_token_miss_reasons["dispatch_key"] =
+      load_relaxed(fastplan_stats.tensor_token_miss_dispatch_key);
+  tensor_token_miss_reasons["dtype"] =
+      load_relaxed(fastplan_stats.tensor_token_miss_dtype);
+  tensor_token_miss_reasons["device"] =
+      load_relaxed(fastplan_stats.tensor_token_miss_device);
+  tensor_token_miss_reasons["requires_grad"] =
+      load_relaxed(fastplan_stats.tensor_token_miss_requires_grad);
+  tensor_token_miss_reasons["dim"] =
+      load_relaxed(fastplan_stats.tensor_token_miss_dim);
+  tensor_token_miss_reasons["size"] =
+      load_relaxed(fastplan_stats.tensor_token_miss_size);
+  tensor_token_miss_reasons["stride"] =
+      load_relaxed(fastplan_stats.tensor_token_miss_stride);
+  result["guard_fastplan_tensor_token_miss_reasons"] =
+      tensor_token_miss_reasons;
   py::dict fastplan_disabled_reasons;
   py::dict fastplan_disabled_top_paths;
   {
@@ -617,6 +710,7 @@ py::dict get_guard_lookup_stats() {
       token_counts["ExactDict"] = items[i].second.token_exact_dict;
       token_counts["ExactList"] = items[i].second.token_exact_list;
       token_counts["ExactTuple"] = items[i].second.token_exact_tuple;
+      token_counts["TensorMatch"] = items[i].second.token_tensor_match;
       item_stats["token_kind_counts"] = token_counts;
       path_stats[py::str(items[i].first)] = item_stats;
     }
@@ -767,6 +861,9 @@ static void add_guard_subtree_probe_token_kind(
     case GuardSubtreeProbeTokenKind::ExactTuple:
       add_relaxed(stats.token_exact_tuple, 1);
       break;
+    case GuardSubtreeProbeTokenKind::TensorMatch:
+      add_relaxed(stats.token_tensor_match, 1);
+      break;
     case GuardSubtreeProbeTokenKind::ObjectOnly:
       add_relaxed(stats.token_object_only, 1);
       break;
@@ -785,6 +882,9 @@ static void add_guard_subtree_probe_token_kind(
       break;
     case GuardSubtreeProbeTokenKind::ExactTuple:
       stats.token_exact_tuple += 1;
+      break;
+    case GuardSubtreeProbeTokenKind::TensorMatch:
+      stats.token_tensor_match += 1;
       break;
     case GuardSubtreeProbeTokenKind::ObjectOnly:
       stats.token_object_only += 1;
@@ -972,6 +1072,81 @@ static void record_guard_fastplan_miss(
   }
 }
 
+static void record_guard_fastplan_token_cap_disabled() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_fastplan_stats().token_cap_disabled, 1);
+}
+
+static void record_guard_fastplan_tensor_token_shadow() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_fastplan_stats();
+  add_relaxed(stats.tensor_token_shadow, 1);
+  add_relaxed(stats.tensor_token_count_sum, 1);
+}
+
+static void record_guard_fastplan_tensor_token_hit(uint64_t check_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_fastplan_stats();
+  add_relaxed(stats.tensor_token_hit, 1);
+  add_relaxed(stats.tensor_token_check_ns, check_ns);
+  add_relaxed(stats.tensor_token_count_sum, 1);
+}
+
+static void record_guard_fastplan_tensor_token_miss(
+    GuardFastPlanTensorTokenMissReason reason,
+    uint64_t check_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_fastplan_stats();
+  add_relaxed(stats.tensor_token_miss, 1);
+  add_relaxed(stats.tensor_token_check_ns, check_ns);
+  add_relaxed(stats.tensor_token_count_sum, 1);
+  switch (reason) {
+    case GuardFastPlanTensorTokenMissReason::MissingLocalState:
+      add_relaxed(stats.tensor_token_miss_missing_local_state, 1);
+      break;
+    case GuardFastPlanTensorTokenMissReason::Object:
+      add_relaxed(stats.tensor_token_miss_object, 1);
+      break;
+    case GuardFastPlanTensorTokenMissReason::Type:
+      add_relaxed(stats.tensor_token_miss_type, 1);
+      break;
+    case GuardFastPlanTensorTokenMissReason::NotTensor:
+      add_relaxed(stats.tensor_token_miss_not_tensor, 1);
+      break;
+    case GuardFastPlanTensorTokenMissReason::DispatchKey:
+      add_relaxed(stats.tensor_token_miss_dispatch_key, 1);
+      break;
+    case GuardFastPlanTensorTokenMissReason::DType:
+      add_relaxed(stats.tensor_token_miss_dtype, 1);
+      break;
+    case GuardFastPlanTensorTokenMissReason::Device:
+      add_relaxed(stats.tensor_token_miss_device, 1);
+      break;
+    case GuardFastPlanTensorTokenMissReason::RequiresGrad:
+      add_relaxed(stats.tensor_token_miss_requires_grad, 1);
+      break;
+    case GuardFastPlanTensorTokenMissReason::Dim:
+      add_relaxed(stats.tensor_token_miss_dim, 1);
+      break;
+    case GuardFastPlanTensorTokenMissReason::Size:
+      add_relaxed(stats.tensor_token_miss_size, 1);
+      break;
+    case GuardFastPlanTensorTokenMissReason::Stride:
+      add_relaxed(stats.tensor_token_miss_stride, 1);
+      break;
+    case GuardFastPlanTensorTokenMissReason::None:
+      break;
+  }
+}
+
 static GuardFastPlanCandidateKind compute_guard_fastplan_candidate_kind(
     const std::string& source) {
   static constexpr const char* kModulesSuffix = "._modules";
@@ -989,6 +1164,12 @@ static GuardFastPlanCandidateKind compute_guard_fastplan_candidate_kind(
     return GuardFastPlanCandidateKind::TopModules;
   }
   return GuardFastPlanCandidateKind::NestedModules;
+}
+
+static bool tensor_match_source_supports_subtree_memo(
+    const std::string& source) {
+  return source.find("._parameters[") != std::string::npos ||
+      source.find("._buffers[") != std::string::npos;
 }
 
 std::string guard_accessor_stats_key(PyObject* key) {
@@ -1698,6 +1879,23 @@ static uint64_t get_dict_version_unchecked(PyObject* dict) {
 #endif
 }
 
+static bool tensor_layout_does_not_support_stride(const at::Tensor& tensor) {
+  return tensor.layout() == c10::kSparseCsr ||
+      tensor.layout() == c10::kSparseCsc ||
+      tensor.layout() == c10::kSparseBsc ||
+      tensor.layout() == c10::kSparseBsr;
+}
+
+static std::vector<c10::SymInt> tensor_strides_for_guard_check(
+    const at::Tensor& tensor) {
+  if (tensor_layout_does_not_support_stride(tensor)) {
+    return std::vector<c10::SymInt>(
+        tensor.ndimension(), c10::SymInt(static_cast<int64_t>(-1)));
+  }
+  auto strides = tensor.sym_strides();
+  return std::vector<c10::SymInt>(strides.begin(), strides.end());
+}
+
 struct GuardSubtreeEntryToken {
   PyObject* object{nullptr};
   PyTypeObject* type{nullptr};
@@ -1705,6 +1903,15 @@ struct GuardSubtreeEntryToken {
   uint64_t version{0};
   Py_ssize_t size{0};
   std::vector<PyObject*> list_items;
+  uint64_t tensor_dispatch_key{0};
+  at::ScalarType tensor_dtype{at::ScalarType::Undefined};
+  c10::DeviceIndex tensor_device_index{-1};
+  bool tensor_requires_grad{false};
+  int64_t tensor_dim{0};
+  std::vector<int64_t> tensor_size_indices;
+  std::vector<c10::SymInt> tensor_size_values;
+  std::vector<int64_t> tensor_stride_indices;
+  std::vector<c10::SymInt> tensor_stride_values;
 
   static GuardSubtreeEntryToken make(PyObject* obj) {
     GuardSubtreeEntryToken token;
@@ -1728,9 +1935,139 @@ struct GuardSubtreeEntryToken {
     return token;
   }
 
+  static bool make_tensor_match(
+      PyObject* obj,
+      TensorCheck& tensor_check,
+      const LocalState& state,
+      GuardSubtreeEntryToken* token) {
+    if (Py_TYPE(obj) != tensor_check.pytype) {
+      return false;
+    }
+    if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
+      return false;
+    }
+
+    const at::Tensor tensor = THPVariable_Unpack(obj);
+    if (!tensor_check.check(state, tensor)) {
+      return false;
+    }
+
+    token->object = obj;
+    token->type = Py_TYPE(obj);
+    token->kind = GuardSubtreeProbeTokenKind::TensorMatch;
+    token->tensor_dispatch_key = state.apply(tensor.key_set()).raw_repr();
+    token->tensor_dtype = tensor.dtype().toScalarType();
+    token->tensor_device_index = tensor.device().index();
+    token->tensor_requires_grad = tensor.requires_grad();
+    token->tensor_dim = tensor.ndimension();
+
+    const auto& expected_sizes = tensor_check.sizes();
+    token->tensor_size_indices.reserve(expected_sizes.size());
+    token->tensor_size_values.reserve(expected_sizes.size());
+    for (auto i : c10::irange(expected_sizes.size())) {
+      const auto& expected_size = expected_sizes[i];
+      if (expected_size.has_value()) {
+        token->tensor_size_indices.push_back(static_cast<int64_t>(i));
+        token->tensor_size_values.push_back(expected_size.value());
+      }
+    }
+
+    const auto& expected_strides = tensor_check.strides();
+    token->tensor_stride_indices.reserve(expected_strides.size());
+    token->tensor_stride_values.reserve(expected_strides.size());
+    for (auto i : c10::irange(expected_strides.size())) {
+      const auto& expected_stride = expected_strides[i];
+      if (expected_stride.has_value()) {
+        token->tensor_stride_indices.push_back(static_cast<int64_t>(i));
+        token->tensor_stride_values.push_back(expected_stride.value());
+      }
+    }
+    return true;
+  }
+
+  bool matches_tensor_current(
+      const LocalState* state,
+      GuardFastPlanTensorTokenMissReason& reason) const {
+    reason = GuardFastPlanTensorTokenMissReason::None;
+    if (state == nullptr) {
+      reason = GuardFastPlanTensorTokenMissReason::MissingLocalState;
+      return false;
+    }
+    if (object == nullptr) {
+      reason = GuardFastPlanTensorTokenMissReason::Object;
+      return false;
+    }
+    if (Py_TYPE(object) != type) {
+      reason = GuardFastPlanTensorTokenMissReason::Type;
+      return false;
+    }
+    if (!THPVariable_CheckExact(object) && !THPVariable_Check(object)) {
+      reason = GuardFastPlanTensorTokenMissReason::NotTensor;
+      return false;
+    }
+
+    const at::Tensor tensor = THPVariable_Unpack(object);
+    if (state->apply(tensor.key_set()).raw_repr() != tensor_dispatch_key) {
+      reason = GuardFastPlanTensorTokenMissReason::DispatchKey;
+      return false;
+    }
+    if (tensor.dtype().toScalarType() != tensor_dtype) {
+      reason = GuardFastPlanTensorTokenMissReason::DType;
+      return false;
+    }
+    if (tensor.device().index() != tensor_device_index) {
+      reason = GuardFastPlanTensorTokenMissReason::Device;
+      return false;
+    }
+    if (tensor.requires_grad() != tensor_requires_grad) {
+      reason = GuardFastPlanTensorTokenMissReason::RequiresGrad;
+      return false;
+    }
+    if (tensor.ndimension() != tensor_dim) {
+      reason = GuardFastPlanTensorTokenMissReason::Dim;
+      return false;
+    }
+
+    const auto current_sizes = tensor.sym_sizes();
+    for (auto i : c10::irange(tensor_size_indices.size())) {
+      const int64_t index = tensor_size_indices[i];
+      if (index < 0 || index >= static_cast<int64_t>(current_sizes.size()) ||
+          tensor_size_values[i] != current_sizes[index]) {
+        reason = GuardFastPlanTensorTokenMissReason::Size;
+        return false;
+      }
+    }
+
+    const std::vector<c10::SymInt> current_strides =
+        tensor_strides_for_guard_check(tensor);
+    for (auto i : c10::irange(tensor_stride_indices.size())) {
+      const int64_t index = tensor_stride_indices[i];
+      if (index < 0 ||
+          index >= static_cast<int64_t>(current_strides.size()) ||
+          tensor_stride_values[i] != current_strides[index]) {
+        reason = GuardFastPlanTensorTokenMissReason::Stride;
+        return false;
+      }
+    }
+    return true;
+  }
+
   bool matches(const GuardSubtreeEntryToken& other) const {
-    return object == other.object && type == other.type && kind == other.kind &&
-        version == other.version && size == other.size &&
+    if (kind != other.kind || object != other.object || type != other.type) {
+      return false;
+    }
+    if (kind == GuardSubtreeProbeTokenKind::TensorMatch) {
+      return tensor_dispatch_key == other.tensor_dispatch_key &&
+          tensor_dtype == other.tensor_dtype &&
+          tensor_device_index == other.tensor_device_index &&
+          tensor_requires_grad == other.tensor_requires_grad &&
+          tensor_dim == other.tensor_dim &&
+          tensor_size_indices == other.tensor_size_indices &&
+          tensor_size_values == other.tensor_size_values &&
+          tensor_stride_indices == other.tensor_stride_indices &&
+          tensor_stride_values == other.tensor_stride_values;
+    }
+    return version == other.version && size == other.size &&
         list_items == other.list_items;
   }
 };
@@ -1749,11 +2086,34 @@ static bool guard_subtree_token_vectors_match(
   return true;
 }
 
+extern thread_local const LocalState* active_guard_local_state;
+
 static bool guard_subtree_memo_tokens_match(
     const std::vector<GuardSubtreeEntryToken>& tokens,
     PyObject* root_value) {
   for (size_t i = 0; i < tokens.size(); ++i) {
     const auto& token = tokens[i];
+    if (token.kind == GuardSubtreeProbeTokenKind::TensorMatch) {
+      const bool collect_stats = guard_lookup_stats_enabled();
+      const uint64_t tensor_start_ns =
+          collect_stats ? guard_lookup_time_ns() : 0;
+      GuardFastPlanTensorTokenMissReason reason =
+          GuardFastPlanTensorTokenMissReason::None;
+      const bool matches =
+          token.matches_tensor_current(active_guard_local_state, reason);
+      if (collect_stats) {
+        const uint64_t check_ns = guard_lookup_time_ns() - tensor_start_ns;
+        if (matches) {
+          record_guard_fastplan_tensor_token_hit(check_ns);
+        } else {
+          record_guard_fastplan_tensor_token_miss(reason, check_ns);
+        }
+      }
+      if (!matches) {
+        return false;
+      }
+      continue;
+    }
     if (i != 0 && token.kind == GuardSubtreeProbeTokenKind::ObjectOnly) {
       // Parent dict/list tokens prove whether this object is still reachable.
       continue;
@@ -1785,6 +2145,7 @@ struct GuardSubtreeProbeState {
 
 thread_local std::vector<GuardSubtreeEntryToken>*
     active_guard_subtree_memo_recorder = nullptr;
+thread_local const LocalState* active_guard_local_state = nullptr;
 
 struct GuardSubtreeMemoRecorderScope {
   explicit GuardSubtreeMemoRecorderScope(
@@ -1798,6 +2159,19 @@ struct GuardSubtreeMemoRecorderScope {
   }
 
   std::vector<GuardSubtreeEntryToken>* previous{nullptr};
+};
+
+struct GuardLocalStateScope {
+  explicit GuardLocalStateScope(const LocalState* state)
+      : previous(active_guard_local_state) {
+    active_guard_local_state = state;
+  }
+
+  ~GuardLocalStateScope() {
+    active_guard_local_state = previous;
+  }
+
+  const LocalState* previous{nullptr};
 };
 
 static PyObject* dict_version(PyObject* dummy, PyObject* args) {
@@ -2443,6 +2817,14 @@ class LeafGuard {
   }
   virtual const char* subtree_memo_unsupported_reason() const {
     return "unsupported_leaf:LeafGuard";
+  }
+  virtual bool emits_subtree_memo_token() const {
+    return false;
+  }
+  virtual bool append_subtree_memo_token(
+      PyObject* value,
+      std::vector<GuardSubtreeEntryToken>* /*tokens*/) {
+    return check_nopybind(value);
   }
 
   virtual ~LeafGuard() = default;
@@ -3823,6 +4205,15 @@ class GuardManager {
       return false;
     }
 
+    if (tokens.size() > kGuardFastPlanMaxTokens) {
+      memo.disabled = true;
+      memo.partial = false;
+      memo.shadow_passes = 0;
+      memo.tokens.clear();
+      record_guard_fastplan_token_cap_disabled();
+      return true;
+    }
+
     if (!memo.tokens.empty() &&
         guard_subtree_token_vectors_match(tokens, memo.tokens)) {
       memo.shadow_passes += 1;
@@ -3896,7 +4287,20 @@ class GuardManager {
   bool check_leaf_guards_nopybind(T* value) {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
-      if (!guard->check_nopybind(value)) { // early exit
+      bool result = false;
+      if constexpr (std::is_same_v<T, PyObject>) {
+        if (C10_UNLIKELY(
+                active_guard_subtree_memo_recorder != nullptr &&
+                guard->emits_subtree_memo_token())) {
+          result = guard->append_subtree_memo_token(
+              value, active_guard_subtree_memo_recorder);
+        } else {
+          result = guard->check_nopybind(value);
+        }
+      } else {
+        result = guard->check_nopybind(value);
+      }
+      if (!result) { // early exit
         _fail_count += 1;
         // no need of sorting, just return.
         return false;
@@ -4248,6 +4652,7 @@ class RootGuardManager : public GuardManager {
     if (collect_stats) {
       local_state_ns += guard_lookup_time_ns() - local_state_start_ns;
     }
+    GuardLocalStateScope local_state_scope(&_local_state);
 
     const uint64_t leaf_start_ns =
         collect_stats ? guard_lookup_time_ns() : 0;
@@ -4976,7 +5381,9 @@ class TENSOR_MATCH : public LeafGuard {
       py::object tensor_name,
       py::object verbose_code_parts)
       : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
-        _tensor_name(py::cast<std::string>(std::move(tensor_name))) {
+        _tensor_name(py::cast<std::string>(std::move(tensor_name))),
+        _supports_subtree_memo_token(
+            tensor_match_source_supports_subtree_memo(_tensor_name)) {
     root_guard_manager->set_init_local_state_flag();
     PyObject* item = value.ptr();
     if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
@@ -5047,14 +5454,30 @@ class TENSOR_MATCH : public LeafGuard {
   }
 
   bool supports_subtree_memo() const override {
-    return false;
+    return _supports_subtree_memo_token;
   }
   const char* subtree_memo_unsupported_reason() const override {
     return "unsupported_leaf:TENSOR_MATCH";
   }
+  bool emits_subtree_memo_token() const override {
+    return _supports_subtree_memo_token;
+  }
+  bool append_subtree_memo_token(
+      PyObject* value,
+      std::vector<GuardSubtreeEntryToken>* tokens) override {
+    GuardSubtreeEntryToken token;
+    if (!GuardSubtreeEntryToken::make_tensor_match(
+            value, *_tensor_check, _root_guard_manager->_local_state, &token)) {
+      return false;
+    }
+    tokens->emplace_back(std::move(token));
+    record_guard_fastplan_tensor_token_shadow();
+    return true;
+  }
 
  private:
   std::string _tensor_name;
+  bool _supports_subtree_memo_token;
   std::unique_ptr<TensorCheck> _tensor_check;
 };
 

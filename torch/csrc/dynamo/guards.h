@@ -94,6 +94,14 @@ class TensorCheck {
       const at::Tensor& v,
       const std::string& tensor_name);
 
+  const std::vector<std::optional<c10::SymInt>>& sizes() const {
+    return sizes_;
+  }
+
+  const std::vector<std::optional<c10::SymInt>>& strides() const {
+    return strides_;
+  }
+
   PyTypeObject* pytype;
 
  private:
