@@ -1226,12 +1226,12 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
 
     # initialize the local tensor
     if init_op is torch.full:
-        fill_value = kwargs.pop("fill_value", 0)
+        fill_value = kwargs.pop("fill_value")
         local_tensor = init_op(local_shape, fill_value, **kwargs)
     elif init_op is torch.logspace:
         start = kwargs.pop("start")
         end = kwargs.pop("end")
-        base = kwargs.pop("base", 10.0)
+        base = kwargs.pop("base")
         local_steps = local_shape[0]
         local_start = start
         local_end = end
@@ -1422,8 +1422,8 @@ def logspace(
     start,
     end,
     steps,
-    *,
     base=10.0,
+    *,
     dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
     requires_grad: bool = False,
