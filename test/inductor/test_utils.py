@@ -9,6 +9,7 @@ from sympy import I, Max, Min, Symbol, sympify
 import torch
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
+from torch._inductor import config
 from torch._inductor.compile_fx import _get_subgraph_names
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
@@ -1009,6 +1010,49 @@ class TestFakeTensorUpdater(TestCase):
 
         self.assertEqual(tuple(neg_replacement.meta["val"].shape), (4, 5))
         self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_should_realize_on_reuse_accounts_for_fanout(self):
+        from torch._inductor.ir import Pointwise, StorageBox
+        from torch._inductor.virtualized import ops
+
+        def inner_four_reads_fn(index):
+            value = ops.constant(0.0, torch.float32)
+            for i in range(4):
+                value = ops.add(value, ops.load(f"in{i}", index[0]))
+            return value
+
+        storage = StorageBox(
+            Pointwise(
+                device=torch.device("cuda"),
+                dtype=torch.float32,
+                inner_fn=inner_four_reads_fn,
+                ranges=[10],
+            )
+        )
+        with config.patch(realize_reads_threshold=4):
+            self.assertFalse(storage.should_realize_on_reuse(1))
+            self.assertTrue(storage.should_realize_on_reuse(2))
+
+    def test_should_realize_on_reuse_preserves_cpu_read_threshold(self):
+        from torch._inductor.ir import Pointwise, StorageBox
+        from torch._inductor.virtualized import ops
+
+        def inner_four_reads_fn(index):
+            value = ops.constant(0.0, torch.float32)
+            for i in range(4):
+                value = ops.add(value, ops.load(f"in{i}", index[0]))
+            return value
+
+        storage = StorageBox(
+            Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=inner_four_reads_fn,
+                ranges=[10],
+            )
+        )
+        with config.patch(realize_reads_threshold=4):
+            self.assertFalse(storage.should_realize_on_reuse(2))
 
 
 if __name__ == "__main__":
