@@ -1658,6 +1658,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._index_put_impl_",
         "torch._indices_copy",
         "torch._int_mm",
+        "torch._int_mm.dtype",
         "torch._is_all_true",
         "torch._is_any_true",
         "torch._is_functional_tensor",

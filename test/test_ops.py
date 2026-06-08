@@ -2560,6 +2560,9 @@ class TestRefsOpsInfo(TestCase):
         "_refs.nn.functional.poisson_nll_loss",
         "_refs.nn.functional.softmax",
         "_refs.nn.functional.softmin",
+        # The frontend ref validates min_val <= max_val, but aten.hardtanh
+        # preserves native ATen semantics and allows inverted bounds.
+        "_refs.nn.functional.hardtanh",
         "_refs.positive",
         "_refs.ravel",
         "_refs.reshape",
@@ -2730,7 +2733,6 @@ fake_backward_skips = {
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     skip("nn.functional.ctc_loss"),
-    xfail("index_fill"),
     skip("bmm", variant_name="triton_optimized"),
 }
 

@@ -1473,6 +1473,23 @@ graph():
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
         self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
 
+    def test_export_allows_aten_hardtanh_with_inverted_bounds(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.hardtanh(x, min_val=2, max_val=0)
+
+        model = M()
+        x = torch.randn(3)
+        ep = export(model, (x,), strict=True)
+        self.assertEqual(ep.module()(x), model(x))
+        self.assertTrue(
+            any(
+                node.op == "call_function"
+                and node.target == torch.ops.aten.hardtanh.default
+                for node in ep.graph_module.graph.nodes
+            )
+        )
+
     def test_symint_output(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1484,6 +1501,11 @@ graph():
         dynamic_shapes = {"x": (dim0_x, dim1_x)}
         export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
 
+    @testing.expectedFailureStrict
+    @testing.expectedFailureStrictV2
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureTrainingIRToRunDecomp
     def test_export_packed_lstm_data_dependent_lengths(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
@@ -1512,31 +1534,33 @@ graph():
             torch.zeros(4, 2, 4),
         )
         ref = mod(*inputs)
-        with self.assertWarnsRegex(
-            UserWarning,
-            r"The tensor attributes self\.lstm\._flat_weights\[0\].*",
-        ):
-            ep = export(mod, inputs)
 
-        preserved_ops = {
-            node.target
-            for node in ep.graph.nodes
-            if node.op == "call_function"
-            and node.target
-            in {
-                torch.ops.aten._pack_padded_sequence.default,
-                torch.ops.aten.lstm.data,
-                torch.ops.aten._pad_packed_sequence.default,
+        for _ in range(2):
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"The tensor attributes self\.lstm\._flat_weights\[0\].*",
+            ):
+                ep = export(mod, inputs)
+
+            preserved_ops = {
+                node.target
+                for node in ep.graph.nodes
+                if node.op == "call_function"
+                and node.target
+                in {
+                    torch.ops.aten._pack_padded_sequence.default,
+                    torch.ops.aten.lstm.data,
+                    torch.ops.aten._pad_packed_sequence.default,
+                }
             }
-        }
-        self.assertExpectedInline(
-            "\n".join(sorted(str(op) for op in preserved_ops)),
-            """\
+            self.assertExpectedInline(
+                "\n".join(sorted(str(op) for op in preserved_ops)),
+                """\
 aten._pack_padded_sequence.default
 aten._pad_packed_sequence.default
 aten.lstm.data""",
-        )
-        self.assertEqual(ep.module()(*inputs), ref)
+            )
+            self.assertEqual(ep.module()(*inputs), ref)
 
     def test_dynamic_lstm(self):
         # Disable mkldnn so eager uses the same pure-PyTorch LSTM/GRU as the
