@@ -3051,31 +3051,6 @@ if torch._C._has_mkldnn:
         out = x.new_empty(output_shape)
         return out
 
-    @register_meta(torch.ops.onednn.qlinear_prepack.default)
-    def meta_qlinear_prepack(weight, x_shape):
-        # Mirror the real C++ kernel pack_weight_to_onednn_tensor in
-        # aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp
-        torch._check(
-            weight.dim() == 2,
-            lambda: f"qlinear_prepack expects a 2D weight, got {weight.dim()}D",
-        )
-        torch._check(
-            weight.dtype in (torch.int8, torch.float8_e4m3fn),
-            lambda: (
-                "qlinear_prepack expects int8 or float8_e4m3fn weight, "
-                f"got {weight.dtype}"
-            ),
-        )
-        N, K = weight.shape
-        torch._check(
-            x_shape is None or x_shape[-1] == K,
-            lambda: (
-                f"qlinear_prepack: x_shape[-1] ({x_shape[-1]}) must match "
-                f"weight in_features ({K})"
-            ),
-        )
-        return weight.new_empty((K, N))
-
     _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
         "quantized", "IMPL", "Meta"
     )
@@ -4044,9 +4019,7 @@ def meta__fused_adam(
     )
 
 
-@register_meta([aten._int_mm])
-@out_wrapper()
-def meta__int_mm(a, b):
+def common_meta_int_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be a 2D tensor")
     torch._check(b.dim() == 2, lambda: "b must be a 2D tensor")
     torch._check(
@@ -4064,7 +4037,26 @@ def meta__int_mm(a, b):
             f"and {b.size(0)}x{b.size(1)})"
         ),
     )
+
+
+@register_meta([aten._int_mm.default, aten._int_mm.out])
+@out_wrapper()
+def meta__int_mm(a, b):
+    common_meta_int_mm(a, b)
     return a.new_empty((a.size(0), b.size(1)), dtype=torch.int32)
+
+
+@register_meta([aten._int_mm.dtype, aten._int_mm.dtype_out])
+@out_wrapper(exact_dtype=True)
+def meta__int_mm_dtype(a, b, out_dtype):
+    common_meta_int_mm(a, b)
+
+    torch._check(
+        out_dtype in (torch.float32, torch.bfloat16),
+        lambda: "_int_mm.dtype only supports float32 and bfloat16 outputs",
+    )
+
+    return a.new_empty((a.size(0), b.size(1)), dtype=out_dtype)
 
 
 @register_meta([aten._convert_weight_to_int4pack])
@@ -4748,7 +4740,7 @@ def meta_lshifts(self, other):
 
 @register_meta(aten.zero.default)
 def meta_zero(self):
-    return self.new_empty(self.shape)
+    return torch.empty_like(self)
 
 
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
