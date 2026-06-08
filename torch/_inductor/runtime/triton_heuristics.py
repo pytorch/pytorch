@@ -4785,6 +4785,49 @@ def _persistent_reduction_configs(
     return configs
 
 
+def _is_power_of_2(value: int) -> bool:
+    return value > 0 and (value & (value - 1)) == 0
+
+
+def _mix_order_reduction_xblock_candidates(
+    x_block: int,
+    rsplit_size: int,
+    rnumel_hint: int,
+    required_x_block: int,
+) -> list[int]:
+    candidates = OrderedSet([x_block])
+    if rnumel_hint > 512:
+        candidates.update([1, 2, 4])
+
+    valid_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate >= required_x_block
+        and candidate <= rsplit_size
+        and _is_power_of_2(candidate)
+        and rsplit_size % candidate == 0
+    ]
+    return valid_candidates or [x_block]
+
+
+def _mix_order_reduction_num_stages(
+    inductor_meta: dict[str, Any],
+    rsplit_size: int,
+    x_block: int,
+    rnumel_hint: int,
+) -> int:
+    num_iters = rsplit_size // x_block
+
+    # With large rnumel, we have higher chance of out-of-shared memory.
+    # To avoid adding too much autotuning overhead, constrain NUM_STAGES
+    # when rnumel is large.
+    if inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
+        max_num_stages = 2 if rnumel_hint > 8192 else 3
+    else:
+        max_num_stages = 1
+    return min(max(num_iters // 4, 1), max_num_stages)
+
+
 def persistent_reduction(
     size_hints,
     reduction_hint=False,
@@ -4851,43 +4894,49 @@ def persistent_reduction(
                 required_x_block, tma_min_block_sizes.get("XBLOCK", 1)
             )
         x_block = min(max(rsplit_size // 32, min_x_block, required_x_block), 16)
+        x_block_candidates = _mix_order_reduction_xblock_candidates(
+            x_block,
+            rsplit_size,
+            rnumel_hint,
+            required_x_block,
+        )
         for c in configs:
-            c.kwargs["RSPLIT_SIZE"] = rsplit_size
-            # small XBLOCK to use less registers/smem
-            c.kwargs["XBLOCK"] = x_block
+            for candidate_x_block in x_block_candidates:
+                candidate_config = copy.deepcopy(c)
+                candidate_config.kwargs["RSPLIT_SIZE"] = rsplit_size
+                # small XBLOCK to use less registers/smem
+                candidate_config.kwargs["XBLOCK"] = candidate_x_block
+                candidate_config.kwargs["NUM_STAGES"] = _mix_order_reduction_num_stages(
+                    inductor_meta,
+                    rsplit_size,
+                    candidate_x_block,
+                    rnumel_hint,
+                )
 
-            num_iters = rsplit_size // x_block
+                if rnumel_hint <= 1024:
+                    candidate_config.num_warps //= 2
+                    candidate_config.num_warps = max(candidate_config.num_warps, 1)
+                    new_configs.append(candidate_config)
 
-            # With large rnumel, we have higher chance of out-of-shared memory
-            # To avoid adding too much autotuning overhead, we just constrain NUM_STAGES
-            # if rnumel is large
-            if inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
-                MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
-            else:
-                MAX_NUM_STAGES = 1
-            c.kwargs["NUM_STAGES"] = min(max(num_iters // 4, 1), MAX_NUM_STAGES)
+                    if max_autotune_enabled:
+                        # less warps so potentially each sm can run more thread blocks
+                        # Inside each thread block, we handle the split sequentially,
+                        # more thread blocks is beneficial here.
+                        newc = copy.deepcopy(candidate_config)
+                        newc.num_warps = 2
+                        new_configs.append(newc)
+                else:
+                    # more warps for larger rows
+                    new_configs.append(candidate_config)
 
-            if rnumel_hint <= 1024:
-                c.num_warps //= 2
-                c.num_warps = max(c.num_warps, 1)
-                new_configs.append(c)
-
-                if max_autotune_enabled:
-                    # less warps so potentially each sm can run more thread blocks
-                    # Inside each thread block, we handle the split sequentially,
-                    # more thread blocks is beneficial here.
-                    newc = copy.deepcopy(c)
-                    newc.num_warps = 2
-                    new_configs.append(newc)
-            else:
-                # more warps for larger rows
-                new_configs.append(c)
-
-                max_warps_limit = 16 if torch.version.hip else 32
-                if max_autotune_enabled and c.num_warps < max_warps_limit:
-                    newc = copy.deepcopy(c)
-                    newc.num_warps *= 2
-                    new_configs.append(newc)
+                    max_warps_limit = 16 if torch.version.hip else 32
+                    if (
+                        max_autotune_enabled
+                        and candidate_config.num_warps < max_warps_limit
+                    ):
+                        newc = copy.deepcopy(candidate_config)
+                        newc.num_warps *= 2
+                        new_configs.append(newc)
         configs = unique_configs(new_configs)
 
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
