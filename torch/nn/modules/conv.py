@@ -10,7 +10,7 @@ from torch.nn import functional as F, init
 from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-from .lazy import LazyModuleMixin
+from .lazy import _to_concrete_int, LazyModuleMixin
 from .module import Module
 from .utils import _pair, _reverse_repeat_tuple, _single, _triple
 
@@ -1480,7 +1480,10 @@ class _LazyConvXdMixin(LazyModuleMixin):
                 f"to {self.__class__.__name__}, but "
                 f"got input of size: {input.shape}"
             )
-        return input.shape[1] if input.dim() == num_dims_batch else input.shape[0]
+        in_channels = (
+            input.shape[1] if input.dim() == num_dims_batch else input.shape[0]
+        )
+        return _to_concrete_int(in_channels)
 
     # Function to return the number of spatial dims expected for inputs to the module.
     # This is expected to be implemented by subclasses.

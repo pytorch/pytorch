@@ -858,6 +858,67 @@ class TestLazyModules(TestCase):
         with self.assertRaisesRegex(ValueError, "uninitialized parameter"):
             param + param
 
+    def _check_lazy_module_with_compile(
+        self,
+        module,
+        input,
+        expected_output_shape,
+        inferred_attr,
+        expected_inferred_value,
+        *,
+        dynamic,
+    ):
+        torch._dynamo.reset()
+        try:
+            compiled_module = torch.compile(
+                module, backend="aot_eager", dynamic=dynamic
+            )
+            with torch.no_grad():
+                output = compiled_module(input)
+            self.assertEqual(output.shape, expected_output_shape)
+            inferred_value = getattr(module, inferred_attr)
+            self.assertEqual(inferred_value, expected_inferred_value)
+            self.assertIsInstance(inferred_value, int)
+        finally:
+            torch._dynamo.reset()
+
+    @suppress_warnings
+    def test_lazy_linear_with_compile(self):
+        for dynamic in (False, True):
+            with self.subTest(dynamic=dynamic):
+                self._check_lazy_module_with_compile(
+                    nn.LazyLinear(out_features=128),
+                    torch.randn(1, 28, 28),
+                    (1, 28, 128),
+                    "in_features",
+                    28,
+                    dynamic=dynamic,
+                )
+
+    @suppress_warnings
+    def test_lazy_conv_with_dynamic_compile(self):
+        self._check_lazy_module_with_compile(
+            nn.LazyConv2d(out_channels=16, kernel_size=3),
+            torch.randn(2, 3, 28, 28),
+            (2, 16, 26, 26),
+            "in_channels",
+            3,
+            dynamic=True,
+        )
+
+    @suppress_warnings
+    def test_lazy_batchnorm_with_dynamic_compile(self):
+        module = nn.LazyBatchNorm1d()
+        module.eval()
+        self._check_lazy_module_with_compile(
+            module,
+            torch.randn(2, 16, 50),
+            (2, 16, 50),
+            "num_features",
+            16,
+            dynamic=True,
+        )
+
 
 if __name__ == "__main__":
     run_tests()
