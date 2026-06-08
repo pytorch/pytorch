@@ -1403,7 +1403,11 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         *,
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
-        if self.maybe_subclass_meta is None and not runtime_metadata.act_input_indices:
+        if (
+            self.maybe_subclass_meta is None
+            and not runtime_metadata.act_input_indices
+            and not runtime_metadata.nested_act_input_paths
+        ):
             return compiled_fn
 
         from .subclass_codegen import codegen_subclass_wrapper
@@ -1415,6 +1419,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
             num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
             frozen_inp_indices=self._get_frozen_inp_indices(),
             act_input_indices=runtime_metadata.act_input_indices,
+            nested_act_input_paths=runtime_metadata.nested_act_input_paths,
         )
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
         return inner_fn

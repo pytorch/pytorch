@@ -252,6 +252,7 @@ def _codegen_subclass_wrapper_source(
     num_fw_outs_saved_for_bw: int | None,
     frozen_inp_indices: frozenset[int] = frozenset(),
     act_input_indices: list[int] | None = None,
+    nested_act_input_paths: list[tuple[int, tuple[str, ...]]] | None = None,
 ) -> tuple[str, dict[str, object]]:
     """Generate source and globals for a subclass wrapper.
 
@@ -269,6 +270,16 @@ def _codegen_subclass_wrapper_source(
     if act_input_indices:
         for i in act_input_indices:
             state.emit(f"args[{i}] = args[{i}].trigger_wait()")
+
+    # --- Resolve nested AsyncCollectiveTensors ---
+    # ACTs can also be nested inside wrapper subclass inputs (e.g.
+    # DTensor._local_tensor after redistribute(async_op=True)).
+    if nested_act_input_paths:
+        for idx, path in nested_act_input_paths:
+            accessor = f"args[{idx}]"
+            for attr in path:
+                accessor = _safe_attr_access(accessor, attr)
+            state.emit(f"{accessor} = {accessor}.trigger_wait()")
 
     # --- Input unwrapping ---
     state.emit("unwrapped_args = []")
@@ -387,6 +398,7 @@ def codegen_subclass_wrapper(
     num_fw_outs_saved_for_bw: int | None,
     frozen_inp_indices: frozenset[int] = frozenset(),
     act_input_indices: list[int] | None = None,
+    nested_act_input_paths: list[tuple[int, tuple[str, ...]]] | None = None,
 ) -> Callable[..., object]:
     """Generate a specialized wrapper function for subclass unwrap/wrap."""
     source, globals_dict = _codegen_subclass_wrapper_source(
@@ -395,6 +407,7 @@ def codegen_subclass_wrapper(
         num_fw_outs_saved_for_bw,
         frozen_inp_indices,
         act_input_indices=act_input_indices,
+        nested_act_input_paths=nested_act_input_paths,
     )
     globals_dict["compiled_fn"] = compiled_fn
     return _compile_and_exec_source(

@@ -1,6 +1,7 @@
 # Owner(s): ["module: functorch"]
 
 import logging
+import unittest
 from contextlib import contextmanager
 
 import torch
@@ -206,6 +207,184 @@ def inner_fn(args):
         self.assertEqual(received_args[1], b)
         self.assertIs(received_args[2], seed)
         self.assertIs(received_args[3], offset)
+
+
+    def test_nested_act_codegen(self):
+        """Nested ACT paths emit trigger_wait() calls in generated source."""
+        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+        from torch._functorch._aot_autograd.subclass_codegen import (
+            _codegen_subclass_wrapper_source,
+        )
+
+        source, _ = _codegen_subclass_wrapper_source(
+            inp_metas=[PlainTensorMeta(unwrapped_idx=0)],
+            out_metas=[PlainTensorMeta(unwrapped_idx=0)],
+            num_fw_outs_saved_for_bw=None,
+            nested_act_input_paths=[(0, ("_local_tensor",))],
+        )
+        self.assertIn(
+            "args[0]._local_tensor = args[0]._local_tensor.trigger_wait()", source
+        )
+
+    def test_nested_act_codegen_deep_path(self):
+        """Deeply nested ACT paths emit correct chained attr access."""
+        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+        from torch._functorch._aot_autograd.subclass_codegen import (
+            _codegen_subclass_wrapper_source,
+        )
+
+        source, _ = _codegen_subclass_wrapper_source(
+            inp_metas=[PlainTensorMeta(unwrapped_idx=0)],
+            out_metas=[PlainTensorMeta(unwrapped_idx=0)],
+            num_fw_outs_saved_for_bw=None,
+            nested_act_input_paths=[(0, ("a", "_local_tensor"))],
+        )
+        self.assertIn(
+            "args[0].a._local_tensor = args[0].a._local_tensor.trigger_wait()",
+            source,
+        )
+
+    def test_nested_act_codegen_combined_with_top_level(self):
+        """Both top-level and nested ACT indices produce trigger_wait() calls."""
+        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+        from torch._functorch._aot_autograd.subclass_codegen import (
+            _codegen_subclass_wrapper_source,
+        )
+
+        source, _ = _codegen_subclass_wrapper_source(
+            inp_metas=[
+                PlainTensorMeta(unwrapped_idx=0),
+                PlainTensorMeta(unwrapped_idx=1),
+            ],
+            out_metas=[
+                PlainTensorMeta(unwrapped_idx=0),
+                PlainTensorMeta(unwrapped_idx=1),
+            ],
+            num_fw_outs_saved_for_bw=None,
+            act_input_indices=[0],
+            nested_act_input_paths=[(1, ("_local_tensor",))],
+        )
+        self.assertIn("args[0] = args[0].trigger_wait()", source)
+        self.assertIn(
+            "args[1]._local_tensor = args[1]._local_tensor.trigger_wait()", source
+        )
+
+    def test_nested_act_codegen_empty_paths(self):
+        """Empty nested_act_input_paths produces no extra codegen."""
+        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+        from torch._functorch._aot_autograd.subclass_codegen import (
+            _codegen_subclass_wrapper_source,
+        )
+
+        source, _ = _codegen_subclass_wrapper_source(
+            inp_metas=[PlainTensorMeta(unwrapped_idx=0)],
+            out_metas=[PlainTensorMeta(unwrapped_idx=0)],
+            num_fw_outs_saved_for_bw=None,
+            nested_act_input_paths=[],
+        )
+        self.assertNotIn("trigger_wait", source)
+
+
+@unittest.skipIf(
+    not torch.distributed.is_available(), "torch.distributed is required"
+)
+class TestResolveNestedActs(TestCase):
+    """Tests for the reconstruct contract of _resolve_nested_acts.
+
+    The helper must NOT mutate the input in place (Dynamo's
+    TENSOR_SUBCLASS_METADATA_MATCH guard still reads the original inner
+    tensors after this runs). Instead it returns a reconstructed wrapper
+    subclass with the nested ACTs resolved, leaving the original untouched,
+    and records the attribute paths for the runtime codegen.
+    """
+
+    def test_resolve_nested_act_in_wrapper_subclass(self):
+        """ACT nested in a TwoTensor is resolved on the returned object."""
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        from torch._functorch._aot_autograd.frontend_utils import _resolve_nested_acts
+
+        inner_a = torch.randn(4)
+        inner_b = torch.randn(4)
+        tt = TwoTensor(AsyncCollectiveTensor(inner_a), inner_b)
+
+        nested_paths: list[tuple[int, tuple[str, ...]]] = []
+        resolved = _resolve_nested_acts(tt, 0, nested_paths, AsyncCollectiveTensor)
+
+        # Path recorded for runtime codegen.
+        self.assertEqual(nested_paths, [(0, ("a",))])
+        # Returned object is a fresh subclass with the ACT resolved.
+        self.assertIsNot(resolved, tt)
+        self.assertNotIsInstance(resolved.a, AsyncCollectiveTensor)
+        self.assertEqual(resolved.a, inner_a)
+        # Original is left untouched (still holds the ACT).
+        self.assertIsInstance(tt.a, AsyncCollectiveTensor)
+
+    def test_resolve_multiple_nested_acts(self):
+        """Multiple ACTs in different attrs are all recorded and resolved."""
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        from torch._functorch._aot_autograd.frontend_utils import _resolve_nested_acts
+
+        inner_a = torch.randn(4)
+        inner_b = torch.randn(4)
+        tt = TwoTensor(AsyncCollectiveTensor(inner_a), AsyncCollectiveTensor(inner_b))
+
+        nested_paths: list[tuple[int, tuple[str, ...]]] = []
+        resolved = _resolve_nested_acts(tt, 0, nested_paths, AsyncCollectiveTensor)
+
+        self.assertEqual(nested_paths, [(0, ("a",)), (0, ("b",))])
+        self.assertNotIsInstance(resolved.a, AsyncCollectiveTensor)
+        self.assertNotIsInstance(resolved.b, AsyncCollectiveTensor)
+        self.assertIsInstance(tt.a, AsyncCollectiveTensor)
+        self.assertIsInstance(tt.b, AsyncCollectiveTensor)
+
+    def test_resolve_no_act_is_noop(self):
+        """No ACTs: nothing recorded and the same object is returned."""
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        from torch._functorch._aot_autograd.frontend_utils import _resolve_nested_acts
+
+        tt = TwoTensor(torch.randn(4), torch.randn(4))
+        nested_paths: list[tuple[int, tuple[str, ...]]] = []
+        resolved = _resolve_nested_acts(tt, 0, nested_paths, AsyncCollectiveTensor)
+
+        self.assertEqual(len(nested_paths), 0)
+        self.assertIs(resolved, tt)
+
+    def test_resolve_plain_tensor_is_noop(self):
+        """Non-wrapper-subclass tensors are returned unchanged."""
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        from torch._functorch._aot_autograd.frontend_utils import _resolve_nested_acts
+
+        t = torch.randn(4)
+        nested_paths: list[tuple[int, tuple[str, ...]]] = []
+        resolved = _resolve_nested_acts(t, 0, nested_paths, AsyncCollectiveTensor)
+
+        self.assertEqual(len(nested_paths), 0)
+        self.assertIs(resolved, t)
+
+    def test_resolve_deeply_nested_act(self):
+        """ACTs nested multiple levels deep are resolved without mutation."""
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        from torch._functorch._aot_autograd.frontend_utils import _resolve_nested_acts
+
+        inner_tensor = torch.randn(4)
+        inner_tt = TwoTensor(AsyncCollectiveTensor(inner_tensor), torch.randn(4))
+        outer_tt = TwoTensor(inner_tt, torch.randn(4))
+
+        nested_paths: list[tuple[int, tuple[str, ...]]] = []
+        resolved = _resolve_nested_acts(
+            outer_tt, 0, nested_paths, AsyncCollectiveTensor
+        )
+
+        self.assertEqual(nested_paths, [(0, ("a", "a"))])
+        self.assertIsNot(resolved, outer_tt)
+        self.assertNotIsInstance(resolved.a.a, AsyncCollectiveTensor)
+        # Original nested subclass is untouched.
+        self.assertIsInstance(outer_tt.a.a, AsyncCollectiveTensor)
 
 
 if __name__ == "__main__":
