@@ -1379,6 +1379,8 @@ class InstructionTranslatorBase(
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
     package: CompilePackage | None
     latest_bytecode_queue: deque[str]
+    loop_backedge_targets: set[int]
+    loop_backedge_start_nodes: dict[int, int]
     # Store the latest bytecode before graph_break() call by user
 
     def mark_inconsistent_side_effects(self) -> None:
@@ -1426,6 +1428,51 @@ class InstructionTranslatorBase(
                         return True
             cur_tx = cur_tx.parent
         return False
+
+    def maybe_record_loop_backedge_start(self, instruction_pointer: int) -> None:
+        if (
+            config.max_loop_unroll_nodes > 0
+            and instruction_pointer in self.loop_backedge_targets
+            and instruction_pointer not in self.loop_backedge_start_nodes
+        ):
+            self.loop_backedge_start_nodes[instruction_pointer] = len(
+                self.output.graph.nodes
+            )
+
+    def maybe_raise_loop_unroll_limit(self, target: int) -> None:
+        limit = config.max_loop_unroll_nodes
+        if limit <= 0:
+            return
+
+        start_node_count = self.loop_backedge_start_nodes.get(target)
+        if start_node_count is None:
+            return
+
+        unrolled_node_count = len(self.output.graph.nodes) - start_node_count
+        if unrolled_node_count > limit:
+            context = (
+                f"Loop generated {unrolled_node_count} FX graph nodes, exceeding "
+                f"torch._dynamo.config.max_loop_unroll_nodes={limit}."
+            )
+            explanation = (
+                "Dynamo stopped tracing because a Python loop generated too many "
+                "FX graph nodes."
+            )
+            hints = [
+                "Set torch._dynamo.config.max_loop_unroll_nodes=0 to allow "
+                "unbounded loop unrolling.",
+            ]
+            if self.one_graph or self.export or self.error_on_graph_break:
+                unimplemented(
+                    gb_type="Loop generated too many FX graph nodes",
+                    context=context,
+                    explanation=explanation,
+                    hints=hints,
+                )
+            raise exc.SkipFrame(
+                f"{explanation} {context} {hints[0]}\n"
+                f"Frame info: {format_frame_info(self.f_code)}"
+            )
 
     def cellvars(self) -> tuple[str, ...]:
         return self.code_options["co_cellvars"]
@@ -1598,6 +1645,7 @@ class InstructionTranslatorBase(
             )
 
         self.update_block_stack(inst)
+        self.maybe_record_loop_backedge_start(ip)
 
         try:
             self.dispatch_table[inst.opcode](self, inst)
@@ -2424,10 +2472,13 @@ class InstructionTranslatorBase(
             raise AssertionError("expected self.start_point is not None to be true")
         if inst.target is None:
             raise AssertionError("expected inst.target is not None to be true")
+        target = self.indexof[inst.target]
+        if target < self.instruction_pointer:
+            self.maybe_raise_loop_unroll_limit(target)
         get_metrics_context().increment(
             "ir_count", self.instruction_pointer - self.start_point
         )
-        self.instruction_pointer = self.indexof[inst.target]
+        self.instruction_pointer = target
         self.start_point = self.instruction_pointer
 
     JUMP_FORWARD = jump
@@ -5207,6 +5258,13 @@ class InstructionTranslatorBase(
         self.indexof: dict[Instruction, int] = (
             indexof if indexof is not None else get_indexof(self.instructions)
         )
+        self.loop_backedge_targets = set()
+        for idx, inst in enumerate(self.instructions):
+            if inst.opname in JUMP_OPNAMES and inst.target is not None:
+                target = self.indexof[inst.target]
+                if target <= idx:
+                    self.loop_backedge_targets.add(target)
+        self.loop_backedge_start_nodes = {}
         self.f_locals: dict[str, Any] = (
             f_locals  # needed for recording accessed locals for replay
         )

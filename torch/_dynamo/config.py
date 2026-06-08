@@ -272,6 +272,11 @@ nontraceable_tensor_subclasses: set[type[Any]] = set()
 # This flag is incompatible with: fail_on_recompile_limit_hit.
 suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 
+# Approximate maximum number of FX graph nodes Dynamo may add while unrolling a
+# Python loop. Set to 0 to allow unbounded loop unrolling.
+# [@compile_ignored: runtime_behaviour]
+max_loop_unroll_nodes = int(os.environ.get("TORCHDYNAMO_MAX_LOOP_UNROLL_NODES", "5000"))
+
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
 # @compile_ignored[debug]

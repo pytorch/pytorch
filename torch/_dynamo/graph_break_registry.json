@@ -1727,6 +1727,14 @@
       "Hints": []
     }
   ],
+  "GB6950": [
+    {
+      "Gb_type": "Loop generated too many FX graph nodes",
+      "Context": "context",
+      "Explanation": "explanation",
+      "Hints": []
+    }
+  ],
   "GB9528": [
     {
       "Gb_type": "Attempted to reconstruct a nested function with closure which is not supported",

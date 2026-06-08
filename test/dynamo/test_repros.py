@@ -34,6 +34,7 @@ from unittest import mock
 import numpy as np
 
 import torch
+import torch._dynamo.exc
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
@@ -3113,6 +3114,84 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 100)
+
+    @torch._dynamo.config.patch(max_loop_unroll_nodes=8)
+    def test_loop_unroll_limit_skips_frame(self):
+        def fn(x):
+            for _ in range(32):
+                x = x + 1
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.zeros(())
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.op_count, 0)
+
+    @torch._dynamo.config.patch(max_loop_unroll_nodes=8)
+    def test_loop_unroll_limit_skips_while_frame(self):
+        def fn(x):
+            i = 0
+            while i < 32:
+                x = x + 1
+                i += 1
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.zeros(())
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.op_count, 0)
+
+    @torch._dynamo.config.patch(max_loop_unroll_nodes=8)
+    def test_loop_unroll_limit_errors_in_fullgraph(self):
+        def fn(x):
+            for _ in range(32):
+                x = x + 1
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Loop generated too many FX graph nodes"
+        ):
+            opt_fn(torch.zeros(()))
+
+    @torch._dynamo.config.patch(max_loop_unroll_nodes=8)
+    def test_loop_unroll_limit_errors_when_graph_breaks_disallowed(self):
+        def fn(x):
+            for _ in range(32):
+                x = x + 1
+            return x
+
+        with (
+            torch._dynamo.error_on_graph_break(True),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Loop generated too many FX graph nodes",
+            ),
+        ):
+            torch.compile(fn, backend="eager")(torch.zeros(()))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Loop generated too many FX graph nodes"
+        ):
+            torch._dynamo.export(fn)(torch.zeros(()))
+
+    @torch._dynamo.config.patch(max_loop_unroll_nodes=0)
+    def test_loop_unroll_limit_can_be_disabled(self):
+        def fn(x):
+            for _ in range(32):
+                x = x + 1
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(())
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 32)
 
     def test_avoid_dupe_specialization(self):
         def f(x, y):
