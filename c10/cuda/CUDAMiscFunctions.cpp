@@ -55,8 +55,8 @@ const char* get_cuda_blocking_message() {
       return "";
     }
     if (effective_flag == "1" || effective_flag == "2") {
-      return ("Set AMD_SERIALIZE_KERNEL=3 to wait for completion before AND after kernel enqueue"
-              ". 1/2 Only waits before or after enqueue.");
+      return ("\nSet AMD_SERIALIZE_KERNEL=3 to wait for completion before AND after kernel enqueue."
+              "\n1/2 Only waits before or after enqueue.");
     }
     // rocm_message is constructed only in rare cases
     rocm_message = "\nUnsupported AMD_SERIALIZE_KERNEL value ";
