@@ -461,10 +461,20 @@ class ConstantVariable(VariableTracker):
 
         if isinstance(other, SymNodeVariable):
             return self.as_python_constant() == other.evaluate_expr()
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
+        if not isinstance(other, VariableTracker):
+            return False
+        if other.is_python_constant():
+            return self.as_python_constant() == other.as_python_constant()
+        # `other` is not a constant (e.g. a user-defined object that may define
+        # __eq__). Mirror CPython dict/set lookup, which compares keys via
+        # PyObject_RichCompareBool, so a user __eq__ runs and any exception it
+        # raises is observed instead of failing as an internal error.
+        from ..symbolic_convert import InstructionTranslator
+        from .object_protocol import generic_richcompare_bool
+
+        tx = InstructionTranslator.current_tx()
+        result = generic_richcompare_bool(tx, self, other, "__eq__")
+        return result.as_python_constant()
 
     def get_id(self, tx: InstructionTranslatorBase) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
