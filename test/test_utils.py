@@ -971,7 +971,9 @@ class TestCppExtensionUtils(TestCase):
 
 
 class TestTraceback(TestCase):
-    def test_context_decorator_traceback_frame_name(self):
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_traceback_frame_names():
         @torch.no_grad()
         def decorated():
             raise RuntimeError("test")
@@ -979,16 +981,18 @@ class TestTraceback(TestCase):
         try:
             decorated()
         except RuntimeError as e:
-            frame_names = [
-                frame.name for frame in traceback.extract_tb(e.__traceback__)
-            ]
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
         else:
-            self.fail("Expected RuntimeError")
+            raise AssertionError("Expected RuntimeError")
 
+    def test_context_decorator_traceback_frame_name(self):
+        frame_names = self._context_decorator_traceback_frame_names()
         self.assertIn("no_grad", frame_names)
         self.assertNotIn("decorate_context", frame_names)
 
-    def test_context_decorator_generator_traceback_frame_name(self):
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_generator_traceback_frame_names():
         @torch.no_grad()
         def decorated_generator():
             yield None
@@ -999,12 +1003,12 @@ class TestTraceback(TestCase):
         try:
             next(gen)
         except RuntimeError as e:
-            frame_names = [
-                frame.name for frame in traceback.extract_tb(e.__traceback__)
-            ]
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
         else:
-            self.fail("Expected RuntimeError")
+            raise AssertionError("Expected RuntimeError")
 
+    def test_context_decorator_generator_traceback_frame_name(self):
+        frame_names = self._context_decorator_generator_traceback_frame_names()
         self.assertIn("no_grad", frame_names)
         self.assertNotIn("generator_context", frame_names)
 
