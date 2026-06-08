@@ -56,10 +56,13 @@ def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> list
     if metadata.define_meta:
         # Get the arguments for the meta function (usually same as impl but without 'out')
         meta_args = structured.meta_arguments(g)
+        # Precompute structured ops return meta_return_ty from meta(); plain ones return void.
+        # Mirror the base so TORCH_PRIVATEUSE1_(PRECOMPUTE_)META_FUNC matches the declaration.
+        meta_ret = "meta_return_ty" if g.out.precomputed is not None else "void"
         meta_decl = (
             f"// Alias to the base meta class for easy access to native meta logic\n"
             f"using base = at::meta::structured_{meta_name};\n"
-            f"void meta({', '.join(a.decl() for a in meta_args)});\n"
+            f"{meta_ret} meta({', '.join(a.decl() for a in meta_args)});\n"
         )
     return [
         f"""\

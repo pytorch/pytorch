@@ -782,6 +782,16 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
         out = self.define_meta_registrations("- div.out")
         self.assertEqual(out, "")
 
+    # A precompute structured op's define_meta declaration returns meta_return_ty (not void), so
+    # it matches TORCH_PRIVATEUSE1_PRECOMPUTE_META_FUNC; the Meta wrapper discards that return and
+    # uses set_output for the shapes.
+    def test_define_meta_precompute_returns_meta_return_ty(self) -> None:
+        decl = self.native_function_declaration(
+            "- avg_pool2d.out:\n    structured: true\n    define_meta: true"
+        )
+        self.assertIn("meta_return_ty meta(", decl)
+        self.assertNotIn("void meta(", decl)
+
     # A multi-output structured op (sort -> values, indices) must build a tuple in the generated
     # Meta wrapper; returning a single Tensor into the tuple slot would not compile.
     def test_define_meta_multi_output_returns_tuple(self) -> None:
