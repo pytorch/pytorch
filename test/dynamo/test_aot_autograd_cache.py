@@ -302,12 +302,46 @@ class AOTAutogradCacheConfigTests(torch._dynamo.test_case.TestCase):
 
     def test_autograd_cache_normalize_inputs_default_enabled_in_fbcode(self):
         script = """
+import importlib.machinery
+import importlib.util
+import pathlib
 import sys
-import torch._environment
+import types
+
+repo_root = pathlib.Path.cwd()
+
+torch_pkg = types.ModuleType("torch")
+torch_pkg.__path__ = [str(repo_root / "torch")]
+torch_pkg.__spec__ = importlib.machinery.ModuleSpec(
+    "torch", loader=None, is_package=True
+)
+sys.modules["torch"] = torch_pkg
+
+utils_pkg = types.ModuleType("torch.utils")
+utils_pkg.__path__ = [str(repo_root / "torch" / "utils")]
+utils_pkg.__spec__ = importlib.machinery.ModuleSpec(
+    "torch.utils", loader=None, is_package=True
+)
+sys.modules["torch.utils"] = utils_pkg
+
+functorch_pkg = types.ModuleType("torch._functorch")
+functorch_pkg.__path__ = [str(repo_root / "torch" / "_functorch")]
+functorch_pkg.__spec__ = importlib.machinery.ModuleSpec(
+    "torch._functorch", loader=None, is_package=True
+)
+sys.modules["torch._functorch"] = functorch_pkg
 
 if "torch._functorch.config" in sys.modules:
     raise AssertionError("torch._functorch.config imported too early")
-torch._environment.is_fbcode = lambda: True
+
+environment_spec = importlib.util.spec_from_file_location(
+    "torch._environment", repo_root / "torch" / "_environment.py"
+)
+environment = importlib.util.module_from_spec(environment_spec)
+sys.modules["torch._environment"] = environment
+environment_spec.loader.exec_module(environment)
+environment.is_fbcode = lambda: True
+
 import torch._functorch.config as config
 
 if not config.is_fbcode():
