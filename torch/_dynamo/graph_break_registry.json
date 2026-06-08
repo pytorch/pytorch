@@ -5383,6 +5383,16 @@
       "Hints": []
     }
   ],
+  "GB2661": [
+    {
+      "Gb_type": "builtin isinstance() with custom __instancecheck__ on tensor",
+      "Context": "isinstance({arg}, {isinstance_type})",
+      "Explanation": "Dynamo cannot soundly trace arbitrary custom __instancecheck__ hooks on tensor values because the hook may read external mutable state.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0359": [
     {
       "Gb_type": "unsupported torch._C._SDPAParams attribute",
