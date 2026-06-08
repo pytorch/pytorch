@@ -3,10 +3,18 @@ set PYTHON_EXEC="python"
 
 
 if "%DESIRED_PYTHON%"=="3.14t" (
-    echo Python version is set to 3.14 or 3.14t
+    echo Python version is set to 3.14t
     set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.14.0/python-3.14.0-amd64.exe"
     set ADDITIONAL_OPTIONS="Include_freethreaded=1"
     set PYTHON_EXEC="python3.14t"
+) else if "%DESIRED_PYTHON%"=="3.15t" (
+    echo Python version is set to 3.15t
+    set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.15.0/python-3.15.0b2-amd64.exe"
+    set ADDITIONAL_OPTIONS="Include_freethreaded=1"
+    set PYTHON_EXEC="python3.15t"
+) else if "%DESIRED_PYTHON%"=="3.15" (
+    echo Python version is set to 3.15
+    set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.15.0/python-3.15.0b2-amd64.exe"
 ) else (
     echo Python version is set to %DESIRED_PYTHON%
     set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/%DESIRED_PYTHON%.0/python-%DESIRED_PYTHON%.0-amd64.exe" %= @lint-ignore =%
