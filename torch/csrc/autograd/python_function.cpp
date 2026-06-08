@@ -4,6 +4,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/SequenceNumber.h>
+#include <ATen/ThreadLocalPythonObjects.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <structmember.h>
@@ -58,11 +59,55 @@ PyObject* THPGradientEdgeClass = nullptr;
 #define THPFunction_assert(condition, ...) \
   if (!(condition)) {                      \
     THPUtils_setError(__VA_ARGS__);        \
-    throw python_error();                  \
+    throw_python_error();                  \
   }
 
 // Anonymous namespace for helpful functions used in this file
 namespace {
+
+void throw_python_error();
+
+THPObjectPtr call_with_context(PyObject* callable, PyObject* args) {
+  if (!at::impl::ThreadLocalPythonObjects::contains("context")) {
+    return THPObjectPtr(PyObject_CallObject(callable, args));
+  }
+
+  auto context = at::impl::ThreadLocalPythonObjects::get("context");
+  auto* py_context = context->ptr(getPyInterpreter());
+  if (Py_IsNone(py_context)) {
+    return THPObjectPtr(PyObject_CallObject(callable, args));
+  }
+
+  // Context objects cannot be entered concurrently, so give each Python node
+  // invocation its own copy of the backward-launch context.
+  THPObjectPtr copy_fn(PyObject_GetAttrString(py_context, "copy"));
+  if (!copy_fn) {
+    throw_python_error();
+  }
+  THPObjectPtr py_context_copy(PyObject_CallNoArgs(copy_fn));
+  if (!py_context_copy) {
+    throw_python_error();
+  }
+  THPObjectPtr run_fn(PyObject_GetAttrString(py_context_copy, "run"));
+  if (!run_fn) {
+    throw_python_error();
+  }
+
+  auto num_args = PyTuple_GET_SIZE(args);
+  THPObjectPtr context_args(PyTuple_New(num_args + 1));
+  if (!context_args) {
+    throw_python_error();
+  }
+  Py_INCREF(callable);
+  PyTuple_SET_ITEM(context_args.get(), 0, callable);
+  for (Py_ssize_t i = 0; i < num_args; i++) {
+    PyObject* item = PyTuple_GET_ITEM(args, i);
+    Py_INCREF(item);
+    PyTuple_SET_ITEM(context_args.get(), i + 1, item);
+  }
+
+  return THPObjectPtr(PyObject_CallObject(run_fn, context_args.get()));
+}
 
 inline void check_legacy_fn_attr_access(
     const c10::intrusive_ptr<torch::autograd::Node>& cdata,
@@ -134,7 +179,7 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
   auto ret = THPObjectPtr(THPSizeType.tp_alloc(
       &THPSizeType, static_cast<Py_ssize_t>(sym_sizes.size())));
   if (!ret)
-    throw python_error();
+    throw_python_error();
 
   for (auto i : c10::irange(sym_sizes.size())) {
     auto symint = sym_sizes[i];
@@ -191,12 +236,12 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
     THPObjectPtr apply_fn(PyObject_GetAttrString(pyobj(), "apply_boxed"));
     if (!apply_fn)
       throw_python_error();
-    r = THPObjectPtr(PyObject_CallObject(apply_fn, boxedArgs.get()));
+    r = call_with_context(apply_fn, boxedArgs.get());
   } else {
     THPObjectPtr apply_fn(PyObject_GetAttrString(pyobj(), "apply"));
     if (!apply_fn)
       throw_python_error();
-    r = THPObjectPtr(PyObject_CallObject(apply_fn, pyInputs.get()));
+    r = call_with_context(apply_fn, pyInputs.get());
   }
   pyInputs = nullptr;
   if (!r)
@@ -256,7 +301,7 @@ auto PyNode::apply_with_saved_impl(
   THPObjectPtr fwdInputMetadatas(
       PyTuple_New(static_cast<Py_ssize_t>(is_variable_input.size())));
   if (!fwdInputMetadatas)
-    throw python_error();
+    throw_python_error();
 
   int offset = 0;
   for (const auto i : c10::irange(is_variable_input.size())) {
@@ -755,13 +800,13 @@ static void _wrap_outputs(
     THPObjectPtr py_x(THPVariable_Wrap(x));
     THPObjectPtr py_view_as_method(PyObject_GetAttrString(py_x, "view_as"));
     if (!py_view_as_method)
-      throw python_error();
+      throw_python_error();
     THPObjectPtr args(PyTuple_Pack(1, py_x.get()));
     if (!args)
-      throw python_error();
+      throw_python_error();
     THPObjectPtr result(PyObject_CallObject(py_view_as_method, args));
     if (!result)
-      throw python_error();
+      throw_python_error();
     return THPVariable_Unpack(result);
   };
 
@@ -1164,7 +1209,7 @@ PyObject* process_outputs(
 
   THPObjectPtr outputs(PyTuple_New(num_outputs));
   if (!outputs)
-    throw python_error();
+    throw_python_error();
 
   grad_fn->cdata->clear_input_metadata();
 
@@ -1764,7 +1809,7 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
       "'saved_variables' is deprecated; use 'saved_tensors'",
       0);
   if (r != 0)
-    throw python_error();
+    throw_python_error();
   TORCH_CHECK(
       !self->saved_tensors_accessed_and_cleared,
       "saved_tensors can only be accessed once when "
@@ -1794,7 +1839,7 @@ PyObject* THPFunction_get_compiled_autograd_symints(
   auto size = self->compiled_autograd_symints.size();
   THPObjectPtr result(PyTuple_New(static_cast<Py_ssize_t>(size)));
   if (!result) {
-    throw python_error();
+    throw_python_error();
   }
   for (const auto i : c10::irange(size)) {
     PyTuple_SET_ITEM(
@@ -2020,6 +2065,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
      (setter)THPFunction_set_compiled_autograd_backward_state,
      nullptr,
      nullptr},
+    // NOLINTNEXTLINE(modernize-use-designated-initializers)
     {nullptr}};
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
@@ -2031,6 +2077,7 @@ static struct PyMethodDef THPFunction_methods[] = {
      THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,
      nullptr},
+    // NOLINTNEXTLINE(modernize-use-designated-initializers)
     {(char*)"apply",
      castPyCFunctionWithKeywords(THPFunction_apply),
      METH_CLASS | METH_VARARGS | METH_KEYWORDS,
@@ -2045,6 +2092,7 @@ static struct PyMethodDef THPFunction_methods[] = {
      THPFunction_get_compiled_autograd_symints,
      METH_NOARGS,
      nullptr},
+    // NOLINTNEXTLINE(modernize-use-designated-initializers)
     {nullptr}};
 
 PyTypeObject THPFunctionType = {

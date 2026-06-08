@@ -27,7 +27,10 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, skipIfHpu
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
@@ -295,6 +298,39 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 return runtime_wrapper
 
             run(export_compiler)
+
+    @onlyCUDA
+    def test_dynamo_config_visible_in_reentrant_checkpoint_backward(self, device):
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        torch._dynamo.reset()
+        try:
+            seen_limits = {}
+            block = Block().to(device)
+            block.compile(fullgraph=True, backend="eager", dynamic=False)
+
+            def checkpointed(x):
+                phase = "recompute" if torch.is_grad_enabled() else "forward"
+                seen_limits.setdefault(phase, torch._dynamo.config.recompile_limit)
+                return block(x)
+
+            with torch._dynamo.config.patch(
+                recompile_limit=8192, fail_on_recompile_limit_hit=True
+            ):
+                for i in range(1, 12):
+                    x = torch.randn(i, 8, device=device, requires_grad=True)
+                    checkpoint(checkpointed, x, use_reentrant=True).sum().backward()
+
+            self.assertEqual(seen_limits["forward"], 8192)
+            self.assertEqual(seen_limits["recompute"], 8192)
+        finally:
+            torch._dynamo.reset()
 
     @parametrize(
         "partition_fn",
