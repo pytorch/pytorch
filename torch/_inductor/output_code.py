@@ -22,19 +22,23 @@ serialized format:
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import logging
 import os
 from functools import partial
-from typing import Any, TYPE_CHECKING, TypeAlias
+from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 import torch
 from torch._dynamo.utils import counters, get_runtime_metrics_context
+from torch._guards import compile_context, CompileContext
 from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
     CudagraphMetadata,
+    get_input_storage_mutation_info,
+    get_input_storage_mutation_reason,
     get_partition_cudagraph_metadata,
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
@@ -126,26 +130,26 @@ def index_expanded_dims(t: torch.Tensor, expanded_dims: list[int]) -> torch.Tens
     return t
 
 
-def complex_memory_overlap(t: torch.Tensor) -> bool:
-    if config.always_complex_memory_overlap_TESTING_ONLY:
-        return True
-
-    # if torch._debug_has_internal_overlap thinks this tensor potentially has
-    # memory overlap internally, let's dig deeper to find out whether it's true.
-    #
-    # Call squeeze() so that dimension with size 1 does not cause false positive.
-    t = index_expanded_dims(t, get_expanded_dims(t)).squeeze()
-    if torch._debug_has_internal_overlap(t) != 0:
-        strides = t.stride()
-        sizes = t.shape
-        indices = list(range(len(strides)))
-        indices = [x for _, x in sorted(zip(strides, indices))]
-        for i in range(len(strides)):
-            prev_stride = 1 if i == 0 else strides[indices[i - 1]]
-            prev_size = 1 if i == 0 else sizes[indices[i - 1]]
-            if strides[indices[i]] < prev_stride * prev_size:
-                return True
-    return False
+# Bytewise copy of src's reachable strided extent into dst, starting from each
+# tensor's data_ptr. Requires matching sizes/strides/dtype. Use when dst
+# self-overlaps and a regular strided copy_ would be ambiguous: the overlap
+# pattern reproduces in dst because the underlying bytes are copied verbatim.
+def copy_strided_storage_(dst: torch.Tensor, src: torch.Tensor) -> None:
+    assert dst.dtype == src.dtype
+    assert tuple(dst.size()) == tuple(src.size())
+    assert tuple(dst.stride()) == tuple(src.stride())
+    if dst.numel() == 0:
+        return
+    assert all(st >= 0 for st in src.stride()), (
+        "copy_strided_storage_ requires non-negative strides"
+    )
+    elem = src.element_size()
+    nbytes = (sum((s - 1) * st for s, st in zip(src.size(), src.stride())) + 1) * elem
+    src_off = src.storage_offset() * elem
+    dst_off = dst.storage_offset() * elem
+    dst.untyped_storage()[dst_off : dst_off + nbytes].copy_(
+        src.untyped_storage()[src_off : src_off + nbytes]
+    )
 
 
 def maybe_handle_backward_generation(
@@ -506,10 +510,14 @@ class CompiledFxGraph(OutputCode):
     _triton_bundle: TritonBundle | None = None
     _wrap_compiled_regions: bool = False
     _defers_input_alignment: bool = False
+    _compile_context: CompileContext | None = dataclasses.field(
+        default=None, init=False, repr=False, compare=False
+    )
     # Metadata-stripped copy of the FX graph for fake tensor propagation.
     # Running this graph under FakeTensorMode re-derives output shapes
     # (including aliasing) from the input shapes.
     _original_gm: torch.fx.GraphModule | None = None
+    _serialized_original_gm: bytes | None = None
 
     def __init__(
         self,
@@ -584,6 +592,7 @@ class CompiledFxGraph(OutputCode):
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
         self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
+        storage_mutation_info = get_input_storage_mutation_info(gm)
         self.fx_kwargs = {}
         self.inputs_to_check = ()
 
@@ -599,12 +608,6 @@ class CompiledFxGraph(OutputCode):
                     counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
             else:
-                complex_memory_overlap_inputs = any(
-                    complex_memory_overlap(t)
-                    for t in example_inputs
-                    if isinstance(t, torch.Tensor)
-                )
-
                 if not config.triton.cudagraph_support_input_mutation:
                     # Skip supports for cudagraph-managed tensors
                     from torch._inductor.cudagraph_utils import (
@@ -627,9 +630,19 @@ class CompiledFxGraph(OutputCode):
                     # Check mutation later to support cudagraph-managed tensors
                     has_mutation = None
 
+                storage_mutation_reason = get_input_storage_mutation_reason(
+                    storage_mutation_info,
+                )
+                if storage_mutation_reason is not None:
+                    self.disabled_cudagraphs_reason = storage_mutation_reason
+
                 cudagraph_tests = [
+                    (storage_mutation_reason is None, "input storage mutation"),
                     (not has_mutation, "mutated inputs"),
-                    (not complex_memory_overlap_inputs, "complex memory overlap"),
+                    (
+                        not config.force_disable_cudagraph_TESTING_ONLY,
+                        "force_disable_cudagraph_TESTING_ONLY",
+                    ),
                     (
                         all(
                             isinstance(
@@ -666,6 +679,7 @@ class CompiledFxGraph(OutputCode):
         self.compile_region_name = compile_region_name
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
+        self._set_compile_context_for_autotune_cache()
 
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
@@ -694,6 +708,16 @@ class CompiledFxGraph(OutputCode):
             # should also delete these partitions.
             del self.compiled_fn_runner.partitions
 
+    def _set_compile_context_for_autotune_cache(self) -> None:
+        compile_context_for_autotune_cache = CompileContext.try_get()
+        self._compile_context = (
+            compile_context_for_autotune_cache
+            if AutotuneCacheBundler.has_active_compile(
+                compile_context_for_autotune_cache
+            )
+            else None
+        )
+
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
 
@@ -713,19 +737,42 @@ class CompiledFxGraph(OutputCode):
                     "compile_id": compile_id,
                 }
             )
+        compile_context_for_autotune_cache = self._compile_context
+        has_active_autotune_cache_bundler = AutotuneCacheBundler.has_active_compile(
+            compile_context_for_autotune_cache
+        )
+        autotune_cache_context = (
+            compile_context(compile_context_for_autotune_cache)
+            if has_active_autotune_cache_bundler
+            else contextlib.nullcontext()
+        )
+        # Autotune cache writes happen during the first call. End the bundler
+        # while its saved compile context is restored, then clear the saved
+        # context after leaving the compile_context manager.
         try:
-            # Checking the profiler directly is faster than nullcontext
-            if torch.autograd.profiler._is_profiler_enabled:
-                with torch._C._profiler._RecordFunctionFast(
-                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
-                    keyword_values={"scope": "user_scope"},
-                ):
-                    return self.current_callable(inputs)
-            else:
-                return self.current_callable(inputs)
+            with autotune_cache_context:
+                try:
+                    # Checking the profiler directly is faster than nullcontext
+                    if torch.autograd.profiler._is_profiler_enabled:
+                        with torch._C._profiler._RecordFunctionFast(
+                            f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
+                            keyword_values={"scope": "user_scope"},
+                        ):
+                            return self.current_callable(inputs)
+                    else:
+                        return self.current_callable(inputs)
+                finally:
+                    get_runtime_metrics_context().finish()
+                    if has_active_autotune_cache_bundler:
+                        AutotuneCacheBundler.end_compile()
         finally:
-            get_runtime_metrics_context().finish()
-            AutotuneCacheBundler.end_compile()
+            if (
+                has_active_autotune_cache_bundler
+                and not AutotuneCacheBundler.has_active_compile(
+                    compile_context_for_autotune_cache
+                )
+            ):
+                self._compile_context = None
 
     def post_compile(
         self,
@@ -831,6 +878,23 @@ class CompiledFxGraph(OutputCode):
             self.mutated_input_idxs,
         )
 
+        if self._original_gm is None and self._serialized_original_gm is not None:
+            from torch._subclasses import FakeTensorMode
+            from torch.fx._graph_pickler import GraphPickler
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+            fake_mode = FakeTensorMode(
+                allow_non_fake_inputs=True,
+                shape_env=ShapeEnv(),
+            )
+            original_gm = cast(
+                torch.fx.GraphModule,
+                GraphPickler.loads(self._serialized_original_gm, fake_mode),
+            )
+            original_gm.recompile()
+            self._original_gm = original_gm
+            self._serialized_original_gm = None
+
         # Apply inductor_compiled_code HOP wrapper if configured
         # This is done in post_compile to ensure it works with cached artifacts
         if self._wrap_compiled_regions and self.current_callable is not None:
@@ -865,10 +929,17 @@ class CompiledFxGraph(OutputCode):
         # so we serialize their PyCodeCache disk cache location instead.
         # TODO: This could be better if we're ever able to serialize compiled
         # models to disk.
+        self._compile_context = None
         self.current_callable = None
         self.recursively_apply_fns = None
         self.compiled_fn_runner = None
-        # Note: _original_gm is already picklable (metadata stripped at creation)
+        if self._original_gm is not None:
+            from torch.fx._graph_pickler import GraphPickler, Options
+
+            self._serialized_original_gm = GraphPickler.dumps(
+                self._original_gm, Options(ops_filter=None)
+            )
+            self._original_gm = None
         # Note: _serialized_fx_graph is already in serializable form (SerializedGraphModule)
         # so it doesn't need to be cleared
 

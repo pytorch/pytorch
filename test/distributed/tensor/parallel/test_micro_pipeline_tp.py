@@ -14,8 +14,8 @@ from torch._inductor.fx_passes.micro_pipeline_tp import (
 from torch._inductor.fx_passes.post_grad import remove_noop_ops, view_to_reshape
 from torch._inductor.utils import fresh_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
-    all_gather_tensor,
-    reduce_scatter_tensor,
+    all_gather_single,
+    reduce_scatter_single,
 )
 from torch.distributed._symmetric_memory import _test_mode
 from torch.distributed.distributed_c10d import _get_group_size_by_name
@@ -25,13 +25,15 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     instantiate_parametrized_tests,
-    MI300_ARCH,
+    IS_LINUX,
     parametrize,
     run_tests,
-    runOnRocmArch,
+    TEST_WITH_ROCM,
+    TEST_WITH_TORCHINDUCTOR,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
@@ -51,7 +53,7 @@ def _fp8_all_gather(
 ) -> torch.Tensor:
     # We don't yet have a canonical pattern for fp8 all-gather. This is a
     # pattern observed in DTensor + float8_experimental.
-    ag = all_gather_tensor(tensor, gather_dim=0, group=group_name)
+    ag = all_gather_single(tensor, gather_dim=0, group=group_name)
     if gather_dim == 0:
         return ag.view(tensor.dtype)
     chunks = ag.chunk(_get_group_size_by_name(group_name))
@@ -62,6 +64,7 @@ def _fp8_all_gather(
 @instantiate_parametrized_tests
 class MicroPipelineTPTest(TestCase):
     def setUp(self):
+        super().setUp()
         torch._inductor.config._micro_pipeline_tp = True
 
         self.rank = 0
@@ -87,8 +90,8 @@ class MicroPipelineTPTest(TestCase):
         def func(
             inp: torch.Tensor,
         ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-            a = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
-            b = all_gather_tensor(inp, gather_dim=1, group=group.group_name)
+            a = all_gather_single(inp, gather_dim=0, group=group.group_name)
+            b = all_gather_single(inp, gather_dim=1, group=group.group_name)
             c = _fp8_all_gather(inp, gather_dim=0, group_name=group.group_name)
             d = _fp8_all_gather(inp, gather_dim=1, group_name=group.group_name)
             return a, b, c, d
@@ -138,8 +141,8 @@ class MicroPipelineTPTest(TestCase):
         group = dist.group.WORLD
 
         def func(inp: torch.Tensor) -> torch.Tensor:
-            a = reduce_scatter_tensor(inp, "sum", scatter_dim=0, group=group.group_name)
-            b = reduce_scatter_tensor(inp, "avg", scatter_dim=1, group=group.group_name)
+            a = reduce_scatter_single(inp, "sum", scatter_dim=0, group=group.group_name)
+            b = reduce_scatter_single(inp, "avg", scatter_dim=1, group=group.group_name)
             return a, b
 
         inp = torch.rand(64, 32, device="cuda")
@@ -179,12 +182,12 @@ class MicroPipelineTPTest(TestCase):
         def func(inp: torch.Tensor) -> torch.Tensor:
             a = inp @ inp.T
             # b is unexposed (hidden by a)
-            b = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
+            b = all_gather_single(inp, gather_dim=0, group=group.group_name)
             c = b @ inp.T
             # d is unexposed (hidden by c)
-            d = reduce_scatter_tensor(b, "avg", scatter_dim=0, group=group.group_name)
+            d = reduce_scatter_single(b, "avg", scatter_dim=0, group=group.group_name)
             # e is exposed
-            e = all_gather_tensor(d, gather_dim=0, group=group.group_name)
+            e = all_gather_single(d, gather_dim=0, group=group.group_name)
             return a, c, e
 
         inp = torch.rand(64, 32, device="cuda")
@@ -208,7 +211,7 @@ class MicroPipelineTPTest(TestCase):
         group = dist.group.WORLD
 
         def func(A_shard: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
-            A = all_gather_tensor(A_shard, gather_dim=gather_dim, group=group)
+            A = all_gather_single(A_shard, gather_dim=gather_dim, group=group)
             if return_A:
                 return A, A @ B
             else:
@@ -234,24 +237,39 @@ class MicroPipelineTPTest(TestCase):
             self.assertEqual(eager_stride, compiled_stride)
 
         if gather_dim == A_dims - 1:
-            # Decomposing the matmul on the K dimension is not supported.
-            # The view optimization in _maybe_view_chunk_cat allows the
-            # all_gather to be optimized away entirely, so we only check that
-            # fused_all_gather_matmul is NOT used.
-            self.assertNotIn("fused_all_gather_matmul", code)
-        elif gather_dim == 1:
-            # When gather_dim == 1, the view optimization in _maybe_view_chunk_cat
-            # allows the all_gather to be optimized away entirely (since there are
-            # no dimensions between dim 0 and gather_dim that need to be moved).
-            # This results in no all_gather_into_tensor appearing in the code.
+            # Gathering on the K dimension of the matmul -- fusion not supported.
             self.assertNotIn("fused_all_gather_matmul", code)
         else:
             self.assertIn("fused_all_gather_matmul", code)
             self.assertNotIn("all_gather_into_tensor", code)
             self.assertEqual("return_A=True" in code, return_A)
 
-    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_fuse_all_gather_matmul_view_optimization(self):
+        """When batch=1 and gather_dim=1, _maybe_view_chunk_cat uses a view
+        (no data movement), so the all_gather is optimized away entirely and
+        there is no all_gather+matmul pattern to fuse."""
+        group = dist.group.WORLD
+
+        def func(A_shard: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+            A = all_gather_single(A_shard, gather_dim=1, group=group)
+            return A @ B
+
+        # batch=1: after all_gather, shape[0] == world_size == group_size,
+        # so the view optimization in _maybe_view_chunk_cat applies.
+        # Shard is [1, 32, 32], all_gather gives [2, 32, 32], view to [1, 64, 32].
+        A_shard = torch.rand(1, 32, 32, device="cuda")
+        B = torch.rand(32, 16, device="cuda")
+
+        with _test_mode():
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, A_shard, B)
+
+        self.assertNotIn("fused_all_gather_matmul", code)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
     @parametrize("A_dims", [2, 3])
     @parametrize("gather_dim", [0, 1, 2])
     @parametrize("return_A", [True, False])
@@ -309,9 +327,6 @@ class MicroPipelineTPTest(TestCase):
             self.assertIn("fused_all_gather_scaled_matmul", str(gm.graph))
             self.assertNotIn("all_gather_into_tensor", str(gm.graph))
 
-        if torch.cuda.get_device_capability() < (8, 9):
-            return
-
         with _test_mode():
             compiled = torch.compile(func)
             code = run_and_get_triton_code(
@@ -336,7 +351,7 @@ class MicroPipelineTPTest(TestCase):
         group = dist.group.WORLD
 
         def func(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
-            return reduce_scatter_tensor(A @ B, "avg", scatter_dim, group)
+            return reduce_scatter_single(A @ B, "avg", scatter_dim, group)
 
         if A_dims == 2:
             A = torch.rand(64, 32, device="cuda")
@@ -353,8 +368,8 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
-    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
     @parametrize("A_dims", [2, 3])
     @parametrize("scatter_dim", [0, 1, 2])
     @fresh_cache()
@@ -378,7 +393,7 @@ class MicroPipelineTPTest(TestCase):
                 C = C.view(*A.shape[:-1], B.shape[1])
             else:
                 C = torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=out_dtype)
-            return reduce_scatter_tensor(C, "avg", scatter_dim, group)
+            return reduce_scatter_single(C, "avg", scatter_dim, group)
 
         if A_dims == 2:
             A = torch.rand(64, 32, device="cuda").to(e4m3_type)
@@ -396,9 +411,6 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_scaled_matmul_reduce_scatter", str(gm.graph))
         self.assertNotIn("reduce_scatter_tensor", str(gm.graph))
 
-        if torch.cuda.get_device_capability() < (8, 9):
-            return
-
         with _test_mode():
             compiled = torch.compile(func)
             code = run_and_get_triton_code(
@@ -407,8 +419,8 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_scaled_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
-    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
     @parametrize("scatter_dim", [0, 1])
     @fresh_cache()
     def test_fuse_scaled_matmul_reduce_scatter_rowwise_scales_reshape_mm_reshape(
@@ -438,7 +450,7 @@ class MicroPipelineTPTest(TestCase):
 
             # reshape output to have same leading dims as original `A` tensor
             C = C.view(*orig_shape[:-1], C.shape[-1])
-            return reduce_scatter_tensor(C, "sum", scatter_dim, group)
+            return reduce_scatter_single(C, "sum", scatter_dim, group)
 
         A = torch.rand(2, 16, 32, device="cuda").to(e4m3_type)
         B = torch.rand(64, 32, device="cuda").to(e4m3_type).T
@@ -470,6 +482,11 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_scaled_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHINDUCTOR or IS_LINUX or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/153223",
+    )
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/145924")
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("shard_dim", [0, 1])
     @fresh_cache()
@@ -504,6 +521,7 @@ class MicroPipelineTPTest(TestCase):
 @instantiate_parametrized_tests
 class MicroPipelineTP4GPUTest(TestCase):
     def setUp(self):
+        super().setUp()
         torch._inductor.config._micro_pipeline_tp = True
 
         self.rank = 0
@@ -532,11 +550,11 @@ class MicroPipelineTP4GPUTest(TestCase):
         )
 
         def func(inp: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor) -> torch.Tensor:
-            hidden = all_gather_tensor(inp, 0, (device_mesh, 0)) @ w1.t()
-            full_hidden = all_gather_tensor(hidden, 0, (device_mesh, 1))
+            hidden = all_gather_single(inp, 0, (device_mesh, 0)) @ w1.t()
+            full_hidden = all_gather_single(hidden, 0, (device_mesh, 1))
             full_hidden /= full_hidden.pow(2).sum().sqrt()
-            hidden = reduce_scatter_tensor(full_hidden, "avg", 0, (device_mesh, 1))
-            return reduce_scatter_tensor(hidden @ w2.t(), "avg", 0, (device_mesh, 0))
+            hidden = reduce_scatter_single(full_hidden, "avg", 0, (device_mesh, 1))
+            return reduce_scatter_single(hidden @ w2.t(), "avg", 0, (device_mesh, 0))
 
         inp = torch.rand(8, 10, device="cuda")
         w1 = torch.rand(7, 10, device="cuda")

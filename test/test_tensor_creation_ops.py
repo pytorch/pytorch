@@ -539,9 +539,9 @@ class TestTensorCreation(TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/155306
         msg = "expected a non-empty list of Tensors"
         with self.assertRaisesRegex(ValueError, msg):
-            torch.concat([], dim='N')
+            torch.concat([], dim=0)
         with self.assertRaisesRegex(ValueError, msg):
-            torch.concatenate([], dim='N')
+            torch.concatenate([], dim=0)
 
     def test_cat_out(self, device):
         x = torch.zeros((0), device=device)
@@ -2789,6 +2789,24 @@ class TestTensorCreation(TestCase):
         self.assertEqual(t[-1].item(), 2)
         del t
 
+        # On ROCm, launches with gridDim.x * blockDim.x >= 2^32 are not
+        # supported and either return hipErrorInvalidConfiguration or fail
+        # silently. Exercise the just-over case (~16 GB at int32) and a
+        # far-above case (~33 GB) when memory permits. arange computes
+        # int64 values then casts down, so for int32 the trailing
+        # 2^32 - 2, 2^32 - 1, 2^32 wrap to -2, -1, 0.
+        if TEST_WITH_ROCM:
+            for bigint in (2 ** 32 + 1, 2 ** 33 + 1):
+                free, _ = torch.cuda.mem_get_info(device)
+                if free < bigint * 4 + (3 << 30):
+                    continue
+                t = torch.arange(bigint, dtype=torch.int32, device=device)
+                self.assertEqual(t.numel(), bigint)
+                self.assertEqual(
+                    t[-3:].cpu(), torch.tensor([-2, -1, 0], dtype=torch.int32)
+                )
+                del t
+
     @expectedFailureMeta  # RuntimeError: The tensor has a non-zero number of elements
     @onlyNativeDeviceTypes
     def test_tensor_ctor_device_inference(self, device):
@@ -4109,6 +4127,63 @@ class TestBufferProtocol(TestCase):
         self.assertEqual(tensor.numel(), 2)
         self.assertSequenceEqual(tensor, [255, 255])
 
+class TestFromBlob(TestCase):
+    def _make_data(self, dtype, numel):
+        numpy_dtype = torch_to_numpy_dtype_dict[dtype]
+        arr = np.arange(1, numel + 1, dtype=numpy_dtype)
+        return arr, arr.ctypes.data
+
+    @dtypes(*all_types_and_complex_and(torch.half))
+    def test_basic(self, device, dtype):
+        arr, ptr = self._make_data(dtype, 6)
+        t = torch._from_blob(ptr, [6], dtype=dtype)
+        self.assertEqual(t, torch.from_numpy(arr))
+
+    @dtypes(*all_types_and_complex_and(torch.half))
+    def test_2d(self, device, dtype):
+        arr, ptr = self._make_data(dtype, 6)
+        t = torch._from_blob(ptr, [2, 3], dtype=dtype)
+        self.assertEqual(t, torch.from_numpy(arr.reshape(2, 3)))
+
+    @dtypes(torch.float32, torch.float64, torch.int32, torch.int64)
+    def test_strides(self, device, dtype):
+        arr, ptr = self._make_data(dtype, 6)
+        t = torch._from_blob(ptr, [2, 3], [1, 2], dtype=dtype)
+        expected = torch.from_numpy(arr.reshape(2, 3, order="F"))
+        self.assertEqual(t, expected)
+
+    @dtypes(torch.float32, torch.int64)
+    def test_shared_memory(self, device, dtype):
+        numpy_dtype = torch_to_numpy_dtype_dict[dtype]
+        arr = np.array([1, 2, 3, 4], dtype=numpy_dtype)
+        t = torch._from_blob(arr.ctypes.data, [4], dtype=dtype)
+        arr[0] = 99
+        self.assertEqual(t[0].item(), 99)
+        t[1] = 77
+        self.assertEqual(arr[1], 77)
+
+    def test_explicit_device(self, device):
+        arr = np.array([1.0, 2.0], dtype=np.float32)
+        t = torch._from_blob(arr.ctypes.data, [2], dtype=torch.float32, device="cpu")
+        self.assertEqual(t.device, torch.device("cpu"))
+        self.assertEqual(t, torch.from_numpy(arr))
+
+    def test_default_dtype(self, device):
+        arr = np.array([1.0, 2.0], dtype=np.float32)
+        with set_default_dtype(torch.float32):
+            t = torch._from_blob(arr.ctypes.data, [2])
+            self.assertEqual(t.dtype, torch.float32)
+        with set_default_dtype(torch.float64):
+            t = torch._from_blob(arr.ctypes.data, [2])
+            self.assertEqual(t.dtype, torch.float64)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
+    def test_invalid_device(self, device):
+        arr = np.array([1.0, 2.0], dtype=np.float32)
+        with self.assertRaises(RuntimeError):
+            torch._from_blob(arr.ctypes.data, [2], dtype=torch.float32, device="cuda")
+
+
 # Tests for the `asarray` function:
 #   Constructs tensors from a Python object that has one of the following
 #   characteristics:
@@ -4452,6 +4527,7 @@ instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
 instantiate_device_type_tests(TestLikeTensorCreation, globals())
 instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
+instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
 instantiate_device_type_tests(TestAsArray, globals())
 
 if __name__ == '__main__':

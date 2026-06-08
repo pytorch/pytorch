@@ -857,7 +857,15 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         ]
 
         init_idx = torch.zeros((), dtype=torch.int64)
-        init_grad_carries = filter_with_masks(grads, carries_tensor_masks)  # type: ignore[arg-type]
+        # Autograd can pass view gradients. The generated backward while_loop
+        # needs stable carry metadata across iterations, so canonicalize tensor
+        # gradients before they become carries.
+        init_grad_carries = tuple(
+            grad.clone(memory_format=torch.contiguous_format)
+            if isinstance(grad, torch.Tensor)
+            else grad
+            for grad in filter_with_masks(grads, carries_tensor_masks)  # type: ignore[arg-type]
+        )
         init_grad_additional_inputs = tuple(
             torch.zeros_like(t)
             for need_keep, t in zip(
@@ -866,7 +874,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             if need_keep
         )
         # We need to the forward inputs to each iteration to compute the backward
-        # which is the concatenation of first iteraiton input i.e. ctx.carries and all iterations's
+        # which is the concatenation of first iteration input i.e. ctx.carries and all iterations'
         # output except the last iteration.
         fw_carries = [
             torch.cat([carry.unsqueeze(0), carries[:-1]])

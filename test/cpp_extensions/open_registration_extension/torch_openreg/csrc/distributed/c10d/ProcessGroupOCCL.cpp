@@ -356,13 +356,5 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::barrier(
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
-c10::intrusive_ptr<ProcessGroupOCCL> createProcessGroupOCCL(
-    const c10::intrusive_ptr<c10d::Store>& store,
-    int rank,
-    int size,
-    const std::chrono::duration<float>& timeout) {
-  return c10::make_intrusive<ProcessGroupOCCL>(rank, size);
-}
-
 } // namespace c10d
 #endif // USE_DISTRIBUTED

@@ -117,10 +117,14 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   END_HANDLE_TH_ERRORS
 }
 
-static void THPStream_dealloc(THPStream* self) {
+void THPStream_dealloc_common(THPStream* self) {
   PyObject_ClearWeakRefs((PyObject*)self);
   Py_CLEAR(self->context);
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
+}
+
+static void THPStream_dealloc(THPStream* self) {
+  THPStream_dealloc_common(self);
 }
 
 static PyObject* THPStream_get_device(THPStream* self, void* unused) {
@@ -294,8 +298,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
 
   // No operation is performed if the stream does not belong to an accelerator.
   if (C10_UNLIKELY(!at::accelerator::isAccelerator(stream_device_type))) {
-    Py_INCREF(_self);
-    return _self;
+    return Py_NewRef(_self);
   }
 
   // Note [Reentrant Stream Context Manager]
@@ -328,8 +331,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
     if (PyList_Append(self->context, Py_None) < 0) {
       throw python_error();
     }
-    Py_INCREF(_self);
-    return _self;
+    return Py_NewRef(_self);
   }
 
   // If the stream is not on the current device, switch the current device to
@@ -358,8 +360,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   if (PyList_Append(self->context, dict.get()) < 0) {
     throw python_error();
   }
-  Py_INCREF(_self);
-  return _self;
+  return Py_NewRef(_self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -453,8 +454,7 @@ static PyObject* THPStream_richcompare(
         break;
     }
   }
-  Py_XINCREF(result);
-  return result;
+  return Py_XNewRef(result);
 }
 
 static const std::initializer_list<PyMemberDef> THPStream_members = {
@@ -551,12 +551,7 @@ static PyTypeObject THPStreamType = {
 void THPStream_init(PyObject* module) {
   THPStreamClass = &THPStreamType;
   Py_SET_TYPE(&THPStreamType, &PyType_Type);
-  if (PyType_Ready(&THPStreamType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPStreamType);
-  if (PyModule_AddObject(
-          module, "Stream", reinterpret_cast<PyObject*>(&THPStreamType)) < 0) {
+  if (PyModule_AddType(module, &THPStreamType) < 0) {
     throw python_error();
   }
 }

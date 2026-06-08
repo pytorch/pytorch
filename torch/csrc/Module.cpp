@@ -56,6 +56,7 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/TensorIterator.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
@@ -223,7 +224,7 @@ static PyObject* THPModule_initExtension(
         oss << '#' << idx << ' ' << frame.funcname << " from " << frame.filename
             << ':' << frame.lineno << '\n';
       }
-      return oss.str();
+      return std::move(oss).str();
     });
   }
 #endif
@@ -488,8 +489,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
         Py_TYPE(obj)->tp_name);
   }
 
-  Py_INCREF(obj);
-  return obj;
+  return Py_NewRef(obj);
 }
 
 static PyObject* THPModule_inferSize(PyObject* _unused, PyObject* args) {
@@ -778,20 +778,21 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     }
   }
 
-  // Get current CUDA/ROCm work stream
+  // Get current CUDA/ROCm or XPU work stream
   static int CurrentWorkStream(
       DLDeviceType device_type,
       int32_t device_id,
       void** out_stream) {
     try {
-#ifdef USE_CUDA
-      if (device_type == kDLCUDA || device_type == kDLROCM) {
-        *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
+      *out_stream = nullptr;
+      const auto acc_type = at::accelerator::getAccelerator(false);
+      if (!acc_type) {
         return 0;
       }
-#endif
-      // For CPU and other devices, return NULL (no stream concept)
-      *out_stream = nullptr;
+      if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
+        *out_stream =
+            at::accelerator::getCurrentStream(device_id).native_handle();
+      }
       return 0;
     } catch (const std::exception& e) {
       PyErr_SetString(PyExc_RuntimeError, e.what());
@@ -1539,6 +1540,55 @@ static PyObject* THPModule_getDefaultDtype(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+// Returns the set of dtypes that are fully realized Python singletons: all
+// floating/complex/integer/bool/float8/float4/bits types. Excludes quantized
+// dtypes and the placeholder sub-byte int/uint types, matching the dtypes
+// tracked in torch.utils._dtype_abbrs.
+static PyObject* THPModule_getAllDtypes(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+#define DEFINE_SCALAR_TYPE(_1, n) at::ScalarType::n,
+  auto all_scalar_types = {
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
+#undef DEFINE_SCALAR_TYPE
+
+  auto is_subbyte_dummy = [](at::ScalarType t) {
+    switch (t) {
+      case at::ScalarType::UInt1:
+      case at::ScalarType::UInt2:
+      case at::ScalarType::UInt3:
+      case at::ScalarType::UInt4:
+      case at::ScalarType::UInt5:
+      case at::ScalarType::UInt6:
+      case at::ScalarType::UInt7:
+      case at::ScalarType::Int1:
+      case at::ScalarType::Int2:
+      case at::ScalarType::Int3:
+      case at::ScalarType::Int4:
+      case at::ScalarType::Int5:
+      case at::ScalarType::Int6:
+      case at::ScalarType::Int7:
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  THPObjectPtr result(PyList_New(0));
+  if (!result)
+    throw python_error();
+  for (auto scalar_type : all_scalar_types) {
+    if (c10::isQIntType(scalar_type) || is_subbyte_dummy(scalar_type)) {
+      continue;
+    }
+    auto* dtype = reinterpret_cast<PyObject*>(torch::getTHPDtype(scalar_type));
+    if (PyList_Append(result.get(), dtype) < 0) {
+      throw python_error();
+    }
+  }
+  return result.release();
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_getDefaultDevice(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(c10::DeviceTypeName(
@@ -1635,9 +1685,9 @@ static PyObject* THPModule_willEngineExecuteNode(
       exec_info,
       "_get_should_execute_nodes should only be called during the backward pass");
   torch::autograd::Node* node = nullptr;
-  std::shared_ptr<torch::autograd::Node> node_sp;
+  c10::intrusive_ptr<torch::autograd::Node> node_sp;
   if (isTHPFunction) {
-    node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata.lock();
+    node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata;
     node = node_sp.get();
   } else {
     node =
@@ -1805,7 +1855,7 @@ static PyObject* THPModule_set_override_stale_capture_stream(
       "enabled must be a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setOverrideStaleCaptureStream(arg == Py_True);
+  at::globalContext().setOverrideStaleCaptureStream(Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -2139,6 +2189,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
+    {"_get_all_dtypes", THPModule_getAllDtypes, METH_NOARGS, nullptr},
     {"_get_default_device", THPModule_getDefaultDevice, METH_NOARGS, nullptr},
     {"_get_qengine", THPModule_qEngine, METH_NOARGS, nullptr},
     {"_set_qengine", THPModule_setQEngine, METH_O, nullptr},
@@ -2192,6 +2243,18 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_disabled_torch_dispatch_impl",
      THPModule_disable_torch_dispatch,
      METH_VARARGS,
+     nullptr},
+    {"_skip_one_hop_torch_function",
+     THPModule_skip_one_hop_torch_function,
+     METH_VARARGS,
+     nullptr},
+    {"_peek_should_skip_torch_function",
+     THPModule_peek_should_skip_torch_function,
+     METH_NOARGS,
+     nullptr},
+    {"_set_skip_next_torch_function",
+     THPModule_set_skip_next_torch_function,
+     METH_O,
      nullptr},
     {"_has_torch_function", THPModule_has_torch_function, METH_O, nullptr},
     {"_has_torch_function_unary",
@@ -2465,6 +2528,8 @@ PyObject* initModule() {
 #endif
 
   torch::distributed::initPlacementBindings(module);
+
+  torch::initTensorIteratorBindings(module);
 
   auto set_module_attr =
       [&](const char* name, PyObject* v, bool incref = true) {
@@ -2837,7 +2902,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "SWIZZLE_32_4_4",
           at::blas::SwizzleType::SWIZZLE_32_4_4,
-          "Blackwell-stype 32x4x4 swizzle");
+          "Blackwell-style 32x4x4 swizzle");
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)
@@ -2913,6 +2978,10 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_key_in_tls", [](const std::string& key) -> bool {
     return at::impl::ThreadLocalPythonObjects::get_state().contains(key);
+  });
+
+  py_module.def("_remove_obj_from_tls", [](const std::string& key) {
+    at::impl::ThreadLocalPythonObjects::erase(key);
   });
 
   py_module.def("_accelerator_hooks_device_count", []() {

@@ -24,7 +24,13 @@ class Info:
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
+    schema = op._schema
     has_kwarg_only_args = utils.has_kwarg_only_args(op._schema)
+    num_positional_args = sum(not a.kwarg_only for a in schema.arguments)
+    has_tensorlist_like_args = any(
+        utils.is_tensorlist_like_type(a.type)
+        for a in (*schema.arguments, *schema.returns)
+    )
 
     @dataclass
     class Metadata:
@@ -74,12 +80,27 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         if info._backward_fn:
             try:
                 prev_needs_input_grad = ctx.needs_input_grad
-                ctx.needs_input_grad = ctx.needs_input_grad[:-1]
+                needs_input_grad = prev_needs_input_grad[:-1]
+                ctx.needs_input_grad = (
+                    *needs_input_grad,
+                    *((False,) * (num_positional_args - len(needs_input_grad))),
+                )
                 result = info._backward_fn(ctx, *grads)
             finally:
                 ctx.needs_input_grad = prev_needs_input_grad
+            expected = num_positional_args
+            actual = len(result) if isinstance(result, tuple) else 1
+            if actual != expected:
+                raise RuntimeError(
+                    f"The backward formula for {op} returned an incorrect "
+                    f"number of gradients (expected {expected}, got {actual}). "
+                    f"Expected one gradient for each positional input to the "
+                    f"operator. Use None for inputs that do not require a "
+                    f"gradient."
+                )
+            num_actual_inputs = len(prev_needs_input_grad) - 1
             if isinstance(result, tuple):
-                return (*result, None)
+                return (*result[:num_actual_inputs], None)
             return result, None
         raise RuntimeError(
             f"Trying to backward through {op} but no autograd "
@@ -96,16 +117,23 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         },
     )
 
-    schema = op._schema
-    if any(
-        utils.is_tensorlist_like_type(a.type)
-        for a in (*schema.arguments, *schema.returns)
-    ):
+    if has_tensorlist_like_args:
         Generated = supports_tensorlist(Generated)
 
     # The dispatcher passes any keyword-only-args as kwargs and the
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
+        if utils.is_out(op):
+            if _C.is_grad_enabled() and _C._any_requires_grad(
+                *args, **keyword_only_args
+            ):
+                raise RuntimeError(
+                    f"{op._opname}(): functions with out=... arguments don't "
+                    "support automatic differentiation, but one of the arguments "
+                    "requires grad."
+                )
+            return forward_no_grad(*args, Metadata(keyset, keyword_only_args))
+
         if _C.is_grad_enabled() and _C._any_requires_grad(*args):
             result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
         else:
@@ -127,7 +155,7 @@ def supports_tensorlist(cls: Any) -> Any:
     orig_apply = cls.apply
 
     @dataclass
-    class Metadata:
+    class TensorListMetadata:
         input_spec: _pytree.TreeSpec
         output_spec: _pytree.TreeSpec | None = None
         result_is_tuple: bool | None = None
@@ -135,7 +163,7 @@ def supports_tensorlist(cls: Any) -> Any:
     def new_forward(ctx, *args):
         metadata = args[-1]
         args = args[:-1]
-        if not isinstance(metadata, Metadata):
+        if not isinstance(metadata, TensorListMetadata):
             raise NotImplementedError(
                 "NYI: calling supports_tensorlist autograd.Function.forward directly. "
                 "You should probably be calling .apply instead. "
@@ -203,7 +231,7 @@ def supports_tensorlist(cls: Any) -> Any:
 
     def new_apply(*args):
         flat_args, input_spec = _pytree.tree_flatten(args, is_leaf=not_list_of_tensor)
-        metadata = Metadata(input_spec)
+        metadata = TensorListMetadata(input_spec)
         result = orig_apply(*flat_args, metadata)  # type: ignore[misc]
         if metadata.output_spec is None:
             raise AssertionError("metadata.output_spec must not be None")

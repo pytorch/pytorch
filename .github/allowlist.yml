@@ -37,4 +37,10 @@
 
 L1:
   - Ascend/pytorch
-  - riseproject-dev/pytorch
+  - riseproject-dev/pytorch-ci
+  - NVIDIA-dev/pytorch-oot-internal
+  - NVIDIA/pytorch-windows-ci
+
+L2:
+  # Canonical test repo for CRCR.
+  - pytorch/crcr-test

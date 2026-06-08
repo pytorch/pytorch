@@ -11,7 +11,7 @@
 #
 # Inputs (env):
 #   PYTORCH_ROOT     Path to the PyTorch checkout.
-#   DESIRED_PYTHONS  Space-separated versions, e.g. "3.10 3.11 3.12 3.13 3.13t".
+#   DESIRED_PYTHONS  Space-separated versions, e.g. "3.10 3.11 3.12 3.13 3.14".
 #   RUNNER_TEMP      Work dir (defaults to /tmp).
 #   BINARY_ENV_FILE  Rewritten per iteration by binary_populate_env.sh;
 #                    defaults to "${RUNNER_TEMP}/env".
