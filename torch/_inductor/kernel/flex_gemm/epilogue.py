@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import hashlib
-import operator
 from typing import Any
 
 import torch
@@ -12,57 +11,14 @@ from torch._inductor.virtualized import ops, V
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
-_BINARY_OPS = {
-    torch.ops.aten.add.Tensor: ops.add,
-    torch.ops.aten.add.Scalar: ops.add,
-    operator.add: ops.add,
-    torch.ops.aten.sub.Tensor: ops.sub,
-    torch.ops.aten.sub.Scalar: ops.sub,
-    operator.sub: ops.sub,
-    torch.ops.aten.mul.Tensor: ops.mul,
-    torch.ops.aten.mul.Scalar: ops.mul,
-    operator.mul: ops.mul,
-    torch.ops.aten.div.Tensor: ops.truediv,
-    torch.ops.aten.div.Scalar: ops.truediv,
-    operator.truediv: ops.truediv,
-    torch.ops.aten.gt.Scalar: ops.gt,
-    torch.ops.aten.gt.Tensor: ops.gt,
-    operator.gt: ops.gt,
-    torch.ops.aten.ge.Scalar: ops.ge,
-    torch.ops.aten.ge.Tensor: ops.ge,
-    operator.ge: ops.ge,
-    torch.ops.aten.lt.Scalar: ops.lt,
-    torch.ops.aten.lt.Tensor: ops.lt,
-    operator.lt: ops.lt,
-    torch.ops.aten.le.Scalar: ops.le,
-    torch.ops.aten.le.Tensor: ops.le,
-    operator.le: ops.le,
-}
-
-_UNARY_OPS = {
-    torch.ops.aten.neg.default: ops.neg,
-    operator.neg: ops.neg,
-    torch.ops.aten.abs.default: ops.abs,
-    torch.abs: ops.abs,
-    torch.ops.aten.exp.default: ops.exp,
-    torch.exp: ops.exp,
-    torch.ops.aten.sqrt.default: ops.sqrt,
-    torch.sqrt: ops.sqrt,
-    torch.ops.aten.sigmoid.default: ops.sigmoid,
-    torch.sigmoid: ops.sigmoid,
-    torch.ops.aten.tanh.default: ops.tanh,
-    torch.tanh: ops.tanh,
-    torch.ops.aten.relu.default: ops.relu,
-    torch.relu: ops.relu,
-}
-
-_METHOD_TARGETS = {
-    "relu": torch.ops.aten.relu.default,
-    "sigmoid": torch.ops.aten.sigmoid.default,
-    "tanh": torch.ops.aten.tanh.default,
-    "abs": torch.ops.aten.abs.default,
-    "sqrt": torch.ops.aten.sqrt.default,
-}
+def _cute_op_name(target: Any) -> str | None:
+    if isinstance(target, torch._ops.OpOverload):
+        op_name = target.overloadpacket.__name__
+    elif isinstance(target, str):
+        op_name = target
+    else:
+        op_name = target.__name__ if callable(target) else None
+    return "truediv" if op_name == "div" else op_name
 
 
 class FlexGemmCuteDSLBody:
@@ -134,51 +90,42 @@ def _cute_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
     raise NotImplementedError(f"unsupported FlexGEMM epilogue constant: {value!r}")
 
 
-def _cute_call_function(
-    target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> Any:
-    if target in _BINARY_OPS:
-        if target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar):
-            alpha = kwargs.get("alpha", 1)
-            rhs = args[1] if alpha == 1 else ops.mul(args[1], alpha).value
+def _cute_call(target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    op_name = _cute_op_name(target)
+    if op_name in {"sum", "mean", "amax", "amin", "prod"}:
+        raise NotImplementedError(f"unsupported FlexGEMM epilogue reduction: {target}")
+    if op_name in ("add", "sub"):
+        alpha = kwargs.get("alpha", 1)
+        rhs = args[1] if alpha == 1 else ops.mul(args[1], alpha).value
+        if op_name == "add":
             return ops.add(args[0], rhs).value
-        if target in (torch.ops.aten.sub.Tensor, torch.ops.aten.sub.Scalar):
-            alpha = kwargs.get("alpha", 1)
-            rhs = args[1] if alpha == 1 else ops.mul(args[1], alpha).value
-            return ops.sub(args[0], rhs).value
-        if kwargs:
-            raise NotImplementedError(
-                f"unsupported kwargs for FlexGEMM epilogue op {target}: {kwargs}"
-            )
-        return _BINARY_OPS[target](*args[:2]).value
-
-    if target in _UNARY_OPS:
-        return _UNARY_OPS[target](args[0]).value
-
-    if target in (torch.where, torch.ops.aten.where.self):
-        return ops.where(*args[:3]).value
-    if target == torch.ops.aten._to_copy.default:
-        return ops.to_dtype(args[0], kwargs["dtype"]).value
-    if target == torch.ops.prims.convert_element_type.default:
+        return ops.sub(args[0], rhs).value
+    if kwargs:
+        if op_name == "_to_copy":
+            return ops.to_dtype(args[0], kwargs["dtype"]).value
+        if op_name == "clamp":
+            result = args[0]
+            min_value = kwargs.get("min", args[1] if len(args) > 1 else None)
+            max_value = kwargs.get("max", args[2] if len(args) > 2 else None)
+            if min_value is not None:
+                result = ops.maximum(result, min_value).value
+            if max_value is not None:
+                result = ops.minimum(result, max_value).value
+            return result
+        raise NotImplementedError(
+            f"unsupported kwargs for FlexGEMM epilogue op {target}: {kwargs}"
+        )
+    if op_name == "convert_element_type":
         return ops.to_dtype(args[0], args[1]).value
-    if target in (torch.ops.aten.clamp.default, torch.clamp):
-        result = args[0]
-        min_value = kwargs.get("min", args[1] if len(args) > 1 else None)
-        max_value = kwargs.get("max", args[2] if len(args) > 2 else None)
-        if min_value is not None:
-            result = ops.maximum(result, min_value).value
-        if max_value is not None:
-            result = ops.minimum(result, max_value).value
-        return result
-    raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {target}")
-
-
-def _cute_call_method(
-    target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> Any:
-    if target not in _METHOD_TARGETS:
-        raise NotImplementedError(f"unsupported FlexGEMM epilogue method: {target}")
-    return _cute_call_function(_METHOD_TARGETS[target], args, kwargs)
+    if op_name is None:
+        raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {target}")
+    try:
+        op = getattr(ops, op_name)
+    except AttributeError:
+        raise NotImplementedError(
+            f"unsupported FlexGEMM epilogue op: {target}"
+        ) from None
+    return op(*args).value
 
 
 def materialize_flex_gemm_epilogue(
@@ -202,11 +149,8 @@ def materialize_flex_gemm_epilogue(
                 node_kwargs = {
                     key: _cute_arg(value, env) for key, value in node.kwargs.items()
                 }
-                if node.op == "call_function":
-                    env[node] = _cute_call_function(node.target, node_args, node_kwargs)
-                    continue
-                if node.op == "call_method":
-                    env[node] = _cute_call_method(node.target, node_args, node_kwargs)
+                if node.op in ("call_function", "call_method"):
+                    env[node] = _cute_call(node.target, node_args, node_kwargs)
                     continue
                 raise NotImplementedError(
                     f"unsupported FlexGEMM epilogue node: {node.format_node()}"

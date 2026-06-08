@@ -10,7 +10,7 @@ from torch._higher_order_ops import flex_gemm
 from torch._higher_order_ops.flex_gemm import supported_flex_gemm_op_names
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUDA
+from torch.testing._internal.common_cuda import SM100OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -50,16 +50,7 @@ class TestFlexGemmRuntimeImport(TestCase):
         self.assertNotIn("quack", sys.modules)
 
 
-@skipIfNoCuteDSL
-@unittest.skipIf(not TEST_CUDA, "CUDA required")
-class TestFlexGemmRuntime(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.relu_epilogue = staticmethod(relu_epilogue)
-        cls.affine_aux_epilogue = staticmethod(affine_aux_epilogue)
-        cls.row_scale_epilogue = staticmethod(row_scale_epilogue)
-
+class FlexGemmTestCase(TestCase):
     def makeTensor(self, *shape, dtype=torch.bfloat16):
         return torch.testing.make_tensor(
             *shape, device="cuda", dtype=dtype, low=-0.1, high=0.1
@@ -76,6 +67,7 @@ class TestFlexGemmRuntime(TestCase):
         eager_error = (
             (low_precision_expected.double() - high_precision_expected).abs().mean()
         )
+        # Model the extra slack as fp32 accumulator rounding across K plus final output rounding.
         fp32_accumulation_eps = (
             math.sqrt(reduction_size) * torch.finfo(torch.float32).eps
         )
@@ -94,7 +86,18 @@ class TestFlexGemmRuntime(TestCase):
             ),
         )
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+
+@skipIfNoCuteDSL
+@unittest.skipIf(not TEST_CUDA, "CUDA required")
+class TestFlexGemmRuntime(FlexGemmTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.relu_epilogue = staticmethod(relu_epilogue)
+        cls.affine_aux_epilogue = staticmethod(affine_aux_epilogue)
+        cls.row_scale_epilogue = staticmethod(row_scale_epilogue)
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_epilogue_with_c_alpha_beta_matches_reference(self):
         from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
 
@@ -123,7 +126,7 @@ class TestFlexGemmRuntime(TestCase):
             out, low_precision_expected, high_precision_expected, k
         )
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_explicit_arg_kind_disambiguates_row_arg(self):
         from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
 
@@ -161,7 +164,7 @@ class TestFlexGemmRuntime(TestCase):
             ("col",),
         )
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_epilogue_infers_captured_aux_arg_kinds(self):
         from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
 
@@ -192,7 +195,7 @@ class TestFlexGemmRuntime(TestCase):
             out, low_precision_expected, high_precision_expected, k
         )
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_validation_rejects_unsupported_epilogue_arg_combinations(self):
         from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
 
@@ -256,7 +259,7 @@ class TestFlexGemmRuntime(TestCase):
                 tuned=True,
             )
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_epilogue_reads_captured_aux_tensors(self):
         from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
 
@@ -290,7 +293,7 @@ class TestFlexGemmRuntime(TestCase):
 
 
 @instantiate_parametrized_tests
-class TestFlexGemmEpilogueHOP(TestCase):
+class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     def assertFlexGemmGeneratedCode(self, code, *checks):
         file_check = (
             FileCheck()
@@ -321,28 +324,42 @@ class TestFlexGemmEpilogueHOP(TestCase):
 
         torch.testing.assert_close(actual, epilogue_fn(a @ b))
 
-    def test_mm_eager_matches_reference(self):
-        a = torch.randn(8, 16)
-        b = torch.randn(16, 12)
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_compiled_matches_reference(self):
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
 
         def epilogue_fn(acc):
             return (acc + 1).relu()
 
-        actual = flex_gemm(
-            torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+        actual = torch.compile(flex_gemm, backend="inductor", fullgraph=True)(
+            torch.mm,
+            (a, b),
+            epilogue_fn,
+            kernel_options={"backend": "QUACK"},
         )
 
-        torch.testing.assert_close(actual, epilogue_fn(a @ b))
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            epilogue_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
 
-    def test_addmm_eager_matches_reference(self):
-        bias = torch.randn(8, 12)
-        a = torch.randn(8, 16)
-        b = torch.randn(16, 12)
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_addmm_compiled_matches_reference(self):
+        bias = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
 
         def epilogue_fn(acc):
             return acc.relu()
 
-        actual = flex_gemm(
+        actual = torch.compile(flex_gemm, backend="inductor", fullgraph=True)(
             torch.addmm,
             (bias, a, b),
             epilogue_fn,
@@ -350,13 +367,18 @@ class TestFlexGemmEpilogueHOP(TestCase):
             kernel_options={"backend": "QUACK"},
         )
 
-        torch.testing.assert_close(
-            actual, epilogue_fn(torch.addmm(bias, a, b, beta=0.5, alpha=1.5))
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.addmm(bias, a, b, beta=0.5, alpha=1.5)),
+            epilogue_fn(
+                torch.addmm(bias.double(), a.double(), b.double(), beta=0.5, alpha=1.5)
+            ),
+            a.shape[1],
         )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_generated_code_calls_flex_gemm_adapter(self):
         def epilogue_fn(acc):
             return (acc + 1).relu()
@@ -376,12 +398,17 @@ class TestFlexGemmEpilogueHOP(TestCase):
             torch.compile(fn, backend="inductor", fullgraph=True), a, b
         )
 
-        torch.testing.assert_close(actual, epilogue_fn(a @ b), atol=1e-2, rtol=1e-2)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            epilogue_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
         self.assertFlexGemmGeneratedCode(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_addmm_generated_code_calls_flex_gemm_adapter(self):
         def epilogue_fn(acc):
             return acc.relu()
@@ -403,23 +430,25 @@ class TestFlexGemmEpilogueHOP(TestCase):
             torch.compile(fn, backend="inductor", fullgraph=True), bias, a, b
         )
 
-        torch.testing.assert_close(
+        self.assertMatchesLowPrecisionEager(
             actual,
             epilogue_fn(torch.addmm(bias, a, b, beta=0.5, alpha=1.5)),
-            atol=1e-2,
-            rtol=1e-2,
+            epilogue_fn(
+                torch.addmm(bias.double(), a.double(), b.double(), beta=0.5, alpha=1.5)
+            ),
+            a.shape[1],
         )
         self.assertFlexGemmGeneratedCode(code, "C=")
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize(
         "case",
         (
             (
                 "unsupported_epilogue",
-                lambda acc: acc.log(),
+                lambda acc: acc.sum(dim=1, keepdim=True),
                 {"backend": "QUACK"},
                 "unsupported FlexGEMM epilogue",
             ),
