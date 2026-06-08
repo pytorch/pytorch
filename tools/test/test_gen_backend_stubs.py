@@ -408,6 +408,22 @@ supported:
             """Operator 'mul.out' has 'define_meta: True' but 'structured: False'. Custom meta functions require a structured kernel.""",
         )
 
+    # structured kernels are out-primary; structured: true without use_out_as_primary would
+    # silently emit a plain non-structured out kernel (no meta reuse, no functional), so reject.
+    def test_structured_requires_use_out_as_primary(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: false
+supported:
+- maximum.out:
+    structured: true"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertExpectedInline(
+            output_error,
+            """Operator 'maximum.out' has 'structured: True' but the backend sets 'use_out_as_primary: False'. Structured kernels are out-primary; set use_out_as_primary: True so the functional/inplace are derived from the out.""",
+        )
+
     # structured: true is only valid on ops that are structured in native_functions.yaml.
     def test_structured_true_on_non_structured_op(self) -> None:
         yaml_str = """\
@@ -765,6 +781,19 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
         # div.out is non-structured here, so no Meta registration is emitted.
         out = self.define_meta_registrations("- div.out")
         self.assertEqual(out, "")
+
+    # A multi-output structured op (sort -> values, indices) must build a tuple in the generated
+    # Meta wrapper; returning a single Tensor into the tuple slot would not compile.
+    def test_define_meta_multi_output_returns_tuple(self) -> None:
+        out = self.define_meta_registrations(
+            "- sort.values_stable:\n    structured: true\n    define_meta: true"
+        )
+        self.assertIn("std::array<at::Tensor, 2> outputs_;", out)
+        self.assertIn(
+            "return std::make_tuple(std::move(op.outputs_[0]), "
+            "std::move(op.outputs_[1]));",
+            out,
+        )
 
 
 if __name__ == "__main__":
