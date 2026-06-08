@@ -54,6 +54,13 @@ PS_INSTALL_ARGS="'/quiet','InstallAllUsers=1','PrependPath=0','Include_test=0'"
 if [[ -n "$ADDITIONAL_OPTIONS" ]]; then
     PS_INSTALL_ARGS="${PS_INSTALL_ARGS},'${ADDITIONAL_OPTIONS}'"
 fi
+# Debug wheels link torch_python.dll against the debug CPython import lib
+# (pythonXY_d.lib), which pyconfig.h auto-links once /MDd defines _DEBUG. The
+# python.org installer only ships that lib (and python_d.exe) with
+# Include_debug=1, so request it when building a debug wheel.
+if [[ "${LIBTORCH_CONFIG:-}" == "debug" ]]; then
+    PS_INSTALL_ARGS="${PS_INSTALL_ARGS},'Include_debug=1'"
+fi
 PS_INSTALL_ARGS="${PS_INSTALL_ARGS},'TargetDir=${PYDIR_W}'"
 
 rm -f "$INSTALLER"
