@@ -986,16 +986,14 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     else:
         result = fast_random_decomps()
     if config.fallback_batch_norm:
-        # Strip every BN entry by name. Also mutate `decompositions` so the
-        # global dict (read by make_fallback's assertion fallback) agrees.
-        bn_keys = [
-            k
-            for k in result
-            if "batch_norm" in (k.name() if hasattr(k, "name") else str(k))
-        ]
-        for k in bn_keys:
-            decompositions.pop(k, None)
-        result = {k: v for k, v in result.items() if k not in bn_keys}
+        # Strip every BN entry by name from the returned table only. Do NOT
+        # mutate `decompositions` -- the patch needs to be reversible across
+        # @config.patch entry/exit.
+        result = {
+            k: v
+            for k, v in result.items()
+            if "batch_norm" not in (k.name() if hasattr(k, "name") else str(k))
+        }
     return result
 
 
