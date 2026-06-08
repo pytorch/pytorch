@@ -1161,6 +1161,7 @@ def _has_script_object_arg(schema: torch.FunctionSchema) -> bool:
 # You can obtain an OpOverload object through attribute query.
 class OpOverloadPacket(Generic[_P, _T]):
     __file__: ClassVar[str] = "torch.ops"
+    __qualname__: str
 
     def __init__(
         self,
@@ -1397,7 +1398,9 @@ class _OpNamespace(types.ModuleType):
             qualified_op_name, op_name, op, overload_names
         )
         opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
-        opoverloadpacket.__qualname__ = f"{opoverloadpacket.__module__}.{opoverloadpacket.__name__}"
+        opoverloadpacket.__qualname__ = (
+            f"{opoverloadpacket.__module__}.{opoverloadpacket.__name__}"
+        )
         # cache the opoverloadpacket to ensure that each op corresponds to
         # a unique OpOverloadPacket object
         setattr(self, op_name, opoverloadpacket)

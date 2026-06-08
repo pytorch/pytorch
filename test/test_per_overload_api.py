@@ -86,9 +86,7 @@ class TestPerOverloadAPI(TestCase):
         add_packet = torch.ops.aten.add
         add_tensoroverload = add_packet.Tensor
         self.assertEqual(add_tensoroverload.__name__, "add.Tensor")
-        self.assertEqual(
-            add_tensoroverload.__qualname__, "torch.ops.aten.add.Tensor"
-        )
+        self.assertEqual(add_tensoroverload.__qualname__, "torch.ops.aten.add.Tensor")
 
     def test_qualname_nested_namespace(self):
         # qualname should reflect the resolved namespace, not the class default
