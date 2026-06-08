@@ -24,6 +24,7 @@ from torch._guards import CompileContext, StorageOverlap, TracingContext
 from torch._inductor.graph import GraphLowering
 from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.profiler import profile
@@ -1917,10 +1918,12 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             )
         )
 
+    @fx_config.patch(translation_validation=False)
     def test_partitioner_saves_unreplaced_input_symbols_for_bw(self):
-        shape_env = ShapeEnv()
+        shape_env = ShapeEnv(should_record_events=False)
         s0 = make_symbol(SymT.SIZE, 0, integer=True)
         shape_env.var_to_range[s0] = ValueRanges(2, 10)
+        shape_env.add_backed_var_to_val(s0, 3)
         s0_sym = shape_env.create_symintnode(s0, hint=3)
 
         u0_sym = shape_env.create_unbacked_symint()
