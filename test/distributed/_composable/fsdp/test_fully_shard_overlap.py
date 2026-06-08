@@ -92,8 +92,8 @@ class TestFullyShardOverlap(FSDPTest):
             fully_shard(lin, reshard_after_forward=True)
         fully_shard(model, reshard_after_forward=True)
 
-        orig_all_gather_into_tensor = dist.all_gather_into_tensor
-        orig_reduce_scatter_tensor = dist.reduce_scatter_tensor
+        orig_all_gather_into_tensor = dist.all_gather_single
+        orig_reduce_scatter_tensor = dist.reduce_scatter_single
         comm_stream = torch.get_device_module(device_type).Stream()
 
         def delay_collective():
@@ -130,7 +130,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
                         self.rank
                     ]
-                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
+                    dist.all_gather_single(dummy_ag_output, dummy_ag_input)
                 return ref_model(inp)
 
         def fwd():
@@ -152,7 +152,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
                         self.rank
                     ]
-                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
+                    dist.all_gather_single(dummy_ag_output, dummy_ag_input)
                 loss = ref_model(inp).sum()
                 # Run dummy all-gathers per weight again since we are
                 # resharding after forward
@@ -161,7 +161,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
                         self.rank
                     ]
-                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
+                    dist.all_gather_single(dummy_ag_output, dummy_ag_input)
                 loss.backward()
                 # Run dummy reduce-scatters per weight
                 for lin in ref_model:
@@ -169,7 +169,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dummy_rs_output = torch.chunk(dummy_rs_input, self.world_size)[
                         self.rank
                     ]
-                    dist.reduce_scatter_tensor(dummy_rs_output, dummy_rs_input)
+                    dist.reduce_scatter_single(dummy_rs_output, dummy_rs_input)
 
         def fwd_bwd():
             with (
@@ -206,7 +206,7 @@ class TestFullyShardOverlap(FSDPTest):
         fully_shard(model[1], reshard_after_forward=False)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
 
-        orig_all_gather_into_tensor = dist.all_gather_into_tensor
+        orig_all_gather_into_tensor = dist.all_gather_single
 
         def delayed_all_gather(*args, **kwargs):
             torch.get_device_module(device_type)._sleep(
