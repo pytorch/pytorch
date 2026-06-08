@@ -1965,8 +1965,6 @@ class TestFP8Matmul(TestCase):
         if "xpu" in device:
             if fast_accum:
                 raise unittest.SkipTest("fast_accum not supported on XPU, skipping")
-            if recipe == "nvfp4":
-                raise unittest.SkipTest("nvfp4 not supported on XPU, skipping")
         M, K, N = mkn
         if recipe == "nvfp4" and K % 32 != 0:
             raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
@@ -2588,7 +2586,7 @@ class TestFP8Matmul(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
-    @skipXPU
+    @onlyOn(["cuda", "xpu"])
     def test_blockwise_nvfp4_compile(self, device) -> None:
 
         M, K, N = 128, 128, 128
