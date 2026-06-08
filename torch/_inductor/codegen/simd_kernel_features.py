@@ -31,7 +31,12 @@ class NodeScheduleMarker:
     @staticmethod
     def only_nodes(it: Iterable[NodeScheduleEntry]) -> Iterable[SchedulerNode]:
         for item in it:
-            if not (item is DisableReduction or item is EnableReduction):
+            if not (
+                item is DisableReduction
+                or item is EnableReduction
+                or item is DisablePointwiseLoop
+                or isinstance(item, EnablePointwiseLoop)
+            ):
                 yield item  # type: ignore[misc]
 
     @staticmethod
@@ -70,6 +75,25 @@ class EnableReduction(NodeScheduleMarker):
                 pass
             else:
                 yield node  # type: ignore[misc]
+
+
+class EnablePointwiseLoop(NodeScheduleMarker):
+    """
+    Marker to enable a loop for multi-dimensional pointwise nodes after DisableReduction.
+    Used for patterns where pointwise has different iteration space than reduction.
+
+    The loop_numel parameter specifies the inner dimension size to loop over.
+    """
+
+    def __init__(self, loop_numel: sympy.Expr):
+        super().__init__()
+        self.loop_numel = loop_numel
+
+
+class DisablePointwiseLoop(NodeScheduleMarker):
+    """
+    Marker to end an EnablePointwiseLoop block.
+    """
 
 
 class SIMDKernelFeatures:
@@ -369,8 +393,16 @@ class MemoryEstimator:
                 self.kernel_sizes = kernel_size_inside_loop
                 self.loops.append(MemoryEstimate())
                 continue
-            if not isinstance(node, SchedulerNode):
-                raise AssertionError(f"expected SchedulerNode, got {type(node)}")
+            elif isinstance(node, EnablePointwiseLoop):
+                self.inside_reduction = False
+                self.kernel_sizes = (self.groups[0], node.loop_numel)
+                self.loops.append(MemoryEstimate())
+                continue
+            elif node is DisablePointwiseLoop:
+                self.inside_reduction = False
+                self.kernel_sizes = kernel_size_outside_loop
+                continue
+            assert isinstance(node, SchedulerNode)
             rw = extract_loop_body_with_args(
                 node._body,
                 SIMDKernel.map_kernel_groups_to_node_sizes(
