@@ -16,7 +16,13 @@ from torch.cuda._graph_annotations import (
     remap_to_exec_graph,
     resolve_pending_annotations,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skipIfRocm,
+    TestCase,
+)
 
 
 TEST_CUDA = torch.cuda.is_available()
@@ -30,6 +36,7 @@ except ImportError:
 
 
 # cuda.bindings is NVIDIA-only; graph annotation APIs have no ROCm equivalent.
+@instantiate_parametrized_tests
 @skipIfRocm
 @unittest.skipUnless(TEST_CUDA, "CUDA not available")
 @unittest.skipUnless(TEST_CUDA_BINDINGS, "cuda.bindings not available")
@@ -463,6 +470,61 @@ class TestMarkKernels(TestCase):
             ann = anns[0]
             self.assertEqual(ann["name"], "aux_branch")
             self.assertEqual(ann["stream"], expected_stream_id)
+
+    def _exec_graph_id(self, graph):
+        from cuda.bindings import runtime as cuda_runtime
+
+        handle = cuda_runtime.cudaGraphExec_t(init_value=graph.raw_cuda_graph_exec())
+        _, exec_graph_id = cuda_runtime.cudaGraphExecGetId(handle)
+        return exec_graph_id
+
+    @parametrize("keep_graph", [True, False])
+    def test_multiple_graphs_in_sequence_each_remapped(self, keep_graph):
+        """Several graphs captured in sequence, then resolved once and
+        remapped each, must all be annotated -- not just the last one.
+
+        Covers both keep_graph modes: with keep_graph=True the template
+        survives capture, with keep_graph=False it is destroyed -- the capture
+        id is recovered from the graph object either way.
+        """
+        graph_a = torch.cuda.CUDAGraph(keep_graph=keep_graph)
+        graph_b = torch.cuda.CUDAGraph(keep_graph=keep_graph)
+        x = torch.randn(8, device="cuda")
+
+        with torch.cuda.graph(graph_a):
+            with mark_kernels("graph_a"):
+                _ = x + 1
+
+        # Break in between, then capture a second graph with its own marks.
+        with torch.cuda.graph(graph_b):
+            with mark_kernels("graph_b"):
+                _ = x * 2
+
+        if keep_graph:
+            # keep_graph=False auto-instantiates at capture_end.
+            graph_a.instantiate()
+            graph_b.instantiate()
+
+        # Resolve the whole sequence once, then remap each graph.
+        resolve_pending_annotations()
+        remap_to_exec_graph(graph_a)
+        remap_to_exec_graph(graph_b)
+
+        exec_a = self._exec_graph_id(graph_a)
+        exec_b = self._exec_graph_id(graph_b)
+        self.assertNotEqual(exec_a, exec_b)
+
+        graph_ids_by_name: dict[str, set] = {}
+        for tools_id, anns in get_kernel_annotations().items():
+            self.assertEqual(len(anns), 1)
+            graph_ids_by_name.setdefault(anns[0]["str"], set()).add(tools_id >> 32)
+
+        self.assertIn("graph_a", graph_ids_by_name)
+        self.assertIn("graph_b", graph_ids_by_name)
+        # Each graph's annotations land under that graph's exec id, proving
+        # both -- not just the last -- were remapped correctly.
+        self.assertEqual(graph_ids_by_name["graph_a"], {exec_a})
+        self.assertEqual(graph_ids_by_name["graph_b"], {exec_b})
 
     def test_mark_kernels_skips_preexisting_dependents_on_entry_frontier(self):
         graph = torch.cuda.CUDAGraph()
