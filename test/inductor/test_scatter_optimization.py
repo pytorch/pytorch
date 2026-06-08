@@ -200,24 +200,7 @@ class TestScatterOpt(TestCase):
 
 
 class TestPartitionedScatterOpt(TestCase):
-    """
-    Tests for the partitioned scatter FX pass
-    (torch/_inductor/fx_passes/reduced_atomic_contention.py).
-
-    The pass replaces high-contention index_put(accumulate=True) ops with a
-    partitioned scatter-add that distributes writes across num_partitions
-    expanded buffers to reduce atomic contention, then sums them back.
-
-    Tests are structured as:
-      1. Accuracy  — compiled output matches eager within numerical tolerance
-      2. Gate skip — pass correctly bypasses unsupported/low-benefit operations
-      3. Counters  — inductor counter bookkeeping reflects pass decisions
-      4. Unit      — pure-function math for _compute_num_partitions
-    """
-
-    # -----------------------------------------------------------------------
-    # Fixtures
-    # -----------------------------------------------------------------------
+    """Tests for the partitioned scatter FX pass (reduced_atomic_contention.py)."""
 
     def setUp(self):
         super().setUp()
@@ -233,17 +216,8 @@ class TestPartitionedScatterOpt(TestCase):
         config.partitioned_scatter_force = self._saved_force
         super().tearDown()
 
-    # -----------------------------------------------------------------------
-    # Helpers
-    # -----------------------------------------------------------------------
-
     def _check_accuracy(self, f, args, *, atol=1e-1, rtol=1e-2, exact=False):
-        """
-        Run f eagerly and through Inductor, assert the results agree.
-
-        exact=True uses torch.equal (integer accumulation is associative so
-        the partitioned result must be bit-for-bit identical to eager).
-        """
+        """Run f eagerly and through Inductor, assert the results agree."""
         with torch.no_grad():
             expected = f(*args)
             compiled_f = torch.compile(f, backend="inductor", fullgraph=True)
@@ -267,9 +241,7 @@ class TestPartitionedScatterOpt(TestCase):
     ):
         """
         Create (out, idx, vals) for a 1-index scatter-add along `dim`.
-
         index_high controls contention: smaller = more writes per slot.
-        Defaults to output_shape[dim] // 2 (moderate contention).
         """
         if index_high is None:
             index_high = output_shape[dim] // 2 or 1
@@ -283,21 +255,8 @@ class TestPartitionedScatterOpt(TestCase):
         out = torch.zeros(output_shape, dtype=dtype)
         return out, idx, vals
 
-    # -----------------------------------------------------------------------
-    # Accuracy — PR reference example (scaled down for CI)
-    # -----------------------------------------------------------------------
-
     def test_pr_reference_accuracy(self):
-        """
-        Scaled-down version of the PR benchmark gist (jataylo/dd3a6353...).
-
-        Original dimensions: N=1_000_000, D=100, n_small=501.
-        CI dimensions:       N=10_000,   D=10,  n_small=51.
-
-        Three independent scatter-adds into three output buffers with
-        worst-case contention (index range = 4 slots, ratio ≈ 19.6×).
-        All three ops should be transformed by the pass.
-        """
+        """Scaled-down PR benchmark: three scatter-adds with high contention (4 slots)."""
         torch.manual_seed(42)
         N, D, n_small = 10_000, 10, 51
 
@@ -311,7 +270,6 @@ class TestPartitionedScatterOpt(TestCase):
         out0 = torch.zeros(n_small, D, dtype=torch.float32)
         out1 = torch.zeros(n_small, D, dtype=torch.float32)
         out2 = torch.zeros(n_small, D, dtype=torch.float32)
-        # index range [0, 4) mirrors the highest-contention row in the PR table
         idx0 = torch.randint(0, 4, (N,), dtype=torch.int64)
         idx1 = torch.randint(0, 4, (N,), dtype=torch.int64)
         idx2 = torch.randint(0, 4, (N,), dtype=torch.int64)
@@ -322,12 +280,7 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertGreaterEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
 
     def test_accuracy_int32_exact(self):
-        """
-        Integer scatter-add must produce an exact match to eager.
-
-        Integer addition is associative, so the partitioned reordering of
-        writes is mathematically exact: result must be bit-for-bit identical.
-        """
+        """Integer scatter-add must be bit-for-bit identical to eager (addition is associative)."""
         torch.manual_seed(4)
         N = 8192
 
@@ -337,17 +290,10 @@ class TestPartitionedScatterOpt(TestCase):
         out, idx, vals = self._make_scatter_inputs(N, (8,), torch.int32, index_high=8)
         self._check_accuracy(f, (out, idx, vals), exact=True)
 
-    # -----------------------------------------------------------------------
-    # Accuracy — in-place variant (index_put_)
-    # -----------------------------------------------------------------------
-
     def test_accuracy_inplace_index_put(self):
-        """
-        in-place index_put_ with accumulate=True is also pattern-matched.
-        The pass replaces it with the same partitioned algorithm.
-        """
+        """index_put_ (in-place) is also matched and produces correct output."""
         torch.manual_seed(7)
-        N, n, D = 8192, 8, 4  # ratio = 8192/(8*4) = 256
+        N, n, D = 8192, 8, 4
 
         def f(out, idx, vals):
             out.index_put_([idx], vals, accumulate=True)
@@ -359,23 +305,11 @@ class TestPartitionedScatterOpt(TestCase):
 
         self._check_accuracy(f, (out, idx, vals), atol=1.0, rtol=1e-2)
 
-    # -----------------------------------------------------------------------
-    # Skip gate tests — pass correctly bypasses ineligible ops
-    # -----------------------------------------------------------------------
-
     def test_skip_accumulate_false(self):
-        """
-        index_put with accumulate=False does not match the registered patterns
-        (patterns hard-code True in the 4th position) so the pass never fires.
-
-        We use a permutation index so there are no duplicate writes and the
-        eager result is deterministic (accumulate=False with duplicates would
-        be non-deterministic and untestable for exact equality).
-        """
-        n = 256  # small enough to use a full permutation
+        """index_put with accumulate=False doesn't match the registered patterns."""
+        n = 256
 
         def f(out, idx, vals):
-            # accumulate=False with a permutation index: each slot written exactly once
             return out.index_put([idx], vals, accumulate=False)
 
         torch.manual_seed(10)
@@ -383,7 +317,6 @@ class TestPartitionedScatterOpt(TestCase):
         idx = torch.randperm(n, dtype=torch.int64)
         vals = torch.randn(n, dtype=torch.float32)
 
-        # Accuracy: pass skips so compiled should match eager exactly
         self._check_accuracy(f, (out, idx, vals), exact=True)
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
 
@@ -410,17 +343,8 @@ class TestPartitionedScatterOpt(TestCase):
 
     def test_force_mode_bypasses_heuristic_gates(self):
         """
-        partitioned_scatter_force=True bypasses gates 6 (min_index_size) and 7
-        (min_contention_ratio) and the diminishing-returns cap on num_partitions,
-        while still enforcing the hard memory-budget and correctness gates.
-
-        Uses two ops that the normal heuristics would skip:
-          Op A — index_size=100 < min_index_size=4096  (gate 6 skip)
-          Op B — index_size=4096, output_size=16384,
-                 contention_ratio=0.25 < 1.0            (gate 7 skip)
-
-        Both should be applied under force mode, and the output must still be
-        numerically correct.
+        partitioned_scatter_force=True bypasses the min_index_size and
+        min_contention_ratio gates while still enforcing correctness constraints.
         """
 
         def f(out_a, idx_a, vals_a, out_b, idx_b, vals_b):
@@ -429,19 +353,18 @@ class TestPartitionedScatterOpt(TestCase):
             return out_a, out_b
 
         torch.manual_seed(15)
-        # Op A: tiny index (would normally be skipped by gate 6)
+        # Op A: index_size=100 < min_index_size → normally skipped by gate 6
         out_a = torch.zeros(10, dtype=torch.float32)
         idx_a = torch.randint(0, 5, (100,), dtype=torch.int64)
         vals_a = torch.randn(100, dtype=torch.float32)
 
-        # Op B: low contention ratio (would normally be skipped by gate 7)
+        # Op B: contention_ratio=0.25 < 1.0 → normally skipped by gate 7
         out_b = torch.zeros(16384, dtype=torch.float32)
         idx_b = torch.randint(0, 16384, (4096,), dtype=torch.int64)
         vals_b = torch.randn(4096, dtype=torch.float32)
 
         args = (out_a, idx_a, vals_a, out_b, idx_b, vals_b)
 
-        # Without force: both ops skipped
         with torch.no_grad():
             expected = f(*args)
             torch.compile(f, backend="inductor", fullgraph=True)(*args)
@@ -452,7 +375,6 @@ class TestPartitionedScatterOpt(TestCase):
             0,
         )
 
-        # With force: both ops applied
         counters.clear()
         torch._dynamo.reset()
         saved_force = config.partitioned_scatter_force
@@ -474,41 +396,18 @@ class TestPartitionedScatterOpt(TestCase):
                 f"force mode output mismatch: expected={e[:5]} actual={a[:5]}",
             )
 
-    # -----------------------------------------------------------------------
-    # Unit tests — _compute_num_partitions pure function
-    # -----------------------------------------------------------------------
-
     def test_compute_num_partitions_tight_budget(self):
-        """Exactly enough memory for 4 partitions of a 1 MB buffer."""
-        # overhead = output_size * element_bytes * (P-1)
-        # 4 partitions: overhead = 1M * 4 * 3 = 12 MB
-        # 8 partitions: overhead = 1M * 4 * 7 = 28 MB → won't fit in 20 MB
-        output_size = 1_000_000
-        element_bytes = 4
-        available = 20_000_000  # 20 MB → fits P=4 (12 MB) but not P=8 (28 MB)
-        result = _compute_num_partitions(
-            available, output_size, element_bytes, min_p=2, max_p=128
-        )
+        """Memory constraint picks P=4: P=8 overhead (28 MB) exceeds 20 MB budget."""
+        # P=4: overhead = 1M * 4 * 3 = 12 MB ≤ 20 MB
+        # P=8: overhead = 1M * 4 * 7 = 28 MB > 20 MB
+        result = _compute_num_partitions(20_000_000, 1_000_000, 4, min_p=2, max_p=128)
         self.assertEqual(result, 4)
 
     def test_compute_num_partitions_diminishing_returns_cap(self):
-        """
-        With ample memory, the contention cap limits P so the sum-reduction
-        kernel never dominates the scatter kernel.
-
-        Cap formula: P <= 4 * (index_size / scatter_dim_size), floored to power-of-2.
-
-        index_size=1024, scatter_dim_size=16 → writes_per_slot=64
-        → cap = 4 * 64 = 256 → floor(log2(256)) = 8 → 2^8 = 256
-        But max_p=128, so result = min(256, 128) = 128. Memory is ample (not the bottleneck).
-
-        index_size=64, scatter_dim_size=16 → writes_per_slot=4
-        → cap = 4 * 4 = 16 → floor(log2(16)) = 4 → 2^4 = 16
-        Even with ample memory, P is capped at 16.
-        """
+        """Diminishing-returns cap limits P when memory is not the bottleneck."""
         available = 10**12  # effectively unlimited
 
-        # writes_per_slot = 1024/16 = 64 → cap = 256, floored to 256, then min(256, 128) = 128
+        # writes_per_slot=64 → cap=256, min(256, max_p=128) = 128
         result = _compute_num_partitions(
             available,
             1024,
@@ -520,7 +419,7 @@ class TestPartitionedScatterOpt(TestCase):
         )
         self.assertEqual(result, 128)
 
-        # writes_per_slot = 64/16 = 4 → cap = 16; memory is not the limit
+        # writes_per_slot=4 → cap=16
         result = _compute_num_partitions(
             available,
             1024,
@@ -532,7 +431,7 @@ class TestPartitionedScatterOpt(TestCase):
         )
         self.assertEqual(result, 16)
 
-        # writes_per_slot = 8/16 = 0.5 → cap = max(2, 2^int(log2(2))) = 2
+        # writes_per_slot=0.5 → cap=max(2, 2)=2
         result = _compute_num_partitions(
             available,
             1024,
@@ -546,20 +445,13 @@ class TestPartitionedScatterOpt(TestCase):
 
     def test_skip_low_contention_ratio_multidim(self):
         """
-        For a multidimensional output [n, D], the contention gate uses
-        index_size / scatter_dim_size (n), NOT index_size / output_numel (n*D).
+        Contention gate uses index_size / scatter_dim_size, not index_size / output_numel.
 
-        Classic failing case: embedding weight gradient [vocab, dim] with D >> 1.
-          vocab=4096, dim=64, N=5000:
-            Old (wrong): 5000 / (4096*64) = 0.019 < 1.0 → incorrectly skip
-            New (correct): 5000 / 4096 = 1.22 >= 1.0 → apply
-
-        Parameters chosen so that:
-          index_size=5000 >= min_index_size=4096  (gate 6 passes)
-          OLD ratio = N/output_numel = 5000/262144 = 0.019 < 1.0  (old gate skips)
-          NEW ratio = N/scatter_dim  = 5000/4096  = 1.22  ≥ 1.0  (new gate applies)
+        For [vocab=4096, dim=64] with N=5000 indices:
+          wrong: 5000 / (4096*64) = 0.019 → skip
+          right: 5000 / 4096 = 1.22 → apply
         """
-        vocab, dim, N = 4096, 64, 5000  # ratio_old=0.019 < 1.0, ratio_new=1.22 ≥ 1.0
+        vocab, dim, N = 4096, 64, 5000
 
         def f(out, idx, vals):
             return out.index_put([idx], vals, accumulate=True)
@@ -578,7 +470,6 @@ class TestPartitionedScatterOpt(TestCase):
             torch.allclose(expected, actual, atol=1e-1, rtol=1e-2),
             f"multidim scatter mismatch: {expected[:3]} vs {actual[:3]}",
         )
-        # If the gate is correct the pass applied; if it still uses numel the counter stays 0.
         self.assertGreater(
             counters["inductor"]["partitioned_scatter_applied"],
             0,
@@ -589,45 +480,21 @@ class TestPartitionedScatterOpt(TestCase):
     @unittest.skipUnless(HAS_GPU, "requires GPU for CUDA-aware memory tracking")
     def test_memory_aware_partition_count(self):
         """
-        Verifies that live tensor memory in the FX graph constrains num_partitions,
-        and that setting floor=total_gpu causes the pass to skip entirely.
+        Verify that live tensor memory constrains num_partitions.
 
-        Graph (572 MB of actual GPU allocations)
-        -----------------------------------------
-        placeholder: out        ( 10 M float32 =  40 MB)
-        placeholder: idx        ( 11 M int64   =  88 MB)
-        placeholder: vals       ( 11 M float32 =  44 MB)
-        placeholder: persistent (100 M float32 = 400 MB)  ← large, live throughout
+        Graph: out(40 MB) + idx(88 MB) + vals(44 MB) + persistent(400 MB) inputs.
+        At the index_put node, baseline live memory ≈ 440 MB.
 
-        index_put(out, [idx], vals) → scattered   ← persistent still live: 440 MB baseline
-        sum(persistent)             → psum         ← persistent freed here
-        add(scattered, psum)        → output
-
-        MemoryTracker baseline at index_put (after scheduling):
-            initial live = 40+88+44+400 = 572 MB
-            +40 MB (index_put output), -(40+88+44) MB (out/idx/vals freed)
-            = 440 MB
-
-        Sub-test 1 — real memory pressure, reasonable floor (allowed_peak = 600 MB):
-            available = 600 - 440 = 160 MB
-            P=4 overhead = 10M * 4 * 3 = 120 MB ≤ 160 MB → fits
-            P=8 overhead = 10M * 4 * 7 = 280 MB > 160 MB → doesn't fit
-            → num_partitions = 4, applied > 0
-
-        Sub-test 2 — floor = total_gpu → allowed_peak = 0 → available < 0 → pass skips:
-            Setting non_model_floor_bytes = total_gpu means "reserve all GPU memory
-            as off-limits floor", leaving zero headroom for expanded scatter buffers.
-            _compute_num_partitions returns 0 < min_p=2 → skip entirely.
+        Sub-test 1: floor leaves 600 MB of headroom → available ≈ 160 MB → P=4 applied.
+        Sub-test 2: floor = total_gpu → no headroom → pass skips.
         """
         torch.manual_seed(12)
-        N = 11_000_000  # index size: ratio=1.1 >= 1.0, size >= 4096
-        output_size = 10_000_000  # 10 M float32 = 40 MB
-        persist_n = 100_000_000  # 100 M float32 = 400 MB
+        N = 11_000_000
+        output_size = 10_000_000
+        persist_n = 100_000_000
 
         def f(out, idx, vals, persistent):
             scattered = out.index_put([idx], vals, accumulate=True)
-            # persistent's last use is here, after index_put:
-            # MemoryTracker counts it as live (440 MB) at the index_put node.
             return scattered + persistent.sum()
 
         out = torch.zeros(output_size, dtype=torch.float32, device=GPU_TYPE)
@@ -640,9 +507,6 @@ class TestPartitionedScatterOpt(TestCase):
 
         _, total_gpu = torch.cuda.mem_get_info()
 
-        # ---- Sub-test 1: real memory pressure → applied > 0 ---------------
-        # floor = total_gpu - 600 MB simulates a GPU with 600 MB of usable headroom.
-        # baseline ≈ 440 MB → available ≈ 160 MB → num_partitions = 4.
         saved_floor = config.partitioned_scatter_non_model_floor_bytes
         try:
             config.partitioned_scatter_non_model_floor_bytes = total_gpu - 600_000_000
@@ -664,9 +528,6 @@ class TestPartitionedScatterOpt(TestCase):
             f"expected[:5]={expected[:5]}\nactual[:5]={actual[:5]}",
         )
 
-        # ---- Sub-test 2: floor = total_gpu → allowed_peak = 0 → skip ------
-        # Setting non_model_floor_bytes = total_gpu leaves zero headroom for
-        # expanded scatter buffers, so _compute_num_partitions returns 0 < min_p=2.
         counters.clear()
         torch._dynamo.reset()
 
@@ -694,46 +555,23 @@ class TestPartitionedScatterOpt(TestCase):
             "floor=total_gpu: output should still be correct (pass gracefully skips)",
         )
 
-    # -----------------------------------------------------------------------
-    # Performance
-    # -----------------------------------------------------------------------
-
     @unittest.skipUnless(HAS_GPU, "requires GPU")
     def test_perf_atomic_contention(self):
         """
-        Reproduces the PR #168073 benchmark.
-
-        Three independent index_put(accumulate=True) ops into three float32[n,D]
-        buffers with N=1_000_000 scatter operations.  The index range is kept
-        deliberately small so many threads write to the same output slots,
-        creating heavy atomic contention — exactly as the original PR gist:
-          https://gist.github.com/jataylo/dd3a6353ad2859efd65fa87b28aa3ebd
-
-        PR benchmark results (N=1M, D=100, n=501, float32):
-          uniform_range | MI300 no-pass | MI300 partitioned | speedup
-          0-3           |  8.31 ms      |  2.20 ms          | 3.78×
-          0-7           |  4.32 ms      |  1.63 ms          | 2.66×
-
-        We benchmark only the moderate-contention case (8 slots, index ∈ [0,7])
-        because it is the hardest scenario that still comfortably clears the
-        minimum threshold: high contention (4 slots) always scores higher, while
-        very-low-contention cases produce negligible gain and are better covered
-        by the heuristic gate unit tests.  CI on ROCm MI300X consistently
-        delivers ≈1.8× here, so a 1.5× floor catches real regressions with
-        enough slack for hardware variance.
+        Reproduce the PR benchmark: three index_put(accumulate=True) ops with
+        moderate contention (8 slots). CI on ROCm MI300X delivers ≈1.8×, so the
+        1.5× floor catches regressions with enough slack for hardware variance.
         """
         torch.manual_seed(42)
         N, D, n = 1_000_000, 100, 501
-        MIN_SPEEDUP = 1.5  # worst-case floor: observed ≈1.8× on CI (ROCm MI300X)
+        MIN_SPEEDUP = 1.5
 
         def scatter_fn(out0, out1, out2, idx, vals):
-            """Three independent scatter-adds — the exact PR benchmark workload."""
             out0 = out0.index_put([idx], vals, accumulate=True)
             out1 = out1.index_put([idx], vals, accumulate=True)
             out2 = out2.index_put([idx], vals, accumulate=True)
             return out0, out1, out2
 
-        # Moderate contention: 8 slots (index values ∈ [0, 7]).
         vals = torch.randn(N, D, dtype=torch.float32, device=GPU_TYPE)
         out0 = torch.zeros(n, D, dtype=torch.float32, device=GPU_TYPE)
         out1 = torch.zeros(n, D, dtype=torch.float32, device=GPU_TYPE)
@@ -741,7 +579,6 @@ class TestPartitionedScatterOpt(TestCase):
         idx = torch.randint(0, 8, (N,), dtype=torch.int64, device=GPU_TYPE)
         inputs = (out0, out1, out2, idx, vals)
 
-        # ---- baseline: pass disabled --------------------------------------------
         config.partitioned_scatter_enabled = False
         torch._dynamo.reset()
         baseline_fn = torch.compile(scatter_fn, backend="inductor", fullgraph=True)
@@ -750,7 +587,6 @@ class TestPartitionedScatterOpt(TestCase):
                 baseline_fn(*inputs)
         baseline_ms = benchmarker.benchmark_gpu(lambda: baseline_fn(*inputs))
 
-        # ---- partitioned: pass enabled ------------------------------------------
         config.partitioned_scatter_enabled = True
         torch._dynamo.reset()
         counters.clear()
