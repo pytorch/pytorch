@@ -5411,6 +5411,16 @@
       ]
     }
   ],
+  "GB5729": [
+    {
+      "Gb_type": "Unspecialized nn.Module container indexed by nn.Module attribute",
+      "Context": "mp_subscript_impl: {self}",
+      "Explanation": "Dynamo does not support selecting a child module or parameter from an unspecialized nn.Module container with a key read from nn.Module state. The selected object can change without a direct guard on that object.",
+      "Hints": [
+        "Use a constant key for nn.Module container indexing."
+      ]
+    }
+  ],
   "GB0361": [
     {
       "Gb_type": "triton kernel unsupported feature",
