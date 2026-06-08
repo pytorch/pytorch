@@ -2540,7 +2540,7 @@ def _maybe_evaluate_static_worker(
             continue
         if vr is None:
             raise AssertionError(f"vr must not be None for symbol {k}")
-        if size_oblivious and is_size_like:
+        if size_oblivious and is_size_like and vr.upper >= 2:
             lower = max(2, vr.lower)
             # Clamping size-oblivious to some quantity below sys.maxsize
             # helps us determine that f(u0) != sys.maxsize, which is a
@@ -2552,11 +2552,7 @@ def _maybe_evaluate_static_worker(
             # Excluding the very upper bound can be helpful
             if upper > lower:
                 upper = upper - 1
-            # This is a bit dodgy: what this means is that there was a
-            # size-like unbacked symbol whose upper bound < 2.  This
-            # causes... problems.
-            if lower <= upper:
-                vr = ValueRanges(lower, upper)
+            vr = ValueRanges(lower, upper)
         else:
             lower = vr.lower
         # Don't do anything if we don't have a nontrivial lower bound
@@ -4424,7 +4420,10 @@ class ShapeEnv:
             compiler_min=min,
             compiler_max=max,
         )
-        self.size_like.add(a)
+        if self.var_to_range[a].upper >= 2:
+            self.size_like.add(a)
+        else:
+            self.size_like.discard(a)
 
     @record_shapeenv_event()
     def _constrain_range(self, a: sympy.Expr, min: int, max: int) -> None:
@@ -6955,7 +6954,8 @@ class ShapeEnv:
             # NB: discarding the old upper bound in intentional, per
             # https://github.com/pytorch/pytorch/pull/123675
             for x in self.size_like & var_to_range.keys():
-                if var_to_range[x] is not None:
+                vr = var_to_range[x]
+                if vr is not None and vr.upper >= 2:
                     # NB: do NOT set upper to 2 ** 48, we're using this solely
                     # to determine if we can do size-like replacement, the
                     # upper bound is irrelevant here
@@ -7468,17 +7468,12 @@ class ShapeEnv:
         *,
         is_constraint: bool = False,
     ) -> None:
-        lower, upper = vr.lower, vr.upper
+        upper = vr.upper
 
-        # If we have a size-like unbacked SymInt, refuse to refine the range to be
-        # less than two.  This is because when we intersect this range
-        # with [2, inf] for size oblivious tests, the range would be
-        # unsatisfiable.  In other words, once you have a size-like
-        # unbacked SymInt, we can never learn that it is exactly zero or one,
-        # because we would now give inconsistent results for all size
-        # oblivous tests!
-        if upper < 2 and symbol in self.size_like:
-            vr = ValueRanges(lower, 2)
+        # If other constraints prove a size-like symbol can only be zero or one,
+        # it no longer has any non-0/1 values for size-oblivious reasoning.
+        if upper < 2:
+            self.size_like.discard(symbol)
 
         # Updates the range and the guards corresponding to each bound of the symbol.
         if symbol not in self.var_to_range:
@@ -7574,7 +7569,15 @@ class ShapeEnv:
                         CeilToInt(rat_b_bound.lower), FloorToInt(rat_b_bound.upper)
                     )
                     self._update_var_to_range(b, b_bound, self.var_to_range_sloc[a])
+                    if self.var_to_range[b].is_singleton():
+                        self._set_replacement(
+                            b,
+                            self.var_to_range[b].lower,
+                            "range_refined_to_singleton",
+                        )
+                        tgt = self.replace(tgt)
                     tgt_bound = self.bound_sympy(tgt)
+                    self._update_var_to_range(a, tgt_bound)
                     if not tgt_bound.issubset(src_bound):
                         raise AssertionError(
                             f"{tgt_bound=} not a subset of {src_bound=}"
