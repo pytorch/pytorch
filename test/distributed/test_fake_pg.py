@@ -124,7 +124,7 @@ class TestFakePG(TestCase):
         default_pg = dist.distributed_c10d._get_default_group()
 
         def allgather_fn(tensor):
-            return funcol.all_gather_tensor(tensor, 0, default_pg)
+            return funcol.all_gather_single(tensor, 0, default_pg)
 
         gm = make_fx(allgather_fn)(torch.randn(2, 2, device=device_type))
         FileCheck().check("all_gather").check("wait_tensor").run(str(gm.graph))
