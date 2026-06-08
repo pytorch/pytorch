@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sympy
 from sympy import S
+from sympy.core.relational import Relational
 
 from torch._prims_common import BoolLike, FloatLike, IntLike
 
@@ -858,8 +859,13 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     if isinstance(expr, (sympy.And, sympy.Or)):
         return type(expr)(*map(canonicalize_bool_expr, expr.args))
 
+    if isinstance(expr, Relational) and not (
+        isinstance(expr.lhs, sympy.Expr) and isinstance(expr.rhs, sympy.Expr)
+    ):
+        return expr
+
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
-    t: type[Any]
+    t: type[Relational]
     if isinstance(expr, tuple(opposite.keys())):
         rhs = expr.lhs - expr.rhs  # type: ignore[attr-defined]
         t = opposite[type(expr)]  # type: ignore[index]
