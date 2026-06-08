@@ -166,13 +166,10 @@ class SIMDKernelFeatures:
                 index = dep.index
                 if not isinstance(index, sympy.Expr):
                     continue
-                free = index.free_symbols
                 try:
-                    # Substitute all symbols with 0 to isolate the constant.
-                    if free:
-                        const_part = index.subs({s: sympy.Integer(0) for s in free})
-                    else:
-                        const_part = index
+                    const_part = index.subs(
+                        {s: sympy.Integer(0) for s in index.free_symbols}
+                    )
                     if not isinstance(const_part, sympy.Expr):
                         continue
                     if const_part > int32_max or const_part < int32_min:
