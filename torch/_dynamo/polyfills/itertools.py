@@ -380,7 +380,9 @@ if sys.version_info >= (3, 12):
     @substitute_in_graph(itertools.batched, is_embedded_type=True)  # type: ignore[arg-type]
     def batched(*args, **kwargs) -> Iterator[tuple[_T, ...]]:  # type: ignore[no-untyped-def]
         if len(args) != 2:
-            raise TypeError(f"batched expected 2 arguments, got {len(args)}")
+            raise TypeError(
+                f"batched takes exactly 2 positional arguments({len(args)} given)"
+            )
         if kwargs.keys() - {"strict"}:
             unexpected = next(iter(kwargs.keys() - {"strict"}))
             raise TypeError(
@@ -389,12 +391,7 @@ if sys.version_info >= (3, 12):
 
         iterable, n = args
         strict = kwargs.get("strict", False)
-        if not isinstance(n, int):
-            raise TypeError(
-                "integer argument expected, got float"
-                if isinstance(n, float)
-                else f"'{type(n).__name__}' object cannot be interpreted as an integer"
-            )
+        n = int(n)
         if n < 1:
             raise ValueError("n must be at least one")
 
