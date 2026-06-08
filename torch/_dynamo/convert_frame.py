@@ -232,14 +232,14 @@ def _dynamo_compile_context() -> Any:
                 yield
             return
 
-        clear_functorch_stack = (
+        with (
             torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack()
-        )
-        with clear_functorch_stack as functorch_dynamic_layer_stack:
-            with functorch_stack_context(
-                functorch_dynamic_layer_stack, functorch_interpreter_stack
-            ):
-                yield
+        ) as functorch_dynamic_layer_stack:
+            functorch_dynamic_layer_stack = list(functorch_dynamic_layer_stack)
+        with functorch_stack_context(
+            functorch_dynamic_layer_stack, functorch_interpreter_stack
+        ):
+            yield
 
 
 _T = TypeVar("_T")

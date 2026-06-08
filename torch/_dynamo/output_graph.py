@@ -3125,7 +3125,8 @@ class OutputGraph(OutputGraphCommon):
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
-            compiled_fn = compiler_fn(gm, example_inputs)
+            with torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack():
+                compiled_fn = compiler_fn(gm, example_inputs)
             _step_logger()(logging.INFO, f"done compiler function {name}")
             if not callable(compiled_fn):
                 raise AssertionError("compiler_fn did not return callable")
