@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from exception_traceback_linter import LINTER_CODE, check_file
+from exception_traceback_linter import check_file, LINTER_CODE
 
 
 def _lint(source: str) -> list[dict]:
@@ -175,6 +175,37 @@ except Exception as e:
 """
         msgs = _lint(source)
         self.assertEqual(len(msgs), 0)
+
+    def test_nested_except_raise_does_not_suppress(self):
+        """A bare raise in a nested except handler should not suppress
+        the warning for the outer exception."""
+        source = """\
+try:
+    pass
+except Exception as e:
+    saved = e
+    try:
+        other()
+    except ValueError:
+        raise
+"""
+        msgs = _lint(source)
+        self.assertEqual(len(msgs), 1)
+
+    def test_nested_function_clear_does_not_suppress(self):
+        """clear_frames inside a nested function does not clear the outer
+        exception."""
+        source = """\
+import traceback
+try:
+    pass
+except Exception as e:
+    saved = e
+    def cleanup(exc):
+        traceback.clear_frames(exc.__traceback__)
+"""
+        msgs = _lint(source)
+        self.assertEqual(len(msgs), 1)
 
 
 if __name__ == "__main__":

@@ -107,6 +107,21 @@ class _TracebackVisitor(ast.NodeVisitor):
             self.is_reraised = True
         self.generic_visit(node)
 
+    # Don't descend into nested scopes -- a bare `raise` or `clear_frames`
+    # inside a nested except/function/lambda does not apply to the outer
+    # exception variable.
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        return
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        return
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        return
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        return
+
     def _value_is_exc(self, node: ast.expr) -> bool:
         return isinstance(node, ast.Name) and node.id in self.aliases
 
