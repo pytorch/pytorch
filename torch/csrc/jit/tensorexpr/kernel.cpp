@@ -569,7 +569,7 @@ static bool constZeroDimTensorAsScalarArg(
       std::stringstream ss;
       ss << "Unsupported tensor dtype:" << dtype
          << " for converting constant 0-dim Tensor to scalar" << '\n';
-      throw unsupported_dtype(ss.str());
+      throw unsupported_dtype(std::move(ss).str());
   }
 }
 
