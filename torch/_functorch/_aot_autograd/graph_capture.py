@@ -19,6 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
 from .. import config
+from ..compile_utils import fx_graph_cse
 from .descriptors import AOTInput, BackwardTokenAOTInput
 from .functional_utils import (
     assert_functional_graph,
@@ -380,6 +381,12 @@ def aot_dispatch_base_graph(
     # there should be *NO* mutating ops in the graph at this point.
     if not aot_config.disable_functionalization:
         copy_count = assert_functional_graph(fw_module.graph)
+        fw_module.graph.eliminate_dead_code()
+        # Run CSE before adding stream/control-dependency nodes, which encode ordering.
+        # Inference CSE is separately gated because it does not have the
+        # partitioner's memory/liveness heuristics.
+        if config.cse and config.cse_inference:
+            fw_module.graph = fx_graph_cse(fw_module.graph)
         assign_epilogue_copy_streams(fw_module)
         # Wrap sync nodes with control_deps to prevent reordering
         wrap_all_sync_nodes_with_control_deps(fw_module)
