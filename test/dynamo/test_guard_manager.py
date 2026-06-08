@@ -1852,6 +1852,7 @@ print(json.dumps({
     "lookup_count": stats["lookup_count"],
     "attempt": stats["guard_last_success_shadow_attempt"],
     "incomplete": stats["guard_last_success_shadow_incomplete"],
+    "support_check_ns": stats["guard_last_success_support_check_ns"],
     "disabled_reasons": stats["guard_last_success_disabled_reasons"],
 }))
 """
@@ -1868,6 +1869,7 @@ print(json.dumps({
         self.assertGreater(stats["lookup_count"], 0)
         self.assertGreater(stats["attempt"], 0)
         self.assertGreater(stats["incomplete"], 0)
+        self.assertGreaterEqual(stats["support_check_ns"], 0)
         self.assertGreater(len(stats["disabled_reasons"]), 0)
 
     def test_guard_fast_plan_subtree_memo_miss_disables_and_falls_back(self):

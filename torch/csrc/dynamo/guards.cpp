@@ -37,7 +37,6 @@
 #include <mutex>
 #include <optional>
 #include <sstream>
-#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -214,6 +213,7 @@ struct GuardLastSuccessStats {
   std::atomic<uint64_t> shadow_max_passes{0};
   std::atomic<uint64_t> token_count_sum{0};
   std::atomic<uint64_t> token_cap_disabled{0};
+  std::atomic<uint64_t> support_check_ns{0};
   std::atomic<uint64_t> receipt_update_ns{0};
   std::atomic<uint64_t> receipt_compare_ns{0};
 };
@@ -543,6 +543,7 @@ void reset_guard_lookup_stats() {
   store_zero(last_success_stats.shadow_max_passes);
   store_zero(last_success_stats.token_count_sum);
   store_zero(last_success_stats.token_cap_disabled);
+  store_zero(last_success_stats.support_check_ns);
   store_zero(last_success_stats.receipt_update_ns);
   store_zero(last_success_stats.receipt_compare_ns);
   {
@@ -759,6 +760,8 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(last_success_stats.token_count_sum);
   result["guard_last_success_token_cap_disabled"] =
       load_relaxed(last_success_stats.token_cap_disabled);
+  result["guard_last_success_support_check_ns"] =
+      load_relaxed(last_success_stats.support_check_ns);
   result["guard_last_success_receipt_update_ns"] =
       load_relaxed(last_success_stats.receipt_update_ns);
   result["guard_last_success_receipt_compare_ns"] =
@@ -1237,15 +1240,25 @@ static void record_guard_last_success_shadow_reset() {
   add_relaxed(guard_last_success_stats().shadow_reset, 1);
 }
 
+static void record_guard_last_success_support_check(uint64_t check_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_last_success_stats().support_check_ns, check_ns);
+}
+
 static void record_guard_last_success_incomplete(
     const char* reason,
     const std::string& path = "") {
   if (!guard_lookup_stats_enabled()) {
     return;
   }
+  if (reason == nullptr) {
+    reason = "unsupported:unknown";
+  }
   auto& stats = guard_last_success_stats();
   add_relaxed(stats.shadow_incomplete, 1);
-  if (std::string_view(reason) == "token_cap_exceeded") {
+  if (std::strcmp(reason, "token_cap_exceeded") == 0) {
     add_relaxed(stats.token_cap_disabled, 1);
   }
   std::lock_guard<std::mutex> lock(
@@ -2067,14 +2080,34 @@ static bool tensor_layout_does_not_support_stride(const at::Tensor& tensor) {
       tensor.layout() == c10::kSparseBsr;
 }
 
-static std::vector<c10::SymInt> tensor_strides_for_guard_check(
-    const at::Tensor& tensor) {
-  if (tensor_layout_does_not_support_stride(tensor)) {
-    return std::vector<c10::SymInt>(
-        tensor.ndimension(), c10::SymInt(static_cast<int64_t>(-1)));
+static bool tensor_strides_match_guard_check(
+    const at::Tensor& tensor,
+    const std::vector<int64_t>& stride_indices,
+    const std::vector<c10::SymInt>& stride_values) {
+  if (stride_indices.size() != stride_values.size()) {
+    return false;
   }
-  auto strides = tensor.sym_strides();
-  return std::vector<c10::SymInt>(strides.begin(), strides.end());
+  if (tensor_layout_does_not_support_stride(tensor)) {
+    const int64_t ndim = tensor.ndimension();
+    const c10::SymInt unsupported_stride(static_cast<int64_t>(-1));
+    for (auto i : c10::irange(stride_indices.size())) {
+      const int64_t index = stride_indices[i];
+      if (index < 0 || index >= ndim ||
+          stride_values[i] != unsupported_stride) {
+        return false;
+      }
+    }
+    return true;
+  }
+  const auto current_strides = tensor.sym_strides();
+  for (auto i : c10::irange(stride_indices.size())) {
+    const int64_t index = stride_indices[i];
+    if (index < 0 || index >= static_cast<int64_t>(current_strides.size()) ||
+        stride_values[i] != current_strides[index]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 struct GuardSubtreeEntryToken {
@@ -2219,16 +2252,10 @@ struct GuardSubtreeEntryToken {
       }
     }
 
-    const std::vector<c10::SymInt> current_strides =
-        tensor_strides_for_guard_check(tensor);
-    for (auto i : c10::irange(tensor_stride_indices.size())) {
-      const int64_t index = tensor_stride_indices[i];
-      if (index < 0 ||
-          index >= static_cast<int64_t>(current_strides.size()) ||
-          tensor_stride_values[i] != current_strides[index]) {
-        reason = GuardFastPlanTensorTokenMissReason::Stride;
-        return false;
-      }
+    if (!tensor_strides_match_guard_check(
+            tensor, tensor_stride_indices, tensor_stride_values)) {
+      reason = GuardFastPlanTensorTokenMissReason::Stride;
+      return false;
     }
     return true;
   }
@@ -7760,7 +7787,11 @@ bool run_root_guard_manager_with_last_success_receipt(
 
   RootGuardManager* root_mgr = static_cast<RootGuardManager*>(root);
   GuardSubtreeMemoSupportAnalysis analysis;
-  if (!root_mgr->supports_subtree_memo_recursive(&analysis)) {
+  const uint64_t support_start_ns = guard_lookup_time_ns();
+  const bool supported = root_mgr->supports_subtree_memo_recursive(&analysis);
+  record_guard_last_success_support_check(
+      guard_lookup_time_ns() - support_start_ns);
+  if (!supported) {
     record_guard_last_success_incomplete(
         analysis.reason.empty() ? "unsupported:unknown"
                                 : analysis.reason.c_str(),
@@ -7771,6 +7802,8 @@ bool run_root_guard_manager_with_last_success_receipt(
 
   std::vector<GuardSubtreeEntryToken> tokens;
   {
+    // This receipt is shadow-only diagnostics. The recorder deliberately
+    // disables nested manager fastplan so it can observe the full guard tree.
     GuardSubtreeMemoRecorderScope recorder(&tokens);
     const bool result = run_root_guard_manager(root, f_locals);
     if (!result) {
@@ -7785,7 +7818,7 @@ bool run_root_guard_manager_with_last_success_receipt(
     return true;
   }
   if (tokens.size() > kGuardFastPlanMaxTokens) {
-    record_guard_last_success_incomplete("token_cap_exceeded");
+    record_guard_last_success_incomplete("token_cap_exceeded", "L");
     state->reset();
     return true;
   }
