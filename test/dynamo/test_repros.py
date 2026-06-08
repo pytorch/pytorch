@@ -34,6 +34,7 @@ from unittest import mock
 import numpy as np
 
 import torch
+import torch._dynamo.exc
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
@@ -81,6 +82,7 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfRocm,
     skipIfWindows,
+    skipIfXpu,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
@@ -3142,6 +3144,40 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(cnt.frame_count, 0)
         self.assertEqual(cnt.op_count, 0)
+
+    @torch._dynamo.config.patch(max_loop_unroll_nodes=8)
+    def test_loop_unroll_limit_errors_in_fullgraph(self):
+        def fn(x):
+            for _ in range(32):
+                x = x + 1
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Loop generated too many FX graph nodes"
+        ):
+            opt_fn(torch.zeros(()))
+
+    @torch._dynamo.config.patch(max_loop_unroll_nodes=8)
+    def test_loop_unroll_limit_errors_when_graph_breaks_disallowed(self):
+        def fn(x):
+            for _ in range(32):
+                x = x + 1
+            return x
+
+        with (
+            torch._dynamo.error_on_graph_break(True),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Loop generated too many FX graph nodes",
+            ),
+        ):
+            torch.compile(fn, backend="eager")(torch.zeros(()))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Loop generated too many FX graph nodes"
+        ):
+            torch._dynamo.export(fn)(torch.zeros(()))
 
     @torch._dynamo.config.patch(max_loop_unroll_nodes=0)
     def test_loop_unroll_limit_can_be_disabled(self):
@@ -8106,6 +8142,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         peak_mem2 = torch.get_device_module(device).max_memory_allocated()
         self.assertTrue(peak_mem1 == peak_mem2)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3860")
     # test involves custom ops that return unbacked symints
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     # test requires the activation memory budget code to think
@@ -8466,6 +8503,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mem_after = torch.accelerator.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3835")
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)
@@ -9499,8 +9537,10 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
 
 instantiate_parametrized_tests(ReproTests)
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(ReproTestsDevice, globals(), only_for=devices)
+devices = ["cuda", "hpu", "xpu"]
+instantiate_device_type_tests(
+    ReproTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

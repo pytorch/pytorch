@@ -1450,12 +1450,27 @@ class InstructionTranslatorBase(
 
         unrolled_node_count = len(self.output.graph.nodes) - start_node_count
         if unrolled_node_count > limit:
-            raise exc.SkipFrame(
-                "Dynamo skipped tracing because a Python loop generated "
-                f"{unrolled_node_count} FX graph nodes, exceeding "
-                f"torch._dynamo.config.max_loop_unroll_nodes={limit}. "
+            context = (
+                f"Loop generated {unrolled_node_count} FX graph nodes, exceeding "
+                f"torch._dynamo.config.max_loop_unroll_nodes={limit}."
+            )
+            explanation = (
+                "Dynamo stopped tracing because a Python loop generated too many "
+                "FX graph nodes."
+            )
+            hints = [
                 "Set torch._dynamo.config.max_loop_unroll_nodes=0 to allow "
-                "unbounded loop unrolling.\n"
+                "unbounded loop unrolling.",
+            ]
+            if self.one_graph or self.export or self.error_on_graph_break:
+                unimplemented(
+                    gb_type="Loop generated too many FX graph nodes",
+                    context=context,
+                    explanation=explanation,
+                    hints=hints,
+                )
+            raise exc.SkipFrame(
+                f"{explanation} {context} {hints[0]}\n"
                 f"Frame info: {format_frame_info(self.f_code)}"
             )
 
@@ -5243,13 +5258,12 @@ class InstructionTranslatorBase(
         self.indexof: dict[Instruction, int] = (
             indexof if indexof is not None else get_indexof(self.instructions)
         )
-        self.loop_backedge_targets = {
-            target
-            for idx, inst in enumerate(self.instructions)
-            if inst.opname in JUMP_OPNAMES and inst.target is not None
-            for target in (self.indexof[inst.target],)
-            if target <= idx
-        }
+        self.loop_backedge_targets = set()
+        for idx, inst in enumerate(self.instructions):
+            if inst.opname in JUMP_OPNAMES and inst.target is not None:
+                target = self.indexof[inst.target]
+                if target <= idx:
+                    self.loop_backedge_targets.add(target)
         self.loop_backedge_start_nodes = {}
         self.f_locals: dict[str, Any] = (
             f_locals  # needed for recording accessed locals for replay
