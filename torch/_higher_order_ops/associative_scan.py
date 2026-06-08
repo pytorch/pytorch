@@ -212,10 +212,12 @@ def associative_scan(
             raise ValueError(
                 f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
             )
-        if cm == "pointwise" and not all(l.device.type in ("cuda", "xpu") for l in lxs):
-            raise ValueError(
-                "For combine_mode='pointwise', all input tensors need to be on CUDA or XPU"
-            )
+        # NOTE: The CUDA/XPU device requirement for combine_mode='pointwise' is
+        # enforced in the Inductor lowering (torch/_inductor/lowering.py), not
+        # here. pointwise codegen only happens through Inductor, so validating
+        # the device this early would block tracing/export of the
+        # associative_scan HOP on other devices (e.g. CPU). See
+        # https://github.com/pytorch/pytorch/issues/186594.
 
         # Checks for xs
         if len(lxs) == 0:

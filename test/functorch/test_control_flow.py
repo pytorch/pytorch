@@ -4047,6 +4047,42 @@ class AssociativeScanTests(TestCase):
                 inputs=x,
             )
 
+    def test_associative_scan_pointwise_export_cpu(self):
+        # combine_mode='pointwise' only has Inductor codegen on CUDA/XPU, but the
+        # device check must not block tracing/export of the HOP on other devices.
+        # See https://github.com/pytorch/pytorch/issues/186594.
+        def combine_fn(x_ab, y_ab):
+            x, a, b = x_ab
+            y, _, _ = y_ab
+            return x * a + y * b, a.clone(), b.clone()
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.rand(6))
+                self.b = torch.nn.Parameter(torch.rand(6))
+
+            def forward(self, xs):
+                a_tiled = self.a.unsqueeze(0).expand(xs.shape[0], -1)
+                b_tiled = self.b.unsqueeze(0).expand(xs.shape[0], -1)
+                out, _, _ = associative_scan(
+                    combine_fn,
+                    (xs, a_tiled, b_tiled),
+                    dim=0,
+                    combine_mode="pointwise",
+                )
+                return out
+
+        ep = torch.export.export(M(), (torch.randn(16, 6),))
+        self.assertTrue(
+            any(
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.associative_scan
+                for node in ep.graph_module.graph.nodes
+            ),
+            "exported graph should retain the associative_scan HOP",
+        )
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
