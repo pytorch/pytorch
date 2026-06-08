@@ -14,7 +14,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
-#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #endif
 
 namespace at {
