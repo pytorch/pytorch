@@ -2709,7 +2709,7 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
         msg += std::to_string(v) + ",";
       }
       msg.pop_back();
-      msg += "\"";
+      msg += '"';
       auto msgs = py::list();
       for (auto code_part : verbose_code_parts()) {
         msgs.append(code_part);

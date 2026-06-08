@@ -997,7 +997,7 @@ void TensorExprKernel::genInputDebugNames() {
     std::string sanitized_name = sanitizeName(input->debugName());
     // we could get fancier here, but name conflict is extremely unlikely
     while (name_set.count(sanitized_name)) {
-      sanitized_name.append("_");
+      sanitized_name.push_back('_');
     }
     value_to_name[input] = sanitized_name;
     name_set.insert(sanitized_name);
