@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import ctypes
 import logging
-import os
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 import numpy as np
@@ -14,27 +13,8 @@ import numpy as np
 import torch
 
 from . import cupti_python
-from .cupti_python import (
-    ActivityAPI,
-    ActivityCudaEvent2,
-    ActivityExternalCorrelation,
-    ActivityKernel11,
-    ActivityKind,
-    ActivityMemcpy6,
-    ActivityMemset4,
-    ActivityOverhead3,
-    ActivitySynchronization2,
-)
-from .fields import (
-    FIELD_ENUMS,
-    FIELD_REGISTRY,
-    MemcpyField,
-    MemsetField,
-    plan_padding,
-    record_layout,
-    STRING_FIELDS,
-    SyncField,
-)
+from .cupti_python import ActivityKind
+from .records import FIELD_REGISTRY, STRING_FIELDS, Sync
 
 
 # A registration request: either a plain iterable of activity kinds (meaning "all
@@ -68,8 +48,8 @@ _DEFAULT_FLUSH_PERIOD_S = 1.0
 # means the session doesn't record every sync between flushes. KIND + END are the
 # fields the fence decodes.
 _FENCE_KIND = ActivityKind.SYNCHRONIZATION
-_FENCE_END_FIELD = int(SyncField.END)
-_FENCE_FIELDS = frozenset({0, _FENCE_END_FIELD})
+_FENCE_END_FIELD = Sync.END.id
+_FENCE_FIELDS = frozenset({Sync.KIND.id, _FENCE_END_FIELD})
 
 
 def _has_active_cuda_context() -> bool:
@@ -91,20 +71,6 @@ def _cuda_version_string() -> str:
     return torch.version.cuda or ""
 
 
-# --- columnar (v2 / user-defined-record) buffer demux ------------------------
-# The monitor (not the observer) demuxes each completed buffer into per-kind
-# columns -- ``{kind: {field_id: column}}`` -- against the record layout it
-# computed from the field spec (``record_layout``). Numeric fields become
-# little-endian unsigned numpy columns; ``const char*`` string fields (e.g.
-# kernel ``NAME``) are dereferenced to object arrays here, while the buffer (and
-# the strings it points to) is still alive. The v1 whole-record counterpart is
-# ``decode_columns_v1`` below.
-
-# A record layout as produced by ``record_layout``:
-# list of (kind, record_size, [(field_id, offset, size), ...]).
-RecordLayouts = list[tuple[int, int, list[tuple[int, int, int]]]]
-
-
 def _deref_cstr(ptr: int) -> str:
     if not ptr:
         return ""
@@ -112,241 +78,120 @@ def _deref_cstr(ptr: int) -> str:
     return value.decode(errors="replace") if value is not None else ""
 
 
-def decode_columns_v2(
-    buffer_ptr: int,
-    valid_size: int,
-    record_layouts: RecordLayouts,
-    wanted: dict[int, set[int]],
-) -> dict[int, dict[int, Any]]:
-    """Demux a completed buffer into ``{kind: {field_id: column}}``.
+class CuptiMonitorBuffer:
+    """A completed CUPTI buffer (the item from ``_cupti_monitor.get_completed()``)
+    plus the record layout CUPTI captured for it. Owns the buffer for its lifetime:
+    it returns the buffer to the native pool on destruction (RAII), so the worker
+    loop never has to. ``decode()`` demuxes its records columnar against the captured
+    layout."""
 
-    record_layouts: the layout (from the spec) for the buffer's epoch.
-    wanted: ``{kind: {field_id}}`` -- only these kinds/fields are gathered.
-    """
-    # kind -> (record_size, {field_id: (offset, size)}); size is authoritative.
-    layouts: dict[int, tuple[int, dict[int, tuple[int, int]]]] = {}
-    for kind, rsz, fields in record_layouts:
-        if kind not in wanted or rsz <= 0:
-            continue
-        layouts[kind] = (rsz, {fid: (off, sz) for fid, off, sz in fields})
-    if not layouts or valid_size == 0:
-        return {}
+    def __init__(self, item: tuple) -> None:
+        # Bind _returned first so __del__ is safe even if unpacking fails.
+        self._returned = False
+        self.buffer_ptr, self.valid_size, self.ctx, self.stream, self.layouts = item
 
-    raw = np.ctypeslib.as_array((ctypes.c_uint8 * valid_size).from_address(buffer_ptr))
+    def __del__(self) -> None:
+        if not self._returned:
+            self._returned = True
+            _cupti_monitor_native.return_buffer(self.buffer_ptr)
 
-    # Record start offsets per kind. Records begin with *_FIELD_KIND (id 0, a
-    # 4-byte kind) at offset 0 and are sized by their kind's record_size. Three
-    # cases, fastest first:
-    #   * one kind        -> homogeneous buffer; starts are a fixed stride.
-    #   * uniform size    -> kinds vary but all share a record_size; stride to
-    #                        the starts, read the KIND column, group by mask.
-    #   * variable/multi  -> sequential walk reading each record's KIND (CUPTI
-    #                        records aren't self-synchronizing).
-    rszs = {rsz for rsz, _ in layouts.values()}
-    positions: dict[int, Any] = {}
-    if len(layouts) == 1:
-        ((kind, (rsz, _)),) = layouts.items()
-        n = valid_size // rsz
-        if n:
-            positions[kind] = np.arange(n, dtype=np.int64) * rsz
-    elif len(rszs) == 1:
-        rsz = next(iter(rszs))
-        n = valid_size // rsz
-        if n:
-            starts = np.arange(n, dtype=np.int64) * rsz
-            kinds_col = raw[starts[:, None] + np.arange(4)].copy().view("<u4").ravel()
-            for kind in layouts:
-                sel = starts[kinds_col == kind]
-                if sel.size:
-                    positions[kind] = sel
-    else:
-        pos_lists: dict[int, list[int]] = {k: [] for k in layouts}
-        pos = 0
-        while pos + 4 <= valid_size:
-            kind = int(raw[pos : pos + 4].view("<u4")[0])
-            ent = layouts.get(kind)
-            if ent is None:
-                break  # unknown kind: can't size it, stop
-            pos_lists[kind].append(pos)
-            pos += ent[0]
-        positions = {k: np.array(v, dtype=np.int64) for k, v in pos_lists.items() if v}
+    def decode(self) -> dict[int, dict[int, Any]]:
+        """Demux this buffer into ``{kind: {field_id: column}}`` against the record
+        layout CUPTI captured for it (``self.layouts``: ``[(kind, record_size,
+        [(field_id, offset, size), ...]), ...]``). Every field in the layout is
+        decoded -- the layout holds exactly the enabled selection (the observers'
+        field union), so there is nothing extra to filter (the per-observer slice
+        happens in dispatch).
 
-    out: dict[int, dict[int, Any]] = {}
-    for kind, pos_arr in positions.items():
-        fields = layouts[kind][1]
-        str_fields = STRING_FIELDS.get(kind, frozenset())
-        cols: dict[int, Any] = {}
-        for fid in wanted[kind]:
-            ent = fields.get(fid)
-            if ent is None:
-                continue
-            off, size = ent
-            if fid in str_fields and size == 8:
-                # const char* field: deref each pointer to a str now.
-                ptrs = (
-                    raw[pos_arr[:, None] + np.arange(off, off + 8)]
-                    .copy()
-                    .view("<u8")
-                    .ravel()
-                )
-                cols[fid] = np.array([_deref_cstr(int(p)) for p in ptrs], dtype=object)
-                continue
-            if size not in (1, 2, 4, 8):
-                continue
-            idx = pos_arr[:, None] + np.arange(off, off + size)
-            cols[fid] = raw[idx].copy().view(f"<u{size}").ravel()
-        if cols:
-            out[kind] = cols
-    return out
+        Records begin with *_FIELD_KIND (id 0, a 4-byte kind) at offset 0 and are
+        sized by their kind's record_size. Three strategies, fastest first: one kind
+        -> homogeneous stride; uniform size -> stride + dispatch by the KIND column;
+        variable size -> per-record walk (CUPTI records aren't self-synchronizing).
+        A bounds guard drops any trailing record that would run past valid_size."""
+        buffer_ptr, valid_size, record_layouts = (
+            self.buffer_ptr,
+            self.valid_size,
+            self.layouts,
+        )
+        # kind -> (record_size, {field_id: (offset, size)}).
+        layouts: dict[int, tuple[int, dict[int, tuple[int, int]]]] = {}
+        for kind, rsz, fields in record_layouts:
+            if rsz > 0:
+                layouts[kind] = (rsz, {fid: (off, sz) for fid, off, sz in fields})
+        if not layouts or valid_size == 0:
+            return {}
 
-
-# --- v1 (whole-record) buffer demux ------------------------------------------
-# v1 has no field-layout API, and the cupti-python record classes are native
-# getset-descriptor objects (not ctypes structs), so their byte offsets aren't
-# introspectable. So v1 reads each record's fields via cupti-python's ``from_ptr``
-# -- the authoritative, version-safe path. Record *positions* are still strided
-# like v2 when the buffer is homogeneous (records are whole structs packed at
-# sizeof(struct)), so the per-record cuptiActivityGetNextRecord cursor walk is only
-# needed for mixed struct sizes. Either way it yields the *identical* column
-# contract the v2 path produces, so observers never see the difference. Columns are
-# RAW field values (``NAME`` mangled, timestamps CUPTI-clock); semantic
-# interpretation is the observer's job, exactly as in v2.
-
-# kind -> the cupti-python whole-record class. RUNTIME and DRIVER share
-# CUpti_ActivityAPI.
-_V1_RECORD_CLASSES: dict[int, type] = {
-    ActivityKind.CONCURRENT_KERNEL: ActivityKernel11,
-    ActivityKind.MEMCPY: ActivityMemcpy6,
-    ActivityKind.MEMSET: ActivityMemset4,
-    ActivityKind.EXTERNAL_CORRELATION: ActivityExternalCorrelation,
-    ActivityKind.OVERHEAD: ActivityOverhead3,
-    ActivityKind.CUDA_EVENT: ActivityCudaEvent2,
-    ActivityKind.SYNCHRONIZATION: ActivitySynchronization2,
-    ActivityKind.RUNTIME: ActivityAPI,
-    ActivityKind.DRIVER: ActivityAPI,
-}
-
-# A record's attribute for a given field id is just the field-enum member name
-# lowercased (KernelField.GRAPH_NODE_ID -> "graph_node_id"); these are the only
-# exceptions, where the cupti-python binding renames the member (`flags` is a
-# Python builtin-ish clash, exposed as `flags_`). Keyed by (kind, field id)
-# because the bare id is ambiguous across kinds.
-_V1_ATTR_OVERRIDES: dict[tuple[int, int], str] = {
-    (ActivityKind.MEMCPY, MemcpyField.FLAGS): "flags_",
-    (ActivityKind.MEMSET, MemsetField.FLAGS): "flags_",
-}
-
-
-def _v1_attr_name(kind: int, field_id: int) -> str:
-    """The cupti-python record attribute that holds CUPTI field ``field_id``."""
-    override = _V1_ATTR_OVERRIDES.get((kind, field_id))
-    if override is not None:
-        return override
-    return FIELD_ENUMS[kind](field_id).name.lower()
-
-
-def _v1_struct_size(kind: int) -> int:
-    """Byte size of the v1 record for ``kind`` -- its stride in the buffer."""
-    return cupti_python.record_struct_sizes()[_V1_RECORD_CLASSES[kind].__name__]
-
-
-def _v1_record_positions(
-    iter_records: Callable[[int, int], Iterator[tuple[int, int]]],
-    buffer_ptr: int,
-    valid_size: int,
-    kinds: list[int],
-) -> dict[int, list[int]]:
-    """``kind -> [record address]`` for the wanted ``kinds`` in the buffer.
-
-    v1 records are whole structs packed back-to-back at sizeof(struct), so when the
-    buffer holds a single kind (or all wanted kinds share a struct size) we address
-    records directly by striding -- no per-record cuptiActivityGetNextRecord cursor
-    call (cf. the v2 demux). Mixed struct sizes fall back to walking the cursor."""
-    sizes = {k: _v1_struct_size(k) for k in kinds}
-    if len(kinds) == 1 and valid_size % sizes[kinds[0]] == 0:
-        kind = kinds[0]
-        size = sizes[kind]
-        return {kind: [buffer_ptr + i * size for i in range(valid_size // size)]}
-
-    distinct = set(sizes.values())
-    if len(distinct) == 1 and valid_size % next(iter(distinct)) == 0:
-        size = next(iter(distinct))
-        n = valid_size // size
         raw = np.ctypeslib.as_array(
             (ctypes.c_uint8 * valid_size).from_address(buffer_ptr)
         )
-        starts = np.arange(n, dtype=np.int64) * size
-        kinds_col = raw[starts[:, None] + np.arange(4)].copy().view("<u4").ravel()
-        wanted_kinds = set(kinds)
-        # If a record's kind isn't one we enabled, the homogeneous-stride
-        # assumption is wrong (e.g. a foreign subscriber's records of another
-        # size) -- fall back to the cursor walk rather than misread.
-        if {int(k) for k in np.unique(kinds_col)} <= wanted_kinds:
-            positions: dict[int, list[int]] = {}
-            for kind in kinds:
-                sel = starts[kinds_col == kind]
-                if sel.size:
-                    positions[kind] = [buffer_ptr + int(s) for s in sel]
-            return positions
 
-    walked: dict[int, list[int]] = {}
-    wanted_kinds = set(kinds)
-    for kind, addr in iter_records(buffer_ptr, valid_size):
-        if kind in wanted_kinds:
-            walked.setdefault(kind, []).append(addr)
-    return walked
+        rszs = {rsz for rsz, _ in layouts.values()}
+        positions: dict[int, Any] = {}
+        if len(layouts) == 1:
+            ((kind, (rsz, _)),) = layouts.items()
+            n = valid_size // rsz
+            if n:
+                positions[kind] = np.arange(n, dtype=np.int64) * rsz
+        elif len(rszs) == 1:
+            rsz = next(iter(rszs))
+            n = valid_size // rsz
+            if n:
+                starts = np.arange(n, dtype=np.int64) * rsz
+                kinds_col = (
+                    raw[starts[:, None] + np.arange(4)].copy().view("<u4").ravel()
+                )
+                for kind in layouts:
+                    sel = starts[kinds_col == kind]
+                    if sel.size:
+                        positions[kind] = sel
+        else:
+            pos_lists: dict[int, list[int]] = {k: [] for k in layouts}
+            pos = 0
+            while pos + 4 <= valid_size:
+                kind = int(raw[pos : pos + 4].view("<u4")[0])
+                ent = layouts.get(kind)
+                if ent is None:
+                    break  # unknown kind: can't size it, stop
+                pos_lists[kind].append(pos)
+                pos += ent[0]
+            positions = {
+                k: np.array(v, dtype=np.int64) for k, v in pos_lists.items() if v
+            }
 
+        # Bounds guard: only decode records that fully fit in the valid region.
+        for kind in list(positions):
+            rsz = layouts[kind][0]
+            fitted = positions[kind][positions[kind] + rsz <= valid_size]
+            if len(fitted):
+                positions[kind] = fitted
+            else:
+                del positions[kind]
 
-def decode_columns_v1(
-    iter_records: Callable[[int, int], Iterator[tuple[int, int]]],
-    buffer_ptr: int,
-    valid_size: int,
-    wanted: dict[int, set[int]],
-) -> dict[int, dict[int, Any]]:
-    """Demux a completed v1 buffer into ``{kind: {field_id: column}}`` for the
-    requested fields, reading each record via cupti-python.
-
-    iter_records: the monitor's record walker yielding ``(kind, record_addr)``.
-    wanted: ``{kind: {field_id}}`` -- only these kinds/fields are gathered.
-    """
-    kinds = [k for k in wanted if k in _V1_RECORD_CLASSES]
-    if not kinds or valid_size == 0:
-        return {}
-    positions = _v1_record_positions(iter_records, buffer_ptr, valid_size, kinds)
-
-    # kind -> {field_id: list of raw values}, appended per record.
-    accum: dict[int, dict[int, list]] = {}
-    for kind, addrs in positions.items():
-        record_class = _V1_RECORD_CLASSES[kind]
-        want = wanted[kind]
-        # Resolve each requested field to its record attribute once, from the first
-        # record (dropping any field the record doesn't expose).
-        attrs: dict[int, str] | None = None
-        cols: dict[int, list] = {}
-        for addr in addrs:
-            record = record_class.from_ptr(addr, readonly=True)
-            if attrs is None:
-                attrs = {}
-                for fid in want:
-                    name = _v1_attr_name(kind, fid)
-                    if hasattr(record, name):
-                        attrs[fid] = name
-                if not attrs:
-                    break
-                cols = accum.setdefault(kind, {fid: [] for fid in attrs})
-            for fid, name in attrs.items():
-                cols[fid].append(getattr(record, name))
-
-    out: dict[int, dict[int, Any]] = {}
-    for kind, cols in accum.items():
-        str_fields = STRING_FIELDS.get(kind, frozenset())
-        out[kind] = {
-            fid: np.array(values, dtype=object)
-            if fid in str_fields
-            else np.array(values, dtype=np.int64)
-            for fid, values in cols.items()
-        }
-    return out
+        out: dict[int, dict[int, Any]] = {}
+        for kind, pos_arr in positions.items():
+            fields = layouts[kind][1]
+            str_fields = STRING_FIELDS.get(kind, frozenset())
+            cols: dict[int, Any] = {}
+            for fid, (off, size) in fields.items():
+                if fid in str_fields and size == 8:
+                    # const char* field: deref each pointer to a str now.
+                    ptrs = (
+                        raw[pos_arr[:, None] + np.arange(off, off + 8)]
+                        .copy()
+                        .view("<u8")
+                        .ravel()
+                    )
+                    cols[fid] = np.array(
+                        [_deref_cstr(int(p)) for p in ptrs], dtype=object
+                    )
+                    continue
+                if size not in (1, 2, 4, 8):
+                    continue
+                idx = pos_arr[:, None] + np.arange(off, off + size)
+                cols[fid] = raw[idx].copy().view(f"<u{size}").ravel()
+            if cols:
+                out[kind] = cols
+        return out
 
 
 class _Observer:
@@ -372,7 +217,6 @@ class CuptiMonitor:
     def __init__(
         self,
         *,
-        version: int = 1,
         buffer_size: int = _DEFAULT_BUFFER_SIZE,
         flush_period_s: float = _DEFAULT_FLUSH_PERIOD_S,
     ) -> None:
@@ -381,29 +225,20 @@ class CuptiMonitor:
         # into columns, and hands every observer the columns it selected. It reaches
         # CUPTI only through the self._cupti.activity_* wrappers -- no ctypes here.
         #
-        # version selects the CUPTI activity API: 1 = classic whole-record
-        # activities (decoded per-record via cupti-python); 2 = user-defined records
-        # (a subscriber + per-field selection, decoded columnar against a record
-        # layout the monitor computes from the field-size spec -- no captured layout
-        # needed). v1 is kept for backward compatibility and as a fallback if the v2
-        # API misbehaves on a given libcupti/driver. A monitor is one version for
-        # its lifetime; either way observers get columns.
-        self.version = version
+        # It uses CUPTI's v2 user-defined-record API: a subscriber + per-field
+        # selection, decoded columnar against a record layout computed from the
+        # field-size spec (no captured layout needed). This requires libcupti >= 13.2.
         self.buffer_size = buffer_size
         self.flush_period_s = flush_period_s
         self._cupti = cupti_python.pylibcupti()
-        # The CUPTI subscriber handle (v2 only).
+        # The CUPTI subscriber handle.
         self._subscriber: int | None = None
         # Layout state -- a function of registration, recomputed only when the
-        # selection changes (never per buffer): the fields enabled per kind, the
-        # fields to extract (the observers' union), and -- for v2 -- the record
-        # layouts the demux decodes against, computed from the field-size spec
-        # (padded for a uniform record size when uniform padding is on). v1 enables
-        # whole kinds and reads whole records, so it ignores _record_layouts.
+        # The fields enabled per kind on the subscriber (a function of the observer
+        # field union, recomputed only on register/deregister, never per buffer). The
+        # record byte layout is NOT tracked here -- each completed buffer carries
+        # CUPTI's own captured layout (ppRecordLayouts) that records.decode reads.
         self._enabled: dict[int, frozenset[int]] = {}
-        self._wanted: dict[int, set[int]] = {}
-        self._record_layouts: list[tuple[int, int, list[tuple[int, int, int]]]] = []
-        self._pad_to_uniform = False
 
         self._lock = threading.Lock()
         self._started = False
@@ -416,7 +251,6 @@ class CuptiMonitor:
         self._observers: list[_Observer] = []
         self._next_external_id = 1
         self._time_converter = None
-        self._timestamp_callback = None
         self._session_start_unix_ns = 0
         self._session_start_approx_ns = 0
         self._session_start_calibrated_unix_ns = 0
@@ -441,33 +275,26 @@ class CuptiMonitor:
     def register_callbacks(self) -> None:
         if self._callbacks_registered:
             return
-        native = _cupti_monitor_native
-        if self.version >= 2:
-            if not self._cupti.has_v2():
-                raise RuntimeError(
-                    "CuptiMonitor(version=2) requires a libcupti with the v2 "
-                    "user-defined-record API (>= 13.2); loaded "
-                    f"{cupti_python.find_cupti_library()} reports "
-                    f"{self._cupti.get_version()}"
-                )
-            request_addr = native.buffer_request_callback_address(2)
-            complete_addr = native.buffer_complete_callback_address(2)
-            # The v2 activity API is subscription-scoped: subscribe, turn on
-            # user-defined records, and register the v2 buffer callbacks.
-            self._subscriber = self._cupti.subscribe()
-            self._cupti.arm_user_defined_records(
-                self._subscriber, request_addr, complete_addr
+        version = self._cupti.get_version()
+        if version < cupti_python.LIBCUPTI_MIN_VERSION:
+            raise RuntimeError(
+                "CuptiMonitor requires libcupti >= "
+                f"{cupti_python.LIBCUPTI_MIN_VERSION}; loaded "
+                f"{cupti_python.find_cupti_library()} reports {version}"
             )
-        else:
-            request_addr = native.buffer_request_callback_address(1)
-            complete_addr = native.buffer_complete_callback_address(1)
-            self._cupti.activity_register_callbacks(request_addr, complete_addr)
+        native = _cupti_monitor_native
+        request_addr = native.buffer_request_callback_address()
+        complete_addr = native.buffer_complete_callback_address()
+        # The activity API is subscription-scoped: subscribe, turn on user-defined
+        # records, and register the v2 buffer callbacks. (A prior consumer that left
+        # CUPTI attached -- e.g. Kineto -- can make cuptiSubscribe_v2 fail with
+        # CUPTI_ERROR_MULTIPLE_SUBSCRIBERS; run such consumers with TEARDOWN_CUPTI=1
+        # so they release CUPTI on teardown rather than us finalizing global state.)
+        self._subscriber = self._cupti.subscribe()
+        self._cupti.arm_user_defined_records(
+            self._subscriber, request_addr, complete_addr
+        )
         self._callbacks_registered = True
-
-    def register_timestamp_callback(self) -> None:
-        callback_addr = _cupti_monitor_native.approximate_time_callback_address()
-        self._cupti.activity_register_timestamp_callback(callback_addr)
-        self._timestamp_callback = callback_addr
 
     def start(self) -> None:
         if self._started:
@@ -476,13 +303,10 @@ class CuptiMonitor:
         _cupti_monitor_native.configure_buffers(self.buffer_size)
         self.register_callbacks()
         self._time_converter = _PY_PROFILER._ApproximateClockToUnixTimeConverter()
-        # The approximate-clock timestamp callback is incompatible with the v2
-        # user-defined-record subscriber (cuptiActivityRegisterTimestampCallback
-        # -> CUPTI_ERROR_NOT_COMPATIBLE), so v2 record timestamps stay in CUPTI's
-        # native clock (durations are unaffected; absolute-time alignment is a v2
-        # follow-up).
-        if self.version < 2:
-            self.register_timestamp_callback()
+        # The approximate-clock timestamp callback is incompatible with the
+        # user-defined-record subscriber (cuptiActivityRegisterTimestampCallback ->
+        # CUPTI_ERROR_NOT_COMPATIBLE), so record timestamps stay in CUPTI's native
+        # clock (durations are unaffected; absolute-time alignment is a follow-up).
         self._session_start_unix_ns = time.time_ns()
         self._session_start_approx_ns = _PY_PROFILER._get_approximate_time()
         self._session_start_calibrated_unix_ns = self._convert_time(
@@ -504,7 +328,7 @@ class CuptiMonitor:
                 daemon=True,
             )
             self._flush_thread.start()
-        # Kinds/fields are enabled by the layout manager as observers register.
+        # Kinds/fields are enabled by _apply_selection as observers register.
         self._started = True
 
     def stop(self) -> None:
@@ -513,17 +337,25 @@ class CuptiMonitor:
         # Drain everything in flight (incl. CUPTI's async deliveries) before we
         # disable kinds and tear the worker down, so the final window is complete.
         self.flush(forced=True, sync=True)
-        # Disable everything we enabled, then tear down the subscription (v2).
+        # Disable everything we enabled, then tear down the subscription.
         self._disable(self._enabled.keys())
         self._enabled = {}
-        self._wanted = {}
-        self._record_layouts = []
-        if self.version >= 2:
-            if self._subscriber is not None:
-                self._cupti.unsubscribe(self._subscriber)
-            self._subscriber = None
-            # Force a fresh subscribe on a subsequent start().
-            self._callbacks_registered = False
+        if self._subscriber is not None:
+            # Release CUPTI without poisoning it for the next session: turn
+            # user-defined-record mode back off (it changes CUPTI's record layout),
+            # then unsubscribe. Crucially this does NOT call cuptiFinalize -- on this
+            # libcupti a finalize poisons CUPTI for the rest of the process (a
+            # subsequent monitor subscribe stops delivering buffers, and a classic
+            # Kineto session records nothing), so disarm + unsubscribe is the only
+            # clean teardown. This lets the monitor be started and stopped repeatedly
+            # in one process. (Switching to a classic consumer after the monitor is a
+            # separate libcupti limitation -- once the process has used UDR/v2 it
+            # cannot downgrade without the poisonous finalize.)
+            self._cupti.disarm_user_defined_records(self._subscriber)
+            self._cupti.unsubscribe(self._subscriber)
+        self._subscriber = None
+        # Force a fresh subscribe on a subsequent start().
+        self._callbacks_registered = False
         self._started = False
         self._flush_stop.set()
         if self._flush_thread is not None:
@@ -544,7 +376,6 @@ class CuptiMonitor:
         self._final_allocated_buffers = _cupti_monitor_native.allocated_buffers()
         _cupti_monitor_native.reset_buffers()
         self._time_converter = None
-        self._timestamp_callback = None
 
     def flush(
         self, *, forced: bool = False, sync: bool = False, timeout_s: float = 5.0
@@ -606,37 +437,27 @@ class CuptiMonitor:
         """Enable + make decodable the SYNCHRONIZATION sync-point kind for the
         duration of a fence. Returns True if this call enabled it (so _end removes
         it); False if it was already enabled (an observer wanted it -- leave it)."""
-        if _FENCE_KIND in self._enabled:
+        if _FENCE_KIND in self._enabled or self._subscriber is None:
             return False
-        if self.version >= 2:
-            if self._subscriber is None:
-                return False
-            self._cupti.activity_enable_v2(self._subscriber, _FENCE_KIND, _FENCE_FIELDS)
-            self._record_layouts = self._record_layouts + [
-                (int(_FENCE_KIND), *record_layout(_FENCE_KIND, _FENCE_FIELDS))
-            ]
-        else:
-            self._cupti.activity_enable(_FENCE_KIND)
+        # Deliver records pending under the current selection before changing it:
+        # without this, enabling the fence kind drops the still-buffered records
+        # (e.g. kernels/launches) that the fence is about to flush for.
+        self._cupti.activity_flush_all(forced=True)
+        self._cupti.activity_enable(self._subscriber, _FENCE_KIND, _FENCE_FIELDS)
         self._enabled = {**self._enabled, _FENCE_KIND: _FENCE_FIELDS}
-        self._wanted = {**self._wanted, int(_FENCE_KIND): set(_FENCE_FIELDS)}
         return True
 
     def _end_fence_kind(self, added: bool) -> None:
         """Undo _begin_fence_kind (no-op if the kind was already enabled)."""
         if not added:
             return
-        if self.version >= 2:
-            if self._subscriber is not None:
-                self._cupti.activity_disable_v2(self._subscriber, _FENCE_KIND)
-            self._record_layouts = [
-                layout
-                for layout in self._record_layouts
-                if layout[0] != int(_FENCE_KIND)
-            ]
-        else:
-            self._cupti.activity_disable(_FENCE_KIND)
+        if self._subscriber is not None:
+            # Flush before disabling so the records pending under the current
+            # selection (incl. the fence's own sync record) are delivered rather
+            # than dropped when the kind goes away.
+            self._cupti.activity_flush_all(forced=True)
+            self._cupti.activity_disable(self._subscriber, _FENCE_KIND)
         self._enabled = {k: v for k, v in self._enabled.items() if k != _FENCE_KIND}
-        self._wanted = {k: v for k, v in self._wanted.items() if k != int(_FENCE_KIND)}
 
     def _fence_sync_point(self) -> int | None:
         """Establish a deterministic fence point for ``flush(sync=True)``. Marks a
@@ -651,7 +472,13 @@ class CuptiMonitor:
         with self._decoded_cv:
             self._fence_waiters += 1
         try:
-            target = self._cupti.get_timestamp()
+            sub = self._subscriber
+            if sub is None:
+                return None
+            # The subscriber-aware _v2 timestamp is required here: plain
+            # cuptiGetTimestamp is CUPTI_ERROR_NOT_COMPATIBLE while the UDR subscriber
+            # is active (13.3), which silently turned this fence into a no-op.
+            target = self._cupti.get_timestamp(sub)
             torch.cuda.synchronize()
             return target
         except Exception:
@@ -688,9 +515,8 @@ class CuptiMonitor:
 
         ``callback(columns)`` fires from the worker thread once per completed
         buffer, with ``columns`` = ``{ActivityKind: {field_id: column}}`` -- the
-        monitor demuxes every buffer to columns (whether v1 or v2) and slices them
-        to this observer's selection, so the contract is identical for both
-        versions (the observer never sees raw bytes or the decode strategy).
+        monitor demuxes every buffer to columns and slices them to this observer's
+        selection (the observer never sees raw bytes or the decode strategy).
 
         Recomputes the enabled selection and starts the monitor on first
         registration."""
@@ -699,15 +525,22 @@ class CuptiMonitor:
         with self._lock:
             self._observers.append(obs)
             start_needed = not self._started
-        if start_needed:
-            self.start()
-        self._apply_selection()
+        try:
+            if start_needed:
+                self.start()
+            self._apply_selection()
+        except Exception:
+            # Don't leave a half-registered observer (or a half-started monitor) if
+            # start/selection fails -- e.g. the CUPTI subscribe is rejected.
+            with self._lock:
+                if obs in self._observers:
+                    self._observers.remove(obs)
+            raise
         return obs
 
     def unregister(self, obs: _Observer) -> None:
-        """Unregister an observer; the layout manager drops kinds/fields no longer
-        wanted by anyone, and the monitor stops once the last observer leaves.
-        Idempotent."""
+        """Unregister an observer; drops kinds/fields no longer wanted by anyone,
+        and the monitor stops once the last observer leaves. Idempotent."""
         with self._lock:
             if obs not in self._observers:
                 return
@@ -722,9 +555,9 @@ class CuptiMonitor:
         self, activities: ActivitiesSpec
     ) -> tuple[frozenset[ActivityKind], dict[ActivityKind, frozenset[int]]]:
         """Resolve a registration request to ``(kinds, fields)``: the
-        ``ActivityKind`` set plus, for v2, the per-activity field-id selection
+        ``ActivityKind`` set plus the per-activity field-id selection
         (``"all"``/``None`` -> the kind's full supported set; ``*_FIELD_KIND`` id 0
-        is always included). v1 ignores fields (empty map)."""
+        is always included)."""
         if isinstance(activities, Mapping):
             kinds: list[ActivityKind] = []
             fields: dict[ActivityKind, frozenset[int]] = {}
@@ -734,8 +567,7 @@ class CuptiMonitor:
                 fields[k] = self._resolve_fields(k, sel)
             return frozenset(kinds), fields
         kind_set = frozenset(ActivityKind(k) for k in activities)
-        # Both versions resolve fields: the monitor always demuxes to columns, so
-        # a bare kind list means "all fields of that kind".
+        # A bare kind list means "all fields of that kind".
         return kind_set, {k: self._resolve_fields(k, "all") for k in kind_set}
 
     @staticmethod
@@ -743,96 +575,46 @@ class CuptiMonitor:
         kind: ActivityKind, sel: Iterable[int] | str | None
     ) -> frozenset[int]:
         if sel is None or sel == "all":
-            resolved = frozenset(int(f) for f in FIELD_REGISTRY.get(kind, frozenset()))
+            resolved = frozenset(f for f in FIELD_REGISTRY.get(kind, frozenset()))
         else:
             resolved = frozenset(int(f) for f in sel)  # type: ignore[union-attr]
         return resolved | {0}  # FIELD_KIND (0) is required for enable + demux
 
     def _apply_selection(self) -> None:
-        """Reconcile CUPTI's enabled selection (and the demux layout) to the current
-        observer field union. Run only here -- when observers register/deregister or
-        padding is toggled -- never per buffer; the layout is a function of
-        registration. v1 enables whole kinds and decodes whole records via
-        cupti-python; v2 enables a per-field selection and decodes columnar against
-        a record layout computed from the field-size spec."""
-        union = self._field_union()
-        wanted = {int(k): set(v) for k, v in union.items()}
-        if self.version >= 2:
-            target = self._plan(wanted)
-            if target != self._enabled:
-                self._reconfigure_v2(target)
-                self._enabled = target
-            # Decode against the enabled (possibly padded) record layout, computed
-            # from the spec; the demux extracts only the wanted fields from it.
-            self._record_layouts = [
-                (kind, *record_layout(kind, fields))
-                for kind, fields in self._enabled.items()
-            ]
-        else:
-            target_kinds = set(wanted)
-            self._enable(target_kinds - self._enabled.keys())
-            self._disable(self._enabled.keys() - target_kinds)
-            self._enabled = {k: frozenset(wanted[k]) for k in target_kinds}
-        self._wanted = wanted
+        """Reconcile CUPTI's enabled per-field selection to the current observer
+        field union. Run only here -- when observers register/deregister -- never
+        per buffer. No demux layout is computed: each completed buffer carries
+        CUPTI's own captured layout (ppRecordLayouts), so this only sets which fields
+        are enabled on the subscriber."""
+        target = {int(k): frozenset(v) for k, v in self._field_union().items()}
+        if target != self._enabled:
+            self._reconfigure(target)
+            self._enabled = target
 
-    def _plan(self, wanted: dict[int, set[int]]) -> dict[int, frozenset[int]]:
-        """The v2 field selection to enable: the wanted fields, padded to a uniform
-        record size when uniform padding is on and achievable, else as-is."""
-        union = {k: frozenset(v) for k, v in wanted.items()}
-        return plan_padding(union) if self._pad_to_uniform else union
-
-    def _reconfigure_v2(self, target: dict[int, frozenset[int]]) -> None:
-        # Fence FIRST, while the current selection is still enabled and
-        # _record_layouts still describes it, so every outstanding buffer is decoded
-        # against the old layout before we switch. (The fence's tracer needs the old
-        # kinds enabled to be recorded -- it can't run after a disable.) Then swap
-        # the per-field selection on the subscriber.
+    def _reconfigure(self, target: dict[int, frozenset[int]]) -> None:
+        # Swap the per-field selection on the subscriber. No drain needed: each
+        # completed buffer carries CUPTI's own captured layout, so buffers recorded
+        # under the old selection still decode correctly against their own layout
+        # even after the switch.
         sub = self._subscriber
         if sub is None:
             return
-        if self._enabled:
-            # Drain buffers from the current selection (its kinds are enabled, so
-            # the fence's tracer can be recorded). Nothing to drain on first enable.
-            self.flush(forced=True, sync=True)
         for kind in self._enabled:
-            self._cupti.activity_disable_v2(sub, kind)
+            self._cupti.activity_disable(sub, kind)
+        # CUPTI requires a flush between disabling and (re-)enabling activities: a
+        # kind re-enabled with a new field selection otherwise loses the records
+        # pending under the old selection. Flush only when something was actually
+        # disabled (nothing pending to lose on the first, empty-set configure).
+        if self._enabled:
+            self._cupti.activity_flush_all(forced=True)
         for kind, fields in target.items():
-            self._cupti.activity_enable_v2(sub, kind, fields)
-
-    def _enable(self, kinds: Iterable[int]) -> None:
-        for kind in kinds:
-            self._cupti.activity_enable(kind)
-            self._apply_filters(kind)
+            self._cupti.activity_enable(sub, kind, fields)
 
     def _disable(self, kinds: Iterable[int]) -> None:
-        if self.version >= 2:
-            sub = self._subscriber
-            if sub is not None:
-                for kind in kinds:
-                    self._cupti.activity_disable_v2(sub, kind)
-        else:
+        sub = self._subscriber
+        if sub is not None:
             for kind in kinds:
-                self._cupti.activity_disable(kind)
-
-    def _apply_filters(self, kind: int) -> None:
-        # v1: drop high-frequency, low-signal runtime/driver API callbacks. No-ops
-        # when the per-cbid filter symbols are unavailable in the loaded libcupti.
-        if kind == ActivityKind.RUNTIME:
-            for cbid in cupti_python.disabled_runtime_cbids():
-                self._cupti.activity_enable_runtime_api(cbid, False)
-        if kind == ActivityKind.DRIVER:
-            for cbid in cupti_python.disabled_driver_cbids():
-                self._cupti.activity_enable_driver_api(cbid, False)
-
-    def enable_uniform_padding(self, enabled: bool = True) -> None:
-        """v2 only: pad the enabled selection so all kinds share one record size,
-        letting multi-kind buffers take the vectorized stride decode (at the cost of
-        extra buffer bandwidth). No-op on v1. Reconfigures if it changed."""
-        if self.version < 2 or self._pad_to_uniform == enabled:
-            return
-        self._pad_to_uniform = enabled
-        if self._started:
-            self._apply_selection()
+                self._cupti.activity_disable(sub, kind)
 
     def _field_union(self) -> dict[ActivityKind, frozenset[int]]:
         """The per-activity field selection wanted across all observers."""
@@ -847,7 +629,6 @@ class CuptiMonitor:
         with self._lock:
             return {
                 "started": self._started,
-                "version": self.version,
                 "activities": list(self._enabled),
                 "buffers_completed": self._buffers_completed,
                 "buffers_allocated": _cupti_monitor_native.allocated_buffers()
@@ -872,15 +653,7 @@ class CuptiMonitor:
         with self._lock:
             external_id = self._next_external_id
             self._next_external_id += 1
-        if self.version >= 2:
-            sub = self._subscriber
-            if sub is None:
-                return None
-            pushed = self._cupti.activity_push_external_correlation_id_v2(
-                sub, external_id
-            )
-        else:
-            pushed = self._cupti.activity_push_external_correlation_id(external_id)
+        pushed = self._cupti.activity_push_external_correlation_id(external_id)
         return external_id if pushed else None
 
     def pop_external_correlation_id(self) -> int | None:
@@ -888,11 +661,6 @@ class CuptiMonitor:
         Returns the popped id, or None if not started/failed."""
         if not self._started:
             return None
-        if self.version >= 2:
-            sub = self._subscriber
-            if sub is None:
-                return None
-            return self._cupti.activity_pop_external_correlation_id_v2(sub)
         return self._cupti.activity_pop_external_correlation_id()
 
     def session_info(self) -> dict[str, Any]:
@@ -929,18 +697,25 @@ class CuptiMonitor:
                 item = _cupti_monitor_native.get_completed()
                 if item is None:
                     break
-                # The native layout_epoch (5th field) is unused -- v2 computes its
-                # own record layout from the spec rather than CUPTI's captured one.
-                buffer_ptr, valid_size, ctx, stream_id, _layout_epoch = item
+                buf = CuptiMonitorBuffer(item)
+                try:
+                    # decode() copies every field into fresh arrays / strs, so the
+                    # returned columns hold no reference to the buffer's memory.
+                    columns = buf.decode()
+                    ctx, stream, valid_size = buf.ctx, buf.stream, buf.valid_size
+                finally:
+                    # Return the buffer to the pool now -- deterministically (not via
+                    # GC) and before dispatch, so nothing references it and it never
+                    # lingers in an exception traceback past stop()/reset_buffers().
+                    del buf
                 with self._lock:
                     self._buffers_completed += 1
                     self._valid_bytes += valid_size
-                try:
-                    self._process_completed_buffer(
-                        ctx, stream_id, buffer_ptr, valid_size
-                    )
-                finally:
-                    _cupti_monitor_native.return_buffer(buffer_ptr)
+                    observers = list(self._observers)
+                if self._fence_waiters:
+                    self._advance_decoded_clock(columns)
+                self._dispatch_observers(columns, observers)
+                self._account_dropped_records(ctx, stream)
                 self._maybe_warn_backpressure()
         except BaseException as exc:
             self._worker_error = exc
@@ -959,22 +734,6 @@ class CuptiMonitor:
                 allocated,
             )
 
-    def _process_completed_buffer(
-        self, ctx: int, stream_id: int, buffer_ptr: int, valid_size: int
-    ) -> None:
-        with self._lock:
-            observers = list(self._observers)
-        # The monitor owns parsing: demux the raw buffer into columns once, THEN
-        # dispatch each observer the columns it selected. Observers never touch the
-        # raw bytes or the decode strategy. The demux must finish before any
-        # callback runs -- the buffer's bytes (and the strings its pointers
-        # reference) are recycled once we return.
-        decoded = self._demux(buffer_ptr, valid_size)
-        if self._fence_waiters:
-            self._advance_decoded_clock(decoded)
-        self._dispatch_observers(decoded, observers)
-        self._account_dropped_records(ctx, stream_id)
-
     def _advance_decoded_clock(self, decoded: dict[int, dict[int, Any]]) -> None:
         """Advance the decoded clock at sync points: track the max SYNCHRONIZATION
         END decoded so far (CUPTI clock) and wake any flush(sync=True) waiting for
@@ -990,34 +749,6 @@ class CuptiMonitor:
             with self._decoded_cv:
                 self._max_decoded_ns = newest
                 self._decoded_cv.notify_all()
-
-    def _demux(self, buffer_ptr: int, valid_size: int) -> dict[int, dict[int, Any]]:
-        """Demux a completed buffer into ``{kind: {field_id: column}}`` for the
-        wanted fields. v2 decodes columnar against the record layout computed from
-        the spec; v1 reads each record via cupti-python. Either way only the
-        observers' selected fields are materialized, while the buffer is alive."""
-        if not self._wanted:
-            return {}
-        if self.version >= 2:
-            return decode_columns_v2(
-                buffer_ptr, valid_size, self._record_layouts, self._wanted
-            )
-        return decode_columns_v1(
-            self._iter_records, buffer_ptr, valid_size, self._wanted
-        )
-
-    def _iter_records(self, buffer_ptr: int, valid_size: int):
-        # v1: walk the buffer yielding (kind, record_addr), threading CUPTI's in/out
-        # record cursor (a fresh NULL each call would re-return the first record).
-        prev_record: int | None = None
-        while True:
-            record_addr = self._cupti.activity_get_next_record(
-                buffer_ptr, valid_size, prev_record
-            )
-            if record_addr is None:
-                break
-            yield self._cupti.read_activity_kind(record_addr), record_addr
-            prev_record = record_addr
 
     def _dispatch_observers(
         self, decoded: dict[int, dict[int, Any]], observers: list[_Observer]
@@ -1048,8 +779,7 @@ class CuptiMonitor:
 _hes_enabled = False
 
 _instance_lock = threading.Lock()
-# At most one monitor per process; its activity-API version is fixed at first use
-# from the $TORCH_CUPTI_MONITOR_USE_V2_API env var (see default_api_version).
+# At most one monitor per process.
 _instance: CuptiMonitor | None = None
 
 
@@ -1079,19 +809,6 @@ def is_hes_enabled() -> bool:
     return _hes_enabled
 
 
-# Env var selecting which CUPTI activity API the monitor uses by default: set it
-# truthy to use v2 (user-defined records); unset/falsy uses v1 (classic activities).
-# Only consulted when a version isn't passed explicitly.
-USE_V2_ENV = "TORCH_CUPTI_MONITOR_USE_V2_API"
-
-
-def default_api_version() -> int:
-    """The CUPTI activity API version used when none is requested explicitly: 2 when
-    ``$TORCH_CUPTI_MONITOR_USE_V2_API`` is truthy, else 1."""
-    value = os.environ.get(USE_V2_ENV, "").strip().lower()
-    return 2 if value in ("1", "true", "yes", "on") else 1
-
-
 def get_monitor() -> CuptiMonitor | None:
     """The process-wide monitor singleton if it has been constructed, else None."""
     return _instance
@@ -1099,11 +816,10 @@ def get_monitor() -> CuptiMonitor | None:
 
 def instance() -> CuptiMonitor:
     """The process-wide CUPTI monitor / multiplexer singleton, constructed on first
-    use. Its activity-API version is fixed then from ``default_api_version()`` -- the
-    ``$TORCH_CUPTI_MONITOR_USE_V2_API`` env var (1 = classic activities, 2 =
-    user-defined records). Observers register with it via register()."""
+    use. It uses CUPTI's v2 user-defined-record API (requires libcupti >= 13.2).
+    Observers register with it via register()."""
     global _instance
     with _instance_lock:
         if _instance is None:
-            _instance = CuptiMonitor(version=default_api_version())
+            _instance = CuptiMonitor()
         return _instance

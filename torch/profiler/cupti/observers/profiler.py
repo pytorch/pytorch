@@ -22,16 +22,17 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.profiler.cupti.cupti_python import ActivityKind, OVERHEAD_KIND_NAMES
-from torch.profiler.cupti.fields import (
-    ApiField,
-    ExternalCorrelationField,
-    KernelField,
-    MemcpyField,
-    MemsetField,
-    OverheadField,
-)
 from torch.profiler.cupti.monitor_trace import merge_trace_window_into_chrome_trace
 from torch.profiler.cupti.observers.base import CuptiMonitorObserver
+from torch.profiler.cupti.records import (
+    Api,
+    ExternalCorrelation,
+    Field,
+    Kernel,
+    Memcpy,
+    Memset,
+    Overhead,
+)
 
 
 def _current_thread_resource_tuple() -> tuple[int, int, int]:
@@ -77,73 +78,73 @@ def default_graph_annotation_resolver(
 # runtime/driver/overhead records and external correlation for the annotation join.
 # (Omits fields the chrome trace never consumes, e.g. memcpy runtime_correlation_id
 # / overhead object_kind -- which also have no v2 user-defined-record id.)
-PROFILER_FIELDS: dict[ActivityKind, set[int]] = {
+PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
     ActivityKind.CONCURRENT_KERNEL: {
-        KernelField.START,
-        KernelField.END,
-        KernelField.DEVICE_ID,
-        KernelField.CONTEXT_ID,
-        KernelField.STREAM_ID,
-        KernelField.CORRELATION_ID,
-        KernelField.GRAPH_NODE_ID,
-        KernelField.GRAPH_ID,
-        KernelField.NAME,
+        Kernel.START,
+        Kernel.END,
+        Kernel.DEVICE_ID,
+        Kernel.CONTEXT_ID,
+        Kernel.STREAM_ID,
+        Kernel.CORRELATION_ID,
+        Kernel.GRAPH_NODE_ID,
+        Kernel.GRAPH_ID,
+        Kernel.NAME,
     },
     ActivityKind.MEMCPY: {
-        MemcpyField.START,
-        MemcpyField.END,
-        MemcpyField.DEVICE_ID,
-        MemcpyField.CONTEXT_ID,
-        MemcpyField.STREAM_ID,
-        MemcpyField.CORRELATION_ID,
-        MemcpyField.GRAPH_NODE_ID,
-        MemcpyField.GRAPH_ID,
-        MemcpyField.BYTES,
-        MemcpyField.COPY_KIND,
-        MemcpyField.SRC_KIND,
-        MemcpyField.DST_KIND,
-        MemcpyField.FLAGS,
+        Memcpy.START,
+        Memcpy.END,
+        Memcpy.DEVICE_ID,
+        Memcpy.CONTEXT_ID,
+        Memcpy.STREAM_ID,
+        Memcpy.CORRELATION_ID,
+        Memcpy.GRAPH_NODE_ID,
+        Memcpy.GRAPH_ID,
+        Memcpy.BYTES,
+        Memcpy.COPY_KIND,
+        Memcpy.SRC_KIND,
+        Memcpy.DST_KIND,
+        Memcpy.FLAGS,
     },
     ActivityKind.MEMSET: {
-        MemsetField.START,
-        MemsetField.END,
-        MemsetField.DEVICE_ID,
-        MemsetField.CONTEXT_ID,
-        MemsetField.STREAM_ID,
-        MemsetField.CORRELATION_ID,
-        MemsetField.GRAPH_NODE_ID,
-        MemsetField.GRAPH_ID,
-        MemsetField.BYTES,
-        MemsetField.VALUE,
-        MemsetField.MEMORY_KIND,
-        MemsetField.FLAGS,
+        Memset.START,
+        Memset.END,
+        Memset.DEVICE_ID,
+        Memset.CONTEXT_ID,
+        Memset.STREAM_ID,
+        Memset.CORRELATION_ID,
+        Memset.GRAPH_NODE_ID,
+        Memset.GRAPH_ID,
+        Memset.BYTES,
+        Memset.VALUE,
+        Memset.MEMORY_KIND,
+        Memset.FLAGS,
     },
     ActivityKind.RUNTIME: {
-        ApiField.CBID,
-        ApiField.START,
-        ApiField.END,
-        ApiField.PROCESS_ID,
-        ApiField.THREAD_ID,
-        ApiField.CORRELATION_ID,
+        Api.CBID,
+        Api.START,
+        Api.END,
+        Api.PROCESS_ID,
+        Api.THREAD_ID,
+        Api.CORRELATION_ID,
     },
     ActivityKind.DRIVER: {
-        ApiField.CBID,
-        ApiField.START,
-        ApiField.END,
-        ApiField.PROCESS_ID,
-        ApiField.THREAD_ID,
-        ApiField.CORRELATION_ID,
+        Api.CBID,
+        Api.START,
+        Api.END,
+        Api.PROCESS_ID,
+        Api.THREAD_ID,
+        Api.CORRELATION_ID,
     },
     ActivityKind.EXTERNAL_CORRELATION: {
-        ExternalCorrelationField.EXTERNAL_KIND,
-        ExternalCorrelationField.EXTERNAL_ID,
-        ExternalCorrelationField.CORRELATION_ID,
+        ExternalCorrelation.EXTERNAL_KIND,
+        ExternalCorrelation.EXTERNAL_ID,
+        ExternalCorrelation.CORRELATION_ID,
     },
     ActivityKind.OVERHEAD: {
-        OverheadField.OVERHEAD_KIND,
-        OverheadField.START,
-        OverheadField.END,
-        OverheadField.CORRELATION_ID,
+        Overhead.OVERHEAD_KIND,
+        Overhead.START,
+        Overhead.END,
+        Overhead.CORRELATION_ID,
     },
 }
 
@@ -299,23 +300,23 @@ def _col_len(cols: dict[int, Any]) -> int:
 def _kernel_events(cols, convert_time, resolver):
     events = []
     for i in range(_col_len(cols)):
-        graph_node_id = int(cols[KernelField.GRAPH_NODE_ID][i])
-        correlation_id = int(cols[KernelField.CORRELATION_ID][i])
+        graph_node_id = int(cols[Kernel.GRAPH_NODE_ID.id][i])
+        correlation_id = int(cols[Kernel.CORRELATION_ID.id][i])
         events.append(
             {
                 "kind": "kernel",
-                "device_id": int(cols[KernelField.DEVICE_ID][i]),
-                "context_id": int(cols[KernelField.CONTEXT_ID][i]),
-                "stream_id": int(cols[KernelField.STREAM_ID][i]),
+                "device_id": int(cols[Kernel.DEVICE_ID.id][i]),
+                "context_id": int(cols[Kernel.CONTEXT_ID.id][i]),
+                "stream_id": int(cols[Kernel.STREAM_ID.id][i]),
                 "correlation_id": correlation_id,
                 "graph_node_id": graph_node_id,
-                "graph_id": int(cols[KernelField.GRAPH_ID][i]),
-                "start_ns": convert_time(int(cols[KernelField.START][i])),
-                "end_ns": convert_time(int(cols[KernelField.END][i])),
+                "graph_id": int(cols[Kernel.GRAPH_ID.id][i]),
+                "start_ns": convert_time(int(cols[Kernel.START.id][i])),
+                "end_ns": convert_time(int(cols[Kernel.END.id][i])),
                 "annotation": resolver(
                     graph_node_id, ActivityKind.CONCURRENT_KERNEL, correlation_id
                 ),
-                "name": _demangle_symbol(cols[KernelField.NAME][i]),
+                "name": _demangle_symbol(cols[Kernel.NAME.id][i]),
             }
         )
     return events
@@ -324,24 +325,24 @@ def _kernel_events(cols, convert_time, resolver):
 def _memcpy_events(cols, convert_time, resolver):
     events = []
     for i in range(_col_len(cols)):
-        graph_node_id = int(cols[MemcpyField.GRAPH_NODE_ID][i])
-        correlation_id = int(cols[MemcpyField.CORRELATION_ID][i])
+        graph_node_id = int(cols[Memcpy.GRAPH_NODE_ID.id][i])
+        correlation_id = int(cols[Memcpy.CORRELATION_ID.id][i])
         events.append(
             {
                 "kind": "gpu_memcpy",
-                "device_id": int(cols[MemcpyField.DEVICE_ID][i]),
-                "context_id": int(cols[MemcpyField.CONTEXT_ID][i]),
-                "stream_id": int(cols[MemcpyField.STREAM_ID][i]),
+                "device_id": int(cols[Memcpy.DEVICE_ID.id][i]),
+                "context_id": int(cols[Memcpy.CONTEXT_ID.id][i]),
+                "stream_id": int(cols[Memcpy.STREAM_ID.id][i]),
                 "correlation_id": correlation_id,
                 "graph_node_id": graph_node_id,
-                "graph_id": int(cols[MemcpyField.GRAPH_ID][i]),
-                "start_ns": convert_time(int(cols[MemcpyField.START][i])),
-                "end_ns": convert_time(int(cols[MemcpyField.END][i])),
-                "bytes": int(cols[MemcpyField.BYTES][i]),
-                "copy_kind": int(cols[MemcpyField.COPY_KIND][i]),
-                "src_kind": int(cols[MemcpyField.SRC_KIND][i]),
-                "dst_kind": int(cols[MemcpyField.DST_KIND][i]),
-                "flags": int(cols[MemcpyField.FLAGS][i]),
+                "graph_id": int(cols[Memcpy.GRAPH_ID.id][i]),
+                "start_ns": convert_time(int(cols[Memcpy.START.id][i])),
+                "end_ns": convert_time(int(cols[Memcpy.END.id][i])),
+                "bytes": int(cols[Memcpy.BYTES.id][i]),
+                "copy_kind": int(cols[Memcpy.COPY_KIND.id][i]),
+                "src_kind": int(cols[Memcpy.SRC_KIND.id][i]),
+                "dst_kind": int(cols[Memcpy.DST_KIND.id][i]),
+                "flags": int(cols[Memcpy.FLAGS.id][i]),
                 "annotation": resolver(
                     graph_node_id, ActivityKind.MEMCPY, correlation_id
                 ),
@@ -354,23 +355,23 @@ def _memcpy_events(cols, convert_time, resolver):
 def _memset_events(cols, convert_time, resolver):
     events = []
     for i in range(_col_len(cols)):
-        graph_node_id = int(cols[MemsetField.GRAPH_NODE_ID][i])
-        correlation_id = int(cols[MemsetField.CORRELATION_ID][i])
+        graph_node_id = int(cols[Memset.GRAPH_NODE_ID.id][i])
+        correlation_id = int(cols[Memset.CORRELATION_ID.id][i])
         events.append(
             {
                 "kind": "gpu_memset",
-                "device_id": int(cols[MemsetField.DEVICE_ID][i]),
-                "context_id": int(cols[MemsetField.CONTEXT_ID][i]),
-                "stream_id": int(cols[MemsetField.STREAM_ID][i]),
+                "device_id": int(cols[Memset.DEVICE_ID.id][i]),
+                "context_id": int(cols[Memset.CONTEXT_ID.id][i]),
+                "stream_id": int(cols[Memset.STREAM_ID.id][i]),
                 "correlation_id": correlation_id,
                 "graph_node_id": graph_node_id,
-                "graph_id": int(cols[MemsetField.GRAPH_ID][i]),
-                "start_ns": convert_time(int(cols[MemsetField.START][i])),
-                "end_ns": convert_time(int(cols[MemsetField.END][i])),
-                "bytes": int(cols[MemsetField.BYTES][i]),
-                "value": int(cols[MemsetField.VALUE][i]),
-                "memory_kind": int(cols[MemsetField.MEMORY_KIND][i]),
-                "flags": int(cols[MemsetField.FLAGS][i]),
+                "graph_id": int(cols[Memset.GRAPH_ID.id][i]),
+                "start_ns": convert_time(int(cols[Memset.START.id][i])),
+                "end_ns": convert_time(int(cols[Memset.END.id][i])),
+                "bytes": int(cols[Memset.BYTES.id][i]),
+                "value": int(cols[Memset.VALUE.id][i]),
+                "memory_kind": int(cols[Memset.MEMORY_KIND.id][i]),
+                "flags": int(cols[Memset.FLAGS.id][i]),
                 "annotation": resolver(
                     graph_node_id, ActivityKind.MEMSET, correlation_id
                 ),
@@ -385,16 +386,16 @@ def _api_events(kind_name):
         del resolver
         events = []
         for i in range(_col_len(cols)):
-            cbid = int(cols[ApiField.CBID][i])
+            cbid = int(cols[Api.CBID.id][i])
             events.append(
                 {
                     "kind": kind_name,
                     "cbid": cbid,
-                    "start_ns": convert_time(int(cols[ApiField.START][i])),
-                    "end_ns": convert_time(int(cols[ApiField.END][i])),
-                    "process_id": int(cols[ApiField.PROCESS_ID][i]),
-                    "thread_id": int(cols[ApiField.THREAD_ID][i]),
-                    "correlation_id": int(cols[ApiField.CORRELATION_ID][i]),
+                    "start_ns": convert_time(int(cols[Api.START.id][i])),
+                    "end_ns": convert_time(int(cols[Api.END.id][i])),
+                    "process_id": int(cols[Api.PROCESS_ID.id][i]),
+                    "thread_id": int(cols[Api.THREAD_ID.id][i]),
+                    "correlation_id": int(cols[Api.CORRELATION_ID.id][i]),
                     "name": f"cbid_{cbid}",
                 }
             )
@@ -410,9 +411,9 @@ def _external_correlation_events(cols, convert_time, resolver):
         events.append(
             {
                 "kind": "external_correlation",
-                "external_kind": int(cols[ExternalCorrelationField.EXTERNAL_KIND][i]),
-                "external_id": int(cols[ExternalCorrelationField.EXTERNAL_ID][i]),
-                "correlation_id": int(cols[ExternalCorrelationField.CORRELATION_ID][i]),
+                "external_kind": int(cols[ExternalCorrelation.EXTERNAL_KIND.id][i]),
+                "external_id": int(cols[ExternalCorrelation.EXTERNAL_ID.id][i]),
+                "correlation_id": int(cols[ExternalCorrelation.CORRELATION_ID.id][i]),
                 "name": "external_correlation",
             }
         )
@@ -423,14 +424,14 @@ def _overhead_events(cols, convert_time, resolver):
     del resolver
     events = []
     for i in range(_col_len(cols)):
-        overhead_kind = int(cols[OverheadField.OVERHEAD_KIND][i])
+        overhead_kind = int(cols[Overhead.OVERHEAD_KIND.id][i])
         events.append(
             {
                 "kind": "overhead",
                 "object_id": 0,
-                "start_ns": convert_time(int(cols[OverheadField.START][i])),
-                "end_ns": convert_time(int(cols[OverheadField.END][i])),
-                "correlation_id": int(cols[OverheadField.CORRELATION_ID][i]),
+                "start_ns": convert_time(int(cols[Overhead.START.id][i])),
+                "end_ns": convert_time(int(cols[Overhead.END.id][i])),
+                "correlation_id": int(cols[Overhead.CORRELATION_ID.id][i]),
                 "name": OVERHEAD_KIND_NAMES.get(
                     overhead_kind, f"overhead_{overhead_kind}"
                 ),

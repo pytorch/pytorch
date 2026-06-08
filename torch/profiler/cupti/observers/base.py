@@ -21,31 +21,30 @@ class CuptiMonitorObserver:
     the activity kinds they want -- a set of kinds (meaning "all fields"), or a
     field map ``{kind: iterable of field ids | "all"}``. Registration happens last
     so the state is ready before the worker thread can deliver buffers. The monitor
-    demuxes every completed buffer to columns (whether v1 or v2), so subclasses
-    implement a single hook, ``_on_activities(columns)`` -- where ``columns`` is
-    ``{ActivityKind: {field_id: column}}`` already sliced to this observer's
-    selection -- and typically a ``drain()`` for callers. ``version`` only selects
-    the underlying monitor (1 = classic activities, 2 = user-defined records); the
-    column contract is identical either way.
+    demuxes every completed buffer to columns, so subclasses implement a single
+    hook, ``_on_activities(columns)`` -- where ``columns`` is ``{ActivityKind:
+    {field_id: column}}`` already sliced to this observer's selection -- and
+    typically a ``drain()`` for callers.
     """
 
     def __init__(self, activities: Any) -> None:
         # frozenset of the requested kinds (a field map collapses to its keys) for
         # the observer's own "is this kind mine?" checks; the full request (incl.
-        # any field selection) is handed to the monitor. The monitor is the
-        # process-wide singleton, whose version is fixed by the
-        # $TORCH_CUPTI_MONITOR_USE_V2_API env var.
+        # any field selection) is handed to the monitor (the process-wide singleton).
         self._activities: frozenset[int] = frozenset(activities)
         self._monitor: Any = None
         self._obs = None
+        # Degrade gracefully (available == False) if the monitor can't be reached or
+        # the registration fails -- e.g. the CUPTI subscribe is rejected because
+        # another subscriber (Kineto) holds it, or libcupti lacks the v2 API. The
+        # profiler must not crash because the optional monitor couldn't start.
         try:
             from torch.profiler.cupti.monitor import instance
 
             self._monitor = instance()
+            self._obs = self._monitor.register(activities, self._on_activities)
         except Exception:
-            return
-        self._version = self._monitor.version
-        self._obs = self._monitor.register(activities, self._on_activities)
+            self._obs = None
 
     @property
     def available(self) -> bool:

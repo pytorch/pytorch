@@ -3,13 +3,13 @@
 
 This module is the single place that reaches into the ``cupti-python`` package
 and into CUPTI's ABI constants. The cupti-python module is imported lazily and
-cached by :func:`_cupti`, and the activity kinds, enum values and record classes
-the monitor needs are re-exported as module attributes resolved on first access
-(see :func:`__getattr__`). Callers therefore just import what they use --
-``from .cupti_python import ActivityKind, ActivityKernel11`` -- and write
-``ActivityKind.MEMCPY`` directly (cupti-python's enums are ``IntEnum``, so kind
-members compare equal to the raw integer kind read from a record), while the
-cupti import stays deferred until one of those names is first touched.
+cached by :func:`_cupti`, and the activity-kind enum the monitor needs is
+re-exported as a module attribute resolved on first access (see
+:func:`__getattr__`). Callers therefore just import what they use --
+``from .cupti_python import ActivityKind`` -- and write ``ActivityKind.MEMCPY``
+directly (cupti-python's enums are ``IntEnum``, so kind members compare equal to
+the raw integer kind read from a record), while the cupti import stays deferred
+until one of those names is first touched.
 """
 
 from __future__ import annotations
@@ -27,9 +27,7 @@ if TYPE_CHECKING:
     # signatures still read as the intended CUPTI types.)
     from cupti.cupti import (  # pyrefly: ignore[missing-import]
         ActivityKind,
-        Driver_api_trace_cbid,
         ExternalCorrelationKind,
-        Runtime_api_trace_cbid,
     )
 
 
@@ -39,14 +37,17 @@ LIBCUPTI_PATH_ENV = "TORCH_CUPTI_MONITOR_LIBCUPTI_PATH"
 # CUPTI C-API result/flag constants (cupti_result.h / cupti_activity.h). These
 # are stable ABI values, so they are spelled out rather than resolved.
 CUPTI_SUCCESS = 0
-CUPTI_ERROR_MAX_LIMIT_REACHED = 12
 CUPTI_ACTIVITY_FLAG_FLUSH_FORCED = 1
 
 # CUpti_ActivityAttribute::CUPTI_ACTIVITY_ATTR_USER_DEFINED_RECORDS (not surfaced
 # by cupti-python); set on the subscription to turn on the v2 user-defined-record
-# path. Minimum libcupti version with that API is CUPTI 13.2.
+# path.
 _ATTR_USER_DEFINED_RECORDS = 11
-_MIN_V2_VERSION = 130200
+
+# Minimum libcupti the monitor supports. The v2 user-defined-record API arrived in
+# 13.2, but only 13.3 populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
+# per-kind record layout) that the monitor decodes against, so 13.3 is the floor.
+LIBCUPTI_MIN_VERSION = 130300
 
 # CUPTI overhead-kind codes (CUpti_ActivityOverheadKind in cupti_activity.h).
 # cupti-python does not surface these as an enum, so the code -> name mapping is
@@ -64,22 +65,14 @@ OVERHEAD_KIND_NAMES: dict[int, str] = {
     8 << 16: "UVM Activity Init",
 }
 
-# cupti-python names re-exported lazily by __getattr__: the enums and the record
-# classes the monitor decodes. Resolved off the cupti module on first access.
+# cupti-python names re-exported lazily by __getattr__: the enums the monitor and
+# trace builder need. Resolved off the cupti module on first access.
 _REEXPORTED = frozenset(
     {
         "ActivityKind",
         "ExternalCorrelationKind",
         "Runtime_api_trace_cbid",
         "Driver_api_trace_cbid",
-        "ActivityKernel11",
-        "ActivityMemcpy6",
-        "ActivityMemset4",
-        "ActivityAPI",
-        "ActivityExternalCorrelation",
-        "ActivityOverhead3",
-        "ActivityCudaEvent2",
-        "ActivitySynchronization2",
     }
 )
 
@@ -110,60 +103,6 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-# Record class -> the cupti-python numpy dtype mirroring its C struct. The dtype's
-# itemsize is the record's byte size, i.e. its stride in a v1 activity buffer
-# (records are whole structs packed back-to-back), which lets the v1 demux address
-# records directly instead of walking the cuptiActivityGetNextRecord cursor.
-_RECORD_DTYPE_NAMES = {
-    "ActivityKernel11": "activity_kernel11_dtype",
-    "ActivityMemcpy6": "activity_memcpy6_dtype",
-    "ActivityMemset4": "activity_memset4_dtype",
-    "ActivityAPI": "activity_api_dtype",
-    "ActivityExternalCorrelation": "activity_external_correlation_dtype",
-    "ActivityOverhead3": "activity_overhead3_dtype",
-    "ActivityCudaEvent2": "activity_cuda_event2_dtype",
-    "ActivitySynchronization2": "activity_synchronization2_dtype",
-}
-
-
-@lru_cache(maxsize=1)
-def record_struct_sizes() -> dict[str, int]:
-    """Record-class name -> its C-struct byte size (the cupti-python dtype
-    itemsize) -- the record's stride in a v1 activity buffer."""
-    import numpy as np
-
-    cc = _cupti()
-    return {
-        cls: int(np.dtype(getattr(cc, dtype)).itemsize)
-        for cls, dtype in _RECORD_DTYPE_NAMES.items()
-    }
-
-
-@lru_cache(maxsize=1)
-def disabled_runtime_cbids() -> tuple[int, ...]:
-    """Runtime API callbacks filtered out of activity to cut trace volume."""
-    cbids = _cupti().Runtime_api_trace_cbid
-    return (
-        cbids.cudaGetDevice_v3020,
-        cbids.cudaSetDevice_v3020,
-        cbids.cudaGetLastError_v3020,
-        cbids.cudaEventCreate_v3020,
-        cbids.cudaEventCreateWithFlags_v3020,
-        cbids.cudaEventDestroy_v3020,
-    )
-
-
-@lru_cache(maxsize=1)
-def disabled_driver_cbids() -> tuple[int, ...]:
-    """Driver API callbacks filtered out of activity to cut trace volume."""
-    cbids = _cupti().Driver_api_trace_cbid
-    return (
-        cbids.cuKernelGetAttribute,
-        cbids.cuDevicePrimaryCtxGetState,
-        cbids.cuCtxGetCurrent,
-    )
-
-
 def find_cupti_library() -> str:
     """Resolve the libcupti shared object to dlopen for the CUPTI v2 API.
 
@@ -191,37 +130,8 @@ def find_cupti_library() -> str:
 def _configure_ctypes(lib: ctypes.CDLL) -> None:
     lib.cuptiGetVersion.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
     lib.cuptiGetVersion.restype = ctypes.c_int
-    lib.cuptiGetTimestamp.argtypes = [ctypes.POINTER(ctypes.c_uint64)]
-    lib.cuptiGetTimestamp.restype = ctypes.c_int
-    lib.cuptiActivityRegisterCallbacks.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-    ]
-    lib.cuptiActivityRegisterCallbacks.restype = ctypes.c_int
-    lib.cuptiActivityEnable.argtypes = [ctypes.c_int]
-    lib.cuptiActivityEnable.restype = ctypes.c_int
-    lib.cuptiActivityDisable.argtypes = [ctypes.c_int]
-    lib.cuptiActivityDisable.restype = ctypes.c_int
-    if hasattr(lib, "cuptiActivityEnableRuntimeApi"):
-        lib.cuptiActivityEnableRuntimeApi.argtypes = [
-            ctypes.c_uint32,
-            ctypes.c_uint8,
-        ]
-        lib.cuptiActivityEnableRuntimeApi.restype = ctypes.c_int
-    if hasattr(lib, "cuptiActivityEnableDriverApi"):
-        lib.cuptiActivityEnableDriverApi.argtypes = [
-            ctypes.c_uint32,
-            ctypes.c_uint8,
-        ]
-        lib.cuptiActivityEnableDriverApi.restype = ctypes.c_int
     lib.cuptiActivityFlushAll.argtypes = [ctypes.c_uint32]
     lib.cuptiActivityFlushAll.restype = ctypes.c_int
-    lib.cuptiActivityGetNextRecord.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_void_p),
-    ]
-    lib.cuptiActivityGetNextRecord.restype = ctypes.c_int
     lib.cuptiActivityGetNumDroppedRecords.argtypes = [
         ctypes.c_void_p,
         ctypes.c_uint32,
@@ -230,26 +140,17 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
     lib.cuptiActivityGetNumDroppedRecords.restype = ctypes.c_int
     lib.cuptiActivityEnableHWTrace.argtypes = [ctypes.c_uint8]
     lib.cuptiActivityEnableHWTrace.restype = ctypes.c_int
-    lib.cuptiActivityRegisterTimestampCallback.argtypes = [ctypes.c_void_p]
-    lib.cuptiActivityRegisterTimestampCallback.restype = ctypes.c_int
-    lib.cuptiActivityPushExternalCorrelationId.argtypes = [
-        ctypes.c_int,
-        ctypes.c_uint64,
-    ]
-    lib.cuptiActivityPushExternalCorrelationId.restype = ctypes.c_int
-    lib.cuptiActivityPopExternalCorrelationId.argtypes = [
-        ctypes.c_int,
-        ctypes.POINTER(ctypes.c_uint64),
-    ]
-    lib.cuptiActivityPopExternalCorrelationId.restype = ctypes.c_int
     lib.cuptiGetResultString.argtypes = [
         ctypes.c_int,
         ctypes.POINTER(ctypes.c_char_p),
     ]
     lib.cuptiGetResultString.restype = ctypes.c_int
+    lib.cuptiFinalize.argtypes = []
+    lib.cuptiFinalize.restype = ctypes.c_int
 
-    # v2 / user-defined-record API -- only present in libcupti >= 13.2; guarded
-    # so configuring against an older libcupti (v1 only) still succeeds.
+    # User-defined-record (subscription) API -- present in libcupti >= 13.2; guarded
+    # so configuring against an older libcupti still succeeds (the monitor's
+    # LIBCUPTI_MIN_VERSION check then fails fast at start).
     if hasattr(lib, "cuptiSubscribe_v2"):
         lib.cuptiSubscribe_v2.argtypes = [
             ctypes.c_void_p,  # CUpti_SubscriberHandle* subscriber
@@ -286,20 +187,25 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
     if hasattr(lib, "cuptiActivityDisable_v2"):
         lib.cuptiActivityDisable_v2.argtypes = [ctypes.c_void_p, ctypes.c_int]
         lib.cuptiActivityDisable_v2.restype = ctypes.c_int
-    if hasattr(lib, "cuptiActivityPushExternalCorrelationId_v2"):
-        lib.cuptiActivityPushExternalCorrelationId_v2.argtypes = [
-            ctypes.c_void_p,
-            ctypes.c_int,
-            ctypes.c_uint64,
-        ]
-        lib.cuptiActivityPushExternalCorrelationId_v2.restype = ctypes.c_int
-    if hasattr(lib, "cuptiActivityPopExternalCorrelationId_v2"):
-        lib.cuptiActivityPopExternalCorrelationId_v2.argtypes = [
-            ctypes.c_void_p,
-            ctypes.c_int,
+    if hasattr(lib, "cuptiGetTimestamp_v2"):
+        lib.cuptiGetTimestamp_v2.argtypes = [
+            ctypes.c_void_p,  # CUpti_SubscriberHandle subscriber
             ctypes.POINTER(ctypes.c_uint64),
         ]
-        lib.cuptiActivityPopExternalCorrelationId_v2.restype = ctypes.c_int
+        lib.cuptiGetTimestamp_v2.restype = ctypes.c_int
+    # External correlation is process-global (not subscription-scoped), and the
+    # _v2 variants aren't present in all libcupti, so the monitor uses the plain
+    # push/pop even on the v2 path.
+    lib.cuptiActivityPushExternalCorrelationId.argtypes = [
+        ctypes.c_int,
+        ctypes.c_uint64,
+    ]
+    lib.cuptiActivityPushExternalCorrelationId.restype = ctypes.c_int
+    lib.cuptiActivityPopExternalCorrelationId.argtypes = [
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_uint64),
+    ]
+    lib.cuptiActivityPopExternalCorrelationId.restype = ctypes.c_int
 
 
 # --- v2 user-defined-record ctypes structs --------------------------------
@@ -377,73 +283,25 @@ class _PyLibCupti:
         self._check(self._lib.cuptiGetVersion(ctypes.byref(version)), "cuptiGetVersion")
         return version.value
 
-    def get_timestamp(self) -> int:
-        """CUPTI's normalized nanosecond clock -- the same timebase as activity
-        record START/END timestamps, so a value captured here is directly
-        comparable to decoded record timestamps."""
+    def get_timestamp(self, sub_handle: int) -> int:
+        """CUPTI's normalized nanosecond clock for a subscriber -- the same timebase
+        as activity record START/END timestamps, so a value captured here is directly
+        comparable to decoded record timestamps. The subscriber-aware _v2 form is
+        required while a user-defined-record subscriber is active: plain
+        cuptiGetTimestamp returns CUPTI_ERROR_NOT_COMPATIBLE under UDR on libcupti
+        13.3 (it works only with no active v2 subscriber)."""
         ts = ctypes.c_uint64()
-        self._check(self._lib.cuptiGetTimestamp(ctypes.byref(ts)), "cuptiGetTimestamp")
+        self._check(
+            self._lib.cuptiGetTimestamp_v2(
+                ctypes.c_void_p(sub_handle), ctypes.byref(ts)
+            ),
+            "cuptiGetTimestamp_v2",
+        )
         return ts.value
-
-    def activity_enable(self, kind: ActivityKind) -> None:
-        self._check(self._lib.cuptiActivityEnable(kind), "cuptiActivityEnable")
-
-    def activity_disable(self, kind: ActivityKind) -> None:
-        self._check(self._lib.cuptiActivityDisable(kind), "cuptiActivityDisable")
-
-    def activity_enable_runtime_api(
-        self, cbid: Runtime_api_trace_cbid, enabled: bool
-    ) -> bool:
-        """Enable/disable a single runtime-API cbid. Returns False (no-op) if the
-        libcupti lacks the per-cbid filter symbol."""
-        if not hasattr(self._lib, "cuptiActivityEnableRuntimeApi"):
-            return False
-        self._check(
-            self._lib.cuptiActivityEnableRuntimeApi(cbid, 1 if enabled else 0),
-            "cuptiActivityEnableRuntimeApi",
-        )
-        return True
-
-    def activity_enable_driver_api(
-        self, cbid: Driver_api_trace_cbid, enabled: bool
-    ) -> bool:
-        """Enable/disable a single driver-API cbid. Returns False (no-op) if the
-        libcupti lacks the per-cbid filter symbol."""
-        if not hasattr(self._lib, "cuptiActivityEnableDriverApi"):
-            return False
-        self._check(
-            self._lib.cuptiActivityEnableDriverApi(cbid, 1 if enabled else 0),
-            "cuptiActivityEnableDriverApi",
-        )
-        return True
 
     def activity_flush_all(self, forced: bool) -> None:
         flag = CUPTI_ACTIVITY_FLAG_FLUSH_FORCED if forced else 0
         self._check(self._lib.cuptiActivityFlushAll(flag), "cuptiActivityFlushAll")
-
-    def activity_get_next_record(
-        self, buffer_ptr: int, valid_size: int, prev_record: int | None = None
-    ) -> int | None:
-        """The address of the activity record after ``prev_record`` in the buffer
-        (or the first record when ``prev_record`` is None), or None once the buffer
-        is exhausted. The record pointer is in/out: it must carry the previous
-        record back in to advance -- passing NULL each call would re-return the
-        first record forever (an infinite walk)."""
-        record_ptr = ctypes.c_void_p(prev_record)
-        rc = self._lib.cuptiActivityGetNextRecord(
-            ctypes.c_void_p(buffer_ptr),
-            ctypes.c_size_t(valid_size),
-            ctypes.byref(record_ptr),
-        )
-        if rc == CUPTI_SUCCESS:
-            if record_ptr.value is None:
-                raise CuptiError("CUPTI returned null activity record pointer")
-            return record_ptr.value
-        if rc == CUPTI_ERROR_MAX_LIMIT_REACHED:
-            return None
-        raise CuptiError(
-            f"cuptiActivityGetNextRecord failed with {self._result_string(rc)}"
-        )
 
     def activity_get_num_dropped_records(self, ctx: int, stream_id: int) -> int:
         dropped = ctypes.c_size_t()
@@ -452,64 +310,23 @@ class _PyLibCupti:
         )
         return dropped.value if rc == CUPTI_SUCCESS else 0
 
-    def activity_register_callbacks(
-        self, request_addr: int, complete_addr: int
-    ) -> None:
-        self._check(
-            self._lib.cuptiActivityRegisterCallbacks(
-                ctypes.c_void_p(request_addr), ctypes.c_void_p(complete_addr)
-            ),
-            "cuptiActivityRegisterCallbacks",
-        )
-
-    def activity_register_timestamp_callback(self, callback_addr: int) -> None:
-        self._check(
-            self._lib.cuptiActivityRegisterTimestampCallback(
-                ctypes.c_void_p(callback_addr)
-            ),
-            "cuptiActivityRegisterTimestampCallback",
-        )
-
-    def activity_push_external_correlation_id(
-        self, external_id: int, kind: ExternalCorrelationKind | None = None
-    ) -> bool:
-        """Push an external-correlation id (default kind CUSTOM1). Best-effort:
-        returns False on failure."""
-        if kind is None:
-            kind = _cupti().ExternalCorrelationKind.CUSTOM1
-        rc = self._lib.cuptiActivityPushExternalCorrelationId(
-            kind, ctypes.c_uint64(external_id)
-        )
-        return rc == CUPTI_SUCCESS
-
-    def activity_pop_external_correlation_id(
-        self, kind: ExternalCorrelationKind | None = None
-    ) -> int | None:
-        """Pop the most recent external-correlation id (default kind CUSTOM1), or
-        None on failure."""
-        if kind is None:
-            kind = _cupti().ExternalCorrelationKind.CUSTOM1
-        last = ctypes.c_uint64()
-        rc = self._lib.cuptiActivityPopExternalCorrelationId(kind, ctypes.byref(last))
-        return last.value if rc == CUPTI_SUCCESS else None
-
     def activity_enable_hw_trace(self, enabled: bool) -> None:
         self._check(
             self._lib.cuptiActivityEnableHWTrace(1 if enabled else 0),
             "cuptiActivityEnableHWTrace",
         )
 
-    def read_activity_kind(self, record_addr: int) -> int:
-        """The leading CUpti_ActivityKind int at the head of an activity record."""
-        return ctypes.c_int.from_address(record_addr).value
+    def finalize(self) -> None:
+        """cuptiFinalize -- detach and release ALL of CUPTI process-wide. This is a
+        global, heavy reset for explicit *synchronous* teardown: e.g. releasing a
+        stock Kineto session's CUPTI subscriber before a CUPTI-monitor session
+        subscribes. The monitor itself never calls this at stop() -- it disarms
+        user-defined records + unsubscribes instead, because cuptiFinalize is global
+        (would clobber a concurrent consumer) and, run asynchronously (Kineto's
+        TEARDOWN_CUPTI), can deadlock against another thread's CUPTI calls."""
+        self._check(self._lib.cuptiFinalize(), "cuptiFinalize")
 
-    # --- v2 / user-defined-records -----------------------------------------
-
-    def has_v2(self) -> bool:
-        """True if libcupti exposes the v2 user-defined-record API (>= 13.2)."""
-        return self.get_version() >= _MIN_V2_VERSION and hasattr(
-            self._lib, "cuptiActivityEnable_v2"
-        )
+    # --- user-defined-records (subscription API) ---------------------------
 
     def subscribe(self, allow_multiple: bool = True) -> int:
         """cuptiSubscribe_v2 with a no-op callback -> opaque subscriber handle
@@ -565,7 +382,24 @@ class _PyLibCupti:
             "cuptiActivityRegisterCallbacks_v2",
         )
 
-    def activity_enable_v2(
+    def disarm_user_defined_records(self, sub_handle: int) -> None:
+        """Turn user-defined records back off for the subscription (the inverse of
+        arm_user_defined_records' set-attribute). UDR mode changes how CUPTI lays
+        out activity records, so leaving it on can leave a following classic
+        consumer (e.g. Kineto) unable to decode -- reset it before unsubscribing."""
+        disabled = ctypes.c_uint8(0)
+        size = ctypes.c_size_t(1)
+        self._check(
+            self._lib.cuptiActivitySetAttribute_v2(
+                ctypes.c_void_p(sub_handle),
+                _ATTR_USER_DEFINED_RECORDS,
+                ctypes.byref(size),
+                ctypes.byref(disabled),
+            ),
+            "cuptiActivitySetAttribute_v2",
+        )
+
+    def activity_enable(
         self, sub_handle: int, kind: ActivityKind, field_ids: Iterable[int]
     ) -> None:
         """Enable a kind with a user-defined field selection. CUPTI requires the
@@ -587,34 +421,34 @@ class _PyLibCupti:
             "cuptiActivityEnable_v2",
         )
 
-    def activity_disable_v2(self, sub_handle: int, kind: ActivityKind) -> None:
+    def activity_disable(self, sub_handle: int, kind: ActivityKind) -> None:
         self._check(
             self._lib.cuptiActivityDisable_v2(ctypes.c_void_p(sub_handle), kind),
             "cuptiActivityDisable_v2",
         )
 
-    def activity_push_external_correlation_id_v2(
-        self,
-        sub_handle: int,
-        external_id: int,
-        kind: ExternalCorrelationKind | None = None,
+    def activity_push_external_correlation_id(
+        self, external_id: int, kind: ExternalCorrelationKind | None = None
     ) -> bool:
+        """Push an external-correlation id (default kind CUSTOM1) onto CUPTI's
+        process-global stack. Best-effort: returns False on failure. Global, not
+        subscription-scoped, so it serves the v2 path too."""
         if kind is None:
             kind = _cupti().ExternalCorrelationKind.CUSTOM1
-        rc = self._lib.cuptiActivityPushExternalCorrelationId_v2(
-            ctypes.c_void_p(sub_handle), kind, ctypes.c_uint64(external_id)
+        rc = self._lib.cuptiActivityPushExternalCorrelationId(
+            kind, ctypes.c_uint64(external_id)
         )
         return rc == CUPTI_SUCCESS
 
-    def activity_pop_external_correlation_id_v2(
-        self, sub_handle: int, kind: ExternalCorrelationKind | None = None
+    def activity_pop_external_correlation_id(
+        self, kind: ExternalCorrelationKind | None = None
     ) -> int | None:
+        """Pop the most recent external-correlation id (default kind CUSTOM1), or
+        None on failure."""
         if kind is None:
             kind = _cupti().ExternalCorrelationKind.CUSTOM1
         last = ctypes.c_uint64()
-        rc = self._lib.cuptiActivityPopExternalCorrelationId_v2(
-            ctypes.c_void_p(sub_handle), kind, ctypes.byref(last)
-        )
+        rc = self._lib.cuptiActivityPopExternalCorrelationId(kind, ctypes.byref(last))
         return last.value if rc == CUPTI_SUCCESS else None
 
 
