@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIf,
 )
+from torch.testing._internal.hash_trace_utils import hash_trace_wrapper
 
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
@@ -3416,7 +3417,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
         input_large = torch.randn(4096, 1, 512, 1024, dtype=dtype, device=device)
         # forward
-        ret = conv(input_large)
+        with hash_trace_wrapper():
+            ret = conv(input_large)
         maxdiff0 = (
             (ret.narrow(0, 0, 1024) - conv(input_large.narrow(0, 0, 1024)))
             .abs_()
@@ -3461,7 +3463,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
         input_large = torch.randn(4097, 2, 512, 512, dtype=dtype, device=device)
         # forward
-        ret = conv(input_large)
+        with hash_trace_wrapper():
+            ret = conv(input_large)
         self.assertEqual(ret[:2048], conv(input_large[:2048]))
         self.assertEqual(ret[2048:4096], conv(input_large[2048:4096]))
         self.assertEqual(ret[4096:], conv(input_large[4096:]))
@@ -3475,9 +3478,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
         del ret
         grad1 = conv.weight.grad.detach().clone()
         conv.zero_grad()
-        conv(input_large[:2048]).view(2048, -1).max(dim=1).values.sum().backward()
-        conv(input_large[2048:4096]).view(2048, -1).max(dim=1).values.sum().backward()
-        conv(input_large[4096:]).view(1, -1).max(dim=1).values.sum().backward()
+        with hash_trace_wrapper():
+            conv(input_large[:2048]).view(2048, -1).max(dim=1).values.sum().backward()
+            conv(input_large[2048:4096]).view(2048, -1).max(dim=1).values.sum().backward()
+            conv(input_large[4096:]).view(1, -1).max(dim=1).values.sum().backward()
         grad2 = conv.weight.grad.detach().clone()
         # gradients are at the order of hundreds, we need to scale it to
         # the order of one so that we can compare
@@ -4416,7 +4420,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
             2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=torch.half
         ).to(memory_format=torch.channels_last)
         yref = c(x)
-        y = c.to(device=device)(x.to(device=device))
+        with hash_trace_wrapper():
+            y = c.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
         del y, yref
 
@@ -4424,7 +4429,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         x = x.reshape(100, 2, 3280, 3280)
         x = x.contiguous(memory_format=torch.channels_last)
         yref = c.cpu()(x)
-        y = c.to(device=device)(x.to(device=device))
+        with hash_trace_wrapper():
+            y = c.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
 
 
