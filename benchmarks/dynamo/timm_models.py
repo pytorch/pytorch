@@ -287,10 +287,10 @@ class TimmRunner(BenchmarkRunner):
             self.compute_loss = self.scaled_compute_loss
 
         # See yaml note for emulate_precision_casts. This preserves the
-        # bf16/fp16 downcast-upcast pairs that inductor would otherwise
-        # elide when fusing across mixed-precision boundaries (e.g.
-        # bf16 conv-bias-add fused into an fp32 cat-prep store), which
-        # is what eager autocast actually does.
+        # bf16 downcast-upcast pairs (fp16 untested) that inductor would
+        # otherwise elide when fusing across mixed-precision boundaries
+        # (e.g. bf16 conv-bias-add fused into an fp32 cat-prep store),
+        # which is what eager autocast actually does.
         #
         # Baseline is captured on the FIRST load_model call so that any
         # --inductor-config emulate_precision_casts=... CLI override (applied

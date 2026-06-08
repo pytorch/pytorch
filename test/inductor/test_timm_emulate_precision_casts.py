@@ -1,11 +1,11 @@
 # Owner(s): ["module: inductor"]
 """Regression test for benchmarks/dynamo/timm_models.py emulate_precision_casts.
 
-Guards against two bugs:
+Guards against:
   1. The flag leaking across iter_models iterations (a listed model flipped
      it on; later non-listed models silently ran with it on).
-  2. The captured baseline being read before main() applied
-     `--inductor-config emulate_precision_casts=...` overrides, which would
+  2. Baseline being captured before main() applied
+     --inductor-config emulate_precision_casts=... overrides, which would
      clobber a user-specified True.
 """
 
@@ -47,34 +47,36 @@ class TimmEmulatePrecisionCastsTest(TestCase):
         self._orig_flag = inductor_config.emulate_precision_casts
         import timm
 
-        stub = lambda self, name: timm.create_model(  # noqa: E731
-            "vit_tiny_patch16_224", pretrained=False, num_classes=10
+        def stub_download(self, name):
+            return timm.create_model(
+                "vit_tiny_patch16_224", pretrained=False, num_classes=10
+            )
+
+        self._dl = mock.patch.object(self.TimmRunner, "_download_model", stub_download)
+        self._vm = mock.patch.object(
+            self.TimmRunner, "validate_model", lambda *a, **k: None
         )
-        self._patches = [
-            mock.patch.object(self.TimmRunner, "_download_model", stub),
-            mock.patch.object(self.TimmRunner, "validate_model", lambda *a, **k: None),
-        ]
-        for p in self._patches:
-            p.start()
-        ns = argparse.Namespace(
+        self._dl.start()
+        self._vm.start()
+
+        self.runner = self.TimmRunner()
+        self.runner._args = self.runner.args = argparse.Namespace(
             training=False,
             use_eval_mode=True,
             channels_last=False,
             enable_activation_checkpointing=False,
             amp=False,
         )
-        self.runner = self.TimmRunner()
-        self.runner._args = self.runner.args = ns
 
     def tearDown(self):
         inductor_config.emulate_precision_casts = self._orig_flag
-        for p in self._patches:
-            p.stop()
+        self._dl.stop()
+        self._vm.stop()
         super().tearDown()
 
     def _load(self, name):
-        # load_model may fail late (stub model vs. real input shape); the
-        # flag assignment happens before any such failure.
+        # load_model may fail late on the stub model (shape mismatch) AFTER
+        # the flag has been assigned; that's fine for this test.
         try:
             self.runner.load_model(torch.device("cpu"), name)
         except Exception:
@@ -89,12 +91,11 @@ class TimmEmulatePrecisionCastsTest(TestCase):
         self.assertFalse(inductor_config.emulate_precision_casts)
 
     def test_user_override_preserved_in_production_order(self):
-        """Mirrors timm_main(): TimmRunner() runs before main() applies
-        --inductor-config overrides. The fix must capture baseline lazily
+        """Mirrors timm_main(): TimmRunner() runs in setUp, BEFORE the CLI
+        override is applied below. The fix must capture baseline lazily
         (on first load_model), not eagerly in __init__."""
-        # TimmRunner() already constructed in setUp.
-        inductor_config.emulate_precision_casts = True  # CLI override applied
-        self._load(self.UNLISTED)  # baseline captured here
+        inductor_config.emulate_precision_casts = True  # CLI override
+        self._load(self.UNLISTED)
         self.assertTrue(inductor_config.emulate_precision_casts)
         self._load(self.LISTED)
         self.assertTrue(inductor_config.emulate_precision_casts)
