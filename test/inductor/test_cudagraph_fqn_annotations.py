@@ -44,17 +44,20 @@ class LeafModule(nn.Module):
         self.linear = nn.Linear(dim, dim)
 
     def forward(self, x):
-        return self.linear(x)
+        h = self.linear(x)                          # GEMM (cuBLAS addmm)
+        h = torch.nn.functional.silu(h) * h + x    # pointwise → triton fused kernel
+        return h
 
 
 class LayerBlock(nn.Module):
     def __init__(self, dim):
         super().__init__()
-        self.input_layernorm = LeafModule(dim)
-        self.mlp = LeafModule(dim)
+        self.fc1 = LeafModule(dim)
+        self.scale = nn.Parameter(torch.ones(dim))
 
     def forward(self, x):
-        return self.mlp(self.input_layernorm(x))
+        h = self.fc1(x)
+        return h * self.scale + x   # mul + scale + add (residual)
 
 
 class InnerModel(nn.Module):
