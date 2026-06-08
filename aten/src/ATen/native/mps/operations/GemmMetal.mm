@@ -74,25 +74,23 @@ SimdTile pick_simd_tile(int64_t M, int64_t N, int64_t K) {
   return {64, 64, 16, 2, 2};
 }
 
-std::string simd_name(
-    const std::string& dt,
-    SimdTile t,
-    bool trans_a,
-    bool trans_b,
-    at_gemm::GemmEpilogue epi,
-    bool batched) {
-  return fmt::format(
-      "gemm_simd_{}_{}_{}_{}_{}_{}_ta{}_tb{}_{}_{}",
-      dt,
-      t.BM,
-      t.BN,
-      t.BK,
-      t.WM,
-      t.WN,
-      trans_a ? 1 : 0,
-      trans_b ? 1 : 0,
-      epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none",
-      batched ? "b1" : "b0");
+std::string simd_name(const std::string& dt,
+                      SimdTile t,
+                      bool trans_a,
+                      bool trans_b,
+                      at_gemm::GemmEpilogue epi,
+                      bool batched) {
+  return fmt::format("gemm_simd_{}_{}_{}_{}_{}_{}_ta{}_tb{}_{}_{}",
+                     dt,
+                     t.BM,
+                     t.BN,
+                     t.BK,
+                     t.WM,
+                     t.WN,
+                     trans_a ? 1 : 0,
+                     trans_b ? 1 : 0,
+                     epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none",
+                     batched ? "b1" : "b0");
 }
 
 // (BM, BN, NSG) for the mpp (matmul2d) kernel.
@@ -144,46 +142,40 @@ TensorTile pick_mpp_tile(int64_t M, int64_t N, int64_t K, c10::ScalarType dt) {
   return {64, 64, 2};
 }
 
-std::string mpp_name(
-    const std::string& dt,
-    TensorTile t,
-    bool trans_a,
-    bool trans_b,
-    bool relaxed,
-    at_gemm::GemmEpilogue epi,
-    bool batched) {
-  return fmt::format(
-      "gemm_mpp_{}_{}_{}_{}_ta{}_tb{}_{}_{}_{}",
-      dt,
-      t.BM,
-      t.BN,
-      t.NSG,
-      trans_a ? 1 : 0,
-      trans_b ? 1 : 0,
-      relaxed ? "relaxed" : "full",
-      epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none",
-      batched ? "b1" : "b0");
+std::string mpp_name(const std::string& dt,
+                     TensorTile t,
+                     bool trans_a,
+                     bool trans_b,
+                     bool relaxed,
+                     at_gemm::GemmEpilogue epi,
+                     bool batched) {
+  return fmt::format("gemm_mpp_{}_{}_{}_{}_ta{}_tb{}_{}_{}_{}",
+                     dt,
+                     t.BM,
+                     t.BN,
+                     t.NSG,
+                     trans_a ? 1 : 0,
+                     trans_b ? 1 : 0,
+                     relaxed ? "relaxed" : "full",
+                     epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none",
+                     batched ? "b1" : "b0");
 }
 
 std::string gemv_t_name(const std::string& dt, int nw, int vec, at_gemm::GemmEpilogue epi) {
-  return fmt::format(
-      "gemv_t_{}_{}_{}_{}", dt, nw, vec, epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none");
+  return fmt::format("gemv_t_{}_{}_{}_{}", dt, nw, vec, epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none");
 }
 
 std::string gemv_nt_name(const std::string& dt, int nw, int vec, at_gemm::GemmEpilogue epi) {
-  return fmt::format(
-      "gemv_nt_{}_{}_{}_{}", dt, nw, vec, epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none");
+  return fmt::format("gemv_nt_{}_{}_{}_{}", dt, nw, vec, epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none");
 }
 
 // c2 = float2 (complex64) / half2 (complex32).
 std::string cgemv_t_name(const std::string& c2, int nw, at_gemm::GemmEpilogue epi) {
-  return fmt::format(
-      "cgemv_t_{}_{}_{}", c2, nw, epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none");
+  return fmt::format("cgemv_t_{}_{}_{}", c2, nw, epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none");
 }
 
 std::string cgemv_nt_name(const std::string& c2, int nw, at_gemm::GemmEpilogue epi) {
-  return fmt::format(
-      "cgemv_nt_{}_{}_{}", c2, nw, epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none");
+  return fmt::format("cgemv_nt_{}_{}_{}", c2, nw, epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none");
 }
 
 // (NWARPS, VEC) for a GEMV launch (metalBLAS _gemv_pick / _gemv_nt_pick). VEC scales
@@ -202,12 +194,7 @@ int clamp_vec(int vec, int64_t align) {
   return vec;
 }
 
-GemvCfg pick_gemv_t(
-    c10::ScalarType dt,
-    int64_t outlen,
-    int64_t K,
-    int64_t align,
-    bool tensor_unit) {
+GemvCfg pick_gemv_t(c10::ScalarType dt, int64_t outlen, int64_t K, int64_t align, bool tensor_unit) {
   if (c10::isIntegralType(dt, /*includeBool=*/false)) {
     // _IGEMV_T_CFG: NW=8 always; VEC by element width (char/uchar 8, short 4,
     // int 2, long 1), clamped to alignment.
@@ -398,25 +385,23 @@ IntTile pick_int_tile(int64_t M, int64_t N, int64_t K, c10::ScalarType dt) {
   return {64, 64, 16, 16, 16};
 }
 
-std::string int_name(
-    const std::string& dt,
-    IntTile t,
-    bool trans_a,
-    bool trans_b,
-    at_gemm::GemmEpilogue epi,
-    bool batched) {
-  return fmt::format(
-      "gemm_int_{}_{}_{}_{}_{}_{}_ta{}_tb{}_{}_{}",
-      dt,
-      t.BM,
-      t.BN,
-      t.BK,
-      t.TX,
-      t.TY,
-      trans_a ? 1 : 0,
-      trans_b ? 1 : 0,
-      epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none",
-      batched ? "b1" : "b0");
+std::string int_name(const std::string& dt,
+                     IntTile t,
+                     bool trans_a,
+                     bool trans_b,
+                     at_gemm::GemmEpilogue epi,
+                     bool batched) {
+  return fmt::format("gemm_int_{}_{}_{}_{}_{}_{}_ta{}_tb{}_{}_{}",
+                     dt,
+                     t.BM,
+                     t.BN,
+                     t.BK,
+                     t.TX,
+                     t.TY,
+                     trans_a ? 1 : 0,
+                     trans_b ? 1 : 0,
+                     epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none",
+                     batched ? "b1" : "b0");
 }
 
 // Deinterleave a complex buffer `src` into contiguous real planes re/im.
@@ -440,12 +425,7 @@ void launch_complex_split(const Tensor& src, const Tensor& re, const Tensor& im)
 }
 
 // Fold the four real products into the interleaved complex result `dst`.
-void launch_complex_combine(
-    const Tensor& P,
-    const Tensor& Q,
-    const Tensor& S,
-    const Tensor& T,
-    const Tensor& dst) {
+void launch_complex_combine(const Tensor& P, const Tensor& Q, const Tensor& S, const Tensor& T, const Tensor& dst) {
   const int64_t n = dst.numel();
   if (n == 0) {
     return;
@@ -467,14 +447,13 @@ void launch_complex_combine(
 // Native interleaved-complex rank-1 GEMV (M==1 / N==1): reads the matrix once as C2
 // (vs the four-real-GEMM decomposition). a, b are already contiguous of the out
 // dtype. Returns true when handled, false to fall back to the decomposition.
-bool launch_cgemv_complex(
-    const Tensor& a,
-    const Tensor& b,
-    const Tensor& out,
-    const std::optional<Tensor>& self,
-    const Scalar& alpha,
-    const Scalar& beta,
-    at_gemm::GemmEpilogue epi) {
+bool launch_cgemv_complex(const Tensor& a,
+                          const Tensor& b,
+                          const Tensor& out,
+                          const std::optional<Tensor>& self,
+                          const Scalar& alpha,
+                          const Scalar& beta,
+                          at_gemm::GemmEpilogue epi) {
   const int64_t M = a.size(0), K = a.size(1), N = b.size(1);
   if (((M == 1) == (N == 1))) {
     return false; // not rank-1 (or degenerate 1x1)
@@ -501,25 +480,22 @@ bool launch_cgemv_complex(
   const Tensor& mat = m_is_one ? b : a; // M==1: matrix is B; N==1: matrix is A
   const Tensor& vec = m_is_one ? a : b;
   const int64_t ld = mat.stride(0); // ldb == N (cgemv_t) or lda == K (cgemv_nt)
-  const std::array<int32_t, 6> gdims = {
-      static_cast<int32_t>(outlen),
-      static_cast<int32_t>(K),
-      static_cast<int32_t>(ld),
-      /*xs=*/1,
-      m_is_one ? 0 : self_r, // cgemv_nt indexes self at (row, 0)
-      m_is_one ? self_c : 0}; // cgemv_t indexes self at (0, n)
+  const std::array<int32_t, 6> gdims = {static_cast<int32_t>(outlen),
+                                        static_cast<int32_t>(K),
+                                        static_cast<int32_t>(ld),
+                                        /*xs=*/1,
+                                        m_is_one ? 0 : self_r, // cgemv_nt indexes self at (row, 0)
+                                        m_is_one ? self_c : 0}; // cgemv_t indexes self at (0, n)
 
   const int nw = m_is_one ? 8 : 4;
-  const std::string fname =
-      m_is_one ? cgemv_t_name(c2, nw, epi) : cgemv_nt_name(c2, nw, epi);
+  const std::string fname = m_is_one ? cgemv_t_name(c2, nw, epi) : cgemv_nt_name(c2, nw, epi);
   auto pso = lib.getPipelineStateForFunc(fname);
   const auto av = alpha.toComplexDouble();
   const auto bv = beta.toComplexDouble();
-  const std::array<float, 4> ab = {
-      static_cast<float>(av.real()),
-      static_cast<float>(av.imag()),
-      static_cast<float>(bv.real()),
-      static_cast<float>(bv.imag())};
+  const std::array<float, 4> ab = {static_cast<float>(av.real()),
+                                   static_cast<float>(av.imag()),
+                                   static_cast<float>(bv.real()),
+                                   static_cast<float>(bv.imag())};
   const NSUInteger tg = static_cast<NSUInteger>(nw * 32);
   const int64_t ng = m_is_one ? ((outlen + 31) / 32) : ((outlen + nw - 1) / nw);
 
@@ -530,8 +506,7 @@ bool launch_cgemv_complex(
       auto enc = stream->commandEncoder();
       [enc setComputePipelineState:pso];
       mtl_setArgs(enc, mat, vec, target, gdims, self_e, ab);
-      [enc dispatchThreadgroups:MTLSizeMake(ng, 1, 1)
-          threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+      [enc dispatchThreadgroups:MTLSizeMake(ng, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
       getMPSProfiler().endProfileKernel(pso);
     }
   });
@@ -557,9 +532,7 @@ bool autotune_enabled() {
   return on;
 }
 
-std::vector<TensorTile> with_primary(
-    TensorTile primary,
-    std::vector<TensorTile> extra) {
+std::vector<TensorTile> with_primary(TensorTile primary, std::vector<TensorTile> extra) {
   std::vector<TensorTile> c{primary};
   for (auto t : extra) {
     bool dup = false;
@@ -579,11 +552,10 @@ std::vector<TensorTile> with_primary(
 // metalBLAS _mpp_tensor_tile_candidates: (candidates, margin). Candidate 0 is the
 // heuristic; a longer list marks an ambiguous regime. Every tile here must be an
 // instantiated untransposed mpp tile (Gemm.metal MB_MPP_* + MB_MPP_UNTRANS).
-std::pair<std::vector<TensorTile>, double> mpp_tensor_tile_candidates(
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    c10::ScalarType dt) {
+std::pair<std::vector<TensorTile>, double> mpp_tensor_tile_candidates(int64_t M,
+                                                                      int64_t N,
+                                                                      int64_t K,
+                                                                      c10::ScalarType dt) {
   TensorTile primary = pick_mpp_tile(M, N, K, dt);
   if (dt == kFloat) {
     return {{primary}, kAutotuneMargin}; // fp32 wins everywhere - never probe
@@ -603,16 +575,14 @@ std::pair<std::vector<TensorTile>, double> mpp_tensor_tile_candidates(
       return {{TensorTile{32, 64, 2}}, kAutotuneMargin};
     }
     if (N == 128 && M >= 4096 && K >= 2048) {
-      const TensorTile thin_n_tile =
-          M >= 8192 ? TensorTile{256, 128, 32} : TensorTile{512, 64, 32};
+      const TensorTile thin_n_tile = M >= 8192 ? TensorTile{256, 128, 32} : TensorTile{512, 64, 32};
       return {{thin_n_tile}, kAutotuneMargin};
     }
     if (N == 256 && M >= 4096 && K >= 2048) {
       return {{primary}, kAutotuneMargin};
     }
     std::vector<TensorTile> extra = {
-        {128, 32, 2}, {256, 32, 4}, {32, 128, 2}, {32, 256, 4},
-        {64, 64, 2}, {64, 32, 2}, {32, 64, 2}};
+        {128, 32, 2}, {256, 32, 4}, {32, 128, 2}, {32, 256, 4}, {64, 64, 2}, {64, 32, 2}, {32, 64, 2}};
     if (N == 128 && M >= 1024) {
       extra.push_back({512, 64, 32});
       if (M >= 8192) {
@@ -659,8 +629,7 @@ TensorTile pick_bmm_tile(int64_t M, int64_t N, int64_t K, c10::ScalarType dt) {
 
 std::vector<TensorTile> bmm_candidates(int64_t M, int64_t N, int64_t K, c10::ScalarType dt) {
   static const TensorTile kBmmTiles[] = {
-      {64, 64, 2}, {64, 64, 4}, {32, 64, 2}, {32, 128, 4},
-      {64, 128, 4}, {128, 64, 4}, {128, 32, 4}, {128, 128, 8}};
+      {64, 64, 2}, {64, 64, 4}, {32, 64, 2}, {32, 128, 4}, {64, 128, 4}, {128, 64, 4}, {128, 32, 4}, {128, 128, 8}};
   std::vector<TensorTile> extra;
   for (auto t : kBmmTiles) {
     if (t.BM <= 2 * M && t.BN <= 2 * N) {
@@ -712,8 +681,7 @@ bool conv_k_supported(int64_t K) {
 }
 bool is_conv_regime(int64_t M, int64_t N, int64_t K, c10::ScalarType dt) {
   const bool use_n64_conv = N < 64 || M > 4096;
-  return dt != kFloat && N <= 64 && use_n64_conv && N % 32 == 0 && M >= 512 &&
-      conv_k_supported(K);
+  return dt != kFloat && N <= 64 && use_n64_conv && N % 32 == 0 && M >= 512 && conv_k_supported(K);
 }
 std::vector<ConvSpec> conv_specs(int64_t M, int64_t N) {
   std::vector<ConvSpec> s;
@@ -728,29 +696,26 @@ std::vector<ConvSpec> conv_specs(int64_t M, int64_t N) {
 }
 
 // Two-pass split-K into a packed (ldc == N) output; encode-only (no commit).
-void launch_splitk(
-    const std::string& dt_str,
-    const Tensor& A,
-    const Tensor& B,
-    const Tensor& out,
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int BM,
-    int BN,
-    int NSG,
-    int G) {
+void launch_splitk(const std::string& dt_str,
+                   const Tensor& A,
+                   const Tensor& B,
+                   const Tensor& out,
+                   int64_t M,
+                   int64_t N,
+                   int64_t K,
+                   int BM,
+                   int BN,
+                   int NSG,
+                   int G) {
   const int planes = G; // every chunk (incl. 0) writes an fp32 plane
   const int kchunk = static_cast<int>(K / G);
   Tensor Cp = at::empty({planes, M, N}, out.options().dtype(kFloat));
   auto stream = getCurrentMPSStream();
-  auto pso_g = lib.getPipelineStateForFunc(
-      fmt::format("splitk_gemm_{}_{}_{}_{}", dt_str, BM, BN, NSG));
+  auto pso_g = lib.getPipelineStateForFunc(fmt::format("splitk_gemm_{}_{}_{}_{}", dt_str, BM, BN, NSG));
   auto pso_r = lib.getPipelineStateForFunc("splitk_reduce_" + dt_str);
   const int64_t tiles_m = (M + BM - 1) / BM;
   const int64_t tiles_n = (N + BN - 1) / BN;
-  const std::array<int32_t, 4> sk = {
-      static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), kchunk};
+  const std::array<int32_t, 4> sk = {static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), kchunk};
   const std::array<int32_t, 2> rd = {static_cast<int32_t>(M * N), planes};
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -758,8 +723,7 @@ void launch_splitk(
       auto enc = stream->commandEncoder();
       [enc setComputePipelineState:pso_g];
       mtl_setArgs(enc, A, B, Cp, sk);
-      [enc dispatchThreadgroups:MTLSizeMake(tiles_n, tiles_m, G)
-          threadsPerThreadgroup:MTLSizeMake(NSG * 32, 1, 1)];
+      [enc dispatchThreadgroups:MTLSizeMake(tiles_n, tiles_m, G) threadsPerThreadgroup:MTLSizeMake(NSG * 32, 1, 1)];
       getMPSProfiler().endProfileKernel(pso_g);
     }
   });
@@ -776,32 +740,28 @@ void launch_splitk(
 }
 
 // 1x1-conv GEMM into a packed (ldc == N) output; encode-only (no commit).
-void launch_conv(
-    const std::string& dt_str,
-    const Tensor& A,
-    const Tensor& B,
-    const Tensor& out,
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int BMW,
-    int BNO,
-    int NSG) {
+void launch_conv(const std::string& dt_str,
+                 const Tensor& A,
+                 const Tensor& B,
+                 const Tensor& out,
+                 int64_t M,
+                 int64_t N,
+                 int64_t K,
+                 int BMW,
+                 int BNO,
+                 int NSG) {
   auto stream = getCurrentMPSStream();
-  auto pso = lib.getPipelineStateForFunc(
-      fmt::format("conv1x1_gemm_{}_{}_{}_{}_{}", dt_str, BMW, BNO, NSG, K));
+  auto pso = lib.getPipelineStateForFunc(fmt::format("conv1x1_gemm_{}_{}_{}_{}_{}", dt_str, BMW, BNO, NSG, K));
   const int64_t tiles_o = (N + BNO - 1) / BNO;
   const int64_t tiles_w = (M + BMW - 1) / BMW;
-  const std::array<int32_t, 3> cd = {
-      static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K)};
+  const std::array<int32_t, 3> cd = {static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K)};
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       getMPSProfiler().beginProfileKernel(pso, "conv1x1_gemm", {A, B});
       auto enc = stream->commandEncoder();
       [enc setComputePipelineState:pso];
       mtl_setArgs(enc, A, B, out, cd);
-      [enc dispatchThreadgroups:MTLSizeMake(tiles_o, tiles_w, 1)
-          threadsPerThreadgroup:MTLSizeMake(NSG * 32, 1, 1)];
+      [enc dispatchThreadgroups:MTLSizeMake(tiles_o, tiles_w, 1) threadsPerThreadgroup:MTLSizeMake(NSG * 32, 1, 1)];
       getMPSProfiler().endProfileKernel(pso);
     }
   });
@@ -810,32 +770,40 @@ void launch_conv(
 // Thin-M gemv_bt launch (row- or column-major B per spec.trans_b); encode-only.
 // Shared by the autotuner probe and the final dispatch, so the timed kernel is
 // exactly the one that runs. Caller supplies the GemvBtDims fields.
-void launch_gemv_bt(
-    const std::string& dt_str,
-    const GemvBtSpec& spec,
-    at_gemm::GemmEpilogue epi,
-    const Tensor& B,
-    const Tensor& X,
-    const Tensor& out,
-    const Tensor& self,
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int32_t ldb,
-    int32_t ldx,
-    int32_t ldy,
-    int32_t self_r,
-    int32_t self_c,
-    int32_t batch_b,
-    int32_t batch_x,
-    int32_t batch_y,
-    int32_t batch_self,
-    const std::array<float, 2>& alpha_beta,
-    int64_t batch) {
+void launch_gemv_bt(const std::string& dt_str,
+                    const GemvBtSpec& spec,
+                    at_gemm::GemmEpilogue epi,
+                    const Tensor& B,
+                    const Tensor& X,
+                    const Tensor& out,
+                    const Tensor& self,
+                    int64_t M,
+                    int64_t N,
+                    int64_t K,
+                    int32_t ldb,
+                    int32_t ldx,
+                    int32_t ldy,
+                    int32_t self_r,
+                    int32_t self_c,
+                    int32_t batch_b,
+                    int32_t batch_x,
+                    int32_t batch_y,
+                    int32_t batch_self,
+                    const std::array<float, 2>& alpha_beta,
+                    int64_t batch) {
   // Field order must match at_gemm::GemvBtDims.
-  const std::array<int32_t, 12> bd = {
-      static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K),
-      ldb, ldx, ldy, self_r, self_c, batch_b, batch_x, batch_y, batch_self};
+  const std::array<int32_t, 12> bd = {static_cast<int32_t>(M),
+                                      static_cast<int32_t>(N),
+                                      static_cast<int32_t>(K),
+                                      ldb,
+                                      ldx,
+                                      ldy,
+                                      self_r,
+                                      self_c,
+                                      batch_b,
+                                      batch_x,
+                                      batch_y,
+                                      batch_self};
   auto pso = lib.getPipelineStateForFunc(gemv_bt_name(dt_str, spec, epi));
   const int per = spec.trans_b ? (spec.nwarps * spec.ncols) : (32 * spec.vec);
   const int64_t ng = (N + per - 1) / per;
@@ -847,8 +815,7 @@ void launch_gemv_bt(
       auto enc = stream->commandEncoder();
       [enc setComputePipelineState:pso];
       mtl_setArgs(enc, B, X, out, bd, self, alpha_beta);
-      [enc dispatchThreadgroups:MTLSizeMake(ng, 1, batch)
-          threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+      [enc dispatchThreadgroups:MTLSizeMake(ng, 1, batch) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
       getMPSProfiler().endProfileKernel(pso);
     }
   });
@@ -879,38 +846,40 @@ std::mutex g_tile_mutex;
 // Time each candidate (best-of-reps min) on scratch; candidate 0 (heuristic mpp) is
 // kept unless beaten by > margin. split-K / conv candidates are verified against the
 // mpp reference before joining the probe (metalBLAS _autotune_mppt).
-GemmPlan autotune_plan(
-    const std::string& dt_str,
-    bool relaxed,
-    bool batched,
-    const Tensor& Av,
-    const Tensor& Bv,
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t batch,
-    const std::vector<TensorTile>& cands,
-    double margin,
-    const std::vector<SplitKSpec>& sk_specs,
-    const std::vector<ConvSpec>& conv_specs,
-    const GemvBtSpec& gbt) {
+GemmPlan autotune_plan(const std::string& dt_str,
+                       bool relaxed,
+                       bool batched,
+                       const Tensor& Av,
+                       const Tensor& Bv,
+                       int64_t M,
+                       int64_t N,
+                       int64_t K,
+                       int64_t batch,
+                       const std::vector<TensorTile>& cands,
+                       double margin,
+                       const std::vector<SplitKSpec>& sk_specs,
+                       const std::vector<ConvSpec>& conv_specs,
+                       const GemvBtSpec& gbt) {
   auto stream = getCurrentMPSStream();
-  Tensor scratch = batched ? at::empty({batch, M, N}, Av.options())
-                           : at::empty({M, N}, Av.options());
+  Tensor scratch = batched ? at::empty({batch, M, N}, Av.options()) : at::empty({M, N}, Av.options());
   // Packed (ta0 tb0) dims for the scratch (lda=K, ldb=N, ldc=N).
-  const std::array<int32_t, 13> dims = {
-      static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K),
-      static_cast<int32_t>(K), static_cast<int32_t>(N), static_cast<int32_t>(N),
-      0, 0, 0,
-      batched ? static_cast<int32_t>(M * K) : 0,
-      batched ? static_cast<int32_t>(K * N) : 0,
-      batched ? static_cast<int32_t>(M * N) : 0,
-      0};
+  const std::array<int32_t, 13> dims = {static_cast<int32_t>(M),
+                                        static_cast<int32_t>(N),
+                                        static_cast<int32_t>(K),
+                                        static_cast<int32_t>(K),
+                                        static_cast<int32_t>(N),
+                                        static_cast<int32_t>(N),
+                                        0,
+                                        0,
+                                        0,
+                                        batched ? static_cast<int32_t>(M * K) : 0,
+                                        batched ? static_cast<int32_t>(K * N) : 0,
+                                        batched ? static_cast<int32_t>(M * N) : 0,
+                                        0};
   const std::array<float, 2> ab = {1.0f, 0.0f};
 
   auto enqueue_mpp = [&](TensorTile t, const Tensor& o) {
-    const std::string fname =
-        mpp_name(dt_str, t, false, false, relaxed, at_gemm::GemmEpilogue::None, batched);
+    const std::string fname = mpp_name(dt_str, t, false, false, relaxed, at_gemm::GemmEpilogue::None, batched);
     auto pso = lib.getPipelineStateForFunc(fname);
     const int64_t tiles_m = (M + t.BM - 1) / t.BM;
     const int64_t tiles_n = (N + t.BN - 1) / t.BN;
@@ -920,8 +889,7 @@ GemmPlan autotune_plan(
         auto enc = stream->commandEncoder();
         [enc setComputePipelineState:pso];
         mtl_setArgs(enc, Av, Bv, o, dims, Av, ab);
-        [enc dispatchThreadgroups:MTLSizeMake(tiles_n, tiles_m, batch)
-            threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+        [enc dispatchThreadgroups:MTLSizeMake(tiles_n, tiles_m, batch) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
       }
     });
   };
@@ -941,13 +909,27 @@ GemmPlan autotune_plan(
     p.backend = GemmPlan::kGemvBt;
     p.gbt = gbt;
     cand.push_back({p, [&, gbt](const Tensor& o) {
-                      launch_gemv_bt(
-                          dt_str, gbt, at_gemm::GemmEpilogue::None, Bv, Av, o, Av,
-                          M, N, K, static_cast<int32_t>(N), static_cast<int32_t>(K),
-                          static_cast<int32_t>(N), 0, 0,
-                          batched ? static_cast<int32_t>(K * N) : 0,
-                          batched ? static_cast<int32_t>(M * K) : 0,
-                          batched ? static_cast<int32_t>(M * N) : 0, 0, ab, batch);
+                      launch_gemv_bt(dt_str,
+                                     gbt,
+                                     at_gemm::GemmEpilogue::None,
+                                     Bv,
+                                     Av,
+                                     o,
+                                     Av,
+                                     M,
+                                     N,
+                                     K,
+                                     static_cast<int32_t>(N),
+                                     static_cast<int32_t>(K),
+                                     static_cast<int32_t>(N),
+                                     0,
+                                     0,
+                                     batched ? static_cast<int32_t>(K * N) : 0,
+                                     batched ? static_cast<int32_t>(M * K) : 0,
+                                     batched ? static_cast<int32_t>(M * N) : 0,
+                                     0,
+                                     ab,
+                                     batch);
                     }});
   }
 
@@ -972,9 +954,8 @@ GemmPlan autotune_plan(
         p.backend = GemmPlan::kSplitK;
         p.tile = {sp.BM, sp.BN, sp.NSG};
         p.G = sp.G;
-        cand.push_back({p, [&, sp](const Tensor& o) {
-                          launch_splitk(dt_str, Av, Bv, o, M, N, K, sp.BM, sp.BN, sp.NSG, sp.G);
-                        }});
+        cand.push_back(
+            {p, [&, sp](const Tensor& o) { launch_splitk(dt_str, Av, Bv, o, M, N, K, sp.BM, sp.BN, sp.NSG, sp.G); }});
       }
     }
     for (auto sp : conv_specs) {
@@ -986,9 +967,8 @@ GemmPlan autotune_plan(
         p.BMW = sp.BMW;
         p.BNO = sp.BNO;
         p.convNSG = sp.NSG;
-        cand.push_back({p, [&, sp](const Tensor& o) {
-                          launch_conv(dt_str, Av, Bv, o, M, N, K, sp.BMW, sp.BNO, sp.NSG);
-                        }});
+        cand.push_back(
+            {p, [&, sp](const Tensor& o) { launch_conv(dt_str, Av, Bv, o, M, N, K, sp.BMW, sp.BNO, sp.NSG); }});
       }
     }
   }
@@ -1054,8 +1034,7 @@ GemmPlan autotune_plan(
         cand[j].run(scratch);
       }
       stream->synchronize(SyncType::COMMIT_AND_WAIT);
-      const double dt =
-          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / itj;
+      const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / itj;
       best[j] = std::min(best[j], dt);
     }
   }
@@ -1073,19 +1052,18 @@ GemmPlan autotune_plan(
 
 // Resolve the launch plan: heuristic mpp for transposed / non-packed / autotune-off,
 // else the cached autotuned winner (probing once on first sight of the shape).
-GemmPlan choose_gemm_plan(
-    c10::ScalarType dt,
-    const std::string& dt_str,
-    bool relaxed,
-    bool batched,
-    bool packed_untrans,
-    const Tensor& Av,
-    const Tensor& Bv,
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t batch,
-    const GemvBtSpec& gbt) {
+GemmPlan choose_gemm_plan(c10::ScalarType dt,
+                          const std::string& dt_str,
+                          bool relaxed,
+                          bool batched,
+                          bool packed_untrans,
+                          const Tensor& Av,
+                          const Tensor& Bv,
+                          int64_t M,
+                          int64_t N,
+                          int64_t K,
+                          int64_t batch,
+                          const GemvBtSpec& gbt) {
   if (!autotune_enabled() || !packed_untrans) {
     GemmPlan p;
     p.tile = batched ? pick_bmm_tile(M, N, K, dt) : pick_mpp_tile(M, N, K, dt);
@@ -1120,8 +1098,7 @@ GemmPlan choose_gemm_plan(
   }
   GemmPlan plan;
   if (cands.size() > 1 || !sk.empty() || !cv.empty() || gbt.valid) {
-    plan = autotune_plan(
-        dt_str, relaxed, batched, Av, Bv, M, N, K, batch, cands, margin, sk, cv, gbt);
+    plan = autotune_plan(dt_str, relaxed, batched, Av, Bv, M, N, K, batch, cands, margin, sk, cv, gbt);
   } else {
     plan.backend = GemmPlan::kMPP;
     plan.tile = cands[0];
@@ -1129,23 +1106,27 @@ GemmPlan choose_gemm_plan(
   static const bool debug = c10::utils::has_env("PYTORCH_MPS_GEMM_DEBUG");
   if (debug) {
     const char* bk = plan.backend == GemmPlan::kSplitK ? "splitk"
-        : plan.backend == GemmPlan::kConv             ? "conv"
-        : plan.backend == GemmPlan::kGemvBt           ? "gemv_bt"
-                                                      : "mpp";
-    TORCH_WARN(
-        "[mps_gemm] ",
-        batched ? "bmm " : "",
-        bk,
-        " M=", M, " N=", N, " K=", K,
-        plan.backend == GemmPlan::kGemvBt
-            ? (" mrows=" + std::to_string(plan.gbt.mrows) + " vec=" +
-               std::to_string(plan.gbt.vec) + " nwarps=" + std::to_string(plan.gbt.nwarps))
-            : (" tile=" + std::to_string(plan.tile.BM) + "x" +
-               std::to_string(plan.tile.BN) + "x" + std::to_string(plan.tile.NSG)),
-        plan.backend == GemmPlan::kSplitK ? (" G=" + std::to_string(plan.G)) : "",
-        plan.backend == GemmPlan::kConv
-            ? (" BMW=" + std::to_string(plan.BMW) + " BNO=" + std::to_string(plan.BNO))
-            : "");
+        : plan.backend == GemmPlan::kConv              ? "conv"
+        : plan.backend == GemmPlan::kGemvBt            ? "gemv_bt"
+                                                       : "mpp";
+    TORCH_WARN("[mps_gemm] ",
+               batched ? "bmm " : "",
+               bk,
+               " M=",
+               M,
+               " N=",
+               N,
+               " K=",
+               K,
+               plan.backend == GemmPlan::kGemvBt
+                   ? (" mrows=" + std::to_string(plan.gbt.mrows) + " vec=" + std::to_string(plan.gbt.vec) +
+                      " nwarps=" + std::to_string(plan.gbt.nwarps))
+                   : (" tile=" + std::to_string(plan.tile.BM) + "x" + std::to_string(plan.tile.BN) + "x" +
+                      std::to_string(plan.tile.NSG)),
+               plan.backend == GemmPlan::kSplitK ? (" G=" + std::to_string(plan.G)) : "",
+               plan.backend == GemmPlan::kConv
+                   ? (" BMW=" + std::to_string(plan.BMW) + " BNO=" + std::to_string(plan.BNO))
+                   : "");
   }
   {
     std::lock_guard<std::mutex> g(g_tile_mutex);
@@ -1157,8 +1138,7 @@ GemmPlan choose_gemm_plan(
 } // namespace
 
 bool gemm_supported_dtype(c10::ScalarType dt) {
-  return dt == kFloat || dt == kHalf || dt == kBFloat16 ||
-      c10::isIntegralType(dt, /*includeBool=*/false);
+  return dt == kFloat || dt == kHalf || dt == kBFloat16 || c10::isIntegralType(dt, /*includeBool=*/false);
 }
 
 bool gemm_use_mpp() {
@@ -1188,15 +1168,14 @@ static_assert(sizeof(at_gemm::SplitKReduceDims) == 2 * sizeof(int32_t));
 static_assert(sizeof(at_gemm::ConvDims) == 3 * sizeof(int32_t));
 static_assert(sizeof(at_gemm::GemvBtDims) == 12 * sizeof(int32_t));
 
-void mps_gemm(
-    const Tensor& A,
-    const Tensor& B,
-    const Tensor& out,
-    const std::optional<Tensor>& self,
-    const Scalar& alpha,
-    const Scalar& beta,
-    at_gemm::GemmEpilogue epi,
-    bool force_precise_fp32) {
+void mps_gemm(const Tensor& A,
+              const Tensor& B,
+              const Tensor& out,
+              const std::optional<Tensor>& self,
+              const Scalar& alpha,
+              const Scalar& beta,
+              at_gemm::GemmEpilogue epi,
+              bool force_precise_fp32) {
   TORCH_INTERNAL_ASSERT(A.dim() == B.dim() && (A.dim() == 2 || A.dim() == 3));
   const bool batched = A.dim() == 3;
   const int64_t r = A.dim() - 2, c = A.dim() - 1;
@@ -1231,20 +1210,19 @@ void mps_gemm(
   }
 
   // Field order must match at_gemm::GemmDimsStrided (size asserted above).
-  const std::array<int32_t, 13> dims = {
-      static_cast<int32_t>(M),
-      static_cast<int32_t>(N),
-      static_cast<int32_t>(K),
-      static_cast<int32_t>(ra.ld),
-      static_cast<int32_t>(rb.ld),
-      static_cast<int32_t>(ldc),
-      static_cast<int32_t>(self_r),
-      static_cast<int32_t>(self_c),
-      /*swizzle_log=*/0,
-      batched ? static_cast<int32_t>(ra.view.stride(0)) : 0,
-      batched ? static_cast<int32_t>(rb.view.stride(0)) : 0,
-      batched ? static_cast<int32_t>(target.stride(0)) : 0,
-      static_cast<int32_t>(batch_self)};
+  const std::array<int32_t, 13> dims = {static_cast<int32_t>(M),
+                                        static_cast<int32_t>(N),
+                                        static_cast<int32_t>(K),
+                                        static_cast<int32_t>(ra.ld),
+                                        static_cast<int32_t>(rb.ld),
+                                        static_cast<int32_t>(ldc),
+                                        static_cast<int32_t>(self_r),
+                                        static_cast<int32_t>(self_c),
+                                        /*swizzle_log=*/0,
+                                        batched ? static_cast<int32_t>(ra.view.stride(0)) : 0,
+                                        batched ? static_cast<int32_t>(rb.view.stride(0)) : 0,
+                                        batched ? static_cast<int32_t>(target.stride(0)) : 0,
+                                        static_cast<int32_t>(batch_self)};
 
   auto stream = getCurrentMPSStream();
 
@@ -1269,24 +1247,21 @@ void mps_gemm(
       }
       // GemvDims: {n, K, ld, xs, self_r, self_c}. gemv_t indexes self at (0,n) so
       // the addend step goes in self_c; gemv_nt indexes (row,0) so it goes in self_r.
-      const std::array<int32_t, 6> gdims = {
-          static_cast<int32_t>(outlen),
-          static_cast<int32_t>(K),
-          static_cast<int32_t>(mat.ld),
-          static_cast<int32_t>(vec_xs),
-          use_t ? 0 : out_stride,
-          use_t ? out_stride : 0};
+      const std::array<int32_t, 6> gdims = {static_cast<int32_t>(outlen),
+                                            static_cast<int32_t>(K),
+                                            static_cast<int32_t>(mat.ld),
+                                            static_cast<int32_t>(vec_xs),
+                                            use_t ? 0 : out_stride,
+                                            use_t ? out_stride : 0};
       // VEC/NWARPS heuristic (clamped to the matrix's row-stride|offset alignment).
       const int64_t mat_align = mat.ld | vmat.storage_offset();
-      const GemvCfg cfg = use_t
-          ? pick_gemv_t(dt, outlen, K, mat_align, gemm_use_mpp())
-          : pick_gemv_nt(dt, K, mat_align, gemm_use_mpp());
-      const std::string fname = use_t ? gemv_t_name(dt_str, cfg.nw, cfg.vec, epi)
-                                      : gemv_nt_name(dt_str, cfg.nw, cfg.vec, epi);
+      const GemvCfg cfg = use_t ? pick_gemv_t(dt, outlen, K, mat_align, gemm_use_mpp())
+                                : pick_gemv_nt(dt, K, mat_align, gemm_use_mpp());
+      const std::string fname =
+          use_t ? gemv_t_name(dt_str, cfg.nw, cfg.vec, epi) : gemv_nt_name(dt_str, cfg.nw, cfg.vec, epi);
       auto pso = lib.getPipelineStateForFunc(fname);
       const NSUInteger tg = static_cast<NSUInteger>(cfg.nw * 32);
-      const int64_t ng = use_t ? ((outlen + 32 * cfg.vec - 1) / (32 * cfg.vec))
-                               : ((outlen + cfg.nw - 1) / cfg.nw);
+      const int64_t ng = use_t ? ((outlen + 32 * cfg.vec - 1) / (32 * cfg.vec)) : ((outlen + cfg.nw - 1) / cfg.nw);
       auto run = [&](auto ab_arr) {
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           @autoreleasepool {
@@ -1294,8 +1269,7 @@ void mps_gemm(
             auto enc = stream->commandEncoder();
             [enc setComputePipelineState:pso];
             mtl_setArgs(enc, vmat, vvec, target, gdims, self_e, ab_arr);
-            [enc dispatchThreadgroups:MTLSizeMake(ng, 1, 1)
-                threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+            [enc dispatchThreadgroups:MTLSizeMake(ng, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
             getMPSProfiler().endProfileKernel(pso);
           }
         });
@@ -1303,11 +1277,9 @@ void mps_gemm(
       if (dt == kLong) {
         run(std::array<int64_t, 2>{alpha.toLong(), beta.toLong()});
       } else if (c10::isIntegralType(dt, /*includeBool=*/false)) {
-        run(std::array<int32_t, 2>{
-            static_cast<int32_t>(alpha.toLong()), static_cast<int32_t>(beta.toLong())});
+        run(std::array<int32_t, 2>{static_cast<int32_t>(alpha.toLong()), static_cast<int32_t>(beta.toLong())});
       } else {
-        run(std::array<float, 2>{
-            static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())});
+        run(std::array<float, 2>{static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())});
       }
       if (!target.is_same(out)) {
         out.copy_(target);
@@ -1322,23 +1294,34 @@ void mps_gemm(
   // cliff, so route it directly. Row-major B instead flows to the autotuner below,
   // which times gemv_bt against the matmul tiles per shape (see choose_gemm_plan).
   static const bool gemv_bt_off = c10::utils::has_env("PYTORCH_MPS_NO_GEMV_BT");
-  if (!gemv_bt_off && rb.trans && (dt == kHalf || dt == kBFloat16) && gemm_use_mpp() &&
-      gemm_has_nax_unit() && !ra.trans && M >= 2 && M <= 16 && K >= 64 &&
-      N >= 16 && N <= 262144) {
-    const int64_t align = rb.ld | ra.ld | ra.view.storage_offset() |
-        rb.view.storage_offset() |
+  if (!gemv_bt_off && rb.trans && (dt == kHalf || dt == kBFloat16) && gemm_use_mpp() && gemm_has_nax_unit() &&
+      !ra.trans && M >= 2 && M <= 16 && K >= 64 && N >= 16 && N <= 262144) {
+    const int64_t align = rb.ld | ra.ld | ra.view.storage_offset() | rb.view.storage_offset() |
         (batched ? (ra.view.stride(0) | rb.view.stride(0)) : 0);
     const GemvBtSpec spec = pick_gemv_bt(M, N, K, /*trans_b=*/true, align);
     if (spec.valid) {
-      const std::array<float, 2> ab = {
-          static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
-      launch_gemv_bt(
-          dt_str, spec, epi, rb.view, ra.view, target, self_e, M, N, K,
-          static_cast<int32_t>(rb.ld), static_cast<int32_t>(ra.ld),
-          static_cast<int32_t>(ldc), self_r, self_c,
-          batched ? static_cast<int32_t>(rb.view.stride(0)) : 0,
-          batched ? static_cast<int32_t>(ra.view.stride(0)) : 0,
-          batched ? static_cast<int32_t>(target.stride(0)) : 0, batch_self, ab, batch);
+      const std::array<float, 2> ab = {static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
+      launch_gemv_bt(dt_str,
+                     spec,
+                     epi,
+                     rb.view,
+                     ra.view,
+                     target,
+                     self_e,
+                     M,
+                     N,
+                     K,
+                     static_cast<int32_t>(rb.ld),
+                     static_cast<int32_t>(ra.ld),
+                     static_cast<int32_t>(ldc),
+                     self_r,
+                     self_c,
+                     batched ? static_cast<int32_t>(rb.view.stride(0)) : 0,
+                     batched ? static_cast<int32_t>(ra.view.stride(0)) : 0,
+                     batched ? static_cast<int32_t>(target.stride(0)) : 0,
+                     batch_self,
+                     ab,
+                     batch);
       if (!target.is_same(out)) {
         out.copy_(target);
       }
@@ -1363,8 +1346,7 @@ void mps_gemm(
           auto enc = stream->commandEncoder();
           [enc setComputePipelineState:pso];
           mtl_setArgs(enc, ra.view, rb.view, target, dims, self_e, alpha_beta_int);
-          [enc dispatchThreadgroups:MTLSizeMake(tiles_n, tiles_m, batch)
-              threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+          [enc dispatchThreadgroups:MTLSizeMake(tiles_n, tiles_m, batch) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
           getMPSProfiler().endProfileKernel(pso);
         }
       });
@@ -1372,8 +1354,7 @@ void mps_gemm(
     if (dt == kLong) {
       run(std::array<int64_t, 2>{alpha.toLong(), beta.toLong()});
     } else {
-      run(std::array<int32_t, 2>{
-          static_cast<int32_t>(alpha.toLong()), static_cast<int32_t>(beta.toLong())});
+      run(std::array<int32_t, 2>{static_cast<int32_t>(alpha.toLong()), static_cast<int32_t>(beta.toLong())});
     }
     if (!target.is_same(out)) {
       out.copy_(target);
@@ -1381,22 +1362,20 @@ void mps_gemm(
     return;
   }
 
-  const std::array<float, 2> alpha_beta = {
-      static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
+  const std::array<float, 2> alpha_beta = {static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
 
   // matmul2d routing: mpp handles every resolvable layout; tiny shapes or no matmul2d
   // fall to simd. fp32 precision follows set_float32_matmul_precision (HIGHEST -> full,
   // HIGH/MEDIUM -> relaxed TF32); force_precise_fp32 (complex sub-GEMMs) forces full.
   const bool use_mpp = gemm_use_mpp();
-  const bool relaxed_fp32 = !force_precise_fp32 &&
-      at::globalContext().float32MatmulPrecision() != at::Float32MatmulPrecision::HIGHEST;
+  const bool relaxed_fp32 =
+      !force_precise_fp32 && at::globalContext().float32MatmulPrecision() != at::Float32MatmulPrecision::HIGHEST;
   const bool want_relaxed = (dt != kFloat) || relaxed_fp32;
   const bool transposed = ra.trans || rb.trans;
   // K >= 64 sends small-K matmuls to the simd kernel; that is only worthwhile on
   // the NAX matrix unit. Off it (e.g. M2) simd is ~20x slower, so use matmul2d for
   // all K there (the kernel takes K as a runtime extent, so any K >= 1 is valid).
-  const bool use_mpp_gemm = use_mpp && M >= 2 && N >= 32 &&
-      (K >= 64 || !gemm_has_nax_unit());
+  const bool use_mpp_gemm = use_mpp && M >= 2 && N >= 32 && (K >= 64 || !gemm_has_nax_unit());
   const bool relaxed = want_relaxed;
 
   if (use_mpp_gemm) {
@@ -1404,14 +1383,13 @@ void mps_gemm(
     // Row-major thin-M (M in 2..16, half/bf16, NAX) enters the probe as a candidate
     // against the matmul tiles; the autotuner caches the per-shape winner.
     GemvBtSpec gbt{};
-    if (!gemv_bt_off && packed_untrans && gemm_has_nax_unit() &&
-        (dt == kHalf || dt == kBFloat16) && M >= 2 && M <= 16 && K >= 64 && N >= 16) {
-      const int64_t align =
-          rb.ld | rb.view.storage_offset() | (batched ? rb.view.stride(0) : 0);
+    if (!gemv_bt_off && packed_untrans && gemm_has_nax_unit() && (dt == kHalf || dt == kBFloat16) && M >= 2 &&
+        M <= 16 && K >= 64 && N >= 16) {
+      const int64_t align = rb.ld | rb.view.storage_offset() | (batched ? rb.view.stride(0) : 0);
       gbt = pick_gemv_bt(M, N, K, /*trans_b=*/false, align);
     }
-    const GemmPlan plan = choose_gemm_plan(
-        dt, dt_str, relaxed, batched, packed_untrans, ra.view, rb.view, M, N, K, batch, gbt);
+    const GemmPlan plan =
+        choose_gemm_plan(dt, dt_str, relaxed, batched, packed_untrans, ra.view, rb.view, M, N, K, batch, gbt);
     const bool epi_none = (epi == at_gemm::GemmEpilogue::None);
     const bool out_packed = (ldc == N) && (!batched || target.stride(0) == M * N);
     // split-K / conv only run for a bare (no-epilogue) packed-output mm; addmm or
@@ -1419,22 +1397,33 @@ void mps_gemm(
     if (plan.backend == GemmPlan::kGemvBt) {
       // Launch with this call's spec (alignment matches the actual operands); the
       // cached plan.gbt only records the autotuner's pick on the first shape seen.
-      launch_gemv_bt(
-          dt_str, gbt.valid ? gbt : plan.gbt, epi, rb.view, ra.view, target, self_e, M, N, K,
-          static_cast<int32_t>(rb.ld), static_cast<int32_t>(ra.ld),
-          static_cast<int32_t>(ldc), self_r, self_c,
-          batched ? static_cast<int32_t>(rb.view.stride(0)) : 0,
-          batched ? static_cast<int32_t>(ra.view.stride(0)) : 0,
-          batched ? static_cast<int32_t>(target.stride(0)) : 0, batch_self, alpha_beta, batch);
+      launch_gemv_bt(dt_str,
+                     gbt.valid ? gbt : plan.gbt,
+                     epi,
+                     rb.view,
+                     ra.view,
+                     target,
+                     self_e,
+                     M,
+                     N,
+                     K,
+                     static_cast<int32_t>(rb.ld),
+                     static_cast<int32_t>(ra.ld),
+                     static_cast<int32_t>(ldc),
+                     self_r,
+                     self_c,
+                     batched ? static_cast<int32_t>(rb.view.stride(0)) : 0,
+                     batched ? static_cast<int32_t>(ra.view.stride(0)) : 0,
+                     batched ? static_cast<int32_t>(target.stride(0)) : 0,
+                     batch_self,
+                     alpha_beta,
+                     batch);
     } else if (epi_none && out_packed && plan.backend == GemmPlan::kSplitK) {
-      launch_splitk(dt_str, ra.view, rb.view, target, M, N, K,
-                    plan.tile.BM, plan.tile.BN, plan.tile.NSG, plan.G);
+      launch_splitk(dt_str, ra.view, rb.view, target, M, N, K, plan.tile.BM, plan.tile.BN, plan.tile.NSG, plan.G);
     } else if (epi_none && out_packed && plan.backend == GemmPlan::kConv) {
       launch_conv(dt_str, ra.view, rb.view, target, M, N, K, plan.BMW, plan.BNO, plan.convNSG);
     } else {
-      const TensorTile t = (plan.backend == GemmPlan::kMPP)
-          ? plan.tile
-          : pick_mpp_tile(M, N, K, dt);
+      const TensorTile t = (plan.backend == GemmPlan::kMPP) ? plan.tile : pick_mpp_tile(M, N, K, dt);
       const std::string fname = mpp_name(dt_str, t, ra.trans, rb.trans, relaxed, epi, batched);
       auto pso = lib.getPipelineStateForFunc(fname);
       const int64_t tiles_m = (M + t.BM - 1) / t.BM;
@@ -1446,8 +1435,7 @@ void mps_gemm(
           auto enc = stream->commandEncoder();
           [enc setComputePipelineState:pso];
           mtl_setArgs(enc, ra.view, rb.view, target, dims, self_e, alpha_beta);
-          [enc dispatchThreadgroups:MTLSizeMake(tiles_n, tiles_m, batch)
-              threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+          [enc dispatchThreadgroups:MTLSizeMake(tiles_n, tiles_m, batch) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
           getMPSProfiler().endProfileKernel(pso);
         }
       });
@@ -1465,8 +1453,7 @@ void mps_gemm(
         auto enc = stream->commandEncoder();
         [enc setComputePipelineState:pso];
         mtl_setArgs(enc, ra.view, rb.view, target, dims, self_e, alpha_beta);
-        [enc dispatchThreadgroups:MTLSizeMake(tiles_n, tiles_m, batch)
-            threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+        [enc dispatchThreadgroups:MTLSizeMake(tiles_n, tiles_m, batch) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
         getMPSProfiler().endProfileKernel(pso);
       }
     });
@@ -1477,14 +1464,13 @@ void mps_gemm(
   }
 }
 
-void mps_gemm_complex(
-    const Tensor& A,
-    const Tensor& B,
-    const Tensor& out,
-    const std::optional<Tensor>& self,
-    const Scalar& alpha,
-    const Scalar& beta,
-    at_gemm::GemmEpilogue epi) {
+void mps_gemm_complex(const Tensor& A,
+                      const Tensor& B,
+                      const Tensor& out,
+                      const std::optional<Tensor>& self,
+                      const Scalar& alpha,
+                      const Scalar& beta,
+                      at_gemm::GemmEpilogue epi) {
   if (out.numel() == 0) {
     return;
   }
@@ -1502,8 +1488,7 @@ void mps_gemm_complex(
 
   // Rank-1 (M==1 / N==1): native interleaved-complex GEMV reads the matrix once,
   // vs the four-real-GEMM decomposition below. Both operands are now contiguous.
-  if (a.dim() == 2 && b.dim() == 2 &&
-      launch_cgemv_complex(a, b, out, self, alpha, beta, epi)) {
+  if (a.dim() == 2 && b.dim() == 2 && launch_cgemv_complex(a, b, out, self, alpha, beta, epi)) {
     return;
   }
 

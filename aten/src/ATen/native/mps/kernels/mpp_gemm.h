@@ -1,7 +1,8 @@
 #pragma once
 // mpp_gemm.h - PRIMARY GEMM backend: mpp::tensor_ops::matmul2d. Metal-4 only
-// (guarded by __METAL_VERSION__ >= 400). Port of metalBLAS mpp_tensor.h; handles
-// packed/transposed/strided operands via strided tensor_inline views + transpose flags.
+// (guarded by __METAL_VERSION__ >= 400). Port of metalBLAS mpp_tensor.h;
+// handles packed/transposed/strided operands via strided tensor_inline views +
+// transpose flags.
 #if __METAL_VERSION__ >= 400
 #include <ATen/native/mps/kernels/gemm_common.h>
 #include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
@@ -47,11 +48,14 @@ kernel void mpp_gemm(
     }
   }
 
-  // Strided tensor views: extent order is (cols, rows) for row-major; transposed
-  // operands swap the extents and flip the descriptor flag. The {1, ld} stride
-  // (unit inner, ld outer) absorbs any leading-dim / column-major view.
-  auto eA = TRANS_A ? dextents<int32_t, 2>(gM, gK) : dextents<int32_t, 2>(gK, gM);
-  auto eB = TRANS_B ? dextents<int32_t, 2>(gK, gN) : dextents<int32_t, 2>(gN, gK);
+  // Strided tensor views: extent order is (cols, rows) for row-major;
+  // transposed operands swap the extents and flip the descriptor flag. The {1,
+  // ld} stride (unit inner, ld outer) absorbs any leading-dim / column-major
+  // view.
+  auto eA =
+      TRANS_A ? dextents<int32_t, 2>(gM, gK) : dextents<int32_t, 2>(gK, gM);
+  auto eB =
+      TRANS_B ? dextents<int32_t, 2>(gK, gN) : dextents<int32_t, 2>(gN, gK);
   tensor<device IN_T, dextents<int32_t, 2>, tensor_inline> tA(
       A, eA, array<int32_t, 2>{1, gP.lda});
   tensor<device IN_T, dextents<int32_t, 2>, tensor_inline> tB(
@@ -92,11 +96,17 @@ kernel void mpp_gemm(
       auto mA = tA.template slice<dynamic_extent, BM>(0, m_off);
       auto mB = tB.template slice<BN, dynamic_extent>(n_off, 0);
       auto mC = tC.template slice<BN, BM>(n_off, m_off);
-      auto cO = op.template get_destination_cooperative_tensor<decltype(mA), decltype(mB), OUT_T>();
+      auto cO = op.template get_destination_cooperative_tensor<
+          decltype(mA),
+          decltype(mB),
+          OUT_T>();
       if IF_CONSTEXPR (EPI == GemmEpilogue::None) {
         op.run(mA, mB, cO);
       } else {
-        auto cT = op.template get_destination_cooperative_tensor<decltype(mA), decltype(mB), float>();
+        auto cT = op.template get_destination_cooperative_tensor<
+            decltype(mA),
+            decltype(mB),
+            float>();
         op.run(mA, mB, cT);
         uint16_t e = 0;
         for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
@@ -112,11 +122,17 @@ kernel void mpp_gemm(
       auto mA = tA.slice(0, m_off);
       auto mB = tB.slice(n_off, 0);
       auto mC = tC.slice(n_off, m_off);
-      auto cO = op.template get_destination_cooperative_tensor<decltype(mA), decltype(mB), OUT_T>();
+      auto cO = op.template get_destination_cooperative_tensor<
+          decltype(mA),
+          decltype(mB),
+          OUT_T>();
       if IF_CONSTEXPR (EPI == GemmEpilogue::None) {
         op.run(mA, mB, cO);
       } else {
-        auto cT = op.template get_destination_cooperative_tensor<decltype(mA), decltype(mB), float>();
+        auto cT = op.template get_destination_cooperative_tensor<
+            decltype(mA),
+            decltype(mB),
+            float>();
         op.run(mA, mB, cT);
         uint16_t e = 0;
         for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
@@ -138,9 +154,15 @@ kernel void mpp_gemm(
     auto mA = TRANS_A ? tA.slice(m_off, 0) : tA.slice(0, m_off);
     auto mB = TRANS_B ? tB.slice(0, n_off) : tB.slice(n_off, 0);
     auto mC = tC.slice(n_off, m_off);
-    auto cT = op.template get_destination_cooperative_tensor<decltype(mA), decltype(mB), float>();
+    auto cT = op.template get_destination_cooperative_tensor<
+        decltype(mA),
+        decltype(mB),
+        float>();
     op.run(mA, mB, cT);
-    auto cO = op.template get_destination_cooperative_tensor<decltype(mA), decltype(mB), OUT_T>();
+    auto cO = op.template get_destination_cooperative_tensor<
+        decltype(mA),
+        decltype(mB),
+        OUT_T>();
     uint16_t e = 0;
     for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
       if (!inside && !cT.is_valid_element(e)) {

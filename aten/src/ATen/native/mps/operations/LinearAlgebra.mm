@@ -672,8 +672,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     return output;
   }
   const bool is_int = c10::isIntegralType(self.scalar_type(), /*includeBool=*/false);
-  if (!gemm_supported_dtype(self.scalar_type()) ||
-      (!is_int && use_metal_mm(self, other, output))) {
+  if (!gemm_supported_dtype(self.scalar_type()) || (!is_int && use_metal_mm(self, other, output))) {
     return do_metal_mm(self, other, output);
   }
   mps_gemm(self, other, output, std::nullopt, /*alpha=*/1, /*beta=*/0, at_gemm::GemmEpilogue::None);
