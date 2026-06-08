@@ -43,18 +43,6 @@ def _k_n_16_byte_aligned(a: torch.Tensor, b: torch.Tensor, elem_size: int) -> bo
     return (a.size(1) * elem_size) % 16 == 0 and (b.size(1) * elem_size) % 16 == 0
 
 
-def _can_use_nvmath_cublaslt_grouped_mm(
-    self: list[torch.Tensor],
-    mat2: list[torch.Tensor],
-) -> bool:
-    # Metadata check only (bf16 + 16-byte-aligned N,K); does not check nvmath is installed
-    # (_check_nvmath_cublaslt). dtype on [0]; _foreach_mm_cond ensures uniform.
-    if self[0].dtype != torch.bfloat16 or mat2[0].dtype != torch.bfloat16:
-        return False
-    elem_size = self[0].element_size()
-    return all(_k_n_16_byte_aligned(a, b, elem_size) for a, b in zip(self, mat2))
-
-
 def _foreach_mm_cond(
     self: list[torch.Tensor],
     mat2: list[torch.Tensor],
@@ -172,6 +160,18 @@ def _foreach_mm_impl_nvmath(
 _CUTLASS_GROUPED_MM_GROUP_LIMIT = 1024
 
 _Route = Literal["nvmath_cublaslt_grouped_mm", "cutlass_grouped_mm", "mm_loop"]
+
+
+def _can_use_nvmath_cublaslt_grouped_mm(
+    self: list[torch.Tensor],
+    mat2: list[torch.Tensor],
+) -> bool:
+    # Metadata check only (bf16 + 16-byte-aligned N,K); does not check nvmath is installed
+    # (_check_nvmath_cublaslt). dtype on [0]; _foreach_mm_cond ensures uniform.
+    if self[0].dtype != torch.bfloat16 or mat2[0].dtype != torch.bfloat16:
+        return False
+    elem_size = self[0].element_size()
+    return all(_k_n_16_byte_aligned(a, b, elem_size) for a, b in zip(self, mat2))
 
 
 def _can_use_cutlass_grouped_mm(
