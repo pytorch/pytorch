@@ -1336,8 +1336,9 @@ class TestInductorOpInfo(TestCase):
             # otherwise avoids. reference_in_float=True (the eager FP32
             # reference) is inherited from the ("addmm", f16) cuda entry above.
             # Observed rel diff is ~9 * eps; use ~2e-2 for headroom across
-            # samples and rocBLAS solver versions.
-            overridden_kwargs.update({"rtol": 2e-2})
+            # samples and rocBLAS solver versions. Set atol explicitly since
+            # PyTorch requires rtol/atol overrides to be paired.
+            overridden_kwargs.update({"rtol": 2e-2, "atol": 1e-3})
         func = op.get_op()
 
         def fn(*args, **kwargs):
