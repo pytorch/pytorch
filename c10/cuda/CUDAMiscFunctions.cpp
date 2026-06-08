@@ -1,6 +1,7 @@
 #include <c10/cuda/CUDAMiscFunctions.h>
 #include <c10/util/env.h>
 #include <string>
+#include <string_view>
 
 namespace c10::cuda {
 
@@ -30,26 +31,40 @@ std::string get_cuda_error_help(cudaError_t error) noexcept {
 
 namespace {
 
-inline auto get_cuda_blocking_enabled() {
+const char* get_cuda_blocking_message() {
+  static const std::string_view default_message = \
+    "\nCUDA kernel errors might be asynchronously reported at some"
+    " other API call, so the stacktrace below might be incorrect."
+    "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1";
 #ifndef USE_ROCM
   static auto device_blocking_flag = c10::utils::check_env("CUDA_LAUNCH_BLOCKING");
-  return device_blocking_flag.value_or(false);
+  if (device_blocking_flag.value_or(false)) {
+    return "";
+  } else {
+    return default_message;
+  }
 #else
   static auto device_blocking_flag = c10::utils::get_env("AMD_SERIALIZE_KERNEL");
   static auto effective_flag = device_blocking_flag.value_or("0");
-  if (effective_flag == "0") {
-    return false;
-  }
-  if (effective_flag == "3") {
-    return true;
-  }
-  if (effective_flag == "1" || effective_flag == "2") {
-    TORCH_WARN_ONCE("AMD_SERIALIZE_KERNEL=3 waits for completion before AND after kernel enqueue"
-                    ". 1/2 Only waits before or after enqueue.");
-    return true;
-  }
-  TORCH_WARN_ONCE("Unsupported AMD_SERIALIZE_KERNEL value ", device_blocking_flag);
-  return false;
+  static std::string rocm_message;
+  static const std::string_view rocm_message_view = [&]() -> std::string_view {
+    if (effective_flag == "0") {
+      return default_message;
+    }
+    if (effective_flag == "3") {
+      return "";
+    }
+    if (effective_flag == "1" || effective_flag == "2") {
+      return ("Set AMD_SERIALIZE_KERNEL=3 to wait for completion before AND after kernel enqueue"
+              ". 1/2 Only waits before or after enqueue.");
+    }
+    // rocm_message is constructed only in rare cases
+    rocm_message = "\nUnsupported AMD_SERIALIZE_KERNEL value ";
+    rocm_message += effective_flag;
+    rocm_message += default_message;
+    return rocm_message;
+  }();
+  return rocm_message_view.data();
 #endif
 }
 
@@ -57,15 +72,10 @@ inline auto get_cuda_blocking_enabled() {
 
 // NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
 const char* get_cuda_check_suffix() noexcept {
-  static auto blocking_enabled = get_cuda_blocking_enabled();
-  if (blocking_enabled) {
-    return "";
-  } else {
-    return "\nCUDA kernel errors might be asynchronously reported at some"
-           " other API call, so the stacktrace below might be incorrect."
-           "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1";
-  }
+  static auto blocking_message = get_cuda_blocking_message();
+  return blocking_message;
 }
+
 // NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
 const char* get_cuda_async_error_suffix(cudaError_t error) noexcept {
   switch (error) {
@@ -77,13 +87,8 @@ const char* get_cuda_async_error_suffix(cudaError_t error) noexcept {
     case cudaErrorMisalignedAddress:
 #endif
     {
-      static auto blocking_enabled = get_cuda_blocking_enabled();
-      if (!blocking_enabled) {
-        return "\nCUDA kernel errors might be asynchronously reported at some"
-               " other API call, so the stacktrace below might be incorrect."
-               "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1";
-      }
-      return "";
+      static auto blocking_message = get_cuda_blocking_message();
+      return blocking_message;
     }
     default:
       return "\nFor more detailed error information, run with"
