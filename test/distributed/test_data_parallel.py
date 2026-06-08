@@ -127,8 +127,8 @@ class TestDataParallel(TestCase):
         not TEST_MULTIACCELERATOR, "multi-GPU not supported"
     )
     def test_parallel_apply(self):
-        l1 = nn.Linear(10, 5).to(f"{device_type}:0", torch.float)
-        l2 = nn.Linear(10, 5).to(f"{device_type}:1", torch.float)
+        l1 = nn.Linear(10, 5).to(0, torch.float)
+        l2 = nn.Linear(10, 5).to(1, torch.float)
         i1 = torch.randn(2, 10, device=f"{device_type}:0", dtype=torch.float)
         i2 = torch.randn(2, 10, device=f"{device_type}:1", dtype=torch.float)
         expected1 = l1(i1)
@@ -147,8 +147,8 @@ class TestDataParallel(TestCase):
         not TEST_MULTIACCELERATOR, "multi-GPU not supported"
     )
     def test_parallel_apply_autocast(self):
-        l1 = nn.Linear(10, 5).to(f"{device_type}:0", torch.float)
-        l2 = nn.Linear(10, 5).to(f"{device_type}:1", torch.float)
+        l1 = nn.Linear(10, 5).to(0, torch.float)
+        l2 = nn.Linear(10, 5).to(1, torch.float)
         i1 = torch.randn(2, 10, device=f"{device_type}:0", dtype=torch.float)
         i2 = torch.randn(2, 10, device=f"{device_type}:1", dtype=torch.float)
         with autocast():
@@ -275,8 +275,8 @@ class TestDataParallel(TestCase):
         r"""Test device[0] check at forward time."""
         l = nn.Linear(2, 2)
         inp = torch.randn(2, 2)
-        inp_cuda0 = inp.to(f"{device_type}:0")
-        inp_cuda1 = inp.to(f"{device_type}:1")
+        inp_cuda0 = inp.to(0)
+        inp_cuda1 = inp.to(1)
 
         error_msg = "module must have its parameters and buffers on device {}"
 
@@ -316,12 +316,12 @@ class TestDataParallel(TestCase):
                 nn.parallel.data_parallel(inner_m.to(dp_device), inp, device_ids)
 
         test(l.to("cpu"), None, inp, None, should_fail=True)
-        test(l.to(f"{device_type}:1"), None, inp_cuda0, None, should_fail=True)
+        test(l.to(1), None, inp_cuda0, None, should_fail=True)
         test(l.to(device_type), None, inp_cuda0, [1, 0], should_fail=True)
 
         test(l.to(device_type), None, inp_cuda0, None, should_fail=False)
         test(l.cpu(), device_type, inp_cuda0, None, should_fail=False)
-        test(l.to(f"{device_type}:1"), None, inp_cuda1, [1, 0], should_fail=False)
+        test(l.to(1), None, inp_cuda1, [1, 0], should_fail=False)
         test(l.cpu(), f"{device_type}:1", inp_cuda1, [1, 0], should_fail=False)
 
         s = nn.Sequential(l.cpu())
@@ -334,7 +334,7 @@ class TestDataParallel(TestCase):
         test(s, None, inp, [0, 1], should_fail=True)
         test(s, None, inp, [1, 0], should_fail=True)
 
-        s = nn.Sequential(l.to(device_type), deepcopy(l).to(f"{device_type}:1"))
+        s = nn.Sequential(l.to(device_type), deepcopy(l).to(1))
         test(s, None, inp, None, should_fail=True)
         test(s, None, inp, [0, 1], should_fail=True)
         test(s, None, inp, [1, 0], should_fail=True)
@@ -344,7 +344,7 @@ class TestDataParallel(TestCase):
         test(s, None, inp, [0, 1], should_fail=False)
         test(s, None, inp, [1, 0], should_fail=True)
         test(s.cpu(), None, inp, [1, 0], should_fail=True)
-        test(s.to(f"{device_type}:1"), None, inp, [1, 0], should_fail=False)
+        test(s.to(1), None, inp, [1, 0], should_fail=False)
 
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "multi-GPU not supported"
@@ -400,7 +400,7 @@ class TestDataParallel(TestCase):
     def test_data_parallel(self):
         l = nn.Linear(10, 5).float().to(device_type)
         i = torch.randn(20, 10, dtype=torch.float, device=f"{device_type}:1")
-        l.to(f"{device_type}:1")
+        l.to(1)
         expected_out = l(i)
         loss = expected_out.sum()
         loss.backward()
@@ -430,7 +430,7 @@ class TestDataParallel(TestCase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_sparse(self):
-        l = nn.Embedding(10, 5, sparse=True).to(f"{device_type}:1")
+        l = nn.Embedding(10, 5, sparse=True).to(1)
         i = torch.randint(10, (20, 5), device=f"{device_type}:1", dtype=torch.long)
         expected_out = l(i)
         loss = expected_out.sum()
@@ -473,7 +473,7 @@ class TestDataParallel(TestCase):
             def forward(self, input):
                 return fn(input)
 
-        i = torch.randn(2, 2).float().to(f"{device_type}:1")
+        i = torch.randn(2, 2).float().to(1)
         gpus = range(torch.accelerator.device_count())
         output = dp.data_parallel(Net(), i, gpus)
         self.assertEqual(output, fn(i))
@@ -826,7 +826,7 @@ class TestDataParallel(TestCase):
             self.assertFalse(result.device.type == device_type)
         grad = torch.randn(2, dtype=torch.double)
         if output_device != -1:
-            grad = grad.to(f"{device_type}:{output_device}")
+            grad = grad.to(output_device)
         result.backward(grad)
         self.assertEqual(inputs[0].grad, grad[0])
         self.assertEqual(inputs[1].grad, grad[1])
@@ -885,7 +885,7 @@ class TestDataParallel(TestCase):
             for i, replica in enumerate(replicas):
                 for p in replica.parameters():
                     self.assertEqual(p.get_device(), i)
-                replica_input = input.to(f"{device_type}:{i}")
+                replica_input = input.to(i)
                 self.assertEqual(replica(replica_input), expected_output)
 
     @skip_but_pass_in_sandcastle_if(
@@ -1032,7 +1032,7 @@ class TestDataParallel(TestCase):
             for formats, dtype_list in product(layer_formats, layer_dtypes):
                 model_msg = f"formats = {formats} dtypes = {dtypes}"
                 try:
-                    m = ConvNet(formats, dtype_list).to(f"{device_type}:0")
+                    m = ConvNet(formats, dtype_list).to(0)
                     m_dp = dp.DataParallel(deepcopy(m), device_ids=device_ids)
                     opt = torch.optim.SGD(m.parameters(), lr=0.1)
                     opt_dp = torch.optim.SGD(m_dp.parameters(), lr=0.1)
