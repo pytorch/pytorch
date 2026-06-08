@@ -81,6 +81,7 @@ from ..utils import (
     cmp_name_to_op_mapping,
     identity,
     is_function,
+    is_lru_cache_wrapper_trace_without_warning_allowed,
     is_tensor_base_attr_getter,
     is_wrapper_or_member_descriptor,
     istype,
@@ -406,6 +407,9 @@ class BaseUserFunctionVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
+    def self_args(self) -> list[VariableTracker]:
+        return []
+
     def get_source(self) -> Source | None:
         return self.source
 
@@ -512,7 +516,12 @@ class BaseUserFunctionVariable(VariableTracker):
             and self.get_filename().endswith("torch/optim/lr_scheduler.py")
         ):
             return ConstantVariable.create(None)
-        return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)  # type: ignore[attr-defined]
+        return tx.inline_user_function_return(
+            self,
+            [*self.self_args(), *args],
+            kwargs,
+            allow_nested_graph_breaks=True,
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -632,6 +641,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def get_globals(self) -> dict[str, Any]:
         return self.fn.__globals__
+
+    def should_allow_nested_graph_breaks(self) -> bool:
+        from torch._dynamo.trace_rules import BUILTIN_INLINE_WHEN_CALLED
+
+        filename = self.get_filename()
+        if any(filename.startswith(d) for d in BUILTIN_INLINE_WHEN_CALLED):
+            return False
+        return True
 
     def get_source(self) -> Source:
         source = self.source
@@ -1229,9 +1246,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L831
         return self
-
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return False
 
     # no nested graph breaks in generators
     def should_allow_nested_graph_breaks(self) -> Literal[False]:
@@ -2551,8 +2565,14 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         if hasattr(self.wrapper_obj, "cache_info"):
             target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
             module_name = getattr(target_fn, "__module__", "") or ""
+            is_allowed_lru_cache_wrapper = (
+                is_lru_cache_wrapper_trace_without_warning_allowed(self.wrapper_obj)
+            )
 
-            if module_name.split(".", maxsplit=1)[0] != "torch":
+            if (
+                module_name.split(".", maxsplit=1)[0] != "torch"
+                and not is_allowed_lru_cache_wrapper
+            ):
                 frame_summary = tx.frame_summary()
                 filename = os.path.basename(frame_summary.filename)
                 lineno = frame_summary.lineno
@@ -2821,6 +2841,8 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
         if self.fn in (
             dist.all_reduce,
+            dist.reduce_scatter_single,
+            # pyrefly: ignore [deprecated]
             dist.reduce_scatter_tensor,
             # pyrefly: ignore [deprecated]
             dist._reduce_scatter_base,
@@ -3111,7 +3133,11 @@ class PolyfilledFunctionVariable(VariableTracker):
             )
 
         traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
-        return traceable_function_variable.call_function(tx, args, kwargs)
+        return tx.inline_user_function_return(
+            traceable_function_variable,
+            list(args),
+            dict(kwargs),
+        )
 
     def call_method(
         self,
@@ -3260,7 +3286,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
         self, configs: Any, tx: Optional["InstructionTranslatorBase"]
     ) -> list[Any]:
         # unpack the list of configs
-        configs = configs.unpack_var_sequence(tx)
+        if tx is None:
+            raise AssertionError("tx must not be None")
+        configs = unpack_iterable(tx, configs)
 
         # guard_as_python_constant inserts guards for Dynamo to check if the configs object changed.
         configs = [config.guard_as_python_constant() for config in configs]
