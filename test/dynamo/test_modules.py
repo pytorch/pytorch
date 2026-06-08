@@ -1842,9 +1842,16 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 4)
 
         with torch._dynamo.config.patch(error_on_recompile=True):
+            direct_cnt = torch._dynamo.testing.CompileCounter()
+            opt_layers = torch.compile(copy.deepcopy(mod.layers), backend=direct_cnt)
+            for _ in range(20):
+                self.assertTrue(torch.allclose(mod.layers(x), opt_layers(x)))
+
             for _ in range(20):
                 self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
 
+        self.assertEqual(direct_cnt.frame_count, 0)
+        self.assertEqual(direct_cnt.op_count, 0)
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
         self.assertTrue(

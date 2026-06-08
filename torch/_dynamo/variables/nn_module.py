@@ -47,6 +47,7 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
 from ..source import (
     AttrSource,
+    CellContentsSource,
     ConstDictKeySource,
     DictGetItemSource,
     FSDPNNModuleSource,
@@ -1096,11 +1097,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         return super().unpack_var_sequence(tx)
 
     @staticmethod
-    def _key_source_is_unspecialized_nn_module(key: VariableTracker) -> bool:
-        if key.source is None:
+    def _key_source_is_unspecialized_nn_module_attr(key: VariableTracker) -> bool:
+        source = key.source
+        if source is None or not isinstance(source, AttrSource):
+            return False
+        if isinstance(source, CellContentsSource):
             return False
         try:
-            return key.source.guard_source.is_unspecialized_nn_module()
+            return source.guard_source.is_unspecialized_nn_module()
         except NotImplementedError:
             return False
 
@@ -1117,8 +1121,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             torch.nn.Sequential.__getitem__,
         )
         getitem = getattr(type(self.value), "__getitem__", None)
-        if getitem in builtin_supported and self._key_source_is_unspecialized_nn_module(
-            key
+        if (
+            getitem in builtin_supported
+            and self._key_source_is_unspecialized_nn_module_attr(key)
         ):
             unimplemented(
                 gb_type="Unspecialized nn.Module container indexed by nn.Module attribute",
