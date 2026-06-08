@@ -1,7 +1,6 @@
 #include <c10/cuda/CUDAMiscFunctions.h>
 #include <c10/util/env.h>
 #include <string>
-#include <string_view>
 
 namespace c10::cuda {
 
@@ -32,7 +31,7 @@ std::string get_cuda_error_help(cudaError_t error) noexcept {
 namespace {
 
 const char* get_cuda_blocking_message() {
-  static const std::string_view default_message = \
+  static const char* default_message =
     "\nCUDA kernel errors might be asynchronously reported at some"
     " other API call, so the stacktrace below might be incorrect."
     "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1";
@@ -47,7 +46,7 @@ const char* get_cuda_blocking_message() {
   static auto device_blocking_flag = c10::utils::get_env("AMD_SERIALIZE_KERNEL");
   static auto effective_flag = device_blocking_flag.value_or("0");
   static std::string rocm_message;
-  static const std::string_view rocm_message_view = [&]() -> std::string_view {
+  static const char* rocm_message_view = [&]() -> const char* {
     if (effective_flag == "0") {
       return default_message;
     }
@@ -62,9 +61,9 @@ const char* get_cuda_blocking_message() {
     rocm_message = "\nUnsupported AMD_SERIALIZE_KERNEL value ";
     rocm_message += effective_flag;
     rocm_message += default_message;
-    return rocm_message;
+    return rocm_message.data();
   }();
-  return rocm_message_view.data();
+  return rocm_message_view;
 #endif
 }
 
@@ -72,8 +71,7 @@ const char* get_cuda_blocking_message() {
 
 // NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
 const char* get_cuda_check_suffix() noexcept {
-  static auto blocking_message = get_cuda_blocking_message();
-  return blocking_message;
+  return get_cuda_blocking_message();
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
@@ -87,8 +85,7 @@ const char* get_cuda_async_error_suffix(cudaError_t error) noexcept {
     case cudaErrorMisalignedAddress:
 #endif
     {
-      static auto blocking_message = get_cuda_blocking_message();
-      return blocking_message;
+      return get_cuda_blocking_message();
     }
     default:
       return "\nFor more detailed error information, run with"
