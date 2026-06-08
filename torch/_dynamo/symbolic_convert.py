@@ -2790,14 +2790,7 @@ class InstructionTranslatorBase(
                         # instruction translator.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
-                            unimplemented(
-                                gb_type="Observed exception (EXCEPT_HANDLER)",
-                                context=str(raised_exception),
-                                explanation=observed_exn_gb_explanation
-                                + " This graph break is unexpected.",
-                                hints=[*graph_break_hints.DYNAMO_BUG],
-                                from_exc=raised_exception,
-                            )
+                            bubble_exception_to_interpreter()
 
                         raise raised_exception
                     block_stack_entry = self.block_stack.pop()
