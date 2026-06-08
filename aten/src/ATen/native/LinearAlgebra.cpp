@@ -2,7 +2,6 @@
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIndexing.h>
@@ -189,9 +188,7 @@ namespace meta {
   TORCH_CHECK( \
       mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (", \
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
- \
-  auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self); \
-  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, mat1.options(), names);
+  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, mat1.options());
 
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   ADDMM_META();
@@ -208,8 +205,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
       self.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
       self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
-  auto names = at::namedinference::compute_matmul_outnames(self, mat2);
-  set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options());
 }
 
 TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
@@ -314,7 +310,6 @@ static void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Te
   TORCH_CHECK(result_sizes == output_size,
               "Expected an output tensor with shape [", output_size, "] but got shape ", result_sizes);
 
-  std::vector<Dimname> outnames = {};
   if (!is_bmm) {
     if (self_baddbmm.has_value()) {
       const auto& self = self_baddbmm.value();
@@ -323,16 +318,10 @@ static void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Te
       const auto self_sizes = self.sizes();
       TORCH_CHECK(self_sizes == output_size,
                   "Expected an input tensor shape with shape ", output_size, " but got shape: ", self_sizes);
-      outnames = namedinference::compute_baddbmm_outnames(result, batch1, batch2, self);
     }
   } else {
-    outnames = namedinference::compute_bmm_outnames(result, batch1, batch2);
   }
 
-  namedinference::propagate_names_if_nonempty(
-    result,
-    outnames
-  );
 }
 
 TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
@@ -1602,11 +1591,8 @@ static void addbmm_impl_(
 Tensor& addbmm_out(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor& result) {
   auto b_self = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out");
   {
-    at::NoNamesGuard guard;
     addbmm_impl_(result, *b_self, batch1, batch2, beta, alpha);
   }
-  auto names = at::namedinference::propagate_names_for_addmm(batch1, batch2, self);
-  at::namedinference::propagate_names_if_nonempty(result, names);
   return result;
 }
 
@@ -1622,7 +1608,6 @@ Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, co
 TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor &result) {
   auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
   {
-    at::NoNamesGuard guard;
     addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
   }
 }
@@ -1630,7 +1615,6 @@ TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Ten
 TORCH_IMPL_FUNC(addmm_activation_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor &result) {
   auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
   {
-    at::NoNamesGuard guard;
     addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
     if (use_gelu) {
       at::gelu_(const_cast<Tensor&>(result));
@@ -1642,7 +1626,6 @@ TORCH_IMPL_FUNC(addmm_activation_out_cpu)(const Tensor& self, const Tensor& mat1
 
 TORCH_IMPL_FUNC(mm_out_cpu)(const Tensor & self, const Tensor & mat2, const Tensor & result) {
   {
-    at::NoNamesGuard guard;
     addmm_impl_cpu_(const_cast<Tensor&>(result), result, self, mat2, 0, 1);
   }
 }
@@ -1896,7 +1879,6 @@ TORCH_IMPL_FUNC(baddbmm_out_cpu)
 TORCH_IMPL_FUNC(bmm_out_cpu)
 (const Tensor & batch1, const Tensor & batch2, const Tensor & result) {
     {
-    NoNamesGuard guard;
     bool result_is_conj = result.is_conj();
     conjugate_mutable_input_if_needed(result, result_is_conj);
     bmm_out_or_baddbmm_(result, batch1.resolve_conj(), batch2.resolve_conj(), Scalar(0.0), Scalar(1.0), true);
@@ -2014,7 +1996,6 @@ static Tensor _matmul_impl(
     Tensor& out,
     const Tensor& tensor1,
     const Tensor& tensor2) {
-  NoNamesGuard guard;
   const auto dim_tensor1 = tensor1.dim();
   const auto dim_tensor2 = tensor2.dim();
 
@@ -2214,17 +2195,13 @@ static Tensor _matmul_impl(
 }
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
-  auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
   at::Tensor result, unused;
   result = at::native::_matmul_impl(unused, tensor1, tensor2);
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
 Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
-  auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
   at::native::_matmul_impl(result, tensor1, tensor2);
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
@@ -3790,6 +3767,107 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
 Tensor _int_mm_cpu(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
   return _int_mm_out_cpu(self, mat2, result);
+}
+
+Tensor& _int_mm_dtype_out_cpu(
+    const Tensor& self,
+    const Tensor& mat2,
+    ScalarType out_dtype,
+    Tensor& result) {
+
+#ifndef STRIP_ERROR_MESSAGES
+  static constexpr std::string_view func_name = "_int_mm_dtype_out_cpu";
+#endif
+  TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
+  TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
+  TORCH_CHECK(self.size(1) == mat2.size(0), func_name, ": self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
+  TORCH_CHECK(self.dtype() == at::kChar || self.dtype() == at::kByte,
+    func_name, ": Expected self dtype to be int8 or uint8 but got ", self.dtype());
+  TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
+  TORCH_CHECK(result.dtype() == at::kFloat || result.dtype() == at::kBFloat16, func_name, ": result must be float32 or bfloat16");
+  TORCH_CHECK(result.scalar_type() == out_dtype, func_name, ": result dtype mismatch. Expected ", out_dtype, " but got ", result.scalar_type());
+  TORCH_CHECK(result.size(0) == self.size(0), func_name, ": Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
+  TORCH_CHECK(result.size(1) == mat2.size(1), func_name, ": Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
+  TORCH_CHECK(result.dim() == 2, func_name, ": Expected result to be of dimension 2 but got ", result.dim());
+  TORCH_CHECK(result.is_contiguous(), func_name, ": Expected result to be contiguous.");
+
+  if (result.numel() == 0 || self.size(1) == 0) {
+    return result.zero_();
+  }
+
+  bool dispatched = false;
+
+#if defined(__aarch64__)
+  if (at::globalContext().userEnabledMkldnn()) {
+    try {
+      mkldnn_matmul_i8i8_dtype(self, mat2, result);
+      dispatched = true;
+    } catch (const std::exception& e) {
+      TORCH_WARN(func_name, ": mkldnn path failed, falling back. Reason: ", e.what());
+    }
+  }
+#endif
+
+  // ---- Naive fallback (portable) ----
+  if (!dispatched) {
+    auto b = reinterpret_cast<const int8_t*>(mat2.data_ptr());
+    auto c_float = result.scalar_type() == at::kFloat
+        ? reinterpret_cast<float*>(result.data_ptr())
+        : nullptr;
+    auto c_bf16 = result.scalar_type() == at::kBFloat16
+        ? reinterpret_cast<at::BFloat16*>(result.data_ptr())
+        : nullptr;
+    const int64_t m = result.size(0);
+    const int64_t n = result.size(1);
+    const int64_t k = self.size(1);
+    const int64_t lda_0 = self.strides()[0];
+    const int64_t lda_1 = self.strides()[1];
+    const int64_t ldb_0 = mat2.strides()[0];
+    const int64_t ldb_1 = mat2.strides()[1];
+    const int64_t ldc = result.strides()[0];
+    #define INTMM_DTYPE_OUT_COMPUTE_WITH_A_TYPE(a_type)                             \
+    auto a = reinterpret_cast<const a_type*>(self.data_ptr());      \
+    at::parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) { \
+      for (const auto idx : c10::irange(start, end)) {              \
+        const int64_t row = idx / n;                                \
+        const int64_t col = idx % n;                                \
+        int32_t acc = 0;                                            \
+        for (const auto kk : c10::irange(k)) {                      \
+          acc += static_cast<int32_t>(                              \
+                    a[row * lda_0 + kk * lda_1]) *                  \
+                static_cast<int32_t>(                               \
+                    b[kk * ldb_0 + col * ldb_1]);                   \
+        }                                                           \
+        if (c_float) {                                              \
+          c_float[row * ldc + col] = static_cast<float>(acc);       \
+        } else {                                                    \
+          c_bf16[row * ldc + col] = static_cast<at::BFloat16>(acc); \
+        }                                                           \
+      }                                                             \
+    });
+
+    if (self.scalar_type() == at::kByte) {
+      INTMM_DTYPE_OUT_COMPUTE_WITH_A_TYPE(uint8_t);
+    } else {
+      INTMM_DTYPE_OUT_COMPUTE_WITH_A_TYPE(int8_t);
+    }
+  }
+  return result;
+}
+
+Tensor _int_mm_dtype_cpu(
+    const Tensor& self,
+    const Tensor& mat2,
+    ScalarType out_dtype) {
+
+  TORCH_CHECK(out_dtype == at::kFloat || out_dtype == at::kBFloat16,
+      "_int_mm_dtype_cpu: out_dtype must be float32 or bfloat16");
+
+  auto result = at::empty(
+      {self.size(0), mat2.size(1)},
+      self.options().dtype(out_dtype));
+
+  return _int_mm_dtype_out_cpu(self, mat2, out_dtype, result);
 }
 
 } // namespace native

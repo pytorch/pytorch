@@ -61,6 +61,8 @@ quantized_decomposed = torch.ops.quantized_decomposed
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
+        aten.adaptive_max_pool2d,
+        aten.adaptive_max_pool3d,
         aten.index_select,
         aten.addmv,
         aten.arange,
@@ -1207,24 +1209,6 @@ def max_pool3d_with_indices(
     )
 
 
-@register_decomposition(aten.adaptive_max_pool2d)
-def adaptive_max_pool2d(
-    x: torch.Tensor, output_size: list[int]
-) -> tuple[torch.Tensor, torch.Tensor]:
-    *batch, h_in, w_in = x.shape
-    h_out, w_out = output_size
-
-    if h_out == 0 or w_out == 0:
-        o_size = [*batch, h_out, w_out]
-        return x.new_empty(o_size), x.new_empty(o_size, dtype=torch.int64)
-
-    if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
-        return aten.max_pool2d_with_indices(x, kernel_size)
-
-    return NotImplemented
-
-
 @register_decomposition(aten.searchsorted.Scalar)
 def searchsorted_scalar(
     sorted_sequence: torch.Tensor,
@@ -1347,3 +1331,14 @@ def conv1d_to_conv2d(
 
     # Squeeze dummy dimension back out: (N,C_out,L_out,1) -> (N,C_out,L_out)
     return out_2d.squeeze(-1)
+
+
+@register_decomposition(torch.ops.aten._int_mm.dtype)
+def decompose_int_mm_dtype(a, b, out_dtype):
+    torch._check(
+        out_dtype in (torch.float32, torch.bfloat16),
+        lambda: "_int_mm.dtype only supports float32 and bfloat16 outputs",
+    )
+
+    # Canonical form that Inductor understands
+    return torch._int_mm(a, b).to(dtype=out_dtype)
