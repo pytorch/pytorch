@@ -642,6 +642,18 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 1, requires_grad=False)]
         self.verify_aot_autograd(f, inp, dynamic=True)
 
+    def test_to_dense_strided_tensor(self):
+        def f(a):
+            return (
+                a.to_dense(),
+                a.to_dense(masked_grad=True),
+                a.to_dense(dtype=torch.float32),
+                a.to_dense(dtype=torch.float64),
+            )
+
+        inp = [torch.randn(3, 4)]
+        self.verify_aot_autograd(f, inp, dynamic=True)
+
     def test_complex_linear(self):
         # https://github.com/pytorch/pytorch/issues/93424
         inp = [torch.randn(1, 10, 10, dtype=torch.complex64)]
@@ -9709,6 +9721,7 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(out_ref.a, out_test.a)
         self.assertEqual(out_ref.b, out_test.b)
 
+    @torch._functorch.config.patch(cse_inference=True)
     def test_aot_dispatch_inference_cse_duplicate_pure_ops(self):
         def quant_like(x):
             x_view = x.view(x.shape)
@@ -9803,6 +9816,56 @@ def forward(self, tangents_1, tangents_2):
         )
         self.assertEqual(
             sum(node.target is side_effect for node in cse_graph.nodes),
+            1,
+        )
+
+    def test_fx_graph_cse_preserves_mutated_inputs(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        cos = graph.call_function(torch.ops.aten.cos.default, (x,))
+        cos_1 = graph.call_function(torch.ops.aten.cos.default, (x,))
+        add_ = graph.call_function(torch.ops.aten.add_.Tensor, (cos, 1))
+        add = graph.call_function(torch.ops.aten.add.Tensor, (add_, cos_1))
+        graph.output(add)
+
+        cse_graph = fx_graph_cse(graph)
+
+        self.assertEqual(
+            sum(node.target is torch.ops.aten.cos.default for node in cse_graph.nodes),
+            2,
+        )
+        self.assertEqual(
+            sum(node.target is torch.ops.aten.add_.Tensor for node in cse_graph.nodes),
+            1,
+        )
+
+    def test_fx_graph_cse_preserves_auto_functionalized_inputs(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        cos = graph.call_function(torch.ops.aten.cos.default, (x,))
+        cos_1 = graph.call_function(torch.ops.aten.cos.default, (x,))
+        auto_functionalized = graph.call_function(
+            torch.ops.higher_order.auto_functionalized_v2,
+            (torch.ops.aten.add_.Tensor,),
+            {
+                "_x_base_index": 0,
+                "_z_base_index": 1,
+                "_all_bases": [cos, cos_1],
+            },
+        )
+        graph.output(auto_functionalized)
+
+        cse_graph = fx_graph_cse(graph)
+
+        self.assertEqual(
+            sum(node.target is torch.ops.aten.cos.default for node in cse_graph.nodes),
+            2,
+        )
+        self.assertEqual(
+            sum(
+                node.target is torch.ops.higher_order.auto_functionalized_v2
+                for node in cse_graph.nodes
+            ),
             1,
         )
 
@@ -11595,10 +11658,6 @@ if not TEST_MKL:
     )
 
 symbolic_aot_autograd_failures = {
-    xfail("combinations", ""),  # aten.masked_select.default
-    xfail(
-        "index_fill", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "linalg.lstsq", ""
     ),  # aten.linalg_lstsq.default - couldn't find symbolic meta function/decomposition
@@ -11940,6 +11999,18 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         optout = run(optf)
 
         self.assertEqual(out, optout)
+
+    def test_lift_after_factory(self):
+        def f(low, high, size):
+            y = torch.randint(low=low, high=high, size=size)
+            return torch.ops.aten.lift.default(y)
+
+        torch.manual_seed(0)
+        out = f(0, 100, [2, 3])
+        torch.manual_seed(0)
+        opt_out = torch.compile(f, backend="aot_eager", fullgraph=True)(0, 100, [2, 3])
+
+        self.assertEqual(out, opt_out)
 
     def test_mutations_in_bw_detached_from_tangent(self):
         class AF(torch.autograd.Function):

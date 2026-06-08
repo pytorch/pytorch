@@ -104,9 +104,12 @@ autograd_cache_normalize_inputs = not is_fbcode()
 #
 # Deprecated: Custom ops returning aliased outputs is deprecated and will
 # become an error in a future version of PyTorch. Currently error_on_custom_op_aliasing
-# is True only in CI.
+# is True in CI unless explicitly overridden.
 check_custom_op_aliasing = True
-error_on_custom_op_aliasing = bool(os.getenv("CI"))
+error_on_custom_op_aliasing: bool = Config(
+    env_name_force="TORCHINDUCTOR_ERROR_ON_CUSTOM_OP_ALIASING",
+    default=bool(os.getenv("CI")),
+)
 
 
 def remote_autograd_cache_default() -> bool | None:
@@ -125,7 +128,7 @@ enable_remote_autograd_cache = remote_autograd_cache_default()
 # ranges or block backend fusion without the partitioner's memory heuristics.
 cse_inference: bool = Config(
     env_name_force="TORCHINDUCTOR_AOT_INFERENCE_CSE",
-    default=True,
+    default=False,
 )
 
 

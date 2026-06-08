@@ -59,12 +59,22 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
     token_map: dict[tuple[Any, int, int], dict[str, Any]] = {}
     cse_region = 0
 
+    from torch._higher_order_ops.auto_functionalize import (
+        AutoFunctionalized,
+        AutoFunctionalizedV2,
+    )
     from torch._inductor.pattern_matcher import (
         compute_mutation_region_ids,
+        is_mutation_op,
         same_mutation_regions,
     )
 
     compute_mutation_region_ids(fx_g)  # type: ignore[arg-type]
+
+    def is_auto_functionalized_node(node: fx.Node) -> bool:
+        return node.op == "call_function" and isinstance(
+            node.target, (AutoFunctionalized, AutoFunctionalizedV2)
+        )
 
     # Make a set of separate storages returned from the output, which will be preserved
     # when pruning.  This prevents us from deduplicating returned tensors which have
@@ -98,9 +108,17 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
         if checkable_node(n)
         and StorageWeakRef(n.meta["val"].untyped_storage()) in output_storages
     }
+    nodes_used_by_mutation = {
+        input_node
+        for n in fx_g.nodes
+        if is_mutation_op(n) or is_auto_functionalized_node(n)
+        for input_node in n.all_input_nodes
+    }
 
     for n in fx_g.nodes:
-        node_is_impure = n.op == "call_function" and n.is_impure()
+        node_is_impure = n.op == "call_function" and (
+            n.is_impure() or is_auto_functionalized_node(n)
+        )
         if node_is_impure:
             cse_region += 1
         # The placeholder, output, and get_attr nodes are copied to the new graph without change
@@ -116,6 +134,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
             or n in nodes_that_alias_outputs
+            or n in nodes_used_by_mutation
             # This CSE pass currently doesn't handle re-propagation of unbacked
             # meta where it'll sometimes eliminate a _local_scalar_dense but not
             # replace the meta of downstream users. eg. one bug we've seen is:
