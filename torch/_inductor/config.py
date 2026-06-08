@@ -368,6 +368,15 @@ post_grad_fusion_options: dict[str, dict[str, Any]] = {}
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
 
+# Also run reorder_for_locality on training (non-inference) graphs.
+# The pass itself is a bitwise-equivalent FX reorder (it walks the graph
+# in reverse and pulls each producer next to its sole consumer) so
+# enabling it cannot change operator semantics. Default off to keep
+# upstream behaviour unchanged on training paths.
+reorder_for_locality_in_training = (
+    os.environ.get("TORCHINDUCTOR_REORDER_LOCALITY_TRAINING", "0") == "1"
+)
+
 # Scale down Rn_BLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
 
