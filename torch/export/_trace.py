@@ -1134,9 +1134,8 @@ def _get_non_persistent_buffers(mod: torch.nn.Module) -> set[str]:
     mirrored_root_buffers = {
         f"{name + '.' if name else ''}{buffer_name}"
         for name, m in named_modules
-        for buffer_name in getattr(
-            m, "_torchdynamo_mirrored_non_persistent_buffers", ()
-        )
+        if isinstance(m, torch._dynamo.OptimizedModule)
+        for buffer_name in m._torchdynamo_mirrored_non_persistent_buffers
     }
     for name, m in named_modules:
         if name:
@@ -1159,8 +1158,7 @@ def _remove_optimized_module_mirrored_buffers(mod: torch.nn.Module):
     optimized_modules = [
         m
         for _, m in mod.named_modules(remove_duplicate=False)
-        if hasattr(m, "_remove_mirrored_non_persistent_buffers")
-        and hasattr(m, "_sync_orig_mod_non_persistent_buffers")
+        if isinstance(m, torch._dynamo.OptimizedModule)
     ]
     for m in optimized_modules:
         m._remove_mirrored_non_persistent_buffers()
@@ -1414,9 +1412,9 @@ def _get_original_state_dict(mod: torch.nn.Module) -> dict[str, Any]:
         original_state_dict.pop(k, None)
     for name, m in mod.named_modules(remove_duplicate=False):
         prefix = f"{name}." if name else ""
-        for buffer_name in getattr(
-            m, "_torchdynamo_mirrored_non_persistent_buffers", ()
-        ):
+        if not isinstance(m, torch._dynamo.OptimizedModule):
+            continue
+        for buffer_name in m._torchdynamo_mirrored_non_persistent_buffers:
             original_state_dict.pop(f"{prefix}{buffer_name}", None)
 
     return original_state_dict

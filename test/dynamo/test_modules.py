@@ -1984,6 +1984,26 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(ep.graph_signature.non_persistent_buffers, ("_orig_mod.buf",))
         self.assertEqual(set(ep.state_dict), {"_orig_mod.persistent"})
 
+    def test_non_persistent_buffers_export_ignores_user_getattr(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buf", torch.ones(2), persistent=False)
+
+            def __getattr__(self, name):
+                if name.startswith("_torchdynamo_mirrored"):
+                    raise RuntimeError(f"unexpected private attribute probe: {name}")
+                return super().__getattr__(name)
+
+            def forward(self, x):
+                return x + self.buf
+
+        ep = torch.export.export(Mod(), (torch.ones(2),), strict=False)
+
+        self.assertEqual(ep.graph_signature.buffers, ("buf",))
+        self.assertEqual(ep.graph_signature.non_persistent_buffers, ("buf",))
+        self.assertEqual(set(ep.state_dict), set())
+
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_attr_precedence(self):
         class Mod(torch.nn.Module):
