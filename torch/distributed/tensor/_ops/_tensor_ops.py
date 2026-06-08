@@ -10,6 +10,9 @@ from torch._prims_common import IntLike
 from torch.distributed.tensor._op_schema import (
     ArgsType,
     KwargsType,
+    OpSchema,
+    OpSpec,
+    OpStrategy,
     RuntimeSchemaInfo,
     TensorMeta,
 )
@@ -17,7 +20,7 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     _ShardingPlaceholder,
     register_single_dim_strategy,
 )
-from torch.distributed.tensor._ops.utils import normalize_dim
+from torch.distributed.tensor._ops.utils import normalize_dim, register_op_strategy
 from torch.distributed.tensor.placement_types import (
     _MaskPartial,
     Partial,
@@ -240,7 +243,6 @@ def new_factory_single_dim_strategy(
     ],
     schema_info=RuntimeSchemaInfo(1, ["dtype"]),
     allow_uneven_sharding=True,
-    include_default_replication=False,
 )
 def new_empty_factory_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
@@ -398,7 +400,6 @@ def slice_backward_single_dim_strategy(
     aten.slice_scatter.default,
     schema_info=RuntimeSchemaInfo(2),
     allow_uneven_sharding=True,
-    allow_replicate_to_partial_redistribution=False,
 )
 def slice_scatter_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
@@ -1109,8 +1110,6 @@ def split_single_dim_strategy(
 @register_single_dim_strategy(
     aten.unbind.int,
     schema_info=RuntimeSchemaInfo(1),
-    include_default_replication=False,
-    allow_input_redistribution=False,
 )
 def unbind_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
@@ -1136,12 +1135,28 @@ def unbind_single_dim_strategy(
     return strategies
 
 
-@register_single_dim_strategy(aten.eye.m_out)
-def eye_out_single_dim_strategy(
-    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
-) -> list[list[Placement | _ShardingPlaceholder]]:
-    out_meta = cast(TensorMeta, kwargs_schema["out"])
-    return _same_dim_sharding_strategies(len(out_meta.shape))
+@register_op_strategy(aten.eye.m_out)
+def eye_out_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Strategy for torch.eye with out= parameter.
+    The sharding is determined by the out tensor's placement.
+    """
+    # eye.m_out has signature: eye(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
+    # The out kwarg is a DTensor that determines the sharding
+    out_spec = op_schema.kwargs_schema["out"]
+    if not isinstance(out_spec, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy for out, got {type(out_spec)}")
+
+    return OpStrategy(
+        [
+            OpSpec(
+                output_specs=strategy.output_spec,
+                input_specs=[strategy.output_spec],  # out is both input and output
+                redistribute_cost=[[0.0]],
+            )
+            for strategy in out_spec.strategies
+        ]
+    )
 
 
 def _pass_through_partials(
