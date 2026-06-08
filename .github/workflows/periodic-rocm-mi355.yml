@@ -1,14 +1,17 @@
+# Unneeded for CI: trunk.yml covers the same ROCm testing.
+# Kept in-repo for metrics; auto-triggers below are commented out.
+# workflow_dispatch remains for manual runs.
 name: periodic-rocm-mi355
 
 on:
-  schedule:
-    - cron: 0 0,3,6,9,12,15,18,21 * * *
-    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
-  push:
-    tags:
-      - ciflow/periodic-rocm-mi355/*
-    branches:
-      - release/*
+  #schedule:
+  #  - cron: 0 0,3,6,9,12,15,18,21 * * *
+  #  - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
+  #push:
+  #  tags:
+  #    - ciflow/periodic-rocm-mi355/*
+  #  branches:
+  #    - release/*
   workflow_dispatch:
 
 concurrency:
