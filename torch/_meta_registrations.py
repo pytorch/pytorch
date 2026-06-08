@@ -7461,9 +7461,14 @@ def _check_scaled_mm_sizes_v2(
                 ),
             )
         elif is_nv_single_level(scale_recipe_a, scale_recipe_b):
-            expected_scale_a_elems = round_up(M, 128) * round_up(ceil_div(K, 16), 4)
-            expected_scale_b_elems = round_up(N, 128) * round_up(ceil_div(K, 16), 4)
-            expected_swizzle = SwizzleType.SWIZZLE_32_4_4
+            if device_hint(self) == "xpu":
+                expected_scale_a_elems = M * ceil_div(K, 16)
+                expected_scale_b_elems = N * ceil_div(K, 16)
+                expected_swizzle = SwizzleType.NO_SWIZZLE
+            else:
+                expected_scale_a_elems = round_up(M, 128) * round_up(ceil_div(K, 16), 4)
+                expected_scale_b_elems = round_up(N, 128) * round_up(ceil_div(K, 16), 4)
+                expected_swizzle = SwizzleType.SWIZZLE_32_4_4
             torch._check(
                 scale_a[0].numel() == expected_scale_a_elems
                 and scale_a[0].dtype == torch.float8_e4m3fn
