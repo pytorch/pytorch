@@ -28,7 +28,8 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     with_ieee_matmul_precision, runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
+     with_ieee_matmul_precision, runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
+     skipIfNoNvmath)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -4342,6 +4343,206 @@ class TestLinalg(TestCase):
         self.assertEqual(q.device, t.device)
         # check r
         self.assertEqual(r, exp_r)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_polar(self, device, dtype):
+        # Polar decomposition A = U @ H: U has orthonormal columns and H is
+        # symmetric/Hermitian positive-semidefinite.
+        def run_test(shape):
+            A = make_tensor(shape, device=device, dtype=dtype, low=-2, high=2)
+            U, H = torch.linalg.polar(A)
+
+            m, n = shape[-2:]
+            self.assertEqual(U.shape, A.shape)
+            self.assertEqual(H.shape, (*shape[:-2], n, n))
+            self.assertEqual(U.dtype, dtype)
+            self.assertEqual(H.dtype, dtype)
+
+            # Tolerance scales with the contraction dimension: the U @ H and
+            # U^H @ U products accumulate O(m) rounding terms, which exceeds the
+            # default tolerance at the larger sizes below. The complex CUDA path
+            # (SVD-based, since cuSOLVER Xpolar is real-only) is the least tight,
+            # so leave generous headroom.
+            eps = torch.finfo(dtype).eps
+            atol, rtol = 50 * m * eps, 50 * m * eps
+
+            # Reconstruction A = U @ H.
+            self.assertEqual(U @ H, A, atol=atol, rtol=rtol)
+            # U has orthonormal columns.
+            eye = torch.eye(n, device=device, dtype=dtype).expand(*shape[:-2], n, n)
+            self.assertEqual(U.mH @ U, eye, atol=atol, rtol=rtol)
+            # H is Hermitian.
+            self.assertEqual(H, H.mH)
+
+        for shape in [(4, 4), (7, 5), (1, 1), (16, 3)]:
+            run_test(shape)
+        # larger square + tall (exercises a non-trivial QDWH iteration count and
+        # the real cuSOLVER workspace sizing, closer to the orthogonalization
+        # use case)
+        for shape in [(256, 256), (512, 128)]:
+            run_test(shape)
+        # batched
+        for shape in [(3, 7, 5), (2, 4, 4, 4)]:
+            run_test(shape)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float, torch.double)
+    def test_polar_ill_conditioned(self, device, dtype):
+        # QDWH is designed to stay accurate on ill-conditioned inputs. Build a
+        # matrix with a wide spread of singular values (cond ~ 1e8) and check
+        # the polar factors still reconstruct it.
+        n = 64
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        Q, _ = torch.linalg.qr(make_fullrank(n, n, device=device, dtype=dtype))
+        s = torch.logspace(0, -8, n, device=device, dtype=dtype)
+        A = (Q * s) @ Q.mH
+        U, H = torch.linalg.polar(A)
+        # U is still exactly orthogonal; reconstruction inherits the input's
+        # tiny singular values, so compare with a small absolute tolerance.
+        atol = 50 * n * torch.finfo(dtype).eps
+        self.assertEqual(U @ H, A, atol=atol, rtol=atol)
+        eye = torch.eye(n, device=device, dtype=dtype)
+        self.assertEqual(U.mH @ U, eye, atol=atol, rtol=atol)
+        # H is symmetric/Hermitian positive-semidefinite.
+        self.assertEqual(H, H.mH, atol=atol, rtol=atol)
+        self.assertGreaterEqual(torch.linalg.eigvalsh(H).min().item(), -atol)
+
+    @skipCUDAIfNoCusolver
+    @skipIfNoNvmath
+    @dtypes(torch.float, torch.double)
+    def test_polar_matches_svd(self, device, dtype):
+        # On CUDA with nvmath present, the cuSOLVER Xpolar path and the SVD-based
+        # aten kernel should agree on the polar factors. Invoke the Xpolar kernel
+        # directly so the comparison exercises it specifically, and check the
+        # reported residual is small. A full-rank input makes the polar
+        # decomposition unique, so the two algorithms must match exactly.
+        if torch.device(device).type != "cuda":
+            self.skipTest("cuSOLVER Xpolar path is CUDA-only")
+        from torch._native.ops.polar import nvmath_impl as nv
+
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        A = make_fullrank(32, 16, device=device, dtype=dtype)
+        U, H, residual = nv.polar_xpolar(A, return_residual=True)
+        self.assertLess(residual.item(), 1e-6)
+        # SVD-based reference (the aten kernel that backs the CPU/fallback path).
+        Up, S, Vh = torch.linalg.svd(A, full_matrices=False)
+        U_ref = Up @ Vh
+        H_ref = Vh.mH @ (S.unsqueeze(-1) * Vh)
+        H_ref = 0.5 * (H_ref + H_ref.mH)
+        self.assertEqual(U, U_ref)
+        self.assertEqual(H, H_ref)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float)
+    def test_polar_error_cases(self, device, dtype):
+        # Fewer rows than columns is unsupported.
+        A = torch.randn((3, 5), device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "at least as many rows as columns"):
+            torch.linalg.polar(A)
+        # Must be a matrix.
+        v = torch.randn(5, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
+            torch.linalg.polar(v)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_polar_out(self, device, dtype):
+        # The out= variant must work and produce the bitwise-same result as the
+        # functional call: both must select the same algorithm (QDWH on CUDA,
+        # SVD on CPU). A divergence here would mean eager and out=/compiled
+        # paths disagree. Check both a single matrix (CUDA QDWH path) and a
+        # batch (falls through to the SVD kernel on both call forms).
+        for shape in [(8, 4), (3, 8, 4)]:
+            A = make_tensor(shape, device=device, dtype=dtype, low=-2, high=2)
+            U_exp, H_exp = torch.linalg.polar(A)
+            U = torch.empty_like(U_exp)
+            H = torch.empty_like(H_exp)
+            ret = torch.linalg.polar(A, out=(U, H))
+            self.assertEqual(ret[0].data_ptr(), U.data_ptr())
+            self.assertEqual(ret[1].data_ptr(), H.data_ptr())
+            self.assertEqual(U, U_exp, atol=0, rtol=0)
+            self.assertEqual(H, H_exp, atol=0, rtol=0)
+            self.assertEqual(U @ H, A)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float)
+    def test_polar_out_validation(self, device, dtype):
+        # out= must enforce the structured-op contract identically on every
+        # backend: reject a dtype-mismatched output, and resize an empty one.
+        # (The CUDA cuSOLVER override must not bypass these checks.)
+        A = make_tensor((8, 4), device=device, dtype=dtype, low=-2, high=2)
+
+        # Dtype mismatch -> error.
+        wrong_dt = torch.float64 if dtype == torch.float else torch.float
+        U = torch.empty((8, 4), device=device, dtype=wrong_dt)
+        H = torch.empty((4, 4), device=device, dtype=wrong_dt)
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            torch.linalg.polar(A, out=(U, H))
+
+        # Empty outputs -> resized to the required shape. This is the supported
+        # path (resizing a non-empty, wrong-shaped out is deprecated), and it
+        # exercises the structured out= resize machinery.
+        U = torch.empty(0, device=device, dtype=dtype)
+        H = torch.empty(0, device=device, dtype=dtype)
+        torch.linalg.polar(A, out=(U, H))
+        self.assertEqual(U.shape, (8, 4))
+        self.assertEqual(H.shape, (4, 4))
+        self.assertEqual(U @ H, A)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float, torch.double)
+    def test_polar_noncontiguous(self, device, dtype):
+        def check(A):
+            U, H = torch.linalg.polar(A)
+            self.assertEqual(U @ H, A)
+            # Outputs follow the contiguous layout the meta function promises.
+            self.assertTrue(U.is_contiguous())
+            self.assertTrue(H.is_contiguous())
+
+        # Column-major (transposed) input: one matrix dim still has unit stride.
+        A = make_tensor((4, 8), device=device, dtype=dtype, low=-2, high=2).mT
+        self.assertFalse(A.is_contiguous())
+        check(A)
+
+        # Fully non-dense input: a strided slice where neither matrix dim has a
+        # unit stride, exercising the general (non-row/col-major) layout path.
+        base = make_tensor((16, 8), device=device, dtype=dtype, low=-2, high=2)
+        A = base[::2, ::2]  # (8, 4), strides (16, 2) -- no unit stride
+        self.assertFalse(A.is_contiguous())
+        self.assertNotIn(1, A.stride())
+        check(A)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float, torch.double)
+    def test_polar_empty(self, device, dtype):
+        # n == 0 (and m == 0) are degenerate but valid; U keeps A's shape and H
+        # is (n, n). This exercises the aten fallthrough (the cuSOLVER override
+        # declines empty inputs).
+        for shape in [(4, 0), (0, 0)]:
+            A = torch.randn(shape, device=device, dtype=dtype)
+            U, H = torch.linalg.polar(A)
+            self.assertEqual(U.shape, A.shape)
+            self.assertEqual(H.shape, (shape[-1], shape[-1]))
+
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float, torch.double)
+    def test_polar_meta_stride_consistency(self, device, dtype):
+        # The eager output strides must match what the meta kernel declares,
+        # otherwise compiled/exported graphs assume the wrong layout.
+        A = make_tensor((8, 4), device=device, dtype=dtype, low=-2, high=2)
+        U, H = torch.linalg.polar(A)
+        Am = A.to(device="meta")
+        Um, Hm = torch.ops.aten.linalg_polar(Am)
+        self.assertEqual(U.stride(), Um.stride())
+        self.assertEqual(H.stride(), Hm.stride())
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
