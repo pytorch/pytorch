@@ -128,6 +128,18 @@ bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
   return (is_fp8_path || is_packed_fp4_path);
 }
 
+// 1x16 blocks for packed nvfp4 data and float8_e4m3fn scales
+bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  // Packed FP4 stores 2 elements per byte, so the logical column count is
+  // size(1) * 2.
+  return (
+      t.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2 &&
+      scale.scalar_type() == at::kFloat8_e4m3fn && scale.dim() == 2 &&
+      scale.size(0) == t.size(0) &&
+      scale.size(1) == ceil_div<int64_t>(t.size(1) * 2, 16) &&
+      (scale.is_contiguous() || scale.t().is_contiguous()));
+}
+
 bool is_desired_scaling(
     const at::Tensor& t,
     const at::Tensor& scale,
@@ -143,6 +155,8 @@ bool is_desired_scaling(
       return is_blockwise_128x128_scaling(t, scale);
     case ScalingType::BlockWise1x32:
       return is_blockwise_1x32_scaling(t, scale);
+    case ScalingType::BlockWise1x16:
+      return is_blockwise_1x16_scaling(t, scale);
     default:
       return false;
   }
@@ -207,6 +221,15 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       ceil_div<int64_t>(a.size(1) * 2, 32),
       ") and scale_b should be (",
       ceil_div<int64_t>(b.size(0) * 2, 32),
+      ", ",
+      b.size(1),
+      ").\n"
+      "- For NVFP4 1x16 scaling, a and b should be float4_e2m1fn_x2, scales should be float8_e4m3fn, scale_a should be (",
+      a.size(0),
+      ", ",
+      ceil_div<int64_t>(a.size(1) * 2, 16),
+      ") and scale_b should be (",
+      ceil_div<int64_t>(b.size(0) * 2, 16),
       ", ",
       b.size(1),
       ").\n"
@@ -343,6 +366,8 @@ Tensor& _scaled_mm_out_xpu(
               ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
           std::make_pair(
               ScalingType::BlockWise1x32, ScalingType::BlockWise1x32),
+          std::make_pair(
+              ScalingType::BlockWise1x16, ScalingType::BlockWise1x16),
       },
       mat1,
       mat2,
@@ -444,14 +469,16 @@ Tensor& _scaled_mm_out_xpu(
   Tensor scale_b_internal = scale_b;
   if (scaling_choice_a == ScalingType::BlockWise128x128 ||
       scaling_choice_a == ScalingType::BlockWise1x128 ||
-      scaling_choice_a == ScalingType::BlockWise1x32) {
+      scaling_choice_a == ScalingType::BlockWise1x32 ||
+      scaling_choice_a == ScalingType::BlockWise1x16) {
     scale_a_internal = scale_a.is_contiguous() ? scale_a : scale_a.contiguous();
   }
   if (scaling_choice_b == ScalingType::BlockWise1x128 ||
       scaling_choice_b == ScalingType::BlockWise128x128 ||
-      scaling_choice_b == ScalingType::BlockWise1x32) {
-    // CUDA v1 shapes [K//128, N], [K//128, N//128], or [K//32, N] already
-    // match oneDNN's expected row-major layout. Just ensure contiguous.
+      scaling_choice_b == ScalingType::BlockWise1x32 ||
+      scaling_choice_b == ScalingType::BlockWise1x16) {
+    // CUDA v1 shapes [K//128, N], [K//128, N//128], [K//32, N], or [K//16, N]
+    // already match oneDNN's expected row-major layout. Just ensure contiguous.
     scale_b_internal = scale_b.is_contiguous() ? scale_b : scale_b.contiguous();
   }
   return _scaled_gemm(
