@@ -1980,6 +1980,8 @@ class ComboKernelMetadataTests(TestCase):
         inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
         code = self._combo_code(fn, inps)
         self.assertRegex(code, r"num_gb = \d*\.\d+")
+        self.assertIn(f"device='{GPU_TYPE}'", code)
+        self.assertNotIn(f"device={GPU_TYPE}", code)
 
 
 # Minimal scheduler doubles for direct _try_combo_with_memory_check tests.
