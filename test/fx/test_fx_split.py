@@ -24,6 +24,97 @@ def wrapped_add(_dataclass, y):
 
 
 class TestFXSplit(TestCase):
+    class TensorBox:
+        pass
+
+    @staticmethod
+    def make_graph_with_non_module_tensor_attr():
+        root = torch.nn.Module()
+        root.box = TestFXSplit.TensorBox()
+        root.box.t = torch.ones(3)
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        t = graph.get_attr("box.t")
+        add = graph.call_function(torch.add, (x, t))
+        graph.output(add)
+        return torch.fx.GraphModule(root, graph)
+
+    def test_graph_module_init_preserves_non_persistent_buffer(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("my_buff", torch.rand(3, 4), persistent=False)
+
+            def forward(self, x):
+                return x + self.my_buff
+
+        mod = MyModule()
+        mod_traced = torch.fx.symbolic_trace(mod)
+        mod_traced_new = torch.fx.GraphModule(mod, mod_traced.graph)
+
+        for gm in (mod_traced, mod_traced_new):
+            self.assertIn("my_buff", gm._buffers)
+            self.assertIn("my_buff", gm._non_persistent_buffers_set)
+            self.assertNotIn("my_buff", gm.state_dict())
+
+    def test_graph_module_init_non_module_tensor_attr_defaults_persistent(self):
+        gm = self.make_graph_with_non_module_tensor_attr()
+
+        self.assertIn("box.t", gm.state_dict())
+        self.assertNotIn("t", gm.box._non_persistent_buffers_set)
+
+    def test_graph_module_init_dict_tensor_attr_defaults_persistent(self):
+        tensor = torch.ones(3)
+        tensor.persistent = False
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        t = graph.get_attr("t")
+        add = graph.call_function(torch.add, (x, t))
+        graph.output(add)
+        gm = torch.fx.GraphModule({"t": tensor}, graph)
+
+        self.assertIn("t", gm.state_dict())
+        self.assertNotIn("t", gm._non_persistent_buffers_set)
+
+    def test_split_by_tags_preserves_non_persistent_buffer(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("my_buff", torch.ones(3), persistent=False)
+                self.register_buffer("persistent", torch.ones(3), persistent=True)
+
+            def forward(self, x):
+                y = x + self.my_buff
+                return y + self.persistent
+
+        mod = MyModule()
+        gm = torch.fx.symbolic_trace(mod)
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                node.tag = "main"
+
+        split_gm = split_by_tags(gm, ["main"])
+        split_submod = split_gm.get_submodule("main")
+
+        self.assertIn("my_buff", split_submod._buffers)
+        self.assertIn("my_buff", split_submod._non_persistent_buffers_set)
+        self.assertNotIn("my_buff", split_submod.state_dict())
+        self.assertIn("persistent", split_submod.state_dict())
+
+    def test_split_by_tags_non_module_tensor_attr_defaults_persistent(self):
+        gm = self.make_graph_with_non_module_tensor_attr()
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                node.tag = "main"
+
+        split_gm = split_by_tags(gm, ["main"])
+        split_submod = split_gm.get_submodule("main")
+
+        self.assertIn("box.t", split_submod.state_dict())
+        self.assertNotIn("t", split_submod.box._non_persistent_buffers_set)
+
     def test_split_preserve_node_meta(self):
         class TestModule(torch.nn.Module):
             def forward(self, x, y):

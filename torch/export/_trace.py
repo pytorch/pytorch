@@ -1130,12 +1130,43 @@ def _get_non_persistent_buffers(mod: torch.nn.Module) -> set[str]:
     Returns set of non-persistent buffers in a module and its submodules.
     """
     result: set[str] = set()
-    for name, m in mod.named_modules(remove_duplicate=False):
+    named_modules = list(mod.named_modules(remove_duplicate=False))
+    mirrored_root_buffers = {
+        f"{name + '.' if name else ''}{buffer_name}"
+        for name, m in named_modules
+        if isinstance(m, torch._dynamo.OptimizedModule)
+        for buffer_name in m._torchdynamo_mirrored_non_persistent_buffers
+    }
+    for name, m in named_modules:
         if name:
-            result.update(f"{name}.{b}" for b in m._non_persistent_buffers_set)
+            result.update(
+                f"{name}.{b}"
+                for b in m._non_persistent_buffers_set
+                if f"{name}.{b}" not in mirrored_root_buffers
+            )
         else:
-            result.update(m._non_persistent_buffers_set)
+            result.update(
+                b
+                for b in m._non_persistent_buffers_set
+                if b not in mirrored_root_buffers
+            )
     return result
+
+
+@contextmanager
+def _remove_optimized_module_mirrored_buffers(mod: torch.nn.Module):
+    optimized_modules = [
+        m
+        for _, m in mod.named_modules(remove_duplicate=False)
+        if isinstance(m, torch._dynamo.OptimizedModule)
+    ]
+    for m in optimized_modules:
+        m._remove_mirrored_non_persistent_buffers()
+    try:
+        yield
+    finally:
+        for m in optimized_modules:
+            m._sync_orig_mod_non_persistent_buffers()
 
 
 def _rewrite_dynamo_tensor_constants(
@@ -1379,6 +1410,12 @@ def _get_original_state_dict(mod: torch.nn.Module) -> dict[str, Any]:
     non_persistent_buffers = _get_non_persistent_buffers(mod)
     for k in non_persistent_buffers:
         original_state_dict.pop(k, None)
+    for name, m in mod.named_modules(remove_duplicate=False):
+        prefix = f"{name}." if name else ""
+        if not isinstance(m, torch._dynamo.OptimizedModule):
+            continue
+        for buffer_name in m._torchdynamo_mirrored_non_persistent_buffers:
+            original_state_dict.pop(f"{prefix}{buffer_name}", None)
 
     return original_state_dict
 
@@ -2286,31 +2323,32 @@ def _export_for_training(
         verify_additional_inputs,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
 
-    original_state_dict = _get_original_state_dict(mod)
+    with _remove_optimized_module_mirrored_buffers(mod):
+        original_state_dict = _get_original_state_dict(mod)
 
-    has_ambient_mode = False
-    if not strict:
-        flat_args, _ = pytree.tree_flatten((args, kwargs))
-        has_ambient_mode = torch._guards.detect_fake_mode(flat_args) is not None
+        has_ambient_mode = False
+        if not strict:
+            flat_args, _ = pytree.tree_flatten((args, kwargs))
+            has_ambient_mode = torch._guards.detect_fake_mode(flat_args) is not None
 
-    # Call the appropriate export function based on the strictness of tracing.
-    export_func = _strict_export if strict else _non_strict_export
+        # Call the appropriate export function based on the strictness of tracing.
+        export_func = _strict_export if strict else _non_strict_export
 
-    if not strict and torch._export.config.detect_non_strict_fake_tensor_leaks:
-        from torch._subclasses.fake_tensor import fake_tensor_tls
+        if not strict and torch._export.config.detect_non_strict_fake_tensor_leaks:
+            from torch._subclasses.fake_tensor import fake_tensor_tls
 
-        fake_tensor_tls.non_strict_export_fake_tensor_tracker.clear()
+            fake_tensor_tls.non_strict_export_fake_tensor_tracker.clear()
 
-    export_artifact = export_func(
-        mod=mod,
-        args=args,
-        kwargs=kwargs,
-        dynamic_shapes=dynamic_shapes,
-        preserve_module_call_signature=preserve_module_call_signature,
-        orig_in_spec=orig_in_spec,
-        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-        _to_aten_func=_export_to_aten_ir_make_fx,
-    )
+        export_artifact = export_func(
+            mod=mod,
+            args=args,
+            kwargs=kwargs,
+            dynamic_shapes=dynamic_shapes,
+            preserve_module_call_signature=preserve_module_call_signature,
+            orig_in_spec=orig_in_spec,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+            _to_aten_func=_export_to_aten_ir_make_fx,
+        )
 
     # If we are tracing with fake inputs, it is expected to
     # see fake tensor constants.
@@ -2533,24 +2571,25 @@ def _export(
         verify_additional_inputs,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
 
-    original_state_dict = _get_original_state_dict(mod)
+    with _remove_optimized_module_mirrored_buffers(mod):
+        original_state_dict = _get_original_state_dict(mod)
 
-    # Call the appropriate export function based on the strictness of tracing.
-    export_func = _strict_export if strict else _non_strict_export
+        # Call the appropriate export function based on the strictness of tracing.
+        export_func = _strict_export if strict else _non_strict_export
 
-    export_artifact = export_func(  # type: ignore[operator]
-        mod=mod,
-        args=args,
-        kwargs=kwargs,
-        dynamic_shapes=dynamic_shapes,
-        preserve_module_call_signature=preserve_module_call_signature,
-        orig_in_spec=original_in_spec,
-        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-        _to_aten_func=functools.partial(
-            _export_to_aten_ir,
-            pre_dispatch=pre_dispatch,
-        ),
-    )
+        export_artifact = export_func(  # type: ignore[operator]
+            mod=mod,
+            args=args,
+            kwargs=kwargs,
+            dynamic_shapes=dynamic_shapes,
+            preserve_module_call_signature=preserve_module_call_signature,
+            orig_in_spec=original_in_spec,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+            _to_aten_func=functools.partial(
+                _export_to_aten_ir,
+                pre_dispatch=pre_dispatch,
+            ),
+        )
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
 
     forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
