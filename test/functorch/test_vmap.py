@@ -4607,6 +4607,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("as_strided_scatter", ""),
                 xfail("equal", ""),
                 xfail("linalg.lu", ""),
+                xfail("linalg.polar"),  # no batch rule
                 skip("linalg.ldl_solve", ""),
                 skip("_softmax_backward_data"),
                 # One or more of the overload doesn't have a Batch rule.

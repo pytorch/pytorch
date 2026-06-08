@@ -168,6 +168,7 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("linalg.lu_factor"),
     xfail("linalg.lu_factor_ex"),
     xfail("linalg.lu_solve"),
+    xfail("linalg.polar"),
     xfail("linalg.qr"),
     xfail("linalg.slogdet"),
     xfail("linalg.solve"),
