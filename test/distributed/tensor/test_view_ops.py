@@ -1916,8 +1916,8 @@ class TestViewOps(DTensorContinuousTestBase):
         """Verify _StridedShard correctness through transpose.
 
         aten.transpose.int goes through view op propagation which handles
-        _StridedShard. aten.t uses transpose_strategy in _matrix_ops.py which
-        swaps the dim for both Shard and _StridedShard.
+        _StridedShard. aten.t uses a single-dim strategy in _matrix_ops.py
+        which swaps the dim for both Shard and _StridedShard.
         """
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         shape = (4, self.world_size * 2, 6)
@@ -1932,7 +1932,7 @@ class TestViewOps(DTensorContinuousTestBase):
         result = dt_flat.transpose(0, 1)
         self.assertEqual(result.full_tensor(), flat_full.transpose(0, 1))
 
-        # t() on 2D tensor (aten.t via transpose_strategy in _matrix_ops.py)
+        # t() on 2D tensor (aten.t via single-dim strategy in _matrix_ops.py)
         # _StridedShard(dim=0) → _StridedShard(dim=1), split_factor preserved
         result = dt_flat.t()
         self.assertIsInstance(result.placements[0], _StridedShard)
