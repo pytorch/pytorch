@@ -3247,7 +3247,7 @@ def _codegen_compiled_backward(
     lines.append(
         "            and (_cc := torch._C._get_obj_in_tls('context')) is not None):"
     )
-    lines.append("        impl_fn = functools.partial(_cc.run, impl_fn)")
+    lines.append("        impl_fn = functools.partial(_cc.copy().run, impl_fn)")
 
     if inputs_require_grad:
         lines.append("    if torch.is_grad_enabled():")
