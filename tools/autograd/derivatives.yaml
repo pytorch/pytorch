@@ -1287,7 +1287,7 @@
   result1: rms_norm_rstd_jvp(input_p, input_t, result1, normalized_shape)
 
 - name: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
-  input, weight, bias: "GradMode::is_enabled() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, grad_input_mask) : native_group_norm_backward_symint(grads[0], input, result1, result2, weight, N, C, HxW, group, grad_input_mask, grads[1], grads[2])"
+  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : (grads[0].defined() ? native_group_norm_backward_symint(grads[0].device().is_xpu() ? grads[0] : grads[0].contiguous(grads[0].device().is_cpu() ? input.suggest_memory_format() : c10::MemoryFormat::Contiguous), input.device().is_xpu() ? input : input.contiguous(input.device().is_cpu() ? input.suggest_memory_format() : c10::MemoryFormat::Contiguous), result1, result2, weight, N, C, HxW, group, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>())"
   result0: group_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, result1, result2, group)
   result1: group_norm_mean_jvp(input_t, result1, group)
   result2: group_norm_invstd_jvp(input_p, input_t, result1, result2, group)
@@ -3281,3 +3281,7 @@
 - name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
   self: norm_backward(grads[i], self[i], ord, result[i])
   result: norm_jvp(self_p, self_t, ord, result[i])
+
+- name: _foreach_mm(Tensor[] self, Tensor[] mat2) -> Tensor[]
+  self: mm_mat1_backward(grads[i], mat2[i], self[i].sym_sizes(), self[i].sym_strides(), self[i].layout(), 1)
+  mat2: mm_mat2_backward(grads[i], self[i], mat2[i].sym_sizes(), mat2[i].sym_strides(), mat2[i].layout(), 1)

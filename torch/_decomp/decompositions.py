@@ -1682,10 +1682,8 @@ def _addmm_activation(
     return aten.relu(out)
 
 
-@register_decomposition(aten.addmv)
-@out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
-def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+def _addmv_impl(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)
         alpha = int(alpha)
@@ -1697,9 +1695,20 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     return out + beta * self
 
 
-@register_decomposition(aten.native_group_norm_backward)
+@register_decomposition(aten.addmv)
+@out_wrapper(exact_dtype=True)
+def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+    torch._check(
+        self.dtype == mat1.dtype and mat1.dtype == vec.dtype,
+        lambda: f"addmv input tensors must have the same dtype, but got {self.dtype}, {mat1.dtype}, and {vec.dtype}",
+    )
+    return _addmv_impl(self, mat1, vec, beta, alpha)
+
+
+@register_decomposition(aten.native_group_norm_backward.default)
+@pw_cast_for_opmath
 def native_group_norm_backward(
-    grad_output: Tensor | None,
+    grad_output: Tensor,
     input: Tensor,
     mean: Tensor,
     rstd: Tensor,
@@ -1709,23 +1718,11 @@ def native_group_norm_backward(
     HxW: int,
     group: int,
     output_mask: list[bool],
-    *,
-    grad_mean: Tensor | None = None,
-    grad_rstd: Tensor | None = None,
-    out0: Tensor | None = None,
-    out1: Tensor | None = None,
-    out2: Tensor | None = None,
 ) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
-    optional_tensors_present = tuple(
-        t
-        for t in (grad_output, gamma, grad_mean, grad_rstd, out0, out1, out2)
-        if t is not None
-    )
     utils.check_same_device(
-        input, mean, rstd, *optional_tensors_present, allow_cpu_scalar_tensors=False
+        grad_output, input, mean, rstd, allow_cpu_scalar_tensors=False
     )
-    if grad_output is not None:
-        utils.check_same_shape(input, grad_output, allow_cpu_scalar_tensors=False)
+    utils.check_same_shape(input, grad_output, allow_cpu_scalar_tensors=False)
     utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
     torch._check(
         input.numel() == N * C * HxW,
@@ -1739,17 +1736,6 @@ def native_group_norm_backward(
         gamma is None or gamma.numel() == C,
         lambda: f"Expect gamma to have {C} elements but got {gamma.numel() if gamma is not None else -1}",
     )
-    if grad_mean is not None:
-        utils.check_same_shape(mean, grad_mean, allow_cpu_scalar_tensors=False)
-    if grad_rstd is not None:
-        utils.check_same_shape(rstd, grad_rstd, allow_cpu_scalar_tensors=False)
-
-    possible_outputs = (out0, out1, out2)
-    if do_output := any(o is not None for o in possible_outputs):
-        torch._check(
-            all(o is not None for o in possible_outputs),
-            lambda: "Please supply arguments for all output tensors or none!",
-        )
 
     cpg = C // group
     torch._check(
@@ -1757,125 +1743,84 @@ def native_group_norm_backward(
         lambda: f"Expect number of channels {C} to be evenly-divisible by number of groups {group}",
     )
 
-    computation_dtype = utils.get_computation_dtype(input.dtype)
-    grad_output_cast = (
-        _maybe_convert_to_dtype(grad_output, computation_dtype)
-        if grad_output is not None
-        else None
-    )
-    input_cast = _maybe_convert_to_dtype(input, computation_dtype)
-    mean_cast = _maybe_convert_to_dtype(mean, computation_dtype)
-    rstd_cast = _maybe_convert_to_dtype(rstd, computation_dtype)
-    gamma_cast = (
-        _maybe_convert_to_dtype(gamma, computation_dtype) if gamma is not None else None
-    )
-    grad_mean_cast = (
-        _maybe_convert_to_dtype(grad_mean, computation_dtype)
-        if grad_mean is not None
-        else None
-    )
-    grad_rstd_cast = (
-        _maybe_convert_to_dtype(grad_rstd, computation_dtype)
-        if grad_rstd is not None
-        else None
-    )
-
     # Compute Internal gradients
-    ds: Tensor | None = None
-    db: Tensor | None = None
-    if grad_output_cast is not None:
-        ds = torch.mul(grad_output_cast, input_cast).reshape(N, C, HxW).sum(2)
-        db = grad_output_cast.reshape(N, C, HxW).sum(2)
+    ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
+    db = grad_output.view(N, C, HxW).sum(dim=[2])
 
     d_input: Tensor | None = None
     d_gamma: Tensor | None = None
     d_bias: Tensor | None = None
-
-    param_output_dtype = gamma.dtype if gamma is not None else input.dtype
-    param_device = gamma.device if gamma is not None else input.device
-
     if output_mask[0]:
         s = 1.0 / (HxW * cpg)
-        if ds is None or db is None:
-            ds_val: Tensor | int = 0
-            db_val: Tensor | int = 0
-            c1: Tensor | int = 0
-        elif gamma_cast is not None:
-            ds_val = torch.mul(ds, gamma_cast.unsqueeze(0)).view(N, group, cpg).sum(2)
-            db_val = torch.mul(db, gamma_cast.unsqueeze(0)).view(N, group, cpg).sum(2)
+        if gamma is not None:
+            ds_val = torch.mul(ds, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
+            db_val = torch.mul(db, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
             c1 = torch.mul(
-                rstd_cast.unsqueeze(-1),
-                gamma_cast.reshape(1, group, cpg),
+                rstd.unsqueeze(-1),
+                gamma.reshape(1, group, cpg),
             )
         else:
-            ds_val = ds.view(N, group, cpg).sum(2)
-            db_val = db.view(N, group, cpg).sum(2)
-            c1 = rstd_cast.unsqueeze(-1)
+            ds_val = ds.reshape(N, group, cpg).sum(2)
+            db_val = db.reshape(N, group, cpg).sum(2)
+            c1 = torch.mul(
+                rstd.unsqueeze(-1),
+                torch.ones((1, group, cpg), device=rstd.device),
+            )
+        c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
+        c3 = -c2 * mean - db_val * rstd * s
 
-        grad_mean_val = grad_mean_cast if grad_mean_cast is not None else 0
-        grad_rstd_val = grad_rstd_cast if grad_rstd_cast is not None else 0
-        c2 = (
-            (db_val * mean_cast - ds_val - grad_rstd_val)
-            * rstd_cast
-            * rstd_cast
-            * rstd_cast
-            * s
-        )
-        c3 = -c2 * mean_cast - (db_val * rstd_cast - grad_mean_val) * s
-
-        c1 = c1.unsqueeze(-1) if isinstance(c1, torch.Tensor) else c1
+        c1 = c1.unsqueeze(-1)
         c2 = _unsqueeze_to_dim(c2, 4)
         c3 = _unsqueeze_to_dim(c3, 4)
-
-        if grad_output_cast is not None:
-            d_input = (
-                c1 * grad_output_cast.reshape(N, group, cpg, HxW)
-                + c2 * input_cast.reshape(N, group, cpg, HxW)
-                + c3
-            )
-        else:
-            d_input = c2 * input_cast.reshape(N, group, cpg, HxW) + c3
-        d_input = d_input.reshape(input.shape)
-
+        d_input = (
+            torch.mul(grad_output.reshape(N, group, cpg, HxW), c1)
+            + torch.mul(input.reshape(N, group, cpg, HxW), c2)
+            + c3
+        )
+        d_input = d_input.reshape(input.shape).to(input.dtype)
     if output_mask[1]:
-        if ds is not None and db is not None:
-            d_gamma = (
-                (
-                    (
-                        ds.view(N, group, cpg)
-                        - db.view(N, group, cpg) * mean_cast.unsqueeze(-1)
-                    )
-                    * rstd_cast.unsqueeze(-1)
-                )
-                .sum(0)
-                .reshape(C)
+        d_gamma = (
+            (
+                (ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.unsqueeze(-1))
+                * rstd.unsqueeze(-1)
             )
-        else:
-            d_gamma = torch.zeros((C,), dtype=param_output_dtype, device=param_device)
-
+            .sum(dim=[0])
+            .reshape(C)
+        )
     if output_mask[2]:
-        if db is not None:
-            d_bias = db.sum(0)
-        else:
-            d_bias = torch.zeros((C,), dtype=param_output_dtype, device=param_device)
+        d_bias = db.sum(dim=[0])
 
-    d_input = _maybe_convert_to_dtype(d_input, input.dtype)
-    d_gamma = _maybe_convert_to_dtype(d_gamma, param_output_dtype)
-    d_bias = _maybe_convert_to_dtype(d_bias, param_output_dtype)
+    return (d_input, d_gamma, d_bias)
 
-    # This can't handle the outputs via out_wrapper, because it can return None.
-    # Normally we would have a separate decomp for this, but due to forwards compat for
-    # the multiple_grads overload they're combined into one.
-    if do_output:
-        for d, o in zip((d_input, d_gamma, d_bias), possible_outputs):
-            # we've already checked that o is not None, but this silences typing
-            if d is not None and o is not None:
-                _maybe_resize_out(o, d.shape)
-                _safe_copy_out(copy_from=d, copy_to=o, exact_dtype=True)
 
-        return possible_outputs
+# out_wrapper currently does not allow optional outputs
+@register_decomposition(aten.native_group_norm_backward.out)
+def native_group_norm_backward_out(
+    grad_output: Tensor,
+    input: Tensor,
+    mean: Tensor,
+    rstd: Tensor,
+    gamma: Tensor | None,
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    output_mask: list[bool],
+    *,
+    out0: torch.Tensor,
+    out1: torch.Tensor,
+    out2: torch.Tensor,
+) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
+    result = native_group_norm_backward(
+        grad_output, input, mean, rstd, gamma, N, C, HxW, group, output_mask
+    )
+    grad_input = (out0, out1, out2)
+    for i, r in enumerate(result):
+        if r is not None:
+            _maybe_resize_out(grad_input[i], r.shape)
+            _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
 
-    return d_input, d_gamma, d_bias
+    return grad_input
 
 
 def _maybe_cast(x: Tensor | None, dtype) -> Tensor | None:
@@ -3118,6 +3063,111 @@ def max_pool3d_with_indices(
     )
 
 
+@register_decomposition(aten.adaptive_max_pool2d)
+@out_wrapper("out", "indices")
+def adaptive_max_pool2d(
+    input: Tensor,
+    output_size: tuple[int, int],
+) -> tuple[Tensor, Tensor]:
+    ndim = input.ndim
+    torch._check(
+        ndim in (3, 4),
+        lambda: f"adaptive_max_pool2d(): Expected 3D or 4D tensor, but got {ndim}D",
+    )
+    for i in range(1, ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                "adaptive_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
+                f"but input has sizes {input.shape} with dimension {i} being empty"
+            ),
+        )
+
+    h_in = input.shape[-2]
+    w_in = input.shape[-1]
+    h_out, w_out = output_size
+
+    # Case 1: empty output
+    if h_out == 0 or w_out == 0:
+        output_shape = list(input.shape[:-2]) + [h_out, w_out]
+        return (
+            input.new_empty(output_shape),
+            input.new_empty(output_shape, dtype=torch.int64),
+        )
+
+    # Case 2: global pooling (output_size == (1, 1))
+    # Equivalent to amax over spatial dims. argmax on the flattened spatial
+    # plane produces flat indices encoded as ih*W+iw.
+    if h_out == 1 and w_out == 1:
+        values = torch.amax(input, dim=(-2, -1), keepdim=True)
+        indices = torch.argmax(input.flatten(-2), dim=-1).unsqueeze(-1).unsqueeze(-1)
+        return values, indices
+
+    # Case 3: evenly divisible -- delegate to max_pool2d_with_indices
+    if h_in % h_out == 0 and w_in % w_out == 0:
+        kernel_size = [h_in // h_out, w_in // w_out]
+        return aten.max_pool2d_with_indices(input, kernel_size)
+
+    # Case 4: general (non-evenly-divisible, output_size > 1)
+    return NotImplemented
+
+
+@register_decomposition(aten.adaptive_max_pool3d)
+@out_wrapper("out", "indices")
+def adaptive_max_pool3d(
+    input: Tensor,
+    output_size: tuple[int, int, int],
+) -> tuple[Tensor, Tensor]:
+    ndim = input.ndim
+    torch._check(
+        ndim in (4, 5),
+        lambda: f"adaptive_max_pool3d(): Expected 4D or 5D tensor, but got {ndim}D",
+    )
+    for i in range(1, ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                "adaptive_max_pool3d(): Expected input to have non-zero size for non-batch dimensions, "
+                f"but input has sizes {input.shape} with dimension {i} being empty"
+            ),
+        )
+
+    d_in = input.shape[-3]
+    h_in = input.shape[-2]
+    w_in = input.shape[-1]
+    d_out, h_out, w_out = output_size
+
+    # Case 1: empty output
+    if d_out == 0 or h_out == 0 or w_out == 0:
+        output_shape = list(input.shape[:-3]) + [d_out, h_out, w_out]
+        return (
+            input.new_empty(output_shape),
+            input.new_empty(output_shape, dtype=torch.int64),
+        )
+
+    # Case 2: global pooling (output_size == (1, 1, 1))
+    # Equivalent to amax over spatial dims. argmax on the flattened spatial
+    # volume produces flat indices encoded as
+    # id*H*W + ih*W + iw.
+    if d_out == 1 and h_out == 1 and w_out == 1:
+        values = torch.amax(input, dim=(-3, -2, -1), keepdim=True)
+        indices = (
+            torch.argmax(input.flatten(-3), dim=-1)
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+        )
+        return values, indices
+
+    # Case 3: evenly divisible -- delegate to max_pool3d_with_indices
+    if d_in % d_out == 0 and h_in % h_out == 0 and w_in % w_out == 0:
+        kernel_size = [d_in // d_out, h_in // h_out, w_in // w_out]
+        return aten.max_pool3d_with_indices(input, kernel_size)
+
+    # Case 4: general (non-evenly-divisible, output_size > 1)
+    return NotImplemented
+
+
 def _max_unpoolnd(
     self: TensorLike, indices: TensorLike, output_size: list[int], dim: int
 ):
@@ -3128,6 +3178,14 @@ def _max_unpoolnd(
     # equal. If this condition is not satisfied, the operation is
     # non-deterministic as one of the different values in `self` 'wins'.
     utils.alert_not_deterministic(f"max_unpooling{dim}d_forward_out")
+    for i, size in enumerate(output_size):
+        torch._check(
+            size >= 0,
+            lambda i=i, size=size: (
+                f"max_unpooling{dim}d(): output_size must contain non-negative "
+                f"spatial dimensions, but got output_size[{i}]={size}"
+            ),
+        )
     output_shape = list(self.shape[:-dim]) + list(output_size)
     if any(s == 0 for s in output_shape):
         return self.new_zeros(output_shape)
@@ -3296,32 +3354,12 @@ def _index_add(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
-    torch._check(
-        dim == 0 or dim < tensor.ndim,
-        lambda: (
-            f"index_add_(): Indexing dim {dim} is out of bounds of the source tensor "
-            f"with dim {tensor.ndim}"
-        ),
-    )
     index_size = index.size(0) if index.ndim == 1 else 1
     tensor_size = tensor.size(dim) if tensor.ndim > 0 else 1
     torch._check(
         tensor_size == index_size,
         lambda: f"Number of indices ({index_size}) should be equal to tensor.size(dim) ({tensor_size}), for {dim=}",
     )
-
-    def source_shape_error() -> str:
-        return (
-            "source tensor shape must match self tensor shape, excluding the specified "
-            f"dimension. Got self.shape = {list(x.shape)} source.shape = {list(tensor.shape)}"
-        )
-
-    torch._check(x.ndim == tensor.ndim, source_shape_error)
-    if x.ndim != 0:
-        for i in range(x.ndim):
-            if i != dim:
-                torch._check(x.size(i) == tensor.size(i), source_shape_error)
-
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         torch._check(
