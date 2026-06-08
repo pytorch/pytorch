@@ -48,6 +48,12 @@
  * ----------------------------------------------------------------------------
  */
 
+// NOTE: `define_meta: true` registers this meta() on aten's process-global, device-agnostic
+// `Meta` key -- once this backend loads it overrides aten's meta for that op on EVERY device
+// (CPU/CUDA too) and cannot be removed, so torch.compile/FakeTensor use it everywhere. Use
+// only when your meta() is shape-faithful to aten. (For precompute ops, define meta() with
+// TORCH_PRIVATEUSE1_PRECOMPUTE_META_FUNC -- the declaration returns meta_return_ty.)
+
 // TORCH_PRIVATEUSE1_META_FUNC bridges backend-specific scoping with the structured
 // meta-function hierarchy.
 // Expansion: void <class_name>::structured_<op>::meta
