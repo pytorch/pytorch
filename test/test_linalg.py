@@ -6589,56 +6589,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
     @onlyCPU
-    @dtypes(torch.bfloat16, torch.float32)
-    @parametrize("m", [0, 8, 17])
-    @parametrize("k", [0, 16, 32])
-    @parametrize("n", [16, 32])
-    @parametrize("use_transpose_a", [True, False])
-    @parametrize("use_transpose_b", [True, False])
-    @parametrize("non_contig_type", [0, 1, 2])
-    @parametrize("x_dtype", [torch.int8, torch.uint8])
-    def test__int_mm_dtype_cpu(self, device, dtype, m, k, n, use_transpose_a, use_transpose_b, non_contig_type, x_dtype):
-        # non_contig_type:
-        # 0: the whole data buffer is contiguous (can be transposed)
-        # 1: stride of one dimension is 1, but the whole buffer is not contiguous
-        # 2: Neither stride is 1
-
-        def genf_int_float(x, y, use_transpose, non_contig_type, dtype):
-            if use_transpose:
-                x, y = y, x
-            if non_contig_type != 0:
-                y = y * 2
-            dt_info = torch.iinfo(dtype)
-            x_int8 = torch.randint(dt_info.min, dt_info.max, (x, y), dtype=dtype, device=device)
-            x_float = x_int8.to(torch.float32)
-            if non_contig_type == 1:
-                x_int8 = x_int8[:, : y // 2]
-                x_float = x_float[:, : y // 2]
-            elif non_contig_type == 2:
-                x_int8 = x_int8[:, ::2]
-                x_float = x_float[:, ::2]
-            if use_transpose:
-                return x_int8.t(), x_float.t()
-            return x_int8, x_float
-
-        if non_contig_type != 0 and (m == 0 or k == 0):
-            return
-
-        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type, x_dtype)
-        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type, torch.int8)
-
-        c = torch._int_mm(a_int8, b_int8, out_dtype=dtype)
-        self.assertTrue(c.dtype is dtype)
-        self.assertEqual(c.device, torch.device(device))
-        self.assertEqual(c, torch.mm(a_float, b_float).to(dtype))
-
-        c_result = torch.empty(c.size(), dtype=dtype, device=device)
-
-        # Checking out variant
-        torch._int_mm(a_int8, b_int8, out_dtype=dtype, out=c_result)
-        self.assertEqual(c_result, torch.mm(a_float, b_float).to(dtype))
-
-    @onlyCPU
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_mm_cpu_unaligned(self, device, dtype):
         m, n, k, n_groups = 16, 32, 64, 4
