@@ -579,6 +579,7 @@ view of a storage and defines numeric operations on it.
     Tensor.pow_
     Tensor.prod
     Tensor.put_
+    Tensor.qr
     Tensor.qscheme
     Tensor.quantile
     Tensor.nanquantile
