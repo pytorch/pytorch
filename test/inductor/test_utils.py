@@ -1023,7 +1023,7 @@ class TestFakeTensorUpdater(TestCase):
 
         storage = StorageBox(
             Pointwise(
-                device=torch.device("cpu"),
+                device=torch.device("cuda"),
                 dtype=torch.float32,
                 inner_fn=inner_four_reads_fn,
                 ranges=[10],
@@ -1032,6 +1032,27 @@ class TestFakeTensorUpdater(TestCase):
         with config.patch(realize_reads_threshold=4):
             self.assertFalse(storage.should_realize_on_reuse(1))
             self.assertTrue(storage.should_realize_on_reuse(2))
+
+    def test_should_realize_on_reuse_preserves_cpu_read_threshold(self):
+        from torch._inductor.ir import Pointwise, StorageBox
+        from torch._inductor.virtualized import ops
+
+        def inner_four_reads_fn(index):
+            value = ops.constant(0.0, torch.float32)
+            for i in range(4):
+                value = ops.add(value, ops.load(f"in{i}", index[0]))
+            return value
+
+        storage = StorageBox(
+            Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=inner_four_reads_fn,
+                ranges=[10],
+            )
+        )
+        with config.patch(realize_reads_threshold=4):
+            self.assertFalse(storage.should_realize_on_reuse(2))
 
 
 if __name__ == "__main__":
