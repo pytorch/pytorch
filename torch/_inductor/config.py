@@ -1173,7 +1173,10 @@ _micro_pipeline_tp: bool = False
 # at the cost of temporary memory for expanded partition buffers.
 _partitioned_scatter_default = "1" if torch.version.hip else "0"
 partitioned_scatter_enabled = (
-    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", _partitioned_scatter_default) == "1"
+    os.environ.get(
+        "TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", _partitioned_scatter_default
+    )
+    == "1"
 )
 
 # Power-of-2 bounds for num_partitions (bitwise AND partition assignment requires pow2).
