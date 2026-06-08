@@ -491,6 +491,8 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "triton.inject_relu_bug_TESTING_ONLY": DEFAULT,  # Testing
         "reorder_for_compute_comm_overlap": DEFAULT,  # FSDP
         "enabled_metric_tables": DEFAULT,  # Typing
+        "triton.debug_sync_graph": DEFAULT,  # Known Failure
+        "triton.debug_sync_kernel": DEFAULT,  # Known Failure
         "profile_bandwidth_regex": DEFAULT,  # Known Failure
         "disable_cpp_codegen": DEFAULT,  # Known Failure
         "trace.save_real_tensors": DEFAULT,  # Known Failure
@@ -573,6 +575,8 @@ class ConfigFuzzer:
     ```
 
     The list of known failures on inductor config are:
+    cpp_wrapper, triton_debug_sync_graph
+    cpp_wrapper, triton_debug_sync_kernel
     cpp_wrapper, disable_cpp_codegen
     combo_kernels, benchmark_combo_kernel, profile_bandwidth, profile_bandwidth_regex
     trace.enabled, trace.save_real_tensors
