@@ -290,6 +290,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         spmd_check(gm)
 
+    if config.aten_distributed_optimizations.allow_comms_decompositions:
+        from torch._inductor.fx_passes.decomp_comms import decomp_comms
+
+        GraphTransformObserver(gm, "decomp_comms").apply_gm_pass(decomp_comms)
+
     collectives_bucketing: bool = False
 
     if config.dedup_reduce_scatters:
@@ -1255,6 +1260,16 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 src = src_index(node.args)
             if not isinstance(src, torch.fx.Node):
                 continue
+
+            if node.target is torch.ops.aten.copy.default:
+                dst = node.args[0]
+                if (
+                    isinstance(dst, torch.fx.Node)
+                    and dst.op == "call_function"
+                    and dst.kwargs.get("pin_memory") is True
+                ):
+                    continue
+
             # Don't introduce new aliasing between inputs and outputs.
             # See fx_passes/README.md for a discussion of why this is
             # necessary.
