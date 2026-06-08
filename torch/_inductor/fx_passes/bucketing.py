@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import logging
 import operator
 from collections import defaultdict
@@ -257,6 +258,98 @@ def _populate_node_meta(
                 )
                 for original_node in bucket_nodes
             ]
+
+
+def _meta_arg(arg: object) -> object:
+    if isinstance(arg, torch.fx.Node):
+        return arg.meta.get("val", arg)
+    return arg
+
+
+def _same_tensor_metadata(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    def same_dim(lhs_dim: object, rhs_dim: object) -> bool:
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+        try:
+            return statically_known_true(lhs_dim == rhs_dim)
+        except Exception:
+            return lhs_dim == rhs_dim
+
+    def same_dims(lhs_dims: tuple[object, ...], rhs_dims: tuple[object, ...]) -> bool:
+        return len(lhs_dims) == len(rhs_dims) and all(
+            same_dim(lhs_dim, rhs_dim) for lhs_dim, rhs_dim in zip(lhs_dims, rhs_dims)
+        )
+
+    return (
+        lhs.dtype == rhs.dtype
+        and lhs.device == rhs.device
+        and lhs.layout == rhs.layout
+        and same_dims(tuple(lhs.shape), tuple(rhs.shape))
+        and same_dims(tuple(lhs.stride()), tuple(rhs.stride()))
+        and same_dim(lhs.storage_offset(), rhs.storage_offset())
+    )
+
+
+def _same_metadata(lhs: object, rhs: object) -> bool:
+    lhs_leaves, lhs_spec = pytree.tree_flatten(lhs)
+    rhs_leaves, rhs_spec = pytree.tree_flatten(rhs)
+    if lhs_spec != rhs_spec or len(lhs_leaves) != len(rhs_leaves):
+        return False
+    for lhs_leaf, rhs_leaf in zip(lhs_leaves, rhs_leaves):
+        if isinstance(lhs_leaf, torch.Tensor) or isinstance(rhs_leaf, torch.Tensor):
+            if not isinstance(lhs_leaf, torch.Tensor) or not isinstance(
+                rhs_leaf, torch.Tensor
+            ):
+                return False
+            if not _same_tensor_metadata(lhs_leaf, rhs_leaf):
+                return False
+    return True
+
+
+def _recompute_changed_user_metadata(start_users: list[torch.fx.Node]) -> None:
+    """
+    Repair fake metadata after bucketing replaces a value with a layout-different
+    equivalent. The replacement is semantically valid, but downstream stride
+    metadata is no longer valid until consumers are re-run from metadata.
+    """
+    worklist = collections.deque(start_users)
+    queued: OrderedSet[torch.fx.Node] = OrderedSet(start_users)
+    while worklist:
+        node = worklist.popleft()
+        queued.discard(node)
+        if node.op != "call_function" or not callable(node.target):
+            continue
+        if "val" not in node.meta:
+            continue
+
+        args = pytree.tree_map(_meta_arg, node.args)
+        kwargs = pytree.tree_map(_meta_arg, node.kwargs)
+        if any(
+            isinstance(leaf, torch.fx.Node)
+            for leaf in pytree.tree_leaves((args, kwargs))
+        ):
+            continue
+
+        fake_mode = detect_fake_mode((node.meta.get("val"), args, kwargs))
+        try:
+            with fake_mode if fake_mode is not None else contextlib.nullcontext():
+                new_val = node.target(*args, **kwargs)
+        except Exception:
+            logger.debug(
+                "Skipping metadata repair for bucketing user %s",
+                node.name,
+                exc_info=True,
+            )
+            continue
+
+        if _same_metadata(node.meta["val"], new_val):
+            continue
+
+        node.meta["val"] = new_val
+        for user in node.users:
+            if user not in queued:
+                queued.add(user)
+                worklist.append(user)
 
 
 def bucket_key(node: torch.fx.Node, mode: BucketMode | None = None) -> object | None:
@@ -1104,8 +1197,11 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
         replacements = {  # noqa: C416
             orig_out: new_out for orig_out, new_out in zip(g_fn_outs, g_fn_new_outs)
         }
+        replaced_users = []
         for orig_out, new_out in zip(g_fn_outs, g_fn_new_outs):
+            replaced_users.extend(orig_out.users)
             orig_out.replace_all_uses_with(new_out)
+        _recompute_changed_user_metadata(replaced_users)
 
         return replacements, new_nodes
 
