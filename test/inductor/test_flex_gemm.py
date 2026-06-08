@@ -6,8 +6,18 @@ import sys
 import unittest
 
 import torch
+from torch._higher_order_ops import flex_gemm
+from torch._higher_order_ops.flex_gemm import supported_flex_gemm_op_names
+from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skipIfNoCuteDSL,
+    TestCase,
+)
 
 
 try:
@@ -66,7 +76,6 @@ class TestFlexGemmRuntime(TestCase):
         eager_error = (
             (low_precision_expected.double() - high_precision_expected).abs().mean()
         )
-        # Model the extra slack as fp32 accumulator rounding across K plus final output rounding.
         fp32_accumulation_eps = (
             math.sqrt(reduction_size) * torch.finfo(torch.float32).eps
         )
@@ -99,7 +108,7 @@ class TestFlexGemmRuntime(TestCase):
             a,
             b,
             self.relu_epilogue,
-            "test_flex_gemm_runtime_relu_c",
+            "test_flex_gemm_relu_c",
             C=c,
             alpha=0.5,
             beta=1.25,
@@ -128,7 +137,7 @@ class TestFlexGemmRuntime(TestCase):
             a,
             b,
             self.row_scale_epilogue,
-            "test_flex_gemm_runtime_row_scale",
+            "test_flex_gemm_row_scale",
             out_dtype=torch.float32,
             epilogue_args=(row_scale,),
             epilogue_arg_kinds=("row",),
@@ -168,7 +177,7 @@ class TestFlexGemmRuntime(TestCase):
             a,
             b,
             self.affine_aux_epilogue,
-            "test_flex_gemm_runtime_infer_aux",
+            "test_flex_gemm_infer_aux",
             out_dtype=torch.float32,
             epilogue_args=(col_bias, row_scale, tile_bias),
         )
@@ -197,7 +206,7 @@ class TestFlexGemmRuntime(TestCase):
                 a,
                 b,
                 self.row_scale_epilogue,
-                "test_flex_gemm_runtime_reject_c_args",
+                "test_flex_gemm_reject_c_args",
                 C=c,
                 epilogue_args=(row_scale,),
                 epilogue_arg_kinds=("row",),
@@ -207,7 +216,7 @@ class TestFlexGemmRuntime(TestCase):
                 a,
                 b,
                 self.row_scale_epilogue,
-                "test_flex_gemm_runtime_reject_alpha_args",
+                "test_flex_gemm_reject_alpha_args",
                 alpha=0.5,
                 epilogue_args=(row_scale,),
                 epilogue_arg_kinds=("row",),
@@ -217,7 +226,7 @@ class TestFlexGemmRuntime(TestCase):
                 a,
                 b,
                 self.row_scale_epilogue,
-                "test_flex_gemm_runtime_reject_bad_kind",
+                "test_flex_gemm_reject_bad_kind",
                 epilogue_args=(row_scale,),
                 epilogue_arg_kinds=("diag",),
             )
@@ -226,7 +235,7 @@ class TestFlexGemmRuntime(TestCase):
                 a,
                 b,
                 self.row_scale_epilogue,
-                "test_flex_gemm_runtime_reject_bad_shape",
+                "test_flex_gemm_reject_bad_shape",
                 epilogue_args=(row_scale.t(),),
                 epilogue_arg_kinds=("row",),
             )
@@ -236,14 +245,14 @@ class TestFlexGemmRuntime(TestCase):
                 bad_layout,
                 b,
                 self.row_scale_epilogue,
-                "test_flex_gemm_runtime_reject_bad_layout",
+                "test_flex_gemm_reject_bad_layout",
             )
         with self.assertRaisesRegex(NotImplementedError, "tuned=True"):
             gemm_epilogue(
                 a,
                 b,
                 self.row_scale_epilogue,
-                "test_flex_gemm_runtime_reject_tuned",
+                "test_flex_gemm_reject_tuned",
                 tuned=True,
             )
 
@@ -263,7 +272,7 @@ class TestFlexGemmRuntime(TestCase):
             a,
             b,
             self.affine_aux_epilogue,
-            "test_flex_gemm_runtime_affine_aux",
+            "test_flex_gemm_affine_aux",
             out_dtype=torch.float32,
             epilogue_args=(col_bias, row_scale, tile_bias),
             epilogue_arg_kinds=("col", "row", "tile"),
@@ -278,6 +287,197 @@ class TestFlexGemmRuntime(TestCase):
         self.assertMatchesLowPrecisionEager(
             out, low_precision_expected, high_precision_expected, k
         )
+
+
+@instantiate_parametrized_tests
+class TestFlexGemmEpilogueHOP(TestCase):
+    def assertFlexGemmGeneratedCode(self, code, *checks):
+        file_check = (
+            FileCheck()
+            .check(
+                "from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue as flex_gemm_epilogue"
+            )
+            .check("flex_gemm_epilogue(")
+        )
+        for check in checks:
+            file_check = file_check.check(check)
+        file_check.check("tuned=False").check("epilogue_source=").check_not(
+            "tuned=True"
+        ).check_not("from quack").check_not("import quack").check_not(
+            "torch._vendor.quack"
+        ).run(code)
+
+    def test_supported_op_names_match_pr2b_scope(self):
+        self.assertEqual(supported_flex_gemm_op_names(), "mm/addmm")
+
+    def test_default_backend_eager_matches_reference(self):
+        a = torch.randn(8, 16)
+        b = torch.randn(16, 12)
+
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        actual = flex_gemm(torch.mm, (a, b), epilogue_fn)
+
+        torch.testing.assert_close(actual, epilogue_fn(a @ b))
+
+    def test_mm_eager_matches_reference(self):
+        a = torch.randn(8, 16)
+        b = torch.randn(16, 12)
+
+        def epilogue_fn(acc):
+            return (acc + 1).relu()
+
+        actual = flex_gemm(
+            torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+        )
+
+        torch.testing.assert_close(actual, epilogue_fn(a @ b))
+
+    def test_addmm_eager_matches_reference(self):
+        bias = torch.randn(8, 12)
+        a = torch.randn(8, 16)
+        b = torch.randn(16, 12)
+
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        actual = flex_gemm(
+            torch.addmm,
+            (bias, a, b),
+            epilogue_fn,
+            gemm_kwargs={"beta": 0.5, "alpha": 1.5},
+            kernel_options={"backend": "QUACK"},
+        )
+
+        torch.testing.assert_close(
+            actual, epilogue_fn(torch.addmm(bias, a, b, beta=0.5, alpha=1.5))
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    def test_mm_generated_code_calls_flex_gemm_adapter(self):
+        def epilogue_fn(acc):
+            return (acc + 1).relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": False},
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        torch.testing.assert_close(actual, epilogue_fn(a @ b), atol=1e-2, rtol=1e-2)
+        self.assertFlexGemmGeneratedCode(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    def test_addmm_generated_code_calls_flex_gemm_adapter(self):
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        def fn(bias, a, b):
+            return flex_gemm(
+                torch.addmm,
+                (bias, a, b),
+                epilogue_fn,
+                gemm_kwargs={"beta": 0.5, "alpha": 1.5},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        bias = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), bias, a, b
+        )
+
+        torch.testing.assert_close(
+            actual,
+            epilogue_fn(torch.addmm(bias, a, b, beta=0.5, alpha=1.5)),
+            atol=1e-2,
+            rtol=1e-2,
+        )
+        self.assertFlexGemmGeneratedCode(code, "C=")
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @parametrize(
+        "case",
+        (
+            (
+                "unsupported_epilogue",
+                lambda acc: acc.log(),
+                {"backend": "QUACK"},
+                "unsupported FlexGEMM epilogue",
+            ),
+            (
+                "unknown_kernel_option",
+                lambda acc: acc.relu(),
+                {"backend": "QUACK", "split_k": 2},
+                "unsupported FlexGEMM kernel options",
+            ),
+            (
+                "tuned_option",
+                lambda acc: acc.relu(),
+                {"backend": "QUACK", "tuned": True},
+                "tuned=True",
+            ),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_generated_code_rejects_unsupported_cases(self, case):
+        _, epilogue_fn, kernel_options, error = case
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options=kernel_options,
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+
+        with self.assertRaisesRegex(Exception, error):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    def test_rejects_unsupported_quack_op(self):
+        a = torch.randn(2, 3, 4)
+        b = torch.randn(2, 4, 5)
+
+        with self.assertRaisesRegex(RuntimeError, "unsupported GEMM op"):
+            flex_gemm(
+                torch.ops.aten.bmm.default,
+                (a, b),
+                lambda acc: acc.relu(),
+                kernel_options={"backend": "QUACK"},
+            )
+
+    def test_rejects_unknown_backend(self):
+        a = torch.randn(8, 16)
+        b = torch.randn(16, 12)
+
+        with self.assertRaisesRegex(RuntimeError, "unsupported FlexGEMM backend"):
+            flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: acc.relu(),
+                kernel_options={"backend": "CUTLASS"},
+            )
 
 
 if __name__ == "__main__":

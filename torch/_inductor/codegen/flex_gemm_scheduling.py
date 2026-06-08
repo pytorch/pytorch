@@ -42,10 +42,9 @@ class FlexGemmScheduling(BaseScheduling):
         assert self.is_flex_gemm_template(template_node)
 
         template_node = cast(SchedulerNode, template_node)
+        template_buffer = cast(ir.FlexGemmEpilogueTemplateBuffer, template_node.node)
         template_node.mark_run()
-        self._codegen_template(
-            cast(ir.FlexGemmEpilogueTemplateBuffer, template_node.node)
-        )
+        self._codegen_template(template_buffer)
         self.free_buffers_in_scheduler()
 
     def _codegen_template(

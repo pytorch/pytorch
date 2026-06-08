@@ -8749,11 +8749,10 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             out_dtype=output_meta.dtype,
         ),
     )
-    return (
-        autotune_select_algorithm("flex_gemm_epilogue", choices, input_nodes, layout)[
-            0
-        ],
+    result, _ = autotune_select_algorithm(
+        "flex_gemm_epilogue", choices, input_nodes, layout
     )
+    return (result,)
 
 
 # Import the control_deps_op HOP for lowering

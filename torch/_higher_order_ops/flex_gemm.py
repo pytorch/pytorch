@@ -93,7 +93,7 @@ class FlexGemm(HigherOrderOperator):
             )
 
         kernel_options = {"backend": "TRITON", **kernel_options}
-        backend = kernel_options.get("backend", "TRITON")
+        backend = kernel_options["backend"]
         if backend not in _SUPPORTED_BACKENDS:
             raise RuntimeError(
                 f"unsupported FlexGEMM backend: {backend}; "

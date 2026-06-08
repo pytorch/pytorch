@@ -3853,7 +3853,7 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
             _,
             example_value,
             body_r,
-            body_gmod,
+            _,
             _,
             body_graph_output_vts,
             _,

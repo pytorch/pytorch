@@ -179,7 +179,6 @@ def gemm_epilogue(
     row_args, col_args, tile_args = _split_epilogue_args(
         epilogue_args, inferred_arg_kinds
     )
-    passes_tensor_epilogue_args = bool(epilogue_args)
 
     if epilogue_source is not None:
         from torch._vendor.quack._compile_payload import set_epilogue_source_cache_key
@@ -188,19 +187,16 @@ def gemm_epilogue(
 
     from torch._vendor.quack.gemm_act import gemm_act as gemm_act_dispatch
 
-    a_quack = a
-    b_quack = b.mT
-    c_quack = C
     out = torch.empty(
         (1, a.shape[0], b.shape[1]),
         device=a.device,
         dtype=a.dtype if out_dtype is None else out_dtype,
     )
     gemm_act_dispatch(
-        a_quack.unsqueeze(0),
-        b_quack.unsqueeze(0),
+        a.unsqueeze(0),
+        b.mT.unsqueeze(0),
         None,
-        None if c_quack is None else c_quack.unsqueeze(0),
+        None if C is None else C.unsqueeze(0),
         out,
         None,
         None,
@@ -213,7 +209,7 @@ def gemm_epilogue(
         is_dynamic_persistent=False,
         tensor_epilogue_fn=epilogue_fn,
         tensor_epilogue_key=epilogue_key,
-        tensor_epilogue_uses_c=passes_tensor_epilogue_args,
+        tensor_epilogue_uses_c=bool(epilogue_args),
         tensor_epilogue_arg_kinds=inferred_arg_kinds,
         tensor_epilogue_rowvec_biases=row_args,
         tensor_epilogue_colvec_biases=col_args,
