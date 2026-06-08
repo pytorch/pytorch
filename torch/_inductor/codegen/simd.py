@@ -749,7 +749,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def combine_contiguous_dims(
         self, index: sympy.Expr, tree: IterationRangesRoot
     ) -> sympy.Expr:
-        if expand_res := V.graph.sizevars.expand_floor_div(index):
+        if isinstance(index, sympy.Add) and index.has(FloorDiv):
+            candidate_vars, _ = tree.vars_and_sizes(index)
+        else:
+            candidate_vars = None
+        if expand_res := V.graph.sizevars.expand_floor_div(index, candidate_vars):
             new_index, denominator = expand_res  # type: ignore[misc]
             return FloorDiv(self._combine_contiguous_dims(new_index, tree), denominator)
         else:
@@ -3410,7 +3414,7 @@ class SIMDScheduling(BaseScheduling):
                 return None
 
     def codegen_sync(self):
-        V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
+        V.graph.wrapper_code.generate_debug_sync(V.graph.wrapper_code)
 
     def generate_combo_kernel_code(
         self,
