@@ -20,6 +20,7 @@ from torch._jit_internal import (
     BroadcastingList1,
     BroadcastingList2,  # pyrefly: ignore [missing-module-attribute]
     BroadcastingList3,  # pyrefly: ignore [missing-module-attribute]
+    unused as _jit_unused,
 )
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
@@ -944,6 +945,17 @@ max_pool3d = boolean_dispatch(
 )
 
 
+@_jit_unused
+def _check_unpool_output_size(output_size: list[int], dim: int) -> None:
+    torch._check_value(
+        output_size[dim] >= 0,
+        lambda: (
+            "max_unpooling: output_size must contain non-negative spatial "
+            f"dimensions, but got output_size[{dim}]={output_size[dim]}"
+        ),
+    )
+
+
 def _unpool_output_size(
     input: Tensor,
     kernel_size: list[int],
@@ -978,6 +990,16 @@ def _unpool_output_size(
                 )
 
         ret = output_size
+    if torch.jit.is_scripting():
+        for d in range(len(kernel_size)):
+            if ret[d] < 0:
+                raise ValueError(
+                    "max_unpooling: output_size must contain non-negative spatial "
+                    f"dimensions, but got output_size[{d}]={ret[d]}"
+                )
+    else:
+        for d in range(len(kernel_size)):
+            _check_unpool_output_size(ret, d)
     return ret
 
 
@@ -1115,6 +1137,12 @@ def lp_pool3d(
             ceil_mode=ceil_mode,
         )
     kd, kw, kh = _triple(kernel_size)
+    if isinstance(norm_type, (int, float)):
+        if norm_type == float("inf"):
+            return max_pool3d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool3d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1156,6 +1184,12 @@ def lp_pool2d(
             ceil_mode=ceil_mode,
         )
     kw, kh = _pair(kernel_size)
+    if isinstance(norm_type, (int, float)):
+        if norm_type == float("inf"):
+            return max_pool2d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool2d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1193,6 +1227,12 @@ def lp_pool1d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
+    if isinstance(norm_type, (int, float)):
+        if norm_type == float("inf"):
+            return max_pool1d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool1d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -3691,10 +3731,10 @@ def linear_cross_entropy(
         linear_bias (Tensor, optional): bias added to the linear
             projection (shape ``(C,)`` or ``(C, d_1, ..., d_K)`` for
             K-dimensional loss, matching :attr:`linear_weight`).
-            Currently supported only on the reference path
-            (``options=None``); setting ``linear_bias`` with a
-            non-``None`` ``options`` warns and falls back to the
-            reference path. Default: ``None``.
+            With ``options != None``, K-dimensional bias
+            (``out_features != ()``) falls back to the reference
+            implementation with a warning; the chunked path supports
+            only ``(C,)``-shaped bias. Default: ``None``.
         weight (Tensor, optional): a manual rescaling weight given to each class.
         reduction (str, optional): Specifies the reduction to apply to
             the output: ``'none'`` | ``'mean'`` |
@@ -3845,12 +3885,11 @@ def linear_cross_entropy(
         or label_smoothing != 0.0
         or target.dtype != torch.int64
         or torch.jit.is_tracing()
-        or linear_bias is not None
     ):
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
             "reduction in {'mean','sum'}, label_smoothing == 0, target.dtype"
-            " == int64, out_features == (), linear_bias is None. Got "
+            " == int64, out_features == (). Got "
             f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
             f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
             f", tracing={torch.jit.is_tracing()}"
@@ -3866,7 +3905,6 @@ def linear_cross_entropy(
         and target.dtype == torch.int64
         and not out_features
         and not torch.jit.is_tracing()
-        and linear_bias is None
     ):
         if input.dim() == 2:
             num_batches = input.shape[0]
@@ -3906,6 +3944,7 @@ def linear_cross_entropy(
             input,
             linear_weight,
             target,
+            linear_bias,
             weight,
             reduction,
             ignore_index,
@@ -3916,6 +3955,9 @@ def linear_cross_entropy(
             options.allow_retain_graph,
             input.requires_grad and torch.is_grad_enabled(),
             linear_weight.requires_grad and torch.is_grad_enabled(),
+            linear_bias is not None
+            and linear_bias.requires_grad
+            and torch.is_grad_enabled(),
         )[0]
 
         if not has_batches:
