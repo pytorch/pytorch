@@ -408,10 +408,13 @@ class BaseListVariable(VariableTracker):
         from .object_protocol import generic_richcompare, generic_richcompare_bool
         from .tensor import SymNodeVariable
 
-        if not isinstance(other, BaseListVariable):
+        # NamedTupleVariable delegates richcompare to its underlying TupleVariable,
+        # so the opposite operand may still be the namedtuple wrapper.
+        other_vt = getattr(other, "_base_vt", None) or other
+        if not isinstance(other_vt, BaseListVariable):
             return ConstantVariable.create(NotImplemented)
         self._check_no_symbolic_length("richcompare")
-        other._check_no_symbolic_length("richcompare")
+        other_vt._check_no_symbolic_length("richcompare")
         try:
             other_type = other.python_type()
         except NotImplementedError:
@@ -423,8 +426,7 @@ class BaseListVariable(VariableTracker):
         # CPython uses ob_item (the C array) directly, bypassing __iter__.
         # For user-defined subclasses (UserDefinedListVariable etc.),
         # the items live on the _base_vt.
-        other_vt = getattr(other, "_base_vt", None) or other
-        right = other_vt.items  # pyrefly: ignore[missing-attribute]
+        right = other_vt.items
 
         cmp_op = cmp_name_to_op_mapping[op]
 
