@@ -706,7 +706,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         ss << "{handle_kind}[{idx}]: unmatched dtype, "
                            << "expected: " << {name}_expected_dtype << "({expected_dtype_name}), "
                            << "but got: " << {name}_dtype << "\\n";
-                        throw std::runtime_error(ss.str());
+                        throw std::runtime_error(std::move(ss).str());
                     }}
                 """
             )
@@ -720,7 +720,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                 ss << "{handle_kind}[{idx}]: unmatched dim value at {dim_idx}, "
                                    << "expected: {d}, " << "but got: " << {name}_size[{dim_idx}]
                                    << "\\n";
-                                throw std::runtime_error(ss.str());
+                                throw std::runtime_error(std::move(ss).str());
                             }}
                         """
                     )
@@ -738,7 +738,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                     ss << "{handle_kind}[{idx}]: dim value is too small at {dim_idx}, "
                                        << "expected it to be >= {sym_range.lower}, " << "but got: "
                                        << {name}_size[{dim_idx}] << "\\n";
-                                    throw std::runtime_error(ss.str());
+                                    throw std::runtime_error(std::move(ss).str());
                                 }}
                             """
                         )
@@ -753,7 +753,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                     ss << "{handle_kind}[{idx}]: dim value is too large at {dim_idx}, "
                                        << "expected to be <= {upper_bound}, " << "but got: "
                                        << {name}_size[{dim_idx}] << "\\n";
-                                    throw std::runtime_error(ss.str());
+                                    throw std::runtime_error(std::move(ss).str());
                                 }}
                             """
                         )
@@ -769,7 +769,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                             ss << "{handle_kind}[{idx}]: unmatched stride value at {stride_idx}, "
                                << "expected: {s}, " << "but got: " << {name}_stride[{stride_idx}]
                                << "\\n";
-                            throw std::runtime_error(ss.str());
+                            throw std::runtime_error(std::move(ss).str());
                         }}
                     """
                 )
@@ -793,7 +793,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                     ss << "{handle_kind}[{idx}]: unmatched device type, "
                                     << "expected: " << {name}_expected_device_type << "{expected_device_type}({device_type_str}), "
                                     << "but got: " << {name}_device_type << "\\n";
-                                    throw std::runtime_error(ss.str());
+                                    throw std::runtime_error(std::move(ss).str());
                                 }}
                             """
                         )
@@ -1551,6 +1551,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def _codegen_entry_impl_prologue(self):
         """Hook for subclasses to emit code at the top of inductor_entry_impl,
         before the GIL is released. Default no-op."""
+        if config.triton.debug_sync_graph:
+            self.generate_debug_sync(self.prefix)
 
     def generate_before_suffix(self, result):
         if not V.graph.is_const_graph:
@@ -2096,6 +2098,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"auto {new_name} = std::move({old_name});  // reuse"
+
+    def generate_debug_sync(self, buffer):
+        pass
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
@@ -3150,20 +3155,16 @@ if (!custom_op_wrapper) {
                 # torch/_prims_common/__init__.py
                 return handle_scalar(raw_arg)
             elif isinstance(raw_arg, torch.device):
-                self.include_extra_header("torch/csrc/Device.h")
                 device_str, device_index = self.codegen_device(raw_arg).split(", ")
-                return f"THPDevice_New(c10::Device(static_cast<c10::DeviceType>({device_str}), {device_index}))"
+                return f"torch_python_thp_device_new({device_str}, {device_index})"
             elif isinstance(raw_arg, torch.dtype):
-                self.include_extra_header("torch/csrc/DynamicTypes.h")
-                return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
+                return f"torch_python_get_thp_dtype({self.codegen_dtype(raw_arg)})"
             elif isinstance(raw_arg, torch.layout):
-                self.include_extra_header("torch/csrc/DynamicTypes.h")
-                return f"Py_NewRef(torch::getTHPLayout(static_cast<c10::Layout>({self.codegen_layout(raw_arg)})))"
+                return f"torch_python_get_thp_layout({self.codegen_layout(raw_arg)})"
             elif isinstance(raw_arg, torch.memory_format):
-                self.include_extra_header("torch/csrc/utils/tensor_memoryformats.h")
                 return (
-                    "Py_NewRef(torch::utils::getTHPMemoryFormat(static_cast<c10::MemoryFormat>("
-                    f"{self.codegen_memory_format(raw_arg)})))"
+                    "torch_python_get_thp_memory_format("
+                    f"{self.codegen_memory_format(raw_arg)})"
                 )
             else:
                 raise NotImplementedError(

@@ -389,7 +389,7 @@ class Shard(torch._C._distributed.Shard):
         elif not tensor.is_contiguous():
             tensor = tensor.contiguous()
 
-        output = funcol.reduce_scatter_tensor(
+        output = funcol.reduce_scatter_single(
             tensor, reduce_op, scatter_dim=self.dim, group=(mesh, mesh_dim)
         )
 
@@ -483,7 +483,7 @@ class Shard(torch._C._distributed.Shard):
             local_tensor, logical_dim_size, num_chunks
         )
 
-        result = funcol.all_gather_tensor(
+        result = funcol.all_gather_single(
             local_tensor,
             gather_dim=self.dim,
             group=(mesh, mesh_dim),
@@ -1044,7 +1044,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         if not local_tensor_padded.is_contiguous():
             local_tensor_padded = local_tensor_padded.contiguous()
 
-        replicate_tensor_permuted_padded = funcol.all_gather_tensor(
+        replicate_tensor_permuted_padded = funcol.all_gather_single(
             local_tensor_padded,
             gather_dim=self.dim,
             group=(mesh, mesh_dim),
