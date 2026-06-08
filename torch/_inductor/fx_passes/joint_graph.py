@@ -317,6 +317,13 @@ class UniformValueConstantFolder(ConstantFolder):
             if not any(is_zero_int(a) for a in op.args):
                 continue
 
+            # x * 0 is only uniformly 0 for integer/bool dtypes. For floating
+            # point (and complex) dtypes nan * 0 == nan and (+/-inf) * 0 == nan,
+            # so folding x * 0 -> 0 would incorrectly drop NaN/Inf when x is not
+            # known to be finite.
+            if tensor_val.dtype.is_floating_point or tensor_val.dtype.is_complex:
+                continue
+
             t = torch.full(
                 [1],  # shape
                 0,  # value
@@ -791,6 +798,9 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         return
 
     if arg_val.dtype in allowed and dtype1 in allowed and dtype2 in allowed:
+        # A narrower intermediate can be worth materializing before upcasting.
+        if dtype1.itemsize < dtype2.itemsize:
+            return
         if config.emulate_precision_casts and not _is_lossless_fp_widening_cast(
             arg_val.dtype, dtype1
         ):
