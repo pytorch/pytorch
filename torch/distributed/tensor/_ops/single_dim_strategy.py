@@ -259,6 +259,21 @@ def _build_output_specs(
         return spec
 
 
+def _get_num_tensor_outputs(
+    op: OpOverload,
+    output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
+) -> int:
+    schema_num_outputs = sum(1 for r in op._schema.returns if "Tensor" in str(r.type))
+    if (
+        schema_num_outputs == 1
+        and len(op._schema.returns) == 1
+        and str(op._schema.returns[0].type).startswith("List[Tensor")
+        and isinstance(output_tensor_meta, Sequence)
+    ):
+        return len(output_tensor_meta)
+    return schema_num_outputs
+
+
 class _PreparedSingleDimStrategy:
     """A single-dim strategy materialized for a specific op.
 
@@ -370,8 +385,8 @@ class _PreparedSingleDimStrategy:
         # A mismatch means the strategy is missing kwargs placements or has
         # extra entries.
         if len(strategies_with_placeholders) > 0:
-            schema_num_outputs = sum(
-                1 for r in op_schema.op._schema.returns if "Tensor" in str(r.type)
+            schema_num_outputs = _get_num_tensor_outputs(
+                op_schema.op, output_tensor_meta
             )
             expected_len = schema_num_outputs + num_inputs
             actual_len = len(strategies_with_placeholders[0])
