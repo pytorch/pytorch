@@ -6,7 +6,6 @@ import sys
 
 import torch
 from torch._inductor import config
-from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     IS_LINUX,
@@ -30,10 +29,9 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
     add_test_failures,
-    assert_expected_dynamic_dims,
     CommonTemplate,
     copy_tests,
-    maybe_disable_caches_for_dynamic_dim_assertions,
+    make_compile_fx_wrapper_with_dynamic_dim_assertions,
     run_and_get_cpp_code,
     run_and_get_triton_code,
     TestFailure,
@@ -77,29 +75,15 @@ def check_codegen(
 
     called = False
 
-    def compile_fx_wrapper(model_, example_inputs_):
+    def mark_called():
         nonlocal called
         called = True
-        dynamic_dim_targets = assert_expected_dynamic_dims(
-            self, model_, assert_dynamic_dims
-        )
 
-        def inner_compile_with_dynamic_dim_assertions(gm, inputs, **kwargs):
-            assert_expected_dynamic_dims(
-                self,
-                gm,
-                assert_dynamic_dims,
-                dynamic_dim_targets,
-                require_matching_aot_inputs=not kwargs.get("is_backward", False),
-            )
-            return compile_fx_inner(gm, inputs, **kwargs)
-
-        with maybe_disable_caches_for_dynamic_dim_assertions(assert_dynamic_dims):
-            return compile_fx(
-                model_,
-                example_inputs_,
-                inner_compile=inner_compile_with_dynamic_dim_assertions,
-            )
+    compile_fx_wrapper = make_compile_fx_wrapper_with_dynamic_dim_assertions(
+        self,
+        assert_dynamic_dims,
+        mark_called,
+    )
 
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
@@ -474,6 +458,8 @@ test_failures = {
     # Refinement means we don't actually generate dynamic shapes (but only on
     # cpu apparently?!)
     "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
+    # The scalar (1,) case intentionally does not generate dynamic code.
+    "test_floordiv_int_min_neg_one_cpu_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_scalar_various_values_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),

@@ -546,6 +546,8 @@ def assert_expected_dynamic_dims(
     def source_root_and_path(source):
         path = []
         while source is not None and getattr(source, "base", None) is not None:
+            # Source links without an index describe wrappers around the same
+            # input; only indexed links contribute to the flattened user path.
             if hasattr(source, "index"):
                 path.append(source.index)
             source = source.base
@@ -567,6 +569,8 @@ def assert_expected_dynamic_dims(
         source = getattr(grapharg, "source", None)
         root, path = source_root_and_path(source)
         local_name = getattr(root, "local_name", "")
+        # Dynamo uses ex for positional inputs and kwargs for keyword inputs.
+        # Preserve that order before falling back to the graph placeholder order.
         if local_name == "ex":
             root_order = 0
         elif local_name == "kwargs":
@@ -636,6 +640,40 @@ def maybe_disable_caches_for_dynamic_dim_assertions(assert_dynamic_dims):
     if assert_dynamic_dims is None:
         return contextlib.nullcontext()
     return config.patch({"force_disable_caches": True})
+
+
+def make_compile_fx_wrapper_with_dynamic_dim_assertions(
+    self: TestCase,
+    assert_dynamic_dims: Mapping[int, Sequence[int]] | None,
+    on_compile: Callable[[], None] | None = None,
+):
+    def compile_fx_wrapper(model_, example_inputs_):
+        if on_compile is not None:
+            on_compile()
+        dynamic_dim_targets = assert_expected_dynamic_dims(
+            self, model_, assert_dynamic_dims
+        )
+
+        def inner_compile_with_dynamic_dim_assertions(gm, inputs, **kwargs):
+            assert_expected_dynamic_dims(
+                self,
+                gm,
+                assert_dynamic_dims,
+                dynamic_dim_targets,
+                # Backward graphs include tangent inputs that need not map
+                # directly to flattened user inputs.
+                require_matching_aot_inputs=not kwargs.get("is_backward", False),
+            )
+            return compile_fx_inner(gm, inputs, **kwargs)
+
+        with maybe_disable_caches_for_dynamic_dim_assertions(assert_dynamic_dims):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                inner_compile=inner_compile_with_dynamic_dim_assertions,
+            )
+
+    return compile_fx_wrapper
 
 
 def check_model(
@@ -718,29 +756,15 @@ def check_model(
 
     called = False
 
-    def compile_fx_wrapper(model_, example_inputs_):
+    def mark_called():
         nonlocal called
         called = True
-        dynamic_dim_targets = assert_expected_dynamic_dims(
-            self, model_, assert_dynamic_dims
-        )
 
-        def inner_compile_with_dynamic_dim_assertions(gm, inputs, **kwargs):
-            assert_expected_dynamic_dims(
-                self,
-                gm,
-                assert_dynamic_dims,
-                dynamic_dim_targets,
-                require_matching_aot_inputs=not kwargs.get("is_backward", False),
-            )
-            return compile_fx_inner(gm, inputs, **kwargs)
-
-        with maybe_disable_caches_for_dynamic_dim_assertions(assert_dynamic_dims):
-            return compile_fx(
-                model_,
-                example_inputs_,
-                inner_compile=inner_compile_with_dynamic_dim_assertions,
-            )
+    compile_fx_wrapper = make_compile_fx_wrapper_with_dynamic_dim_assertions(
+        self,
+        assert_dynamic_dims,
+        mark_called,
+    )
 
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
@@ -4143,6 +4167,65 @@ class CommonTemplate:
             b_neg = torch.full_like(a, -divisor)
             self.common(fn, (a, b_neg))
 
+    def test_floordiv_int_min_neg_one_cpu(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/184406
+        if not is_cpp_backend(self.device):
+            raise unittest.SkipTest("cpp backend required")
+
+        def fn(a, b):
+            return torch.floor_divide(a, b)
+
+        for dtype in [torch.int32, torch.int64]:
+            min_value = torch.iinfo(dtype).min
+            a = torch.tensor([min_value], dtype=dtype, device=self.device)
+            b = torch.tensor([-1], dtype=dtype, device=self.device)
+            self.common(fn, (a, b))
+
+            a = torch.full((128,), min_value, dtype=dtype, device=self.device)
+            b = torch.full((128,), -1, dtype=dtype, device=self.device)
+            self.common(fn, (a, b))
+
+    def test_floordiv_div_by_zero_int_cpu_inductor_raises_error(self):
+        if not is_cpp_backend(self.device):
+            raise unittest.SkipTest("cpp backend required")
+
+        code = """
+import torch
+
+def fn(a, b):
+    return torch.floor_divide(a, b)
+
+opt = torch.compile(fn, backend="inductor", fullgraph=True)
+for dtype in (torch.int32, torch.int64):
+    cases = [
+        (torch.arange(1, 11, dtype=dtype), torch.tensor([1, 1, 1, 0, 1, 1, 1, 1, 1, 1], dtype=dtype)),
+        (torch.tensor([1], dtype=dtype), torch.tensor([0], dtype=dtype)),
+    ]
+    for a, b in cases:
+        try:
+            opt(a, b)
+        except RuntimeError as exc:
+            if "ZeroDivisionError" not in str(exc):
+                raise
+        else:
+            raise AssertionError("expected ZeroDivisionError")
+"""
+        env = os.environ.copy()
+        env.setdefault("TORCHINDUCTOR_CPP_CACHE_PRECOMPILE_HEADERS", "0")
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            # Avoid importing the source tree's ungenerated torch package in CI.
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+
     @skip_if_cpu
     def test_floordiv_div_by_zero_int(self):
         # Integer floor division by zero is undefined behavior on CUDA/Triton.
@@ -4636,6 +4719,17 @@ class CommonTemplate:
         vec = torch.tensor([], dtype=torch.int32)
         with torch.no_grad():
             self.assertEqual(cfn(input, mat, vec), fn(input, mat, vec))
+
+    def test_addmv_mixed_dtype_errors(self):
+        def fn(a, b, c):
+            return torch.addmv(a, b, c)
+
+        cfn = torch.compile(backend="inductor")(fn)
+        input = torch.tensor([2.7], dtype=torch.float32, device=self.device)
+        mat = torch.tensor([[1, 2], [3, 4]], dtype=torch.int32, device=self.device)
+        vec = torch.tensor([1, 2], dtype=torch.int32, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "same dtype"):
+            cfn(input, mat, vec)
 
     # https://github.com/pytorch/pytorch/issues/98979
     @skipCUDAIf(True, "cuda failed for float64 linear")
@@ -5577,7 +5671,6 @@ class CommonTemplate:
         with config.patch({"triton.use_block_ptr": use_block_ptr}):
             self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
-    @xfail_if_mps  # aten::full with zero-sized dim triggers AcceleratorError on MPS
     def test_max_unpool_empty_output(self):
         class Unpool1d(nn.Module):
             def __init__(self):
