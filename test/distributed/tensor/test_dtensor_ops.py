@@ -93,10 +93,8 @@ def repurpose_ops(op_db, base_test_name, derived_test_name):
 dtensor_fails = {
     # view/reshape ops: rejects flatten/split of sharded dims without redistribution
     xfail("repeat_interleave"),
-    xfail("reshape"),
     xfail("unbind"),
     xfail("unflatten"),
-    xfail("view"),
     # factory/creation ops: test harness can't convert non-tensor args to DTensor
     xfail("arange"),
     xfail("broadcast_shapes"),
@@ -239,7 +237,9 @@ dtensor_compiled_fails = {
     xfail("flatten"),
     xfail("kron"),
     xfail("ravel"),
+    xfail("reshape"),
     xfail("reshape_as"),
+    xfail("view"),
     xfail("view_as"),
     # View-type ops that decompose into as_strided (at autograd level).
     # DTensor doesn't have a sharding strategy for as_strided.
@@ -837,13 +837,11 @@ ops_unbacked_dtensor_dde = {
     xfail("nn.functional.margin_ranking_loss"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
     xfail("nn.functional.pad", "constant"),
-    xfail("nn.functional.pixel_shuffle"),
     xfail("nn.functional.poisson_nll_loss"),
     xfail("nn.functional.soft_margin_loss"),
     xfail("nn.functional.triplet_margin_loss"),
     xfail("nn.functional.triplet_margin_with_distance_loss"),
     xfail("nn.functional.upsample_nearest"),
-    xfail("nn.functional.pixel_unshuffle"),
     xfail("nonzero_static"),
     xfail("permute_copy"),
     xfail("prod"),
@@ -867,7 +865,6 @@ ops_unbacked_dtensor_dde = {
     xfail("view"),
     xfail("view_as"),
     xfail("view_as_complex"),
-    xfail("view_copy"),
 }
 
 
