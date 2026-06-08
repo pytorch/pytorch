@@ -4327,6 +4327,21 @@ def run(runner, args, original_dir=None):
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
+        if (
+            args.training
+            and args.only is not None
+            and args.only
+            in {
+                "DistillGPT2",
+            }
+        ):
+            # aten.native_dropout is decomposed in AOT-autograd (see
+            # torch/_decomp/decompositions.py) before inductor's fallback_random
+            # gate fires, so the post-decomposition rand is lowered with a Philox
+            # layout that disagrees with eager. align_random_eager re-aligns it
+            # at codegen time (torch/_inductor/fx_passes/replace_random.py).
+            inductor_config.align_random_eager = True
+
         # Some models e.g. yolov3 assert batch size on n_gpus
         if "CUDA_VISIBLE_DEVICES" not in os.environ and not args.multiprocess:
             args.device_index = "0"
