@@ -18,7 +18,7 @@ import torch._prims as prims
 import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
-from torch._decomp import register_decomposition
+from torch._decomp import _convert_out_params, register_decomposition
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import (
     IntLike,
@@ -44,6 +44,16 @@ DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 __all__: list[str] = []
 
 aten = torch._ops.ops.aten
+
+
+def _py_impl_decomposition(op, dispatch_key):
+    # Direct py_impl registrations need the same named-out schema conversion
+    # that register_decomposition applies to decomposition_table entries.
+    def decorator(fn):
+        op.py_impl(dispatch_key)(_convert_out_params(fn))
+        return fn
+
+    return decorator
 
 
 class Reduction(Enum):
@@ -2525,8 +2535,15 @@ def nop_decomposition(x):
     return aten.alias(x)
 
 
-# Also register to the Autograd dispatch key, so this decomp can run above autograd.
+# Also register to the Autograd and CompositeImplicitAutograd dispatch keys, so
+# this decomp runs both above autograd and in inference-mode tracing.
 # native_batch_norm needs to decompose into other ops before autograd.
+@_py_impl_decomposition(
+    aten.cudnn_batch_norm.out, DispatchKey.CompositeImplicitAutograd
+)
+@_py_impl_decomposition(
+    aten.cudnn_batch_norm.default, DispatchKey.CompositeImplicitAutograd
+)
 @aten.cudnn_batch_norm.default.py_impl(DispatchKey.Autograd)
 @register_decomposition(aten.cudnn_batch_norm)
 @out_wrapper("out0", "out1", "out2", "out3")
@@ -4496,6 +4513,9 @@ def upsample_linear1d(
 @register_decomposition(
     [aten.upsample_bilinear2d.default, aten.upsample_bilinear2d.out]
 )
+@_py_impl_decomposition(
+    aten.upsample_bilinear2d.out, DispatchKey.CompositeImplicitAutograd
+)
 @aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 def upsample_bilinear2d(
@@ -5322,6 +5342,12 @@ def matmul(tensor1, tensor2, *, is_out=False):
 
 
 @register_decomposition([aten.upsample_bicubic2d.default, aten.upsample_bicubic2d.out])
+@_py_impl_decomposition(
+    aten.upsample_bicubic2d.out, DispatchKey.CompositeImplicitAutograd
+)
+@_py_impl_decomposition(
+    aten.upsample_bicubic2d.default, DispatchKey.CompositeImplicitAutograd
+)
 @aten.upsample_bicubic2d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 @pw_cast_for_opmath
@@ -5662,6 +5688,12 @@ def out_dtype_decomp(*args, **kwargs):
 
 
 @register_decomposition(aten.multi_margin_loss)
+@_py_impl_decomposition(
+    aten.multi_margin_loss.out, DispatchKey.CompositeImplicitAutograd
+)
+@_py_impl_decomposition(
+    aten.multi_margin_loss.default, DispatchKey.CompositeImplicitAutograd
+)
 @aten.multi_margin_loss.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 def multi_margin_loss(
@@ -5709,6 +5741,12 @@ def multi_margin_loss(
 
 
 @register_decomposition(aten.multilabel_margin_loss_forward)
+@_py_impl_decomposition(
+    aten.multilabel_margin_loss_forward.output, DispatchKey.CompositeImplicitAutograd
+)
+@_py_impl_decomposition(
+    aten.multilabel_margin_loss_forward.default, DispatchKey.CompositeImplicitAutograd
+)
 @aten.multilabel_margin_loss_forward.default.py_impl(DispatchKey.Autograd)
 @out_wrapper("output", "is_target")
 def multilabel_margin_loss_forward(

@@ -1503,6 +1503,73 @@ class HasDecompTest(TestCase):
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
 
+    def test_autograd_python_decomposition_cia_exceptions_are_known(self):
+        ops_missing_cia = {
+            op.name()
+            for op in decomposition_table
+            if isinstance(op, torch._ops.OpOverload)
+            and DispatchKey.Autograd in op.py_kernels
+            and DispatchKey.CompositeImplicitAutograd not in op.py_kernels
+        }
+        self.assertSetEqual(
+            ops_missing_cia,
+            {
+                # These default overloads have backend-specific kernels that
+                # need to remain reachable through their AutogradOther paths.
+                "aten::hardshrink",
+                "aten::upsample_bilinear2d",
+            },
+            msg=(
+                "Autograd-only Python decompositions should be limited to "
+                "known AutogradOther backend conflicts."
+            ),
+        )
+
+    def test_composite_implicit_autograd_out_decompositions_accept_schema_kwargs(
+        self,
+    ):
+        x = torch.randn(2, 3, 4, 4)
+        weight = torch.randn(3)
+        bias = torch.randn(3)
+        running_mean = torch.randn(3)
+        running_var = torch.rand(3) + 1
+        expected = aten.cudnn_batch_norm.default.decompose(
+            x, weight, bias, running_mean, running_var, False, 0.1, 1e-5
+        )
+        out0, out1, out2, out3 = (torch.empty_like(t) for t in expected)
+        result = aten.cudnn_batch_norm.out.decompose(
+            x,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            False,
+            0.1,
+            1e-5,
+            out0=out0,
+            out1=out1,
+            out2=out2,
+            out3=out3,
+        )
+        self.assertTrue(all(r is o for r, o in zip(result, (out0, out1, out2, out3))))
+        self.assertEqual(result, expected)
+
+        loss_input = torch.randn(2, 3)
+        target = torch.tensor([[0, 1, -1], [1, -1, -1]])
+        expected = aten.multilabel_margin_loss_forward.default.decompose(
+            loss_input, target, 0
+        )
+        output, is_target = (torch.empty_like(t) for t in expected)
+        result = aten.multilabel_margin_loss_forward.output.decompose(
+            loss_input,
+            target,
+            0,
+            output=output,
+            is_target=is_target,
+        )
+        self.assertTrue(all(r is o for r, o in zip(result, (output, is_target))))
+        self.assertEqual(result, expected)
+
     def test_conv1d_decomposition(self):
         from torch._inductor.decomposition import conv1d_to_conv2d
 
