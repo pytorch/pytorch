@@ -13,6 +13,8 @@
 #include <ATen/ops/full.h>
 #include <ATen/ops/meshgrid.h>
 #include <ATen/ops/stack.h>
+#include <ATen/ops/index_select.h>
+#include <ATen/ops/nonzero_static.h>
 #endif
 
 #include <vector>
@@ -21,12 +23,26 @@ namespace {
 
 using namespace at;
 
+c10::SymInt calculate_num_combinations(c10::SymInt n, int64_t r, bool with_replacement) {
+  // Helper to compute the number of combinations (binomial coefficient)
+  if (with_replacement) {
+    n = n + r - 1;
+  }
+  if (r < 0) return 0;
+  if (r == 0) return 1;
+  c10::SymInt res = 1;
+  for (int64_t i = 1; i <= r; ++i) {
+    res = res * (n - r + i) / i;
+  }
+  return res;
+}
+
 Tensor _triu_mask(c10::SymInt n, int64_t dims, bool diagonal, TensorOptions opt) {
   // get a mask that has value 1 whose indices satisfies i < j < k < ...
   // or i <= j <= k <= ... (depending on diagonal)
   Tensor range = at::arange(std::move(n), opt.dtype(kLong));
   std::vector<Tensor> index_grids = at::meshgrid(std::vector<Tensor>(dims, range), "ij");
-  Tensor mask = at::full(index_grids[0].sizes(), true, opt.dtype(kBool));
+  Tensor mask = at::full_symint(index_grids[0].sym_sizes(), true, opt.dtype(kBool));
   if(diagonal) {
     for(int64_t i = 0; i < dims - 1; i++) {
       mask *= index_grids[i] <= index_grids[i+1];
@@ -64,12 +80,10 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
     return at::empty({0}, self.options());
   }
   c10::SymInt num_elements = self.sym_numel();
-  std::vector<Tensor> grids = at::meshgrid(std::vector<Tensor>(r, self), "ij");
+  c10::SymInt num_combinations = calculate_num_combinations(num_elements, r, with_replacement);
   Tensor mask = _triu_mask(std::move(num_elements), r, with_replacement, self.options());
-  for(Tensor &t : grids) {
-    t = t.masked_select(mask);
-  }
-  return at::stack(grids, 1);
+  Tensor indices = at::nonzero_static_symint(mask, num_combinations);
+  return self.index_select(0, indices.flatten()).view_symint({num_combinations, r});
 }
 
 }  // namespace at::native
