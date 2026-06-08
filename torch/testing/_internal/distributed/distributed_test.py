@@ -97,8 +97,8 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TemporaryFileName,
     TEST_CUDA,
-    TEST_XPU,
     TEST_WITH_ROCM,
+    TEST_XPU,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.data.distributed import DistributedSampler
