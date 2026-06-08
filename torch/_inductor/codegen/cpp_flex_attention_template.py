@@ -364,7 +364,7 @@ extern "C"
 
 FLEX_ATTENTION_TEMPLATE = r"""
   bool need_pack = false;
-{%- if use_pack_brgemm %}
+{%- if not use_blas_gemm %}
   // Whether pack is needed for BFloat16/Half
   if constexpr (is_reduced_type) {
     // check platform ability
@@ -415,7 +415,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
       /* qk_sum */ qSplitSize +
       /* dst    */ eqSplitSize * headSize_v;
 
-  // Buffers to store accum results, padding query and transpose/packing key/value
+  // Buffers to store accum results
   {{template.codegen_allocate_buffer("buf_data", "accum_t", "num_thread*_size_per_thread")}}
   {{template.codegen_allocate_buffer("buf_reduced_data", "scalar_t", "num_thread*eqSplitSize*ekvSplitSize")}}
 {%- if amx_supported %}
@@ -423,11 +423,12 @@ FLEX_ATTENTION_TEMPLATE = r"""
   int64_t qk_data2_size = use_amx_overlap ? num_thread*eqSplitSize*kvSplitSize : 0;
   {{template.codegen_allocate_buffer("qk_data2_data", "accum_t", "qk_data2_size")}}
 {%- endif %}
+{%- if not use_blas_gemm %}
+  // Buffers for padding query and transpose/packing key/value
   {{template.codegen_allocate_buffer("key_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*eheadSize*kvSize")}}
   {{template.codegen_allocate_buffer("value_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*kv_padding_size*headSize_v")}}
   {{template.codegen_allocate_buffer("transpose_buffer_ptr", "scalar_t", "num_thread*kvSplitSize*headSize")}}
   {{template.codegen_allocate_buffer("query_padding_ptr", "scalar_t", "num_thread*eqSplitSize*eheadSize")}}
-{%- if use_pack_brgemm %}
   if (need_pack) {
     // Pack K, V
     at::parallel_for(0, batchSize_k * num_head_k * kvSlice, 1, [&](int64_t begin, int64_t end) {
@@ -490,9 +491,13 @@ FLEX_ATTENTION_TEMPLATE = r"""
         is_reduced_type
             ? buf_reduced_data + ompIdx * eqSplitSize * ekvSplitSize
             : nullptr;
+{%- if not use_blas_gemm %}
     scalar_t* query_t_padding_ptr = (!headSize_even && need_pack)
             ? query_padding_ptr + ompIdx * eqSplitSize * eheadSize
             : nullptr;
+{%- else %}
+    scalar_t* query_t_padding_ptr = nullptr;
+{%- endif %}
 {%- if amx_supported %}
     // amx_state is released at the end of each q-block so it never carries a stale tile config across a
     // brgemm fallback (tail case).
@@ -715,7 +720,9 @@ FLEX_ATTENTION_TEMPLATE = r"""
               cur_kvSplitSize);
 {%- endif %}
 
-        } else {
+        }
+{%- if not use_blas_gemm %}
+        else {
           if constexpr (is_reduced_type) {
             at::native::cpublas::brgemm(
                 cur_qSplitSize,
@@ -734,6 +741,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
                 need_pack);
           }
         }
+{%- endif %}
 
         {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(qk_data, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
 
@@ -806,6 +814,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
                 v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
             // Fallback Half brgemm is slower than micro gemm
             if (!std::is_same_v<scalar_t, at::Half>) {
+              // On SVE, brgemm falls back to gemm because the oneDNN ukernel path is x86-only.
               at::native::cpublas::brgemm(
                     cur_qSplitSize,
                     headSize_v,
@@ -843,7 +852,9 @@ FLEX_ATTENTION_TEMPLATE = r"""
                   headSize_v);
               }
             }
-          } else {
+          }
+{%- if not use_blas_gemm %}
+          else {
             int64_t psize = n / kvSplitSize * ekvSplitSize;
             at::native::cpublas::brgemm(
                 cur_qSplitSize,
@@ -860,6 +871,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
                 dst_data,
                 need_pack);
           }
+{%- endif %}
         }  // end else (non-AMX softmax + P@V)
       }  // end for n_idx (KV blocks)
 
@@ -1642,8 +1654,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
         self.accumulate_dtype = torch.float
         self.input_dtype = query.layout.dtype
-        use_blas_gemm = torch.backends.cpu.get_cpu_capability() in ("SVE128", "SVE256")
-        use_pack_brgemm = not use_blas_gemm
+        use_blas_gemm = torch.cpu._is_sve_supported()
 
         num_threads = parallel_num_threads()
         if not isinstance(self.output_node, ir.IRNode):
@@ -1682,7 +1693,6 @@ class CppFlexAttentionTemplate(CppTemplate):
             partition_size=self.partition_size,
             amx_supported=self.amx_supported,
             use_blas_gemm=use_blas_gemm,
-            use_pack_brgemm=use_pack_brgemm,
         )
         with contextlib.ExitStack() as stack:
             for buf in self.fake_buffers:
@@ -1733,9 +1743,10 @@ class CppFlexAttentionTemplate(CppTemplate):
         from torch._inductor.codegen.cpp_micro_gemm import CppMicroGemmFP32Vec
         from torch._inductor.virtualized import V
 
-        use_blas_gemm = torch.backends.cpu.get_cpu_capability() in ("SVE128", "SVE256")
+        use_blas_gemm = torch.cpu._is_sve_supported()
         emit_transpose_b_micro_gemm = not use_blas_gemm
 
+        micro_gemm_trans: CppMicroGemmFP32Vec | None = None
         code_trans = ""
         if emit_transpose_b_micro_gemm:
             micro_gemm_trans = CppMicroGemmFP32Vec(
@@ -1764,7 +1775,7 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         with V.set_graph_handler(V.graph):
             kernel = CppTemplateKernel("cpp_micro_gemm", parallel_num_threads())
-            if emit_transpose_b_micro_gemm:
+            if micro_gemm_trans is not None:
                 code_trans = micro_gemm_trans.codegen_define(kernel)
             code = micro_gemm.codegen_define(kernel)
         return code + code_trans
