@@ -1729,6 +1729,29 @@ class TensorVariable(VariableTracker):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
+        if not tx.output.export:
+            if isinstance(args[0], SymNodeVariable):
+                # Standard indexing will force specialization due to
+                # __index__.  Rewrite as a regular torch op which will
+                # trace fine
+                fn, args = (  # type: ignore[assignment]
+                    torch.select,
+                    [
+                        VariableTracker.build(tx, 0),
+                        args[0],
+                    ],
+                )
+            else:
+                fn = operator.getitem
+
+            proxy = tx.output.create_proxy(
+                "call_function",
+                fn,
+                *proxy_args_kwargs([self] + list(args), kwargs),
+            )
+
+            return wrap_fx_proxy(tx, proxy)
+
         def slice_step(item: SliceVariable) -> tuple[VariableTracker, int] | None:
             step = item.items[2]
             if step.is_constant_none():
@@ -1922,10 +1945,7 @@ class TensorVariable(VariableTracker):
 
             return result
 
-        if (
-            tx.output.export
-            and (result := getitem_with_slice_default_stop()) is not None
-        ):
+        if (result := getitem_with_slice_default_stop()) is not None:
             return result
 
         if isinstance(args[0], SymNodeVariable):

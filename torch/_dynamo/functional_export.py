@@ -279,7 +279,7 @@ class _StrictExportGetItemDefaultStopHandler(torch.overrides.TorchFunctionMode):
                 return dim + 1, current_ndim + 1, (torch.unsqueeze, [dim])
             if dim >= current_ndim:
                 return None
-            if isinstance(item, int):
+            if type(item) is int:
                 return dim, current_ndim - 1, (torch.select, [dim, item])
             if isinstance(item, slice):
                 step = 1 if item.step is None else item.step

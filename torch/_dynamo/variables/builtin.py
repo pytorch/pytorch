@@ -1511,35 +1511,36 @@ class BuiltinVariable(BaseBuiltinVariable):
                     tx, args[0], args[1], _OPERATOR_TO_DUNDER[fn]
                 )
 
-            def has_slice_default_stop_with_non_unit_step(
-                key: VariableTracker,
-            ) -> bool:
-                items = key.items if isinstance(key, TupleVariable) else [key]
-                for item in items:
-                    if not isinstance(item, variables.SliceVariable):
-                        continue
-                    step = item.items[2]
-                    if step.is_constant_none():
-                        continue
-                    if not step.is_python_constant():
-                        continue
-                    step_value = step.as_python_constant()
-                    if (
-                        type(step_value) is int
-                        and step_value > 0
-                        and step_value != 1
-                        and item.items[1].is_constant_none()
-                    ):
-                        return True
-                return False
-
             if (
                 fn is operator.getitem
                 and type(args[0]) is TensorVariable
                 and tx.output.export
-                and has_slice_default_stop_with_non_unit_step(args[1])
             ):
-                return args[0].method___getitem__(tx, args[1])
+
+                def has_slice_default_stop_with_non_unit_step(
+                    key: VariableTracker,
+                ) -> bool:
+                    items = key.items if isinstance(key, TupleVariable) else [key]
+                    for item in items:
+                        if not isinstance(item, variables.SliceVariable):
+                            continue
+                        step = item.items[2]
+                        if step.is_constant_none():
+                            continue
+                        if not step.is_python_constant():
+                            continue
+                        step_value = step.as_python_constant()
+                        if (
+                            type(step_value) is int
+                            and step_value > 0
+                            and step_value != 1
+                            and item.items[1].is_constant_none()
+                        ):
+                            return True
+                    return False
+
+                if has_slice_default_stop_with_non_unit_step(args[1]):
+                    return args[0].method___getitem__(tx, args[1])
             proxy = tx.output.create_proxy(
                 "call_function",
                 fn,
