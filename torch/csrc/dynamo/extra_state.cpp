@@ -22,7 +22,13 @@ CacheEntry* ExtraState::get_first_entry() {
 }
 
 ExtraState::ExtraState(PyCodeObject* orig_code_arg)
-    : orig_code(orig_code_arg) {}
+    : orig_code(orig_code_arg),
+      last_success_receipt(
+          torch::dynamo::create_guard_last_success_receipt()) {}
+
+ExtraState::~ExtraState() {
+  torch::dynamo::destroy_guard_last_success_receipt(last_success_receipt);
+}
 
 void ExtraState::move_to_front(CacheEntry* cache_entry) {
   CHECK(cache_entry->_owner == this);
@@ -58,6 +64,7 @@ void ExtraState::invalidate(
   CHECK(cache_entry->_owner == this);
   CHECK(!this->cache_entry_list.empty());
   CHECK(cache_entry == &*cache_entry->_owner_loc);
+  torch::dynamo::reset_guard_last_success_receipt(last_success_receipt);
   cache_entry->invalidate(std::move(deleted_guard_manager));
   // Move the cache entry to the end of the list because these will always
   // return False.
@@ -171,7 +178,12 @@ void lookup(
             const uint64_t slow_guard_start_ns =
                 collect_stats ? torch::dynamo::guard_lookup_time_ns() : 0;
             const bool slow_guard_result =
-                torch::dynamo::run_root_guard_manager(root_mgr, f_locals);
+                torch::dynamo::run_root_guard_manager_with_last_success_receipt(
+                    extra_state->last_success_receipt,
+                    &cache_entry,
+                    root_mgr,
+                    f_locals,
+                    is_skip_guard_eval_unsafe);
             if (collect_stats) {
               slow_guard_ns +=
                   torch::dynamo::guard_lookup_time_ns() - slow_guard_start_ns;
@@ -243,6 +255,8 @@ CacheEntry* create_cache_entry(
     ExtraState* extra_state,
     PyObject* guarded_code,
     PyObject* backend) {
+  torch::dynamo::reset_guard_last_success_receipt(
+      extra_state->last_success_receipt);
   extra_state->cache_entry_list.emplace_front(guarded_code, backend);
   auto new_iter = extra_state->cache_entry_list.begin();
   new_iter->_owner = extra_state;

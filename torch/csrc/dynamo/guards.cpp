@@ -37,6 +37,7 @@
 #include <mutex>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -204,6 +205,19 @@ struct GuardFastPlanStats {
   std::atomic<uint64_t> tensor_token_miss_stride{0};
 };
 
+struct GuardLastSuccessStats {
+  std::atomic<uint64_t> shadow_attempt{0};
+  std::atomic<uint64_t> shadow_success{0};
+  std::atomic<uint64_t> shadow_incomplete{0};
+  std::atomic<uint64_t> shadow_stable{0};
+  std::atomic<uint64_t> shadow_reset{0};
+  std::atomic<uint64_t> shadow_max_passes{0};
+  std::atomic<uint64_t> token_count_sum{0};
+  std::atomic<uint64_t> token_cap_disabled{0};
+  std::atomic<uint64_t> receipt_update_ns{0};
+  std::atomic<uint64_t> receipt_compare_ns{0};
+};
+
 struct GuardFastPlanDisabledPathStats {
   uint64_t count{0};
   std::string reason;
@@ -272,6 +286,11 @@ GuardFastPlanStats& guard_fastplan_stats() {
   return stats;
 }
 
+GuardLastSuccessStats& guard_last_success_stats() {
+  static GuardLastSuccessStats stats;
+  return stats;
+}
+
 std::atomic<bool>& guard_lookup_stats_force_enabled() {
   static std::atomic<bool> enabled{false};
   return enabled;
@@ -287,6 +306,17 @@ uint64_t load_relaxed(const std::atomic<uint64_t>& value) {
 
 void add_relaxed(std::atomic<uint64_t>& value, uint64_t delta) {
   value.fetch_add(delta, std::memory_order_relaxed);
+}
+
+void max_relaxed(std::atomic<uint64_t>& value, uint64_t candidate) {
+  uint64_t current = value.load(std::memory_order_relaxed);
+  while (candidate > current &&
+         !value.compare_exchange_weak(
+             current,
+             candidate,
+             std::memory_order_relaxed,
+             std::memory_order_relaxed)) {
+  }
 }
 
 std::mutex& guard_accessor_type_stats_mutex() {
@@ -335,6 +365,23 @@ guard_fastplan_disabled_reason_stats() {
 
 std::unordered_map<std::string, GuardFastPlanDisabledPathStats>&
 guard_fastplan_disabled_path_stats() {
+  static std::unordered_map<std::string, GuardFastPlanDisabledPathStats> stats;
+  return stats;
+}
+
+std::mutex& guard_last_success_disabled_stats_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::unordered_map<std::string, uint64_t>&
+guard_last_success_disabled_reason_stats() {
+  static std::unordered_map<std::string, uint64_t> stats;
+  return stats;
+}
+
+std::unordered_map<std::string, GuardFastPlanDisabledPathStats>&
+guard_last_success_disabled_path_stats() {
   static std::unordered_map<std::string, GuardFastPlanDisabledPathStats> stats;
   return stats;
 }
@@ -416,6 +463,7 @@ void reset_guard_lookup_stats() {
   auto& stats = guard_lookup_stats();
   auto& subtree_stats = guard_subtree_probe_stats();
   auto& fastplan_stats = guard_fastplan_stats();
+  auto& last_success_stats = guard_last_success_stats();
   store_zero(stats.lookup_count);
   store_zero(stats.lookup_total_ns);
   store_zero(stats.backend_match_ns);
@@ -487,6 +535,16 @@ void reset_guard_lookup_stats() {
   store_zero(fastplan_stats.tensor_token_miss_dim);
   store_zero(fastplan_stats.tensor_token_miss_size);
   store_zero(fastplan_stats.tensor_token_miss_stride);
+  store_zero(last_success_stats.shadow_attempt);
+  store_zero(last_success_stats.shadow_success);
+  store_zero(last_success_stats.shadow_incomplete);
+  store_zero(last_success_stats.shadow_stable);
+  store_zero(last_success_stats.shadow_reset);
+  store_zero(last_success_stats.shadow_max_passes);
+  store_zero(last_success_stats.token_count_sum);
+  store_zero(last_success_stats.token_cap_disabled);
+  store_zero(last_success_stats.receipt_update_ns);
+  store_zero(last_success_stats.receipt_compare_ns);
   {
     std::lock_guard<std::mutex> lock(guard_accessor_type_stats_mutex());
     guard_accessor_type_stats().clear();
@@ -503,6 +561,12 @@ void reset_guard_lookup_stats() {
     std::lock_guard<std::mutex> lock(guard_fastplan_disabled_stats_mutex());
     guard_fastplan_disabled_reason_stats().clear();
     guard_fastplan_disabled_path_stats().clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(
+        guard_last_success_disabled_stats_mutex());
+    guard_last_success_disabled_reason_stats().clear();
+    guard_last_success_disabled_path_stats().clear();
   }
   guard_lookup_stats_force_enabled().store(true, std::memory_order_relaxed);
 }
@@ -678,6 +742,63 @@ py::dict get_guard_lookup_stats() {
   }
   result["guard_fastplan_disabled_reasons"] = fastplan_disabled_reasons;
   result["guard_fastplan_disabled_top_paths"] = fastplan_disabled_top_paths;
+  auto& last_success_stats = guard_last_success_stats();
+  result["guard_last_success_shadow_attempt"] =
+      load_relaxed(last_success_stats.shadow_attempt);
+  result["guard_last_success_shadow_success"] =
+      load_relaxed(last_success_stats.shadow_success);
+  result["guard_last_success_shadow_incomplete"] =
+      load_relaxed(last_success_stats.shadow_incomplete);
+  result["guard_last_success_shadow_stable"] =
+      load_relaxed(last_success_stats.shadow_stable);
+  result["guard_last_success_shadow_reset"] =
+      load_relaxed(last_success_stats.shadow_reset);
+  result["guard_last_success_shadow_max_passes"] =
+      load_relaxed(last_success_stats.shadow_max_passes);
+  result["guard_last_success_token_count_sum"] =
+      load_relaxed(last_success_stats.token_count_sum);
+  result["guard_last_success_token_cap_disabled"] =
+      load_relaxed(last_success_stats.token_cap_disabled);
+  result["guard_last_success_receipt_update_ns"] =
+      load_relaxed(last_success_stats.receipt_update_ns);
+  result["guard_last_success_receipt_compare_ns"] =
+      load_relaxed(last_success_stats.receipt_compare_ns);
+  py::dict last_success_disabled_reasons;
+  py::dict last_success_disabled_top_paths;
+  {
+    std::vector<std::pair<std::string, GuardFastPlanDisabledPathStats>>
+        path_items;
+    {
+      std::lock_guard<std::mutex> lock(
+          guard_last_success_disabled_stats_mutex());
+      for (const auto& item : guard_last_success_disabled_reason_stats()) {
+        last_success_disabled_reasons[py::str(item.first)] = item.second;
+      }
+      path_items.reserve(guard_last_success_disabled_path_stats().size());
+      for (const auto& item : guard_last_success_disabled_path_stats()) {
+        path_items.emplace_back(item.first, item.second);
+      }
+    }
+    std::sort(
+        path_items.begin(),
+        path_items.end(),
+        [](const auto& a, const auto& b) {
+          return a.second.count > b.second.count;
+        });
+    const size_t limit =
+        std::min(path_items.size(), kGuardFastPlanDisabledTopK);
+    for (size_t i = 0; i < limit; ++i) {
+      py::dict item_stats;
+      item_stats["count"] = path_items[i].second.count;
+      item_stats["reason"] = path_items[i].second.reason;
+      last_success_disabled_top_paths[py::str(path_items[i].first)] =
+          item_stats;
+    }
+  }
+  result["guard_last_success_disabled_reasons"] =
+      last_success_disabled_reasons;
+  result["guard_last_success_disabled_top_paths"] =
+      last_success_disabled_top_paths;
   if (guard_subtree_probe_detail_enabled()) {
     py::dict path_stats;
     std::vector<std::pair<std::string, GuardSubtreeProbePathStats>> items;
@@ -1077,6 +1198,66 @@ static void record_guard_fastplan_token_cap_disabled() {
     return;
   }
   add_relaxed(guard_fastplan_stats().token_cap_disabled, 1);
+}
+
+static void record_guard_last_success_shadow_attempt() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_last_success_stats().shadow_attempt, 1);
+}
+
+static void record_guard_last_success_shadow_success(
+    size_t token_count,
+    uint64_t update_ns,
+    uint64_t compare_ns,
+    uint64_t shadow_passes) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_last_success_stats();
+  add_relaxed(stats.shadow_success, 1);
+  add_relaxed(stats.token_count_sum, token_count);
+  add_relaxed(stats.receipt_update_ns, update_ns);
+  add_relaxed(stats.receipt_compare_ns, compare_ns);
+  max_relaxed(stats.shadow_max_passes, shadow_passes);
+}
+
+static void record_guard_last_success_shadow_stable() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_last_success_stats().shadow_stable, 1);
+}
+
+static void record_guard_last_success_shadow_reset() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_last_success_stats().shadow_reset, 1);
+}
+
+static void record_guard_last_success_incomplete(
+    const char* reason,
+    const std::string& path = "") {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_last_success_stats();
+  add_relaxed(stats.shadow_incomplete, 1);
+  if (std::string_view(reason) == "token_cap_exceeded") {
+    add_relaxed(stats.token_cap_disabled, 1);
+  }
+  std::lock_guard<std::mutex> lock(
+      guard_last_success_disabled_stats_mutex());
+  guard_last_success_disabled_reason_stats()[reason] += 1;
+  if (!path.empty()) {
+    auto& path_stats = guard_last_success_disabled_path_stats()[path];
+    path_stats.count += 1;
+    if (path_stats.reason.empty()) {
+      path_stats.reason = reason;
+    }
+  }
 }
 
 static void record_guard_fastplan_tensor_token_shadow() {
@@ -2085,6 +2266,44 @@ static bool guard_subtree_token_vectors_match(
   }
   return true;
 }
+
+struct GuardLastSuccessReceipt {
+  void reset() {
+    entry_key = nullptr;
+    root_key = nullptr;
+    shadow_passes = 0;
+    tokens.clear();
+  }
+
+  uint64_t update(
+      void* new_entry_key,
+      void* new_root_key,
+      std::vector<GuardSubtreeEntryToken>&& new_tokens,
+      bool& stable,
+      bool& reset_state,
+      uint64_t& compare_ns) {
+    const uint64_t compare_start_ns = guard_lookup_time_ns();
+    stable = entry_key == new_entry_key && root_key == new_root_key &&
+        !tokens.empty() && guard_subtree_token_vectors_match(tokens, new_tokens);
+    compare_ns = guard_lookup_time_ns() - compare_start_ns;
+    reset_state = !stable && !tokens.empty();
+
+    if (stable) {
+      shadow_passes += 1;
+    } else {
+      entry_key = new_entry_key;
+      root_key = new_root_key;
+      tokens = std::move(new_tokens);
+      shadow_passes = 1;
+    }
+    return shadow_passes;
+  }
+
+  void* entry_key{nullptr};
+  void* root_key{nullptr};
+  uint64_t shadow_passes{0};
+  std::vector<GuardSubtreeEntryToken> tokens;
+};
 
 extern thread_local const LocalState* active_guard_local_state;
 
@@ -7493,6 +7712,100 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
     return ((RootGuardManager*)root)
         ->check_nopybind((PyObject*)f_locals->to_dict());
   }
+}
+
+void* create_guard_last_success_receipt() {
+  return new GuardLastSuccessReceipt();
+}
+
+void destroy_guard_last_success_receipt(void* receipt) {
+  delete static_cast<GuardLastSuccessReceipt*>(receipt);
+}
+
+void reset_guard_last_success_receipt(void* receipt) {
+  if (receipt == nullptr) {
+    return;
+  }
+  static_cast<GuardLastSuccessReceipt*>(receipt)->reset();
+}
+
+static bool guard_last_success_shadow_enabled() {
+  return C10_UNLIKELY(guard_fast_plan_enabled()) &&
+      C10_UNLIKELY(guard_lookup_stats_enabled());
+}
+
+bool run_root_guard_manager_with_last_success_receipt(
+    void* receipt,
+    void* entry_key,
+    void* root,
+    FrameLocalsMapping* f_locals,
+    bool is_skip_guard_eval_unsafe) {
+  if (!guard_last_success_shadow_enabled() || receipt == nullptr) {
+    return run_root_guard_manager(root, f_locals);
+  }
+
+  record_guard_last_success_shadow_attempt();
+  GuardLastSuccessReceipt* state =
+      static_cast<GuardLastSuccessReceipt*>(receipt);
+  if (is_skip_guard_eval_unsafe) {
+    record_guard_last_success_incomplete("skip_guard_eval_unsafe");
+    state->reset();
+    return run_root_guard_manager(root, f_locals);
+  }
+  if (root == nullptr) {
+    record_guard_last_success_incomplete("null_root");
+    state->reset();
+    return run_root_guard_manager(root, f_locals);
+  }
+
+  RootGuardManager* root_mgr = static_cast<RootGuardManager*>(root);
+  GuardSubtreeMemoSupportAnalysis analysis;
+  if (!root_mgr->supports_subtree_memo_recursive(&analysis)) {
+    record_guard_last_success_incomplete(
+        analysis.reason.empty() ? "unsupported:unknown"
+                                : analysis.reason.c_str(),
+        analysis.path);
+    state->reset();
+    return run_root_guard_manager(root, f_locals);
+  }
+
+  std::vector<GuardSubtreeEntryToken> tokens;
+  {
+    GuardSubtreeMemoRecorderScope recorder(&tokens);
+    const bool result = run_root_guard_manager(root, f_locals);
+    if (!result) {
+      state->reset();
+      return false;
+    }
+  }
+
+  if (tokens.empty()) {
+    record_guard_last_success_incomplete("empty_receipt");
+    state->reset();
+    return true;
+  }
+  if (tokens.size() > kGuardFastPlanMaxTokens) {
+    record_guard_last_success_incomplete("token_cap_exceeded");
+    state->reset();
+    return true;
+  }
+
+  const uint64_t update_start_ns = guard_lookup_time_ns();
+  bool stable = false;
+  bool reset_state = false;
+  uint64_t compare_ns = 0;
+  const uint64_t shadow_passes = state->update(
+      entry_key, root, std::move(tokens), stable, reset_state, compare_ns);
+  const uint64_t update_ns = guard_lookup_time_ns() - update_start_ns;
+  if (stable) {
+    record_guard_last_success_shadow_stable();
+  }
+  if (reset_state) {
+    record_guard_last_success_shadow_reset();
+  }
+  record_guard_last_success_shadow_success(
+      state->tokens.size(), update_ns, compare_ns, shadow_passes);
+  return true;
 }
 
 PyObject* torch_c_dynamo_guards_init() {

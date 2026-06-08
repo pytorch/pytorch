@@ -14,6 +14,12 @@ PyObject* torch_c_dynamo_guards_init();
 // not visible there.
 void* convert_to_root_guard_manager(py::object root);
 bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals);
+bool run_root_guard_manager_with_last_success_receipt(
+    void* receipt,
+    void* entry_key,
+    void* root,
+    FrameLocalsMapping* f_locals,
+    bool is_skip_guard_eval_unsafe);
 
 bool guard_lookup_stats_enabled();
 bool unsafe_mock_guard_bypass_enabled();
@@ -36,6 +42,9 @@ void record_root_guard_stats(
     uint64_t epilogue_ns,
     uint64_t tls_ns);
 void record_unsafe_mock_guard_bypass_stats(uint64_t cache_entry_hit_index);
+void* create_guard_last_success_receipt();
+void destroy_guard_last_success_receipt(void* receipt);
+void reset_guard_last_success_receipt(void* receipt);
 
 struct LocalState {
   // TLS state that changes operators
