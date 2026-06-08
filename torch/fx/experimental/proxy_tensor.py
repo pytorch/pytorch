@@ -1582,10 +1582,15 @@ class PythonKeyTracer(Tracer):
                 )
 
     def _snapshot_opaque_class_constants(self) -> None:
-        for cls in _OPAQUE_TYPES:
+        def snapshot_cls(cls: type[object]) -> None:
             self._allowed_opaque_constant_ids.update(
                 id(attr) for attr in cls.__dict__.values()
             )
+            for subcls in cls.__subclasses__():
+                snapshot_cls(subcls)
+
+        for cls in _OPAQUE_TYPES:
+            snapshot_cls(cls)
 
     def _get_tracked_opaque_proxy(
         self, obj: FakeScriptObject | OpaqueBase
@@ -2007,7 +2012,6 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 # pyrefly: ignore [bad-argument-type]
                 func(*args, **kwargs)
             return node
-
         # We need more complicated handling here because the inputs
         # to these functions are sometimes tensors or symints where
         # we need to fetch the proxies properly.

@@ -3263,6 +3263,18 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
             lambda: make_fx(fn, tracing_mode="fake")(torch.randn(4)),
         )
 
+    def test_reference_opaque_subclass_class_constant(self):
+        class Issue175968ChildMeta(Issue175968Meta):
+            pass
+
+        Issue175968ChildMeta.SINGLETON = Issue175968ChildMeta()
+
+        def fn(x):
+            return torch.ops._issue_175968_base.apply(x, Issue175968ChildMeta.SINGLETON)
+
+        gm = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+        self.assertIn("_opaque_obj", gm.code)
+
     def test_reference_opaque_export_creation_errors(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -3332,18 +3344,6 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
             RuntimeError,
             "untracked reference-type opaque object",
             lambda: make_fx(dynamic_module, tracing_mode="fake")(torch.randn(4)),
-        )
-
-        class AllowAttrMeta(Issue175968Meta):
-            _allow_opaque_fx_constant = True
-
-        def dynamic_allow_attr(x):
-            return torch.ops._issue_175968_base.apply(x, AllowAttrMeta())
-
-        self.assertRaisesRegex(
-            RuntimeError,
-            "untracked reference-type opaque object",
-            lambda: make_fx(dynamic_allow_attr, tracing_mode="fake")(torch.randn(4)),
         )
 
         class Child(torch.nn.Module):

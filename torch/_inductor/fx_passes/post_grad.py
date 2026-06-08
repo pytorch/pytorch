@@ -290,6 +290,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         spmd_check(gm)
 
+    if config.aten_distributed_optimizations.allow_comms_decompositions:
+        from torch._inductor.fx_passes.decomp_comms import decomp_comms
+
+        GraphTransformObserver(gm, "decomp_comms").apply_gm_pass(decomp_comms)
+
     collectives_bucketing: bool = False
 
     if config.dedup_reduce_scatters:
