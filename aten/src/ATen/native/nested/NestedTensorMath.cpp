@@ -499,7 +499,7 @@ std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, s
   // i.e. if input is not contiguous, then output is also discontiguous
   Tensor output = wrap_buffer(output_buffer, sizemat.clone(), stridemat.clone(), offsets.clone()),
       mask = wrap_buffer(mask_buffer, sizemat.clone(), stridemat.clone(), offsets.clone());
-  return std::make_tuple(output, mask);
+  return std::make_tuple(std::move(output), std::move(mask));
 }
 
 Tensor softmax_nested(
@@ -802,7 +802,8 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
       sizemat_reshaped_ptr += ndims_underlying_reshaped;
     }
   }
-  return std::make_tuple(viewable, sizemat_reshaped, stridemat_reshaped);
+  return std::make_tuple(
+      viewable, std::move(sizemat_reshaped), std::move(stridemat_reshaped));
 }
 } // namespace
 

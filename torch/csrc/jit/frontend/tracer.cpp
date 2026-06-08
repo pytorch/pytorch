@@ -529,7 +529,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     }
     FixupTraceScopeBlocks(graph, self);
     NormalizeOps(graph);
-    return {state, out_stack};
+    return {std::move(state), std::move(out_stack)};
   } catch (...) {
     tracer::abandon();
     throw;
