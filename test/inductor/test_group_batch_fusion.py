@@ -698,6 +698,12 @@ class TestGroupBatchFusion(TestCase):
             "unbind_stack_aten_pass": {},
         },
     )
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"min_fuse_set_size": 999}
+        },  # Disable auto-enable to test post-grad behavior
+    )
     def test_gate_fusion_post_grad(self):
         counters.clear()
         size = 20
@@ -712,18 +718,12 @@ class TestGroupBatchFusion(TestCase):
         ref = module(*input)
         res = traced(*input)
         self.compare_pred(module, traced, input)
-        # On XPU, batch_linear_lhs auto-enables in pre-grad, fusing forward
-        # gating_proj + transform_proj. This eliminates all post-grad batch
-        # fusion patterns since the backward graph structure changes entirely.
-        if GPU_TYPE == "xpu":
-            self.assertGreater(counters["inductor"]["batch_linear_lhs"], 0)
-        else:
-            self.assertEqual(counters["inductor"]["batch_linear_post_grad"], 2)
-            self.assertEqual(counters["inductor"]["batch_aten_sigmoid"], 1)
-            self.assertEqual(counters["inductor"]["batch_aten_mul"], 1)
-            self.assertEqual(counters["inductor"]["batch_aten_add"], 2)
-            self.assertEqual(counters["inductor"]["normalization_aten_pass"], 1)
-            self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 5)
+        self.assertEqual(counters["inductor"]["batch_linear_post_grad"], 2)
+        self.assertEqual(counters["inductor"]["batch_aten_sigmoid"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_mul"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_add"], 2)
+        self.assertEqual(counters["inductor"]["normalization_aten_pass"], 1)
+        self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 5)
         ref.sum().backward()
         res.sum().backward()
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
@@ -781,20 +781,18 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_dropout"], 1)
         counters.clear()
 
-    @unittest.skipUnless(
-        torch.xpu.is_available(), "XPU device is required for auto-enable test"
-    )
-    def test_xpu_auto_enable_batch_linear_lhs(self):
+    @requires_gpu()
+    def test_gpu_auto_enable_batch_linear_lhs(self):
         # Verify that batch_linear_lhs fusion is auto-enabled when example inputs
-        # contain XPU tensors, without explicitly setting
+        # contain GPU tensors, without explicitly setting
         # config.pre_grad_fusion_options.
         z = 10
         for has_bias in [True, False]:
             # Capture the global config state before compilation
             orig_fusion_options = dict(config.pre_grad_fusion_options)
             counters.clear()
-            module = MyModule4(z, "xpu", has_bias)
-            input = [torch.randn(20, z, device="xpu")]
+            module = MyModule4(z, GPU_TYPE, has_bias)
+            input = [torch.randn(20, z, device=GPU_TYPE)]
             traced = torch.compile(module)
             ref = module(*input)
             res = traced(*input)

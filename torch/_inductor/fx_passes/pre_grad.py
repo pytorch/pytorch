@@ -316,19 +316,20 @@ def pre_grad_passes(
             numpy_compat_normalization(gm.graph)
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
-            # Auto-enable batch_linear_lhs fusion for XPU compilations.
+            # Auto-enable batch_linear_lhs fusion for GPU compilations.
             # batch_linear_lhs fuses parallel linears that share the same LHS
             # input (e.g., gate_proj + up_proj in Llama MLP) into a single wide
             # GEMM, giving 7-15% inference speedup by reducing kernel launches
             # and improving GPU occupancy.
             # Uses a local copy to avoid mutating global config (which would
-            # interfere with tests that explicitly set pre_grad_fusion_options={}).
+            # interfere with tests that explicitly set pre_grad_fusion_options).
             fusion_options = config.pre_grad_fusion_options
             if (
                 example_inputs is not None
                 and "batch_linear_lhs" not in fusion_options
                 and any(
-                    getattr(t, "device", None) is not None and t.device.type == "xpu"
+                    getattr(t, "device", None) is not None
+                    and t.device.type in ("cuda", "xpu")
                     for t in example_inputs
                     if isinstance(t, torch.Tensor)
                 )
