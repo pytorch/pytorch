@@ -1047,9 +1047,8 @@ def _other_is_broadcasted_in_dim(match):
 
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
-        scaled = inp * other
+        orig_inp = inp
         if dtype is not None:
-            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -1059,13 +1058,16 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
             one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)
             sign = torch.where(other >= 0, one, -one)
 
-        inp = inp * sign
-        max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-
-        stable = (inp - max_) * (sign * other)
+        inp_for_stable = inp * sign
+        max_ = torch.amax(inp_for_stable, dim=dim, keepdim=keepdim)
+        stable = (inp_for_stable - max_) * (sign * other)
         # Fast path for static small scales that will not cause overflow.
         if _is_static_safe_softmax_scale(other):
             return stable
+
+        scaled = orig_inp * other
+        if dtype is not None:
+            scaled = scaled.to(dtype)
 
         return _preserve_scaled_softmax_nonfinite_semantics(
             scaled, stable, dim, keepdim
@@ -1089,7 +1091,6 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         orig_inp = inp
 
         if dtype is not None:
-            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
