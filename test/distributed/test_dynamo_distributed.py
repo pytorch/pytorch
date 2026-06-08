@@ -2349,9 +2349,9 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                     self.linear2, x, use_reentrant=False, context_fn=context_fn
                 )
 
-        mod = MockModule().to(self.device_type)
+        mod = MockModule().to(device_type)
         mod = DDP(mod, bucket_cap_mb=1)
-        x = torch.randn(N, N, device=self.device_type, requires_grad=True)
+        x = torch.randn(N, N, device=device_type, requires_grad=True)
 
         compiled = torch.compile(mod, backend="aot_eager")
         compiled(x).sum().backward()
