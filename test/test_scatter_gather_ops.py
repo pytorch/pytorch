@@ -5,6 +5,7 @@ import unittest
 from typing import NamedTuple
 
 import torch
+import torch._dynamo.config
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
@@ -354,6 +355,7 @@ class TestScatterGather(TestCase):
             del self_t1, src_t1, self_full, src_full
 
     # FIXME: discrepancy between bool ReduceAdd on CUDA and CPU (a + b on CPU and buggy a && b on CUDA)
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
     def test_scatter_reduce_sum(self, device, dtype):
         for include_self in (True, False):
