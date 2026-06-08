@@ -70,6 +70,39 @@ def _strip_opaque_base_state(state):
     return state
 
 
+def _get_object_state(instance):
+    try:
+        dict_state = dict(object.__getattribute__(instance, "__dict__"))
+    except AttributeError:
+        dict_state = None
+
+    slot_state = {}
+    for name in _slot_names(type(instance)):
+        if name in {"__dict__", "__weakref__"}:
+            continue
+        try:
+            slot_state[name] = object.__getattribute__(instance, name)
+        except AttributeError:
+            pass
+
+    if slot_state:
+        return dict_state, slot_state
+    return dict_state
+
+
+def _slot_names(cls):
+    names = []
+    for base in cls.__mro__:
+        slots = base.__dict__.get("__slots__", ())
+        if isinstance(slots, str):
+            slots = (slots,)
+        for name in slots:
+            if name.startswith("__") and not name.endswith("__"):
+                name = f"_{base.__name__.lstrip('_')}{name}"
+            names.append(name)
+    return names
+
+
 def _is_instance_of_type(instance, cls):
     instance_type = type(instance)
     return instance_type is cls or issubclass(instance_type, cls)
@@ -138,23 +171,35 @@ def _install_opaque_base(_PybindOpaqueBase: type) -> tuple[type, type]:
             return _is_opaque_base_instance(cls, instance, super().__instancecheck__)
 
     def _construct_python_opaque(cls, args, kwargs):
-        class_constructing = cls.__dict__.get("_opaque_base_constructing", _MISSING)
-        cls._opaque_base_constructing = True
-        try:
-            instance = cls.__new__(cls, *args, **kwargs)
-            if not _is_instance_of_type(instance, cls):
-                return instance
+        instance = cls.__new__(cls, *args, **kwargs)
+        if not _is_instance_of_type(instance, cls):
+            return instance
 
+        try:
+            instance_dict = object.__getattribute__(instance, "__dict__")
+        except AttributeError:
+            instance_dict = {}
+        if "_opaque_base_constructing" in instance_dict:
+            instance_constructing = instance_dict["_opaque_base_constructing"]
+        else:
+            instance_constructing = _MISSING
+        object.__setattr__(instance, "_opaque_base_constructing", True)
+        try:
             init = _find_python_init(cls)
             if init is not None:
                 init(instance, *args, **kwargs)
             _ensure_opaque_base_initialized(instance)
             return instance
         finally:
-            if class_constructing is _MISSING:
-                delattr(cls, "_opaque_base_constructing")
+            if instance_constructing is _MISSING:
+                try:
+                    object.__delattr__(instance, "_opaque_base_constructing")
+                except AttributeError:
+                    pass
             else:
-                cls._opaque_base_constructing = class_constructing
+                object.__setattr__(
+                    instance, "_opaque_base_constructing", instance_constructing
+                )
 
     class OpaqueBase(_PybindOpaqueBase, metaclass=OpaqueBaseMeta):
         def __init__(self, *args, **kwargs):
@@ -181,9 +226,7 @@ def _install_opaque_base(_PybindOpaqueBase: type) -> tuple[type, type]:
                 newkwargs = {}
 
             getstate = _find_pickle_method(type(self), "__getstate__")
-            state = (
-                getstate(self) if getstate is not None else object.__getstate__(self)
-            )
+            state = getstate(self) if getstate is not None else _get_object_state(self)
             state = _strip_opaque_base_state(state)
             return _rebuild_opaque_base, (type(self), newargs, newkwargs), state
 

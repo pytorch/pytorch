@@ -1,6 +1,7 @@
-# NOTE: add new template heuristics here, so they get imported and registered
-# TODO: write a simple glob if there are many heuristics to auto import them in the right order
-from . import (
+# Backward-compatibility shim.
+# This package has been moved to torch._inductor.heuristics.template.
+# These re-exports will be removed in a future release.
+from torch._inductor.heuristics.template import (
     aten,
     base,
     contiguous_mm,
@@ -10,6 +11,4 @@ from . import (
     tlx,
     triton,
 )
-
-# expose the entry function
-from .registry import get_template_heuristic
+from torch._inductor.heuristics.template.registry import get_template_heuristic

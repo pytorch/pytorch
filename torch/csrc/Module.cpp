@@ -239,7 +239,7 @@ static PyObject* THPModule_initExtension(
         oss << '#' << idx << ' ' << frame.funcname << " from " << frame.filename
             << ':' << frame.lineno << '\n';
       }
-      return oss.str();
+      return std::move(oss).str();
     });
   }
 #endif

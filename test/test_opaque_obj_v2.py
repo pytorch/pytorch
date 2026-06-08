@@ -980,6 +980,27 @@ class TestOpaqueObject(TestCase):
         self.assertIsInstance(fake_queue, FakeScriptObject)
         self.assertIsInstance(fake_rng, FakeScriptObject)
 
+    def test_opaque_base_constructing_guard_is_instance_local(self):
+        class ConstructingOpaque(OpaqueBase):
+            def __init__(self, value, peer=None, fake_mode=None):
+                self.value = value
+                if peer is not None:
+                    with fake_mode:
+                        self.fake_peer = maybe_to_fake_obj(fake_mode, peer)
+
+        register_opaque_type(
+            ConstructingOpaque,
+            typ="reference",
+            members={"value": MemberType.USE_REAL},
+        )
+
+        existing = ConstructingOpaque(5)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        constructing = ConstructingOpaque(6, existing, fake_mode)
+
+        self.assertIsInstance(constructing.fake_peer, FakeScriptObject)
+        self.assertEqual(constructing.fake_peer.value, 5)
+
     def test_isinstance_opaque_base_covers_all_opaque_types(self):
         # isinstance(x, OpaqueBase) should match all registered opaque types,
         # not just classes that directly subclass OpaqueBase.
@@ -1209,6 +1230,16 @@ def forward(self, x_1, cfg_1):
         cyclic_roundtrip = pickle.loads(pickle.dumps(cyclic))
         self.assertIs(cyclic_roundtrip.child, cyclic_roundtrip)
         self.assertIsInstance(cyclic_roundtrip, torch._C._OpaqueBase)
+
+        class SlottedOpaque(OpaqueBase):
+            __slots__ = ("value",)
+
+            def __init__(self, value):
+                self.value = value
+
+        slotted_roundtrip = copy.deepcopy(SlottedOpaque(11))
+        self.assertEqual(slotted_roundtrip.value, 11)
+        self.assertIsInstance(slotted_roundtrip, torch._C._OpaqueBase)
 
         class ModuleOpaque(OpaqueBase, torch.nn.Module):
             pass
