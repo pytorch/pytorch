@@ -181,6 +181,48 @@ class LoggingTest(TestCase):
                 path.unlink(missing_ok=True)
 
     @unittest.skipIf(not hasattr(os, "fork"), "requires os.fork")
+    def test_trace_handler_close_after_fork_skips_flush(self):
+        fd, path_str = tempfile.mkstemp()
+        path = Path(path_str)
+        child_pid = None
+
+        handler = log_internal.LazyTraceHandler(None)
+        handler.stream = os.fdopen(fd, "w+")
+        handler._pid = os.getpid()
+        handler._pending_log_version = True
+        try:
+            handler.stream.write("discarded parent buffer")
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="This process .* is multi-threaded, use of fork\\(\\) may lead to deadlocks in the child.",
+                    category=DeprecationWarning,
+                )
+                child_pid = os.fork()
+            if child_pid == 0:
+                try:
+                    handler.close()
+                except BaseException:
+                    os._exit(1)
+                os._exit(0)
+
+            _, status = os.waitpid(child_pid, 0)
+            child_pid = None
+            self.assertTrue(os.WIFEXITED(status))
+            self.assertEqual(os.WEXITSTATUS(status), 0)
+
+            self.assertEqual(path.read_text(), "")
+        finally:
+            if child_pid is not None:
+                try:
+                    os.waitpid(child_pid, 0)
+                except ChildProcessError:
+                    pass
+            handler._close_stream(flush=False)
+            path.unlink(missing_ok=True)
+
+    @unittest.skipIf(not hasattr(os, "fork"), "requires os.fork")
     def test_trace_handler_reopens_after_fork(self):
         old_env = os.environ.get("TORCH_TRACE")
         old_handler = log_internal.LOG_TRACE_HANDLER
@@ -267,6 +309,9 @@ class LoggingTest(TestCase):
             log_internal.LOG_TRACE_HANDLER = old_handler
             _init_logs()
 
+    @unittest.skipIf(
+        sys.platform == "win32", "tests a bash CI helper with POSIX path semantics"
+    )
     def test_collect_tlparse_output_preserves_multiple_trace_logs(self):
         repo_root = Path(__file__).resolve().parent.parent
 

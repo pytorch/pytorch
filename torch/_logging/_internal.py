@@ -1206,6 +1206,7 @@ class LazyTraceHandler(logging.StreamHandler):
         logging.Handler.__init__(self)
         self.stream = None
         self._pid: int | None = None
+        self._stream_path: str | None = None
         self._builtin_open = open
         self._pending_log_version = False
 
@@ -1218,6 +1219,7 @@ class LazyTraceHandler(logging.StreamHandler):
             finally:
                 self.stream = None
                 self._pid = None
+                self._stream_path = None
                 self._pending_log_version = False
                 if flush and hasattr(stream, "close"):
                     stream.close()
@@ -1237,7 +1239,7 @@ class LazyTraceHandler(logging.StreamHandler):
         self.acquire()
         try:
             try:
-                self._close_stream()
+                self._close_stream(flush=self._pid is None or self._pid == os.getpid())
             finally:
                 # Issue #19523: call unconditionally to
                 # prevent a handler leak when delay is set
@@ -1292,14 +1294,14 @@ class LazyTraceHandler(logging.StreamHandler):
                     prefix=LOG_PREFIX + ranksuffix,
                     dir=self.root_dir,
                 )
-                os.close(fd)
-                self.stream = self._builtin_open(path, mode="w+")
+                self.stream = os.fdopen(fd, mode="w+")
                 self._pid = current_pid
-                log.info("LazyTraceHandler: logging to %s", self.stream.name)
+                self._stream_path = path
+                log.info("LazyTraceHandler: logging to %s", self._stream_path)
                 # Log tlparse path via inductor logger so it shows when
                 # TORCH_LOGS="inductor" is enabled
                 inductor_log = logging.getLogger("torch._inductor")
-                inductor_log.info("tlparse raw data: %s", self.stream.name)
+                inductor_log.info("tlparse raw data: %s", self._stream_path)
                 self._pending_log_version = True
             else:
                 # We go poof, remove and no-op
