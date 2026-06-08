@@ -32,12 +32,12 @@ def check_cpu_supported():
     requires_avx2_on_cpu = (
         torch.cpu._is_avx2_supported() and os.getenv("ATEN_CPU_CAPABILITY") != "default"
     )
-    requires_sve_on_cpu = (
-        torch.cpu._is_sve_supported()
+    requires_arm_on_cpu = (
+        torch.cpu._is_aarch64_supported()
         and os.getenv("ATEN_CPU_CAPABILITY") != "default"
     )
     supported = (
-        (requires_avx2_on_cpu or requires_sve_on_cpu)
+        (requires_avx2_on_cpu or requires_arm_on_cpu)
         and not torch.xpu.is_available()
         and sys.platform != "darwin"
     )

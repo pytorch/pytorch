@@ -31,23 +31,54 @@ inline void {{kernel_name}}_exp_reduce_sum_fusion_kernel(
     const int& size,
     T2* out,
     T1& val) {
-  auto vec_size = at::vec::Vectorized<T1>::size();
-  auto vec_max = at::vec::Vectorized<T1>(val);
+  constexpr auto vec_size1 = at::vec::Vectorized<T1>::size();
+  constexpr auto vec_size2 = at::vec::Vectorized<T2>::size();
+  constexpr int64_t T1_n =
+      (vec_size2 == vec_size1 * 2 && c10::is_reduced_floating_point_v<T2>) ? 2 : 1;
+  constexpr int64_t T2_n = 1;
+  using Vec = at::vec::Vectorized<T1>;
+  using VecN = at::vec::VectorizedN<T1, T1_n>;
+
+  auto vec_max = VecN(val);
+  auto vec_max_tail = Vec(val);
   T1 tmp_sum = 0;
-  auto vec_tmp_sum = at::vec::Vectorized<T1>(tmp_sum);
-  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    auto tmp0 = at::vec::Vectorized<T1>::loadu(a + i);
+  auto vec_tmp_sum = VecN(tmp_sum);
+  auto vec_tmp_sum_tail = Vec(tmp_sum);
+  const long vec_end_n = vec_size2 * (size / vec_size2);
+  const long vec_end = vec_size1 * (size / vec_size1);
+  auto exp_vec = [](const auto& v) {
+    if constexpr (
+        std::is_same_v<T1, float> &&
+        (std::is_same_v<T2, at::BFloat16> || std::is_same_v<T2, at::Half>)) {
+      return v.fexp_u20();
+    } else {
+      return v.exp_u20();
+    }
+  };
+
+  long i = 0;
+  for (; i < vec_end_n; i += vec_size2) {
+    auto tmp0 = VecN::loadu(a + i);
     auto tmp1 = tmp0 - vec_max;
-    auto tmp2 = tmp1.exp_u20();
-    vec_tmp_sum += tmp2;
+    auto tmp2 = exp_vec(tmp1);
+    vec_tmp_sum = vec_tmp_sum + tmp2;
+    auto out_n = at::vec::convert<T2, T2_n, T1, T1_n, true>(tmp2);
+    out_n.store(out + i);
+  }
+  for (; i < vec_end; i += vec_size1) {
+    auto tmp0 = Vec::loadu(a + i);
+    auto tmp1 = tmp0 - vec_max_tail;
+    auto tmp2 = exp_vec(tmp1);
+    vec_tmp_sum_tail = vec_tmp_sum_tail + tmp2;
     at::native::_store(out + i, tmp2);
   }
+  vec_tmp_sum[0] += vec_tmp_sum_tail;
   tmp_sum = at::vec::vec_reduce_all<T1>(
       [](at::vec::Vectorized<T1>& x, at::vec::Vectorized<T1>& y) {
         return x + y;
       },
       vec_tmp_sum);
-  for (long i = vec_size * (size / vec_size); i < size; i++) {
+  for (long i = vec_end; i < size; i++) {
     auto tmp0 = a[i];
     auto tmp1 = tmp0 - val;
     auto tmp2 = exp(tmp1);
@@ -66,17 +97,31 @@ inline void {{kernel_name}}_mul_reduce_max_fusion_kernel(
     const int& size,
     scalar_t* out,
     scalar_t& max) {
-  auto vec_size = at::vec::Vectorized<scalar_t>::size();
-  auto vec_scale = at::vec::Vectorized<scalar_t>(scale);
+  using Vec = at::vec::Vectorized<scalar_t>;
+  using VecN = at::vec::VectorizedN<scalar_t, 2>;
+  constexpr auto vec_size = Vec::size();
+  constexpr auto vec_size_n = VecN::size();
+  auto vec_scale = VecN(scale);
   scalar_t tmp_max = -std::numeric_limits<scalar_t>::infinity();
-  auto vec_tmp_max = at::vec::Vectorized<scalar_t>(tmp_max);
-  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    auto tmp0 = at::vec::Vectorized<scalar_t>::loadu(a + i);
+  auto vec_tmp_max = VecN(tmp_max);
+  auto vec_tmp_max_tail = Vec(tmp_max);
+  const long vec_end_n = vec_size_n * (size / vec_size_n);
+  const long vec_end = vec_size * (size / vec_size);
+  long i = 0;
+  for (; i < vec_end_n; i += vec_size_n) {
+    auto tmp0 = VecN::loadu(a + i);
     auto tmp1 = tmp0 * vec_scale;
     vec_tmp_max = at::vec::maximum(vec_tmp_max, tmp1);
+    tmp1.store(out + i);
+  }
+  for (; i < vec_end; i += vec_size) {
+    auto tmp0 = Vec::loadu(a + i);
+    auto tmp1 = tmp0 * Vec(scale);
+    vec_tmp_max_tail = at::vec::maximum(vec_tmp_max_tail, tmp1);
     at::native::_store(out + i, tmp1);
   }
-  for (long i = vec_size * (size / vec_size); i < size; i++) {
+  vec_tmp_max[0] = at::vec::maximum(vec_tmp_max[0], vec_tmp_max_tail);
+  for (; i < size; i++) {
     auto tmp0 = a[i];
     auto tmp1 = tmp0 * scale;
     tmp_max = std::max(tmp_max, tmp1);
@@ -636,7 +681,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
               v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
           // Fallback Half brgemm is slower than micro gemm
           if (!std::is_same_v<scalar_t, at::Half>) {
-            // On SVE, brgemm falls back to gemm because the oneDNN ukernel path is x86-only.
+            // On AArch64, brgemm falls back to gemm because the oneDNN ukernel path is x86-only.
             at::native::cpublas::brgemm(
                   cur_qSplitSize,
                   headSize_v,
@@ -1458,7 +1503,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
         self.accumulate_dtype = torch.float
         self.input_dtype = query.layout.dtype
-        use_blas_gemm = torch.cpu._is_sve_supported()
+        use_blas_gemm = torch.cpu._is_aarch64_supported()
 
         num_threads = parallel_num_threads()
         if not isinstance(self.output_node, ir.IRNode):
@@ -1536,7 +1581,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         from torch._inductor.codegen.cpp_micro_gemm import CppMicroGemmFP32Vec
         from torch._inductor.virtualized import V
 
-        use_blas_gemm = torch.cpu._is_sve_supported()
+        use_blas_gemm = torch.cpu._is_aarch64_supported()
         emit_transpose_b_micro_gemm = not use_blas_gemm
 
         micro_gemm_trans: CppMicroGemmFP32Vec | None = None

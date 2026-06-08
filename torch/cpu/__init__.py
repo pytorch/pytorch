@@ -88,6 +88,16 @@ def _is_sve_supported() -> bool:
     return torch.backends.cpu.get_cpu_capability() in ("SVE128", "SVE256")
 
 
+def _is_aarch64_supported() -> bool:
+    r"""Returns a bool indicating if CPU is AArch64."""
+    return get_capabilities().get("architecture") in ("arm64", "aarch64", "ARM64")
+
+
+def _is_neon_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports NEON."""
+    return get_capabilities().get("neon", False)
+
+
 def _is_avx512_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AVX512."""
     return get_capabilities().get("avx512_f", False)
