@@ -16,12 +16,12 @@ from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrL
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfXPU,
-    expectedFailureXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
     OpDTypes,
     ops,
+    skipXPU,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -1674,7 +1674,7 @@ class TestForeach(TestCase):
     @serialTest()
     # OOM issue on xpu, see https://github.com/intel/torch-xpu-ops/issues/2444
     @largeTensorTest("40GB")
-    @expectedFailureXPU
+    @skipXPU
     def test_foreach_copy_with_multi_dtypes_large_input(self, device):
         # see https://github.com/pytorch/pytorch/issues/156261
         self_tensor = torch.empty(2**31 + 1, device=device, dtype=torch.float32)
