@@ -11,6 +11,7 @@ import functools
 import inspect
 import logging
 import operator
+import sys
 import threading
 import typing
 import typing_extensions
@@ -41,6 +42,7 @@ from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
+    _OPAQUE_TYPES,
     get_reconstruct_fn,
     is_opaque_reference_type,
     is_opaque_value,
@@ -1427,10 +1429,22 @@ class PythonKeyTracer(Tracer):
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
+    allow_opaque_closure_constants: bool = False
 
     def __init__(self) -> None:
         super().__init__(autowrap_modules=())  # type: ignore[arg-type]
         _init_proxy_trackers(self)
+        self._allowed_opaque_constant_ids: set[int] = set()
+        self._allowed_opaque_module_attrs: dict[int, set[int]] = {}
+
+    def trace(  # type: ignore[override]
+        self,
+        root: Module | Callable[..., Any],
+        concrete_args: dict[str, object] | None = None,
+    ) -> fx.Graph:
+        self._snapshot_allowed_opaque_constants(root)
+        self._snapshot_opaque_class_constants()
+        return super().trace(root, concrete_args)
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
@@ -1442,6 +1456,10 @@ class PythonKeyTracer(Tracer):
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
+        if id(m) in self._allowed_opaque_module_attrs:
+            self._allowed_opaque_constant_ids.update(
+                self._allowed_opaque_module_attrs[id(m)]
+            )
         return forward(*args, **kwargs)
 
     # We don't want to turn getattr calls into proxies. So we just return the actual value.
@@ -1468,11 +1486,151 @@ class PythonKeyTracer(Tracer):
         # Try reconstructing untracked opaque reference types from existing
         # graph inputs (e.g. derive a DeviceMesh submesh from its root mesh).
         if isinstance(a, (FakeScriptObject, OpaqueBase)):
+            proxy = self._get_tracked_opaque_proxy(a)
+            if proxy is not None:
+                return proxy.node
             node = self._try_reconstruct_opaque(a)
             if node is not None:
                 return node
+            real_obj = self._opaque_real_obj(a)
+            if is_opaque_reference_type(
+                type(real_obj)
+            ) and not self._allow_constant_opaque(real_obj):
+                raise RuntimeError(
+                    f"An untracked reference-type opaque object "
+                    f"({type(real_obj).__name__}) reached FX graph creation. "
+                    "FX would otherwise bake this object into the graph as "
+                    "a get_attr constant with no input guard, which can "
+                    "produce stale or missing objects when the graph is "
+                    "reused. Pass the opaque object as a graph input or "
+                    "make it a module/class attribute, or register a "
+                    "reconstruct_fn that derives it from tracked inputs."
+                )
 
         return super().create_arg(a)  # type: ignore[return-value]
+
+    def _opaque_real_obj(self, a: FakeScriptObject | OpaqueBase) -> OpaqueBase:
+        return a.real_obj if isinstance(a, FakeScriptObject) else a
+
+    def _allow_constant_opaque(self, obj: OpaqueBase) -> bool:
+        # Internal compiler-owned opaque types can opt into FX constants.
+        leaf_module = sys.modules.get("torch._higher_order_ops.invoke_leaf_function")
+        if leaf_module is not None and type(obj) is getattr(
+            leaf_module, "_LeafCallable", None
+        ):
+            return True
+        # Export lifts pre-existing module/captured opaque attributes into
+        # explicit custom object inputs immediately after make_fx.
+        if id(obj) in self._allowed_opaque_constant_ids:
+            return True
+        # Some factory ops pass Generator kwargs directly to C++ without
+        # proxy-tracking the corresponding make_fx input.
+        if isinstance(obj, torch.Generator):
+            return True
+        return False
+
+    def _is_device_mesh(self, obj: object) -> bool:
+        return (
+            type(obj).__name__ == "DeviceMesh"
+            and type(obj).__module__ == "torch.distributed.device_mesh"
+        )
+
+    def _snapshot_allowed_opaque_constants(
+        self, root: Module | Callable[..., Any]
+    ) -> None:
+        seen: set[int] = set()
+
+        def snapshot_obj(obj: object) -> None:
+            obj_id = id(obj)
+            if obj_id in seen:
+                return
+            seen.add(obj_id)
+            if isinstance(obj, OpaqueBase):
+                self._allowed_opaque_constant_ids.add(obj_id)
+            if isinstance(obj, torch.nn.Module):
+                for _, mod in obj.named_modules(remove_duplicate=False):
+                    attr_ids = {id(value) for value in vars(mod).values()}
+                    self._allowed_opaque_constant_ids.add(id(mod))
+                    self._allowed_opaque_constant_ids.update(attr_ids)
+                    self._allowed_opaque_module_attrs[id(mod)] = attr_ids
+                return
+            if inspect.isfunction(obj):
+                for cell in obj.__closure__ or ():
+                    try:
+                        value = cell.cell_contents
+                    except ValueError:
+                        pass
+                    else:
+                        if (
+                            not isinstance(value, OpaqueBase)
+                            or self.allow_opaque_closure_constants
+                            or self._is_device_mesh(value)
+                        ):
+                            snapshot_obj(value)
+                for value in obj.__defaults__ or ():
+                    snapshot_obj(value)
+                for value in (obj.__kwdefaults__ or {}).values():
+                    snapshot_obj(value)
+
+        snapshot_obj(root)
+        if not callable(root):
+            return
+        for value in getattr(root, "__globals__", {}).values():
+            if isinstance(value, type) and is_opaque_reference_type(value):
+                self._allowed_opaque_constant_ids.update(
+                    id(attr) for attr in value.__dict__.values()
+                )
+
+    def _snapshot_opaque_class_constants(self) -> None:
+        def snapshot_cls(cls: type[object]) -> None:
+            self._allowed_opaque_constant_ids.update(
+                id(attr) for attr in cls.__dict__.values()
+            )
+            for subcls in cls.__subclasses__():
+                snapshot_cls(subcls)
+
+        for cls in _OPAQUE_TYPES:
+            snapshot_cls(cls)
+
+    def _get_tracked_opaque_proxy(
+        self, obj: FakeScriptObject | OpaqueBase
+    ) -> Proxy | None:
+        return self._get_tracked_opaque_proxy_impl(obj, allow_equal_real_obj=False)
+
+    def _get_reconstruct_opaque_proxy(self, obj: OpaqueBase) -> Proxy | None:
+        return self._get_tracked_opaque_proxy_impl(obj, allow_equal_real_obj=True)
+
+    def _get_tracked_opaque_proxy_impl(
+        self, obj: FakeScriptObject | OpaqueBase, *, allow_equal_real_obj: bool
+    ) -> Proxy | None:
+        proxy = get_proxy_slot(obj, self, None)
+        if proxy is not None:
+            return proxy
+
+        real_obj = self._opaque_real_obj(obj)
+        proxy = self._opaque_real_obj_proxy.get(id(real_obj))
+        if proxy is not None:
+            return proxy
+
+        if real_obj is not obj:
+            proxy = get_proxy_slot(real_obj, self, None)
+            if proxy is not None:
+                return proxy
+
+        if not allow_equal_real_obj:
+            return None
+
+        # The object may be identity-different but equal to a tracked
+        # FSO's real_obj. This happens because maybe_to_fake_obj creates
+        # a new DeviceMesh wrapper, so the FSO's real_obj is a distinct
+        # object from the one held by submesh._root_mesh. Equality
+        # comparison is needed, not identity.
+        for tracked_obj, p in self.opaque_tracker.items():
+            if not isinstance(tracked_obj, FakeScriptObject):
+                continue
+            if tracked_obj.real_obj == real_obj:
+                return p
+        return None
 
     def _try_reconstruct_opaque(
         self, a: FakeScriptObject | OpaqueBase
@@ -1485,7 +1643,7 @@ class PythonKeyTracer(Tracer):
         from inputs already in the graph.  Returns an FX Node on success,
         None on failure (falls back to get_attr constant).
         """
-        real_obj: OpaqueBase = a.real_obj if isinstance(a, FakeScriptObject) else a
+        real_obj = self._opaque_real_obj(a)
 
         if not is_opaque_reference_type(type(real_obj)):
             return None
@@ -1495,23 +1653,7 @@ class PythonKeyTracer(Tracer):
             return None
 
         def get_tracked_proxy(obj: OpaqueBase) -> Proxy | None:
-            proxy = self._opaque_real_obj_proxy.get(id(obj))
-            if proxy is not None:
-                return proxy
-            proxy = get_proxy_slot(obj, self, None)
-            if proxy is not None:
-                return proxy
-            # The object may be identity-different but equal to a tracked
-            # FSO's real_obj. This happens because maybe_to_fake_obj creates
-            # a new DeviceMesh wrapper, so the FSO's real_obj is a distinct
-            # object from the one held by submesh._root_mesh. Equality
-            # comparison is needed, not identity.
-            for tracked_obj, p in self.opaque_tracker.items():
-                if not isinstance(tracked_obj, FakeScriptObject):
-                    continue
-                if tracked_obj.real_obj == obj:
-                    return p
-            return None
+            return self._get_reconstruct_opaque_proxy(obj)
 
         result = reconstruct_fn(real_obj, get_tracked_proxy, self)
         if result is None:
@@ -2348,11 +2490,14 @@ class _ModuleStackTracer(PythonKeyTracer):
     See Note [Preserving the nn module stack metadata during export non-strict mode]  # noqa: W605
     """
 
+    allow_opaque_closure_constants: bool = True
+
     def __init__(self, scope_root: GraphModule) -> None:
         super().__init__()
         self.record_stack_traces = not fx.config.do_not_emit_stack_traces
         self._record_forward_stack_traces_only = True
         self.scope_root = scope_root
+        self._snapshot_allowed_opaque_constants(scope_root)
         self.enable_attr_proxy = False
         self.submodule_paths = {}
         for name, m in self.scope_root.named_modules(remove_duplicate=False):
@@ -2492,7 +2637,9 @@ class _ModuleStackTracer(PythonKeyTracer):
         return self.attr_proxy_map[attr_val]
 
     def trace(  # type: ignore[override]
-        self, root: Module | Callable[..., Any], concrete_args: dict[str, object] | None
+        self,
+        root: Module | Callable[..., Any],
+        concrete_args: dict[str, object] | None = None,
     ) -> fx.Graph:
         res = super().trace(root, concrete_args)
 
