@@ -1250,9 +1250,7 @@ class VariableBuilder:
             # along with other builtin debugging functions
             self.install_guards(GuardBuilder.BUILTIN_MATCH)
             return DebuggingVariable(value, source=self.source)
-        elif callable(value) and any(
-            value is fn for fn in torch._dynamo.config.ignore_logging_functions
-        ):
+        elif callable(value) and IgnoredFunctionVariable.is_ignored(value):
             # Treat ignored functions as full no-ops
             self.install_guards(GuardBuilder.ID_MATCH)
             return IgnoredFunctionVariable(value, source=self.source)
