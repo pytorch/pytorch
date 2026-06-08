@@ -304,7 +304,8 @@ class TestScatterGather(TestCase):
         else:
             shapes.append((4, 4, 16384 * 256))
         for (m, n, k) in shapes:
-            torch.accelerator.empty_cache()
+            if torch.accelerator.is_available():
+                torch.accelerator.empty_cache()
             self_tensor = torch.zeros(m, k, device=device, dtype=dtype)
             src = make_tensor((n, k), device=device, dtype=dtype)
             # contiguous + aligned (should hit fast path on dim=0)
