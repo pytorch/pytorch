@@ -259,7 +259,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_method', 'item', {'moo': 0})
 ('call_function', 'mul_1', {'moo': 0})
 ('call_function', 'ge', {'moo': 0})
-('call_function', '_check', {'moo': 0})
+('call_function', '_assert_scalar_default', {'moo': 0})
 ('call_function', 'mul', {'moo': 0})""",
         )
 
