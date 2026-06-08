@@ -24,7 +24,13 @@ class Info:
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
+    schema = op._schema
     has_kwarg_only_args = utils.has_kwarg_only_args(op._schema)
+    num_positional_args = sum(not a.kwarg_only for a in schema.arguments)
+    has_tensorlist_like_args = any(
+        utils.is_tensorlist_like_type(a.type)
+        for a in (*schema.arguments, *schema.returns)
+    )
 
     @dataclass
     class Metadata:
@@ -74,11 +80,15 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         if info._backward_fn:
             try:
                 prev_needs_input_grad = ctx.needs_input_grad
-                ctx.needs_input_grad = ctx.needs_input_grad[:-1]
+                needs_input_grad = prev_needs_input_grad[:-1]
+                ctx.needs_input_grad = (
+                    *needs_input_grad,
+                    *((False,) * (num_positional_args - len(needs_input_grad))),
+                )
                 result = info._backward_fn(ctx, *grads)
             finally:
                 ctx.needs_input_grad = prev_needs_input_grad
-            expected = len(prev_needs_input_grad) - 1
+            expected = num_positional_args
             actual = len(result) if isinstance(result, tuple) else 1
             if actual != expected:
                 raise RuntimeError(
@@ -88,8 +98,9 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
                     f"operator. Use None for inputs that do not require a "
                     f"gradient."
                 )
+            num_actual_inputs = len(prev_needs_input_grad) - 1
             if isinstance(result, tuple):
-                return (*result, None)
+                return (*result[:num_actual_inputs], None)
             return result, None
         raise RuntimeError(
             f"Trying to backward through {op} but no autograd "
@@ -106,11 +117,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         },
     )
 
-    schema = op._schema
-    if any(
-        utils.is_tensorlist_like_type(a.type)
-        for a in (*schema.arguments, *schema.returns)
-    ):
+    if has_tensorlist_like_args:
         Generated = supports_tensorlist(Generated)
 
     # The dispatcher passes any keyword-only-args as kwargs and the
