@@ -2374,6 +2374,27 @@ class CPUReproTests(TestCase):
         p1 = torch.randn(1)
         self.common(fn, (p0, p1))
 
+    def test_division_by_zero(self):
+        @torch.compile(backend="inductor")
+        def test_division(x, y, rounding_mode=None):
+            return torch.div(x, y, rounding_mode=rounding_mode)
+
+        def run_division(x, y, rounding_mode=None):
+            try:
+                ret = test_division(x, y, rounding_mode=rounding_mode)
+                return ret
+            except Exception as e:
+                detected = "ZeroDivisionError" in str(e)
+                self.assertTrue(detected)
+                return None
+
+        x2 = torch.randint(0, 10, size=(3, 4))
+        y2 = torch.tensor(0, dtype=torch.int32)
+        ret = run_division(x2, y2, rounding_mode="trunc")
+        self.assertTrue(ret is None)
+        ret = run_division(x2, y2, rounding_mode="floor")
+        self.assertTrue(ret is None)
+
     def test_no_op_squeeze(self):
         @torch.compile(backend="inductor")
         def forward(arg0_1):
