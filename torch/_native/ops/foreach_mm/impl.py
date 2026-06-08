@@ -1,19 +1,37 @@
 """
-Python override for aten::_foreach_mm (bf16/fp32, CUDA SM90+).
+Python override for aten::_foreach_mm. Supports bf16 and fp32.
 
-_foreach_mm_cond gates entry; _foreach_mm_route then picks a backend:
-  - nvmath_cublaslt_grouped_mm: bf16 + nvmath installed + N,K 16-byte aligned;
-    any group count, uniform or mixed shapes.
-  - cutlass_grouped_mm: uniform K,N and < 1024 groups (torch._grouped_mm).
-  - mm_loop: everything else (non-uniform K,N, or >= 1024 groups).
+Dispatch prerequisites:
+  CUDA SM90+, not HIP
+  equal-length lists with >= 2 tensors
+  same CUDA device, same bf16/fp32 dtype
+  2D dense/non-overlapping tensors
+  same row/column-major orientation across groups
+  matching K, K,N > 0, K,N 16-byte aligned
 
-Whatever cond rejects falls back to fallback_loop_mm (the native aten at::mm loop),
-so cond rejects only what the grouped kernels mishandle (verified against both):
-  - non-bf16/fp32, or mixed A/B dtype (nvmath is bf16-only).
-  - N or K not 16-byte aligned are not supported by cublasLt and cutlass grouped_mm
-  - zero-sized K or N are not supported by cutlass grouped_mm
-  - min(M,N,K) >= 2048 on the non-nvmath path: each mm already saturates the GPU.
-  - G < 1024 group cap is cutlass-only (nvmath has none), so it bounds only that route.
+Dispatch:
+  nvmath cublasLt grouped GEMM:
+  - bf16
+  - nvmath installed
+  |-- YES --> nvmath cublasLt grouped GEMM (uniform and mixed shapes, any G)
+  |
+  torch._grouped_mm with offs:
+  - non-nvmath path
+  - max(M,N,K) < 2048
+  - uniform K,N
+  - G < 1024
+  |-- YES --> torch.cat + torch._grouped_mm with offs (uniform or variable-M)
+  |
+  fallback loop:
+  - non-nvmath path
+  - max(M,N,K) < 2048
+  |-- YES --> fallback loop: torch.mm per input pair
+  |
+  |-- else -> native _foreach_mm fallback (loop of at::mm)
+
+Notes:
+- cublasLt grouped GEMM is bf16-only (fp32 returns CUBLAS_STATUS_NOT_SUPPORTED).
+- At dim >= 2048 each mm saturates the GPU; native fallback is equivalent.
 """
 
 import warnings
