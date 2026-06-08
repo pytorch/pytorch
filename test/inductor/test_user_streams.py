@@ -1263,6 +1263,92 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertIn("wait_stream", code)
         self.assertIn("synchronize_stream", code)
 
+    def test_wait_stream_ordering_preserved(self):
+        """wait_stream must not be reordered before the work it synchronizes."""
+        from torch._inductor.utils import run_and_get_code
+
+        side = torch.cuda.Stream()
+
+        def fn(x):
+            a = x * 2
+            side.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side):
+                b = a + 1
+            torch.cuda.current_stream().wait_stream(side)
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+
+        # Both wait_stream calls must survive
+        self.assertIn("wait_stream", code)
+
+        # The first wait_stream(1, 0) must appear AFTER the mul kernel,
+        # not before it. Find positions in the generated code.
+        mul_pos = code.find("fused_mul")
+        wait_1_0_pos = code.find("wait_stream.default(1, 0)")
+        wait_0_1_pos = code.find("wait_stream.default(0, 1)")
+        self.assertGreater(mul_pos, -1, "mul kernel not found in code")
+        self.assertGreater(wait_1_0_pos, -1, "wait_stream(1, 0) not found")
+        self.assertGreater(wait_0_1_pos, -1, "wait_stream(0, 1) not found")
+        # wait_stream(1, 0) must come after mul (side waits for default's work)
+        self.assertGreater(wait_1_0_pos, mul_pos)
+        # wait_stream(0, 1) must come after wait_stream(1, 0)
+        self.assertGreater(wait_0_1_pos, wait_1_0_pos)
+
+    def test_wait_stream_ordering_independent_inputs(self):
+        """wait_stream must order subsequent waiting-stream work even with independent inputs."""
+        from torch._inductor.utils import run_and_get_code
+
+        side = torch.cuda.Stream()
+
+        def fn(x, y):
+            a = x * 2
+            side.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side):
+                b = y + 1
+            torch.cuda.current_stream().wait_stream(side)
+            return a + b
+
+        x = torch.randn(1024, device="cuda")
+        y = torch.randn(1024, device="cuda")
+        expected = fn(x, y)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x, y)
+        self.assertTrue(torch.allclose(result, expected, atol=1e-5, rtol=1e-5))
+
+        # Search within the call method only to avoid matching kernel
+        # definitions at the top of the generated file.
+        call_code = code[code.find("def call(") :]
+
+        # wait_stream(1, 0) must come BEFORE the add kernel on stream 1.
+        # This tests that even when the waiting-stream computation (y + 1)
+        # uses an independent input (y), it is still ordered after wait_stream.
+        wait_1_0_pos = call_code.find("wait_stream.default(1, 0)")
+        wait_0_1_pos = call_code.find("wait_stream.default(0, 1)")
+        self.assertGreater(wait_1_0_pos, -1, "wait_stream(1, 0) not found")
+        self.assertGreater(wait_0_1_pos, -1, "wait_stream(0, 1) not found")
+
+        # Find the stream1 add kernel call (fused_add*.run)
+        add_kernel_pos = call_code.find("fused_add")
+        self.assertGreater(add_kernel_pos, -1, "add kernel not found")
+
+        # Correct ordering: wait_stream(1,0) before add kernel (on stream 1),
+        # add kernel before wait_stream(0,1)
+        self.assertGreater(
+            add_kernel_pos,
+            wait_1_0_pos,
+            "add kernel (stream 1) must come after wait_stream(1, 0)",
+        )
+        self.assertGreater(
+            wait_0_1_pos,
+            add_kernel_pos,
+            "wait_stream(0, 1) must come after add kernel (stream 1)",
+        )
+
     def test_codegen_structure_single_stream(self):
         """Verify wrapper structure for pointwise ops with one side stream."""
         from torch._inductor.utils import run_and_get_code
@@ -2459,6 +2545,57 @@ class TestStreamCudagraphInteraction(InductorTestCase):
         for _ in range(3):
             result = compiled_fn(x, y)
         self.assertEqual(result, expected)
+
+    def test_wait_stream_fork_join_with_cudagraphs(self):
+        """wait_stream fork-join pattern must work under cudagraph capture.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/185546.
+        CUDA graph capture requires all forked streams to be rejoined before
+        capture ends. If wait_stream(default, side) is incorrectly reordered
+        before the side-stream work, capture fails with StreamCaptureUnjoined.
+        """
+        side = torch.cuda.Stream()
+
+        def fn(x):
+            a = x * 2
+            side.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side):
+                b = a + 1
+            torch.cuda.current_stream().wait_stream(side)
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        # Warmup + capture + replay
+        for _ in range(3):
+            result = compiled_fn(x)
+        self.assertEqual(result, expected)
+
+    def test_wait_stream_independent_inputs_with_cudagraphs(self):
+        """wait_stream with independent inputs must work under cudagraph capture.
+
+        When the waiting-stream computation uses an input independent of the
+        waited-on stream, it must still be ordered after wait_stream.
+        """
+        side = torch.cuda.Stream()
+
+        def fn(x, y):
+            a = x * 2
+            side.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side):
+                b = y + 1
+            torch.cuda.current_stream().wait_stream(side)
+            return a + b
+
+        x = torch.randn(1024, device="cuda")
+        y = torch.randn(1024, device="cuda")
+        expected = fn(x, y)
+        compiled_fn = torch.compile(fn, mode="reduce-overhead")
+        # Warmup + capture + replay
+        for _ in range(3):
+            result = compiled_fn(x, y)
+        self.assertTrue(torch.allclose(result, expected, atol=1e-5, rtol=1e-5))
 
 
 instantiate_parametrized_tests(TestStreamUtils)
