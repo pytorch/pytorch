@@ -336,6 +336,14 @@ if not torch._library.opaque_object.is_opaque_type(_CyclicOpaque):
     torch._library.opaque_object.register_opaque_type(_CyclicOpaque, typ="reference")
 
 
+def _custom_empty(*args: object, **kwargs: object) -> None:
+    return None
+
+
+# Verify factory detection does not match arbitrary functions named like torch.empty.
+_custom_empty.__name__ = "empty"
+
+
 class TestPyCodeCache(TestCase):
     def test_linemaps_empty(self):
         src = """import torch"""
@@ -532,6 +540,69 @@ class TestFxGraphCache(TestCase):
                 if filename.endswith(binary_ext):
                     found.append(os.path.join(dirpath, filename))
         return found
+
+    def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
+        script = textwrap.dedent(
+            f"""
+            import os
+            import torch
+            import warnings
+            from torch._dynamo.utils import counters
+            from torch._inductor import config
+
+            warnings.filterwarnings("ignore")
+            config.fx_graph_cache = True
+            config.fx_graph_remote_cache = False
+            torch.set_num_threads(int(os.environ["TEST_THREADS"]))
+            torch._dynamo.reset()
+
+            @torch.compile(backend="inductor")
+            def f():
+                return {return_expr}
+
+            f()
+            print(f"threads {{torch.get_num_threads()}}")
+            print(f"fxgraph_cache_hit {{counters['inductor']['fxgraph_cache_hit']}}")
+            print(f"fxgraph_cache_miss {{counters['inductor']['fxgraph_cache_miss']}}")
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = os.environ.copy()
+            env["TORCHINDUCTOR_CACHE_DIR"] = tmpdir
+            env["PYTHONPATH"] = os.pathsep.join(
+                x for x in (os.getcwd(), env.get("PYTHONPATH", "")) if x
+            )
+
+            env1 = env.copy()
+            env1["TEST_THREADS"] = "1"
+            out1 = subprocess.check_output(
+                [sys.executable, "-c", script], env=env1
+            ).decode()
+            self.assertIn("threads 1", out1)
+            self.assertIn("fxgraph_cache_hit 0", out1)
+            self.assertIn("fxgraph_cache_miss 1", out1)
+
+            env2 = env.copy()
+            env2["TEST_THREADS"] = "2"
+            out2 = subprocess.check_output(
+                [sys.executable, "-c", script], env=env2
+            ).decode()
+            self.assertIn("threads 2", out2)
+            self.assertIn("fxgraph_cache_hit 0", out2)
+            self.assertIn("fxgraph_cache_miss 1", out2)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_cpu_thread_count_cache_key_no_input_factory(self):
+        self._check_cpu_thread_count_cache_key_no_input(
+            "torch.log(torch.arange(1 << 12, dtype=torch.float32) + 1)"
+        )
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_cpu_thread_count_cache_key_no_input_randperm(self):
+        self._check_cpu_thread_count_cache_key_no_input(
+            "torch.randperm(1 << 12, dtype=torch.float32).log()"
+        )
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -3248,6 +3319,206 @@ class TestCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestFxGraphCacheHashing(TestCase):
+    def _fx_graph_cache_key(self, gm, example_inputs):
+        details = FxGraphHashDetails(gm, example_inputs, cast(Any, {}), [])
+        return FxGraphCachePickler(gm).get_key(details)
+
+    def _no_input_factory_graph(self, device=None):
+        graph = torch.fx.Graph()
+        kwargs: dict[str, Any] = {"dtype": torch.float32}
+        if device is not None:
+            kwargs["device"] = torch.device(device)
+        result = graph.call_function(torch.empty, ((4,),), kwargs)
+        graph.output(result)
+        return torch.fx.GraphModule({}, graph)
+
+    def test_cpu_thread_count_affects_cache_key(self):
+        def fn(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(fn)
+        x = torch.ones(4)
+        orig_num_threads = torch.get_num_threads()
+
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [x])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [x])
+                self.assertNotEqual(key_1, key_2)
+
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": True}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [x])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [x])
+                self.assertEqual(key_1, key_2)
+
+            with config.patch({"cpp.threads": 4, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [x])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [x])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_affects_cache_key_for_no_input_cpu_factory(self):
+        gm = self._no_input_factory_graph()
+        orig_num_threads = torch.get_num_threads()
+
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertNotEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_affects_cache_key_for_example_value_metadata(self):
+        graph = torch.fx.Graph()
+        result = graph.call_function(_custom_empty, (), {})
+        with torch._subclasses.FakeTensorMode():
+            result.meta["example_value"] = torch.empty(4)
+        self.assertNotIn("val", result.meta)
+        graph.output(result)
+        gm = torch.fx.GraphModule({}, graph)
+
+        orig_num_threads = torch.get_num_threads()
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertNotEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_affects_cache_key_for_randperm_factory(self):
+        graph = torch.fx.Graph()
+        result = graph.call_function(
+            torch.ops.aten.randperm.default,
+            (4,),
+            {"dtype": torch.float32},
+        )
+        graph.output(result)
+        gm = torch.fx.GraphModule({}, graph)
+
+        orig_num_threads = torch.get_num_threads()
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertNotEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_ignored_for_explicit_non_cpu_factory(self):
+        gm = self._no_input_factory_graph(device="cuda")
+        orig_num_threads = torch.get_num_threads()
+
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_ignores_non_device_string_on_factory(self):
+        graph = torch.fx.Graph()
+        result = graph.call_function(
+            torch.empty,
+            ((4,),),
+            {
+                "dtype": torch.float32,
+                "device": torch.device("cuda"),
+                "debug_device": "cpu",
+            },
+        )
+        graph.output(result)
+        gm = torch.fx.GraphModule({}, graph)
+
+        orig_num_threads = torch.get_num_threads()
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_ignored_for_cuda_like_factory(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        result = graph.call_function(torch.empty_like, (x,), {})
+        graph.output(result)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode():
+            example_input = torch.empty(4, device="cuda")
+
+        orig_num_threads = torch.get_num_threads()
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [example_input])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [example_input])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_ignored_for_cuda_metadata_device_constructor(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        result = graph.call_function(torch.as_tensor, (x,), {})
+        graph.output(result)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode():
+            example_input = torch.empty(4, device="cuda")
+        x.meta["val"] = example_input
+        result.meta["example_value"] = example_input
+
+        orig_num_threads = torch.get_num_threads()
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [example_input])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [example_input])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_ignored_for_custom_empty_target(self):
+        graph = torch.fx.Graph()
+        result = graph.call_function(_custom_empty, ("cpu",), {"device": "cpu"})
+        graph.output(result)
+        gm = torch.fx.GraphModule({}, graph)
+
+        orig_num_threads = torch.get_num_threads()
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_cacheability_validator_checks_mkldnn_constant(self):
         graph = torch.fx.Graph()
