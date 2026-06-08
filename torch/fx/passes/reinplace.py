@@ -180,10 +180,7 @@ def _maybe_get_inplace_op(op: object) -> torch._ops.OpOverload | None:
     if maybe_inplace_op is None:
         return None
 
-    inplace_overloads = [
-        getattr(maybe_inplace_op, overload_name)
-        for overload_name in maybe_inplace_op.overloads()
-    ]
+    inplace_overloads = maybe_inplace_op.op_overloads()
     inplace_overloads_with_matching_schemas = [
         f for f in inplace_overloads if _schemas_match(op._schema, f._schema)
     ]
