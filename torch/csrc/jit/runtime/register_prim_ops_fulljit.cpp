@@ -628,7 +628,7 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
     std::stringstream ss;
     ss << "Expecting optional int or int list arg for scale factor, got"
        << int_ivalue;
-    throw std::runtime_error(ss.str());
+    throw std::runtime_error(std::move(ss).str());
   }
   return scale_factor_double;
 }

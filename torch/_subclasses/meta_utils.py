@@ -1145,6 +1145,39 @@ class MetaConverter(Generic[_TensorT]):
             else:
                 return (t.size, t.stride, t.storage_offset)
 
+        def sym_sparse_sizes(
+            t: MetaTensorDesc[Any],
+            src: torch._guards.Source,
+            symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
+            | None = symbolic_context,
+        ) -> tuple[IntLikeType, ...]:
+            if shape_env is None:
+                return t.size
+
+            from torch._prims_common import make_contiguous_strides_for
+            from torch.fx.experimental.symbolic_shapes import is_symbolic
+
+            fake_mode = t.fake_mode
+            has_symbolic = any(is_symbolic(sz) for sz in t.size)
+            if fake_mode is not None and fake_mode.shape_env is shape_env:
+                return t.size
+            if symbolic_context is None and not (
+                fake_mode is not None and has_symbolic
+            ):
+                return t.size
+
+            sparse_tensor_with_synthetic_strides = dataclasses.replace(
+                t,
+                stride=make_contiguous_strides_for(t.size),
+                storage_offset=0,
+            )
+            sizes, _, _ = sym_sizes_strides_storage_offset(
+                sparse_tensor_with_synthetic_strides,
+                src,
+                symbolic_context,
+            )
+            return sizes
+
         def empty_create(
             inner_t: MetaTensorDesc[Any],
             inner_src: torch._guards.Source,
@@ -1478,17 +1511,34 @@ class MetaConverter(Generic[_TensorT]):
                 if t.is_sparse:
                     is_leaf = t.is_leaf
 
+                    sparse_size = sym_sparse_sizes(t, source, symbolic_context)
+                    if t.sparse_dim is None:
+                        raise AssertionError("t.sparse_dim must not be None")
+                    if t.dense_dim is None:
+                        raise AssertionError("t.dense_dim must not be None")
+
                     # The lambda function below is similar to
                     # `t.to(device='meta')` except the latter
                     # preserves nnz value
                     r = callback(
-                        lambda: torch.ops.aten._sparse_coo_tensor_with_dims(
+                        lambda: torch.ops.aten._sparse_coo_tensor_with_dims_and_tensors(
                             t.sparse_dim,
                             t.dense_dim,
-                            t.size,
+                            sparse_size,
+                            torch.empty(
+                                (t.sparse_dim, 0),
+                                dtype=torch.int64,
+                                device="meta",
+                            ),
+                            torch.empty(
+                                (0, *sparse_size[t.sparse_dim :]),
+                                dtype=t.dtype,
+                                device="meta",
+                            ),
                             dtype=t.dtype,
                             layout=torch.sparse_coo,
                             device="meta",
+                            is_coalesced=t.is_coalesced,
                         )
                     )
                     if self.copy_data:
@@ -2011,29 +2061,31 @@ class MetaConverter(Generic[_TensorT]):
                         sym_eq,
                     )
 
-                    # The freshly allocated tensor storage can only stand in
-                    # for the source storage when it covers the whole storage.
-                    # Parameters made from views are not autograd views, but
-                    # can still share a larger storage with later parameters.
-                    # Zero-sized source storages are handled specially because
-                    # resize_(0) below restores the zero-sized storage state.
-                    if r.is_nested:
-                        storage_is_representative = True
-                    else:
-                        r_storage_size = r.untyped_storage().size()
-                        storage_is_representative = statically_known_true(
+                    storage_needs_resize = False
+                    if not r.is_nested:
+                        r_storage = r.untyped_storage()
+                        storage_needs_resize = not statically_known_true(
                             s.size == 0
-                        ) or statically_known_true(r_storage_size == s.size)
+                        ) and statically_known_true(r_storage.size() < s.size)
                     if s.id not in self.storage_memo and (
-                        storage_is_representative
-                        and (
-                            r.is_nested
-                            or (
-                                guard_or_false(sym_eq(r.stride(), strides))
-                                and guard_or_false(r.storage_offset() == storage_offset)
-                            )
+                        r.is_nested
+                        or (
+                            guard_or_false(sym_eq(r.stride(), strides))
+                            and guard_or_false(r.storage_offset() == storage_offset)
                         )
                     ):
+                        if not r.is_nested:
+                            # The freshly allocated tensor storage can stand in
+                            # for the source storage only if it covers the whole
+                            # storage. Parameters made from views are not
+                            # autograd views, but can still share a larger
+                            # storage with later parameters. Leave symbolic
+                            # sizes alone; this preserves the fast path for
+                            # dynamic inputs without adding storage-size guards.
+                            # Zero-sized source storages are handled by the
+                            # resize_(0) below.
+                            if storage_needs_resize:
+                                r.untyped_storage().resize_(s.size)
                         # You're normal and happy, install the fresh storage into the memo
                         self.set_storage_memo(s, r.untyped_storage())
                         if self.copy_data:
@@ -2043,9 +2095,42 @@ class MetaConverter(Generic[_TensorT]):
                                 raise AssertionError(
                                     "r.real_tensor must not be None when copy_data is True"
                                 )
-                            _set_real_storage(
-                                r.untyped_storage(), r.real_tensor.untyped_storage()
-                            )
+                            if statically_known_true(s.size == 0):
+                                _set_real_storage(
+                                    r.untyped_storage(),
+                                    r.real_tensor.untyped_storage(),
+                                )
+                            else:
+                                if t.size is None:
+                                    raise AssertionError(
+                                        "t.size must not be None when copy_data is True"
+                                    )
+                                if t.stride is None:
+                                    raise AssertionError(
+                                        "t.stride must not be None when copy_data is True"
+                                    )
+                                if t.data is None:
+                                    raise AssertionError(
+                                        "t.data must not be None when copy_data is True"
+                                    )
+                                with torch.no_grad(), no_dispatch():
+                                    if _is_fake_tensor(t.data):
+                                        if t.data.real_tensor is None:
+                                            raise AssertionError(
+                                                "t.data.real_tensor must not be None when copy_data is True"
+                                            )
+                                        real_storage = (
+                                            t.data.real_tensor.untyped_storage().clone()
+                                        )
+                                    else:
+                                        real_storage = t.data.untyped_storage().clone()
+                                    _set_real_storage(r.untyped_storage(), real_storage)
+                                    r.real_tensor.set_(
+                                        real_storage,
+                                        t.storage_offset,
+                                        t.size,
+                                        t.stride,
+                                    )
                     else:
                         # You're in crazy town; somehow you gave us a tensor
                         # that wasn't a view, but had nonzero storage offset,

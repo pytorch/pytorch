@@ -1804,6 +1804,53 @@ for t in threads:
             msg=f"subprocess failed:\n{result.stderr.decode()}",
         )
 
+    @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
+    def test_cuda_fake_tensor_new_methods_no_device_init(self):
+        # CUDA_VISIBLE_DEVICES must be set before torch is imported, so run
+        # the repro in a subprocess.
+
+        script = """\
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+# Import numpy before torch to avoid an MKL threading-layer conflict in this
+# subprocess environment.
+import numpy
+import torch
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+fake_mode = FakeTensorMode()
+with fake_mode:
+    x = torch.randn(3, device="cuda")
+
+assert not torch.cuda.is_initialized()
+
+new_tensors = [
+    x.new_empty([2, 1], device="cuda:0", dtype=torch.float32),
+    x.new_empty_strided([2, 1], [1, 2], device="cuda:0", dtype=torch.float32),
+    x.new_full([2, 1], 1.0, device="cuda:0", dtype=torch.float32),
+    x.new_ones([2, 1], device="cuda:0", dtype=torch.float32),
+    x.new_zeros([2, 1], device="cuda:0", dtype=torch.float32),
+]
+
+for y in new_tensors:
+    assert isinstance(y, FakeTensor)
+    assert y.device == torch.device("cuda:0")
+    assert y.dtype is torch.float32
+
+assert not torch.cuda.is_initialized()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"subprocess failed:\n{result.stderr.decode()}",
+        )
+
     @unittest.skipIf(
         TEST_ACCELERATOR, "Only execute when an accelerator is not present"
     )
@@ -1869,6 +1916,25 @@ for t in threads:
             self.assertEqual(fake_unique.dtype, real_unique.dtype)
             self.assertEqual(fake_inverse.dtype, real_inverse.dtype)
             self.assertEqual(fake_counts.dtype, real_counts.dtype)
+
+    def test_unique_default_dynamic_output_shape(self):
+        x = torch.tensor([2, 1, 4, 2, 2])
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(x)
+            with self.assertRaises(DynamicOutputShapeException):
+                torch.ops.aten._unique.default(fake_x, False, False)
+
+        shape_env = ShapeEnv(allow_dynamic_output_shape_ops=True)
+        with FakeTensorMode(shape_env=shape_env) as mode:
+            fake_x = mode.from_tensor(x)
+            fake_unique, fake_inverse = torch.ops.aten._unique.default(
+                fake_x, False, True
+            )
+
+        self.assertEqual(fake_unique.dtype, x.dtype)
+        self.assertEqual(fake_inverse.dtype, torch.int64)
+        self.assertEqual(fake_inverse.shape, x.shape)
+        self.assertTrue(free_unbacked_symbols(fake_unique.shape[0]))
 
     def test_select_out_of_bounds(self):
         with FakeTensorMode():
@@ -2064,7 +2130,7 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(len(converter.meta_converter.storage_memo), 0)
 
     def test_parameter_views_keep_full_storage(self):
-        base = torch.empty(12, dtype=torch.float16)
+        base = torch.arange(12, dtype=torch.float16)
         x = torch.nn.Parameter(base[:6].view(2, 3))
         y = torch.nn.Parameter(base[6:].view(2, 3))
         self.assertFalse(x._is_view())
@@ -2085,9 +2151,11 @@ class FakeTensorConverterTest(TestCase):
                 base.untyped_storage().nbytes(),
             )
             self.assertEqual(y_conv.real_tensor.storage_offset(), y.storage_offset())
+            self.assertEqual(x_conv.real_tensor, x)
+            self.assertEqual(y_conv.real_tensor, y)
 
     def test_parameter_views_keep_full_storage_symbolic_propagate_real(self):
-        base = torch.empty(12, dtype=torch.float16)
+        base = torch.arange(12, dtype=torch.float16)
         x = torch.nn.Parameter(base[:6].view(2, 3))
         y = torch.nn.Parameter(base[6:].view(2, 3))
 
@@ -2106,6 +2174,24 @@ class FakeTensorConverterTest(TestCase):
             base.untyped_storage().nbytes(),
         )
         self.assertEqual(y_conv.real_tensor.storage_offset(), y.storage_offset())
+        self.assertEqual(x_conv.real_tensor, x)
+        self.assertEqual(y_conv.real_tensor, y)
+
+    def test_strided_parameter_views_keep_real_storage_data(self):
+        base = torch.arange(11, dtype=torch.float32)
+        x = torch.nn.Parameter(base[::2])
+        y = torch.nn.Parameter(base[1::2])
+        self.assertFalse(x._is_view())
+        self.assertFalse(y._is_view())
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            mode = FakeTensorMode()
+            x_conv = mode.from_tensor(x, static_shapes=True)
+            y_conv = mode.from_tensor(y, static_shapes=True)
+
+        self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
+        self.assertEqual(x_conv.real_tensor, x)
+        self.assertEqual(y_conv.real_tensor, y)
 
     def test_refake_unbacked_storage_static_shapes(self):
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=False):
