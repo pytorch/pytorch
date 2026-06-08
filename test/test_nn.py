@@ -21,6 +21,7 @@ from collections import OrderedDict
 from unittest import SkipTest
 
 import torch
+import torch._dynamo.config
 from torch import inf, nan
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
@@ -1930,6 +1931,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             m = pickle.loads(pickle.dumps(m))
         self.assertTrue(len(w) == 0)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
@@ -2183,6 +2185,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     snm.eval()
                     self.assertEqual(out3_eval, snm(inp))
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_spectral_norm_dim(self):
         inp = torch.randn(2, 3, 10, 12)
         m = nn.ConvTranspose2d(3, 4, (5, 6))
@@ -2208,6 +2211,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expect_out = m(input)
         self.assertEqual(expect_out, out_hat)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_spectral_norm_pickle(self):
         m = torch.nn.utils.spectral_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
@@ -5958,6 +5962,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         self.assertEqual(theta_grad_cf, theta_grad_cl)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @set_default_dtype(torch.double)
     def test_grid_sample(self):
         # Backward pass of native C++ and CUDA kernels branch depending on whether input requires gradient,

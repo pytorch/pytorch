@@ -6,6 +6,7 @@ from collections import namedtuple
 import os
 import sys
 import torch
+import torch._dynamo.config
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.functional import scaled_dot_product_attention
@@ -425,6 +426,7 @@ class TestTransformers(NNTestCase):
         with torch.no_grad():
             model(src, src_mask=src_mask)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @parametrize("nhead", [3, 4])
     def test_transformerencoderlayer_no_fastpath_with_hooks(self, device, nhead):
         batch_size = 2

@@ -3,6 +3,7 @@
 
 import itertools
 import torch
+import torch._dynamo.config
 import os
 import numpy as np
 from enum import Enum
@@ -1412,6 +1413,7 @@ class TestMeta(TestCase):
         assertEqualShapes(out_kwargs["out1"], expected_shapes[1])
         assertEqualShapes(out_kwargs["out2"], expected_shapes[2])
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @onlyCPU
     @parametrize("output_mask", list(itertools.product([True, False], [True, False], [True, False])))
     def test_layer_norm_backward(self, output_mask):
