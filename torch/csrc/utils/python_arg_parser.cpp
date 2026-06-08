@@ -485,7 +485,7 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
       if (ret.ptr() == nullptr) {
         throw python_error();
       }
-      return std::make_tuple(ret, mode_obj);
+      return std::make_tuple(std::move(ret), std::move(mode_obj));
     }
   }
 
@@ -513,7 +513,7 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
   if (ret.ptr() == nullptr) {
     throw python_error();
   }
-  return std::make_tuple(ret, mode_obj);
+  return std::make_tuple(std::move(ret), std::move(mode_obj));
 }
 
 // See Note: [Overloaded args] for what they hold
