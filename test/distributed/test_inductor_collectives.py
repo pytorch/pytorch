@@ -25,6 +25,7 @@ from torch._inductor.comms import (
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.fx_passes.bucketing import (
+    _insert_fn_trace_before_node,
     _trace as bucketing_trace,
     all_gather_merge_fn_to_trace_custom_ops,
     is_all_gather_into_tensor,
@@ -157,6 +158,43 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
         ]
         self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
         self.assertTrue(any("(u0//4)" in shape for shape in symbolic_shapes))
+
+    def test_replacement_updates_layout_dependent_user_metadata(self):
+        graph = torch.fx.Graph()
+        base = graph.placeholder("base")
+        original = graph.call_function(
+            torch.ops.aten.as_strided.default,
+            args=(base, [2, 4], [4, 1], 0),
+        )
+        transposed = graph.call_function(
+            torch.ops.aten.transpose.int,
+            args=(original, 0, 1),
+        )
+        graph.output(transposed)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            base_val = torch.empty(32)
+            original_val = torch.as_strided(base_val, (2, 4), (4, 1), 0)
+            transposed_val = original_val.transpose(0, 1)
+        base.meta["val"] = base_val
+        original.meta["val"] = original_val
+        transposed.meta["val"] = transposed_val
+
+        def replacement_fn(x):
+            return [torch.as_strided(x, (2, 4), (8, 1), 0)]
+
+        _insert_fn_trace_before_node(
+            gm.graph,
+            replacement_fn,
+            (base_val,),
+            original,
+            [base],
+            [original],
+        )
+
+        self.assertEqual(transposed.meta["val"].stride(), (1, 8))
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
