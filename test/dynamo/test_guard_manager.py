@@ -1239,6 +1239,77 @@ print(json.dumps({
         self.assertEqual(stats["disabled"], 0)
         self.assertGreater(stats["token_count_sum"], 0)
 
+    def test_guard_fast_plan_records_disabled_reasons(self):
+        script = r"""
+import functools
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+def equals_match(x, expected):
+    return x == expected
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+model = Mod()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+modules_mgr.add_lambda_guard(
+    functools.partial(equals_match, expected=model._modules),
+    ["L['self']._modules == original"],
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+assert root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "enabled": stats["guard_fastplan_enabled"],
+    "candidate": stats["guard_fastplan_candidate"],
+    "disabled": stats["guard_fastplan_disabled"],
+    "reasons": stats["guard_fastplan_disabled_reasons"],
+    "top_paths": stats["guard_fastplan_disabled_top_paths"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["enabled"])
+        self.assertGreater(stats["candidate"], 0)
+        self.assertGreater(stats["disabled"], 0)
+        self.assertEqual(
+            stats["reasons"].get("unsupported_leaf:LAMBDA_GUARD"), 1
+        )
+        self.assertIn("L['self']._modules", stats["top_paths"])
+        self.assertEqual(
+            stats["top_paths"]["L['self']._modules"]["reason"],
+            "unsupported_leaf:LAMBDA_GUARD",
+        )
+
     def test_guard_fast_plan_subtree_memo_miss_disables_and_falls_back(self):
         script = r"""
 import json

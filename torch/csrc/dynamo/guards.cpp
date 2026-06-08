@@ -148,6 +148,11 @@ struct GuardFastPlanStats {
   std::atomic<uint64_t> slow_check_ns{0};
 };
 
+struct GuardFastPlanDisabledPathStats {
+  uint64_t count{0};
+  std::string reason;
+};
+
 struct GuardAccessorTypeStats {
   uint64_t count{0};
   uint64_t fail_count{0};
@@ -179,6 +184,20 @@ struct GuardSubtreeProbePathStats {
 
 constexpr size_t kGuardAccessorDetailStatsTopK = 64;
 constexpr size_t kGuardSubtreeProbeTopK = 64;
+constexpr size_t kGuardFastPlanDisabledTopK = 64;
+
+struct GuardSubtreeMemoSupportAnalysis {
+  std::string reason;
+  std::string path;
+
+  void set_if_empty(const char* new_reason, const std::string& new_path) {
+    if (!reason.empty()) {
+      return;
+    }
+    reason = new_reason == nullptr ? "unsupported:unknown" : new_reason;
+    path = new_path;
+  }
+};
 
 GuardLookupStats& guard_lookup_stats() {
   static GuardLookupStats stats;
@@ -242,6 +261,23 @@ std::mutex& guard_subtree_probe_path_stats_mutex() {
 std::unordered_map<std::string, GuardSubtreeProbePathStats>&
 guard_subtree_probe_path_stats() {
   static std::unordered_map<std::string, GuardSubtreeProbePathStats> stats;
+  return stats;
+}
+
+std::mutex& guard_fastplan_disabled_stats_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::unordered_map<std::string, uint64_t>&
+guard_fastplan_disabled_reason_stats() {
+  static std::unordered_map<std::string, uint64_t> stats;
+  return stats;
+}
+
+std::unordered_map<std::string, GuardFastPlanDisabledPathStats>&
+guard_fastplan_disabled_path_stats() {
+  static std::unordered_map<std::string, GuardFastPlanDisabledPathStats> stats;
   return stats;
 }
 
@@ -372,6 +408,11 @@ void reset_guard_lookup_stats() {
     std::lock_guard<std::mutex> lock(guard_subtree_probe_path_stats_mutex());
     guard_subtree_probe_path_stats().clear();
   }
+  {
+    std::lock_guard<std::mutex> lock(guard_fastplan_disabled_stats_mutex());
+    guard_fastplan_disabled_reason_stats().clear();
+    guard_fastplan_disabled_path_stats().clear();
+  }
   guard_lookup_stats_force_enabled().store(true, std::memory_order_relaxed);
 }
 
@@ -447,6 +488,38 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(fastplan_stats.token_check_ns);
   result["guard_fastplan_slow_check_ns"] =
       load_relaxed(fastplan_stats.slow_check_ns);
+  py::dict fastplan_disabled_reasons;
+  py::dict fastplan_disabled_top_paths;
+  {
+    std::vector<std::pair<std::string, GuardFastPlanDisabledPathStats>>
+        path_items;
+    {
+      std::lock_guard<std::mutex> lock(guard_fastplan_disabled_stats_mutex());
+      for (const auto& item : guard_fastplan_disabled_reason_stats()) {
+        fastplan_disabled_reasons[py::str(item.first)] = item.second;
+      }
+      path_items.reserve(guard_fastplan_disabled_path_stats().size());
+      for (const auto& item : guard_fastplan_disabled_path_stats()) {
+        path_items.emplace_back(item.first, item.second);
+      }
+    }
+    std::sort(
+        path_items.begin(),
+        path_items.end(),
+        [](const auto& a, const auto& b) {
+          return a.second.count > b.second.count;
+        });
+    const size_t limit =
+        std::min(path_items.size(), kGuardFastPlanDisabledTopK);
+    for (size_t i = 0; i < limit; ++i) {
+      py::dict item_stats;
+      item_stats["count"] = path_items[i].second.count;
+      item_stats["reason"] = path_items[i].second.reason;
+      fastplan_disabled_top_paths[py::str(path_items[i].first)] = item_stats;
+    }
+  }
+  result["guard_fastplan_disabled_reasons"] = fastplan_disabled_reasons;
+  result["guard_fastplan_disabled_top_paths"] = fastplan_disabled_top_paths;
   if (guard_subtree_probe_detail_enabled()) {
     py::dict path_stats;
     std::vector<std::pair<std::string, GuardSubtreeProbePathStats>> items;
@@ -735,11 +808,25 @@ static void record_guard_fastplan_enable() {
   add_relaxed(guard_fastplan_stats().enable, 1);
 }
 
-static void record_guard_fastplan_disabled() {
+static void record_guard_fastplan_disabled(
+    const GuardSubtreeMemoSupportAnalysis& analysis) {
   if (!guard_lookup_stats_enabled()) {
     return;
   }
   add_relaxed(guard_fastplan_stats().disabled, 1);
+  if (analysis.reason.empty()) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(guard_fastplan_disabled_stats_mutex());
+  guard_fastplan_disabled_reason_stats()[analysis.reason] += 1;
+  if (!analysis.path.empty()) {
+    auto& path_stats = guard_fastplan_disabled_path_stats()[analysis.path];
+    path_stats.count += 1;
+    if (path_stats.reason.empty()) {
+      path_stats.reason = analysis.reason;
+    }
+  }
 }
 
 static void record_guard_fastplan_hit(
@@ -2220,6 +2307,9 @@ class LeafGuard {
   virtual bool supports_subtree_memo() const {
     return true;
   }
+  virtual const char* subtree_memo_unsupported_reason() const {
+    return "unsupported_leaf:LeafGuard";
+  }
 
   virtual ~LeafGuard() = default;
 
@@ -2286,6 +2376,9 @@ class LAMBDA_GUARD : public LeafGuard {
 
   bool supports_subtree_memo() const override {
     return false;
+  }
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:LAMBDA_GUARD";
   }
 
  private:
@@ -2544,6 +2637,9 @@ class DEFAULT_DEVICE : public LeafGuard {
   bool supports_subtree_memo() const override {
     return false;
   }
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:DEFAULT_DEVICE";
+  }
 
  private:
   // Save the current device and the module dict during the guard construction.
@@ -2580,6 +2676,9 @@ class GLOBAL_STATE : public LeafGuard {
   bool supports_subtree_memo() const override {
     return false;
   }
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:GLOBAL_STATE";
+  }
 
  private:
   std::unique_ptr<GlobalStateGuard> _guard;
@@ -2606,6 +2705,9 @@ class DATA_PTR_MATCH : public LeafGuard {
 
   bool supports_subtree_memo() const override {
     return false;
+  }
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:DATA_PTR_MATCH";
   }
 
  private:
@@ -2678,6 +2780,9 @@ class RelationalGuard : public LeafGuard {
 
   bool supports_subtree_memo() const override {
     return false;
+  }
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:RelationalGuard";
   }
 
   // reset the relational guard state on guard failure. This is called by the
@@ -2941,6 +3046,9 @@ class DYNAMIC_INDICES : public LeafGuard {
   bool supports_subtree_memo() const override {
     return false;
   }
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:DYNAMIC_INDICES";
+  }
 
  private:
   py::set _dynamic_indices;
@@ -3031,6 +3139,9 @@ class GuardAccessor {
   bool check_child_manager_nopybind(PyObject* obj);
   virtual bool supports_subtree_memo() const {
     return true;
+  }
+  virtual const char* subtree_memo_unsupported_reason() const {
+    return "unsupported_accessor:GuardAccessor";
   }
   virtual const char* stats_name() const {
     return "GuardAccessor";
@@ -3302,17 +3413,31 @@ class GuardManager {
     return _source.find("._modules[") == std::string::npos;
   }
 
-  virtual bool supports_subtree_memo_recursive() const {
+  virtual bool supports_subtree_memo_recursive(
+      GuardSubtreeMemoSupportAnalysis* analysis = nullptr) const {
     for (const auto& guard : _leaf_guards) {
       if (!guard->supports_subtree_memo()) {
+        if (analysis != nullptr) {
+          analysis->set_if_empty(
+              guard->subtree_memo_unsupported_reason(), _source);
+        }
         return false;
       }
     }
     for (const auto& accessor : _accessors) {
       if (!accessor->supports_subtree_memo()) {
+        if (analysis != nullptr) {
+          analysis->set_if_empty(
+              accessor->subtree_memo_unsupported_reason(),
+              accessor->get_source());
+        }
         return false;
       }
-      if (!accessor->get_guard_manager()->supports_subtree_memo_recursive()) {
+      if (!accessor->get_guard_manager()->supports_subtree_memo_recursive(
+              analysis)) {
+        if (analysis != nullptr && analysis->path.empty()) {
+          analysis->path = accessor->get_source();
+        }
         return false;
       }
     }
@@ -3330,10 +3455,14 @@ class GuardManager {
     if (collect_stats) {
       record_guard_fastplan_candidate();
     }
-    if (memo.tokens.empty() && !supports_subtree_memo_recursive()) {
+    GuardSubtreeMemoSupportAnalysis analysis;
+    GuardSubtreeMemoSupportAnalysis* analysis_ptr =
+        collect_stats ? &analysis : nullptr;
+    if (memo.tokens.empty() &&
+        !supports_subtree_memo_recursive(analysis_ptr)) {
       memo.disabled = true;
       if (collect_stats) {
-        record_guard_fastplan_disabled();
+        record_guard_fastplan_disabled(analysis);
       }
       return check_nopybind(value);
     }
@@ -4261,17 +4390,20 @@ class DictGuardManager : public GuardManager {
     return _is_exact_dict_type;
   }
 
-  bool supports_subtree_memo_recursive() const override {
-    if (!GuardManager::supports_subtree_memo_recursive()) {
+  bool supports_subtree_memo_recursive(
+      GuardSubtreeMemoSupportAnalysis* analysis = nullptr) const override {
+    if (!GuardManager::supports_subtree_memo_recursive(analysis)) {
       return false;
     }
     for (const auto& item : _key_value_managers) {
       const auto& key_manager = item.second.first;
-      if (key_manager && !key_manager->supports_subtree_memo_recursive()) {
+      if (key_manager && !key_manager->supports_subtree_memo_recursive(
+                             analysis)) {
         return false;
       }
       const auto& value_manager = item.second.second;
-      if (value_manager && !value_manager->supports_subtree_memo_recursive()) {
+      if (value_manager && !value_manager->supports_subtree_memo_recursive(
+                               analysis)) {
         return false;
       }
     }
@@ -4479,6 +4611,9 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
   bool supports_subtree_memo() const override {
     return false;
   }
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:TORCH_FUNCTION_MODE_STACK";
+  }
 
  private:
   std::vector<PyTypeObject*> _ref_stack;
@@ -4505,6 +4640,9 @@ class DISPATCH_KEY_SET_MATCH : public LeafGuard {
 
   bool supports_subtree_memo() const override {
     return false;
+  }
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:DISPATCH_KEY_SET_MATCH";
   }
 
  private:
@@ -4593,6 +4731,9 @@ class TENSOR_MATCH : public LeafGuard {
 
   bool supports_subtree_memo() const override {
     return false;
+  }
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:TENSOR_MATCH";
   }
 
  private:
@@ -6333,6 +6474,9 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
   bool supports_subtree_memo() const override {
     return false;
   }
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_accessor:CallFunctionNoArgsGuardAccessor";
+  }
 
  public: // cloning functions
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -6410,6 +6554,9 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
 
   bool supports_subtree_memo() const override {
     return false;
+  }
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_accessor:PythonLambdaGuardAccessor";
   }
 
  public: // cloning functions
