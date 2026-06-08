@@ -787,6 +787,28 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i2 * 4 == i3))
         self.assertExpectedInline(str(i3), """u3""")
 
+    def test_unbacked_divisibility_singleton_quotient(self):
+        # See https://github.com/pytorch/pytorch/issues/123651
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        q = shape_env.create_unbacked_symint()
+        i0_sym = i0.node.expr
+        q_sym = q.node.expr
+        _constrain_range_for_size(i0)
+        _constrain_range_for_size(q)
+        self.assertTrue(expect_true(i0 > 0))
+        self.assertTrue(expect_true(i0 <= 448))
+
+        shape_env._set_replacement(i0_sym, 447 * q_sym, "divisibility")
+
+        self.assertEqual(shape_env.replace(q_sym), 1)
+        self.assertEqual(shape_env.replace(i0_sym), 447)
+        self.assertExpectedInline(str(shape_env.var_to_range[q_sym]), """VR[1, 1]""")
+        self.assertExpectedInline(
+            str(shape_env.var_to_range[i0_sym]), """VR[447, 447]"""
+        )
+        self.assertNotIn(q_sym, shape_env.size_like)
+
     def test_avoid_unbacked_substitution(self):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()
