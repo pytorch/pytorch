@@ -905,12 +905,14 @@ def trace_frame(
     package: CompilePackage | None = None,
 ) -> DynamoTracerOutput:
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
+    from torch._dynamo.eval_frame import get_fullgraph_compiled_frame_count
 
     if (
         torch.cuda.is_available()
         and hasattr(torch._C, "_cuda_isCurrentStreamCapturing")
         and not isinstance(torch._C._cuda_isCurrentStreamCapturing, type)
         and torch.cuda.is_current_stream_capturing()
+        and get_fullgraph_compiled_frame_count() == -1
     ):
         raise exc.TorchRuntimeError(
             "torch.compile cannot JIT compile during CUDA graph capture. "

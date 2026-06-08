@@ -764,6 +764,12 @@ int fullgraph_compiled_frame_count = -1;
 // skipped.
 bool fullgraph_error_on_nested_compile = false;
 
+// Get the fullgraph compiled frame counter
+static PyObject* get_fullgraph_compiled_frame_count_py(
+    PyObject* dummy,
+    PyObject* args) {
+  return PyLong_FromLong(fullgraph_compiled_frame_count);
+}
 // Set the fullgraph compiled frame counter and return the old value.
 // If setting to >= 0 (activating) and already active, no-op.
 static PyObject* set_fullgraph_compiled_frame_count_py(
@@ -811,6 +817,10 @@ static PyMethodDef _methods[] = {
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_guard_complete_hook", set_guard_complete_hook, METH_O, NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
+    {"get_fullgraph_compiled_frame_count",
+     get_fullgraph_compiled_frame_count_py,
+     METH_NOARGS,
+     NULL},
     {"set_fullgraph_compiled_frame_count",
      set_fullgraph_compiled_frame_count_py,
      METH_O,
