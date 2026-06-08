@@ -311,6 +311,20 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
         copy_stream = get_stream(epi_copy)
         if arg_stream != copy_stream:
             set_stream(epi_copy, get_stream_or_current_stream(epi_copy.args[1]))
+    for foreach_copy in gm.graph.find_nodes(
+        op="call_function", target=aten._foreach_copy_.default
+    ):
+        srcs = foreach_copy.args[1]
+        if not isinstance(srcs, (list, tuple)) or len(srcs) == 0:
+            continue
+        if not all(isinstance(src, torch.fx.Node) for src in srcs):
+            continue
+        first_src = srcs[0]
+        arg_stream = get_stream(first_src)
+        assert all(get_stream(src) == arg_stream for src in srcs)  # noqa: S101
+        copy_stream = get_stream(foreach_copy)
+        if arg_stream != copy_stream:
+            set_stream(foreach_copy, get_stream_or_current_stream(first_src))
 
 
 def populate_fw_metadata_with_stream_indices(
