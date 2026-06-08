@@ -2971,6 +2971,45 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(grads, expected_grads)
             self.assertEqual(add_input_grads, expected_add_input_grads)
 
+    @parametrize("include_final_carry", [False, True])
+    def test_scan_closure_scalar_carry_grad(self, include_final_carry):
+        dtype = torch.float64
+        x = torch.tensor([0.11, -0.37, 0.23, 0.41, -0.19], dtype=dtype)
+        a = torch.tensor(0.7, dtype=dtype)
+        carry0 = torch.tensor(0.2, dtype=dtype)
+
+        def loop_recurrence(x, a, carry0):
+            carry = carry0
+            ys = []
+            for x_t in x:
+                carry = a * carry + x_t
+                ys.append(carry)
+            return carry, torch.stack(ys)
+
+        def scan_recurrence(x, a, carry0):
+            def step(carry, x_t):
+                carry_next = a * carry + x_t
+                return carry_next.clone(), carry_next.clone()
+
+            return scan(step, carry0, x, dim=0)
+
+        def value_and_grad(recurrence):
+            a_req_grad = a.detach().clone().requires_grad_()
+            carry, ys = recurrence(x, a_req_grad, carry0)
+            loss = ys.square().sum()
+            if include_final_carry:
+                loss = loss + carry.square()
+            (grad_a,) = torch.autograd.grad(loss, a_req_grad)
+            return loss.detach(), grad_a.detach(), carry.detach(), ys.detach()
+
+        scan_loss, scan_grad, scan_carry, scan_ys = value_and_grad(scan_recurrence)
+        loop_loss, loop_grad, loop_carry, loop_ys = value_and_grad(loop_recurrence)
+
+        self.assertEqual(scan_carry, loop_carry)
+        self.assertEqual(scan_ys, loop_ys)
+        self.assertEqual(scan_loss, loop_loss)
+        self.assertEqual(scan_grad, loop_grad)
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
