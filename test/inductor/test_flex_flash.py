@@ -908,10 +908,6 @@ GQA_MQA_BLOCK_MASK_CASES = [
 class TestFlexFlash(InductorTestCase):
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
     @xfailIfSM120OrLater
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: params["case"].requires_grad and IS_SM90,
-    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
     def test_flash_attention_score_mod_cases(self, device, dtype, case):
@@ -2470,14 +2466,12 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             self._flash_triton_dynamic(q, k, v)
 
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_backward(self):
         """Test backward with dynamic sequence lengths."""
         self._run_dynamic_test(seq_lens=[128, 256, 512], requires_grad=True)
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_backward_with_score_mod(self):
         """Test backward with score_mod and dynamic sequence lengths."""
 
@@ -2715,7 +2709,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self.assertEqual(out.shape, q.shape)
 
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_captured_buffer_varying_heads(self):
         """Dynamic head_count with captured tensor buffer under FLASH/TRITON parity."""
         torch._dynamo.reset()
