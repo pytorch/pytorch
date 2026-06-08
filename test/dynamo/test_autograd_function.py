@@ -583,11 +583,12 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             return MyMM.apply(a, b)
 
         a = torch.randn([64, 64], dtype=torch.float32, requires_grad=True)
-        grad = a.clone()
-        res = fn(a, a)
+        b = torch.randn([64, 64], dtype=torch.float32, requires_grad=True)
+        res = fn(a, b)
+        grad = torch.randn_like(res)
         res.backward(grad)
 
-        self.assertEqual(res, MyMM.apply(a, a))
+        self.assertEqual(res, MyMM.apply(a, b))
         self.assertEqual(cnt.frame_count, 1)
 
     def test_set_materialize_grads_no_graph_break(self):
@@ -1883,6 +1884,47 @@ class GraphModule(torch.nn.Module):
             return (None, add, None, add_1)
 """,
         )
+
+    def test_duplicate_input_accumulates_grad(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.save_for_backward(a, b)
+                return a * b + a + b
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                a, b = ctx.saved_tensors
+                return grad_output * (b + 1), grad_output * (a + 1)
+
+        def fn(x):
+            return Foo.apply(x, x).sum()
+
+        def check_fallback():
+            x = torch.tensor([0.7, -1.3, 2.1, 0.05, -0.5], requires_grad=True)
+
+            x_ref = x.detach().clone().requires_grad_(True)
+            ref = fn(x_ref)
+            ref.backward()
+
+            torch._dynamo.reset()
+            x_compiled = x.detach().clone().requires_grad_(True)
+            res = torch.compile(fn, backend="eager", fullgraph=False)(x_compiled)
+            res.backward()
+
+            self.assertEqual(ref, res)
+            self.assertEqual(x_ref.grad, x_compiled.grad)
+
+        check_fallback()
+
+        torch._dynamo.reset()
+        x = torch.randn(5, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "duplicate tensor input",
+        ):
+            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            out.backward()
 
     def test_udf_output(self):
         class Foo:
