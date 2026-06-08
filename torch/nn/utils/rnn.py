@@ -5,6 +5,7 @@ from typing_extensions import Self
 
 import torch
 from torch import _VF, Tensor
+from torch._jit_internal import unused
 from torch.utils._typing_utils import copy_method_params
 
 
@@ -34,6 +35,42 @@ def bind(optional: _T | None, fn: Callable[[_T], _R]) -> _R | None:
     if optional is None:
         return None
     return fn(optional)
+
+
+@unused
+def _maybe_get_unbacked_total_length(
+    sequence: "PackedSequence",
+    total_length: Any,
+    max_seq_length: Any,
+) -> Any:
+    if isinstance(total_length, torch.Tensor):
+        total_length = total_length.item()
+
+    from torch.fx.experimental.symbolic_shapes import (
+        free_unbacked_symbols,
+        guard_or_false,
+    )
+
+    if guard_or_false(total_length < max_seq_length):
+        raise ValueError(
+            "Expected total_length to be at least the length "
+            "of the longest sequence in input, but got "
+            f"total_length={total_length} and max sequence length being {max_seq_length}"
+        )
+    max_seq_length = total_length
+    if (
+        isinstance(max_seq_length, torch.SymInt)
+        and free_unbacked_symbols(max_seq_length)
+        and isinstance(total_length, torch.SymInt)
+        and free_unbacked_symbols(total_length)
+    ):
+        torch._check(
+            total_length == sequence.batch_sizes.size(0),
+            lambda: "unbacked total_length is only supported when it "
+            "matches the PackedSequence sequence length",
+        )
+        max_seq_length = 0
+    return max_seq_length
 
 
 class PackedSequence(PackedSequence_):
@@ -381,13 +418,18 @@ def pad_packed_sequence(
     """
     max_seq_length = sequence.batch_sizes.size(0)
     if total_length is not None:
-        if total_length < max_seq_length:
-            raise ValueError(
-                "Expected total_length to be at least the length "
-                "of the longest sequence in input, but got "
-                f"total_length={total_length} and max sequence length being {max_seq_length}"
+        if torch.jit.is_scripting():
+            if total_length < max_seq_length:
+                raise ValueError(
+                    "Expected total_length to be at least the length "
+                    "of the longest sequence in input, but got "
+                    f"total_length={total_length} and max sequence length being {max_seq_length}"
+                )
+            max_seq_length = total_length
+        else:
+            max_seq_length = _maybe_get_unbacked_total_length(
+                sequence, total_length, max_seq_length
             )
-        max_seq_length = total_length
     padded_output, lengths = _VF._pad_packed_sequence(
         sequence.data, sequence.batch_sizes, batch_first, padding_value, max_seq_length
     )

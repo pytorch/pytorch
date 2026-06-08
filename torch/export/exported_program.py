@@ -199,6 +199,7 @@ def _override_composite_implicit_decomp(cia_ops_to_callable):
     # functional but not really aka dropout), for these cases, we just decompose.
     saved_tables = {}
     patched_ops = set()
+    registered_fake_impl_ops = set()
     for op_overload, decomp_callable in cia_ops_to_callable.items():
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
@@ -242,6 +243,7 @@ def _override_composite_implicit_decomp(cia_ops_to_callable):
                     original_callable=orig_cia_callable,
                 )
             )
+            registered_fake_impl_ops.add(op_overload)
 
         for key in _BACKEND_KEYS_TO_OVERRIDE:
             if key not in op_overload.py_kernels:
@@ -269,7 +271,8 @@ def _override_composite_implicit_decomp(cia_ops_to_callable):
             op.py_kernels.clear()
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
-            _deregister_op_impl(op)
+            if op in registered_fake_impl_ops:
+                _deregister_op_impl(op)
 
 
 def _split_decomp_table_to_cia_and_python_decomp(

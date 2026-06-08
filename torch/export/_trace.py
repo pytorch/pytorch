@@ -48,6 +48,7 @@ from torch._export.utils import (
     _compiling_state_context,
     _fakify_params_buffers,
     _populate_param_buffer_metadata_to_new_gm,
+    _special_op_to_preserve_cia,
     _update_gm_meta_if_possible,
     apply_runtime_assertion_pass,
     placeholder_naming_pass,
@@ -105,6 +106,7 @@ from torch.utils._sympy.value_ranges import ValueRangeError
 
 from .exported_program import (
     _disable_prexisiting_fake_mode,
+    _override_composite_implicit_decomp,
     ExportedProgram,
     InputKind,
     ModuleCallEntry,
@@ -188,6 +190,16 @@ def _ignore_backend_decomps():
         torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
         torch.backends.cudnn.set_flags(*orig_cudnn_flag)
+
+
+@contextmanager
+def _preserve_packed_sequence_ops():
+    packed_sequence_ops = {
+        torch.ops.aten.lstm.data: _special_op_to_preserve_cia,
+        torch.ops.aten._pad_packed_sequence.default: _special_op_to_preserve_cia,
+    }
+    with _override_composite_implicit_decomp(packed_sequence_ops):
+        yield
 
 
 @contextmanager
@@ -895,7 +907,7 @@ def _export_to_torch_ir(
                 ctx = _wrap_submodules(  # type: ignore[assignment]
                     f, preserve_module_call_signature, module_call_specs
                 )
-            with ctx, _ignore_backend_decomps():
+            with ctx, _ignore_backend_decomps(), _preserve_packed_sequence_ops():
                 if torch._export.config.use_new_tracer_experimental:
                     from torch._dynamo.functional_export import (
                         _dynamo_graph_capture_for_export,
@@ -1035,6 +1047,7 @@ def _export_to_aten_ir(
             )
         )
         stack.enter_context(_ignore_backend_decomps())
+        stack.enter_context(_preserve_packed_sequence_ops())
         stack.enter_context(_compiling_state_context())
         stack.enter_context(custom_triton_ops_decomposition_ctx())
         stack.enter_context(torch.no_grad())
@@ -2006,6 +2019,7 @@ def _export_to_aten_ir_make_fx(
             )
         )
         stack.enter_context(_ignore_backend_decomps())
+        stack.enter_context(_preserve_packed_sequence_ops())
         stack.enter_context(_compiling_state_context())
         gm, graph_signature = transform(_make_fx_helper)(
             stack,
