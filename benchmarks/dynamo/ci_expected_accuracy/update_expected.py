@@ -22,6 +22,7 @@ import subprocess
 import sys
 import urllib
 from concurrent.futures import as_completed, ThreadPoolExecutor
+from contextlib import closing
 from io import BytesIO
 from itertools import product
 from pathlib import Path
@@ -71,35 +72,134 @@ ARTIFACTS_QUERY_URL = (
     "https://console-api.clickhouse.cloud/.api/query-endpoints/"  # @lint-ignore
     "c1cdfadc-6bb2-4a91-bbf9-3d19e1981cd4/run?format=JSON"
 )
+GITHUB_API_URL = "https://api.github.com"
+TARGET_WORKFLOWS = ("inductor", "inductor-periodic")
+SKIPPED_WORKFLOW_EVENTS = {"workflow_run", "repository_dispatch"}
+SKIPPED_JOB_NAMES = {"ciflow_should_run", "generate-test-matrix"}
 CSV_LINTER = str(
     Path(__file__).absolute().parents[3]
     / "tools/linter/adapters/no_merge_conflict_csv_linter.py"
 )
 
 
-def query_job_sha(repo, sha):
+def query_job_sha_from_clickhouse(repo, sha, key_id, key_secret):
     params = {
         "queryVariables": {"sha": sha, "repo": repo},
     }
-    # If you are a Meta employee, go to P1679979893 to get the id and secret.
-    # Otherwise, ask a Meta employee give you the id and secret.
-    try:
-        KEY_ID = os.environ["CH_KEY_ID"]
-        KEY_SECRET = os.environ["CH_KEY_SECRET"]
-    except KeyError as e:
-        raise RuntimeError(
-            "CH_KEY_ID and CH_KEY_SECRET environment variables must be set. "
-            "If you are a Meta employee, go to P1679979893 to get the id and secret. "
-            "Otherwise, ask a Meta employee to give you the id and secret."
-        ) from e
 
     r = requests.post(
         url=ARTIFACTS_QUERY_URL,
         data=json.dumps(params),
         headers={"Content-Type": "application/json"},
-        auth=(KEY_ID, KEY_SECRET),
+        auth=(key_id, key_secret),
+        timeout=30,
     )
+    r.raise_for_status()
     return r.json()["data"]
+
+
+def github_request_headers():
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    github_token = os.environ.get("GITHUB_TOKEN")
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
+    return headers
+
+
+def github_pages(url, params):
+    headers = github_request_headers()
+    while url:
+        with closing(
+            requests.get(url, params=params, headers=headers, timeout=30)
+        ) as r:
+            try:
+                r.raise_for_status()
+            except requests.HTTPError as e:
+                if (
+                    r.status_code == 403
+                    and r.headers.get("x-ratelimit-remaining") == "0"
+                ):
+                    raise RuntimeError(
+                        "GitHub API rate limit exceeded while querying workflow jobs. "
+                        "Set GITHUB_TOKEN to raise the limit."
+                    ) from e
+                raise
+            page = r.json()
+            next_url = r.links.get("next", {}).get("url")
+        yield page
+        url = next_url
+        params = None
+
+
+def query_job_sha_from_github(repo, sha):
+    results = []
+    runs_url = f"{GITHUB_API_URL}/repos/{repo}/actions/runs"
+    for runs_page in github_pages(runs_url, {"head_sha": sha, "per_page": 100}):
+        for workflow in runs_page.get("workflow_runs", []):
+            workflow_name = workflow.get("name")
+            if workflow_name not in TARGET_WORKFLOWS:
+                continue
+            if workflow.get("event") in SKIPPED_WORKFLOW_EVENTS:
+                continue
+            if workflow.get("head_sha") != sha:
+                continue
+
+            workflow_id = workflow["id"]
+            jobs_url = f"{GITHUB_API_URL}/repos/{repo}/actions/runs/{workflow_id}/jobs"
+            for jobs_page in github_pages(jobs_url, {"filter": "all", "per_page": 100}):
+                for job in jobs_page.get("jobs", []):
+                    job_name = job.get("name")
+                    if job_name in SKIPPED_JOB_NAMES:
+                        continue
+                    if job.get("head_sha") != sha:
+                        continue
+                    results.append(
+                        {
+                            "workflowName": workflow_name,
+                            "jobName": job_name,
+                            "id": str(job["id"]),
+                            "runAttempt": job.get(
+                                "run_attempt", workflow.get("run_attempt", 1)
+                            ),
+                            "workflowId": str(workflow_id),
+                            "time": job.get("created_at")
+                            or workflow.get("created_at", ""),
+                        }
+                    )
+
+    return sorted(results, key=lambda r: (r["workflowName"], r["jobName"]))
+
+
+def query_job_sha(repo, sha):
+    # Prefer the CI ClickHouse endpoint when credentials are available, but
+    # local contributors can get the same public job metadata from GitHub.
+    key_id = os.environ.get("CH_KEY_ID")
+    key_secret = os.environ.get("CH_KEY_SECRET")
+    if key_id and key_secret:
+        try:
+            return query_job_sha_from_clickhouse(repo, sha, key_id, key_secret)
+        except requests.RequestException as e:
+            print(
+                "Warning: ClickHouse query failed; falling back to GitHub "
+                f"Actions API. Error: {e}",
+                file=sys.stderr,
+            )
+    elif key_id or key_secret:
+        print(
+            "Warning: only one of CH_KEY_ID and CH_KEY_SECRET is set; "
+            "falling back to GitHub Actions API.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "ClickHouse credentials not found; querying GitHub Actions API.",
+            file=sys.stderr,
+        )
+
+    return query_job_sha_from_github(repo, sha)
 
 
 def parse_job_name(job_str):
@@ -113,14 +213,14 @@ def parse_test_str(test_str):
 S3_BASE_URL = "https://gha-artifacts.s3.amazonaws.com"
 
 
-def get_artifacts_urls(results, suites, is_rocm=False):
+def get_artifacts_urls(repo, results, suites, is_rocm=False):
     urls = {}
     # Sort by time (oldest first) to prefer earlier completed workflow runs
     # over potentially still-running newer ones
     sorted_results = sorted(results, key=lambda x: x.get("time", ""))
     for r in sorted_results:
         if (
-            r["workflowName"] in ("inductor", "inductor-periodic")
+            r["workflowName"] in TARGET_WORKFLOWS
             and "test" in r["jobName"]
             and "build" not in r["jobName"]
             and "runner-determinator" not in r["jobName"]
@@ -304,8 +404,8 @@ if __name__ == "__main__":
     results = query_job_sha(repo, args.sha)
 
     # Get URLs for both CUDA and ROCm
-    cuda_urls = get_artifacts_urls(results, suites, is_rocm=False)
-    rocm_urls = get_artifacts_urls(results, suites, is_rocm=True)
+    cuda_urls = get_artifacts_urls(repo, results, suites, is_rocm=False)
+    rocm_urls = get_artifacts_urls(repo, results, suites, is_rocm=True)
 
     # Download CUDA and ROCm artifacts in parallel
     print("Downloading CUDA and ROCm artifacts in parallel...")
