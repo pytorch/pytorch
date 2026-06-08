@@ -26,6 +26,14 @@ pushd "$PYTORCH_ROOT/.ci/pytorch/"
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
 
 if [[ "$OS" == "windows-arm64" ]]; then
+    # The arm64 bats read %BUILD_TYPE% (and %DEBUG% for libtorch) directly --
+    # they bypass build_env_setup.py, which is where the x64 path turns
+    # LIBTORCH_CONFIG=debug into DEBUG=1 + CMAKE_BUILD_TYPE=Debug. Translate
+    # the same knob here so arm64 debug builds aren't silently built release.
+    if [[ "${LIBTORCH_CONFIG:-}" == "debug" ]]; then
+        export BUILD_TYPE=Debug
+        export DEBUG=1
+    fi
     if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
         ./windows/arm64/build_libtorch.bat
     elif [[ "$PACKAGE_TYPE" == 'wheel' ]]; then
