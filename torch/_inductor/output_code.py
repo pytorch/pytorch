@@ -37,6 +37,8 @@ from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
     CudagraphMetadata,
+    get_input_storage_mutation_info,
+    get_input_storage_mutation_reason,
     get_partition_cudagraph_metadata,
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
@@ -159,7 +161,7 @@ def maybe_handle_backward_generation(
 
     # See [Backward Generation Handling]
     # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
-    # know we are we running the backward even if we will not run it in cudagraphs
+    # know we are running the backward even if we will not run it in cudagraphs
     if is_backward and config.triton.cudagraph_trees:
         assert boxed_forward_device_index is not None
         assert boxed_forward_device_index.value is not None
@@ -297,7 +299,7 @@ def cudagraph_partition_post_compile(
     boxed_forward_device_index: BoxedDeviceIndex | None,
 ) -> None:
     """
-    Cudagraphify each partition functions, which first prepares the necessary
+    Cudagraphify each partition function, which first prepares the necessary
     metadata and then applies the cudagraphify function to each partition.
 
     Assuming all partition functions are cudagraphified and share the same order
@@ -590,6 +592,7 @@ class CompiledFxGraph(OutputCode):
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
         self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
+        storage_mutation_info = get_input_storage_mutation_info(gm)
         self.fx_kwargs = {}
         self.inputs_to_check = ()
 
@@ -627,7 +630,14 @@ class CompiledFxGraph(OutputCode):
                     # Check mutation later to support cudagraph-managed tensors
                     has_mutation = None
 
+                storage_mutation_reason = get_input_storage_mutation_reason(
+                    storage_mutation_info,
+                )
+                if storage_mutation_reason is not None:
+                    self.disabled_cudagraphs_reason = storage_mutation_reason
+
                 cudagraph_tests = [
+                    (storage_mutation_reason is None, "input storage mutation"),
                     (not has_mutation, "mutated inputs"),
                     (
                         not config.force_disable_cudagraph_TESTING_ONLY,

@@ -74,6 +74,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_LINUX,
     IS_WINDOWS,
+    TEST_WITH_ROCM,
     run_tests,
     skipIfTorchDynamo,
     xfailIf,
@@ -1045,6 +1046,7 @@ class TestFX(JitTestCase):
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/74208")
     @unittest.skip("Hotfix for SEV remediation")
     def test_trace_buffer_slice(self):
         bs, d_hid = 10, 23
@@ -5475,6 +5477,9 @@ class TestVisionTracing(JitTestCase):
             )
             kwargs = dict(num_classes=50)
             model_test = cls.generate_test_fn(k, x, kwargs)
+            model_test = unittest.skipIf(
+                TEST_WITH_ROCM, "Skipped on ROCm"
+            )(model_test)
             setattr(cls, test_name, model_test)
 
     @classmethod

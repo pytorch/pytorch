@@ -1,6 +1,8 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
+import json
+import math
 import os
 import unittest
 from itertools import product
@@ -20,6 +22,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     blas_library_context,
+    IS_SM90,
     PLATFORM_SUPPORTS_BF16,
     SM80OrLater,
     SM90OrLater,
@@ -51,6 +54,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
+    TemporaryFileName,
     decorateIf,
 )
 
@@ -94,6 +98,16 @@ def rocm_group_gemm_ck_env(value):
         else:
             os.environ[var] = old
 
+
+@contextlib.contextmanager
+def sm_carveout(value: int | None):
+    torch._C._set_sm_carveout_experimental(value)
+    try:
+        yield
+    finally:
+        torch._C._set_sm_carveout_experimental(None)
+
+
 class TestMatmulCuda(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -102,6 +116,84 @@ class TestMatmulCuda(InductorTestCase):
     def tearDown(self):
         torch.backends.cuda.matmul.allow_tf32 = True
         super().tearDown()
+
+    @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
+    def test_legacy_cublas_honors_sm_carveout(self, device):
+        if torch.version.cuda is None or not IS_SM90:
+            raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA and sm90")
+
+        torch._C._set_sm_carveout_experimental(None)
+        dtype = torch.float16
+        sm_count = torch.cuda.get_device_properties().multi_processor_count
+        carveout = max(1, sm_count // 2)
+        a = torch.empty(8192, 8192, device=device, dtype=dtype)
+        b = torch.empty(8192, 8192, device=device, dtype=dtype)
+
+        def mm_grid_size(carveout_value: int | None) -> int:
+            with sm_carveout(carveout_value), TemporaryFileName(mode="w+") as fname:
+                with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                    torch.mm(a, b)
+                prof.export_chrome_trace(fname)
+                with open(fname) as trace_file:
+                    total_grid_size = 0
+                    kernel_count = 0
+                    for evt in json.load(trace_file)["traceEvents"]:
+                        grid = evt.get("args", {}).get("grid")
+                        if evt.get("cat", "") == "kernel" and grid:
+                            total_grid_size += math.prod(grid)
+                            kernel_count += 1
+
+            self.assertNotEqual(0, kernel_count)
+            return total_grid_size
+
+        with blas_library_context("cublas"):
+            torch.mm(a, b)
+            torch.cuda.synchronize()
+
+            no_carveout = mm_grid_size(None)
+            carveout_0 = mm_grid_size(0)
+            carved_out = mm_grid_size(carveout)
+            no_carveout_again = mm_grid_size(None)
+
+        self.assertEqual(no_carveout, carveout_0)
+        self.assertNotEqual(no_carveout, carved_out)
+        self.assertEqual(no_carveout, no_carveout_again)
+
+    @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
+    def test_sm_carveout_invalid_value_throws(self, device):
+        if torch.version.cuda is None or not IS_SM90:
+            raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA and sm90")
+        sm_count = torch.cuda.get_device_properties().multi_processor_count
+        a = torch.empty(64, 64, device=device, dtype=torch.float16)
+        b = torch.empty(64, 64, device=device, dtype=torch.float16)
+
+        with blas_library_context("cublas"):
+            with sm_carveout(sm_count):
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    r"SM carveout must be between 0 and \d+",
+                    torch.mm,
+                    a,
+                    b,
+                )
+
+            with sm_carveout(sm_count + 1):
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    r"SM carveout must be between 0 and \d+",
+                    torch.mm,
+                    a,
+                    b,
+                )
+
+            with sm_carveout(-1):
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    r"SM carveout must be between 0 and \d+",
+                    torch.mm,
+                    a,
+                    b,
+                )
 
     def cublas_addmm(
         self,
@@ -262,6 +354,40 @@ class TestMatmulCuda(InductorTestCase):
             out = torch.addmm(b, m1, m2, beta=1.0)
             self.assertEqual(out.sum().item(), 0.0)
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_precision
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI200_ARCH)
+    @parametrize("batched", [False, True])
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_fp16_backward_preserves_subnormals_rocm(self, backend, batched):
+        # Regression test for issue #182952. On ROCm, the hipBLASLt path for
+        # at::Half had no equivalent of rocBLAS's fp16_alt_impl, so backward
+        # fp16 GEMMs silently flushed subnormals to zero. The dispatcher now
+        # routes fp16 backward GEMMs to rocBLAS on gfx90a regardless of the
+        # user's preferred backend.
+        dtype = torch.float16
+        M = K = N = 64
+        sub_val = torch.finfo(dtype).tiny / 2
+        ref = M * sub_val
+        with blas_library_context(backend):
+            if batched:
+                B = 3
+                x = torch.ones(B, M, K, dtype=dtype, device="cuda")
+                w = torch.nn.Parameter(
+                    torch.ones(B, K, N, dtype=dtype, device="cuda")
+                )
+                d = torch.full((B, M, N), sub_val, dtype=dtype, device="cuda")
+            else:
+                x = torch.ones(M, K, dtype=dtype, device="cuda")
+                w = torch.nn.Parameter(
+                    torch.ones(K, N, dtype=dtype, device="cuda")
+                )
+                d = torch.full((M, N), sub_val, dtype=dtype, device="cuda")
+            (x @ w).backward(d)
+            torch.cuda.synchronize()
+            grad = w.grad.flatten()[0].item()
+            self.assertEqual(grad, ref)
 
     @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above
@@ -771,7 +897,9 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("batch_size", [None, 1, 16])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
-        if torch.version.hip and _get_torch_rocm_version() < (7, 2, 1):
+        if torch.version.hip and (
+            _get_torch_rocm_version() < (7, 2, 1) or isRocmArchAnyOf(MI200_ARCH)
+        ):
             msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
                 raise unittest.SkipTest(msg)
@@ -838,7 +966,9 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("high_precision_self", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, broadcast_self, high_precision_self, backend):
-        if torch.version.hip and _get_torch_rocm_version() < (7, 2, 1):
+        if torch.version.hip and (
+            _get_torch_rocm_version() < (7, 2, 1) or isRocmArchAnyOf(MI200_ARCH)
+        ):
             msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
                 raise unittest.SkipTest(msg)

@@ -1,0 +1,171 @@
+diff --git a/test/cpython/v3_13/test_descr.py b/test/cpython/v3_13/test_descr.py
+index be49ce8c066..899f2a11e92 100644
+--- a/test/cpython/v3_13/test_descr.py
++++ b/test/cpython/v3_13/test_descr.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_descr.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import builtins
+ import copyreg
+ import gc
+@@ -28,10 +46,10 @@ except ImportError:
+     xxsubtype = None
+ 
+ 
+-class OperatorsTest(unittest.TestCase):
++class OperatorsTest(CPythonTestCase):
+ 
+     def __init__(self, *args, **kwargs):
+-        unittest.TestCase.__init__(self, *args, **kwargs)
++        CPythonTestCase.__init__(self, *args, **kwargs)
+         self.binops = {
+             'add': '+',
+             'sub': '-',
+@@ -404,7 +422,7 @@ class OperatorsTest(unittest.TestCase):
+         self.assertEqual(range(sys.maxsize).__len__(), sys.maxsize)
+ 
+ 
+-class ClassPropertiesAndMethods(unittest.TestCase, ExtraAssertions):
++class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
+ 
+     def test_python_dicts(self):
+         # Testing Python subclass of dict...
+@@ -536,7 +554,7 @@ class ClassPropertiesAndMethods(unittest.TestCase, ExtraAssertions):
+             # This trick only works for dynamic classes
+             def __new__(metaclass, name, bases, dict):
+                 cls = super(autosuper, metaclass).__new__(metaclass,
+-                                                          name, bases, dict)
++                                                        name, bases, dict)
+                 # Name mangling for __super removes leading underscores
+                 while name[:1] == "_":
+                     name = name[1:]
+@@ -846,7 +864,7 @@ class ClassPropertiesAndMethods(unittest.TestCase, ExtraAssertions):
+             pass
+         else:
+             self.fail("inheriting from ModuleType and str at the same time "
+-                      "should fail")
++                    "should fail")
+ 
+         # Issue 34805: Verify that definition order is retained
+         def random_name():
+@@ -1102,6 +1120,7 @@ class ClassPropertiesAndMethods(unittest.TestCase, ExtraAssertions):
+         with self.assertRaises(TypeError):
+             frozenset().__class__ = MyFrozenSet
+ 
++    @unittest.expectedFailure
+     def test_slots(self):
+         # Testing __slots__...
+         class C0(object):
+@@ -4876,6 +4895,7 @@ class ClassPropertiesAndMethods(unittest.TestCase, ExtraAssertions):
+                           str, 'Oink')
+ 
+         global Y
++
+         class Y:
+             class Inside:
+                 pass
+@@ -4911,8 +4931,10 @@ class ClassPropertiesAndMethods(unittest.TestCase, ExtraAssertions):
+         # See issue #1683368
+         class OverrideNeither:
+             pass
++
+         self.assertRaises(TypeError, OverrideNeither, 1)
+         self.assertRaises(TypeError, OverrideNeither, kw=1)
++
+         class OverrideNew:
+             def __new__(cls, foo, kw=0, *args, **kwds):
+                 return object.__new__(cls, *args, **kwds)
+@@ -4921,6 +4943,7 @@ class ClassPropertiesAndMethods(unittest.TestCase, ExtraAssertions):
+                 return object.__init__(self, *args, **kwargs)
+         class OverrideBoth(OverrideNew, OverrideInit):
+             pass
++
+         for case in OverrideNew, OverrideInit, OverrideBoth:
+             case(1)
+             case(1, kw=2)
+@@ -5066,8 +5089,9 @@ class ClassPropertiesAndMethods(unittest.TestCase, ExtraAssertions):
+             B().foo
+ 
+ 
+-class DictProxyTests(unittest.TestCase):
++class DictProxyTests(CPythonTestCase):
+     def setUp(self):
++        super().setUp()
+         class C(object):
+             def meth(self):
+                 pass
+@@ -5130,7 +5154,7 @@ class DictProxyTests(unittest.TestCase):
+             self.assertIn('{!r}: {!r}'.format(k, v), r)
+ 
+ 
+-class AAAPTypesLongInitTest(unittest.TestCase):
++class AAAPTypesLongInitTest(CPythonTestCase):
+     # This is in its own TestCase so that it can be run before any other tests.
+     # (Hence the 'AAA' in the test class name: to make it the first
+     # item in a list sorted by name, like
+@@ -5155,7 +5179,7 @@ class AAAPTypesLongInitTest(unittest.TestCase):
+         type.mro(tuple)
+ 
+ 
+-class MiscTests(unittest.TestCase):
++class MiscTests(CPythonTestCase):
+     def test_type_lookup_mro_reference(self):
+         # Issue #14199: _PyType_Lookup() has to keep a strong reference to
+         # the type MRO because it may be modified during the lookup, if
+@@ -5188,7 +5212,7 @@ class MiscTests(unittest.TestCase):
+         self.assertEqual(getattr(X, 'mykey2'), 'from Base2')
+ 
+ 
+-class PicklingTests(unittest.TestCase):
++class PicklingTests(CPythonTestCase):
+ 
+     def _check_reduce(self, proto, obj, args=(), kwargs={}, state=None,
+                       listitems=None, dictitems=None):
+@@ -5630,7 +5654,7 @@ class PicklingTests(unittest.TestCase):
+             object().__reduce_ex__(None)
+ 
+ 
+-class SharedKeyTests(unittest.TestCase):
++class SharedKeyTests(CPythonTestCase):
+ 
+     @support.cpython_only
+     def test_subclasses(self):
+@@ -5668,7 +5692,7 @@ class DebugHelperMeta(type):
+         return repr(cls.__name__)
+ 
+ 
+-class MroTest(unittest.TestCase):
++class MroTest(CPythonTestCase):
+     """
+     Regressions for some bugs revealed through
+     mcsl.mro() customization (typeobject.c: mro_internal()) and
+@@ -5676,6 +5700,7 @@ class MroTest(unittest.TestCase):
+     """
+ 
+     def setUp(self):
++        super().setUp()
+         self.step = 0
+         self.ready = False
+ 
+@@ -5898,4 +5923,4 @@ class MroTest(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

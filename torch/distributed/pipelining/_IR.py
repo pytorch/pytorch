@@ -232,6 +232,27 @@ def _insert_stage_symbolic_backward(
     return g
 
 
+def _move_placeholders_to_front(graph: fx.Graph):
+    """Ensure all placeholder nodes form a contiguous prefix of the graph.
+    split_module can interleave get_attr nodes with placeholders."""
+    last_ph = None
+    for node in graph.nodes:
+        if node.op == "placeholder":
+            last_ph = node
+    if last_ph is None:
+        return
+    nodes_to_move = []
+    for node in graph.nodes:
+        if node is last_ph:
+            break
+        if node.op != "placeholder":
+            nodes_to_move.append(node)
+    insert_point = last_ph
+    for node in nodes_to_move:
+        insert_point.append(node)
+        insert_point = node
+
+
 class PipeSequential(torch.nn.Sequential):
     @staticmethod
     def from_sequential(sequential_instance: torch.nn.Sequential):
@@ -764,6 +785,7 @@ class Pipe(torch.nn.Module):
 
         for name, submodule in split.named_children():
             if isinstance(submodule, fx.GraphModule):
+                _move_placeholders_to_front(submodule.graph)
                 new_submod = _outline_submodules(submodule.graph)
                 # Replace old submod
                 split.register_module(name, new_submod)
