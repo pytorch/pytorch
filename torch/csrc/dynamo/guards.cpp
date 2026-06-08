@@ -709,6 +709,9 @@ static void record_guard_subtree_probe_stats(
 }
 
 static void record_guard_fastplan_candidate() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
   auto& stats = guard_fastplan_stats();
   add_relaxed(stats.candidate, 1);
 }
@@ -716,6 +719,9 @@ static void record_guard_fastplan_candidate() {
 static void record_guard_fastplan_shadow_pass(
     size_t token_count,
     uint64_t slow_check_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
   auto& stats = guard_fastplan_stats();
   add_relaxed(stats.shadow_pass, 1);
   add_relaxed(stats.token_count_sum, token_count);
@@ -723,16 +729,25 @@ static void record_guard_fastplan_shadow_pass(
 }
 
 static void record_guard_fastplan_enable() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
   add_relaxed(guard_fastplan_stats().enable, 1);
 }
 
 static void record_guard_fastplan_disabled() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
   add_relaxed(guard_fastplan_stats().disabled, 1);
 }
 
 static void record_guard_fastplan_hit(
     size_t token_count,
     uint64_t token_check_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
   auto& stats = guard_fastplan_stats();
   add_relaxed(stats.hit, 1);
   add_relaxed(stats.token_count_sum, token_count);
@@ -744,6 +759,9 @@ static void record_guard_fastplan_miss(
     uint64_t token_check_ns,
     uint64_t slow_check_ns,
     bool disabled_now) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
   auto& stats = guard_fastplan_stats();
   add_relaxed(stats.miss, 1);
   add_relaxed(stats.token_count_sum, token_count);
@@ -1467,6 +1485,7 @@ struct GuardSubtreeEntryToken {
   GuardSubtreeProbeTokenKind kind{GuardSubtreeProbeTokenKind::ObjectOnly};
   uint64_t version{0};
   Py_ssize_t size{0};
+  std::vector<PyObject*> list_items;
 
   static GuardSubtreeEntryToken make(PyObject* obj) {
     GuardSubtreeEntryToken token;
@@ -1479,6 +1498,10 @@ struct GuardSubtreeEntryToken {
     } else if (PyList_CheckExact(obj)) {
       token.kind = GuardSubtreeProbeTokenKind::ExactList;
       token.size = PyList_GET_SIZE(obj);
+      token.list_items.reserve(static_cast<size_t>(token.size));
+      for (Py_ssize_t i = 0; i < token.size; ++i) {
+        token.list_items.push_back(PyList_GET_ITEM(obj, i));
+      }
     } else if (PyTuple_CheckExact(obj)) {
       token.kind = GuardSubtreeProbeTokenKind::ExactTuple;
       token.size = PyTuple_GET_SIZE(obj);
@@ -1488,7 +1511,8 @@ struct GuardSubtreeEntryToken {
 
   bool matches(const GuardSubtreeEntryToken& other) const {
     return object == other.object && type == other.type && kind == other.kind &&
-        version == other.version && size == other.size;
+        version == other.version && size == other.size &&
+        list_items == other.list_items;
   }
 };
 
@@ -1507,10 +1531,16 @@ static bool guard_subtree_token_vectors_match(
 }
 
 static bool guard_subtree_memo_tokens_match(
-    const std::vector<GuardSubtreeEntryToken>& tokens) {
-  for (const auto& token : tokens) {
+    const std::vector<GuardSubtreeEntryToken>& tokens,
+    PyObject* root_value) {
+  for (size_t i = 0; i < tokens.size(); ++i) {
+    const auto& token = tokens[i];
+    if (i != 0 && token.kind == GuardSubtreeProbeTokenKind::ObjectOnly) {
+      // Parent dict/list tokens prove whether this object is still reachable.
+      continue;
+    }
     GuardSubtreeEntryToken current =
-        GuardSubtreeEntryToken::make(token.object);
+        GuardSubtreeEntryToken::make(i == 0 ? root_value : token.object);
     if (!current.matches(token)) {
       return false;
     }
@@ -1548,13 +1578,6 @@ struct GuardSubtreeMemoRecorderScope {
 
   std::vector<GuardSubtreeEntryToken>* previous{nullptr};
 };
-
-static void record_guard_subtree_memo_token(PyObject* obj) {
-  if (active_guard_subtree_memo_recorder != nullptr) {
-    active_guard_subtree_memo_recorder->emplace_back(
-        GuardSubtreeEntryToken::make(obj));
-  }
-}
 
 static PyObject* dict_version(PyObject* dummy, PyObject* args) {
   // Retrieves the version of a dictionary.
@@ -3249,7 +3272,10 @@ class GuardManager {
   template <typename T>
   bool check_nopybind_template(T* value) { // borrowed ref
     if constexpr (std::is_same_v<T, PyObject>) {
-      record_guard_subtree_memo_token(value);
+      if (C10_UNLIKELY(active_guard_subtree_memo_recorder != nullptr)) {
+        active_guard_subtree_memo_recorder->emplace_back(
+            GuardSubtreeEntryToken::make(value));
+      }
     }
 
     if (!this->check_leaf_guards_nopybind(value)) {
@@ -3300,39 +3326,55 @@ class GuardManager {
       return check_nopybind(value);
     }
 
-    record_guard_fastplan_candidate();
+    const bool collect_stats = guard_lookup_stats_enabled();
+    if (collect_stats) {
+      record_guard_fastplan_candidate();
+    }
     if (memo.tokens.empty() && !supports_subtree_memo_recursive()) {
       memo.disabled = true;
-      record_guard_fastplan_disabled();
+      if (collect_stats) {
+        record_guard_fastplan_disabled();
+      }
       return check_nopybind(value);
     }
 
     if (memo.enabled) {
-      const uint64_t token_start_ns = guard_lookup_time_ns();
-      const bool token_match = guard_subtree_memo_tokens_match(memo.tokens);
-      const uint64_t token_check_ns = guard_lookup_time_ns() - token_start_ns;
+      const uint64_t token_start_ns =
+          collect_stats ? guard_lookup_time_ns() : 0;
+      const bool token_match =
+          guard_subtree_memo_tokens_match(memo.tokens, value);
+      const uint64_t token_check_ns =
+          collect_stats ? guard_lookup_time_ns() - token_start_ns : 0;
       if (token_match) {
-        record_guard_fastplan_hit(memo.tokens.size(), token_check_ns);
+        if (collect_stats) {
+          record_guard_fastplan_hit(memo.tokens.size(), token_check_ns);
+        }
         return true;
       }
 
       memo.disabled = true;
-      const uint64_t slow_start_ns = guard_lookup_time_ns();
+      const uint64_t slow_start_ns =
+          collect_stats ? guard_lookup_time_ns() : 0;
       const bool result = check_nopybind(value);
-      const uint64_t slow_check_ns = guard_lookup_time_ns() - slow_start_ns;
-      record_guard_fastplan_miss(
-          memo.tokens.size(), token_check_ns, slow_check_ns, true);
+      const uint64_t slow_check_ns =
+          collect_stats ? guard_lookup_time_ns() - slow_start_ns : 0;
+      if (collect_stats) {
+        record_guard_fastplan_miss(
+            memo.tokens.size(), token_check_ns, slow_check_ns, true);
+      }
       return result;
     }
 
     std::vector<GuardSubtreeEntryToken> tokens;
-    const uint64_t slow_start_ns = guard_lookup_time_ns();
+    const uint64_t slow_start_ns =
+        collect_stats ? guard_lookup_time_ns() : 0;
     bool result = false;
     {
       GuardSubtreeMemoRecorderScope recorder(&tokens);
       result = check_nopybind(value);
     }
-    const uint64_t slow_check_ns = guard_lookup_time_ns() - slow_start_ns;
+    const uint64_t slow_check_ns =
+        collect_stats ? guard_lookup_time_ns() - slow_start_ns : 0;
 
     if (!result) {
       memo.shadow_passes = 0;
@@ -3348,10 +3390,14 @@ class GuardManager {
       memo.shadow_passes = 1;
     }
 
-    record_guard_fastplan_shadow_pass(memo.tokens.size(), slow_check_ns);
+    if (collect_stats) {
+      record_guard_fastplan_shadow_pass(memo.tokens.size(), slow_check_ns);
+    }
     if (memo.shadow_passes >= 3) {
       memo.enabled = true;
-      record_guard_fastplan_enable();
+      if (collect_stats) {
+        record_guard_fastplan_enable();
+      }
     }
     return true;
   }
