@@ -112,6 +112,7 @@ from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
 from . import config, distributed_autotune, metrics
+from .autocast_utils import low_precision_autocast_enabled, LOW_PRECISION_FP_DTYPES
 from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
 from .debug import DebugContext
 from .decomposition import select_decomp_table
@@ -2870,6 +2871,42 @@ def _maybe_wrap_and_compile_fx_main(
     )
 
 
+def _contains_low_precision_fp_tensor(value: object) -> bool:
+    return any(
+        isinstance(leaf, torch.Tensor) and leaf.dtype in LOW_PRECISION_FP_DTYPES
+        for leaf in pytree.tree_leaves(value)
+    )
+
+
+def _is_low_precision_cast_node(node: torch.fx.Node) -> bool:
+    if node.op != "call_function":
+        return False
+
+    if node.target is torch.ops.aten._to_copy.default:
+        dtype = node.kwargs.get("dtype")
+    elif node.target is torch.ops.prims.convert_element_type.default:
+        dtype = node.args[1] if len(node.args) > 1 else None
+    else:
+        return False
+
+    return dtype in LOW_PRECISION_FP_DTYPES
+
+
+def _mark_low_precision_pointwise_barriers(model: GraphModule) -> bool:
+    if not any(_is_low_precision_cast_node(node) for node in model.graph.nodes):
+        return False
+
+    for node in model.graph.nodes:
+        output_low_precision = _contains_low_precision_fp_tensor(node.meta.get("val"))
+        input_low_precision = any(
+            _contains_low_precision_fp_tensor(input_node.meta.get("val"))
+            for input_node in node.all_input_nodes
+        )
+        if output_low_precision or input_low_precision:
+            node.meta["low_precision_pointwise_barrier"] = True
+    return True
+
+
 def _compile_fx_main(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -2908,7 +2945,24 @@ def _compile_fx_main(
 
         compiler_config_extra = create_compiler_config_extra(model_)
 
+        low_precision_pointwise_barrier = (
+            low_precision_autocast_enabled()
+            or _mark_low_precision_pointwise_barriers(model_)
+            or any(
+                node.meta.get("low_precision_pointwise_barrier", False)
+                for node in model_.graph.nodes
+            )
+        )
         decompositions = get_decomp_fn()
+        if low_precision_pointwise_barrier:
+            # Under low-precision autocast, native_layer_norm's reference
+            # decomposition can perturb fp32 statistics enough for later bf16
+            # rounding to diverge from eager. Keep the fast decomposition for
+            # normal graphs, but route autocast/precision-sensitive graphs to
+            # the native fallback.
+            decompositions = decompositions.copy()
+            decompositions.pop(torch.ops.aten.native_layer_norm.default, None)
+            decompositions.pop(torch.ops.aten.native_layer_norm.out, None)
         inner_compile = functools.partial(inner_compile, get_decomp_fn=get_decomp_fn)
 
         def fw_compiler_base(

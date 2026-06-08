@@ -1230,6 +1230,20 @@ class FxGraphHashDetails:
                 else:
                     self.fx_kwargs[k] = v
 
+        # This node metadata affects pointwise lowering/codegen, but FX graph
+        # pickling intentionally omits node meta. Record just this codegen-
+        # relevant bit so cache lookups cannot reuse a graph compiled without
+        # the low-precision barrier.
+        self.low_precision_pointwise_barriers: list[tuple[str, str]] = []
+        for module_name, module in gm.named_modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                if node.meta.get("low_precision_pointwise_barrier", False):
+                    self.low_precision_pointwise_barriers.append(
+                        (module_name, node.name)
+                    )
+
         from torch._higher_order_ops.triton_kernel_wrap import (
             kernel_side_table,
             triton_kernel_wrapper_functional,

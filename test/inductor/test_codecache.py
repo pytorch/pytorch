@@ -40,6 +40,7 @@ from torch._inductor.codecache import (
     BypassFxGraphCache,
     CacheabilityValidator,
     CacheBase,
+    compiled_fx_graph_hash,
     CppWrapperCodeCache,
     CUDACodeCache,
     FxGraphCache,
@@ -521,6 +522,25 @@ class TestFxGraphCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_caches()
+
+    def test_low_precision_pointwise_barrier_affects_cache_key(self):
+        def fn(x):
+            return torch.sigmoid(x)
+
+        gm = torch.fx.symbolic_trace(fn)
+        x = torch.randn(4)
+
+        key_without_barrier, _ = compiled_fx_graph_hash(gm, [x], {}, [])
+        sigmoid_node = next(
+            node for node in gm.graph.nodes if node.op == "call_function"
+        )
+        sigmoid_node.meta["low_precision_pointwise_barrier"] = True
+        key_with_barrier, debug_lines = compiled_fx_graph_hash(gm, [x], {}, [])
+
+        self.assertNotEqual(key_without_barrier, key_with_barrier)
+        self.assertTrue(
+            any("low_precision_pointwise_barriers" in line for line in debug_lines)
+        )
 
     def _find_triton_kernel_binaries(self):
         found = []
