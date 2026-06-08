@@ -904,8 +904,8 @@ def trace_frame(
     distributed_state: DistributedState | None = None,
     package: CompilePackage | None = None,
 ) -> DynamoTracerOutput:
-    from torch.fx.experimental.validator import bisect, translation_validation_enabled
     from torch._dynamo.eval_frame import get_fullgraph_compiled_frame_count
+    from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
     if (
         torch.cuda.is_available()
