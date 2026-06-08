@@ -367,8 +367,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
                                              IntArrayRef stride,
                                              IntArrayRef dilation,
                                              int64_t groups,
-                                             bool bias_defined,
-                                             at::MemoryFormat output_memory_format) {
+                                             bool bias_defined) {
   using namespace at::native::mps;
   using namespace mps;
   bool is3DConv = grad_output_t.dim() == 5;
@@ -393,8 +392,9 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   const bool use_dhwio = is3DConv && is_macos_15_plus && is_packed_channels_last_3d(grad_output_t) &&
       conv3d_dhwio_is_beneficial(weight_t.sizes());
   const auto desc_layout = use_dhwio ? kChannelsLast3d : kContiguous;
-  // Allocate grad_input in the caller-supplied layout so it matches input.
-  const bool is_channels_last = output_memory_format == kChannelsLast || output_memory_format == kChannelsLast3d;
+  // Allocate grad_input in the user-requested layout. The fast path writes
+  // directly; the NCDHW fallback writes via a contig scratch + copy below.
+  const bool is_channels_last = mps_conv_use_channels_last(grad_output_t, weight_t);
   auto grad_input_t =
       at::empty(input_size,
                 grad_output_t.options(),
@@ -530,8 +530,7 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
                                                IntArrayRef stride,
                                                IntArrayRef dilation,
                                                int64_t groups,
-                                               bool bias_defined,
-                                               at::MemoryFormat output_memory_format) {
+                                               bool bias_defined) {
   using namespace at::native::mps;
   using namespace mps;
   const bool is3DConv = input_t.dim() == 5;
@@ -548,9 +547,9 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   const bool use_dhwio = is3DConv && is_macos_15_plus && !half_precision_wg && is_packed_channels_last_3d(input_t) &&
       is_packed_channels_last_3d(grad_output_t) && conv3d_dhwio_is_beneficial(weight_size);
   const auto desc_layout = use_dhwio ? kChannelsLast3d : kContiguous;
-  // grad_weight allocation: 2D follows the caller-supplied layout; 3D always
+  // grad_weight allocation: 2D follows the standard CL convention; 3D always
   // stays contiguous OIDHW (the graph already transposes DHWIO -> OIDHW).
-  const bool allocate_grad_weight_cl = output_memory_format == kChannelsLast && !is3DConv;
+  const bool allocate_grad_weight_cl = mps_conv_use_channels_last(input_t, grad_output_t) && !is3DConv;
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
@@ -672,12 +671,9 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
       newCachedGraph->gradWeightTensor_ = gradWeightTensor;
     });
 
-    // For 2D CL grad_weight the kernel emits in the input's layout, so feed CL
-    // input to match the CL-allocated output.
-    const auto input_for_2d = allocate_grad_weight_cl ? input_t.contiguous(kChannelsLast) : input_t;
     const auto grad_out_for_graph =
         grad_weight_c ? grad_output_t.contiguous() : materialize_for_conv(grad_output_t, desc_layout);
-    const auto input_for_graph = grad_weight_c ? input_t.contiguous() : materialize_for_conv(input_for_2d, desc_layout);
+    const auto input_for_graph = grad_weight_c ? input_t.contiguous() : materialize_for_conv(input_t, desc_layout);
     auto gradOutputPlaceholder = make_conv_placeholder(cachedGraph->gradOutputTensor_, grad_out_for_graph, desc_layout);
     auto inputPlaceholder = make_conv_placeholder(cachedGraph->inputTensor_, input_for_graph, desc_layout);
     auto outputPlaceholder =
@@ -710,18 +706,13 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> mps_convolution_backward(const at
       grad_weight = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
   } else {
-    // Decide the layout once from input and weight; both gradients must share it.
-    const bool use_cl = mps_conv_use_channels_last(input, weight);
-    const auto memory_format = use_cl
-        ? (input.dim() == 5 ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast)
-        : at::MemoryFormat::Contiguous;
     if (output_mask[0]) {
       grad_input = mps_convolution_backward_input(
-          input.sizes(), grad_output, weight, padding, stride, dilation, groups, output_mask[2], memory_format);
+          input.sizes(), grad_output, weight, padding, stride, dilation, groups, output_mask[2]);
     }
     if (output_mask[1]) {
       grad_weight = mps_convolution_backward_weights(
-          weight.sizes(), grad_output, input, padding, stride, dilation, groups, output_mask[2], memory_format);
+          weight.sizes(), grad_output, input, padding, stride, dilation, groups, output_mask[2]);
     }
   }
 
@@ -737,12 +728,7 @@ static Tensor mps_convolution_transpose_forward(const Tensor& grad_output,
                                                 int64_t groups) {
   auto input_size =
       conv_input_size(grad_output.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
-  const bool use_cl = mps_conv_use_channels_last(grad_output, weight);
-  const auto output_memory_format = use_cl
-      ? (grad_output.dim() == 5 ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast)
-      : at::MemoryFormat::Contiguous;
-  return mps_convolution_backward_input(
-      input_size, grad_output, weight, padding, stride, dilation, groups, false, output_memory_format);
+  return mps_convolution_backward_input(input_size, grad_output, weight, padding, stride, dilation, groups, false);
 }
 
 Tensor _mps_convolution_transpose(const Tensor& input_t,
@@ -778,12 +764,8 @@ static Tensor mps_convolution_transpose_backward_weight(IntArrayRef weight_size,
                                                         IntArrayRef stride,
                                                         IntArrayRef dilation,
                                                         int64_t groups) {
-  const bool use_cl = mps_conv_use_channels_last(input_t, grad_output_t);
-  const auto output_memory_format = use_cl
-      ? (input_t.dim() == 5 ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast)
-      : at::MemoryFormat::Contiguous;
   return mps_convolution_backward_weights(
-      weight_size, input_t, grad_output_t, padding, stride, dilation, groups, false, output_memory_format);
+      weight_size, input_t, grad_output_t, padding, stride, dilation, groups, false);
 }
 
 std::tuple<Tensor, Tensor> mps_convolution_transpose_backward(const Tensor& input,
