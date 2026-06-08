@@ -10,7 +10,11 @@ from functools import partial
 import torch._inductor.decomposition
 import torch.autograd
 from torch import Tensor
-from torch._decomp import core_aten_decompositions, decomposition_table
+from torch._decomp import (
+    core_aten_decompositions,
+    decomposition_table,
+    get_decompositions,
+)
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
@@ -267,6 +271,8 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
             1e-3,
         ),
         (torch.float64, torch.ops.aten.native_layer_norm.default): (1e-6, 1e-6),
+        # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
+        (torch.float32, torch.ops.aten.native_group_norm.default): (1e-4, 5e-6),
         # This exceeds default tolerances only on CPU, on CUDA it's fine
         (torch.float32, torch.ops.aten.grid_sampler_2d.default): (7e-6, 3e-5),
         # Exceeds tolerances on CUDA, likely due to fma
@@ -429,6 +435,11 @@ CROSS_REF_EXCLUDE_SET = {
         None,
         "bernoulli",
     ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
+    # Decomposition is intentionally partial: returns NotImplemented for
+    # non-evenly-divisible output sizes.
+    (None, None, "nn.functional.adaptive_max_pool1d"),
+    (None, None, "nn.functional.adaptive_max_pool2d"),
+    (None, None, "nn.functional.adaptive_max_pool3d"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
@@ -1343,6 +1354,17 @@ class DecompOneOffTests(TestCase):
 
             self.assertEqual(res.dtype, torch.float32)
             self.assertEqual(res, ref)
+
+    @onlyCPU
+    @skipIfCrossRef
+    def test_addmv_decomp_rejects_mixed_dtype(self, device):
+        addmv_decomp = get_decompositions([aten.addmv.default])[aten.addmv.default]
+        input = torch.tensor([2.7], dtype=torch.float32, device=device)
+        mat = torch.tensor([[1, 2], [3, 4]], dtype=torch.int32, device=device)
+        vec = torch.tensor([1, 2], dtype=torch.int32, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "same dtype"):
+            addmv_decomp(input, mat, vec)
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())

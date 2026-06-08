@@ -1,4 +1,3 @@
-import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -26,6 +25,7 @@ from torch._inductor.fx_passes.overlap_scheduling import (
     is_compute_node,
     log as overlap_scheduling_log,
 )
+from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
 
@@ -167,29 +167,17 @@ class OverlapPreservingBucketer:
         self.pg_to_timeline_head: dict[str, PGEvent | None] = self.build_timelines()
         self._add_hiding_interval_constraints()
 
-    def _compute_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
-        """
-        Compute ancestor sets for all nodes including:
-        1. Original graph edges
-        2. Hiding interval deps: collective_start -> hiding_node -> wait
-        """
-        augmented_inputs: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+    def _compute_node_ancestors(self) -> BitsetAncestors:
+        """Compute ancestor sets including hiding interval deps using bitsets."""
+        extra_inputs: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for start, info in self.collective_info.items():
             if info.is_exposed:
                 continue
             for hiding_node in info.hiding_nodes:
-                augmented_inputs[hiding_node].add(start)
-                augmented_inputs[info.wait_node].add(hiding_node)
+                extra_inputs[hiding_node].add(start)
+                extra_inputs[info.wait_node].add(hiding_node)
 
-        node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
-        for node in self.scheduled:
-            for input_node in itertools.chain(
-                augmented_inputs[node], node.all_input_nodes
-            ):
-                node_ancestors[node].add(input_node)
-                node_ancestors[node] |= node_ancestors[input_node]
-
-        return node_ancestors
+        return BitsetAncestors(list(self.scheduled), extra_inputs=extra_inputs)
 
     def build_timelines(self) -> dict[str, PGEvent | None]:
         "Construct each process groups ordered series of event"
@@ -511,7 +499,7 @@ class OverlapPreservingBucketer:
             for candidate in sorted_collectives[i + 1 : i + 1 + self.max_coll_distance]:
                 candidate_bytes = self.collective_info[candidate].size_bytes
                 # proxy on memory use, if we see a too large bucket,
-                # dont look for another, later bucket
+                # don't look for another, later bucket
                 if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
                     break
 
@@ -546,7 +534,7 @@ class OverlapPreservingBucketer:
 
     def _ancestor_dep(self, n1: fx.Node, n2: fx.Node) -> bool:
         """Check if there's an ancestor relationship between two nodes."""
-        return n1 in self.node_ancestors[n2] or n2 in self.node_ancestors[n1]
+        return self.node_ancestors.has_dep(n1, n2)
 
     def _get_intervals(
         self, event: PGEvent
@@ -839,28 +827,22 @@ class OverlapPreservingBucketer:
         candidate_wait = candidate_info.wait_node
 
         for coll in bucket_info.collectives:
-            if (
-                coll in self.node_ancestors[candidate]
-                or candidate in self.node_ancestors[coll]
-            ):
+            if self.node_ancestors.has_dep(coll, candidate):
                 return True
 
             # Check if waits are ancestors of each other
             coll_wait = self.collective_info[coll].wait_node
-            if (
-                coll_wait in self.node_ancestors[candidate_wait]
-                or candidate_wait in self.node_ancestors[coll_wait]
-            ):
+            if self.node_ancestors.has_dep(coll_wait, candidate_wait):
                 return True
 
             # Check if existing hiding node conflicts with candidate wait
             for old_hiding_node in self.collective_info[coll].hiding_nodes:
-                if candidate_wait in self.node_ancestors[old_hiding_node]:
+                if self.node_ancestors.is_ancestor(candidate_wait, old_hiding_node):
                     return True
 
             # Check if candidate hiding node conflicts with existing wait
             for new_hiding_node in candidate_info.hiding_nodes:
-                if coll_wait in self.node_ancestors[new_hiding_node]:
+                if self.node_ancestors.is_ancestor(coll_wait, new_hiding_node):
                     return True
 
         return False

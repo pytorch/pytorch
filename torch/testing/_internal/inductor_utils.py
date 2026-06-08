@@ -10,7 +10,21 @@ import unittest
 from subprocess import CalledProcessError
 
 import torch
+import torch._inductor.async_compile
 import torch._inductor.config as config
+from torch._inductor.codecache import CppCodeCache
+from torch._inductor.codegen.common import (
+    get_custom_backend_config_for_device,
+    get_custom_backend_pass_for_device,
+    get_scheduling_for_device,
+    get_wrapper_codegen_for_device,
+    init_backend_registration,
+    register_backend_for_device,
+)
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.compile_fx import shape_env_from_inputs
+from torch._inductor.custom_graph_pass import CustomGraphModulePass, CustomGraphPass
+from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import (
     get_gpu_shared_memory,
     get_gpu_type,
@@ -19,6 +33,7 @@ from torch._inductor.utils import (
     is_gpu,
     OrderedSet,
 )
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._helion import has_helion
 from torch.utils._pallas import has_pallas_package, has_tpu_pallas
 from torch.utils._triton import has_triton
@@ -40,8 +55,6 @@ log: logging.Logger = logging.getLogger(__name__)
 
 def test_cpu():
     try:
-        from torch._inductor.codecache import CppCodeCache
-
         CppCodeCache.load("")
         return True
     except (
@@ -57,7 +70,7 @@ HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
 
-HAS_PALLAS = LazyVal(has_pallas_package)
+HAS_PALLAS = has_pallas_package()
 
 HAS_HELION = has_helion()
 
@@ -90,24 +103,17 @@ RUN_GPU = HAS_GPU and any(
     is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases
 )
 
-RUN_CPU = LazyVal(
-    lambda: HAS_CPU
-    and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+RUN_CPU = HAS_CPU and any(
+    getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases
 )
 
-HAS_TPU = LazyVal(has_tpu_pallas)
+HAS_TPU = has_tpu_pallas()
 # TPU is a privateuse1 backend that isn't in _desired_test_bases (it requires
 # runtime initialization before the test base is registered). Check the env var
 # directly, matching the same semantics as RUN_CPU/RUN_GPU: when the env var is
 # unset, run if the hardware is available; when set, only run if "tpu" is listed.
-RUN_TPU = LazyVal(
-    lambda: HAS_TPU
-    and (
-        "tpu" in os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "").split(",")
-        if os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "")
-        else True
-    )
-)
+_only_for = os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "")
+RUN_TPU = HAS_TPU and ("tpu" in _only_for.split(",") if _only_for else True)
 
 
 def _check_has_dynamic_shape(
@@ -206,15 +212,11 @@ IS_H100 = LazyVal(lambda: HAS_CUDA_AND_TRITON and get_gpu_shared_memory() == 232
 IS_BIG_GPU = LazyVal(lambda: HAS_GPU_AND_TRITON and is_big_gpu())
 
 
-def dummy_graph():
+def dummy_graph() -> GraphLowering:
     """
     Create a graph. This is useful for unit testing code which accesses
     V.graph.sizevars.
     """
-    from torch._inductor.compile_fx import shape_env_from_inputs
-    from torch._inductor.graph import GraphLowering
-    from torch.fx.experimental.proxy_tensor import make_fx
-
     example_inputs = [torch.randn(10) for _ in range(2)]
     gm = make_fx(torch.add, tracing_mode="fake")(*example_inputs)
     shape_env = shape_env_from_inputs(example_inputs)
@@ -377,7 +379,7 @@ def _quantize_blockwise(
     return x_fp8, inverse_scale
 
 
-class MockGraphHandler:
+class MockGraphHandler(GraphLowering):
     """Minimal mock graph handler for testing virtualized context."""
 
     def __init__(self, name_to_buffer=None):
@@ -391,17 +393,18 @@ class MockGraphHandler:
         self.constants = {}
         self.scheduler = None
 
+    def try_get_buffer(self, buffer_name: str):
+        return self.name_to_buffer.get(buffer_name)
+
+    def get_buffer(self, buffer_name: str):
+        return self.name_to_buffer[buffer_name]
+
     def get_dtype(self, buffer_name: str) -> torch.dtype:
         """Return default dtype for any buffer (for testing)."""
         return torch.float32
 
 
 def has_cpp_wrapper_for_device(device: str) -> bool:
-    from torch._inductor.codegen.common import (
-        get_wrapper_codegen_for_device,
-        init_backend_registration,
-    )
-
     init_backend_registration()
     return get_wrapper_codegen_for_device(device, cpp_wrapper=True) is not None
 
@@ -409,22 +412,13 @@ def has_cpp_wrapper_for_device(device: str) -> bool:
 @contextlib.contextmanager
 def patch_inductor_backend(
     device: str,
-    python_wrapper_codegen=None,
-    custom_pass=None,
+    python_wrapper_codegen: PythonWrapperCodegen = None,
+    custom_pass: CustomGraphModulePass = None,
     custom_backend_config: ConfigModule = None,
 ):
     """
     Patch the inductor backend for a specific device.
     """
-    from torch._inductor.codegen.common import (
-        get_custom_backend_config_for_device,
-        get_custom_backend_pass_for_device,
-        get_scheduling_for_device,
-        get_wrapper_codegen_for_device,
-        init_backend_registration,
-        register_backend_for_device,
-    )
-
     # Make sure the backend is already registered
     init_backend_registration()
 
@@ -474,8 +468,6 @@ def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> co
     we could provide a predicate which returns True for all aten.add.default nodes.
     Returns a context activating the pass.
     """
-    from torch._inductor.custom_graph_pass import CustomGraphPass
-
     class Pass(CustomGraphPass):
         def __call__(self, graph: torch.fx.Graph):
             for node in graph.nodes:
