@@ -293,7 +293,7 @@ class ProcessGroupNCCLTest(Dist2MultiProcessTestCase):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @requires_accelerator_dist_backend()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     def new_group(self) -> torch.distributed.ProcessGroup:
         os.environ["RANK"] = str(self.rank)
