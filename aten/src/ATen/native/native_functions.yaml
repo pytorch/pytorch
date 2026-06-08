@@ -151,11 +151,13 @@
   dispatch:
     CPU: _assert_async_cpu
     CUDA: _assert_async_cuda
+    MPS: _assert_async_mps
 
 - func: _assert_async.msg(Tensor self, str assert_msg) -> ()
   dispatch:
     CPU: _assert_async_msg_cpu
     CUDA: _assert_async_msg_cuda
+    MPS: _assert_async_msg_mps
 
 - func: _assert_scalar(Scalar self, str assert_msg) -> ()
   dispatch:
@@ -4115,6 +4117,14 @@
     CUDA: _int_mm_out_cuda
     XPU: _int_mm_out_xpu
 
+- func: _int_mm.dtype(Tensor self, Tensor mat2, *, ScalarType out_dtype) -> Tensor
+  dispatch:
+    CPU: _int_mm_dtype_cpu
+
+- func: _int_mm.dtype_out(Tensor self, Tensor mat2, *, ScalarType out_dtype, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _int_mm_dtype_out_cpu
+
 - func: _convert_weight_to_int4pack(Tensor self, int innerKTiles) -> Tensor
   dispatch:
     CUDA: _convert_weight_to_int4pack_cuda
@@ -6282,6 +6292,7 @@
     CPU: _unique_cpu
     CUDA: _unique_cuda
     MPS: _unique_mps
+  tags: dynamic_output_shape
   autogen: _unique.out
 
 - func: unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
