@@ -612,16 +612,6 @@ def _get_foreach_copy_candidate(
     return parent, dst, src
 
 
-def _is_getitem_from_parent(node: torch.fx.Node, parent: torch.fx.Node) -> bool:
-    return (
-        node.op == "call_function"
-        and node.target is operator.getitem
-        and len(node.args) == 2
-        and node.args[0] is parent
-        and isinstance(node.args[1], int)
-    )
-
-
 def _storage_ref(node: torch.fx.Node) -> StorageWeakRef | None:
     val = node.meta.get("val")
     if not isinstance(val, torch.Tensor):
@@ -696,14 +686,10 @@ def fold_foreach_input_mutation_ops(fx_g: torch.fx.Graph) -> None:
     for node in fx_g.nodes:
         candidate = _get_foreach_copy_candidate(node, placeholders)
         if candidate is None:
-            if current_key is not None and _is_getitem_from_parent(
-                node, current_key[0]
-            ):
-                # The folded foreach_copy_ is inserted before the first copy_ in
-                # a group, so all source getitems must already appear before it.
-                # Flush instead of folding across an interleaved getitem/copy_.
-                if not current_group:
-                    continue
+            # The folded foreach_copy_ is inserted before the first copy_ in a
+            # group, so all source getitems must already appear before it.
+            # Flush on any non-candidate to avoid folding across interleaved
+            # getitem/copy_ sequences or unrelated nodes.
             flush()
             continue
 
@@ -729,7 +715,9 @@ def fold_foreach_input_mutation_ops(fx_g: torch.fx.Graph) -> None:
             )
 
         foreach_copy.meta.update(first_copy.meta)
-        foreach_copy.meta["val"] = first_copy.meta.get("val")
+        foreach_copy.meta["val"] = None
+        foreach_copy.meta.pop("tensor_meta", None)
+        foreach_copy.meta["original_aten"] = torch.ops.aten._foreach_copy_.default
 
         for copy_node, *_ in group:
             fx_g.erase_node(copy_node)
