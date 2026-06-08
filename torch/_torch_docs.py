@@ -7815,7 +7815,7 @@ Alias for :func:`torch.mul`.
 add_docstr(
     torch.multinomial,
     r"""
-multinomial(input, num_samples, replacement=False, *, generator=None, out=None) -> LongTensor
+multinomial(input, num_samples, replacement=False, *, validate=True, generator=None, out=None) -> LongTensor
 
 Returns a tensor where each row contains :attr:`num_samples` indices sampled
 from the multinomial (a stricter definition would be multivariate,
@@ -7852,6 +7852,11 @@ Args:
     replacement (bool, optional): whether to draw with replacement or not
 
 Keyword args:
+    validate (bool, optional): whether to validate the input probability tensor
+        (check for negative values, NaN, Inf, and zero sum). Default: ``True``.
+        Set to ``False`` to skip validation when the caller guarantees the input
+        is valid (e.g. output of :func:`~torch.nn.functional.softmax`), which
+        can provide a significant speedup on CUDA.
     {generator}
     {out}
 

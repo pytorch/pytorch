@@ -5503,6 +5503,45 @@ class TestTorchDeviceType(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
+    def test_multinomial_validate_false(self, device, dtype):
+        # Test that validate=False produces valid samples from valid input
+        probs = torch.tensor([0.1, 0.2, 0.3, 0.4], dtype=dtype, device=device)
+        result = torch.multinomial(probs, 1, validate=False)
+        self.assertEqual(result.shape, (1,))
+        self.assertTrue(0 <= result.item() < 4)
+
+        # Test with num_samples > 1, no replacement
+        result = torch.multinomial(probs, 3, replacement=False, validate=False)
+        self.assertEqual(result.shape, (3,))
+        self.assertEqual(result.unique().numel(), 3)
+
+        # Test with replacement
+        result = torch.multinomial(probs, 5, replacement=True, validate=False)
+        self.assertEqual(result.shape, (5,))
+
+        # Test with 2D input
+        probs_2d = torch.tensor([[0.1, 0.9], [0.5, 0.5]], dtype=dtype, device=device)
+        result = torch.multinomial(probs_2d, 1, validate=False)
+        self.assertEqual(result.shape, (2, 1))
+
+        # Test that validate=True (default) still catches invalid input
+        bad_probs = torch.tensor([-1.0, 0.5, 0.5], dtype=dtype, device=device)
+        with self.assertRaises(RuntimeError):
+            torch.multinomial(bad_probs, 1)
+
+        # Test method variant
+        result = probs.multinomial(1, validate=False)
+        self.assertEqual(result.shape, (1,))
+
+        # Test softmax output (the primary use case from the issue)
+        logits = torch.randn(100, dtype=dtype, device=device)
+        softmax_probs = logits.softmax(dim=0)
+        result = torch.multinomial(softmax_probs, 1, validate=False)
+        self.assertEqual(result.shape, (1,))
+        self.assertTrue(0 <= result.item() < 100)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float, torch.double)
     def test_grad_scaling_unscale(self, device, dtype):
         device = torch.device(device)
         device0 = "cuda:0" if device.type == "cuda" else "cpu"

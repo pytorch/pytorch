@@ -7578,7 +7578,7 @@ def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
 
 @register_meta([aten.multinomial.default, aten.multinomial.out])
 @out_wrapper()
-def meta_multinomial(input, num_samples, replacement=False, *, generator=None):
+def meta_multinomial(input, num_samples, replacement=False, *, validate=True, generator=None):
     torch._check(
         0 < input.dim() <= 2,
         lambda: f"The probability distributions dimensions must be 1 or 2, but got {input.dim()}",

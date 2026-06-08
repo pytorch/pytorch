@@ -555,6 +555,7 @@ constexpr int64_t FLOAT32_MAX_CONSECUTIVE_INT = 1 << (FLT_MANT_DIG);
 Tensor& multinomial_out(const Tensor& self,
     int64_t n_sample,
     bool with_replacement,
+    bool validate,
     std::optional<Generator> gen,
     Tensor& result) {
   TORCH_CHECK(
@@ -592,17 +593,19 @@ Tensor& multinomial_out(const Tensor& self,
   // Reference:
   // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
   if (!with_replacement || n_sample == 1) {
-    // Sanity checks on `self`.
-    auto [self_min, self_max] = self.aminmax();
-    auto is_valid = ((self_max < INFINITY) & (self_min >= 0));
-    at::_assert_async(is_valid, "probability tensor contains either `inf`, `nan` or element < 0");
-    at::Tensor zero_prob_condition;
-    if (self.dim() == 1){
-      zero_prob_condition = (self.sum() == 0);
-    } else {
-      zero_prob_condition = (self.sum(1) == 0).any();
+    if (validate) {
+      // Sanity checks on `self`.
+      auto [self_min, self_max] = self.aminmax();
+      auto is_valid = ((self_max < INFINITY) & (self_min >= 0));
+      at::_assert_async(is_valid, "probability tensor contains either `inf`, `nan` or element < 0");
+      at::Tensor zero_prob_condition;
+      if (self.dim() == 1){
+        zero_prob_condition = (self.sum() == 0);
+      } else {
+        zero_prob_condition = (self.sum(1) == 0).any();
+      }
+      at::_assert_async(~zero_prob_condition, "invalid multinomial distribution (sum of probabilities <= 0)");
     }
-    at::_assert_async(~zero_prob_condition, "invalid multinomial distribution (sum of probabilities <= 0)");
 
     // The algorithm is from gumbel softmax.
     // s = argmax( logp - log(-log(eps)) ) where eps ~ U(0, 1)
@@ -636,9 +639,10 @@ Tensor multinomial(
     const Tensor& self,
     int64_t n_sample,
     bool with_replacement,
+    bool validate,
     std::optional<Generator> gen) {
   Tensor result = at::empty({0}, self.options().dtype(kLong));
-  native::multinomial_out(self, n_sample, with_replacement, std::move(gen), result);
+  native::multinomial_out(self, n_sample, with_replacement, validate, std::move(gen), result);
   return result;
 }
 

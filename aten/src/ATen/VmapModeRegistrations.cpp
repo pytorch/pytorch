@@ -47,8 +47,8 @@ TORCH_LIBRARY_IMPL(aten, VmapMode, m) {
   m.impl("exponential_", unsupportedRandomOp_<Tensor&, double, std::optional<Generator>>);
   m.impl("geometric_", unsupportedRandomOp_<Tensor&, double, std::optional<Generator>>);
   m.impl("log_normal_", unsupportedRandomOp_<Tensor&, double, double, std::optional<Generator>>);
-  m.impl("multinomial", unsupportedRandomOp<const Tensor&, int64_t, bool, std::optional<Generator>>);
-  m.impl("multinomial.out", unsupportedRandomOp_<const Tensor&, int64_t, bool, std::optional<Generator>, Tensor&>);
+  m.impl("multinomial", unsupportedRandomOp<const Tensor&, int64_t, bool, bool, std::optional<Generator>>);
+  m.impl("multinomial.out", unsupportedRandomOp_<const Tensor&, int64_t, bool, bool, std::optional<Generator>, Tensor&>);
 
   m.impl("normal.Tensor_float", unsupportedRandomOp<const Tensor&, double, std::optional<Generator>>);
   m.impl("normal.Tensor_float_out", unsupportedRandomOp_<const Tensor&, double, std::optional<Generator>, Tensor&>);

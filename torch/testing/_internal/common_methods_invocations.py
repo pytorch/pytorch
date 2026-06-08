@@ -2010,6 +2010,8 @@ def sample_inputs_multinomial(self, device, dtype, requires_grad, **kwargs):
         ([3], 3, dict(replacement=True)),
         ([3, 4], 4, dict(replacement=True)),
         ([3, 4], 4, dict(replacement=False)),
+        ([3], 3, dict(validate=False)),
+        ([3, 4], 4, dict(replacement=True, validate=False)),
     ]
 
     for shape, num_samples, kwargs in cases:

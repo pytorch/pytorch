@@ -826,7 +826,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.msort: lambda input, descending=False, out=None: -1,
         torch.mul: lambda input, other, out=None: -1,
         torch.multiply: lambda input, other, out=None: -1,
-        torch.multinomial: lambda input, num_samples, replacement=False, out=None: -1,
+        torch.multinomial: lambda input, num_samples, replacement=False, *, validate=True, out=None: -1,
         torch.mv: lambda input, vec, out=None: -1,
         torch.mvlgamma: lambda input, p: -1,
         torch.narrow: lambda input, dim, start, length: -1,

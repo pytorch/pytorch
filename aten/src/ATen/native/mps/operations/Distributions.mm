@@ -618,6 +618,7 @@ constexpr int64_t FLOAT32_MAX_CONSECUTIVE_INT = 1 << (FLT_MANT_DIG);
 Tensor& multinomial_out_mps(const Tensor& self,
                             int64_t n_sample,
                             bool with_replacement,
+                            bool validate,
                             std::optional<Generator> gen,
                             Tensor& result) {
   TORCH_CHECK(result.device() == self.device(), "multinomial arguments must have the same device");
@@ -649,16 +650,18 @@ Tensor& multinomial_out_mps(const Tensor& self,
   // Reference:
   // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
   if (!with_replacement || n_sample == 1) {
-    // Sanity checks on `self`.
-    auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
-    TORCH_CHECK(is_valid.to<bool>(), "probability tensor contains either `inf`, `nan` or element < 0");
-    bool zero_prob_condition = false;
-    if (self.dim() == 1) {
-      zero_prob_condition = (self.sum() == 0).item().to<bool>();
-    } else {
-      zero_prob_condition = (self.sum(1) == 0).sum().item().to<bool>();
+    if (validate) {
+      // Sanity checks on `self`.
+      auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
+      TORCH_CHECK(is_valid.to<bool>(), "probability tensor contains either `inf`, `nan` or element < 0");
+      bool zero_prob_condition = false;
+      if (self.dim() == 1) {
+        zero_prob_condition = (self.sum() == 0).item().to<bool>();
+      } else {
+        zero_prob_condition = (self.sum(1) == 0).sum().item().to<bool>();
+      }
+      TORCH_CHECK(!zero_prob_condition, "invalid multinomial distribution (sum of probabilities <= 0)");
     }
-    TORCH_CHECK(!zero_prob_condition, "invalid multinomial distribution (sum of probabilities <= 0)");
 
     // The algorithm is from gumbel softmax.
     // s = argmax( logp - log(-log(eps)) ) where eps ~ U(0, 1)
@@ -691,9 +694,9 @@ Tensor& multinomial_out_mps(const Tensor& self,
   return result;
 }
 
-Tensor multinomial_mps(const Tensor& self, int64_t n_sample, bool with_replacement, std::optional<Generator> gen) {
+Tensor multinomial_mps(const Tensor& self, int64_t n_sample, bool with_replacement, bool validate, std::optional<Generator> gen) {
   Tensor result = at::empty({0}, self.options().dtype(kLong));
-  multinomial_out_mps(self, n_sample, with_replacement, gen, result);
+  multinomial_out_mps(self, n_sample, with_replacement, validate, gen, result);
   return result;
 }
 
