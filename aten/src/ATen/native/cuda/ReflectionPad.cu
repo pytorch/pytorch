@@ -106,7 +106,8 @@ __global__ void reflection_pad1d_out_kernel(
     const scalar_t * input, scalar_t * output,
     int64_t input_w,
     int64_t pad_l, int64_t pad_r) {
-  auto output_x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int64_t output_x =
+      static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   auto output_w = input_w + pad_l + pad_r;
 
   if (output_x < output_w) {
@@ -142,13 +143,38 @@ __global__ void reflection_pad1d_backward_out_kernel(
     scalar_t * grad_input, const scalar_t * grad_output,
     int64_t input_w,
     int64_t pad_l, int64_t pad_r) {
-  auto output_x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int64_t output_x =
+      static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   auto output_w = input_w + pad_l + pad_r;
 
   if (output_x < output_w) {
     auto index_pair = get_index_mapping1d(input_w, output_w, output_x, pad_l);
     gpuAtomicAddNoReturn(
       &grad_input[index_pair.first], grad_output[index_pair.second]);
+  }
+}
+
+template <typename scalar_t>
+__global__ void reflection_pad1d_backward_flat(
+    scalar_t* grad_input,
+    const scalar_t* __restrict__ grad_output,
+    int64_t input_w,
+    int64_t pad_l,
+    int64_t out_w,
+    int64_t plane_count) {
+  const int64_t bx = blockDim.x;
+  const int64_t tx = threadIdx.x;
+
+  const int64_t total = plane_count * out_w;
+  const int64_t grid_stride = static_cast<int64_t>(bx) * gridDim.x;
+  int64_t linear = static_cast<int64_t>(blockIdx.x) * bx + tx;
+
+  for (; linear < total; linear += grid_stride) {
+    const int64_t plane = linear / out_w;
+    const int64_t x = linear - plane * out_w;
+    const int64_t j = reflect_index(x - pad_l, input_w);
+    gpuAtomicAddNoReturn(
+        &grad_input[plane * input_w + j], grad_output[plane * out_w + x]);
   }
 }
 
@@ -797,9 +823,6 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,
   TORCH_CHECK(canUse32BitIndexMath(input),
     "input tensor must fit into 32-bit index math");
 
-  TORCH_CHECK(canUse32BitIndexMath(grad_output_),
-    "input tensor must fit into 32-bit index math");
-
   int64_t dim_plane = 0;
   int64_t dim_w = 1;
   int64_t nbatch = 1;
@@ -819,15 +842,46 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,
 
   Tensor grad_output = grad_output_.contiguous();
 
-  dim3 block_size(output_w > 256 ? 256 : output_w);
-  dim3 grid_size((int) ::ceil(output_w / 256.0), nplane, nbatch);
+  const int block_x =
+      static_cast<int>(std::min<int64_t>(256, std::max<int64_t>(1, output_w)));
+  const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  const int max_x = prop->maxGridSize[0];
+  const int max_y = prop->maxGridSize[1];
+  const int max_z = prop->maxGridSize[2];
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
     grad_input.scalar_type(), "reflection_pad1d_backward_out_cuda", [&] {
-      reflection_pad1d_backward_out_kernel<<<
-        grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          grad_input.mutable_data_ptr<scalar_t>(), grad_output.const_data_ptr<scalar_t>(),
-          input_w, pad_l, pad_r);
+      auto stream = at::cuda::getCurrentCUDAStream();
+
+      const int64_t gx = at::ceil_div(output_w, static_cast<int64_t>(block_x));
+      const bool fits3d =
+          (nplane <= max_y) && (nbatch <= max_z) && (gx <= max_x);
+
+      dim3 block(block_x, 1, 1);
+      if (fits3d) {
+        dim3 grid(
+            gx, static_cast<unsigned>(nplane), static_cast<unsigned>(nbatch));
+        reflection_pad1d_backward_out_kernel<<<grid, block, 0, stream>>>(
+            grad_input.mutable_data_ptr<scalar_t>(),
+            grad_output.const_data_ptr<scalar_t>(),
+            input_w,
+            pad_l,
+            pad_r);
+      } else {
+        const int64_t plane_count = nplane * nbatch;
+        const int64_t total_blocks =
+            at::ceil_div(plane_count * output_w, static_cast<int64_t>(block_x));
+        const int grid_x = static_cast<int>(
+            std::min<int64_t>(max_x, std::max<int64_t>(1, total_blocks)));
+        dim3 grid(grid_x, 1, 1);
+        reflection_pad1d_backward_flat<<<grid, block, 0, stream>>>(
+            grad_input.mutable_data_ptr<scalar_t>(),
+            grad_output.const_data_ptr<scalar_t>(),
+            input_w,
+            pad_l,
+            output_w,
+            plane_count);
+      }
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   );

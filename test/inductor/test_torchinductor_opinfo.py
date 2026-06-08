@@ -39,9 +39,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
-    skipIfRocm,
     skipIfTorchDynamo,
-    skipIfTorchInductor,
     suppress_warnings,
     TEST_MKL,
     TEST_WITH_ASAN,
@@ -1216,19 +1214,30 @@ def _inductor_extra_samples(op_name, device, dtype, requires_grad):
 
 @wrapper_noop_set_seed_decorator
 class TestInductorOpInfo(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._test_config_stack = contextlib.ExitStack()
+        cls._test_config_stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._test_config_stack.close()
+        super().tearDownClass()
+
     def tearDown(self):
         torch._dynamo.reset()
 
     check_model = check_model
     check_model_gpu = check_model_gpu
 
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/147047")
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/156514")
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/147058")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/147057")
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/140383")
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/137684")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/165296")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @skipCUDAMemoryLeakCheckIf(
@@ -1248,8 +1257,6 @@ class TestInductorOpInfo(TestCase):
     @torch._inductor.config.patch(
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
-    @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @torch._inductor.config.patch("test_configs.static_cpp_dtype_assert", True)
     @torch._inductor.config.patch("shape_padding", False)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
