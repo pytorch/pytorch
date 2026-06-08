@@ -3694,7 +3694,7 @@ class TestReductions(TestCase):
 
             bin_edges = make_tensor(bin_ct + 1, device="cpu", dtype=dtype, low=-9, high=9).msort()
             if not bins_contig:
-                bin_edges_noncontig = make_tensor(bin_ct + 1, dtype=dtype, noncontiguous=not bins_contig)
+                bin_edges_noncontig = make_tensor(bin_ct + 1, device="cpu", dtype=dtype, noncontiguous=not bins_contig)
                 bin_edges_noncontig.copy_(bin_edges)
                 bin_edges = bin_edges_noncontig
             self.assertEqual(bin_edges.is_contiguous(), bins_contig)
