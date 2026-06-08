@@ -1592,7 +1592,7 @@ class TestReductions(TestCase):
 
     @onlyCPU
     def test_max_mixed_devices(self, device):
-        a = torch.randn(10, device=device)
+        a = torch.randn(10, device="cpu")
         if torch.accelerator.is_available():
             accelerator_type = torch.accelerator.current_accelerator().type
             values = torch.randn(10).to(accelerator_type)
