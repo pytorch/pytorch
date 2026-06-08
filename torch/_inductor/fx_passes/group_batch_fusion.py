@@ -1413,13 +1413,17 @@ def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
     return fusions
 
 
-def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True, fusion_options=None):
+def group_batch_fusion_passes(
+    graph: torch.fx.Graph, pre_grad=True, fusion_options=None
+):
     fusions: list[GroupBatchFusionBase] = []
     # we keep all current pre grad fusions to keep
     # current implementation, will remove this later
     if pre_grad:
         fusions += generate_fusion_from_config(
-            fusion_options if fusion_options is not None else config.pre_grad_fusion_options,
+            fusion_options
+            if fusion_options is not None
+            else config.pre_grad_fusion_options,
             pre_grad=True,
         )
     else:

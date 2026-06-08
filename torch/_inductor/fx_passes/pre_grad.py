@@ -341,7 +341,9 @@ def pre_grad_passes(
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
                 pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
             GraphTransformObserver(gm, "group_batch_fusion_passes").apply_graph_pass(
-                lambda graph: group_batch_fusion_passes(graph, pre_grad=True, fusion_options=fusion_options)
+                lambda graph: group_batch_fusion_passes(
+                    graph, pre_grad=True, fusion_options=fusion_options
+                )
             )
             for pass_name in fusion_options:
                 # skip all patterns for group batch fusions
