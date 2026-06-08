@@ -888,6 +888,67 @@ class ComboKernelTests(TestCase):
         # 1 combo (b*2, c+1) + 1 standalone (bucketize) = 2 real kernels.
         self.assertEqual(combined.count("async_compile.triton("), 2)
 
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels": True,
+            "combo_kernel_per_subkernel_blocks": True,
+        }
+    )
+    def test_combo_kernel_split_large_reductions(self):
+        # squeezenet1_1 backward (combo regression sum_sum_8bcd6e12dcd4):
+        # two very large reductions (sum over [0,2,3] of [512,64,55,55]) must NOT be
+        # co-fused into one combo kernel -- each is split out (5 kernels, vs 4 if fused).
+        import torch._inductor.inductor_prims
+
+        class Model(torch.nn.Module):
+            def forward(
+                self, getitem_54, arg33_1, arg61_1, full, arg62_1, sp0, sp1, sp2
+            ):
+                full_default = torch.ops.aten.full.default(
+                    [65536, 3025], 0, dtype=torch.float32, device=getitem_54.device
+                )
+                view_default = torch.ops.aten.view.default(getitem_54, sp0)
+                idx = torch.ops.prims._low_memory_max_pool_offsets_to_indices.default(
+                    arg33_1, [3, 3], [55, 55], [2, 2], [0, 0], [1, 1]
+                )
+                view_default_1 = torch.ops.aten.view.default(idx, sp1)
+                scatter_add = torch.ops.aten.scatter_add.default(
+                    full_default, 1, view_default_1, view_default
+                )
+                view_default_2 = torch.ops.aten.view.default(scatter_add, sp2)
+                s0 = torch.ops.aten.slice.Tensor(view_default_2, 1, 0, 64)
+                s1 = torch.ops.aten.slice.Tensor(view_default_2, 1, 64, 128)
+                r0 = torch.ops.aten.sum.dim_IntList(
+                    torch.ops.aten.where.self(arg61_1, full, s1), [0, 2, 3]
+                )
+                r1 = torch.ops.aten.sum.dim_IntList(
+                    torch.ops.aten.where.self(arg62_1, full, s0), [0, 2, 3]
+                )
+                return (r0, r1)
+
+        dev = GPU_TYPE
+        torch.manual_seed(0)
+        inps = (
+            torch.randn(512, 128, 27, 27, device=dev),
+            torch.randint(0, 9, (512, 128, 27, 27), dtype=torch.int8, device=dev),
+            torch.rand(512, 64, 55, 55, device=dev) > 0.5,
+            torch.randn((), device=dev),
+            torch.rand(512, 64, 55, 55, device=dev) > 0.5,
+            [65536, 729],
+            [65536, 729],
+            [512, 128, 55, 55],
+        )
+
+        m = Model()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_eager = m(*inps)
+        out_compiled = torch.compile(m)(*inps)
+        self.assertEqual(out_eager, out_compiled)
+        # Very-large reductions split out instead of co-fused: 5 kernels (4 = the regression).
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+
 
 class ComboKernelBenchmarkTests(TestCase):
     check_model_gpu = check_model_gpu
