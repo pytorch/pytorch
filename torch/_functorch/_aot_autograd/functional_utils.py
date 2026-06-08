@@ -284,11 +284,18 @@ def has_metadata_mutation(
         if has_storage_metadata_mutation:
             return True
 
+        # This is true if the current tensor experienced at least one metadata mutation
+        maybe_metadata_mutated = torch._functionalize_has_metadata_mutation(f_arg.elem)  # type: ignore[attr-defined]
+
         # Multiple metadata mutations can cancel out, so check the final
         # concrete metadata. In addition, auto-functionalized out= ops can
         # update wrapper metadata via replace_() without setting the C++
-        # metadata mutation bit.
+        # metadata mutation bit. In that case, only treat a logical size
+        # change as metadata mutation; stride/offset may differ for ordinary
+        # data mutations on non-contiguous inputs.
         same_sizes = arg.shape == arg_after.shape
+        if not maybe_metadata_mutated and same_sizes:
+            return False
         same_strides = arg.stride() == arg_after.stride()
         same_offsets = arg.storage_offset() == arg_after.storage_offset()
         return not (same_sizes and same_strides and same_offsets)
