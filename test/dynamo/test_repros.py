@@ -81,6 +81,7 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfRocm,
     skipIfWindows,
+    skipIfXpu,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
@@ -1240,6 +1241,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
         compiled_out = compiled_fn(x)
         self.assertTrue(compiled_out.is_contiguous())
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
+
+    # https://github.com/pytorch/pytorch/issues/183771
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_interpolate_nearest_5d_channels_last_stride(self, backend):
+        def fn(x):
+            return F.interpolate(x, size=(5, 6, 7), mode="nearest")
+
+        x = torch.arange(2 * 5 * 2 * 3 * 2, dtype=torch.float32).reshape(2, 5, 2, 3, 2)
+        x = x.permute(0, 4, 1, 2, 3)
+        eager_out = fn(x)
+        compiled_out = torch.compile(fn, backend=backend, fullgraph=True)(x)
+
         self.assertEqual(eager_out, compiled_out)
         self.assertEqual(eager_out.stride(), compiled_out.stride())
 
@@ -7564,6 +7579,83 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(model(*inputs), compiled_model(*inputs))
 
+    # https://github.com/pytorch/pytorch/issues/152307
+    def test_fp8_qdq_repeated_modules_no_recompile(self):
+        class FP8QDQLinear(torch.nn.Module):
+            def __init__(self, in_features, out_features):
+                super().__init__()
+                weight = torch.randn(out_features, in_features).abs().add(0.01)
+                scale = weight.amax() / torch.finfo(torch.float8_e4m3fn).max
+                self.register_buffer(
+                    "qweight",
+                    torch.clamp(
+                        weight / scale,
+                        torch.finfo(torch.float8_e4m3fn).min,
+                        torch.finfo(torch.float8_e4m3fn).max,
+                    ).to(torch.float8_e4m3fn),
+                )
+                self.register_buffer("weight_scale", scale)
+                self.register_buffer("bias", torch.randn(out_features))
+                self.scale = 1 / torch.finfo(torch.float8_e4m3fn).max
+
+            def forward(self, x):
+                from torch.ao.quantization.fx._decomposed import (
+                    dequantize_per_tensor,
+                    quantize_per_tensor,
+                )
+
+                weight = dequantize_per_tensor(
+                    self.qweight,
+                    self.weight_scale,
+                    0,
+                    torch.finfo(torch.float8_e4m3fn).min,
+                    torch.finfo(torch.float8_e4m3fn).max,
+                    self.qweight.dtype,
+                    out_dtype=torch.float,
+                )
+                qx = quantize_per_tensor(
+                    x,
+                    self.scale,
+                    0,
+                    torch.finfo(torch.float8_e4m3fn).min,
+                    torch.finfo(torch.float8_e4m3fn).max,
+                    torch.float8_e4m3fn,
+                )
+                dx = dequantize_per_tensor(
+                    qx,
+                    self.scale,
+                    0,
+                    torch.finfo(torch.float8_e4m3fn).min,
+                    torch.finfo(torch.float8_e4m3fn).max,
+                    qx.dtype,
+                    out_dtype=torch.float,
+                )
+                return torch.nn.functional.linear(dx, weight, self.bias)
+
+        class Block(torch.nn.Module):
+            def __init__(self, in_features, out_features):
+                super().__init__()
+                self.linear = FP8QDQLinear(in_features, out_features)
+
+            def forward(self, input):
+                return torch.relu(self.linear(input))
+
+        model = torch.nn.Sequential(
+            Block(13, 512),
+            Block(512, 256),
+            Block(256, 128),
+        ).eval()
+        x = torch.randn(8, 13)
+
+        with torch.no_grad(), torch._dynamo.config.patch(error_on_recompile=True):
+            expected = model(x)
+            opt_model = torch.compile(model, backend="eager")
+            result = opt_model(x)
+            result_second_call = opt_model(x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(result_second_call, expected)
+
     # https://github.com/pytorch/pytorch/issues/144080
     def test_pad_sequence_mixed_dtype_padding_value(self):
         class RNNPadSequence(torch.nn.Module):
@@ -7971,6 +8063,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         peak_mem2 = torch.get_device_module(device).max_memory_allocated()
         self.assertTrue(peak_mem1 == peak_mem2)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3860")
     # test involves custom ops that return unbacked symints
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     # test requires the activation memory budget code to think
@@ -8331,6 +8424,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mem_after = torch.accelerator.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3835")
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)
@@ -9258,6 +9352,32 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(f(inp), inp + 2)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_graph_metadata_does_not_retain_cuda_fake_constants(self):
+        def f():
+            x = torch.tensor(5, dtype=torch.float32, device="cuda")
+            copy.deepcopy(x)
+
+        def clear_cuda_memory(*, reset_dynamo):
+            if reset_dynamo:
+                torch._dynamo.reset()
+            gc.collect()
+            torch._C._cuda_clearCublasWorkspaces()
+            torch.cuda.empty_cache()
+
+        clear_cuda_memory(reset_dynamo=True)
+        memory_before = torch.cuda.memory_allocated()
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_f()
+        clear_cuda_memory(reset_dynamo=False)
+
+        self.assertEqual(torch.cuda.memory_allocated(), memory_before)
+        # Keep the compiled callable alive through the assertion. Before the
+        # fix, it retained the compiled FX graph, whose FakeTensor metadata
+        # retained the real CUDA scalar through FakeTensor.constant.
+        self.assertIsNotNone(opt_f)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")
     # TODO: Remoe this skip once nccl issue if fixed
     @unittest.skip(
@@ -9338,8 +9458,10 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
 
 instantiate_parametrized_tests(ReproTests)
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(ReproTestsDevice, globals(), only_for=devices)
+devices = ["cuda", "hpu", "xpu"]
+instantiate_device_type_tests(
+    ReproTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
