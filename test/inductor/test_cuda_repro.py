@@ -3155,6 +3155,51 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.common(fn, [x])
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_layer_norm_with_reciprocal_like_epilogue(self):
+        torch.manual_seed(0)
+        direct_x = torch.randn(64, 128, device=device_type)
+        torch.manual_seed(0)
+        x = torch.randn(68, 4, 14, 9, device=device_type)
+
+        def check(fn, arg):
+            torch._dynamo.reset()
+            expected = fn(arg)
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(arg)
+            self.assertEqual(actual, expected, atol=1e-3, rtol=1e-3)
+
+        def direct_reciprocal_fn(x):
+            t = F.layer_norm(x, [128])
+            return torch.reciprocal(torch.abs(t) + 1e-6)
+
+        def direct_rsqrt_fn(x):
+            t = F.layer_norm(x, [128])
+            return torch.rsqrt(torch.abs(t) + 1e-6)
+
+        def reciprocal_fn(x):
+            t = torch.cummax(x, dim=-1)[0]
+            t = F.layer_norm(t, [9])
+            return torch.reciprocal(torch.abs(t) + 1e-6)
+
+        def rsqrt_fn(x):
+            t = torch.cummax(x, dim=-1)[0]
+            t = F.layer_norm(t, [9])
+            return torch.rsqrt(torch.abs(t) + 1e-6)
+
+        def manual_div_fn(x):
+            t = torch.cummax(x, dim=-1)[0]
+            t = F.layer_norm(t, [9])
+            return 1.0 / torch.sqrt(torch.abs(t) + 1e-6)
+
+        for fn, arg in (
+            (direct_reciprocal_fn, direct_x),
+            (direct_rsqrt_fn, direct_x),
+            (reciprocal_fn, x),
+            (rsqrt_fn, x),
+            (manual_div_fn, x),
+        ):
+            check(fn, arg)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     @skipIfRocm(msg="PTX atan codegen is CUDA-specific")
     @skipIfXpu(msg="PTX atan codegen is CUDA-specific")
     def test_atan_special_psi_eager_parity(self):
