@@ -27,7 +27,7 @@ def get_rng_state(device: _device_t = None, /) -> Tensor:
     .. warning::
         This function eagerly initializes the accelerator runtime.
     """
-    device_index = _get_device_index(device)
+    device_index = _get_device_index(device, optional=True)
     default_generator = torch._C._accelerator_getDefaultGenerator(device_index)
     return default_generator.get_state()
 
