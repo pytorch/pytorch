@@ -67,7 +67,7 @@ def _add_op_to_registry(registry, op, fn):
     This is an internal API for adding an op to the decomposition table.
 
     If op is OpOverload, it will be added to the registry directly.
-    If op is OpOverloadPacket, all the valid op_overloads in the packet will be added to the registry.
+    If op is OpOverloadPacket, all the valid overload_ops in the packet will be added to the registry.
     """
     overloads: list[torch._ops.OperatorBase] = []
     if isinstance(op, HigherOrderOperator):
@@ -79,8 +79,7 @@ def _add_op_to_registry(registry, op, fn):
     else:
         if not isinstance(op, OpOverloadPacket):
             raise AssertionError(f"expected OpOverloadPacket, got {type(op)}")
-        for ol in op.overloads():
-            overloads.append(getattr(op, ol))
+        overloads.extend(op.op_overloads())
 
     for op_overload in overloads:
         if op_overload in registry:
@@ -277,8 +276,7 @@ def remove_decompositions(
     """
     for op in aten_ops:
         if isinstance(op, OpOverloadPacket):
-            for overload_name in op.overloads():
-                opo = getattr(op, overload_name)
+            for opo in op.op_overloads():
                 decompositions.pop(opo, None)
         elif isinstance(op, OpOverload):
             decompositions.pop(op, None)
