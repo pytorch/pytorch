@@ -1886,6 +1886,32 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
                 with self.assertRaises(ValueError):
                     dist.BackendConfig(config_str)
 
+    def test_register_backend_devices_string(self):
+        # `register_backend` advertises `devices: str | list[str]`. A single
+        # device passed as a bare string must register the same device->backend
+        # mapping as the equivalent one-element list, not iterate the string's
+        # characters into `default_device_backend_map`.
+        backend_map = dist.Backend.default_device_backend_map
+        capability = dist.Backend.backend_capability
+        saved_map = dict(backend_map)
+        saved_capability = dict(capability)
+        try:
+            dist.Backend.register_backend(
+                "dummy_str",
+                PythonProcessGroupExtensionTest.create_dummy,
+                devices="privateuseone",
+            )
+            self.assertEqual(backend_map["privateuseone"], "dummy_str")
+            self.assertEqual(capability["dummy_str"], ["privateuseone"])
+            # The characters of the string must not have leaked in as keys.
+            for ch in set("privateuseone"):
+                self.assertNotIn(ch, backend_map)
+        finally:
+            backend_map.clear()
+            backend_map.update(saved_map)
+            capability.clear()
+            capability.update(saved_capability)
+
     def test_parse_backend_string(self):
         from torch.distributed.distributed_c10d import _parse_backend_string
 

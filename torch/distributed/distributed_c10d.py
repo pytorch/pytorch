@@ -375,6 +375,12 @@ class Backend(str):  # noqa: SLOT000
         if name.lower() not in Backend.backend_list:
             Backend.backend_list.append(name.lower())
 
+        # `devices` advertises `str | list[str]`; normalize a single device
+        # string to a list so the device->backend map below registers the whole
+        # name as one key rather than iterating the string's characters.
+        if isinstance(devices, str):
+            devices = [devices]
+
         if devices is not None:
             for device in devices:
                 current = Backend.default_device_backend_map.get(device)
@@ -398,9 +404,6 @@ class Backend(str):  # noqa: SLOT000
             Backend.backend_capability[name.lower()] = (
                 ["cpu", "cuda", "xpu"] if torch.xpu.is_available() else ["cpu", "cuda"]
             )
-        elif isinstance(devices, str):
-            # Single device string specified. Simply convert to list.
-            Backend.backend_capability[name.lower()] = [devices]
         else:
             Backend.backend_capability[name.lower()] = devices
 
