@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import torch
+import torch._dynamo.config
 import unittest
 import math
 from contextlib import contextmanager
@@ -383,6 +384,7 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expected, exact_dtype=exact_dtype)
 
     @skipCPUIfNoFFT
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @onlyNativeDeviceTypes
     @toleranceOverride({
         torch.half : tol(1e-2, 1e-2),
