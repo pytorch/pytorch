@@ -1103,31 +1103,6 @@ GemmPlan choose_gemm_plan(c10::ScalarType dt,
     plan.backend = GemmPlan::kMPP;
     plan.tile = cands[0];
   }
-  static const bool debug = c10::utils::has_env("PYTORCH_MPS_GEMM_DEBUG");
-  if (debug) {
-    const char* bk = plan.backend == GemmPlan::kSplitK ? "splitk"
-        : plan.backend == GemmPlan::kConv              ? "conv"
-        : plan.backend == GemmPlan::kGemvBt            ? "gemv_bt"
-                                                       : "mpp";
-    TORCH_WARN("[mps_gemm] ",
-               batched ? "bmm " : "",
-               bk,
-               " M=",
-               M,
-               " N=",
-               N,
-               " K=",
-               K,
-               plan.backend == GemmPlan::kGemvBt
-                   ? (" mrows=" + std::to_string(plan.gbt.mrows) + " vec=" + std::to_string(plan.gbt.vec) +
-                      " nwarps=" + std::to_string(plan.gbt.nwarps))
-                   : (" tile=" + std::to_string(plan.tile.BM) + "x" + std::to_string(plan.tile.BN) + "x" +
-                      std::to_string(plan.tile.NSG)),
-               plan.backend == GemmPlan::kSplitK ? (" G=" + std::to_string(plan.G)) : "",
-               plan.backend == GemmPlan::kConv
-                   ? (" BMW=" + std::to_string(plan.BMW) + " BNO=" + std::to_string(plan.BNO))
-                   : "");
-  }
   {
     std::lock_guard<std::mutex> g(g_tile_mutex);
     g_tile_cache.emplace(key, plan); // first writer wins
@@ -1146,17 +1121,6 @@ bool gemm_use_mpp() {
   // no GPU-family requirement (it lowers to the NAX matrix unit where present and to
   // simdgroup execution otherwise).
   static const bool ok = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_2_PLUS);
-  return ok;
-}
-
-// True only on GPUs with the NAX matrix unit (Apple10+), where the simd kernels are
-// competitive for tiny shapes. On earlier GPUs (e.g. M2) matmul2d is ~20x faster even
-// at small K, so the dispatcher's "tiny shape -> simd" fallback is gated on this.
-static bool gemm_has_nax_unit() {
-  static const bool ok = [] {
-    auto dev = MPSDevice::getInstance()->device();
-    return dev != nil && [dev supportsFamily:MTLGPUFamilyApple10];
-  }();
   return ok;
 }
 
@@ -1293,9 +1257,8 @@ void mps_gemm(const Tensor& A,
   // column-major gemv_bt_t kernel reduces over K with simd_sum and has no high-M
   // cliff, so route it directly. Row-major B instead flows to the autotuner below,
   // which times gemv_bt against the matmul tiles per shape (see choose_gemm_plan).
-  static const bool gemv_bt_off = c10::utils::has_env("PYTORCH_MPS_NO_GEMV_BT");
-  if (!gemv_bt_off && rb.trans && (dt == kHalf || dt == kBFloat16) && gemm_use_mpp() && gemm_has_nax_unit() &&
-      !ra.trans && M >= 2 && M <= 16 && K >= 64 && N >= 16 && N <= 262144) {
+  if (rb.trans && (dt == kHalf || dt == kBFloat16) && gemm_use_mpp() && !ra.trans && M >= 2 && M <= 16 &&
+      K >= 64 && N >= 16 && N <= 262144) {
     const int64_t align = rb.ld | ra.ld | ra.view.storage_offset() | rb.view.storage_offset() |
         (batched ? (ra.view.stride(0) | rb.view.stride(0)) : 0);
     const GemvBtSpec spec = pick_gemv_bt(M, N, K, /*trans_b=*/true, align);
@@ -1372,19 +1335,17 @@ void mps_gemm(const Tensor& A,
       !force_precise_fp32 && at::globalContext().float32MatmulPrecision() != at::Float32MatmulPrecision::HIGHEST;
   const bool want_relaxed = (dt != kFloat) || relaxed_fp32;
   const bool transposed = ra.trans || rb.trans;
-  // K >= 64 sends small-K matmuls to the simd kernel; that is only worthwhile on
-  // the NAX matrix unit. Off it (e.g. M2) simd is ~20x slower, so use matmul2d for
-  // all K there (the kernel takes K as a runtime extent, so any K >= 1 is valid).
-  const bool use_mpp_gemm = use_mpp && M >= 2 && N >= 32 && (K >= 64 || !gemm_has_nax_unit());
+  // matmul2d takes K as a runtime extent, including K < 64, and outperforms the
+  // portable simd fallback for the small-K regimes tested on Apple10+ and earlier.
+  const bool use_mpp_gemm = use_mpp && M >= 2 && N >= 32;
   const bool relaxed = want_relaxed;
 
   if (use_mpp_gemm) {
     const bool packed_untrans = !transposed && ra.ld == K && rb.ld == N;
-    // Row-major thin-M (M in 2..16, half/bf16, NAX) enters the probe as a candidate
+    // Row-major thin-M (M in 2..16, half/bf16) enters the probe as a candidate
     // against the matmul tiles; the autotuner caches the per-shape winner.
     GemvBtSpec gbt{};
-    if (!gemv_bt_off && packed_untrans && gemm_has_nax_unit() && (dt == kHalf || dt == kBFloat16) && M >= 2 &&
-        M <= 16 && K >= 64 && N >= 16) {
+    if (packed_untrans && (dt == kHalf || dt == kBFloat16) && M >= 2 && M <= 16 && K >= 64 && N >= 16) {
       const int64_t align = rb.ld | rb.view.storage_offset() | (batched ? rb.view.stride(0) : 0);
       gbt = pick_gemv_bt(M, N, K, /*trans_b=*/false, align);
     }
