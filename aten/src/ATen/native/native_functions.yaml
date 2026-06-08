@@ -4117,14 +4117,6 @@
     CUDA: _int_mm_out_cuda
     XPU: _int_mm_out_xpu
 
-- func: _int_mm.dtype(Tensor self, Tensor mat2, *, ScalarType out_dtype) -> Tensor
-  dispatch:
-    CPU: _int_mm_dtype_cpu
-
-- func: _int_mm.dtype_out(Tensor self, Tensor mat2, *, ScalarType out_dtype, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: _int_mm_dtype_out_cpu
-
 - func: _convert_weight_to_int4pack(Tensor self, int innerKTiles) -> Tensor
   dispatch:
     CUDA: _convert_weight_to_int4pack_cuda
