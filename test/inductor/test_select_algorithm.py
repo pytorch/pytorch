@@ -40,7 +40,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
-    skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
     TEST_WITH_ROCM,
@@ -477,7 +476,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
     @patches
     def test_mm_dropout(self):
         @torch.compile
@@ -486,7 +484,12 @@ class TestSelectAlgorithm(TestCase):
             rnd = torch.ops.prims.inductor_random.default(mm_4.shape, seed, "rand")
             return mm_4 * rnd
 
-        if GPU_TYPE == "xpu":
+        # Triton MFMA matmul on AMD GPUs and Intel XPUs produces
+        # ~1 ULP fp16 rounding differences vs the aten reference used by the
+        # autotuner's internal VERIFY path. Max abs diff 0.0625 (= 2^-4),
+        # max rel diff 2^-10 (fp16 mantissa LSB). Benign; expand tolerance
+        # to match the existing XPU pattern.
+        if GPU_TYPE == "xpu" or torch.version.hip:
             patcher = patch.object(
                 select_algorithm, "VERIFY", dict(atol=1e-3, rtol=1e-3)
             )
@@ -711,6 +714,66 @@ class TestSelectAlgorithm(TestCase):
         )
         caller_str = str(caller)
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
+
+
+class TestSelectAlgorithmCleanup(TestCase):
+    def test_benchmark_only_clears_matching_precompile_cache_entry(self):
+        """
+        Autotune cleanup should release only the closure for the active site.
+        Clearing the whole precompile cache regresses compile-time reuse for
+        unrelated autotune sites.
+        """
+        cache = select_algorithm.AlgorithmSelectorCache()
+        cache.precompile_cache = {"keep": dict, "drop": dict}
+
+        with patch.object(cache, "make_benchmark_fn", return_value=lambda _choices: {}):
+            cache.benchmark([], [], unittest.mock.Mock(), None, precompile_key="drop")
+
+        self.assertIn("keep", cache.precompile_cache)
+        self.assertNotIn("drop", cache.precompile_cache)
+
+    def test_release_benchmark_artifacts_closes_and_clears_state(self):
+        """
+        Benchmark-only autotuners own temporary launchers and compile results.
+        Cleanup must close their module owners and clear the references that
+        otherwise keep Triton ``CompiledKernel`` objects alive.
+        """
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        closed = []
+
+        class FakeKernel:
+            def __init__(self, name):
+                self.name = name
+
+            def close(self):
+                closed.append(self.name)
+
+        class FakeCompileResult:
+            def __init__(self, name):
+                self.kernel = FakeKernel(name)
+
+        def fake_launcher():
+            return None
+
+        launcher_kernel = FakeKernel("launcher")
+        fake_launcher.__self__ = launcher_kernel  # type: ignore[attr-defined]
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.launchers = [fake_launcher]
+        autotuner.compile_results = [FakeCompileResult("compile_result")]
+        autotuner.benchmark_failure_reasons = {fake_launcher: "failed"}
+        autotuner._cached_launcher = fake_launcher
+        autotuner._debug_call = object()
+
+        autotuner.release_benchmark_artifacts()
+
+        self.assertEqual(closed, ["launcher", "compile_result"])
+        self.assertEqual(autotuner.launchers, [])
+        self.assertEqual(autotuner.compile_results, [])
+        self.assertEqual(autotuner.benchmark_failure_reasons, {})
+        self.assertIsNone(autotuner._cached_launcher)
+        self.assertIsNone(autotuner._debug_call)
 
 
 class TestExternKernelCaller(TestCase):
