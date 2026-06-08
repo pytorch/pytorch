@@ -455,6 +455,67 @@ class TestLibtorchAgnostic(TestCase):
 
         self.assertEqual(stream_id, expected_stream_id)
 
+    @skipIfTorchVersionLessThan(2, 13)
+    @onlyCUDA
+    def test_stream_native_handle(self, device):
+        import libtorch_agn_2_13 as libtorch_agnostic
+
+        device_idx = torch.cuda.current_device()
+        streams = [torch.cuda.Stream(device=device_idx) for _ in range(3)]
+
+        native_handles = []
+        for stream in streams:
+            with torch.cuda.stream(stream):
+                expected = torch.accelerator.current_stream(device_idx).native_handle
+                nh = libtorch_agnostic.ops.test_stream_native_handle(device_idx)
+
+            self.assertEqual(nh, expected)
+            self.assertNotIn(nh, native_handles)
+            native_handles.append(nh)
+
+    @skipIfTorchVersionLessThan(2, 13)
+    @onlyCUDA
+    def test_kernel_launch_on_custom_stream(self, device):
+        import libtorch_agn_2_13 as libtorch_agnostic
+
+        device_idx = torch.cuda.current_device()
+        fill_value = 42
+
+        input_tensor = torch.zeros(1024, dtype=torch.int32, device=f"cuda:{device_idx}")
+        custom_stream = torch.cuda.Stream(device=device_idx)
+
+        with torch.cuda.stream(custom_stream):
+            output = libtorch_agnostic.ops.test_kernel_launch_on_stream(
+                input_tensor, fill_value
+            )
+
+        custom_stream.synchronize()
+        self.assertEqual(output, torch.full_like(input_tensor, fill_value))
+
+    @skipIfTorchVersionLessThan(2, 13)
+    def test_my_rand_with_generator(self, device):
+        import libtorch_agn_2_13 as libtorch_agnostic
+
+        g1 = torch.Generator(device=device)
+        g1.manual_seed(42)
+        g2 = torch.Generator(device=device)
+        g2.manual_seed(42)
+
+        out = libtorch_agnostic.ops.my_rand_with_generator([2, 3], g1)
+        expected = torch.rand(2, 3, generator=g2, device=device)
+
+        # Generator threaded through correctly => exact match with same seed.
+        self.assertEqual(out, expected)
+        # Output device is derived from the generator via Generator::device().
+        self.assertEqual(out.device.type, torch.device(device).type)
+
+        # Generator state advances across calls, and re-seeding reproduces.
+        out2 = libtorch_agnostic.ops.my_rand_with_generator([2, 3], g1)
+        self.assertFalse(torch.equal(out, out2))
+        g1.manual_seed(42)
+        out3 = libtorch_agnostic.ops.my_rand_with_generator([2, 3], g1)
+        self.assertEqual(out, out3)
+
     @onlyCUDA
     @deviceCountAtLeast(2)
     def test_get_current_device_index(self, device):
