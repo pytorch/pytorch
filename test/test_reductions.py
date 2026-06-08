@@ -1602,7 +1602,7 @@ class TestReductions(TestCase):
             self.assertRaises(RuntimeError,
                               lambda: torch.amax(a, 0, out=values))
 
-    @onlyCPU
+    @onlyAccelerator
     def test_min_mixed_devices(self, device):
         a = torch.randn(10, device="cpu")
         if torch.accelerator.is_available():
