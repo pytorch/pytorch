@@ -180,6 +180,12 @@ def parse_backend_yaml(
                         f"Operator '{_op}' has 'define_meta: True' but 'structured: False'. "
                         "Custom meta functions require a structured kernel."
                     )
+                if structured and not use_out_as_primary:
+                    raise AssertionError(
+                        f"Operator '{_op}' has 'structured: True' but the backend sets "
+                        "'use_out_as_primary: False'. Structured kernels are out-primary; set "
+                        "use_out_as_primary: True so the functional/inplace are derived from the out."
+                    )
                 op = _op
             op_name = OperatorName.parse(op)
             if op_name not in native_functions_map:
@@ -539,7 +545,12 @@ def gen_define_meta_registrations(
         )
         sig = DispatcherSignature.from_schema(g.functional.func)
         num_out = len(g.functional.func.returns)
+        # structured ops can't carry TensorOptions, so these functional args always match the
+        # generated meta() declaration (i.e. equal structured.meta_arguments(g)).
         arg_names = ", ".join(a.name for a in sig.arguments())
+        # Return one moved Tensor, or a make_tuple for multi-output ops (e.g. sort/topk).
+        moved = [f"std::move(op.outputs_[{i}])" for i in range(num_out)]
+        ret_expr = moved[0] if num_out == 1 else f"std::make_tuple({', '.join(moved)})"
         struct_name = f"structured_{metadata.kernel}_define_meta"
         wrapper_name = f"wrapper_Meta_define_{meta_name}"
         # The set_output_* signature depends on the structured meta base: ops that inherit
@@ -581,7 +592,7 @@ struct {struct_name} final : public {backend_struct} {{
 {sig.defn(name=wrapper_name)} {{
     {struct_name} op;
     op.meta({arg_names});
-    return std::move(op.outputs_[0]);
+    return {ret_expr};
 }}
 }}  // anonymous namespace
 """
@@ -591,6 +602,8 @@ struct {struct_name} final : public {backend_struct} {{
         )
     if not registrations:
         return ""
+    # NB: the aten Meta key is device-agnostic, so this globally overrides aten's meta for these
+    # ops (CPU/CUDA fake tensors included); safe only when the custom meta matches aten's shape.
     reg = "TORCH_LIBRARY_IMPL(aten, Meta, m) {\n" + "\n".join(registrations) + "\n}\n"
     return "\n".join(blocks) + reg
 
