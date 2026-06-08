@@ -1378,56 +1378,67 @@ def aot_export_joint_with_descriptors(
     of the inputs to determine if inputs are parameters and their FQNs.
     """
 
-    (
-        functional_call,
-        _params_buffers_flat,
-        params_spec,
-        buffers_spec,
-        fake_flat_args,
-        full_args_descs,
-        aot_config,
-        fake_mode,
-        shape_env,
-        in_spec,
-        out_spec,
-        act_input_indices,
-    ) = prepare_aot_module_simplified(
-        mod,
-        args,
-        kwargs,
-        # In contrast, decompositions are needed at this stage.
-        decompositions,
-        keep_inference_input_mutations,
-        ignore_shape_env,
-        flatten=True,
-        # Without this, we will attempt to "compile" the backward lazily
-        # at runtime, but this is pointless because it's just boxed_nop,
-        # it's trivial.  But this will get Inductor confused about scoping
-        # Metric(s) {'is_forward'} have already been set in the current
-        # context.
-        force_non_lazy_backward_lowering=True,
-        disable_functionalization=disable_functionalization,
-        _record_nn_module_stack=_record_nn_module_stack,
-        _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
-    )
+    dynamo_config_ctx = torch._dynamo.config.patch(error_on_nested_fx_trace=False)
 
-    # TODO: Maybe this should be in create_aot_state?  Not sure, that would
-    # increase its scope
-    stack.enter_context(compiled_autograd._disable())
+    with dynamo_config_ctx:
+        (
+            functional_call,
+            _params_buffers_flat,
+            params_spec,
+            buffers_spec,
+            fake_flat_args,
+            full_args_descs,
+            aot_config,
+            fake_mode,
+            shape_env,
+            in_spec,
+            out_spec,
+            act_input_indices,
+        ) = prepare_aot_module_simplified(
+            mod,
+            args,
+            kwargs,
+            # In contrast, decompositions are needed at this stage.
+            decompositions,
+            keep_inference_input_mutations,
+            ignore_shape_env,
+            flatten=True,
+            # Without this, we will attempt to "compile" the backward lazily
+            # at runtime, but this is pointless because it's just boxed_nop,
+            # it's trivial.  But this will get Inductor confused about scoping
+            # Metric(s) {'is_forward'} have already been set in the current
+            # context.
+            force_non_lazy_backward_lowering=True,
+            disable_functionalization=disable_functionalization,
+            _record_nn_module_stack=_record_nn_module_stack,
+            _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
+        )
 
-    aot_state = create_aot_state(
-        stack,
-        functional_call,
-        fake_flat_args,
-        full_args_descs,
-        aot_config,
-        fake_mode,
-        shape_env,
-    )
-    aot_state.fw_metadata.act_input_indices = act_input_indices
+        # TODO: Maybe this should be in create_aot_state?  Not sure, that would
+        # increase its scope
+        stack.enter_context(compiled_autograd._disable())
 
-    # NB: no cache lookup!
-    aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
+        tracing_context = torch._guards.TracingContext.try_get()
+        if tracing_context is None:
+            tracing_context = torch._guards.TracingContext(fake_mode)
+            tracing_ctx = torch._guards.tracing(tracing_context)
+        else:
+            tracing_ctx = nullcontext()
+
+        with torch.compiler._non_strict_tracing_context(), tracing_ctx:
+            aot_state = create_aot_state(
+                stack,
+                functional_call,
+                fake_flat_args,
+                full_args_descs,
+                aot_config,
+                fake_mode,
+                shape_env,
+            )
+        aot_state.fw_metadata.act_input_indices = act_input_indices
+
+        # NB: no cache lookup!
+        aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
 
     if out_spec is None or out_spec.spec is None:
         raise AssertionError("out_spec and out_spec.spec must not be None")

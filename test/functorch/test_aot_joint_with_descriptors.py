@@ -797,6 +797,64 @@ class inner_f(torch.nn.Module):
         compiled_fn(*dict(model.named_parameters()).values(), inputs).sum().backward()
         self.assertIsNotNone(model.linear.weight.grad)
 
+    def test_export_ignores_precompiled_function(self):
+        backend_calls = []
+
+        def backend(gm, example_inputs):
+            backend_calls.append((gm, example_inputs))
+            raise AssertionError("backend should not run during export")
+
+        def faster(x):
+            return x.sin() * 2
+
+        class ModuleWithCompiledCallable(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 4))
+                self.compiled = torch.compile(faster, backend=backend)
+
+            def forward(self, x):
+                return self.compiled(x @ self.weight).sum()
+
+        with ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(
+                stack, ModuleWithCompiledCallable(), (torch.randn(4, 4),)
+            )
+
+        self.assertEqual(backend_calls, [])
+        for node in joint_with_descriptors.graph_module.graph.nodes:
+            self.assertFalse(
+                any(
+                    key.startswith("_torchdynamo_disable")
+                    for key in node.meta.get("custom", {})
+                )
+            )
+
+    def test_export_ignores_compile_called_inside_forward(self):
+        backend_calls = []
+
+        def backend(gm, example_inputs):
+            backend_calls.append((gm, example_inputs))
+            raise AssertionError("backend should not run during export")
+
+        def faster(x):
+            return x.sin() * 2
+
+        class ModuleWithNestedCompile(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                return torch.compile(faster, backend=backend)(x @ self.weight).sum()
+
+        with ExitStack() as stack:
+            aot_export_joint_with_descriptors(
+                stack, ModuleWithNestedCompile(), (torch.randn(4, 4),)
+            )
+
+        self.assertEqual(backend_calls, [])
+
     def test_preserve_annotate_simple(self):
         """Test basic linear module with aot_export_joint_with_descriptors"""
 
