@@ -1682,10 +1682,8 @@ def _addmm_activation(
     return aten.relu(out)
 
 
-@register_decomposition(aten.addmv)
-@out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
-def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+def _addmv_impl(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)
         alpha = int(alpha)
@@ -1695,6 +1693,16 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     if out.numel() == 0:  # handle empty matrix
         return beta * self
     return out + beta * self
+
+
+@register_decomposition(aten.addmv)
+@out_wrapper(exact_dtype=True)
+def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+    torch._check(
+        self.dtype == mat1.dtype and mat1.dtype == vec.dtype,
+        lambda: f"addmv input tensors must have the same dtype, but got {self.dtype}, {mat1.dtype}, and {vec.dtype}",
+    )
+    return _addmv_impl(self, mat1, vec, beta, alpha)
 
 
 @register_decomposition(aten.native_group_norm_backward.default)
@@ -3170,6 +3178,14 @@ def _max_unpoolnd(
     # equal. If this condition is not satisfied, the operation is
     # non-deterministic as one of the different values in `self` 'wins'.
     utils.alert_not_deterministic(f"max_unpooling{dim}d_forward_out")
+    for i, size in enumerate(output_size):
+        torch._check(
+            size >= 0,
+            lambda i=i, size=size: (
+                f"max_unpooling{dim}d(): output_size must contain non-negative "
+                f"spatial dimensions, but got output_size[{i}]={size}"
+            ),
+        )
     output_shape = list(self.shape[:-dim]) + list(output_size)
     if any(s == 0 for s in output_shape):
         return self.new_zeros(output_shape)
@@ -3325,6 +3341,8 @@ def _index_add(
     inplace: bool,
     alpha: NumberType = 1,
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
         x.device == index.device and x.device == tensor.device,
@@ -3368,18 +3386,22 @@ def _index_add(
         del x_shape[dim]
         del tensor_shape[dim]
     torch._check(
-        x_shape == tensor_shape,
+        sym_eq(x_shape, tensor_shape),
         lambda: (
             "source tensor shape must match self tensor shape, excluding the "
             f"specified dimension. Got self.shape = {x.shape} "
             f"source.shape = {tensor.shape}"
         ),
     )
-    index_bound = 1 if x.ndim == 0 else x.size(dim)
-    aten._assert_async.msg(
-        torch.all((index >= 0) & (index < index_bound)),
-        "index_add(): index out of bounds",
+    has_dtensor_spec = any(
+        getattr(arg, "_spec", None) is not None for arg in (x, index, tensor)
     )
+    index_bound = 1 if x.ndim == 0 else x.size(dim)
+    if not has_dtensor_spec:
+        aten._assert_async.msg(
+            torch.all((index >= 0) & (index < index_bound)),
+            "index_add(): index out of bounds",
+        )
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         torch._check(
@@ -3392,7 +3414,16 @@ def _index_add(
     zero_dim = x.ndim == 0
     x1 = x.unsqueeze(0) if zero_dim else x
     scatter_dim = 0 if zero_dim else dim
-    if x.dtype == torch.complex32:
+    # DTensor sharding propagation traces decompositions on meta tensors tagged
+    # with _spec. Keep the old index_put lowering for that trace because its
+    # placement rules support the index_add cases covered by DTensor today.
+    # CPU low-precision dtypes also keep the old path to match eager numerics.
+    use_index_put = (
+        x.dtype == torch.complex32
+        or has_dtensor_spec
+        or (x.device.type == "cpu" and x.dtype in (torch.float16, torch.bfloat16))
+    )
+    if use_index_put:
         idx = (None,) * scatter_dim + (index,)
         index_put = aten.index_put_ if inplace else aten.index_put
         out = index_put(x1, idx, tensor, accumulate=True)
