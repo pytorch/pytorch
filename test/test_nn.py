@@ -2663,6 +2663,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
 
+    def test_loss_reduction_storage_size(self):
+        # https://github.com/pytorch/pytorch/issues/185647
+        x = torch.rand(3, 256, 256)
+        y = torch.rand(3, 256, 256)
+        scalar_bytes = x.element_size()
+        for reduction in ("mean", "sum"):
+            mse = F.mse_loss(x, y, reduction=reduction)
+            self.assertEqual(mse.shape, torch.Size([]))
+            self.assertEqual(mse.untyped_storage().nbytes(), scalar_bytes)
+
+            sl1 = F.smooth_l1_loss(x, y, reduction=reduction)
+            self.assertEqual(sl1.shape, torch.Size([]))
+            self.assertEqual(sl1.untyped_storage().nbytes(), scalar_bytes)
+
     def test_weighted_mse_loss(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
         targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
