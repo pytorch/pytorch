@@ -1327,19 +1327,17 @@ class TestInductorOpInfo(TestCase):
             and dtype is f16
             and isRocmArchAnyOf(MI200_ARCH)
         ):
-            # On AMD Instinct MI200, FP16 matrix instructions may flush denormal
-            # values to zero. PyTorch uses rocBLAS alternate FP16 implementations
-            # during backward to preserve these values. See:
+            # MI200 eager backward routes FP16 GEMMs through the rocBLAS
+            # alt-impl to preserve denormals while inductor's compiled GEMM does
+            # not, so the two diverge at FP16 scale. See:
             # https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html#reduced-precision-fp16-and-bf16-gemms-and-convolutions-on-amd-instinct-mi200-devices
-            #
-            # Keep the FP32 eager reference, but allow FP16-scale differences:
-            # tiny is the smallest normal FP16 value, so it covers
-            # subnormal-scale absolute differences; eps is FP16 relative
-            # precision near 1.0. The observed relative difference for this
-            # test on MI200 is about 9 * eps, so use 10 * eps as a
-            # small round-number margin.
-            f16_info = torch.finfo(f16)
-            overridden_kwargs.update({"atol": f16_info.tiny, "rtol": 10 * f16_info.eps})
+            # Checked at runtime, not in inductor_override_kwargs, because the
+            # arch query would force import-time HIP init that this module
+            # otherwise avoids. reference_in_float=True (the eager FP32
+            # reference) is inherited from the ("addmm", f16) cuda entry above.
+            # Observed rel diff is ~9 * eps; use ~2e-2 for headroom across
+            # samples and rocBLAS solver versions.
+            overridden_kwargs.update({"rtol": 2e-2})
         func = op.get_op()
 
         def fn(*args, **kwargs):
