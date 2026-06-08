@@ -84,10 +84,7 @@ def _safe_metadata_eq(
     outer: Iterable[IntLikeType],
     inner: Iterable[IntLikeType],
 ) -> bool:
-    try:
-        return guard_or_false(sym_eq(tuple(outer), tuple(inner)))
-    except Exception:
-        return False
+    return guard_or_false(sym_eq(tuple(outer), tuple(inner)))
 
 
 def _find_attr_matching_outer_metadata(
@@ -101,6 +98,8 @@ def _find_attr_matching_outer_metadata(
         return None
 
     outer_metadata = tuple(metadata_fn(a))
+    # Only use an attr as the runtime source when every tensor attr agrees
+    # with the wrapper metadata; otherwise there is no single attr to trust.
     if all(
         _safe_metadata_eq(outer_metadata, metadata_fn(getattr(a, key)))
         for key in tensor_attrs

@@ -2,14 +2,35 @@
 
 import logging
 from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Any
 
 import torch
 import torch._functorch.config
+from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+from torch._functorch._aot_autograd.subclass_codegen import (
+    _codegen_subclass_wrapper_source,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.two_tensor import TwoTensor
 
 
 trace_log = logging.getLogger("torch.__trace")
+
+
+@dataclass
+class _TestSubclassMeta:
+    flat_tensor_start_idx: int
+    arg_count: int
+    included_subclass_symints: bool
+    attrs: dict
+    outer_size: tuple
+    outer_stride: tuple
+    meta: Any
+    original_subclass: Any
+    original_subclass_type: type
+    outer_size_from_attr: str | None = None
+    outer_stride_from_attr: str | None = None
 
 
 class TestSubclassCodegen(TestCase):
@@ -127,26 +148,6 @@ def inner_fn(args):
     def test_trailing_args_forwarded(self):
         """Extra trailing args (e.g. rng seed/offset) are forwarded to compiled_fn."""
         # Build SubclassCreationMeta manually to avoid __post_init__ fake tensor check
-        from dataclasses import dataclass
-        from typing import Any
-
-        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
-        from torch._functorch._aot_autograd.subclass_codegen import (
-            _codegen_subclass_wrapper_source,
-        )
-
-        @dataclass
-        class _TestSubclassMeta:
-            flat_tensor_start_idx: int
-            arg_count: int
-            included_subclass_symints: bool
-            attrs: dict
-            outer_size: tuple
-            outer_stride: tuple
-            meta: Any
-            original_subclass: Any
-            original_subclass_type: type
-
         inp_meta = _TestSubclassMeta(
             flat_tensor_start_idx=0,
             arg_count=2,
@@ -206,6 +207,50 @@ def inner_fn(args):
         self.assertEqual(received_args[1], b)
         self.assertIs(received_args[2], seed)
         self.assertIs(received_args[3], offset)
+
+    def test_attr_derived_metadata_does_not_skip_outputs(self):
+        # Build SubclassCreationMeta manually to avoid __post_init__ fake tensor check
+        out_meta = _TestSubclassMeta(
+            flat_tensor_start_idx=0,
+            arg_count=5,
+            included_subclass_symints=True,
+            attrs={
+                "a": PlainTensorMeta(unwrapped_idx=0),
+                "b": PlainTensorMeta(unwrapped_idx=1),
+            },
+            outer_size=(None, None),
+            outer_stride=(None, 1),
+            meta=None,
+            original_subclass=None,
+            original_subclass_type=TwoTensor,
+            outer_size_from_attr="a",
+            outer_stride_from_attr="a",
+        )
+
+        source, globals_dict = _codegen_subclass_wrapper_source(
+            inp_metas=[],
+            out_metas=[out_meta],
+            num_fw_outs_saved_for_bw=1,
+        )
+
+        a = torch.randn(2, 3)
+        b = torch.randn(2, 3)
+        activation = torch.randn(4)
+
+        def mock_compiled_fn(args):
+            return [a, b, a.shape[0], a.shape[1], a.stride()[0], activation]
+
+        globals_dict["compiled_fn"] = mock_compiled_fn
+        local_dict = {}
+        exec(compile(source, "<test>", "exec"), globals_dict, local_dict)
+        wrapper = local_dict["inner_fn"]
+
+        out, saved_activation = wrapper([])
+
+        self.assertIsInstance(out, TwoTensor)
+        self.assertEqual(out.a, a)
+        self.assertEqual(out.b, b)
+        self.assertIs(saved_activation, activation)
 
 
 if __name__ == "__main__":
