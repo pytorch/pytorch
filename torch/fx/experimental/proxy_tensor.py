@@ -1847,6 +1847,21 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         kwargs: dict[str, object] | None = None,
     ) -> object:
         kwargs = kwargs or {}
+        if func is torch.Tensor.requires_grad_:
+            flat_args_kwargs, spec = pytree.tree_flatten((args, kwargs))
+            _, proxy_flat_args_kwargs, _ = _fetch_proxies_and_all_constant_flag(
+                flat_args_kwargs, self.tracer
+            )
+            proxy_args, proxy_kwargs = pytree.tree_unflatten(
+                proxy_flat_args_kwargs, spec
+            )
+            out_proxy = self.tracer.create_proxy(
+                "call_function", func, proxy_args, proxy_kwargs
+            )
+            with disable_proxy_modes_tracing():
+                res = func(*args, **kwargs)
+                track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
+            return res
         if func in _side_effectful_need_to_be_preserved_pre_dispatch:
             # It's for passing the export verifier which needs to verify the meta['val']
             # TODO(tmanlaibaatar): we should systematically couple it with export verifier,

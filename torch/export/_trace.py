@@ -1285,6 +1285,9 @@ def get_ep_stats(ep: ExportedProgram) -> dict[str, Any]:
             if node.op != "call_function":
                 continue
             op_count += 1
+            if node.target is torch.Tensor.requires_grad_:
+                op_set.add("torch.Tensor.requires_grad_")
+                continue
             if not hasattr(node.target, "__module__"):
                 raise AssertionError(
                     f"node.target {node.target} must have __module__ attribute"

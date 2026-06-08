@@ -770,6 +770,8 @@ class GraphModuleSerializer(metaclass=Final):
     def serialize_operator(self, target) -> str:
         if isinstance(target, str):
             return target
+        elif target is torch.Tensor.requires_grad_:
+            return "torch.Tensor.requires_grad_"
         elif target.__module__.startswith("torch._ops"):
             # TODO(zhxchen17) Maybe provide a function name helper in FX.
             # From torch.fx.node._get_qualified_name

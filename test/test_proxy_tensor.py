@@ -207,6 +207,31 @@ def forward(self, a_1):
         out2.sum().backward()
         self.assertEqual(a1.grad, a2.grad)
 
+    def test_pre_dispatch_requires_grad_(self):
+        for requires_grad in (True, False):
+            with self.subTest(requires_grad=requires_grad):
+                def f(a):
+                    b = a.clone()
+                    b.requires_grad_(requires_grad)
+                    return b.sin()
+
+                inp = torch.randn(4)
+                fx_g = make_fx(f, pre_dispatch=True)(inp)
+                requires_grad_nodes = [
+                    node
+                    for node in fx_g.graph.nodes
+                    if node.target is torch.Tensor.requires_grad_
+                ]
+                self.assertEqual(len(requires_grad_nodes), 1)
+                sin_nodes = [
+                    node
+                    for node in fx_g.graph.nodes
+                    if node.target is torch.ops.aten.sin.default
+                ]
+                self.assertEqual(len(sin_nodes), 1)
+                self.assertIs(sin_nodes[0].args[0], requires_grad_nodes[0])
+                self.assertEqual(fx_g(inp).requires_grad, requires_grad)
+
     def test_make_fx_simple(self):
         def f(x):
             return torch.sin(x)

@@ -238,6 +238,7 @@ class Verifier(metaclass=_VerifierMeta):
                 # Predispatch export is able to contain autograd ops.
                 # These will be modeled as HOO later
                 torch._C._set_grad_enabled,
+                torch.Tensor.requires_grad_,
                 torch.amp.autocast_mode._enter_autocast,
                 torch.amp.autocast_mode._exit_autocast,
                 torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless,
