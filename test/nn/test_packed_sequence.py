@@ -492,6 +492,38 @@ class PackedSequenceTest(TestCase):
                 torch.randn([0, 1, 10]), torch.randn([11, 14, 14, 2]), True
             )
 
+    def test_pad_packed_sequence_autograd(self):
+        lengths = [5, 3, 2]
+        padded = torch.randn(5, 3, 2, dtype=torch.double)
+
+        for batch_first, total_length in itertools.product((True, False), (5, 7)):
+            src = padded.transpose(0, 1).contiguous() if batch_first else padded
+            packed = rnn_utils.pack_padded_sequence(
+                src,
+                lengths,
+                batch_first=batch_first,
+                enforce_sorted=True,
+            )
+            data = packed.data.detach().clone().requires_grad_()
+
+            unpacked, out_lengths = torch.ops.aten._pad_packed_sequence.default(
+                data,
+                packed.batch_sizes,
+                batch_first,
+                0.0,
+                total_length,
+            )
+            grad_output = torch.randn_like(unpacked)
+            (actual_grad,) = torch.autograd.grad(unpacked, data, grad_output)
+            expected_grad = rnn_utils.pack_padded_sequence(
+                grad_output,
+                out_lengths,
+                batch_first=batch_first,
+                enforce_sorted=True,
+            ).data
+
+            self.assertEqual(actual_grad, expected_grad)
+
     def test_empty_packed_sequence(self):
         """
         Regression test for https://github.com/pytorch/pytorch/issues/149622
