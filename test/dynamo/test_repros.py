@@ -14,6 +14,7 @@ import importlib
 import inspect
 import itertools
 import logging
+import operator
 import os
 import random
 import sys
@@ -5437,6 +5438,172 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
     #     return [mm, getitem]""",
     #         )
     #         self.assertEqual(out_ref, out_test)
+
+    def test_foreach_input_mutation_emits_foreach_copy(self):
+        fw_graph[0] = None
+
+        @torch.compile(backend=aot_graph_capture_backend, fullgraph=True)
+        def fn(args):
+            torch._foreach_mul_(args, 2)
+
+        inps = [torch.ones(10) for _ in range(4)]
+        fn(inps)
+
+        for inp in inps:
+            self.assertEqual(inp, torch.full((10,), 2.0))
+        self.assertIsNotNone(fw_graph[0])
+
+        foreach_copy_nodes = list(
+            fw_graph[0].graph.find_nodes(
+                op="call_function", target=torch.ops.aten._foreach_copy_.default
+            )
+        )
+        copy_nodes = list(
+            fw_graph[0].graph.find_nodes(
+                op="call_function", target=torch.ops.aten.copy_.default
+            )
+        )
+
+        self.assertEqual(len(foreach_copy_nodes), 1)
+        self.assertEqual(len(copy_nodes), 0)
+
+        foreach_copy = foreach_copy_nodes[0]
+        dsts, srcs = foreach_copy.args[:2]
+        self.assertEqual(len(dsts), len(inps))
+        self.assertEqual([src.args[1] for src in srcs], list(range(len(inps))))
+
+    def test_foreach_input_mutation_preserves_used_copy_result(self):
+        fw_graph[0] = None
+
+        @torch.compile(backend=aot_graph_capture_backend, fullgraph=True)
+        def fn(args):
+            torch._foreach_mul_(args, 2)
+            return args[0]
+
+        inps = [torch.ones(10) for _ in range(4)]
+        out = fn(inps)
+
+        self.assertEqual(out, torch.full((10,), 2.0))
+        self.assertIsNotNone(fw_graph[0])
+        self.assertEqual(
+            len(
+                list(
+                    fw_graph[0].graph.find_nodes(
+                        op="call_function",
+                        target=torch.ops.aten._foreach_copy_.default,
+                    )
+                )
+            ),
+            1,
+        )
+        self.assertEqual(
+            len(
+                list(
+                    fw_graph[0].graph.find_nodes(
+                        op="call_function", target=torch.ops.aten.copy_.default
+                    )
+                )
+            ),
+            1,
+        )
+
+    def test_foreach_input_mutation_does_not_fold_aliased_group(self):
+        from torch._functorch._aot_autograd.functional_utils import (
+            fold_foreach_input_mutation_ops,
+        )
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        foreach_mul = graph.call_function(
+            torch.ops.aten._foreach_mul.Scalar, args=([x, y], 2)
+        )
+        getitem = graph.call_function(operator.getitem, args=(foreach_mul, 0))
+        getitem_1 = graph.call_function(operator.getitem, args=(foreach_mul, 1))
+        copy_ = graph.call_function(torch.ops.aten.copy_.default, args=(x, getitem))
+        copy__1 = graph.call_function(torch.ops.aten.copy_.default, args=(y, getitem_1))
+        graph.output(())
+
+        base = torch.ones(4)
+        x.meta["val"] = base[:2]
+        y.meta["val"] = base[1:3]
+        getitem.meta["val"] = torch.ones(2)
+        getitem_1.meta["val"] = torch.ones(2)
+        copy_.meta["val"] = x.meta["val"]
+        copy__1.meta["val"] = y.meta["val"]
+
+        fold_foreach_input_mutation_ops(graph)
+
+        self.assertEqual(
+            len(
+                list(
+                    graph.find_nodes(
+                        op="call_function",
+                        target=torch.ops.aten._foreach_copy_.default,
+                    )
+                )
+            ),
+            0,
+        )
+        self.assertEqual(
+            len(
+                list(
+                    graph.find_nodes(
+                        op="call_function", target=torch.ops.aten.copy_.default
+                    )
+                )
+            ),
+            2,
+        )
+
+    def test_foreach_input_mutation_does_not_fold_interleaved_getitems(self):
+        from torch._functorch._aot_autograd.functional_utils import (
+            fold_foreach_input_mutation_ops,
+        )
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        foreach_mul = graph.call_function(
+            torch.ops.aten._foreach_mul.Scalar, args=([x, y], 2)
+        )
+        getitem = graph.call_function(operator.getitem, args=(foreach_mul, 0))
+        copy_ = graph.call_function(torch.ops.aten.copy_.default, args=(x, getitem))
+        getitem_1 = graph.call_function(operator.getitem, args=(foreach_mul, 1))
+        copy__1 = graph.call_function(torch.ops.aten.copy_.default, args=(y, getitem_1))
+        graph.output(())
+
+        x.meta["val"] = torch.ones(2)
+        y.meta["val"] = torch.ones(2)
+        getitem.meta["val"] = torch.ones(2)
+        getitem_1.meta["val"] = torch.ones(2)
+        copy_.meta["val"] = x.meta["val"]
+        copy__1.meta["val"] = y.meta["val"]
+
+        fold_foreach_input_mutation_ops(graph)
+
+        self.assertEqual(
+            len(
+                list(
+                    graph.find_nodes(
+                        op="call_function",
+                        target=torch.ops.aten._foreach_copy_.default,
+                    )
+                )
+            ),
+            0,
+        )
+        self.assertEqual(
+            len(
+                list(
+                    graph.find_nodes(
+                        op="call_function", target=torch.ops.aten.copy_.default
+                    )
+                )
+            ),
+            2,
+        )
+        torch.fx.GraphModule({}, graph)
 
     def test_super_in_staticmethod(self):
         class A:
