@@ -100,4 +100,6 @@ per-backend modules, the following APIs are delegated to each backend:
      get_rng_state
      get_rng_state_all
      initial_seed
+     set_rng_state
+     set_rng_state_all
 ```
