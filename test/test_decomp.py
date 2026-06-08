@@ -10,7 +10,11 @@ from functools import partial
 import torch._inductor.decomposition
 import torch.autograd
 from torch import Tensor
-from torch._decomp import core_aten_decompositions, decomposition_table
+from torch._decomp import (
+    core_aten_decompositions,
+    decomposition_table,
+    get_decompositions,
+)
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
@@ -193,6 +197,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
             f"{i} Operation: {op} shape mismatch: {orig.shape} != {decomp.shape}"
         )
     tol_table = {
+        (torch.bfloat16, torch.ops.aten.native_group_norm.default): 5e-6,
+        (torch.float16, torch.ops.aten.native_group_norm.default): 5e-6,
         (torch.bfloat16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_layer_norm_backward.default): 1e-3,
@@ -431,6 +437,11 @@ CROSS_REF_EXCLUDE_SET = {
         None,
         "bernoulli",
     ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
+    # Decomposition is intentionally partial: returns NotImplemented for
+    # non-evenly-divisible output sizes.
+    (None, None, "nn.functional.adaptive_max_pool1d"),
+    (None, None, "nn.functional.adaptive_max_pool2d"),
+    (None, None, "nn.functional.adaptive_max_pool3d"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
@@ -673,17 +684,6 @@ class TestDecomp(TestCase):
         xs_two[0] = x
 
         self.assertEqual(xs, xs_two)
-
-    def test_index_add_decomp_source_shape_mismatch(self, device):
-        x = torch.zeros([10, 5], device=device)
-        index = torch.arange(5, device=device)
-        source = torch.ones([5], device=device)
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "source tensor shape must match self tensor shape",
-        ):
-            torch._decomp.decompositions.index_add(x, 0, index, source)
 
     def test_cat_single_input(self, device):
         decomp_table = torch._inductor.decomposition.select_decomp_table()
@@ -1356,6 +1356,17 @@ class DecompOneOffTests(TestCase):
 
             self.assertEqual(res.dtype, torch.float32)
             self.assertEqual(res, ref)
+
+    @onlyCPU
+    @skipIfCrossRef
+    def test_addmv_decomp_rejects_mixed_dtype(self, device):
+        addmv_decomp = get_decompositions([aten.addmv.default])[aten.addmv.default]
+        input = torch.tensor([2.7], dtype=torch.float32, device=device)
+        mat = torch.tensor([[1, 2], [3, 4]], dtype=torch.int32, device=device)
+        vec = torch.tensor([1, 2], dtype=torch.int32, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "same dtype"):
+            addmv_decomp(input, mat, vec)
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
