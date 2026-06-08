@@ -165,6 +165,19 @@ aten__fp8_mm = ExternKernelChoice(
     torch._scaled_mm, "at::_scaled_mm_out", op_overload=aten._scaled_mm.out
 )
 
+# Fallback choice for the _scaled_mm_v2 API. Used for recipes that have no Triton
+# template yet (e.g. the MX variants BlockWise1x32/BlockWise1x16). Routed through
+# ir.FallbackKernel so the v2 op is called directly with its native scale
+# convention, instead of being lowered to the v1 _scaled_mm kernel which uses a
+# different scale_b orientation.
+aten__scaled_mm_v2 = ExternKernelChoice(
+    aten._scaled_mm_v2.default,
+    name="_scaled_mm_v2",
+    has_out_variant=False,
+    op_overload=aten._scaled_mm_v2.default,
+    use_fallback_kernel=True,
+)
+
 
 def _is_int8_mat(mat):
     return mat.get_dtype() in (torch.int8, torch.uint8)
@@ -1032,7 +1045,16 @@ def tuned_scaled_mm_v2(
         recipe_b
     )
 
-    # Only handle single-level scales (no MX/NV)
+    # MX variants (BlockWise1x32/BlockWise1x16) and multi-level scales have no
+    # Triton template; they fall back to an aten kernel. The v1 _scaled_mm kernel
+    # uses a different scale_b orientation than v2, so route these through the
+    # _scaled_mm_v2 fallback below instead of the v1 aten__fp8_mm choice.
+    is_mx_fallback = (
+        scale_a[0].dtype != torch.float32
+        or (not supported_recipe)
+        or (not is_single_level_scale)
+    )
+
     scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
 
     input_nodes: list[Any]
@@ -1055,10 +1077,29 @@ def tuned_scaled_mm_v2(
     kwarg_overrides = {}
 
     if use_aten_gemm_kernels():
-        templates_to_use.append(aten__fp8_mm)
-        kwarg_overrides[aten__fp8_mm.uid] = dict(
-            out_dtype=out_dtype, use_fast_accum=use_fast_accum
-        )
+        if is_mx_fallback:
+            # Call _scaled_mm_v2 directly so the scales keep their v2 convention.
+            bias_node = realize_inputs(bias) if bias else None
+            aten__scaled_mm_v2.maybe_append_choice(
+                choices,
+                input_nodes=[mat_a, mat_b],
+                layout=layout,
+                scale_a=[realize_inputs(s) for s in scale_a],
+                recipe_a=list(recipe_a),
+                swizzle_a=list(swizzle_a),
+                scale_b=[realize_inputs(s) for s in scale_b],
+                recipe_b=list(recipe_b),
+                swizzle_b=list(swizzle_b),
+                bias=bias_node,
+                out_dtype=out_dtype,
+                contraction_dim=list(contraction_dim) if contraction_dim else [],
+                use_fast_accum=use_fast_accum,
+            )
+        else:
+            templates_to_use.append(aten__fp8_mm)
+            kwarg_overrides[aten__fp8_mm.uid] = dict(
+                out_dtype=out_dtype, use_fast_accum=use_fast_accum
+            )
 
     _, is_nonzero = _is_static_problem(layout)
 
@@ -1150,11 +1191,7 @@ def tuned_scaled_mm_v2(
         )
 
     # Early return for MX variants
-    if (
-        scale_a[0].dtype != torch.float32
-        or (not supported_recipe)
-        or (not is_single_level_scale)
-    ):
+    if is_mx_fallback:
         node, _ = autotune_select_algorithm(name, choices, input_nodes, layout)
         return node
 
