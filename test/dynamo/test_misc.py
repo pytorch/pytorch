@@ -20,6 +20,7 @@ import os
 import pickle
 import random
 import re
+import subprocess
 import sys
 import tempfile
 import threading
@@ -6181,6 +6182,47 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
+
+    @torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False)
+    def test_param_grad_in_forward(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            w = torch.nn.Parameter(torch.ones(4, 4))
+            saw_none = w.grad is None
+            if saw_none:
+                w.grad = torch.zeros_like(w)
+            return saw_none, w.grad + x
+
+        x = torch.randn(4, 4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+
+        self.assertTrue(res[0])
+        self.assertEqual(ref[1], res[1])
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(
+        graph_break_on_nn_param_ctor=False, trace_autograd_ops=True
+    )
+    def test_param_autograd_grad_in_forward(self):
+        def fn(x):
+            w = torch.nn.Parameter(torch.ones(4, 4))
+            y = (x @ w).sum()
+            (grad,) = torch.autograd.grad(y, w)
+            return grad is not None, w.grad is None, grad
+
+        x = torch.randn(4, 4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        res = opt_fn(x)
+
+        self.assertTrue(res[0])
+        self.assertTrue(res[1])
+        self.assertEqual(ref[2], res[2])
 
     def test_intermediary_tensor_grad_access(self):
         # This test creates a model, and accesses the grads
@@ -15584,6 +15626,68 @@ fn
                     "tensor(s) (e.g. return x.clone()) or refactor the custom operator "
                     "to not return y. This is deprecated and will become an error in a future version of PyTorch.",
                 )
+
+    def test_debugmode_respects_custom_op_aliasing_env_override(self):
+        default_script = """
+from torch._functorch import config as functorch_config
+assert functorch_config.error_on_custom_op_aliasing is True
+"""
+        default_env = os.environ.copy()
+        default_env["CI"] = "1"
+        default_env.pop("TORCHINDUCTOR_ERROR_ON_CUSTOM_OP_ALIASING", None)
+        default_result = subprocess.run(
+            [sys.executable, "-c", default_script],
+            env=default_env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            default_result.returncode,
+            0,
+            msg=f"stdout:\n{default_result.stdout}\nstderr:\n{default_result.stderr}",
+        )
+
+        script = """
+import warnings
+import torch
+from torch._functorch import config as functorch_config
+
+assert functorch_config.error_on_custom_op_aliasing is False
+with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
+    lib.define("alias_op(Tensor x) -> Tensor")
+    lib.impl("alias_op", lambda x: x.view_as(x), "CompositeExplicitAutograd")
+    lib.impl("alias_op", lambda x: x.view_as(x), "Meta")
+
+    def fn(x):
+        return torch.ops.mylib_ci.alias_op(x) + 1
+
+    compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        compiled_fn(torch.randn(4))
+    aliasing_warnings = [
+        warning
+        for warning in caught
+        if "may not alias any inputs" in str(warning.message)
+    ]
+    assert len(aliasing_warnings) == 1, [
+        str(warning.message) for warning in caught
+    ]
+"""
+        env = os.environ.copy()
+        env["CI"] = "1"
+        env["TORCHINDUCTOR_ERROR_ON_CUSTOM_OP_ALIASING"] = "0"
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
 
     def test_make_contiguous_strides_for_under_compile(self):
         # is_nested_int and sym_max must be traceable under Dynamo.
