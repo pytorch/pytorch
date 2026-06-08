@@ -107,6 +107,34 @@ struct GuardLookupStats {
   std::atomic<uint64_t> unsafe_mock_guard_bypass_hit_index_sum{0};
 };
 
+enum class GuardSubtreeProbeMode {
+  Off,
+  Summary,
+  Detail,
+};
+
+enum class GuardSubtreeProbeTokenKind : uint8_t {
+  ObjectOnly,
+  ExactDict,
+  ExactList,
+  ExactTuple,
+};
+
+struct GuardSubtreeProbeStats {
+  std::atomic<uint64_t> attempt{0};
+  std::atomic<uint64_t> entry_match{0};
+  std::atomic<uint64_t> entry_miss{0};
+  std::atomic<uint64_t> shadow_ok{0};
+  std::atomic<uint64_t> mismatch{0};
+  std::atomic<uint64_t> disabled{0};
+  std::atomic<uint64_t> entry_check_ns{0};
+  std::atomic<uint64_t> child_check_ns{0};
+  std::atomic<uint64_t> token_object_only{0};
+  std::atomic<uint64_t> token_exact_dict{0};
+  std::atomic<uint64_t> token_exact_list{0};
+  std::atomic<uint64_t> token_exact_tuple{0};
+};
+
 struct GuardAccessorTypeStats {
   uint64_t count{0};
   uint64_t fail_count{0};
@@ -121,10 +149,31 @@ struct GuardAccessorDetailStats {
   uint64_t inclusive_ns{0};
 };
 
+struct GuardSubtreeProbePathStats {
+  uint64_t attempt{0};
+  uint64_t entry_match{0};
+  uint64_t entry_miss{0};
+  uint64_t shadow_ok{0};
+  uint64_t mismatch{0};
+  uint64_t disabled{0};
+  uint64_t entry_check_ns{0};
+  uint64_t child_check_ns{0};
+  uint64_t token_object_only{0};
+  uint64_t token_exact_dict{0};
+  uint64_t token_exact_list{0};
+  uint64_t token_exact_tuple{0};
+};
+
 constexpr size_t kGuardAccessorDetailStatsTopK = 64;
+constexpr size_t kGuardSubtreeProbeTopK = 64;
 
 GuardLookupStats& guard_lookup_stats() {
   static GuardLookupStats stats;
+  return stats;
+}
+
+GuardSubtreeProbeStats& guard_subtree_probe_stats() {
+  static GuardSubtreeProbeStats stats;
   return stats;
 }
 
@@ -167,6 +216,17 @@ guard_accessor_detail_stats() {
   return stats;
 }
 
+std::mutex& guard_subtree_probe_path_stats_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::unordered_map<std::string, GuardSubtreeProbePathStats>&
+guard_subtree_probe_path_stats() {
+  static std::unordered_map<std::string, GuardSubtreeProbePathStats> stats;
+  return stats;
+}
+
 } // namespace
 
 bool guard_lookup_stats_enabled() {
@@ -175,6 +235,50 @@ bool guard_lookup_stats_enabled() {
   const bool force_enabled =
       guard_lookup_stats_force_enabled().load(std::memory_order_relaxed);
   return C10_UNLIKELY(env_enabled) || C10_UNLIKELY(force_enabled);
+}
+
+static GuardSubtreeProbeMode guard_subtree_probe_mode() {
+  static const GuardSubtreeProbeMode mode = [] {
+    const auto env = c10::utils::get_env("TORCHDYNAMO_GUARD_SUBTREE_PROBE");
+    const std::string value = env.value_or("");
+    if (value.empty() || value == "0" || value == "false" ||
+        value == "False" || value == "off") {
+      return GuardSubtreeProbeMode::Off;
+    }
+    if (value == "detail") {
+      return GuardSubtreeProbeMode::Detail;
+    }
+    if (value == "summary" || value == "1" || value == "true" ||
+        value == "True") {
+      return GuardSubtreeProbeMode::Summary;
+    }
+    return GuardSubtreeProbeMode::Off;
+  }();
+  return mode;
+}
+
+static const char* guard_subtree_probe_mode_name() {
+  switch (guard_subtree_probe_mode()) {
+    case GuardSubtreeProbeMode::Summary:
+      return "summary";
+    case GuardSubtreeProbeMode::Detail:
+      return "detail";
+    case GuardSubtreeProbeMode::Off:
+      return "off";
+  }
+  return "off";
+}
+
+static bool guard_subtree_probe_enabled() {
+  static const bool enabled =
+      guard_subtree_probe_mode() != GuardSubtreeProbeMode::Off;
+  return C10_UNLIKELY(enabled);
+}
+
+static bool guard_subtree_probe_detail_enabled() {
+  static const bool detail_enabled =
+      guard_subtree_probe_mode() == GuardSubtreeProbeMode::Detail;
+  return C10_UNLIKELY(detail_enabled);
 }
 
 bool unsafe_mock_guard_bypass_enabled() {
@@ -192,6 +296,7 @@ uint64_t guard_lookup_time_ns() {
 
 void reset_guard_lookup_stats() {
   auto& stats = guard_lookup_stats();
+  auto& subtree_stats = guard_subtree_probe_stats();
   store_zero(stats.lookup_count);
   store_zero(stats.lookup_total_ns);
   store_zero(stats.backend_match_ns);
@@ -209,6 +314,18 @@ void reset_guard_lookup_stats() {
   store_zero(stats.root_guard_tls_ns);
   store_zero(stats.unsafe_mock_guard_bypass_count);
   store_zero(stats.unsafe_mock_guard_bypass_hit_index_sum);
+  store_zero(subtree_stats.attempt);
+  store_zero(subtree_stats.entry_match);
+  store_zero(subtree_stats.entry_miss);
+  store_zero(subtree_stats.shadow_ok);
+  store_zero(subtree_stats.mismatch);
+  store_zero(subtree_stats.disabled);
+  store_zero(subtree_stats.entry_check_ns);
+  store_zero(subtree_stats.child_check_ns);
+  store_zero(subtree_stats.token_object_only);
+  store_zero(subtree_stats.token_exact_dict);
+  store_zero(subtree_stats.token_exact_list);
+  store_zero(subtree_stats.token_exact_tuple);
   {
     std::lock_guard<std::mutex> lock(guard_accessor_type_stats_mutex());
     guard_accessor_type_stats().clear();
@@ -216,6 +333,10 @@ void reset_guard_lookup_stats() {
   {
     std::lock_guard<std::mutex> lock(guard_accessor_detail_stats_mutex());
     guard_accessor_detail_stats().clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(guard_subtree_probe_path_stats_mutex());
+    guard_subtree_probe_path_stats().clear();
   }
   guard_lookup_stats_force_enabled().store(true, std::memory_order_relaxed);
 }
@@ -246,6 +367,72 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(stats.unsafe_mock_guard_bypass_count);
   result["unsafe_mock_guard_bypass_hit_index_sum"] =
       load_relaxed(stats.unsafe_mock_guard_bypass_hit_index_sum);
+  auto& subtree_stats = guard_subtree_probe_stats();
+  result["guard_subtree_probe_mode"] = guard_subtree_probe_mode_name();
+  result["guard_subtree_probe_attempt"] =
+      load_relaxed(subtree_stats.attempt);
+  result["guard_subtree_probe_entry_match"] =
+      load_relaxed(subtree_stats.entry_match);
+  result["guard_subtree_probe_entry_miss"] =
+      load_relaxed(subtree_stats.entry_miss);
+  result["guard_subtree_probe_shadow_ok"] =
+      load_relaxed(subtree_stats.shadow_ok);
+  result["guard_subtree_probe_mismatch"] =
+      load_relaxed(subtree_stats.mismatch);
+  result["guard_subtree_probe_disabled"] =
+      load_relaxed(subtree_stats.disabled);
+  result["guard_subtree_probe_entry_check_ns"] =
+      load_relaxed(subtree_stats.entry_check_ns);
+  result["guard_subtree_probe_child_check_ns"] =
+      load_relaxed(subtree_stats.child_check_ns);
+  py::dict subtree_token_kind_counts;
+  subtree_token_kind_counts["ObjectOnly"] =
+      load_relaxed(subtree_stats.token_object_only);
+  subtree_token_kind_counts["ExactDict"] =
+      load_relaxed(subtree_stats.token_exact_dict);
+  subtree_token_kind_counts["ExactList"] =
+      load_relaxed(subtree_stats.token_exact_list);
+  subtree_token_kind_counts["ExactTuple"] =
+      load_relaxed(subtree_stats.token_exact_tuple);
+  result["guard_subtree_probe_token_kind_counts"] =
+      subtree_token_kind_counts;
+  if (guard_subtree_probe_detail_enabled()) {
+    py::dict path_stats;
+    std::vector<std::pair<std::string, GuardSubtreeProbePathStats>> items;
+    {
+      std::lock_guard<std::mutex> lock(guard_subtree_probe_path_stats_mutex());
+      items.reserve(guard_subtree_probe_path_stats().size());
+      for (const auto& item : guard_subtree_probe_path_stats()) {
+        items.emplace_back(item.first, item.second);
+      }
+    }
+    std::sort(
+        items.begin(),
+        items.end(),
+        [](const auto& a, const auto& b) {
+          return a.second.child_check_ns > b.second.child_check_ns;
+        });
+    const size_t limit = std::min(items.size(), kGuardSubtreeProbeTopK);
+    for (size_t i = 0; i < limit; ++i) {
+      py::dict item_stats;
+      item_stats["attempt"] = items[i].second.attempt;
+      item_stats["entry_match"] = items[i].second.entry_match;
+      item_stats["entry_miss"] = items[i].second.entry_miss;
+      item_stats["shadow_ok"] = items[i].second.shadow_ok;
+      item_stats["mismatch"] = items[i].second.mismatch;
+      item_stats["disabled"] = items[i].second.disabled;
+      item_stats["entry_check_ns"] = items[i].second.entry_check_ns;
+      item_stats["child_check_ns"] = items[i].second.child_check_ns;
+      py::dict token_counts;
+      token_counts["ObjectOnly"] = items[i].second.token_object_only;
+      token_counts["ExactDict"] = items[i].second.token_exact_dict;
+      token_counts["ExactList"] = items[i].second.token_exact_list;
+      token_counts["ExactTuple"] = items[i].second.token_exact_tuple;
+      item_stats["token_kind_counts"] = token_counts;
+      path_stats[py::str(items[i].first)] = item_stats;
+    }
+    result["guard_subtree_probe_top_paths"] = path_stats;
+  }
   py::dict accessor_type_stats;
   {
     std::lock_guard<std::mutex> lock(guard_accessor_type_stats_mutex());
@@ -375,6 +562,98 @@ void record_guard_accessor_detail_stats(
   stats.inclusive_ns += inclusive_ns;
   if (failed) {
     stats.fail_count += 1;
+  }
+}
+
+static void add_guard_subtree_probe_token_kind(
+    GuardSubtreeProbeStats& stats,
+    GuardSubtreeProbeTokenKind token_kind) {
+  switch (token_kind) {
+    case GuardSubtreeProbeTokenKind::ExactDict:
+      add_relaxed(stats.token_exact_dict, 1);
+      break;
+    case GuardSubtreeProbeTokenKind::ExactList:
+      add_relaxed(stats.token_exact_list, 1);
+      break;
+    case GuardSubtreeProbeTokenKind::ExactTuple:
+      add_relaxed(stats.token_exact_tuple, 1);
+      break;
+    case GuardSubtreeProbeTokenKind::ObjectOnly:
+      add_relaxed(stats.token_object_only, 1);
+      break;
+  }
+}
+
+static void add_guard_subtree_probe_token_kind(
+    GuardSubtreeProbePathStats& stats,
+    GuardSubtreeProbeTokenKind token_kind) {
+  switch (token_kind) {
+    case GuardSubtreeProbeTokenKind::ExactDict:
+      stats.token_exact_dict += 1;
+      break;
+    case GuardSubtreeProbeTokenKind::ExactList:
+      stats.token_exact_list += 1;
+      break;
+    case GuardSubtreeProbeTokenKind::ExactTuple:
+      stats.token_exact_tuple += 1;
+      break;
+    case GuardSubtreeProbeTokenKind::ObjectOnly:
+      stats.token_object_only += 1;
+      break;
+  }
+}
+
+static void record_guard_subtree_probe_stats(
+    const std::string& path,
+    bool entry_match,
+    bool child_result,
+    bool disabled_now,
+    uint64_t entry_check_ns,
+    uint64_t child_check_ns,
+    GuardSubtreeProbeTokenKind token_kind) {
+  if (!guard_subtree_probe_enabled()) {
+    return;
+  }
+  auto& stats = guard_subtree_probe_stats();
+  add_relaxed(stats.attempt, 1);
+  add_relaxed(stats.entry_check_ns, entry_check_ns);
+  add_relaxed(stats.child_check_ns, child_check_ns);
+  add_guard_subtree_probe_token_kind(stats, token_kind);
+  if (entry_match) {
+    add_relaxed(stats.entry_match, 1);
+    if (child_result) {
+      add_relaxed(stats.shadow_ok, 1);
+    } else {
+      add_relaxed(stats.mismatch, 1);
+    }
+  } else {
+    add_relaxed(stats.entry_miss, 1);
+  }
+  if (disabled_now) {
+    add_relaxed(stats.disabled, 1);
+  }
+
+  if (!guard_subtree_probe_detail_enabled()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(guard_subtree_probe_path_stats_mutex());
+  auto& path_stats = guard_subtree_probe_path_stats()[path];
+  path_stats.attempt += 1;
+  path_stats.entry_check_ns += entry_check_ns;
+  path_stats.child_check_ns += child_check_ns;
+  add_guard_subtree_probe_token_kind(path_stats, token_kind);
+  if (entry_match) {
+    path_stats.entry_match += 1;
+    if (child_result) {
+      path_stats.shadow_ok += 1;
+    } else {
+      path_stats.mismatch += 1;
+    }
+  } else {
+    path_stats.entry_miss += 1;
+  }
+  if (disabled_now) {
+    path_stats.disabled += 1;
   }
 }
 
@@ -1084,6 +1363,43 @@ static uint64_t get_dict_version_unchecked(PyObject* dict) {
 
 #endif
 }
+
+struct GuardSubtreeEntryToken {
+  PyObject* object{nullptr};
+  PyTypeObject* type{nullptr};
+  GuardSubtreeProbeTokenKind kind{GuardSubtreeProbeTokenKind::ObjectOnly};
+  uint64_t version{0};
+  Py_ssize_t size{0};
+
+  static GuardSubtreeEntryToken make(PyObject* obj) {
+    GuardSubtreeEntryToken token;
+    token.object = obj;
+    token.type = Py_TYPE(obj);
+    if (PyDict_CheckExact(obj)) {
+      token.kind = GuardSubtreeProbeTokenKind::ExactDict;
+      token.version = get_dict_version_unchecked(obj);
+      token.size = PyDict_GET_SIZE(obj);
+    } else if (PyList_CheckExact(obj)) {
+      token.kind = GuardSubtreeProbeTokenKind::ExactList;
+      token.size = PyList_GET_SIZE(obj);
+    } else if (PyTuple_CheckExact(obj)) {
+      token.kind = GuardSubtreeProbeTokenKind::ExactTuple;
+      token.size = PyTuple_GET_SIZE(obj);
+    }
+    return token;
+  }
+
+  bool matches(const GuardSubtreeEntryToken& other) const {
+    return object == other.object && type == other.type && kind == other.kind &&
+        version == other.version && size == other.size;
+  }
+};
+
+struct GuardSubtreeProbeState {
+  bool has_last_token{false};
+  bool disabled{false};
+  GuardSubtreeEntryToken last_token;
+};
 
 static PyObject* dict_version(PyObject* dummy, PyObject* args) {
   // Retrieves the version of a dictionary.
@@ -2507,6 +2823,7 @@ class GuardAccessor {
     // Could fallback to running check on the Python dict (lazily constructed)
     return check_nopybind((PyObject*)map->to_dict(), matches_dict_tag);
   }
+  bool check_child_manager_nopybind(PyObject* obj);
   virtual const char* stats_name() const {
     return "GuardAccessor";
   }
@@ -2758,6 +3075,45 @@ class GuardManager {
     return check_nopybind_template(value);
   }
 
+  bool check_nopybind_with_subtree_probe(
+      PyObject* value,
+      const std::string& path) {
+    if (!guard_subtree_probe_enabled() || _subtree_probe_state.disabled) {
+      return check_nopybind(value);
+    }
+
+    const uint64_t entry_start_ns = guard_lookup_time_ns();
+    GuardSubtreeEntryToken token = GuardSubtreeEntryToken::make(value);
+    const bool entry_match = _subtree_probe_state.has_last_token &&
+        token.matches(_subtree_probe_state.last_token);
+    const uint64_t entry_check_ns = guard_lookup_time_ns() - entry_start_ns;
+
+    const uint64_t child_start_ns = guard_lookup_time_ns();
+    const bool child_result = check_nopybind(value);
+    const uint64_t child_check_ns = guard_lookup_time_ns() - child_start_ns;
+
+    bool disabled_now = false;
+    if (entry_match && !child_result) {
+      _subtree_probe_state.disabled = true;
+      disabled_now = true;
+    }
+    if (child_result) {
+      _subtree_probe_state.last_token = std::move(token);
+      _subtree_probe_state.has_last_token = true;
+    }
+    record_guard_subtree_probe_stats(
+        path,
+        entry_match,
+        child_result,
+        disabled_now,
+        entry_check_ns,
+        child_check_ns,
+        _subtree_probe_state.has_last_token
+            ? _subtree_probe_state.last_token.kind
+            : token.kind);
+    return child_result;
+  }
+
   virtual bool check_nopybind(FrameLocalsMapping* value) {
     return check_nopybind_template(value);
   }
@@ -2992,6 +3348,7 @@ class GuardManager {
 
   bool _is_dict;
   uint64_t _dict_tag{0};
+  GuardSubtreeProbeState _subtree_probe_state;
 };
 
 GuardAccessor::GuardAccessor(
@@ -3009,6 +3366,18 @@ GuardAccessor::GuardAccessor(
 GuardAccessor::GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
     : _guard_manager(std::unique_ptr<GuardManager>(guard_manager)) {
   from->clone_visitor(this);
+}
+
+inline bool GuardAccessor::check_child_manager_nopybind(PyObject* obj) {
+  if (C10_LIKELY(!guard_subtree_probe_enabled())) {
+    return _guard_manager->check_nopybind(obj);
+  }
+  static const std::string empty_path = "";
+  if (!guard_subtree_probe_detail_enabled()) {
+    return _guard_manager->check_nopybind_with_subtree_probe(obj, empty_path);
+  }
+  return _guard_manager->check_nopybind_with_subtree_probe(
+      obj, stats_detail_name());
 }
 
 /**
@@ -3902,7 +4271,7 @@ class GetAttrGuardAccessor : public GuardAccessor {
       PyErr_Clear();
       return false;
     }
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     Py_DECREF(x);
     return result;
   }
@@ -3981,7 +4350,7 @@ class GenericGetAttrGuardAccessor : public GuardAccessor {
       PyErr_Clear();
       return false;
     }
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     Py_DECREF(x);
     return result;
   }
@@ -4063,7 +4432,7 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
         PyErr_Clear();
         return false;
       }
-      bool result = _guard_manager->check_nopybind(x);
+      bool result = check_child_manager_nopybind(x);
       Py_DECREF(x);
       return result;
     }
@@ -4079,7 +4448,7 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
       return false;
     }
     const uint64_t child_start_ns = guard_lookup_time_ns();
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
     Py_DECREF(x);
     record_detail_stats(
@@ -4155,7 +4524,7 @@ class GetItemGuardAccessor : public GuardAccessor {
         PyErr_Clear();
         return false;
       }
-      bool result = _guard_manager->check_nopybind(x);
+      bool result = check_child_manager_nopybind(x);
       Py_DECREF(x);
       return result;
     }
@@ -4170,7 +4539,7 @@ class GetItemGuardAccessor : public GuardAccessor {
       return false;
     }
     const uint64_t child_start_ns = guard_lookup_time_ns();
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
     Py_DECREF(x);
     record_detail_stats(
@@ -4266,7 +4635,7 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
         PyErr_Clear();
         return false;
       }
-      return _guard_manager->check_nopybind(x);
+      return check_child_manager_nopybind(x);
     }
 
     const uint64_t total_start_ns = guard_lookup_time_ns();
@@ -4279,7 +4648,7 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
       return false;
     }
     const uint64_t child_start_ns = guard_lookup_time_ns();
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
     record_detail_stats(
         self_ns, child_ns, guard_lookup_time_ns() - total_start_ns, !result);
@@ -4313,7 +4682,7 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
         PyErr_Clear();
         return false;
       }
-      bool result = _guard_manager->check_nopybind(x);
+      bool result = check_child_manager_nopybind(x);
       return result;
     }
 
@@ -4327,7 +4696,7 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
       return false;
     }
     const uint64_t child_start_ns = guard_lookup_time_ns();
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
     record_detail_stats(
         self_ns, child_ns, guard_lookup_time_ns() - total_start_ns, !result);
@@ -4436,7 +4805,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
         PyErr_Clear();
         return false;
       }
-      bool result = _guard_manager->check_nopybind(x);
+      bool result = check_child_manager_nopybind(x);
       return result;
     }
 
@@ -4450,7 +4819,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
       return false;
     }
     const uint64_t child_start_ns = guard_lookup_time_ns();
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
     record_detail_stats(
         self_ns, child_ns, guard_lookup_time_ns() - total_start_ns, !result);
@@ -4535,7 +4904,7 @@ class ListGetItemGuardAccessor : public GuardAccessor {
         PyErr_Clear();
         return false;
       }
-      bool result = _guard_manager->check_nopybind(x);
+      bool result = check_child_manager_nopybind(x);
       return result;
     }
 
@@ -4549,7 +4918,7 @@ class ListGetItemGuardAccessor : public GuardAccessor {
       return false;
     }
     const uint64_t child_start_ns = guard_lookup_time_ns();
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
     record_detail_stats(
         self_ns, child_ns, guard_lookup_time_ns() - total_start_ns, !result);
@@ -4628,7 +4997,7 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
         PyErr_Clear();
         return false;
       }
-      bool result = _guard_manager->check_nopybind(x);
+      bool result = check_child_manager_nopybind(x);
       return result;
     }
 
@@ -4642,7 +5011,7 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
       return false;
     }
     const uint64_t child_start_ns = guard_lookup_time_ns();
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     const uint64_t child_ns = guard_lookup_time_ns() - child_start_ns;
     record_detail_stats(
         self_ns, child_ns, guard_lookup_time_ns() - total_start_ns, !result);
@@ -4768,7 +5137,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
 
     PyObject* py_value =
         PyLong_FromLongLong(opt_value.value()); // New reference
-    bool result = _guard_manager->check_nopybind(py_value);
+    bool result = check_child_manager_nopybind(py_value);
     Py_DECREF(py_value);
     return result;
   }
@@ -4864,7 +5233,7 @@ class IndexedGuardAccessor : public GuardAccessor {
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
     PyObject* tuple = PyTuple_Pack(2, _index.ptr(), obj); // New reference
-    bool result = _guard_manager->check_nopybind(tuple);
+    bool result = check_child_manager_nopybind(tuple);
     Py_DECREF(tuple);
     return result;
   }
@@ -4934,7 +5303,7 @@ class GradGuardAccessor : public GuardAccessor {
     }
     PyObject* grad =
         THPVariable_Wrap(THPVariable_Unpack(obj).grad()); // New reference
-    bool result = _guard_manager->check_nopybind(grad);
+    bool result = check_child_manager_nopybind(grad);
     // For undefined tensor, THPVariable_Wrap returns Py_RETURN_NONE. So, no
     // need of Py_XDECREF.
     Py_DECREF(grad);
@@ -5011,7 +5380,7 @@ class FuncDefaultsGuardAccessor : public GuardAccessor {
       PyErr_Clear();
       return false;
     }
-    return _guard_manager->check_nopybind(x);
+    return check_child_manager_nopybind(x);
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -5089,7 +5458,7 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
       PyErr_Clear();
       return false;
     }
-    return _guard_manager->check_nopybind(x);
+    return check_child_manager_nopybind(x);
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -5161,7 +5530,7 @@ class GlobalsGuardAccessor : public GuardAccessor {
       override { // borrowed ref
     // Ignore the obj arg. This is required to satisfy the function signature.
     // Just pass on the globals dict to the child manager.
-    return _guard_manager->check_nopybind(_globals_dict);
+    return check_child_manager_nopybind(_globals_dict);
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -5224,7 +5593,7 @@ class TypeGuardAccessor : public GuardAccessor {
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
     PyObject* x = (PyObject*)Py_TYPE(obj); // borrowed ref
-    return _guard_manager->check_nopybind(x);
+    return check_child_manager_nopybind(x);
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -5286,7 +5655,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
       PyErr_Clear();
       return false;
     }
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     return result;
   }
 
@@ -5383,7 +5752,7 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
       // weakref is dead
       x = Py_NewRef(Py_None);
     }
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     Py_DECREF(x);
     return result;
   }
@@ -5487,7 +5856,7 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
       // weakref is dead
       x = Py_NewRef(Py_None);
     }
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     Py_DECREF(x);
     return result;
   }
@@ -5572,7 +5941,7 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
       return false;
     }
 
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     Py_DECREF(x);
     return result;
   }
@@ -5652,7 +6021,7 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
       PyErr_Clear();
       return false;
     }
-    bool result = _guard_manager->check_nopybind(x);
+    bool result = check_child_manager_nopybind(x);
     Py_DECREF(x);
     return result;
   }

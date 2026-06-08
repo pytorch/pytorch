@@ -1060,6 +1060,118 @@ print(json.dumps({
         self.assertGreater(stats["unsafe_mock_guard_bypass_count"], 0)
         self.assertEqual(stats["slow_guard_ns"], 0)
 
+    def test_guard_subtree_probe_is_off_by_default(self):
+        guards.reset_guard_lookup_stats()
+        stats = guards.get_guard_lookup_stats()
+
+        self.assertEqual(stats["guard_subtree_probe_mode"], "off")
+        self.assertEqual(stats["guard_subtree_probe_attempt"], 0)
+        self.assertEqual(stats["guard_subtree_probe_entry_match"], 0)
+        self.assertNotIn("guard_subtree_probe_top_paths", stats)
+
+    def test_guard_subtree_probe_summary_records_shadow_entries(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+    def forward(self, x):
+        return self.seq(x)
+
+model = Mod()
+opt_model = torch.compile(model, backend="eager", fullgraph=True)
+x = torch.randn(2, 4)
+
+opt_model(x)
+guards.reset_guard_lookup_stats()
+for _ in range(3):
+    opt_model(x)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "mode": stats["guard_subtree_probe_mode"],
+    "attempt": stats["guard_subtree_probe_attempt"],
+    "entry_match": stats["guard_subtree_probe_entry_match"],
+    "shadow_ok": stats["guard_subtree_probe_shadow_ok"],
+    "child_check_ns": stats["guard_subtree_probe_child_check_ns"],
+    "has_top_paths": "guard_subtree_probe_top_paths" in stats,
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_SUBTREE_PROBE"] = "summary"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertEqual(stats["mode"], "summary")
+        self.assertGreater(stats["attempt"], 0)
+        self.assertGreater(stats["entry_match"], 0)
+        self.assertGreater(stats["shadow_ok"], 0)
+        self.assertGreater(stats["child_check_ns"], 0)
+        self.assertFalse(stats["has_top_paths"])
+
+    def test_guard_subtree_probe_detail_records_top_paths(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+    def forward(self, x):
+        return self.seq(x)
+
+model = Mod()
+opt_model = torch.compile(model, backend="eager", fullgraph=True)
+x = torch.randn(2, 4)
+
+opt_model(x)
+guards.reset_guard_lookup_stats()
+for _ in range(3):
+    opt_model(x)
+
+stats = guards.get_guard_lookup_stats()
+top_paths = stats["guard_subtree_probe_top_paths"]
+print(json.dumps({
+    "mode": stats["guard_subtree_probe_mode"],
+    "attempt": stats["guard_subtree_probe_attempt"],
+    "entry_match": stats["guard_subtree_probe_entry_match"],
+    "shadow_ok": stats["guard_subtree_probe_shadow_ok"],
+    "top_path_count": len(top_paths),
+    "top_path_values": list(top_paths.values()),
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_SUBTREE_PROBE"] = "detail"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertEqual(stats["mode"], "detail")
+        self.assertGreater(stats["attempt"], 0)
+        self.assertGreater(stats["entry_match"], 0)
+        self.assertGreater(stats["shadow_ok"], 0)
+        self.assertGreater(stats["top_path_count"], 0)
+        self.assertTrue(
+            any(value["attempt"] > 0 for value in stats["top_path_values"])
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
