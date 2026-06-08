@@ -3028,6 +3028,8 @@ def _codegen_compiled_forward(
     num_symints = fw_metadata.num_symints_saved_for_bw
     num_no_vc = fw_metadata.num_tensors_saved_with_no_vc_check
     num_opaque = fw_metadata.num_opaque_objects_saved_for_bw or 0
+    # The compiled forward returns forward outputs followed by saved tensors,
+    # opaque objects, then symints; keep this in sync with AOTOutputLayout.
     num_saved_tensors = num_fw_outs_saved_for_bw - num_symints - num_opaque
     num_vc = num_saved_tensors - num_no_vc
     if num_vc < 0:
@@ -3265,7 +3267,7 @@ def _codegen_compiled_forward(
 
     source = "\n".join(lines)
     return _compile_and_exec_source(
-        source, code_globals, "_compiled_forward", "compiled_function_forward"
+        source, code_globals, "_compiled_forward", "compiled_fn_wrapper"
     )
 
 
