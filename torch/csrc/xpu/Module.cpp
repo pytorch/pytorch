@@ -389,7 +389,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
 #if SYCL_COMPILER_VERSION >= 20260000
                    << ", is_integrated_gpu=" << prop.is_integrated_gpu
 #endif
-                   << ")";
+                   << ')';
             return stream.str();
           });
 }
