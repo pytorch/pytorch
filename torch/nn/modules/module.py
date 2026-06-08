@@ -135,6 +135,8 @@ def _has_any_global_hook():
 
 
 def _dynamo_module_state_changed(target: Any, name: str) -> None:
+    if torch.compiler.is_compiling():
+        return
     if "torch._dynamo.mutation_guard" in sys.modules:
         from torch._dynamo.mutation_guard import on_mutation
 

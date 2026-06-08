@@ -2375,17 +2375,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         inp = torch.tensor(1.0, requires_grad=True)
 
-        failure_reason = None
-
-        def guard_fail_fn(failure):
-            nonlocal failure_reason
-            failure_reason = failure[0]
-
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        compiled_func = torch._dynamo.optimize(
-            guard_fail_fn=guard_fail_fn,
-            backend=cc,
-        )(outer_func)
+        compiled_func = torch._dynamo.optimize(backend=cc)(outer_func)
 
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 15)
@@ -2398,7 +2389,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         handle.remove()
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 7)
-        self.assertTrue("forward_hooks" in failure_reason)
+        # Hook removal now proactively invalidates the watched hook dict cache entry,
+        # so guard_fail_fn is not guaranteed to run before recompilation.
         self.assertEqual(cc.frame_count, 1 + 1)
         self.assertEqual(cc.op_count, 6 + 4)
 
@@ -2406,7 +2398,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         m = TestModule()
         handle = m.register_forward_hook(forward_hook)
-        failure_reason = None
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 15)
 
