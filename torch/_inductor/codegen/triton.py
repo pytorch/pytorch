@@ -4841,16 +4841,35 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     argreduce_result_kind(),
                 )
             elif reduction_type == "welford_reduce":
-                if self.cooperative_reduction:
-                    # cooperative reductions require full welford for correctness
-                    result_var = self.welford_reduce(
-                        result_var, reduction_type, value, where_cond, acc_type, dtype
+                assert isinstance(masked_value, CSEVariable)
+                zero = self.cse.generate(
+                    self.compute,
+                    f"tl.zeros({masked_value}.shape, {acc_type})",
+                    dtype=torch_acc_type,
+                    shape=masked_value.shape,
+                )
+                one = self.cse.generate(
+                    self.compute,
+                    f"tl.full({masked_value}.shape, 1, {acc_type})",
+                    dtype=torch_acc_type,
+                    shape=masked_value.shape,
+                )
+                weight = (
+                    self.cse.generate(
+                        self.compute,
+                        where_cond(one, zero),
+                        dtype=torch_acc_type,
+                        shape=masked_value.shape,
                     )
-                else:
-                    # For persistent reductions, don't bother with
-                    # welford's algorithm since it uses more registers, and
-                    # taking two reductions doesn't increase memory usage.
-                    result_var = self.welford_reduce_fallback(dtype, value)
+                    if cond
+                    else one
+                )
+                result_var = tuple(
+                    self.cse.generate(self.compute, value, dtype=dtype, shape=shape)
+                    for value, shape in self._welford(
+                        self.compute, masked_value, zero, weight, dim, dtype
+                    )
+                )
             elif reduction_type == "welford_combine":
                 assert isinstance(masked_value, Sequence)
                 (mean, m2, weight) = masked_value
