@@ -46,8 +46,9 @@ namespace {
 /*
  * Scaling Type Determination (XPU):
  * -------------------------------------------
- * Most scale tensors are float32. The exception is BlockWise1x32
- * (MXFP8/MXFP4 microscaling), whose scales are Float8_e8m0fnu.
+ * Most scale tensors are float32. The exceptions are BlockWise1x32
+ * (MXFP8/MXFP4 microscaling), whose scales are Float8_e8m0fnu, and
+ * BlockWise1x16 (NVFP4), whose scales are Float8_e4m3fn.
  * API shapes match CUDA for portability (Same shape [n, k], but strides may
  * differ). CUDA uses col-major because of swizzling purpose, but XPU expects
  * row-major order for oneDNN.
@@ -57,6 +58,7 @@ namespace {
  *   - RowWise:         scale_a has shape [M, 1]
  *   - BlockWise1x128:  scale_a has shape [M, K//128]
  *   - BlockWise1x32:   scale_a has shape [M, K//32]   (MXFP8/MXFP4)
+ *   - BlockWise1x16:   scale_a has shape [M, K//16]   (NVFP4)
  *   - BlockWise128x128: scale_a has shape [M//128, K//128]
  *
  * For matrix B [K, N] and scale_b:
@@ -64,6 +66,7 @@ namespace {
  *   - RowWise:         scale_b has shape [1, N]
  *   - BlockWise1x128:  scale_b has shape [K//128, N]
  *   - BlockWise1x32:   scale_b has shape [K//32, N]   (MXFP8/MXFP4)
+ *   - BlockWise1x16:   scale_b has shape [K//16, N]   (NVFP4)
  *   - BlockWise128x128: scale_b has shape [K//128, N//128]
  *
  * Supported (A, B) scaling combinations:
@@ -73,6 +76,7 @@ namespace {
  *   - (BlockWise1x128, BlockWise128x128)
  *   - (BlockWise1x128, BlockWise1x128)
  *   - (BlockWise1x32, BlockWise1x32)      -- MXFP8/MXFP4 microscaling
+ *   - (BlockWise1x16, BlockWise1x16)      -- NVFP4
  */
 
 bool is_tensorwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
@@ -251,12 +255,14 @@ Tensor& _scaled_gemm(
 //        RowWise: [M, 1];
 //        BlockWise1x128: [M, K//128];
 //        BlockWise1x32: [M, K//32] (MXFP8/MXFP4, Float8_e8m0fnu);
+//        BlockWise1x16: [M, K//16] (NVFP4, Float8_e4m3fn);
 //        BlockWise128x128: [M//128, K//128]
 //    - `scale_b`: inverse scale of `mat2`; shape depends on scaling scheme:
 //        TensorWise: scalar tensor;
 //        RowWise: [1, N];
 //        BlockWise1x128: [K//128, N];
 //        BlockWise1x32: [K//32, N] (MXFP8/MXFP4, Float8_e8m0fnu);
+//        BlockWise1x16: [K//16, N] (NVFP4, Float8_e4m3fn);
 //        BlockWise128x128: [K//128, N//128]
 //    - `scale_result`: a scalar tensor with the scale of the output (not
 //    currently supported on XPU)
@@ -465,7 +471,7 @@ namespace scaled_blas = at::native::scaled;
 using scaled_blas::convert_int_to_enum;
 using scaled_blas::ScaledGemmImplementation;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 7>
+std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 8>
     scale_kernel_dispatch = {{
         {"tensorwise_tensorwise",
          scaled_blas::check_tensorwise_recipe,
@@ -515,6 +521,9 @@ std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 7>
         {"mxfp4_mxfp4",
          scaled_blas::check_mxfp4_recipe,
          ScaledGemmImplementation::MXFP4_MXFP4},
+        {"nvfp4_nvfp4_single_scale",
+         scaled_blas::check_nvfp4_recipe_single_scale,
+         ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE},
     }};
 
 Tensor& _scaled_tensorwise_tensorwise(
@@ -962,6 +971,78 @@ Tensor& _scaled_mxfp4_mxfp4(
   return out;
 }
 
+Tensor& _scaled_nvfp4_nvfp4(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    const c10::ScalarType out_dtype,
+    const bool use_fast_accum,
+    Tensor& out) {
+  // Restrictions:
+  // A, B are FP4, scales are float8_e4m3fn, scale_a: [M, K//16],
+  // scale_b: [N, K//16]. Single-level scaling (no global scale). Unlike CUDA,
+  // oneDNN does not swizzle scales; it needs real row-major 2D data, so scale_b
+  // is transposed to [K//16, N] below.
+  TORCH_CHECK_VALUE(
+      mat_a.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2 &&
+          mat_b.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2,
+      "mat_a and mat_b must be Float4_e2m1fn_x2 types, got: ",
+      mat_a.scalar_type(),
+      ", ",
+      mat_b.scalar_type());
+
+  // Packed FP4 format means actual-K = 2 * reported-K -- adjust
+  constexpr int64_t K_multiplier = 2;
+  const int64_t M = mat_a.sizes()[0];
+  const int64_t K = mat_a.sizes()[1] * K_multiplier;
+  const int64_t N = mat_b.sizes()[1];
+
+  TORCH_CHECK_VALUE(
+      scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 16) &&
+          scale_a.scalar_type() == kFloat8_e4m3fn,
+      "scale_a must have shape ",
+      M,
+      " x ",
+      ceil_div<int64_t>(K, 16),
+      " Float8_e4m3fn elements, got ",
+      scale_a.sizes());
+
+  TORCH_CHECK_VALUE(
+      scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 16) &&
+          scale_b.scalar_type() == kFloat8_e4m3fn,
+      "scale_b must have shape ",
+      N,
+      " x ",
+      ceil_div<int64_t>(K, 16),
+      " Float8_e4m3fn elements, got ",
+      scale_b.sizes());
+
+  // Convert to oneDNN row-major layout:
+  //   scale_a [M, K//16] -> no transpose, just contiguous
+  //   scale_b [N, K//16] -> transpose to [K//16, N], then contiguous
+  auto sa = scale_a.is_contiguous() ? scale_a : scale_a.contiguous();
+  auto sb_t = scale_b.t();
+  auto sb = sb_t.is_contiguous() ? sb_t : sb_t.contiguous();
+
+  auto scaling_choice_a = ScalingType::BlockWise1x16;
+  auto scaling_choice_b = ScalingType::BlockWise1x16;
+
+  _scaled_gemm(
+      mat_a,
+      mat_b,
+      sa,
+      sb,
+      scaling_choice_a,
+      scaling_choice_b,
+      bias,
+      use_fast_accum,
+      out);
+
+  return out;
+}
+
 // V2: Computes matrix multiply + bias while applying scaling to input and
 // output matrices. Scales are applicable when matrices are of Float8 or
 // Float4 (packed) type and assumed to be equal to 1.0 by default. If output
@@ -1186,6 +1267,15 @@ Tensor& _scaled_mm_xpu_v2_out(
       ", ",
       ceil_div<int64_t>(mat_b.size(0) * 2, 32),
       ").\n"
+      "- For NVFP4 BlockWise 1x16 scaling, a and b should be float4 (packed 2x), scales should be float8_e4m3fn, scale_a should be (",
+      mat_a.size(0),
+      ", ",
+      ceil_div<int64_t>(mat_a.size(1) * 2, 16),
+      ") and scale_b should be (",
+      mat_b.size(1),
+      ", ",
+      ceil_div<int64_t>(mat_b.size(0) * 2, 16),
+      ").\n"
       "Got mat_a.dtype()=",
       mat_a.scalar_type(),
       ", scale_a[0].dtype()=",
@@ -1270,6 +1360,16 @@ Tensor& _scaled_mm_xpu_v2_out(
         out);
   } else if (gemm_impl == ScaledGemmImplementation::MXFP4_MXFP4) {
     return _scaled_mxfp4_mxfp4(
+        mat_a,
+        mat_b,
+        scale_a[0],
+        scale_b[0],
+        bias,
+        out_dtype_,
+        use_fast_accum,
+        out);
+  } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE) {
+    return _scaled_nvfp4_nvfp4(
         mat_a,
         mat_b,
         scale_a[0],

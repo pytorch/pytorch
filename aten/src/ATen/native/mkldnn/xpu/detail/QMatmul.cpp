@@ -367,6 +367,8 @@ struct ScaleSpec {
     //     scale shape: [outer_dim, ceil_div(inner_dim, 128)]
     // For blockwise 1x32 (MXFP8/MXFP4): groups = {1, 32} for SRC, {32, 1} for WEI
     //     scale shape: [outer_dim, ceil_div(inner_dim, 32)]
+    // For blockwise 1x16 (NVFP4): groups = {1, 16} for SRC, {16, 1} for WEI
+    //     scale shape: [outer_dim, ceil_div(inner_dim, 16)]
     if (group_m == 1 && group_k > 1) {
       return outer_dim * at::ceil_div(inner_dim, group_k);
     } else if (group_m > 1 && group_k == 1) {
@@ -473,12 +475,24 @@ inline ScaleSpec make_scale_spec(
           dnnl::memory::data_type::e8m0};
     }
 
+    case at::blas::ScalingType::BlockWise1x16: {
+      // Blockwise 1x16 scaling (NVFP4)
+      // For SRC (A): scale shape [M, ceil_div(K, 16)], groups = {1, 16}
+      // For WEI (B): scale shape [ceil_div(K, 16), N], groups = {16, 1}
+      // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
+      // Scale dtype is float8_e4m3fn -> oneDNN f8_e4m3
+      return {
+          (1 << 0) | (1 << 1),
+          is_src ? dnnl::memory::dims{1, 16} : dnnl::memory::dims{16, 1},
+          dnnl::memory::data_type::f8_e4m3};
+    }
+
     default:
       TORCH_INTERNAL_ASSERT(
           false,
           "Unsupported scaling_type: ",
           static_cast<int>(scaling_type),
-          ". Currently only support TensorWise, RowWise, BlockWise1x128, BlockWise128x128, and BlockWise1x32");
+          ". Currently only support TensorWise, RowWise, BlockWise1x128, BlockWise128x128, BlockWise1x32, and BlockWise1x16");
   }
 }
 
