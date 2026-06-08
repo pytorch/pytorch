@@ -12152,6 +12152,27 @@ foreach_reduce_op_db: list[ForeachFuncInfo] = [
     ),
 ]
 
+def _sample_inputs_foreach_mm(opinfo, device, dtype, requires_grad, **kwargs):
+    # _foreach_mm uses grouped GEMM or loop-of-mm, not multi_tensor_apply
+    for num_tensors in [2, 5]:
+        for m, k, n in [(32, 16, 24), (16, 16, 16)]:
+            self_tensors = [
+                make_tensor(
+                    (m, k), dtype=dtype, device=device, requires_grad=requires_grad
+                )
+                for _ in range(num_tensors)
+            ]
+            mat2_tensors = [
+                make_tensor(
+                    (k, n), dtype=dtype, device=device, requires_grad=requires_grad
+                )
+                for _ in range(num_tensors)
+            ]
+            yield ForeachSampleInput(
+                self_tensors, args=(mat2_tensors,), disable_fastpath=True
+            )
+
+
 foreach_other_op_db: list[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
@@ -12209,6 +12230,17 @@ foreach_other_op_db: list[ForeachFuncInfo] = [
                 "test_dispatch_symbolic_meta_outplace_all_strides",
                 dtypes=integral_types_and(torch.bool),
             ),
+        ),
+    ),
+    ForeachFuncInfo(
+        "mm",
+        sample_inputs_func=_sample_inputs_foreach_mm,
+        supports_autograd=True,
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            # _foreach_mm decomposes into per-element at::mm; meta output
+            # storage_offset/strides may differ from the real implementation
+            DecorateInfo(unittest.skip("decomposed op"), "TestMeta"),
         ),
     ),
 ]
@@ -13638,8 +13670,6 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                         # https://github.com/pytorch/pytorch/issues/70904
                         DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
-                        # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
                     )),
     BinaryUfuncInfo('bitwise_right_shift',
                     op=torch.bitwise_right_shift,
@@ -13655,8 +13685,6 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                         # https://github.com/pytorch/pytorch/issues/70904
                         DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
-                        # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
                     )),
     OpInfo('combinations',
            op=torch.combinations,
@@ -15744,13 +15772,6 @@ op_db: list[OpInfo] = [
                     ref=np.lcm,
                     dtypes=integral_types_and(),
                     supports_autograd=False,
-                    skips=(
-                        # The operator 'aten::lcm.out' is not currently implemented for the MPS device.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                    ),
                     supports_rhs_python_scalar=False),
     BinaryUfuncInfo('gcd',
                     ref=np.gcd,
@@ -18947,6 +18968,17 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_promotes_int_to_float', device_type='mps'),
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
                     )),
+    OpInfo('qr',
+           op=torch.qr,
+           dtypes=floating_and_complex_types(),
+           dtypesIfMPS=floating_types(),
+           sample_inputs_func=sample_inputs_linalg_qr_geqrf,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # In-place ops
+           check_batched_gradgrad=False,
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
+           ),
     UnaryUfuncInfo('rad2deg',
                    ref=np.degrees,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -26073,11 +26105,6 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.lcm",
         torch_opinfo_name="lcm",
-        skips=(
-            # The operator 'aten::lcm.out' is not currently implemented for the MPS device.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.le",
@@ -27583,6 +27610,7 @@ python_ref_db = [
         skips=(
             # no _refs support for Tensor.__setitem__
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     PythonRefInfo(
