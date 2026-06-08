@@ -433,7 +433,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
 
 def _suggest_or_raise_constraint_violation(
-    module_to_trace: torch.nn.Module,
+    module_to_trace: Any,
     orig_callable: Callable[..., Any],
     fake_mode: FakeTensorMode | None,
     graph_capture_output: CaptureOutput,
@@ -453,7 +453,7 @@ def _suggest_or_raise_constraint_violation(
         (shape_env := getattr(fake_mode, "shape_env", None)) is not None
         and (dim_constraints := shape_env.dim_constraints) is not None
         and not isinstance(
-            module_to_trace.forward,
+            getattr(module_to_trace, "forward", module_to_trace),
             torch._ops.OpOverloadPacket | torch._ops.OpOverload,
         )
     ):
@@ -926,6 +926,8 @@ def dynamo_graph_capture_for_export(
     constraints: list[Constraint] | None = None,
     *,
     export: bool = False,
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
+    disable_constraint_solver: bool = False,
 ) -> Callable[..., Any]:
     if isinstance(fn, torch._ops.OpOverload):
 
@@ -968,6 +970,18 @@ def op_overload_wrapper({", ".join(arg_list)}):
                 kwargs,
                 constraints=constraints,
                 _is_export_deprecated_do_not_use=export,
+            )
+        if export and not disable_constraint_solver and (constraints or dynamic_shapes):
+            fake_mode = out.backend_input.fake_mode if out.backend_input else None
+            orig_callable = fn.forward if isinstance(fn, torch.nn.Module) else fn
+            _suggest_or_raise_constraint_violation(
+                fn,
+                orig_callable,
+                fake_mode,
+                out,
+                args,
+                kwargs,
+                dynamic_shapes,
             )
         graph_module = create_fx_graph_from_captured_output(out, fn, args, kwargs)
         return graph_module

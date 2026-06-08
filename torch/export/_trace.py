@@ -1167,7 +1167,11 @@ def _export_to_torch_ir(
                                 assume_static_by_default=True,
                             )(
                                 dynamo_graph_capture_for_export(
-                                    f, constraints=constraints, export=True
+                                    f,
+                                    constraints=constraints,
+                                    export=True,
+                                    dynamic_shapes=dynamic_shapes,
+                                    disable_constraint_solver=disable_constraint_solver,
                                 )
                             )
                         else:
@@ -1182,55 +1186,19 @@ def _export_to_torch_ir(
                             assume_static_by_default=True,
                         )(
                             dynamo_graph_capture_for_export(
-                                f, export=bool(constraints or dynamic_shapes)
+                                f,
+                                export=bool(constraints or dynamic_shapes),
+                                dynamic_shapes=dynamic_shapes,
+                                disable_constraint_solver=disable_constraint_solver,
                             )
                         )
-                    # We can't serialize entire fake mode yet, so this is to make sure
-                    # things like copy.deepcopy(ep.graph_module) not crash.
-                    # see test_export.py::test_custom_tag_metadata_re_export
-                    # Once we delete the old strict export, we can use
                     gm_torch_level = dynamo_graph_capture(*args, **kwargs)
-                    if (
-                        (constraints or dynamic_shapes)
-                        and not disable_constraint_solver
-                        and isinstance(f, torch.nn.Module)
-                        and "fake_mode" in gm_torch_level.meta
-                        and isinstance(
-                            gm_torch_level.graph._codegen,
-                            torch._dynamo.functional_export._DynamoBytecodeCodeGen,
-                        )
-                    ):
-                        # Bytecode export capture returns before Dynamo's
-                        # normal export guard finalization, so run the same
-                        # constraint solver here while the capture fake mode is
-                        # still attached to the graph.
-                        (
-                            _,
-                            _,
-                            _,
-                            equalities_inputs,
-                            original_signature,
-                            dynamic_shapes,
-                        ) = make_fake_inputs(
-                            f,
-                            args,
-                            kwargs,
-                            dynamic_shapes,
-                            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-                            source_is_input=True,
-                        )
-                        produce_guards_and_solve_constraints(
-                            fake_mode=gm_torch_level.meta["fake_mode"],
-                            gm=gm_torch_level,
-                            dynamic_shapes=dynamic_shapes,
-                            equalities_inputs=equalities_inputs,
-                            original_signature=original_signature,
-                        )
                     # We can't serialize entire fake mode yet, so this is to make sure
                     # things like copy.deepcopy(ep.graph_module) not crash.
                     # see test_export.py::test_custom_tag_metadata_re_export
                     # Once we delete the old strict export, we can use this fake mode in the
                     # subsequent logic when lowering to aten IR.
+                    gm_torch_level.meta.pop("tracing_context", None)
                     del gm_torch_level.meta["fake_mode"]
 
                 else:
