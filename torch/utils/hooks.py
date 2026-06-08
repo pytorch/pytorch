@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
 from collections import OrderedDict
+from collections.abc import Callable
 import weakref
 import warnings
 from typing import Any
@@ -21,10 +22,17 @@ class RemovableHandle:
     id: int
     next_id: int = 0
 
-    def __init__(self, hooks_dict: Any, *, extra_dict: Any = None) -> None:
+    def __init__(
+        self,
+        hooks_dict: Any,
+        *,
+        extra_dict: Any = None,
+        remove_callback: Callable[[Any], None] | None = None,
+    ) -> None:
         self.hooks_dict_ref = weakref.ref(hooks_dict)
         self.id = RemovableHandle.next_id
         RemovableHandle.next_id += 1
+        self.remove_callback = remove_callback
 
         self.extra_dict_ref: tuple = ()
         if isinstance(extra_dict, dict):
@@ -36,11 +44,15 @@ class RemovableHandle:
         hooks_dict = self.hooks_dict_ref()
         if hooks_dict is not None and self.id in hooks_dict:
             del hooks_dict[self.id]
+            if self.remove_callback is not None:
+                self.remove_callback(hooks_dict)
 
         for ref in self.extra_dict_ref:
             extra_dict = ref()
             if extra_dict is not None and self.id in extra_dict:
                 del extra_dict[self.id]
+                if self.remove_callback is not None:
+                    self.remove_callback(extra_dict)
 
     def __getstate__(self):
         if self.extra_dict_ref is None:
@@ -56,6 +68,7 @@ class RemovableHandle:
             self.hooks_dict_ref = weakref.ref(state[0])
         self.id = state[1]
         RemovableHandle.next_id = max(RemovableHandle.next_id, self.id + 1)
+        self.remove_callback = None
 
         if len(state) < 3 or state[2] is None:
             self.extra_dict_ref = ()

@@ -2375,17 +2375,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         inp = torch.tensor(1.0, requires_grad=True)
 
-        failure_reason = None
-
-        def guard_fail_fn(failure):
-            nonlocal failure_reason
-            failure_reason = failure[0]
-
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        compiled_func = torch._dynamo.optimize(
-            guard_fail_fn=guard_fail_fn,
-            backend=cc,
-        )(outer_func)
+        compiled_func = torch._dynamo.optimize(backend=cc)(outer_func)
 
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 15)
@@ -2398,7 +2389,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         handle.remove()
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 7)
-        self.assertTrue("forward_hooks" in failure_reason)
+        # Hook removal now proactively invalidates the watched hook dict cache entry,
+        # so guard_fail_fn is not guaranteed to run before recompilation.
         self.assertEqual(cc.frame_count, 1 + 1)
         self.assertEqual(cc.op_count, 6 + 4)
 
@@ -2406,7 +2398,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         m = TestModule()
         handle = m.register_forward_hook(forward_hook)
-        failure_reason = None
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 15)
 
@@ -2633,6 +2624,193 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(grad_sizes.keys() == backward_hook_handles.keys())
         self.assertTrue(pre_grad_sizes.keys() == pre_backward_hook_handles.keys())
+
+    def test_register_full_backward_pre_hook_invalidates(self):
+        layer = torch.nn.Linear(3, 3, bias=False)
+        layer.weight = torch.nn.Parameter(torch.eye(3, dtype=torch.float))
+
+        def hook(module, grad_output):
+            return tuple(go * 2 for go in grad_output)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return layer(x)
+
+        fn(torch.randn(3, requires_grad=True))
+        layer.register_full_backward_pre_hook(hook)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Module-level backwards hooks require compiled autograd",
+        ):
+            fn(torch.randn(3, requires_grad=True))
+
+    def test_register_forward_hook_invalidates(self):
+        layer = torch.nn.Linear(3, 3, bias=False)
+        layer.weight = torch.nn.Parameter(torch.eye(3, dtype=torch.float))
+
+        def hook(module, args, output):
+            return output * 2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return layer(x)
+
+        x = torch.ones(3)
+        self.assertEqual(fn(x), x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        handle = layer.register_forward_hook(hook)
+
+        self.assertEqual(fn(x), x * 2)
+        self.assertEqual(cnt.frame_count, 2)
+
+        handle.remove()
+
+        self.assertEqual(fn(x), x)
+        self.assertEqual(cnt.frame_count, 3)
+
+    def test_register_global_forward_hook_invalidates(self):
+        layer = torch.nn.Linear(3, 3, bias=False)
+        layer.weight = torch.nn.Parameter(torch.eye(3, dtype=torch.float))
+
+        def hook(module, args, output):
+            return output * 2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return layer(x)
+
+        x = torch.ones(3)
+        self.assertEqual(fn(x), x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        handle = torch.nn.modules.module.register_module_forward_hook(hook)
+        try:
+            self.assertEqual(fn(x), x * 2)
+            self.assertEqual(cnt.frame_count, 2)
+
+            handle.remove()
+
+            self.assertEqual(fn(x), x)
+            self.assertEqual(cnt.frame_count, 3)
+        finally:
+            handle.remove()
+
+    def test_register_forward_hook_secondary_dicts_invalidate(self):
+        layer = torch.nn.Linear(3, 3)
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return (
+                x
+                + len(layer._forward_pre_hooks_with_kwargs)
+                + 10 * len(layer._forward_hooks_with_kwargs)
+                + 100 * len(layer._forward_hooks_always_called)
+            )
+
+        def pre_hook(module, args, kwargs):
+            return None
+
+        def hook(module, args, kwargs, output):
+            return output
+
+        x = torch.ones(())
+        self.assertEqual(fn(x), x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        pre_handle = layer.register_forward_pre_hook(pre_hook, with_kwargs=True)
+        self.assertEqual(fn(x), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+        hook_handle = layer.register_forward_hook(
+            hook, with_kwargs=True, always_call=True
+        )
+        self.assertEqual(fn(x), x + 111)
+        self.assertEqual(cnt.frame_count, 3)
+
+        hook_handle.remove()
+        self.assertEqual(fn(x), x + 1)
+        self.assertEqual(cnt.frame_count, 4)
+
+        pre_handle.remove()
+        self.assertEqual(fn(x), x)
+        self.assertEqual(cnt.frame_count, 5)
+
+    def test_register_global_forward_hook_secondary_dicts_invalidate(self):
+        hooks_with_kwargs = torch.nn.modules.module._global_forward_hooks_with_kwargs
+        hooks_always_called = (
+            torch.nn.modules.module._global_forward_hooks_always_called
+        )
+        base_with_kwargs = len(hooks_with_kwargs)
+        base_always_called = len(hooks_always_called)
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return (
+                x
+                + len(torch.nn.modules.module._global_forward_hooks_with_kwargs)
+                + 10 * len(torch.nn.modules.module._global_forward_hooks_always_called)
+            )
+
+        def hook(module, args, kwargs, output):
+            return output
+
+        x = torch.ones(())
+        self.assertEqual(fn(x), x + base_with_kwargs + 10 * base_always_called)
+        self.assertEqual(cnt.frame_count, 1)
+
+        handle = torch.nn.modules.module.register_module_forward_hook(
+            hook, with_kwargs=True, always_call=True
+        )
+        try:
+            self.assertEqual(
+                fn(x), x + base_with_kwargs + 1 + 10 * (base_always_called + 1)
+            )
+            self.assertEqual(cnt.frame_count, 2)
+
+            handle.remove()
+
+            self.assertEqual(fn(x), x + base_with_kwargs + 10 * base_always_called)
+            self.assertEqual(cnt.frame_count, 3)
+        finally:
+            handle.remove()
+
+    def test_register_global_full_backward_pre_hook_invalidates(self):
+        layer = torch.nn.Linear(3, 3, bias=False)
+        layer.weight = torch.nn.Parameter(torch.eye(3, dtype=torch.float))
+
+        def hook(module, grad_output):
+            return tuple(go * 2 for go in grad_output)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return layer(x)
+
+        fn(torch.randn(3, requires_grad=True))
+
+        handle = torch.nn.modules.module.register_module_full_backward_pre_hook(hook)
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Module-level backwards hooks require compiled autograd",
+            ):
+                fn(torch.randn(3, requires_grad=True))
+
+            handle.remove()
+
+            x = torch.randn(3, requires_grad=True)
+            y = fn(x)
+            y.sum().backward()
+            self.assertEqual(x.grad, torch.ones(3))
+        finally:
+            handle.remove()
 
     def test_udo_instance_method_as_hook(self):
         class CustomClass:

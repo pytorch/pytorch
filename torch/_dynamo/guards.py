@@ -118,6 +118,7 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
+from .mutation_guard import watch
 from .source import (
     AttrProxySource,
     AttrSource,
@@ -201,6 +202,21 @@ if TYPE_CHECKING:
 
 guard_manager_testing_hook_fn: Callable[[Any, Any, Any], Any] | None = None
 _COUNT_ITERATOR_TYPE = type(itertools.count())
+_NN_MODULE_HOOK_DICT_NAMES = {
+    "_backward_hooks",
+    "_backward_pre_hooks",
+    "_forward_hooks",
+    "_forward_hooks_always_called",
+    "_forward_hooks_with_kwargs",
+    "_forward_pre_hooks",
+    "_forward_pre_hooks_with_kwargs",
+    "_global_backward_hooks",
+    "_global_backward_pre_hooks",
+    "_global_forward_hooks",
+    "_global_forward_hooks_always_called",
+    "_global_forward_hooks_with_kwargs",
+    "_global_forward_pre_hooks",
+}
 
 try:
     import numpy as np
@@ -2194,6 +2210,19 @@ class GuardBuilder(GuardBuilderBase):
         )
         self.already_added_code_parts.add(code)
 
+    def _watch_nn_module_hook_dict(self, guard: Guard, value: Any) -> None:
+        source = guard.originating_source
+        if (
+            isinstance(source, AttrSource)
+            and source.member in _NN_MODULE_HOOK_DICT_NAMES
+            and isinstance(value, collections.OrderedDict)
+        ):
+            watch(
+                value,
+                self.check_fn_manager,
+                guard_on_attribute_mutation=False,
+            )
+
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: type(value),
         eval_fn=lambda value, metadata: type(value) is metadata,
@@ -2201,6 +2230,7 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         value = self.get(guard)
+        self._watch_nn_module_hook_dict(guard, value)
         if isinstance(value, torch._subclasses.FakeTensor) and value.pytype:
             t = value.pytype
         else:
@@ -2899,6 +2929,7 @@ class GuardBuilder(GuardBuilderBase):
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard)
+        self._watch_nn_module_hook_dict(guard, value)
 
         if not isinstance(value, dict):
             # C++ DICT_LENGTH checks for type
@@ -3113,6 +3144,7 @@ class GuardBuilder(GuardBuilderBase):
         """Special guard to skip guards on empty hooks. This is controlled by skip_nnmodule_hook_guards"""
         if config.skip_nnmodule_hook_guards:
             # This is unsafe if you add/remove a hook on nn module variable
+            self._watch_nn_module_hook_dict(guard, self.get(guard))
             return
         self.SEQUENCE_LENGTH(guard)
 
@@ -4978,7 +5010,7 @@ class CheckFunctionManager:
         self.guard_manager.extra_state = None
         self.guard_manager.no_tensor_aliasing_sources = no_tensor_aliasing_names
 
-    def invalidate(self, obj_str: str) -> None:
+    def invalidate(self, obj_str: str, reason: str | None = None) -> None:
         # Some tests reveal that CheckFunctionManager has no attribute
         # guard_manager, but this case should not be of any concern.
         # This case doesn't seem easy to repro.
@@ -4993,7 +5025,8 @@ class CheckFunctionManager:
 
             if not isinstance(extra_state, ExtraState):
                 raise AssertionError(f"Expected ExtraState, got {type(extra_state)}")
-            reason = f"Cache line invalidated because {obj_str} got deallocated"
+            if reason is None:
+                reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
 
             extra_state.invalidate(cache_entry, deleted_guard_manager)
