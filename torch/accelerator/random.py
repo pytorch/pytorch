@@ -87,10 +87,101 @@ def set_rng_state_all(new_states: Iterable[Tensor]) -> None:
         set_rng_state(state, i)
 
 
+def manual_seed(seed: int) -> None:
+    r"""Set the seed for generating random numbers for the current :ref:`accelerator<accelerators>`
+    on the current device (:func:`torch.accelerator.current_device_index`).
+
+    Args:
+        seed (int): The desired seed.
+
+    .. warning::
+        If you are working with a multi-device model, this function is insufficient
+        to get determinism. To seed all devices, use :func:`manual_seed_all`.
+
+    .. note::
+        If the accelerator runtime is not yet initialized, the state is deferred
+        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+    """
+
+    def cb() -> None:
+        device_index = torch.accelerator.current_device_index()
+        default_generator = torch._C._accelerator_getDefaultGenerator(device_index)
+        default_generator.manual_seed(seed)
+
+    _lazy_call(cb, seed=True)
+
+
+def manual_seed_all(seed: int) -> None:
+    r"""Set the seed for generating random numbers on all devices for the current :ref:`accelerator<accelerators>`.
+
+    Args:
+        seed (int): The desired seed.
+
+    .. note::
+        If the accelerator runtime is not yet initialized, the state is deferred
+        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+    """
+
+    def cb() -> None:
+        for device_index in range(torch.accelerator.device_count()):
+            default_generator = torch._C._accelerator_getDefaultGenerator(device_index)
+            default_generator.manual_seed(seed)
+
+    _lazy_call(cb, seed_all=True)
+
+
+def seed() -> None:
+    r"""Set the seed for generating random numbers to a random number for the current :ref:`accelerator<accelerators>`
+    on the current device (:func:`torch.accelerator.current_device_index`).
+
+    .. warning::
+        If you are working with a multi-device model, this function is insufficient
+        to get determinism. To seed all devices, use :func:`seed_all`.
+
+    .. note::
+        If the accelerator runtime is not yet initialized, the state is deferred
+        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+    """
+
+    def cb() -> None:
+        device_index = torch.accelerator.current_device_index()
+        default_generator = torch._C._accelerator_getDefaultGenerator(device_index)
+        default_generator.seed()
+
+    _lazy_call(cb)
+
+
+def seed_all() -> None:
+    r"""Set the seed for generating random numbers to a random number on all devices for the current :ref:`accelerator<accelerators>`.
+
+    .. note::
+        If the accelerator runtime is not yet initialized, the state is deferred
+        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+    """
+
+    def cb() -> None:
+        random_seed = 0
+        seeded = False
+        for i in range(torch.accelerator.device_count()):
+            default_generator = torch._C._accelerator_getDefaultGenerator(i)
+            if not seeded:
+                default_generator.seed()
+                random_seed = default_generator.initial_seed()
+                seeded = True
+            else:
+                default_generator.manual_seed(random_seed)
+
+    _lazy_call(cb)
+
+
 __all__ = [
     "initial_seed",
     "get_rng_state",
     "get_rng_state_all",
+    "manual_seed",
+    "manual_seed_all",
+    "seed",
+    "seed_all",
     "set_rng_state",
     "set_rng_state_all",
 ]
