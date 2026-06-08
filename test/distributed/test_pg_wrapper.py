@@ -391,6 +391,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 )
                 self.assertTrue(torch.allclose(output, expected))
 
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
         @patch("torch.distributed.distributed_c10d._GLOO_AVAILABLE", False)
