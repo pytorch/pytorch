@@ -2462,19 +2462,35 @@ class PythonWrapperCodegen(CodeGen):
             bind_assert_symbols = (
                 bind_assert_symbols and sympy_product(value.get_size()) != 0
             )
-            for dim, size in enumerate(value.get_size()):
-                size = V.graph.sizevars.simplify(size)
+            for dim, raw_size in enumerate(value.get_size()):
+                size = V.graph.sizevars.simplify(raw_size)
                 if isinstance(size, sympy.Symbol) and (
                     bind_assert_symbols or size in needed
                 ):
                     self.bind_input_symbol(size, input_name, "size", dim, bound_vars)
-            for dim, stride in enumerate(value.get_stride()):
-                stride = V.graph.sizevars.simplify(stride)
+                if (
+                    isinstance(raw_size, sympy.Symbol)
+                    and (bind_assert_symbols or raw_size in needed)
+                    and raw_size not in bound_vars
+                ):
+                    self.bind_input_symbol(
+                        raw_size, input_name, "size", dim, bound_vars
+                    )
+            for dim, raw_stride in enumerate(value.get_stride()):
+                stride = V.graph.sizevars.simplify(raw_stride)
                 if isinstance(stride, sympy.Symbol) and (
                     bind_assert_symbols or stride in needed
                 ):
                     self.bind_input_symbol(
                         stride, input_name, "stride", dim, bound_vars
+                    )
+                if (
+                    isinstance(raw_stride, sympy.Symbol)
+                    and (bind_assert_symbols or raw_stride in needed)
+                    and raw_stride not in bound_vars
+                ):
+                    self.bind_input_symbol(
+                        raw_stride, input_name, "stride", dim, bound_vars
                     )
 
         def _verify_input_symbol_assignment(

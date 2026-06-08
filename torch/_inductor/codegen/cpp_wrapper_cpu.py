@@ -733,7 +733,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         ss << "{handle_kind}[{idx}]: unmatched dtype, "
                            << "expected: " << {name}_expected_dtype << "({expected_dtype_name}), "
                            << "but got: " << {name}_dtype << "\\n";
-                        throw std::runtime_error(ss.str());
+                        throw std::runtime_error(std::move(ss).str());
                     }}
                 """
             )
@@ -747,7 +747,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                 ss << "{handle_kind}[{idx}]: unmatched dim value at {dim_idx}, "
                                    << "expected: {d}, " << "but got: " << {name}_size[{dim_idx}]
                                    << "\\n";
-                                throw std::runtime_error(ss.str());
+                                throw std::runtime_error(std::move(ss).str());
                             }}
                         """
                     )
@@ -765,7 +765,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                     ss << "{handle_kind}[{idx}]: dim value is too small at {dim_idx}, "
                                        << "expected it to be >= {sym_range.lower}, " << "but got: "
                                        << {name}_size[{dim_idx}] << "\\n";
-                                    throw std::runtime_error(ss.str());
+                                    throw std::runtime_error(std::move(ss).str());
                                 }}
                             """
                         )
@@ -780,7 +780,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                     ss << "{handle_kind}[{idx}]: dim value is too large at {dim_idx}, "
                                        << "expected to be <= {upper_bound}, " << "but got: "
                                        << {name}_size[{dim_idx}] << "\\n";
-                                    throw std::runtime_error(ss.str());
+                                    throw std::runtime_error(std::move(ss).str());
                                 }}
                             """
                         )
@@ -796,7 +796,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                             ss << "{handle_kind}[{idx}]: unmatched stride value at {stride_idx}, "
                                << "expected: {s}, " << "but got: " << {name}_stride[{stride_idx}]
                                << "\\n";
-                            throw std::runtime_error(ss.str());
+                            throw std::runtime_error(std::move(ss).str());
                         }}
                     """
                 )
@@ -820,7 +820,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                     ss << "{handle_kind}[{idx}]: unmatched device type, "
                                     << "expected: " << {name}_expected_device_type << "{expected_device_type}({device_type_str}), "
                                     << "but got: " << {name}_device_type << "\\n";
-                                    throw std::runtime_error(ss.str());
+                                    throw std::runtime_error(std::move(ss).str());
                                 }}
                             """
                         )

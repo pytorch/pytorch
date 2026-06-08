@@ -402,7 +402,7 @@ s1 = arg0_1.stride()[0]""",
         ):
             wrapper.codegen_inputs()
 
-        self.assertEqual(wrapper.prefix.getvalue().strip(), "")
+        self.assertEqual(wrapper.prefix.getvalue().strip(), "s0 = arg0_1.size()[0]")
 
     def test_codegen_inputs_binds_canonical_size_assert_symbol(self):
         wrapper = self._new_wrapper()
