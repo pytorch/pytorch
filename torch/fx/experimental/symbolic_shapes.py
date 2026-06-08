@@ -1558,6 +1558,9 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
         return guard_bool(a)
 
     sym_node = a.node
+    if sym_node.expr.free_symbols & shape_env.do_not_specialize_zero_one_symbols:
+        return default
+
     r = sym_node.shape_env.evaluate_sym_node(
         sym_node, size_oblivious=False, fallback_value=default
     )
@@ -3767,6 +3770,32 @@ class DimConstraints:
 TLS = threading.local()
 
 
+def _ignore_fresh_unbacked_symbols_tls() -> bool:
+    return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
+
+
+def _ignore_fresh_unbacked_symbols_set(b: bool) -> bool:
+    prev = _ignore_fresh_unbacked_symbols_tls()
+    TLS.ignore_fresh_unbacked_symbols = b
+    return prev
+
+
+@contextmanager
+def _ignore_fresh_unbacked_symbols_tls_context() -> Generator[None, None, None]:
+    """
+    Indicates that newly allocated unbacked SymInts are intentionally discarded.
+
+    This is used by tracing-only metadata paths that do not own a ShapeEnv, but
+    still create temporary fake tensors whose fresh symbols should not be bound
+    into the surrounding graph.
+    """
+    prev = _ignore_fresh_unbacked_symbols_set(True)
+    try:
+        yield
+    finally:
+        _ignore_fresh_unbacked_symbols_set(prev)
+
+
 @dataclass(frozen=True, slots=True)
 class ShapeEnvSettings:
     """
@@ -4114,6 +4143,7 @@ class ShapeEnv:
         self.unbacked_alloc_order: dict[sympy.Symbol, int] = {}
 
         self.specialization_stacks: dict[Source, traceback.StackSummary] = {}
+        self.do_not_specialize_zero_one_symbols: set[sympy.Symbol] = set()
 
         # Used by _get_unbacked_replacements / _sub_unbacked_exprs for
         # optimization_hint canonicalization of unbacked expressions.
@@ -4460,13 +4490,11 @@ class ShapeEnv:
                 self.replacements[b.node.expr] = new_var
 
     def _ignore_fresh_unbacked_symbols_tls(self) -> bool:
-        return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
+        return _ignore_fresh_unbacked_symbols_tls()
 
     @record_shapeenv_event()
     def _ignore_fresh_unbacked_symbols_set(self, b: bool) -> bool:
-        prev = self._ignore_fresh_unbacked_symbols_tls()
-        TLS.ignore_fresh_unbacked_symbols = b
-        return prev
+        return _ignore_fresh_unbacked_symbols_set(b)
 
     @contextmanager
     def ignore_fresh_unbacked_symbols(self) -> Generator[None, None, None]:
@@ -4474,11 +4502,8 @@ class ShapeEnv:
         Indicates that the newly allocated unbacked SymInts are being
         discarded
         """
-        prev = self._ignore_fresh_unbacked_symbols_set(True)
-        try:
+        with _ignore_fresh_unbacked_symbols_tls_context():
             yield
-        finally:
-            self._ignore_fresh_unbacked_symbols_set(prev)
 
     @record_shapeenv_event()
     def freeze(self) -> None:
@@ -4709,7 +4734,8 @@ class ShapeEnv:
                 TensorPropertySource(source, TensorProperty.SIZE, i),
                 dynamic_dims[i],
                 constraint_dims[i],
-                do_not_specialize_zero_one=config.backed_size_oblivious,
+                do_not_specialize_zero_one=config.backed_size_oblivious
+                or isinstance(constraint_dims[i], StrictMinMaxConstraint),
                 symbolic_context=symbolic_context,
             )
             if (
@@ -5623,6 +5649,8 @@ class ShapeEnv:
                 sympy_expr = make_symbol(
                     SymT.SIZE, symbol_id, positive=positive, integer=True
                 )
+                if do_not_specialize_zero_one and val in (0, 1):
+                    self.do_not_specialize_zero_one_symbols.add(sympy_expr)
             else:
                 sympy_expr = make_symbol(
                     SymT.FLOAT, symbol_id, positive=positive, real=True

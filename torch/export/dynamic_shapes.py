@@ -1193,29 +1193,9 @@ def _process_dynamic_shapes(
         def _create_static_dim(tensor, i, value):
             return _StaticDim(value)
 
-        def _mark_unbacked_if_specialized(tensor, i, dim) -> None:
-            from torch.utils._sympy.numbers import int_oo
-
-            # Preserve named dynamic Dim semantics even when the example would
-            # otherwise be subject to 0/1 specialization.
-            if tensor.shape[i] not in (0, 1):
-                return
-            if not (dim.min <= tensor.shape[i] <= dim.max):
-                return
-
-            min_bound = None if dim.min == -int_oo else dim.min
-            max_bound = None if dim.max == int_oo else dim.max
-            tensor._dynamo_unbacked_indices.add(i)
-            tensor._dynamo_hint_overrides[i] = int(tensor.shape[i])
-            tensor._dynamo_shape_ids[i] = dim.__name__
-            tensor._dynamo_unbacked_bounds[i] = (min_bound, max_bound)
-            tensor._has_dynamo_dim_marking = True
-
         if isinstance(dim, (int, Dim)):
             if isinstance(dim, int):
                 dim = _create_static_dim(tensor, idx, dim)
-            else:
-                _mark_unbacked_if_specialized(tensor, idx, dim)
             constraint = to_constraint(dim, tensor, idx)
             symbols[dim.__name__].append(constraint)
         elif isinstance(dim, _DimHint):
