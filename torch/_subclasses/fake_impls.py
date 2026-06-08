@@ -1891,6 +1891,52 @@ def _pack_padded_sequence(
     return (packed_data, batch_size)  # type: ignore[return]
 
 
+@register_op_impl(torch.ops.aten._pad_packed_sequence.default)
+def _pad_packed_sequence(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    batch_first: bool,
+    padding_value: Any,
+    total_length: IntLikeType,
+) -> tuple[FakeTensor, FakeTensor]:
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # batch_sizes[0] determines the output batch dimension.
+        raise DynamicOutputShapeException(func)
+
+    torch._check(batch_sizes.numel() > 0, lambda: "batch_sizes can not be empty")
+
+    max_batch_size = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(max_batch_size)
+
+    max_real_seq_length = batch_sizes.shape[0]
+    max_seq_length = max_real_seq_length
+    if total_length > 0:
+        torch._check(
+            total_length >= max_real_seq_length,
+            lambda: (
+                "Expected total_length to be at least the length of the longest "
+                "sequence in input, but got total_length="
+                f"{total_length} and max sequence length being {max_real_seq_length}"
+            ),
+        )
+        max_seq_length = total_length
+
+    output = data.new_empty((max_seq_length, max_batch_size, *data.shape[1:]))
+    lengths = batch_sizes.new_empty((max_batch_size,))
+    if batch_first:
+        output = output.transpose(0, 1)
+
+    return (output, lengths)  # type: ignore[return]
+
+
 # pyrefly: ignore [implicit-any]
 FAST_OP_IMPLEMENTATIONS = {}
 

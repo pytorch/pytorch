@@ -2989,6 +2989,10 @@
 - name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
   input: _pack_padded_sequence_backward_symint(grad, input.sym_sizes(), result1, batch_first)
 
+- name: _pad_packed_sequence(Tensor data, Tensor batch_sizes, bool batch_first, Scalar padding_value, int total_length) -> (Tensor, Tensor)
+  output_differentiability: [True, False]
+  data: std::get<0>(_pack_padded_sequence(grad, result1, batch_first))
+
 # TH wrappers
 - name: eq.Scalar(Tensor self, Scalar other) -> Tensor
   output_differentiability: [False]

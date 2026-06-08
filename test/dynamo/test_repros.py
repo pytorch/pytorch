@@ -7681,6 +7681,85 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
             self.assertEqual(model(*inputs), compiled_result)
 
+    # https://github.com/pytorch/pytorch/issues/155238
+    def test_pad_packed_sequence_fake_tensor(self):
+        class Model(torch.nn.Module):
+            def __init__(self, batch_first, total_length):
+                super().__init__()
+                self.batch_first = batch_first
+                self.total_length = total_length
+
+            def forward(self, x, x_lengths):
+                packed = torch.nn.utils.rnn.pack_padded_sequence(
+                    x,
+                    x_lengths,
+                    batch_first=self.batch_first,
+                    enforce_sorted=False,
+                )
+                unpacked, lengths = torch.nn.utils.rnn.pad_packed_sequence(
+                    packed,
+                    batch_first=self.batch_first,
+                    total_length=self.total_length,
+                )
+                return unpacked, lengths
+
+        x_lengths = torch.tensor([8, 6, 10, 4, 9, 7, 5, 3] * 4)
+
+        for batch_first, total_length in itertools.product((True, False), (None, 12)):
+            x = torch.randn(32, 10, 64) if batch_first else torch.randn(10, 32, 64)
+            model = Model(batch_first, total_length)
+            backend = EagerAndRecordGraphs()
+
+            with torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True):
+                compiled_model = torch.compile(model, backend=backend)
+                self.assertEqual(model(x, x_lengths), compiled_model(x, x_lengths))
+
+            self.assertEqual(len(backend.graphs), 1)
+            pad_packed_sequence_nodes = [
+                node
+                for node in backend.graphs[0].graph.nodes
+                if node.op == "call_function"
+                and getattr(node.target, "__name__", None) == "_pad_packed_sequence"
+            ]
+            self.assertEqual(len(pad_packed_sequence_nodes), 1)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_pad_packed_sequence_fake_tensor_fullgraph(self):
+        x_lengths = torch.tensor([8, 6, 10, 4, 9, 7, 5, 3] * 4)
+
+        for batch_first, total_length in itertools.product((True, False), (None, 12)):
+            x = torch.randn(32, 10, 64) if batch_first else torch.randn(10, 32, 64)
+            packed = torch.nn.utils.rnn.pack_padded_sequence(
+                x, x_lengths, batch_first=batch_first, enforce_sorted=False
+            )
+            op_total_length = (
+                packed.batch_sizes.size(0) if total_length is None else total_length
+            )
+
+            def fn(data, batch_sizes):
+                return torch.ops.aten._pad_packed_sequence.default(
+                    data,
+                    batch_sizes,
+                    batch_first,
+                    0.0,
+                    op_total_length,
+                )
+
+            backend = EagerAndRecordGraphs()
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+            self.assertEqual(
+                fn(packed.data, packed.batch_sizes),
+                compiled_fn(packed.data, packed.batch_sizes),
+            )
+
+            self.assertEqual(len(backend.graphs), 1)
+            pad_packed_sequence_nodes = backend.graphs[0].graph.find_nodes(
+                op="call_function",
+                target=torch.ops.aten._pad_packed_sequence.default,
+            )
+            self.assertEqual(len(pad_packed_sequence_nodes), 1)
+
     def test_autograd_function_ctx_stash_no_vc_check(self):
         # Test that tensors stashed directly on ctx (e.g., ctx.x = x) in an
         # autograd.Function don't trigger version counter checks, while tensors
