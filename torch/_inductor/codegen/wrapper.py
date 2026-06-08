@@ -3138,6 +3138,11 @@ class PythonWrapperCodegen(CodeGen):
                 extra_launcher_call_args,
             )
 
+        # Escape kernel names that start with '__' to prevent Python name mangling
+        # in class contexts. See https://github.com/pytorch/pytorch/issues/170398
+        if original_name.startswith("__"):
+            original_name = f"_triton{original_name}"
+
         name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
         # Prevent Python class-based name mangling (``__x`` -> ``_Class__x``)
         # when the generated call site is inside a class body.

@@ -1882,6 +1882,44 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
+    def test_triton_kernel_dunder_name_mangling(self):
+        """Test that kernel names starting with __ are escaped to avoid Python name mangling.
+
+        See https://github.com/pytorch/pytorch/issues/170398
+        """
+
+        @triton.jit
+        def __private_add_kernel(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            __private_add_kernel[(n_elements,)](x, out, n_elements, BLOCK_SIZE=16)
+            return out
+
+        x = torch.randn(4, device=GPU_TYPE)
+        eager_out = f(x)
+        compiled_out, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True, backend="inductor"), x
+        )
+
+        self.assertEqual(compiled_out, eager_out)
+        # Verify the generated code escapes the dunder name
+        self.assertNotIn('"__private_add_kernel', code)
+        self.assertIn("_triton__private_add_kernel", code)
+
+    @requires_gpu
     @common_utils.parametrize("size", [4, 16])
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_different_shapes(self, size, dynamic):
