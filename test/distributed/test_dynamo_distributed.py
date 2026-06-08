@@ -54,15 +54,13 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     MI350_ARCH,
     skipIfRocmArch,
+    skipIfTorchInductor,
     skipIfXpu,
     TEST_MULTIACCELERATOR,
     TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
-from torch.testing._internal.triton_utils import (
-    requires_gpu_and_triton,
-    skipIfTorchInductor,
-)
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 try:
