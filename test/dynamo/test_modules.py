@@ -1858,6 +1858,152 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_non_persistent_buffers(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buf", torch.ones(2), persistent=False)
+                self.register_buffer("persistent", torch.ones(2), persistent=True)
+
+            def forward(self, x):
+                return x + self.buf + self.persistent
+
+        mod = Mod()
+        opt_mod = torch.compile(mod)
+
+        self.assertIs(type(opt_mod._buffers), dict)
+        self.assertIs(type(opt_mod._non_persistent_buffers_set), set)
+        self.assertIn("buf", opt_mod._buffers)
+        self.assertIn("buf", opt_mod._non_persistent_buffers_set)
+        self.assertEqual(set(opt_mod._non_persistent_buffers_set), {"buf"})
+        non_persistent_buffers = set()
+        non_persistent_buffers.update(opt_mod._non_persistent_buffers_set)
+        self.assertEqual(non_persistent_buffers, {"buf"})
+        self.assertIs(opt_mod.get_buffer("buf"), mod.get_buffer("buf"))
+        self.assertNotIn("persistent", opt_mod._buffers)
+        self.assertNotIn("buf", opt_mod.state_dict())
+        self.assertNotIn("_orig_mod.buf", opt_mod.state_dict())
+        self.assertIn("_orig_mod.persistent", opt_mod.state_dict())
+
+        opt_mod.to(dtype=torch.float64)
+        self.assertIs(opt_mod._buffers["buf"], mod._buffers["buf"])
+
+        new_buf = torch.full((2,), 2.0)
+        opt_mod.buf = new_buf
+        self.assertIs(opt_mod._buffers["buf"], new_buf)
+        self.assertIn("buf", opt_mod._non_persistent_buffers_set)
+
+        del opt_mod.buf
+        self.assertNotIn("buf", opt_mod._buffers)
+        self.assertNotIn("buf", opt_mod._non_persistent_buffers_set)
+        with self.assertRaises(AttributeError):
+            opt_mod.get_buffer("buf")
+
+    def test_non_persistent_buffers_to_empty_recurse_false(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buf", torch.ones(2), persistent=False)
+                self.register_buffer("persistent", torch.ones(2), persistent=True)
+
+            def forward(self, x):
+                return x + self.buf + self.persistent
+
+        mod = Mod()
+        opt_mod = torch.compile(mod)
+
+        opt_mod.to_empty(device="meta", recurse=False)
+
+        self.assertEqual(mod.buf.device.type, "meta")
+        self.assertEqual(mod.persistent.device.type, "cpu")
+        self.assertIs(opt_mod._buffers["buf"], mod._buffers["buf"])
+
+    def test_non_persistent_buffer_name_collision(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("dynamo_ctx", torch.ones(2), persistent=False)
+
+            def forward(self, x):
+                return x + self.dynamo_ctx
+
+        mod = Mod()
+        opt_mod = torch.compile(mod)
+
+        self.assertIn("dynamo_ctx", opt_mod._buffers)
+        self.assertIn("dynamo_ctx", opt_mod._non_persistent_buffers_set)
+        self.assertIs(opt_mod.get_buffer("dynamo_ctx"), mod.get_buffer("dynamo_ctx"))
+        self.assertIs(opt_mod.dynamo_ctx, opt_mod.__dict__["dynamo_ctx"])
+
+    def test_non_persistent_buffer_mutated_in_forward(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buf", torch.ones(2), persistent=False)
+
+            def forward(self, x):
+                self.buf = torch.full_like(x, 7)
+                return self.buf + x
+
+        mod = Mod()
+        opt_mod = torch.compile(mod)
+
+        result = opt_mod(torch.ones(3))
+
+        self.assertEqual(result, torch.full((3,), 8.0))
+        self.assertIs(opt_mod.get_buffer("buf"), mod.get_buffer("buf"))
+        self.assertEqual(opt_mod.get_buffer("buf"), torch.full((3,), 7.0))
+        self.assertEqual(
+            list(opt_mod.named_buffers(remove_duplicate=False)),
+            [
+                ("buf", mod.buf),
+                ("_orig_mod.buf", mod.buf),
+            ],
+        )
+
+    def test_non_persistent_buffers_export_dedup(self):
+        from torch.export._trace import _get_non_persistent_buffers
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buf", torch.ones(2), persistent=False)
+                self.register_buffer("persistent", torch.ones(2), persistent=True)
+
+            def forward(self, x):
+                return x + self.buf + self.persistent
+
+        opt_mod = torch.compile(Mod())
+
+        self.assertEqual(_get_non_persistent_buffers(opt_mod), {"_orig_mod.buf"})
+
+        ep = torch.export.export(opt_mod, (torch.ones(2),), strict=False)
+        self.assertEqual(
+            ep.graph_signature.buffers, ("_orig_mod.buf", "_orig_mod.persistent")
+        )
+        self.assertEqual(ep.graph_signature.non_persistent_buffers, ("_orig_mod.buf",))
+        self.assertEqual(set(ep.state_dict), {"_orig_mod.persistent"})
+
+    def test_non_persistent_buffers_export_ignores_user_getattr(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buf", torch.ones(2), persistent=False)
+
+            def __getattr__(self, name):
+                if name.startswith("_torchdynamo_mirrored"):
+                    raise RuntimeError(f"unexpected private attribute probe: {name}")
+                return super().__getattr__(name)
+
+            def forward(self, x):
+                return x + self.buf
+
+        ep = torch.export.export(Mod(), (torch.ones(2),), strict=False)
+
+        self.assertEqual(ep.graph_signature.buffers, ("buf",))
+        self.assertEqual(ep.graph_signature.non_persistent_buffers, ("buf",))
+        self.assertEqual(set(ep.state_dict), set())
+
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_attr_precedence(self):
         class Mod(torch.nn.Module):
