@@ -62,7 +62,7 @@ struct Match {
  * output and assume that we can traverse up from this node to match the
  * entire pattern.
  *
- * Corrolary 1: the order of outputs in the pattern matters!
+ * Corollary 1: the order of outputs in the pattern matters!
  * Corollary 2: patterns cannot contain any nodes not participating in the main
  * output computation.
  */
