@@ -2856,7 +2856,7 @@ end
             )
 
             # potentially, precompile the AOT header for this device
-            if config.aot_inductor.precompile_headers and not _IS_WINDOWS:
+            if config.aot_inductor.precompile_headers:
                 with dynamo_timed("aoti_precompile_header", log_pt2_compile_event=True):
                     header_file = _get_cpp_wrapper_header(
                         device_type, aot_mode=graph.aot_mode
@@ -2867,12 +2867,31 @@ end
                         min_optimize=not config.aot_inductor.package_cpp_only,
                         **compile_command,
                     )
-                    if cpp_prefix := _get_cpp_prefix_header(device_type):
-                        kernel_build_options.precompiled_header = _precompile_header(
-                            cpp_prefix,
-                            cpp_command,
-                            **compile_command,
+                    if _IS_WINDOWS:
+                        wrapper_build_options.precompiled_header_include = header_file
+                        wrapper_build_options.precompiled_header_object = (
+                            f"{wrapper_build_options.precompiled_header}.obj"
                         )
+                    if cpp_prefix := _get_cpp_prefix_header(device_type):
+                        if _IS_WINDOWS:
+                            kernel_build_options.precompiled_header = _precompile_header(
+                                cpp_prefix,
+                                cpp_command,
+                                min_optimize=not config.aot_inductor.package_cpp_only,
+                                **compile_command,
+                            )
+                            kernel_build_options.precompiled_header_include = cpp_prefix
+                            kernel_build_options.precompiled_header_object = (
+                                f"{kernel_build_options.precompiled_header}.obj"
+                            )
+                        else:
+                            kernel_build_options.precompiled_header = (
+                                _precompile_header(
+                                    cpp_prefix,
+                                    cpp_command,
+                                    **compile_command,
+                                )
+                            )
 
             wrapper_builder = CppBuilder(
                 name=str(wrapper_path_operator.stem),
@@ -3159,7 +3178,24 @@ end
                     ],
                 )
 
-            obj_srcs = [wrapper_o, kernel_o, consts_o, *gpu_kernels_o, *cubins_o]
+            pch_obj_srcs: list[str] = []
+            if _IS_WINDOWS:
+                pch_obj_srcs = [
+                    obj
+                    for obj in (
+                        wrapper_build_options.precompiled_header_object,
+                        kernel_build_options.precompiled_header_object,
+                    )
+                    if obj is not None
+                ]
+            obj_srcs = [
+                wrapper_o,
+                kernel_o,
+                consts_o,
+                *gpu_kernels_o,
+                *cubins_o,
+                *pch_obj_srcs,
+            ]
             so_builder = CppBuilder(
                 name=output_name,
                 sources=obj_srcs,
@@ -3375,10 +3411,6 @@ def _precompile_header(
     hashable_cmd_line: str,
     **compile_command: Any,
 ) -> str:
-    assert not _IS_WINDOWS, (
-        "CppBuilder does not currently support precompiling on Windows!"
-    )
-
     # Get the preprocessed output from the header file to be precompiled.  This allows
     # us to properly invalidate the file cache when any header dependency changes.  This
     # is thread-safe, as each thread will get its own temporary directory.
@@ -3396,17 +3428,18 @@ def _precompile_header(
         preprocessor.build()
 
         def _get_file_checksum(filename: str) -> str:
-            """Reading the whole preprocessed header in for hashing is very expensive,
-            but calling a fast hashing utility in a subprocess is cheap."""
-            # If Windows support needs to be added here, use certutil -hashfile.
-            cmd_output = subprocess.run(
-                ("openssl", "sha512", filename), capture_output=True, text=True
-            )
-            return cmd_output.stdout.split()[-1]
+            """Compute a stable hash of the preprocessed header output."""
+            hasher = hashlib.sha512()
+            with open(filename, "rb") as f:
+                while chunk := f.read(1024 * 1024):
+                    hasher.update(chunk)
+            return hasher.hexdigest()
 
         preprocessor_hash = _get_file_checksum(preprocessor.get_target_file_path())
 
     header_build_option = CppTorchDeviceOptions(**compile_command, precompiling=True)
+    if _IS_WINDOWS:
+        header_build_option.precompiled_header_include = header
     header_hash, header_full_path = write(
         content=f"#include <{header}>\n",
         extension="h",
@@ -3422,6 +3455,10 @@ def _precompile_header(
         sources=header_full_path,
         BuildOption=header_build_option,
     )
+    if _IS_WINDOWS:
+        header_build_option.precompiled_header_object = (
+            cpp_builder.get_precompiled_header_object_file_path()
+        )
     # _worker_compile_cpp will automatically ignore any compilation whose result already
     # exists, so this is always safe.
     os.makedirs(_HEADER_LOCK_DIR, exist_ok=True)
@@ -3600,7 +3637,7 @@ class CppCodeCache:
             lib = None
 
             # if requested, pre-compile any headers
-            if config.cpp_cache_precompile_headers and not _IS_WINDOWS:
+            if config.cpp_cache_precompile_headers:
                 if header := cls._get_uncompiled_header(device_type):
                     main_build_option.precompiled_header = _precompile_header(
                         header,
@@ -3608,6 +3645,11 @@ class CppCodeCache:
                         min_optimize=min_optimize,
                         **main_compile_command,
                     )
+                    if _IS_WINDOWS:
+                        main_build_option.precompiled_header_include = header
+                        main_build_option.precompiled_header_object = (
+                            f"{main_build_option.precompiled_header}.obj"
+                        )
 
                 # Currently, the optimized_code field is only used for cpp kernel code,
                 # so go ahead and precompile the relevant header here.  Revisit this
@@ -3619,6 +3661,11 @@ class CppCodeCache:
                         optimized_cmd_line,
                         **optimized_compile_command,
                     )
+                    if _IS_WINDOWS:
+                        optimized_build_option.precompiled_header_include = header
+                        optimized_build_option.precompiled_header_object = (
+                            f"{optimized_build_option.precompiled_header}.obj"
+                        )
 
             main_name, output_dir = get_name_and_dir_from_output_file_path(main_path)
             main_builder = CppBuilder(
@@ -3644,6 +3691,18 @@ class CppCodeCache:
                     sources=[
                         main_builder.get_target_file_path(),
                         optimized_builder.get_target_file_path(),
+                        *(
+                            [main_build_option.precompiled_header_object]
+                            if _IS_WINDOWS
+                            and main_build_option.precompiled_header_object
+                            else []
+                        ),
+                        *(
+                            [optimized_build_option.precompiled_header_object]
+                            if _IS_WINDOWS
+                            and optimized_build_option.precompiled_header_object
+                            else []
+                        ),
                     ],
                     # pyrefly: ignore [bad-argument-type]
                     BuildOption=CppTorchDeviceOptions(**shared_compile_command),

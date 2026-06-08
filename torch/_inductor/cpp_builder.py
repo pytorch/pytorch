@@ -760,6 +760,11 @@ class BuildOptionsBase:
         # Optionally, the path to a precompiled header which should be included on the
         # build command line.
         self.precompiled_header: str | None = None
+        # Header identity for MSVC /Yc and /Yu matching.
+        self.precompiled_header_include: str | None = None
+        # For MSVC, the precompiled header creation step also emits a companion object
+        # file which may need to be linked into the final binary.
+        self.precompiled_header_object: str | None = None
 
         self._aot_mode: bool = aot_mode
         self._use_relative_path: bool = use_relative_path
@@ -2256,7 +2261,7 @@ class CppBuilder:
     @staticmethod
     def __get_preprocessor_output_flags() -> tuple[str, str]:
         extension = ".i"
-        output_flags = "/EP /P" if _IS_WINDOWS else "-E -P -o"
+        output_flags = "/EP /P /Fi" if _IS_WINDOWS else "-E -P -o"
         return extension, output_flags
 
     def __init__(
@@ -2279,6 +2284,7 @@ class CppBuilder:
         self._orig_source_paths = []
         self._output_dir = ""
         self._target_file = ""
+        self._precompiled_header_object_file: str | None = None
 
         self._use_relative_path: bool = False
         self._aot_mode: bool = False
@@ -2305,13 +2311,6 @@ class CppBuilder:
             self._compile_only or self._precompiling or self._preprocessing
         )
 
-        # MSVC produces two files when precompiling: the actual .pch file, as well as an
-        # object file which must be linked into the final library.  This class assumes
-        # only one output file of note, so for now we'll error out here.
-        assert not _IS_WINDOWS or not self._precompiling, (
-            "Cannot currently precompile headers on Windows!"
-        )
-
         if self._compile_only:
             file_ext, output_flags = self.__get_object_flags()
         elif self._precompiling:
@@ -2328,11 +2327,7 @@ class CppBuilder:
             else self._target_file
         )
         if _IS_WINDOWS:
-            if self._preprocessing:
-                # The target file name is automatically determined by MSVC.
-                self._output = output_flags
-            else:
-                self._output = f"{output_flags}{relative_target_file}"
+            self._output = f"{output_flags}{relative_target_file}"
         else:
             self._output = f"{output_flags} {relative_target_file}"
 
@@ -2348,15 +2343,33 @@ class CppBuilder:
 
         if self._precompiling:
             assert len(sources) == 1
-            # See above; we can currently assume this is not on MSVC.
-            self._sources_args = f"-x c++-header {sources[0]}"
-            if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
-                # Store PCH paths relative to -isysroot so the .pch can
-                # be used from a different build directory.  The matching
-                # -isysroot is injected by build_fbcode_re().
-                self._cflags_args += " -relocatable-pch -Xclang -fno-pch-timestamp "
+            if _IS_WINDOWS:
+                # For MSVC, force C++ mode and request both the .pch and companion .obj
+                # artifacts from this precompile step.
+                self._sources_args = sources[0]
+                self._cflags_args += "/c /TP "
+                pch_include = BuildOption.precompiled_header_include or sources[0]
+                self._cflags_args += f'/Yc"{normalize_path_separator(pch_include)}" '
+                pch_obj = os.path.join(self._output_dir, f"{self._name}.obj")
+                relative_pch_obj = (
+                    os.path.basename(pch_obj) if self._use_relative_path else pch_obj
+                )
+                self._cflags_args += f'/Fo"{relative_pch_obj}" '  # codespell:ignore /Fo
+                self._precompiled_header_object_file = normalize_path_separator(pch_obj)
+            else:
+                self._sources_args = f"-x c++-header {sources[0]}"
+                if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
+                    # Store PCH paths relative to -isysroot so the .pch can
+                    # be used from a different build directory.  The matching
+                    # -isysroot is injected by build_fbcode_re().
+                    self._cflags_args += " -relocatable-pch -Xclang -fno-pch-timestamp "
         else:
             self._sources_args = " ".join(sources)
+
+        if self._preprocessing and _IS_WINDOWS:
+            # The preprocessing path feeds a temporary header-like source into cl,
+            # so force C++ parsing mode for STL includes.
+            self._cflags_args += "/TP "
 
         for cflag in BuildOption.get_cflags():
             if _IS_WINDOWS:
@@ -2372,10 +2385,19 @@ class CppBuilder:
 
         if precompiled_header := BuildOption.precompiled_header:
             if _IS_WINDOWS:
-                log.warning(
-                    "Precompiled header support for MSVC is currently unavailable; ignoring %s",
-                    precompiled_header,
+                pch_path = normalize_path_separator(f"{precompiled_header}.pch")
+                pch_include = normalize_path_separator(
+                    BuildOption.precompiled_header_include or precompiled_header
                 )
+                self._cflags_args += f'/Yu"{pch_include}" '
+                self._cflags_args += f'/FI"{pch_include}" '
+                self._cflags_args += f'/Fp"{pch_path}" '
+
+                # If this compile call also links, provide the companion .obj emitted
+                # during precompilation as a linker input.
+                pch_obj = BuildOption.precompiled_header_object
+                if self._do_link and pch_obj:
+                    self._sources_args += f" {normalize_path_separator(pch_obj)}"
             else:
                 self._include_dirs_args = f"-include {precompiled_header} "
                 if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
@@ -2461,6 +2483,11 @@ class CppBuilder:
 
     def get_target_file_path(self) -> str:
         return normalize_path_separator(self._target_file)
+
+    def get_precompiled_header_object_file_path(self) -> str | None:
+        if self._precompiled_header_object_file is None:
+            return None
+        return normalize_path_separator(self._precompiled_header_object_file)
 
     def build_fbcode_re(
         self,
