@@ -89,6 +89,8 @@ dnnl::memory::data_type get_onednn_dtype(
       return dnnl::memory::data_type::f8_e4m3;
     case at::ScalarType::Float8_e5m2:
       return dnnl::memory::data_type::f8_e5m2;
+    case at::ScalarType::Float4_e2m1fn_x2:
+      return dnnl::memory::data_type::f4_e2m1;
     default:
       if (!allow_undef) {
         TORCH_CHECK(
@@ -129,6 +131,20 @@ dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor) {
 
 dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
   Tensor t = tensor.sizes().empty() ? tensor.unsqueeze(0) : tensor;
+  // Float4_e2m1fn_x2 packs 2 fp4 values per byte. PyTorch shape [M, K/2]
+  // must be expanded to logical [M, K] with f4_e2m1 data type for oneDNN.
+  if (t.scalar_type() == at::ScalarType::Float4_e2m1fn_x2) {
+    TORCH_CHECK(t.dim() == 2, "fp4x2 tensor must be 2D, got ", t.dim(), "D");
+    TORCH_CHECK(
+        t.is_contiguous(),
+        "fp4x2 tensor must be contiguous for get_onednn_md");
+    int64_t M = t.size(0);
+    int64_t K_logical = t.size(1) * 2;
+    return {
+        {M, K_logical},
+        dnnl::memory::data_type::f4_e2m1,
+        {K_logical, 1}};
+  }
   return {
       get_onednn_dims(t),
       get_onednn_dtype_include_double(t),

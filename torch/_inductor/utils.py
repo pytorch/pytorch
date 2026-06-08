@@ -4890,6 +4890,16 @@ def _infer_scale_swizzle_impl(
 
     # NVFP4: BlockWise1x16 with float8_e4m3fn scales
     if mat_dtype == torch.float4_e2m1fn_x2 and scale_dtype == torch.float8_e4m3fn:
+        # 2D unpadded scales XPU: shape [outer, ceil_div(K*2, block)]
+        if len(scale_size) == 2:
+            if (
+                (eq_fn(scale_size[0], mat_size[0]) and
+                 eq_fn(scale_size[1], ceildiv(K_multiplier * mat_size[1], 16))) or
+                (eq_fn(scale_size[0], mat_size[1]) and
+                 eq_fn(scale_size[1], ceildiv(K_multiplier * mat_size[0], 16)))
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.NO_SWIZZLE
+        # 1D padded scales (CUDA/cuBLAS after to_blocked): numel with round_up
         expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
             ceildiv(K_multiplier * mat_size[1], 16), 4
         )

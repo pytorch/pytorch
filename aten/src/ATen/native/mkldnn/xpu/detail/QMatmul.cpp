@@ -459,12 +459,23 @@ inline ScaleSpec make_scale_spec(
           dnnl::memory::data_type::f32};
     }
 
+    case at::blas::ScalingType::BlockWise1x16: {
+      // NVFP4 blockwise 1x16 scaling
+      // Scale dtype is f8_e4m3 (not f32, unlike other blockwise modes).
+      // For SRC (A): groups = {1, 16}, scale shape [M, ceil_div(K, 16)]
+      // For WEI (B): groups = {16, 1}, scale shape [ceil_div(K, 16), N]
+      return {
+          (1 << 0) | (1 << 1),
+          is_src ? dnnl::memory::dims{1, 16} : dnnl::memory::dims{16, 1},
+          dnnl::memory::data_type::f8_e4m3};
+    }
+
     default:
       TORCH_INTERNAL_ASSERT(
           false,
           "Unsupported scaling_type: ",
           static_cast<int>(scaling_type),
-          ". Currently only support TensorWise, RowWise, BlockWise1x128, and BlockWise128x128");
+          ". Currently only support TensorWise, RowWise, BlockWise1x128, BlockWise128x128, and BlockWise1x16");
   }
 }
 
@@ -487,13 +498,33 @@ sycl::event scaled_matmul(
   // 2. call write_to_dnnl_memory() to actually write memory
   // 3. execute
 
+  // Detect fp4x2 packed inputs.
+  // Float4_e2m1fn_x2 packs 2 fp4 values per byte, so:
+  //   mat1: [M, K_packed] where K_logical = K_packed * 2
+  //   mat2: [K_packed, N] (transposed view of original [N, K_packed])
+  // oneDNN matmul expects A[M,K] @ B[K,N], so we create memory descriptors
+  // with logical dims and transposed strides for B.
+  const bool is_fp4 =
+      mat1.scalar_type() == at::ScalarType::Float4_e2m1fn_x2;
+
   const int64_t M = mat1.size(0);
-  const int64_t K = mat1.size(1);
+  // For fp4x2, K is the logical (unpacked) dimension
+  const int64_t K = is_fp4 ? mat1.size(1) * 2 : mat1.size(1);
   const int64_t N = mat2.size(1);
 
   // 1.1 Create memory descriptors
+  // get_onednn_md handles fp4x2 internally (expands [M, K/2] -> [M, K])
   dnnl::memory::desc src_md = get_onednn_md(mat1);
-  dnnl::memory::desc weights_md = get_onednn_md(mat2);
+  dnnl::memory::desc weights_md;
+  if (is_fp4) {
+    // B arrives as [K_packed, N] (transposed view of original [N, K_packed])
+    // oneDNN needs [K, N] with f4_e2m1 dtype. The physical data is [N, K_packed]
+    // contiguous, so strides in fp4 element units: {1, K} maps [k, n] -> n*K + k
+    weights_md = {
+        {K, N}, dnnl::memory::data_type::f4_e2m1, {1, K}};
+  } else {
+    weights_md = get_onednn_md(mat2);
+  }
   dnnl::memory::desc dst_md = get_onednn_md(result);
 
   dnnl::memory::desc bias_md;
@@ -587,11 +618,16 @@ sycl::event scaled_matmul(
     args.insert({DNNL_ARG_BIAS, b_usr_m});
   }
 
+  // Scale tensors must be contiguous for the 1D memory descriptor.
+  // Transposed scale tensors (e.g., from NVFP4 weight.t()) may not be.
+  auto scale_a_contig = scale_a.contiguous();
+  auto scale_b_contig = scale_b.contiguous();
+
   auto src_sc_mem = make_scale_mem_from_spec(
-      src_spec, src_spec.expected_numel(M, K, "src"), scale_a);
+      src_spec, src_spec.expected_numel(M, K, "src"), scale_a_contig);
 
   auto wei_sc_mem = make_scale_mem_from_spec(
-      wei_spec, wei_spec.expected_numel(N, K, "wei"), scale_b);
+      wei_spec, wei_spec.expected_numel(N, K, "wei"), scale_b_contig);
 
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_sc_mem});
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_sc_mem});

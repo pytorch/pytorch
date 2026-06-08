@@ -61,6 +61,8 @@ enum class ScaledGemmImplementation {
   BLOCK_128x128_1x128 = 3,
   BLOCK_1x128_128x128 = 4,
   BLOCK_1x128_1x128 = 5,
+  NVFP4_NVFP4 = 7,
+  NVFP4_NVFP4_SINGLE_SCALE = 8,
 };
 
 /**
