@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     requires_cuda,
     TEST_WITH_ROCM,
+    TEST_XPU,
 )
 
 
@@ -89,62 +90,6 @@ class TestStreams(torch._dynamo.test_case.TestCase):
             self.skipTest(f"No backend-specific Stream/Event for {device}")
         self._assert_weakref_callback_fires(device_mod.Stream)
         self._assert_weakref_callback_fires(device_mod.Event)
-
-    @onlyAccelerator
-    def test_dynamo_registry_no_dangling_weakref(self, device):
-        """Natural repro of the original UAF pattern.
-
-        `torch.compile(fn, backend="eager")` with `fn` referencing
-        `torch.accelerator.current_stream()` causes dynamo to register a
-        weakref to the captured stream in
-        `index_to_external_object_weakref` (via
-        `store_user_object_weakrefs`, which does NOT pin via
-        `keep_alive`).  As soon as `fn` returns, the captured wrapper
-        has no strong references and is freed via tp_dealloc.
-
-        At that point the patched tp_dealloc must call
-        `PyObject_ClearWeakRefs`, otherwise the registry now holds a
-        weakref whose `wr_object` is a dangling pointer to freed
-        memory.  Later, when `_PyModule_ClearDict` tears down the
-        registry at interpreter finalization, dereferencing that
-        dangling pointer to clear the weakref hits a use-after-free.
-        """
-        # Start from a known-clean registry so the assertion below is
-        # a statement about what happened in *this* test, not residue
-        # from earlier tests in the same process.
-        reset_user_object_tracking()
-
-        def fn(x):
-            return torch.accelerator.current_stream(device).stream_id
-
-        x = torch.zeros(1, device=device)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        compiled(x)
-        del compiled
-        gc.collect()
-
-        # Tripwire: torch.compile of a function referencing
-        # current_stream() must still register under
-        # CURRENT_STREAM_INDEX.  If this fails, the production code
-        # path that originally surfaced the UAF has moved and this
-        # regression test no longer covers it.
-        self.assertIn(
-            CURRENT_STREAM_INDEX,
-            index_to_external_object_weakref,
-            "torch.compile of a function referencing current_stream() must "
-            "register a weakref under CURRENT_STREAM_INDEX",
-        )
-
-        # The captured stream wrapper was freed when fn returned.  The
-        # patched tp_dealloc must have cleared the registry's weakref;
-        # dereferencing it now must return None rather than a dangling
-        # pointer into freed memory.
-        self.assertIsNone(
-            index_to_external_object_weakref[CURRENT_STREAM_INDEX](),
-            "dynamo registry holds a weakref to a Stream wrapper that has "
-            "been freed; tp_dealloc must call PyObject_ClearWeakRefs to "
-            "clear it, otherwise the registry retains a dangling pointer",
-        )
 
     @onlyAccelerator
     def test_stream_enter_exit(self, device):
@@ -226,7 +171,11 @@ class <lambda>(torch.nn.Module):
             y = z + 2
             return y, s
 
-        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2), torch.Stream(device=device))
+        inp = (
+            torch.ones(2, 2) + 1,
+            torch.ones(2, 2),
+            torch.Stream(device=device),
+        )
         expected = fn(*inp)
         fn_opt = torch.compile(fn, fullgraph=True)
         actual = fn_opt(*inp)
@@ -249,47 +198,6 @@ class <lambda>(torch.nn.Module):
         self.assertIsInstance(s0, torch.Stream)
         # Stream should be newly allocated on each call
         self.assertNotEqual(s0, s1)
-
-    @onlyAccelerator
-    def test_get_current_stream_return(self, device):
-        def fn(x, s):
-            with s:
-                s0 = torch.accelerator.current_stream(device)
-            return x, s0
-
-        s_inp = torch.Stream(device=device)
-        inp = (torch.ones(2, 2) + 1, s_inp)
-        fn_opt = torch.compile(fn, fullgraph=True)
-        _, s0 = fn_opt(*inp)
-        _, s1 = fn_opt(*inp)
-        self.assertEqual(s_inp, s0)
-        self.assertEqual(s0, s1)
-
-    @onlyAccelerator
-    def test_current_stream_attrs(self, device):
-        """Verify that accelerator current_stream() attributes are accessible
-        under torch.compile and match eager behavior."""
-
-        def fn_stream(x):
-            return torch.accelerator.current_stream(device).stream_id
-
-        x = torch.zeros(1, device=device)
-        compiled = torch.compile(fn_stream, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(x), fn_stream(x))
-
-    @onlyAccelerator
-    def test_current_stream_with_entered_stream(self, device):
-        """Verify that current_stream().stream_id returns the correct value
-        when inside a stream context for a user-created stream."""
-
-        def fn(x, s):
-            with s:
-                return torch.accelerator.current_stream(device).stream_id
-
-        s = torch.Stream(device=device)
-        x = torch.zeros(1, device=device)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(x, s), fn(x, s))
 
     @onlyAccelerator
     def test_nested_stream_enter_exit(self, device):
@@ -348,8 +256,8 @@ class <lambda>(torch.nn.Module):
     @onlyAccelerator
     def test_local_stream_enter_exit(self, device):
         def fn(x, y):
-            s2 = torch.Stream()
-            s1 = torch.Stream()
+            s2 = torch.Stream(device=device)
+            s1 = torch.Stream(device=device)
             with s1:
                 z1 = torch.add(x, y)
             with s2:
@@ -389,9 +297,9 @@ class <lambda>(torch.nn.Module):
     @onlyAccelerator
     def test_local_stream_nested_enter_exit(self, device):
         def fn(x, y):
-            s2 = torch.Stream()
-            s1 = torch.Stream()
-            s0 = torch.Stream()
+            s2 = torch.Stream(device=device)
+            s1 = torch.Stream(device=device)
+            s0 = torch.Stream(device=device)
             with s1:
                 with s2:
                     z1 = torch.add(x, y)
@@ -460,10 +368,8 @@ class <lambda>(torch.nn.Module):
         from torch._dynamo.variables.streams import get_current_stream
 
         cur_stream = torch.accelerator.current_stream(device)
-        s0 = None
 
         def stream_generation_backend(gm, *args, **kwargs):  # type: ignore[no-untyped-def]
-            nonlocal s0
             s0_ind = get_current_stream(torch.device(device))
             self.assertEqual(get_external_object_by_index(s0_ind), cur_stream)
             with gm.graph.inserting_after(next(iter(gm.graph.nodes))):
@@ -488,9 +394,9 @@ class <lambda>(torch.nn.Module):
     @onlyAccelerator
     def test_stream_with_mutation(self, device):
         def fn(x, y):
-            s2 = torch.Stream()
-            s1 = torch.Stream()
-            s0 = torch.Stream()
+            s2 = torch.Stream(device=device)
+            s1 = torch.Stream(device=device)
+            s0 = torch.Stream(device=device)
             with s1:
                 with s2:
                     x.add_(y)
@@ -538,8 +444,8 @@ class <lambda>(torch.nn.Module):
     @onlyAccelerator
     def test_stream_backward_simple(self, device) -> None:
         def fn(x, y):
-            s2 = torch.Stream()
-            s0 = torch.Stream()
+            s2 = torch.Stream(device=device)
+            s0 = torch.Stream(device=device)
             with s0:
                 y0 = 2 * x + y
             with s2:
@@ -618,8 +524,8 @@ class GraphModule(torch.nn.Module):
     @onlyAccelerator
     def test_stream_backward_sync(self, device) -> None:
         def fn(x, y):
-            s2 = torch.Stream()
-            s0 = torch.Stream()
+            s2 = torch.Stream(device=device)
+            s0 = torch.Stream(device=device)
             with s0:
                 y0 = 2 * x + y
             with s2:
@@ -751,37 +657,6 @@ class <lambda>(torch.nn.Module):
         return (copy_,)
 """,
         )
-
-    @requires_cuda
-    def test_recorded_cuda_events_append_runtime_objects(self):
-        events = []
-
-        def fn(x):
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-
-            start_event.record()
-            out = torch.matmul(x, x)
-            end_event.record()
-
-            events.append(start_event)
-            events.append(end_event)
-            return out
-
-        x = torch.randn(16, 16, device="cuda")
-        expected = fn(x)
-        torch.cuda.synchronize()
-        events[0].elapsed_time(events[1])
-        events.clear()
-
-        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        torch.cuda.synchronize()
-
-        self.assertEqual(expected, actual)
-        self.assertEqual(len(events), 2)
-        self.assertIsInstance(events[0], torch.Event)
-        self.assertIsInstance(events[1], torch.Event)
-        self.assertGreaterEqual(events[0].elapsed_time(events[1]), 0.0)
 
     @onlyAccelerator
     def test_run_opcheck_fork_join(self, device):
@@ -2237,8 +2112,8 @@ class <lambda>(torch.nn.Module):
     @onlyAccelerator
     def test_del_multi_stream_sync_dealloc(self, device):
         def fn(x, y):
-            s = torch.Stream()
-            e = torch.Event()
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
             z0 = x + 1
             with s:
                 z = torch.add(x, y)
@@ -2264,8 +2139,8 @@ class <lambda>(torch.nn.Module):
     @onlyAccelerator
     def test_del_same_stream_no_sync_dealloc(self, device):
         def fn(x, y):
-            s = torch.Stream()
-            e = torch.Event()
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
             with s:
                 z = torch.add(x, y)
                 del x
@@ -2312,8 +2187,8 @@ class <lambda>(torch.nn.Module):
             pass
 
         def fn(x, y):
-            s = torch.Stream()
-            e = torch.Event()
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
             h = Holder()
             h.tensor = x
             z0 = x + 1
@@ -2341,8 +2216,8 @@ class <lambda>(torch.nn.Module):
     @onlyAccelerator
     def test_del_subscr_multi_stream_sync_dealloc(self, device):
         def fn(x, y):
-            s = torch.Stream()
-            e = torch.Event()
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
             d = {"t": x}
             z0 = x + 1
             with s:
@@ -2367,8 +2242,130 @@ class <lambda>(torch.nn.Module):
         self.assertIn("record_event", graph_str)
 
 
+instantiate_device_type_tests(TestStreams, globals(), allow_xpu=True)
+
+_TestStreamsCUDA = globals().get("TestStreamsCUDA", object)
+
+
 @requires_cuda
-class TestStreamsCUDA(torch._dynamo.test_case.TestCase):
+class TestStreamsCUDA(_TestStreamsCUDA):
+    @requires_cuda
+    def test_dynamo_registry_no_dangling_weakref(self):
+        """Natural repro of the original UAF pattern.
+
+        `torch.compile(fn, backend="eager")` with `fn` referencing
+        `torch.cuda.current_stream()` causes dynamo to register a
+        weakref to the captured stream in
+        `index_to_external_object_weakref` (via
+        `store_user_object_weakrefs`, which does NOT pin via
+        `keep_alive`).  As soon as `fn` returns, the captured wrapper
+        has no strong references and is freed via tp_dealloc.
+
+        At that point the patched tp_dealloc must call
+        `PyObject_ClearWeakRefs`, otherwise the registry now holds a
+        weakref whose `wr_object` is a dangling pointer to freed
+        memory.  Later, when `_PyModule_ClearDict` tears down the
+        registry at interpreter finalization, dereferencing that
+        dangling pointer to clear the weakref hits a use-after-free.
+        """
+        reset_user_object_tracking()
+
+        def fn(x):
+            return torch.cuda.current_stream().cuda_stream
+
+        x = torch.zeros(1, device="cuda")
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled(x)
+        del compiled
+        gc.collect()
+
+        self.assertIn(
+            CURRENT_STREAM_INDEX,
+            index_to_external_object_weakref,
+            "torch.compile of a function referencing current_stream() must "
+            "register a weakref under CURRENT_STREAM_INDEX",
+        )
+
+        self.assertIsNone(
+            index_to_external_object_weakref[CURRENT_STREAM_INDEX](),
+            "dynamo registry holds a weakref to a Stream wrapper that has "
+            "been freed; tp_dealloc must call PyObject_ClearWeakRefs to "
+            "clear it, otherwise the registry retains a dangling pointer",
+        )
+
+    @requires_cuda
+    def test_get_current_stream_return(self):
+        def fn(x, s):
+            with s:
+                s0 = torch.cuda.current_stream()
+            return x, s0
+
+        s_inp = torch.Stream(device="cuda")
+        inp = (torch.ones(2, 2, device="cuda") + 1, s_inp)
+        fn_opt = torch.compile(fn, fullgraph=True)
+        _, s0 = fn_opt(*inp)
+        _, s1 = fn_opt(*inp)
+        self.assertEqual(s_inp, s0)
+        self.assertEqual(s0, s1)
+
+    @requires_cuda
+    def test_cuda_current_stream_attrs(self):
+        """Verify that torch.cuda.current_stream() attributes are accessible
+        under torch.compile and match eager behavior."""
+
+        def fn_cuda_stream(x):
+            return torch.cuda.current_stream().cuda_stream
+
+        x = torch.zeros(1, device="cuda")
+        compiled = torch.compile(fn_cuda_stream, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn_cuda_stream(x))
+
+    @requires_cuda
+    def test_cuda_current_stream_with_entered_stream(self):
+        """Verify that torch.cuda.current_stream().cuda_stream returns the
+        correct value when inside a stream context for a user-created stream."""
+
+        def fn(x, s):
+            with s:
+                return torch.cuda.current_stream().cuda_stream
+
+        s = torch.cuda.Stream()
+        x = torch.zeros(1, device="cuda")
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, s), fn(x, s))
+
+    @requires_cuda
+    def test_recorded_cuda_events_append_runtime_objects(self):
+        events = []
+
+        def fn(x):
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+
+            start_event.record()
+            out = torch.matmul(x, x)
+            end_event.record()
+
+            events.append(start_event)
+            events.append(end_event)
+            return out
+
+        x = torch.randn(16, 16, device="cuda")
+        expected = fn(x)
+        torch.cuda.synchronize()
+        events[0].elapsed_time(events[1])
+        events.clear()
+
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch.cuda.synchronize()
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(len(events), 2)
+        self.assertIsInstance(events[0], torch.Event)
+        self.assertIsInstance(events[1], torch.Event)
+        self.assertGreaterEqual(events[0].elapsed_time(events[1]), 0.0)
+
+    @requires_cuda
     def test_stream_pointer_extraction_edge_cases(self):
         def get_ptrs(stream_a, stream_b, default_stream):
             return (
@@ -2395,7 +2392,132 @@ class TestStreamsCUDA(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_default, default_s.cuda_stream)
 
 
-instantiate_device_type_tests(TestStreams, globals())
+del _TestStreamsCUDA
+
+if TEST_XPU:
+    _TestStreamsXPU = TestStreamsXPU  # noqa: F821
+
+    class TestStreamsXPU(_TestStreamsXPU):
+        def test_dynamo_registry_no_dangling_weakref(self):
+            reset_user_object_tracking()
+
+            def fn(x):
+                return torch.xpu.current_stream().sycl_queue
+
+            x = torch.zeros(1, device="xpu")
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            compiled(x)
+            del compiled
+            gc.collect()
+
+            self.assertIn(
+                CURRENT_STREAM_INDEX,
+                index_to_external_object_weakref,
+                "torch.compile of a function referencing current_stream() must "
+                "register a weakref under CURRENT_STREAM_INDEX",
+            )
+
+            self.assertIsNone(
+                index_to_external_object_weakref[CURRENT_STREAM_INDEX](),
+                "dynamo registry holds a weakref to a Stream wrapper that has "
+                "been freed; tp_dealloc must call PyObject_ClearWeakRefs to "
+                "clear it, otherwise the registry retains a dangling pointer",
+            )
+
+        def test_get_current_stream_return(self):
+            def fn(x, s):
+                with s:
+                    s0 = torch.xpu.current_stream()
+                return x, s0
+
+            s_inp = torch.Stream(device="xpu")
+            inp = (torch.ones(2, 2, device="xpu") + 1, s_inp)
+            fn_opt = torch.compile(fn, fullgraph=True)
+            _, s0 = fn_opt(*inp)
+            _, s1 = fn_opt(*inp)
+            self.assertEqual(s_inp, s0)
+            self.assertEqual(s0, s1)
+
+        def test_xpu_current_stream_attrs(self):
+            """Verify that torch.xpu.current_stream() attributes are accessible
+            under torch.compile and match eager behavior."""
+
+            def fn_xpu_stream(x):
+                return torch.xpu.current_stream().sycl_queue
+
+            x = torch.zeros(1, device="xpu")
+            compiled = torch.compile(fn_xpu_stream, backend="eager", fullgraph=True)
+            self.assertEqual(compiled(x), fn_xpu_stream(x))
+
+        def test_xpu_current_stream_with_entered_stream(self):
+            """Verify that torch.xpu.current_stream().sycl_queue returns the
+            correct value when inside a stream context for a user-created stream."""
+
+            def fn(x, s):
+                with s:
+                    return torch.xpu.current_stream().sycl_queue
+
+            s = torch.xpu.Stream()
+            x = torch.zeros(1, device="xpu")
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(compiled(x, s), fn(x, s))
+
+        def test_recorded_xpu_events_append_runtime_objects(self):
+            events = []
+
+            def fn(x):
+                start_event = torch.xpu.Event(enable_timing=True)
+                end_event = torch.xpu.Event(enable_timing=True)
+
+                start_event.record()
+                out = torch.matmul(x, x)
+                end_event.record()
+
+                events.append(start_event)
+                events.append(end_event)
+                return out
+
+            x = torch.randn(16, 16, device="xpu")
+            expected = fn(x)
+            torch.xpu.synchronize()
+            events[0].elapsed_time(events[1])
+            events.clear()
+
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            torch.xpu.synchronize()
+
+            self.assertEqual(expected, actual)
+            self.assertEqual(len(events), 2)
+            self.assertIsInstance(events[0], torch.Event)
+            self.assertIsInstance(events[1], torch.Event)
+            self.assertGreaterEqual(events[0].elapsed_time(events[1]), 0.0)
+
+        def test_stream_pointer_extraction_edge_cases(self):
+            def get_ptrs(stream_a, stream_b, default_stream):
+                return (
+                    stream_a.sycl_queue,
+                    stream_b.sycl_queue,
+                    default_stream.sycl_queue,
+                )
+
+            s1, s2 = torch.xpu.Stream(), torch.xpu.Stream()
+            default_s = torch.xpu.current_stream()
+            expected_s1, expected_s2 = s1.sycl_queue, s2.sycl_queue
+
+            self.assertNotEqual(expected_s1, expected_s2)
+
+            opt_get_ptrs = torch.compile(get_ptrs, backend="inductor")
+
+            s3 = torch.xpu.Stream()
+            with torch.xpu.stream(s3):
+                actual_s1, actual_s2, actual_default = opt_get_ptrs(s1, s2, default_s)
+
+            self.assertEqual(actual_s1, expected_s1)
+            self.assertEqual(actual_s2, expected_s2)
+            self.assertEqual(actual_default, default_s.sycl_queue)
+
+    del _TestStreamsXPU
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
