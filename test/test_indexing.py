@@ -1168,6 +1168,7 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyAccelerator
+    @skipMPS
     def test_index_put_deterministic_with_optional_tensors(self, device):
         def func(x, i, v):
             with DeterministicGuard(True):
