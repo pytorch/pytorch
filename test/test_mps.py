@@ -14383,11 +14383,11 @@ class TestFallbackWarning(TestCase):
         self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement 'lcm'
-        # Should return fn, args, kwargs, string_version
-        return (torch.lcm,
-                [torch.tensor([1], device='mps'), torch.tensor([2], device='mps')], {},
-                "torch.lcm(torch.tensor([1], device='mps'), torch.tensor([2], device='mps'))")
+        # Should return fn, args, kwargs, string_version. Uses an op with no MPS
+        # kernel; change it if 'special.airy_ai' ever gets one.
+        return (torch.special.airy_ai,
+                [torch.tensor([1.0], device='mps')], {},
+                "torch.special.airy_ai(torch.tensor([1.0], device='mps'))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
@@ -15143,6 +15143,27 @@ class TestErrorInputs(TestCase):
         with self.assertRaises(torch.AcceleratorError):
             y = x[:, [1]]
             torch.mps.synchronize()
+
+    def test_assert_async(self, device):
+        # Passing (nonzero/true) asserts must not raise, even after a sync.
+        for t in (torch.tensor([True], device=device), torch.tensor([3.5], device=device)):
+            torch._assert_async(t)
+            torch._assert_async(t, "should not fire")
+        torch.mps.synchronize()
+
+        # Failing (zero/false) asserts surface as AcceleratorError at the next sync.
+        with self.assertRaises(torch.AcceleratorError):
+            torch._assert_async(torch.tensor([False], device=device))
+            torch.mps.synchronize()
+        with self.assertRaisesRegex(torch.AcceleratorError, "custom assert message"):
+            torch._assert_async(torch.tensor([0.0], device=device), "custom assert message")
+            torch.mps.synchronize()
+
+        # Ambiguous (empty / multi-element) inputs are rejected on the host.
+        with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor"):
+            torch._assert_async(torch.tensor([1, 2], device=device))
+        with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor"):
+            torch._assert_async(torch.tensor([], device=device))
 
     def test_embedding_bag_out_of_bounds(self, device):
         inputs = torch.tensor([0, 1, 6], device=device)  # Note: 6 is out of bounds for weight with size 4
