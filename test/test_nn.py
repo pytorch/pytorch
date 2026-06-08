@@ -2211,6 +2211,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expect_out = m(input)
         self.assertEqual(expect_out, out_hat)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_spectral_norm_pickle(self):
         m = torch.nn.utils.spectral_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
