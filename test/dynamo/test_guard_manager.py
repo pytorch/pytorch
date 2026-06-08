@@ -1310,6 +1310,213 @@ print(json.dumps({
             "unsupported_leaf:LAMBDA_GUARD",
         )
 
+    def test_guard_fast_plan_nested_modules_records_hits(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Child(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.clean = Child()
+
+model = Mod()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_mgr = modules_mgr.getitem_manager(
+    "clean",
+    "L['self']._modules['clean']",
+    model.clean,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_dict_mgr = clean_mgr.get_generic_dict_manager(
+    "L['self']._modules['clean'].__dict__",
+    model.clean.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_modules_mgr = clean_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['clean']._modules",
+    model.clean._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_modules_mgr.add_dict_length_check_guard(
+    len(model.clean._modules),
+    ["len(L['self']._modules['clean']._modules) == 1"],
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "enabled": stats["guard_fastplan_enabled"],
+    "candidate_nested": stats["guard_fastplan_candidate_nested"],
+    "shadow_pass_nested": stats["guard_fastplan_shadow_pass_nested"],
+    "enable_nested": stats["guard_fastplan_enable_nested"],
+    "hit_nested": stats["guard_fastplan_hit_nested"],
+    "miss": stats["guard_fastplan_miss"],
+    "disabled_nested": stats["guard_fastplan_disabled_nested"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["enabled"])
+        self.assertGreater(stats["candidate_nested"], 0)
+        self.assertGreater(stats["shadow_pass_nested"], 0)
+        self.assertGreater(stats["enable_nested"], 0)
+        self.assertGreater(stats["hit_nested"], 0)
+        self.assertEqual(stats["miss"], 0)
+        self.assertEqual(stats["disabled_nested"], 0)
+
+    def test_guard_fast_plan_blocked_sibling_does_not_disable_clean_nested(self):
+        script = r"""
+import functools
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+def equals_match(x, expected):
+    return x == expected
+
+class Child(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.clean = Child()
+        self.blocked = Child()
+
+model = Mod()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_mgr = modules_mgr.getitem_manager(
+    "clean",
+    "L['self']._modules['clean']",
+    model.clean,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_dict_mgr = clean_mgr.get_generic_dict_manager(
+    "L['self']._modules['clean'].__dict__",
+    model.clean.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_modules_mgr = clean_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['clean']._modules",
+    model.clean._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_modules_mgr.add_dict_length_check_guard(
+    len(model.clean._modules),
+    ["len(L['self']._modules['clean']._modules) == 1"],
+)
+
+blocked_mgr = modules_mgr.getitem_manager(
+    "blocked",
+    "L['self']._modules['blocked']",
+    model.blocked,
+    GuardManagerType.GUARD_MANAGER,
+)
+blocked_dict_mgr = blocked_mgr.get_generic_dict_manager(
+    "L['self']._modules['blocked'].__dict__",
+    model.blocked.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+blocked_modules_mgr = blocked_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['blocked']._modules",
+    model.blocked._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+blocked_modules_mgr.add_lambda_guard(
+    functools.partial(equals_match, expected=model.blocked._modules),
+    ["L['self']._modules['blocked']._modules == original"],
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "enabled": stats["guard_fastplan_enabled"],
+    "candidate_top": stats["guard_fastplan_candidate_top"],
+    "candidate_nested": stats["guard_fastplan_candidate_nested"],
+    "enable_nested": stats["guard_fastplan_enable_nested"],
+    "hit_nested": stats["guard_fastplan_hit_nested"],
+    "disabled": stats["guard_fastplan_disabled"],
+    "disabled_nested": stats["guard_fastplan_disabled_nested"],
+    "reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["enabled"])
+        self.assertGreater(stats["candidate_top"], 0)
+        self.assertGreater(stats["candidate_nested"], 0)
+        self.assertGreater(stats["enable_nested"], 0)
+        self.assertGreater(stats["hit_nested"], 0)
+        self.assertGreater(stats["disabled"], 0)
+        self.assertGreater(stats["disabled_nested"], 0)
+        self.assertGreaterEqual(
+            stats["reasons"].get("unsupported_leaf:LAMBDA_GUARD", 0), 1
+        )
+
     def test_guard_fast_plan_subtree_memo_miss_disables_and_falls_back(self):
         script = r"""
 import json

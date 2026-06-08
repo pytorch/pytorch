@@ -121,6 +121,13 @@ enum class GuardSubtreeProbeTokenKind : uint8_t {
   ExactTuple,
 };
 
+enum class GuardFastPlanCandidateKind : uint8_t {
+  Unknown,
+  None,
+  TopModules,
+  NestedModules,
+};
+
 struct GuardSubtreeProbeStats {
   std::atomic<uint64_t> attempt{0};
   std::atomic<uint64_t> entry_match{0};
@@ -138,11 +145,23 @@ struct GuardSubtreeProbeStats {
 
 struct GuardFastPlanStats {
   std::atomic<uint64_t> candidate{0};
+  std::atomic<uint64_t> candidate_top{0};
+  std::atomic<uint64_t> candidate_nested{0};
   std::atomic<uint64_t> shadow_pass{0};
+  std::atomic<uint64_t> shadow_pass_top{0};
+  std::atomic<uint64_t> shadow_pass_nested{0};
   std::atomic<uint64_t> enable{0};
+  std::atomic<uint64_t> enable_top{0};
+  std::atomic<uint64_t> enable_nested{0};
   std::atomic<uint64_t> hit{0};
+  std::atomic<uint64_t> hit_top{0};
+  std::atomic<uint64_t> hit_nested{0};
   std::atomic<uint64_t> miss{0};
+  std::atomic<uint64_t> miss_top{0};
+  std::atomic<uint64_t> miss_nested{0};
   std::atomic<uint64_t> disabled{0};
+  std::atomic<uint64_t> disabled_top{0};
+  std::atomic<uint64_t> disabled_nested{0};
   std::atomic<uint64_t> token_count_sum{0};
   std::atomic<uint64_t> token_check_ns{0};
   std::atomic<uint64_t> slow_check_ns{0};
@@ -388,11 +407,23 @@ void reset_guard_lookup_stats() {
   store_zero(subtree_stats.token_exact_list);
   store_zero(subtree_stats.token_exact_tuple);
   store_zero(fastplan_stats.candidate);
+  store_zero(fastplan_stats.candidate_top);
+  store_zero(fastplan_stats.candidate_nested);
   store_zero(fastplan_stats.shadow_pass);
+  store_zero(fastplan_stats.shadow_pass_top);
+  store_zero(fastplan_stats.shadow_pass_nested);
   store_zero(fastplan_stats.enable);
+  store_zero(fastplan_stats.enable_top);
+  store_zero(fastplan_stats.enable_nested);
   store_zero(fastplan_stats.hit);
+  store_zero(fastplan_stats.hit_top);
+  store_zero(fastplan_stats.hit_nested);
   store_zero(fastplan_stats.miss);
+  store_zero(fastplan_stats.miss_top);
+  store_zero(fastplan_stats.miss_nested);
   store_zero(fastplan_stats.disabled);
+  store_zero(fastplan_stats.disabled_top);
+  store_zero(fastplan_stats.disabled_nested);
   store_zero(fastplan_stats.token_count_sum);
   store_zero(fastplan_stats.token_check_ns);
   store_zero(fastplan_stats.slow_check_ns);
@@ -475,13 +506,35 @@ py::dict get_guard_lookup_stats() {
   result["guard_fastplan_enabled"] = guard_fast_plan_enabled();
   result["guard_fastplan_candidate"] =
       load_relaxed(fastplan_stats.candidate);
+  result["guard_fastplan_candidate_top"] =
+      load_relaxed(fastplan_stats.candidate_top);
+  result["guard_fastplan_candidate_nested"] =
+      load_relaxed(fastplan_stats.candidate_nested);
   result["guard_fastplan_shadow_pass"] =
       load_relaxed(fastplan_stats.shadow_pass);
+  result["guard_fastplan_shadow_pass_top"] =
+      load_relaxed(fastplan_stats.shadow_pass_top);
+  result["guard_fastplan_shadow_pass_nested"] =
+      load_relaxed(fastplan_stats.shadow_pass_nested);
   result["guard_fastplan_enable"] = load_relaxed(fastplan_stats.enable);
+  result["guard_fastplan_enable_top"] =
+      load_relaxed(fastplan_stats.enable_top);
+  result["guard_fastplan_enable_nested"] =
+      load_relaxed(fastplan_stats.enable_nested);
   result["guard_fastplan_hit"] = load_relaxed(fastplan_stats.hit);
+  result["guard_fastplan_hit_top"] = load_relaxed(fastplan_stats.hit_top);
+  result["guard_fastplan_hit_nested"] =
+      load_relaxed(fastplan_stats.hit_nested);
   result["guard_fastplan_miss"] = load_relaxed(fastplan_stats.miss);
+  result["guard_fastplan_miss_top"] = load_relaxed(fastplan_stats.miss_top);
+  result["guard_fastplan_miss_nested"] =
+      load_relaxed(fastplan_stats.miss_nested);
   result["guard_fastplan_disabled"] =
       load_relaxed(fastplan_stats.disabled);
+  result["guard_fastplan_disabled_top"] =
+      load_relaxed(fastplan_stats.disabled_top);
+  result["guard_fastplan_disabled_nested"] =
+      load_relaxed(fastplan_stats.disabled_nested);
   result["guard_fastplan_token_count_sum"] =
       load_relaxed(fastplan_stats.token_count_sum);
   result["guard_fastplan_token_check_ns"] =
@@ -781,15 +834,36 @@ static void record_guard_subtree_probe_stats(
   }
 }
 
-static void record_guard_fastplan_candidate() {
+static void add_guard_fastplan_kind_count(
+    std::atomic<uint64_t>& top,
+    std::atomic<uint64_t>& nested,
+    GuardFastPlanCandidateKind kind) {
+  switch (kind) {
+    case GuardFastPlanCandidateKind::TopModules:
+      add_relaxed(top, 1);
+      break;
+    case GuardFastPlanCandidateKind::NestedModules:
+      add_relaxed(nested, 1);
+      break;
+    case GuardFastPlanCandidateKind::Unknown:
+    case GuardFastPlanCandidateKind::None:
+      break;
+  }
+}
+
+static void record_guard_fastplan_candidate(
+    GuardFastPlanCandidateKind kind) {
   if (!guard_lookup_stats_enabled()) {
     return;
   }
   auto& stats = guard_fastplan_stats();
   add_relaxed(stats.candidate, 1);
+  add_guard_fastplan_kind_count(
+      stats.candidate_top, stats.candidate_nested, kind);
 }
 
 static void record_guard_fastplan_shadow_pass(
+    GuardFastPlanCandidateKind kind,
     size_t token_count,
     uint64_t slow_check_ns) {
   if (!guard_lookup_stats_enabled()) {
@@ -797,23 +871,31 @@ static void record_guard_fastplan_shadow_pass(
   }
   auto& stats = guard_fastplan_stats();
   add_relaxed(stats.shadow_pass, 1);
+  add_guard_fastplan_kind_count(
+      stats.shadow_pass_top, stats.shadow_pass_nested, kind);
   add_relaxed(stats.token_count_sum, token_count);
   add_relaxed(stats.slow_check_ns, slow_check_ns);
 }
 
-static void record_guard_fastplan_enable() {
+static void record_guard_fastplan_enable(GuardFastPlanCandidateKind kind) {
   if (!guard_lookup_stats_enabled()) {
     return;
   }
-  add_relaxed(guard_fastplan_stats().enable, 1);
+  auto& stats = guard_fastplan_stats();
+  add_relaxed(stats.enable, 1);
+  add_guard_fastplan_kind_count(stats.enable_top, stats.enable_nested, kind);
 }
 
 static void record_guard_fastplan_disabled(
+    GuardFastPlanCandidateKind kind,
     const GuardSubtreeMemoSupportAnalysis& analysis) {
   if (!guard_lookup_stats_enabled()) {
     return;
   }
-  add_relaxed(guard_fastplan_stats().disabled, 1);
+  auto& stats = guard_fastplan_stats();
+  add_relaxed(stats.disabled, 1);
+  add_guard_fastplan_kind_count(
+      stats.disabled_top, stats.disabled_nested, kind);
   if (analysis.reason.empty()) {
     return;
   }
@@ -830,6 +912,7 @@ static void record_guard_fastplan_disabled(
 }
 
 static void record_guard_fastplan_hit(
+    GuardFastPlanCandidateKind kind,
     size_t token_count,
     uint64_t token_check_ns) {
   if (!guard_lookup_stats_enabled()) {
@@ -837,11 +920,13 @@ static void record_guard_fastplan_hit(
   }
   auto& stats = guard_fastplan_stats();
   add_relaxed(stats.hit, 1);
+  add_guard_fastplan_kind_count(stats.hit_top, stats.hit_nested, kind);
   add_relaxed(stats.token_count_sum, token_count);
   add_relaxed(stats.token_check_ns, token_check_ns);
 }
 
 static void record_guard_fastplan_miss(
+    GuardFastPlanCandidateKind kind,
     size_t token_count,
     uint64_t token_check_ns,
     uint64_t slow_check_ns,
@@ -851,12 +936,34 @@ static void record_guard_fastplan_miss(
   }
   auto& stats = guard_fastplan_stats();
   add_relaxed(stats.miss, 1);
+  add_guard_fastplan_kind_count(stats.miss_top, stats.miss_nested, kind);
   add_relaxed(stats.token_count_sum, token_count);
   add_relaxed(stats.token_check_ns, token_check_ns);
   add_relaxed(stats.slow_check_ns, slow_check_ns);
   if (disabled_now) {
     add_relaxed(stats.disabled, 1);
+    add_guard_fastplan_kind_count(
+        stats.disabled_top, stats.disabled_nested, kind);
   }
+}
+
+static GuardFastPlanCandidateKind compute_guard_fastplan_candidate_kind(
+    const std::string& source) {
+  static constexpr const char* kModulesSuffix = "._modules";
+  static constexpr const char* kSelfModules = "L['self']._modules";
+  const size_t suffix_len = std::strlen(kModulesSuffix);
+  if (source.size() < suffix_len ||
+      source.compare(source.size() - suffix_len, suffix_len, kModulesSuffix) !=
+          0) {
+    return GuardFastPlanCandidateKind::None;
+  }
+  if (source.find(kSelfModules) == std::string::npos) {
+    return GuardFastPlanCandidateKind::None;
+  }
+  if (source.find("._modules[") == std::string::npos) {
+    return GuardFastPlanCandidateKind::TopModules;
+  }
+  return GuardFastPlanCandidateKind::NestedModules;
 }
 
 std::string guard_accessor_stats_key(PyObject* key) {
@@ -3271,7 +3378,11 @@ class GuardManager {
  public:
   GuardManager() = delete;
   GuardManager(RootGuardManager* root, std::string source)
-      : _root(root), _source(std::move(source)), _is_dict(false) {}
+      : _root(root),
+        _source(std::move(source)),
+        _is_dict(false),
+        _fastplan_candidate_kind(
+            compute_guard_fastplan_candidate_kind(_source)) {}
 
   GuardManager(
       RootGuardManager* root,
@@ -3280,6 +3391,7 @@ class GuardManager {
       : _root(root),
         _source(std::move(source)),
         _is_dict(py::isinstance<py::dict>(example_value)) {
+    _fastplan_candidate_kind = compute_guard_fastplan_candidate_kind(_source);
     if (_is_dict) {
       _dict_tag = get_dict_version_unchecked(example_value.ptr());
     }
@@ -3304,7 +3416,11 @@ class GuardManager {
  public:
   // For cloning
   GuardManager(RootGuardManager* root, std::string source, bool is_dict)
-      : _root(root), _source(std::move(source)), _is_dict(is_dict) {}
+      : _root(root),
+        _source(std::move(source)),
+        _is_dict(is_dict),
+        _fastplan_candidate_kind(
+            compute_guard_fastplan_candidate_kind(_source)) {}
 
   void clone_common(
       RootGuardManager* cloned_root,
@@ -3400,17 +3516,12 @@ class GuardManager {
     return check_nopybind_template(value);
   }
 
+  GuardFastPlanCandidateKind guard_fastplan_candidate_kind() const {
+    return _fastplan_candidate_kind;
+  }
+
   bool is_guard_fastplan_candidate() const {
-    static constexpr const char* kModulesSuffix = "._modules";
-    const size_t suffix_len = std::strlen(kModulesSuffix);
-    if (_source.size() < suffix_len ||
-        _source.compare(
-            _source.size() - suffix_len, suffix_len, kModulesSuffix) != 0) {
-      return false;
-    }
-    // P1a only targets the top module registry, e.g. L['self']._modules.
-    // Nested module registries are left to P1 candidate selection.
-    return _source.find("._modules[") == std::string::npos;
+    return guard_fastplan_candidate_kind() != GuardFastPlanCandidateKind::None;
   }
 
   virtual bool supports_subtree_memo_recursive(
@@ -3446,14 +3557,16 @@ class GuardManager {
 
   bool check_nopybind_with_fastplan(PyObject* value) {
     GuardSubtreeMemoState& memo = _subtree_probe_state.memo;
+    const GuardFastPlanCandidateKind candidate_kind =
+        guard_fastplan_candidate_kind();
     if (!guard_fast_plan_enabled() || memo.disabled ||
-        !is_guard_fastplan_candidate()) {
+        candidate_kind == GuardFastPlanCandidateKind::None) {
       return check_nopybind(value);
     }
 
     const bool collect_stats = guard_lookup_stats_enabled();
     if (collect_stats) {
-      record_guard_fastplan_candidate();
+      record_guard_fastplan_candidate(candidate_kind);
     }
     GuardSubtreeMemoSupportAnalysis analysis;
     GuardSubtreeMemoSupportAnalysis* analysis_ptr =
@@ -3462,7 +3575,7 @@ class GuardManager {
         !supports_subtree_memo_recursive(analysis_ptr)) {
       memo.disabled = true;
       if (collect_stats) {
-        record_guard_fastplan_disabled(analysis);
+        record_guard_fastplan_disabled(candidate_kind, analysis);
       }
       return check_nopybind(value);
     }
@@ -3476,7 +3589,8 @@ class GuardManager {
           collect_stats ? guard_lookup_time_ns() - token_start_ns : 0;
       if (token_match) {
         if (collect_stats) {
-          record_guard_fastplan_hit(memo.tokens.size(), token_check_ns);
+          record_guard_fastplan_hit(
+              candidate_kind, memo.tokens.size(), token_check_ns);
         }
         return true;
       }
@@ -3489,7 +3603,11 @@ class GuardManager {
           collect_stats ? guard_lookup_time_ns() - slow_start_ns : 0;
       if (collect_stats) {
         record_guard_fastplan_miss(
-            memo.tokens.size(), token_check_ns, slow_check_ns, true);
+            candidate_kind,
+            memo.tokens.size(),
+            token_check_ns,
+            slow_check_ns,
+            true);
       }
       return result;
     }
@@ -3520,12 +3638,13 @@ class GuardManager {
     }
 
     if (collect_stats) {
-      record_guard_fastplan_shadow_pass(memo.tokens.size(), slow_check_ns);
+      record_guard_fastplan_shadow_pass(
+          candidate_kind, memo.tokens.size(), slow_check_ns);
     }
     if (memo.shadow_passes >= 3) {
       memo.enabled = true;
       if (collect_stats) {
-        record_guard_fastplan_enable();
+        record_guard_fastplan_enable(candidate_kind);
       }
     }
     return true;
@@ -3534,7 +3653,9 @@ class GuardManager {
   bool check_nopybind_with_subtree_probe(
       PyObject* value,
       const std::string& path) {
-    if (guard_fast_plan_enabled() && is_guard_fastplan_candidate()) {
+    if (guard_fast_plan_enabled() &&
+        active_guard_subtree_memo_recorder == nullptr &&
+        is_guard_fastplan_candidate()) {
       return check_nopybind_with_fastplan(value);
     }
     if (!guard_subtree_probe_enabled() || _subtree_probe_state.disabled) {
@@ -3808,6 +3929,8 @@ class GuardManager {
   bool _is_dict;
   uint64_t _dict_tag{0};
   GuardSubtreeProbeState _subtree_probe_state;
+  GuardFastPlanCandidateKind _fastplan_candidate_kind{
+      GuardFastPlanCandidateKind::None};
 };
 
 GuardAccessor::GuardAccessor(
