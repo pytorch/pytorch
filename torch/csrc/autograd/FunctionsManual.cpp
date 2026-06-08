@@ -1238,17 +1238,17 @@ Tensor clamp_backward(
     const Tensor& self,
     const std::optional<Scalar>& min,
     const std::optional<Scalar>& max) {
-  // Use strict comparisons so the subgradient at the boundary is 0
-  // (minimum-norm convention, consistent with relu).
+  // clamp: gradients not defined on min and max, so we return the subgradient 1
+  // for these cases.
   if (max && min) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where((self > *min).logical_and_(self < *max), grad, zero);
+    return where((self >= *min).logical_and_(self <= *max), grad, zero);
   } else if (min) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self > *min, grad, zero);
+    return where(self >= *min, grad, zero);
   } else if (max) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self < *max, grad, zero);
+    return where(self <= *max, grad, zero);
   } else {
     return grad;
   }
@@ -1259,8 +1259,8 @@ Tensor clamp_backward(
     const Tensor& self,
     const Tensor& min,
     const Tensor& max) {
-  // Tensor overload: keep non-strict comparisons since (0, 0) is not a
-  // valid subgradient when both self and min/max require grad.
+  // clamp: gradients not defined on min and max, so we return the subgradient 1
+  // for these cases.
   if (max.defined() && min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
     const auto self_ge_min = self >= min;
