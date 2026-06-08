@@ -123,6 +123,15 @@ def remote_autograd_cache_default() -> bool | None:
 enable_remote_autograd_cache = remote_autograd_cache_default()
 
 
+# Applies CSE to AOTAutograd inference graphs before backend compilation.
+# Keep this separate from partitioner CSE: inference CSE can increase live
+# ranges or block backend fusion without the partitioner's memory heuristics.
+cse_inference: bool = Config(
+    env_name_force="TORCHINDUCTOR_AOT_INFERENCE_CSE",
+    default=False,
+)
+
+
 # When AOTAutograd regenerates aliased graph outputs,
 # attempt to use functionalization's view-replay logic
 # before falling back to the autograd engine's view replay or as_strided.

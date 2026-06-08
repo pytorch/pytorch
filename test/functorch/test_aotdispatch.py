@@ -61,6 +61,7 @@ from torch._functorch.aot_autograd import (
     aot_export_module,
     SerializableAOTDispatchCompiler,
 )
+from torch._functorch.compile_utils import fx_graph_cse
 from torch._functorch.partitioners import (
     _extract_fwd_bwd_modules,
     _extract_fwd_bwd_outputs,
@@ -73,6 +74,7 @@ from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
+from torch.fx.node import has_side_effect
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing import FileCheck
@@ -9718,6 +9720,154 @@ def forward(self, tangents_1, tangents_2):
         # Output is a TwoTensor (check both inner tensors)
         self.assertEqual(out_ref.a, out_test.a)
         self.assertEqual(out_ref.b, out_test.b)
+
+    @torch._functorch.config.patch(cse_inference=True)
+    def test_aot_dispatch_inference_cse_duplicate_pure_ops(self):
+        def quant_like(x):
+            x_view = x.view(x.shape)
+            scale = x_view.abs().amax(dim=-1, keepdim=True).clamp(min=1e-12)
+            return x_view / scale
+
+        def f(x, w0, w1):
+            q0 = quant_like(x)
+            q1 = quant_like(x)
+            return q0 @ w0, q1 @ w1
+
+        inference_graph_cell = [None]
+        inference_compiler = make_boxed_compiler(
+            partial(extract_graph, graph_cell=inference_graph_cell)
+        )
+        compiled_f = aot_function(f, nop, inference_compiler=inference_compiler)
+
+        x = torch.randn(2, 3, 4)
+        w0 = torch.randn(4, 5)
+        w1 = torch.randn(4, 6)
+        out_ref = f(x, w0, w1)
+        out_test = compiled_f(x, w0, w1)
+
+        self.assertEqual(out_ref, out_test)
+        graph = inference_graph_cell[0]
+        self.assertTrue(graph is not None)
+
+        def count(target):
+            return sum(node.target is target for node in graph.graph.nodes)
+
+        self.assertEqual(count(torch.ops.aten.abs.default), 1)
+        self.assertEqual(count(torch.ops.aten.amax.default), 1)
+        self.assertEqual(count(torch.ops.aten.clamp.default), 1)
+        self.assertEqual(count(torch.ops.aten.div.Tensor), 1)
+        self.assertEqual(count(torch.ops.aten.mm.default), 2)
+
+    @torch._functorch.config.patch(cse_inference=False)
+    def test_aot_dispatch_inference_cse_config_disable(self):
+        def quant_like(x):
+            x_view = x.view(x.shape)
+            scale = x_view.abs().amax(dim=-1, keepdim=True).clamp(min=1e-12)
+            return x_view / scale
+
+        def f(x, w0, w1):
+            q0 = quant_like(x)
+            q1 = quant_like(x)
+            return q0 @ w0, q1 @ w1
+
+        inference_graph_cell = [None]
+        inference_compiler = make_boxed_compiler(
+            partial(extract_graph, graph_cell=inference_graph_cell)
+        )
+        compiled_f = aot_function(f, nop, inference_compiler=inference_compiler)
+
+        x = torch.randn(2, 3, 4)
+        w0 = torch.randn(4, 5)
+        w1 = torch.randn(4, 6)
+        out_ref = f(x, w0, w1)
+        out_test = compiled_f(x, w0, w1)
+
+        self.assertEqual(out_ref, out_test)
+        graph = inference_graph_cell[0]
+        self.assertTrue(graph is not None)
+
+        def count(target):
+            return sum(node.target is target for node in graph.graph.nodes)
+
+        self.assertEqual(count(torch.ops.aten.abs.default), 2)
+        self.assertEqual(count(torch.ops.aten.amax.default), 2)
+        self.assertEqual(count(torch.ops.aten.clamp.default), 2)
+        self.assertEqual(count(torch.ops.aten.div.Tensor), 2)
+        self.assertEqual(count(torch.ops.aten.mm.default), 2)
+
+    def test_fx_graph_cse_preserves_impure_barriers(self):
+        @has_side_effect
+        def side_effect():
+            return None
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        sin = graph.call_function(torch.ops.aten.sin.default, (x,))
+        graph.call_function(side_effect, ())
+        sin_1 = graph.call_function(torch.ops.aten.sin.default, (x,))
+        add = graph.call_function(torch.ops.aten.add.Tensor, (sin, sin_1))
+        graph.output(add)
+
+        cse_graph = fx_graph_cse(graph)
+
+        self.assertEqual(
+            sum(node.target is torch.ops.aten.sin.default for node in cse_graph.nodes),
+            2,
+        )
+        self.assertEqual(
+            sum(node.target is side_effect for node in cse_graph.nodes),
+            1,
+        )
+
+    def test_fx_graph_cse_preserves_mutated_inputs(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        cos = graph.call_function(torch.ops.aten.cos.default, (x,))
+        cos_1 = graph.call_function(torch.ops.aten.cos.default, (x,))
+        add_ = graph.call_function(torch.ops.aten.add_.Tensor, (cos, 1))
+        add = graph.call_function(torch.ops.aten.add.Tensor, (add_, cos_1))
+        graph.output(add)
+
+        cse_graph = fx_graph_cse(graph)
+
+        self.assertEqual(
+            sum(node.target is torch.ops.aten.cos.default for node in cse_graph.nodes),
+            2,
+        )
+        self.assertEqual(
+            sum(node.target is torch.ops.aten.add_.Tensor for node in cse_graph.nodes),
+            1,
+        )
+
+    def test_fx_graph_cse_preserves_auto_functionalized_inputs(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        cos = graph.call_function(torch.ops.aten.cos.default, (x,))
+        cos_1 = graph.call_function(torch.ops.aten.cos.default, (x,))
+        auto_functionalized = graph.call_function(
+            torch.ops.higher_order.auto_functionalized_v2,
+            (torch.ops.aten.add_.Tensor,),
+            {
+                "_x_base_index": 0,
+                "_z_base_index": 1,
+                "_all_bases": [cos, cos_1],
+            },
+        )
+        graph.output(auto_functionalized)
+
+        cse_graph = fx_graph_cse(graph)
+
+        self.assertEqual(
+            sum(node.target is torch.ops.aten.cos.default for node in cse_graph.nodes),
+            2,
+        )
+        self.assertEqual(
+            sum(
+                node.target is torch.ops.higher_order.auto_functionalized_v2
+                for node in cse_graph.nodes
+            ),
+            1,
+        )
 
     def test_aot_dispatch_incorrect_backward(self):
         # a is a subclass, b is not
