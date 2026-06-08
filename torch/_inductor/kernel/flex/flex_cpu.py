@@ -33,7 +33,7 @@ def check_cpu_supported():
         torch.cpu._is_avx2_supported() and os.getenv("ATEN_CPU_CAPABILITY") != "default"
     )
     requires_sve_on_cpu = (
-        torch.backends.cpu.get_cpu_capability() in ("SVE128", "SVE256")
+        torch.cpu._is_sve_supported()
         and os.getenv("ATEN_CPU_CAPABILITY") != "default"
     )
     supported = (

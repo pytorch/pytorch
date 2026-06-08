@@ -83,6 +83,11 @@ def _is_avx2_supported() -> bool:
     return get_capabilities().get("avx2", False)
 
 
+def _is_sve_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports SVE."""
+    return torch.backends.cpu.get_cpu_capability() in ("SVE128", "SVE256")
+
+
 def _is_avx512_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AVX512."""
     return get_capabilities().get("avx512_f", False)

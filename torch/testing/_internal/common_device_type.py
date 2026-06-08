@@ -2425,7 +2425,7 @@ IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
     not IS_MACOS
     and (
         torch.cpu._is_avx2_supported()
-        or torch.backends.cpu.get_cpu_capability() in ("SVE128", "SVE256")
+        or torch.cpu._is_sve_supported()
     )
     and os.getenv("ATEN_CPU_CAPABILITY") != "default"
 )

@@ -150,11 +150,7 @@ class CuteDSLSubgraphInfo:
     body: IndentedBuffer
     template_mask: str | None = None
     template_out: str | None = None
-<<<<<<< HEAD
-    cse: CSE[Any, str] | None = None
-=======
     cse: CSE[Any, Any] | None = None
->>>>>>> 064649d86d4 (add flex-attention + SVE128 support)
 
     def __post_init__(self):
         self.only_copy_if_non_none_fields = ("cse",)
