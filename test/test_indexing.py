@@ -196,7 +196,6 @@ class TestIndexing(TestCase):
 
         self.assertRaises(TypeError, delitem)
 
-    @onlyAccelerator
     @dtypes(torch.half, torch.double)
     @dtypesIfMPS(torch.half)  # TODO: add bf16 there?
     def test_advancedindex(self, device, dtype):
@@ -1056,7 +1055,6 @@ class TestIndexing(TestCase):
         self.assertEqual(a[-1, -1], 14)
         self.assertEqual(a[0, -1], 1)
 
-    @onlyAccelerator
     def test_index_put_accumulate_expanded_values(self, device):
         # checks the issue with cuda: https://github.com/pytorch/pytorch/issues/39227
         # and verifies consistency with CPU result
@@ -1743,13 +1741,15 @@ class TestIndexing(TestCase):
         dim = 0
         t = make_tensor(shape, device=device, dtype=dtype)
         indices = torch.argsort(t, dim=dim)
-        gather_cross_device_error = (
-            r"Expected all tensors to be on the same device|Passed CPU tensor to MPS op"
-            if torch.device(device).type == "mps"
+
+        # MPS backend uses a different error message
+        expected_error = (
+            "Passed CPU tensor to MPS op"
+            if device.type == "mps"
             else "Expected all tensors to be on the same device"
         )
 
-        with self.assertRaisesRegex(RuntimeError, gather_cross_device_error):
+        with self.assertRaisesRegex(RuntimeError, expected_error):
             torch.gather(t, 0, indices.cpu())
 
         with self.assertRaisesRegex(
@@ -1758,7 +1758,7 @@ class TestIndexing(TestCase):
         ):
             torch.take_along_dim(t, indices.cpu(), dim=0)
 
-        with self.assertRaisesRegex(RuntimeError, gather_cross_device_error):
+        with self.assertRaisesRegex(RuntimeError, expected_error):
             torch.gather(t.cpu(), 0, indices)
 
         with self.assertRaisesRegex(
@@ -1943,7 +1943,6 @@ class TestIndexing(TestCase):
 
     # onlyNativeDeviceTypes due to an XLA error:
     # https://github.com/pytorch/pytorch/issues/53256
-    @onlyAccelerator
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_copy_scalars(self, device, dtype):
