@@ -85,6 +85,10 @@ tolerance:
     sam_fast: 5
 
 require_larger_multiplier_for_smaller_tensor:
+  # Small (128-elem) BatchNorm bias gradient under AMP training; borderline RMSE
+  # after inductor PR #186379 stopped folding float x*0 -> 0. Noise dominates the
+  # error metric on this small tensor, so use the larger small-tensor multiplier.
+  - functorch_dp_cifar10
   - yolov3
 
 # These benchmarks took >600s on an i9-11900K CPU
