@@ -10041,6 +10041,7 @@ class StorageBox(MutableBox):
         that is used multiple times.
         """
         if users > 1 and isinstance(self.data, (Pointwise, Reduction)):
+            num_reads = self.num_reads()
             if is_cpu(self.data):
                 # Heuristic for realizing reused result of heavy ops on cpu
                 opcount = self.data.inner_fn_opcount()
@@ -10055,8 +10056,12 @@ class StorageBox(MutableBox):
                 ]
                 if any(x in opcount.used_ops for x in heavy_ops):
                     return True
+                return (
+                    num_reads > config.realize_reads_threshold
+                    or self.has_large_inner_fn()
+                )
             return (
-                self.num_reads() > config.realize_reads_threshold
+                num_reads * users > config.realize_reads_threshold
                 or self.has_large_inner_fn()
             )
         return False
