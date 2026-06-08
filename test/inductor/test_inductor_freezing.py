@@ -574,6 +574,39 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
 
     @torch._inductor.config.patch(layout_optimization=False)
+    def test_shared_conv_bn_keeps_addcmul(self):
+        if self.device != "cuda" or TEST_WITH_ROCM:
+            raise unittest.SkipTest("requires CUDA")
+
+        class SharedConvBN(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 32, bias=True, kernel_size=3, stride=2)
+                self.bn = torch.nn.BatchNorm2d(32, eps=0.001, dtype=torch.float)
+
+            def forward(self, x):
+                y = self.conv(x)
+                return self.bn(y), y
+
+        mod = SharedConvBN().eval().to(self.device).to(torch.float16)
+        x = torch.rand(3, 3, 32, 32).to(self.device).to(torch.float16)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        @torch.compile()
+        def foo(mod, x):
+            return mod(x)
+
+        with torch.no_grad():
+            out_eager = mod(x)
+            out_compiled, code = run_and_get_code(foo, mod, x)
+
+        self.assertEqual(out_compiled, out_eager, atol=1e-2, rtol=1e-2)
+        self.assertEqual(counters["inductor"]["binary_folding"], 0)
+        FileCheck().check("tl.fma").run(code[0])
+
+    @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_functional_bn_with_module_sharing(self):
         x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
         running_mean = torch.mean(x, dim=(0, 2, 3)).to(self.device)

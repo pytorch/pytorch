@@ -7015,6 +7015,62 @@ for dtype in (torch.int32, torch.int64):
         o2 = torch.compile(mod)(inp)
         self.assertEqual(o1, o2, rtol=1e-3, atol=1e-3)
 
+    @skipIfRocm
+    @with_tf32_off
+    def test_batch_norm_2d_eval_dynamic_conv_accuracy(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Bn1Conv2(torch.nn.Module):
+            def __init__(self, sd):
+                super().__init__()
+                self.bn1 = torch.nn.BatchNorm2d(96)
+                self.conv2 = torch.nn.Conv2d(
+                    96, 256, kernel_size=5, padding=2, bias=True
+                )
+                self.load_state_dict(sd, strict=True)
+
+            def forward(self, x):
+                return self.conv2(self.bn1(x))
+
+        def random_state_dict():
+            bn1 = torch.nn.BatchNorm2d(96)
+            conv2 = torch.nn.Conv2d(96, 256, kernel_size=5, padding=2, bias=True)
+            with torch.no_grad():
+                bn1.weight.normal_(0, 1)
+                bn1.bias.normal_(0, 1)
+                bn1.running_mean.normal_(0, 0.1)
+                bn1.running_var.uniform_(0.5, 1.5)
+                conv2.weight.normal_(0, 0.02)
+                conv2.bias.normal_(0, 0.02)
+
+            sd = {}
+            for k, v in bn1.state_dict().items():
+                sd[f"bn1.{k}"] = v.float().cpu().clone()
+            for k, v in conv2.state_dict().items():
+                sd[f"conv2.{k}"] = v.float().cpu().clone()
+            return sd
+
+        random.seed(0)
+        torch.manual_seed(0)
+        x = torch.randn((4, 96, 8, 8), dtype=torch.float32, device="cpu").to(
+            self.device
+        )
+        sd = random_state_dict()
+
+        with torch.backends.cudnn.flags(
+            enabled=False, deterministic=True, benchmark=False, allow_tf32=False
+        ):
+            m0 = Bn1Conv2(sd).to(self.device).eval()
+            with torch.no_grad():
+                y0 = m0(x)
+
+            m1 = torch.compile(Bn1Conv2(sd).to(self.device).eval(), dynamic=True)
+            with torch.no_grad():
+                y1 = m1(x)
+
+        self.assertEqual(y0, y1, rtol=0, atol=0)
+
     @patch.object(config.trace, "enabled", True)
     def test_layer_norm(self):
         m = torch.nn.Sequential(
