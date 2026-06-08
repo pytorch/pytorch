@@ -5,6 +5,7 @@
 
 #include <string>
 #include <string_view>
+#include <utility>
 
 using torch::stable::Tensor;
 
@@ -28,7 +29,7 @@ std::tuple<std::vector<std::string>, int64_t> my_string_op_const_string_ref(
     const std::string& passthru) {
   int64_t res = process_accessor(t, accessor);
   auto vec = std::vector<std::string>({accessor, std::to_string(res), passthru});
-  return std::make_tuple(vec, res);
+  return std::make_tuple(std::move(vec), res);
 }
 
 // Test const std::string_view&
@@ -38,7 +39,7 @@ std::tuple<std::vector<std::string>, int64_t> my_string_op_const_string_view_ref
     const std::string_view& passthru) {
   int64_t res = process_accessor(t, accessor);
   auto vec = std::vector<std::string>({std::string(accessor), std::to_string(res), std::string(passthru)});
-  return std::make_tuple(vec, res);
+  return std::make_tuple(std::move(vec), res);
 }
 
 // Test std::string& (non-const)
@@ -48,7 +49,7 @@ std::tuple<std::vector<std::string>, int64_t> my_string_op_string_ref(
     std::string& passthru) {
   int64_t res = process_accessor(t, accessor);
   auto vec = std::vector<std::string>({accessor, std::to_string(res), passthru});
-  return std::make_tuple(vec, res);
+  return std::make_tuple(std::move(vec), res);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {

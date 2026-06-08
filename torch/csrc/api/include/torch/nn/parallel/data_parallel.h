@@ -89,7 +89,7 @@ struct ReduceAdd : public autograd::Node {
       output.add_(input.to(destination_device_));
     }
 
-    return {output};
+    return {std::move(output)};
   }
 
  private:

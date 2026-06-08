@@ -1666,7 +1666,7 @@ RecordQueue::getRecords(
   }
 
   build_tree(out);
-  return {out, std::move(trace)};
+  return {std::move(out), std::move(trace)};
 }
 
 namespace {
