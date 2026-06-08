@@ -653,7 +653,7 @@ class DeferredTritonCallWrapper:
     def generate_launch_kernel(self, prefix, wrapper, kernel_var_name, params):
         """
         Generate the GPU kernel launching code.
-        This is where all the call args being sorted out and generated.
+        This is where all the call args are sorted out and generated.
         If enable_kernel_profile is enabled, all args related information would be packed in this function.
         """
         triton_meta = params["triton_meta"]
@@ -873,6 +873,19 @@ class CppWrapperGpu(CppWrapperCpu):
         self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
         self._lazy_kernel_names: list[str] = []
 
+    def generate_debug_sync(self, buffer):
+        if self.device == "cuda":
+            buffer.writeline(
+                maybe_hipify_code_wrapper(
+                    "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
+                )
+            )
+            return
+
+        raise NotImplementedError(
+            f"triton debug sync is not supported with {self.device} cpp_wrapper"
+        )
+
     @staticmethod
     def create(
         is_subgraph: bool,
@@ -980,6 +993,7 @@ class CppWrapperGpu(CppWrapperCpu):
             return super().generate(is_inference)
 
     def _codegen_entry_impl_prologue(self):
+        super()._codegen_entry_impl_prologue()
         self.prefix.writeline(
             _LazyTritonCompileKickoffLine(
                 self._lazy_kernel_names, "ensure_triton_kernel_compiles_started();"
