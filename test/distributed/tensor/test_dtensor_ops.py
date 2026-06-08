@@ -298,7 +298,6 @@ dtensor_compiled_fails = {
     skip("histc"),
     xfail("nn.functional.linear_cross_entropy"),
     xfail("nn.functional.linear_cross_entropy", "chunked"),
-    xfail("nn.functional.linear_cross_entropy", "chunked_none"),
 }
 
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
@@ -371,7 +370,6 @@ dtensor_fails_no_strategy = {
     xfail("nanquantile"),
     xfail("nn.functional.bilinear"),
     xfail("nn.functional.linear_cross_entropy", "chunked"),
-    xfail("nn.functional.linear_cross_entropy", "chunked_none"),
     xfail("nn.functional.multi_margin_loss"),
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.pad", "reflect"),
