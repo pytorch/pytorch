@@ -434,13 +434,22 @@ def _uses_custom_instancecheck(type_info: Any) -> bool:
             _uses_custom_instancecheck(item) for item in typing.get_args(type_info)
         )
     if isinstance(type_info, type):
-        if (
-            type_info in tensortype_to_dtype
-            or type_info is torch.nn.Parameter
-            or type_info is torch.nn.Buffer
+        instancecheck = getattr(type(type_info), "__instancecheck__", None)
+        if type_info in tensortype_to_dtype:
+            return False
+        if issubclass(type_info, torch.Tensor) and (
+            instancecheck is type.__instancecheck__
+            or (
+                type(type_info).__module__,
+                type(type_info).__qualname__,
+            )
+            in {
+                ("torch.nn.parameter", "_ParameterMeta"),
+                ("torch.nn.parameter", "_BufferMeta"),
+                ("torch.distributed.fsdp._flat_param", "_FlatParameterMeta"),
+            }
         ):
             return False
-        instancecheck = getattr(type(type_info), "__instancecheck__", None)
         return (
             instancecheck is not None
             and instancecheck is not type.__instancecheck__

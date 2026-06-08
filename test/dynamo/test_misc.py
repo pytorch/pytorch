@@ -20,6 +20,7 @@ import os
 import pickle
 import random
 import re
+import subprocess
 import sys
 import tempfile
 import threading
@@ -8359,19 +8360,54 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaisesRegex(Unsupported, "custom __instancecheck__"):
             torch.compile(fn_union, backend="eager", fullgraph=True)(x)
 
+        def fn_union_type(x):
+            if isinstance(x, TensorWithShape | int):
+                return x + 1
+            return x - 1
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "custom __instancecheck__"):
+            torch.compile(fn_union_type, backend="eager", fullgraph=True)(x)
+
+        class TensorSubclassMeta(type(torch.Tensor)):
+            def __instancecheck__(cls, instance):
+                return getattr(shape_context, "is_tensor_subclass", False)
+
+        class TensorSubclassWithInstanceCheck(
+            torch.Tensor, metaclass=TensorSubclassMeta
+        ):
+            pass
+
+        def fn_tensor_subclass(x):
+            if isinstance(x, TensorSubclassWithInstanceCheck):
+                return x + 1
+            return x - 1
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "custom __instancecheck__"):
+            torch.compile(fn_tensor_subclass, backend="eager", fullgraph=True)(x)
+
     def test_tensor_isinstance_supported_tensor_types_no_graph_break(self):
+        class ParameterSubclass(torch.nn.Parameter):
+            pass
+
+        class BufferSubclass(torch.nn.Buffer):
+            pass
+
         def fn(x, p, b):
             return (
                 isinstance(x, torch.FloatTensor),
                 isinstance(p, torch.nn.Parameter),
+                isinstance(p, ParameterSubclass),
                 isinstance(b, torch.nn.Buffer),
+                isinstance(b, BufferSubclass),
                 isinstance(x, collections.abc.Sequence),
                 isinstance(x, abc.ABC),
             )
 
         x = torch.randn(2, 3)
-        p = torch.nn.Parameter(torch.randn(2, 3))
-        b = torch.nn.Buffer(torch.randn(2, 3))
+        p = ParameterSubclass(torch.randn(2, 3))
+        b = BufferSubclass(torch.randn(2, 3))
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x, p, b), fn(x, p, b))
 
@@ -10164,6 +10200,93 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         fn(torch.randn(2))
         fn(torch.randn(3))
         fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_values="1111")
+    def test_dynamic_values_int(self):
+        builder._DYNAMIC_VALUES = None
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        # Warm up with the sentinel value 1111 → the int gets marked dynamic.
+        fn(1111)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_values="1111")
+    def test_dynamic_values_tensor(self):
+        builder._DYNAMIC_VALUES = None
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        # Warm up with a tensor whose dim equals 1111 → that dim becomes dynamic.
+        fn(torch.randn(1111))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(assume_static_by_default=True)
+    @torch.compiler.config.patch(dynamic_values="1111")
+    def test_dynamic_values_no_match_specializes(self):
+        builder._DYNAMIC_VALUES = None
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        fn(2)
+        fn(3)
+        fn(4)
+
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(dynamic_values="1111")
+    def test_dynamic_values_graph_break(self):
+        """Motivating use case: graph breaks drop dynamic-ness in eager code,
+        but the sentinel value lets the second compiled region re-mark dynamic."""
+        builder._DYNAMIC_VALUES = None
+        counter = CompileCounter()
+
+        def foo(x):
+            return x * x
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            x = x * x
+            torch._dynamo.graph_break()
+            return foo(x)
+
+        fn(torch.randn(1111))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        # 2 frames (one per side of the graph break), no recompiles on either.
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(dynamic_values="1111, 2222")
+    def test_dynamic_values_multiple(self):
+        builder._DYNAMIC_VALUES = None
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        # Both sentinel values trigger dynamic marking.
+        fn(torch.randn(2222))
+        fn(torch.randn(7))
+        fn(torch.randn(9))
 
         self.assertEqual(counter.frame_count, 1)
 
@@ -15688,6 +15811,68 @@ fn
                     "tensor(s) (e.g. return x.clone()) or refactor the custom operator "
                     "to not return y. This is deprecated and will become an error in a future version of PyTorch.",
                 )
+
+    def test_debugmode_respects_custom_op_aliasing_env_override(self):
+        default_script = """
+from torch._functorch import config as functorch_config
+assert functorch_config.error_on_custom_op_aliasing is True
+"""
+        default_env = os.environ.copy()
+        default_env["CI"] = "1"
+        default_env.pop("TORCHINDUCTOR_ERROR_ON_CUSTOM_OP_ALIASING", None)
+        default_result = subprocess.run(
+            [sys.executable, "-c", default_script],
+            env=default_env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            default_result.returncode,
+            0,
+            msg=f"stdout:\n{default_result.stdout}\nstderr:\n{default_result.stderr}",
+        )
+
+        script = """
+import warnings
+import torch
+from torch._functorch import config as functorch_config
+
+assert functorch_config.error_on_custom_op_aliasing is False
+with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
+    lib.define("alias_op(Tensor x) -> Tensor")
+    lib.impl("alias_op", lambda x: x.view_as(x), "CompositeExplicitAutograd")
+    lib.impl("alias_op", lambda x: x.view_as(x), "Meta")
+
+    def fn(x):
+        return torch.ops.mylib_ci.alias_op(x) + 1
+
+    compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        compiled_fn(torch.randn(4))
+    aliasing_warnings = [
+        warning
+        for warning in caught
+        if "may not alias any inputs" in str(warning.message)
+    ]
+    assert len(aliasing_warnings) == 1, [
+        str(warning.message) for warning in caught
+    ]
+"""
+        env = os.environ.copy()
+        env["CI"] = "1"
+        env["TORCHINDUCTOR_ERROR_ON_CUSTOM_OP_ALIASING"] = "0"
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
 
     def test_make_contiguous_strides_for_under_compile(self):
         # is_nested_int and sym_max must be traceable under Dynamo.
