@@ -1111,6 +1111,16 @@ class _TorchDynamoContext:
                     if not _in_hop_compile():
                         if torch._guards.TracingContext.try_get() is not None:
                             return fn(*args, **kwargs)
+                # Skip nested compile during non-strict tracing-style analysis.
+                # This covers direct AOT export metadata collection, which runs
+                # user code before make_fx has set the FX symbolic tracing flag.
+                if (
+                    torch.compiler._is_non_strict_tracing()
+                    and not config.error_on_nested_fx_trace
+                    and not config.force_compile_during_fx_trace
+                    and torch._guards.TracingContext.try_get() is not None
+                ):
+                    return fn(*args, **kwargs)
                 # Skip nested compile - just inline the function
                 if (
                     is_fx_symbolic_tracing()
