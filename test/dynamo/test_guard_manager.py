@@ -1489,6 +1489,8 @@ print(json.dumps({
     "enabled": stats["guard_fastplan_enabled"],
     "candidate_top": stats["guard_fastplan_candidate_top"],
     "candidate_nested": stats["guard_fastplan_candidate_nested"],
+    "partial_enable": stats["guard_fastplan_partial_enable"],
+    "partial_hit": stats["guard_fastplan_partial_hit"],
     "enable_nested": stats["guard_fastplan_enable_nested"],
     "hit_nested": stats["guard_fastplan_hit_nested"],
     "disabled": stats["guard_fastplan_disabled"],
@@ -1509,10 +1511,149 @@ print(json.dumps({
         self.assertTrue(stats["enabled"])
         self.assertGreater(stats["candidate_top"], 0)
         self.assertGreater(stats["candidate_nested"], 0)
+        self.assertGreater(stats["partial_enable"], 0)
+        self.assertGreater(stats["partial_hit"], 0)
         self.assertGreater(stats["enable_nested"], 0)
         self.assertGreater(stats["hit_nested"], 0)
         self.assertGreater(stats["disabled"], 0)
         self.assertGreater(stats["disabled_nested"], 0)
+        self.assertGreaterEqual(
+            stats["reasons"].get("unsupported_leaf:LAMBDA_GUARD", 0), 1
+        )
+
+    def test_guard_fast_plan_partial_hit_checks_unsupported_child(self):
+        script = r"""
+import functools
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+def is_original_dict(x, expected):
+    return x is expected
+
+class Child(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+class Parent(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.clean = Child()
+        self.blocked = Child()
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.parent = Parent()
+
+model = Mod()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+parent_mgr = modules_mgr.getitem_manager(
+    "parent",
+    "L['self']._modules['parent']",
+    model.parent,
+    GuardManagerType.GUARD_MANAGER,
+)
+parent_dict_mgr = parent_mgr.get_generic_dict_manager(
+    "L['self']._modules['parent'].__dict__",
+    model.parent.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+parent_modules_mgr = parent_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['parent']._modules",
+    model.parent._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+
+clean_mgr = parent_modules_mgr.getitem_manager(
+    "clean",
+    "L['self']._modules['parent']._modules['clean']",
+    model.parent.clean,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_dict_mgr = clean_mgr.get_generic_dict_manager(
+    "L['self']._modules['parent']._modules['clean'].__dict__",
+    model.parent.clean.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_modules_mgr = clean_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['parent']._modules['clean']._modules",
+    model.parent.clean._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+clean_modules_mgr.add_dict_length_check_guard(
+    len(model.parent.clean._modules),
+    ["len(L['self']._modules['parent']._modules['clean']._modules) == 1"],
+)
+
+blocked_mgr = parent_modules_mgr.getitem_manager(
+    "blocked",
+    "L['self']._modules['parent']._modules['blocked']",
+    model.parent.blocked,
+    GuardManagerType.GUARD_MANAGER,
+)
+blocked_dict_mgr = blocked_mgr.get_generic_dict_manager(
+    "L['self']._modules['parent']._modules['blocked'].__dict__",
+    model.parent.blocked.__dict__,
+    GuardManagerType.GUARD_MANAGER,
+)
+blocked_modules_mgr = blocked_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules['parent']._modules['blocked']._modules",
+    model.parent.blocked._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+blocked_modules_mgr.add_lambda_guard(
+    functools.partial(is_original_dict, expected=model.parent.blocked._modules),
+    ["blocked._modules is original"],
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+model.parent.blocked._modules = {}
+assert not root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "partial_enable": stats["guard_fastplan_partial_enable"],
+    "partial_hit": stats["guard_fastplan_partial_hit"],
+    "miss": stats["guard_fastplan_miss"],
+    "reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["partial_enable"], 0)
+        self.assertGreater(stats["partial_hit"], 0)
+        self.assertEqual(stats["miss"], 0)
         self.assertGreaterEqual(
             stats["reasons"].get("unsupported_leaf:LAMBDA_GUARD", 0), 1
         )

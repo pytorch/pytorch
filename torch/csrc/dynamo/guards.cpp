@@ -150,12 +150,15 @@ struct GuardFastPlanStats {
   std::atomic<uint64_t> shadow_pass{0};
   std::atomic<uint64_t> shadow_pass_top{0};
   std::atomic<uint64_t> shadow_pass_nested{0};
+  std::atomic<uint64_t> partial_shadow_pass{0};
   std::atomic<uint64_t> enable{0};
   std::atomic<uint64_t> enable_top{0};
   std::atomic<uint64_t> enable_nested{0};
+  std::atomic<uint64_t> partial_enable{0};
   std::atomic<uint64_t> hit{0};
   std::atomic<uint64_t> hit_top{0};
   std::atomic<uint64_t> hit_nested{0};
+  std::atomic<uint64_t> partial_hit{0};
   std::atomic<uint64_t> miss{0};
   std::atomic<uint64_t> miss_top{0};
   std::atomic<uint64_t> miss_nested{0};
@@ -412,12 +415,15 @@ void reset_guard_lookup_stats() {
   store_zero(fastplan_stats.shadow_pass);
   store_zero(fastplan_stats.shadow_pass_top);
   store_zero(fastplan_stats.shadow_pass_nested);
+  store_zero(fastplan_stats.partial_shadow_pass);
   store_zero(fastplan_stats.enable);
   store_zero(fastplan_stats.enable_top);
   store_zero(fastplan_stats.enable_nested);
+  store_zero(fastplan_stats.partial_enable);
   store_zero(fastplan_stats.hit);
   store_zero(fastplan_stats.hit_top);
   store_zero(fastplan_stats.hit_nested);
+  store_zero(fastplan_stats.partial_hit);
   store_zero(fastplan_stats.miss);
   store_zero(fastplan_stats.miss_top);
   store_zero(fastplan_stats.miss_nested);
@@ -516,15 +522,21 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(fastplan_stats.shadow_pass_top);
   result["guard_fastplan_shadow_pass_nested"] =
       load_relaxed(fastplan_stats.shadow_pass_nested);
+  result["guard_fastplan_partial_shadow_pass"] =
+      load_relaxed(fastplan_stats.partial_shadow_pass);
   result["guard_fastplan_enable"] = load_relaxed(fastplan_stats.enable);
   result["guard_fastplan_enable_top"] =
       load_relaxed(fastplan_stats.enable_top);
   result["guard_fastplan_enable_nested"] =
       load_relaxed(fastplan_stats.enable_nested);
+  result["guard_fastplan_partial_enable"] =
+      load_relaxed(fastplan_stats.partial_enable);
   result["guard_fastplan_hit"] = load_relaxed(fastplan_stats.hit);
   result["guard_fastplan_hit_top"] = load_relaxed(fastplan_stats.hit_top);
   result["guard_fastplan_hit_nested"] =
       load_relaxed(fastplan_stats.hit_nested);
+  result["guard_fastplan_partial_hit"] =
+      load_relaxed(fastplan_stats.partial_hit);
   result["guard_fastplan_miss"] = load_relaxed(fastplan_stats.miss);
   result["guard_fastplan_miss_top"] = load_relaxed(fastplan_stats.miss_top);
   result["guard_fastplan_miss_nested"] =
@@ -864,6 +876,7 @@ static void record_guard_fastplan_candidate(
 
 static void record_guard_fastplan_shadow_pass(
     GuardFastPlanCandidateKind kind,
+    bool partial,
     size_t token_count,
     uint64_t slow_check_ns) {
   if (!guard_lookup_stats_enabled()) {
@@ -873,17 +886,25 @@ static void record_guard_fastplan_shadow_pass(
   add_relaxed(stats.shadow_pass, 1);
   add_guard_fastplan_kind_count(
       stats.shadow_pass_top, stats.shadow_pass_nested, kind);
+  if (partial) {
+    add_relaxed(stats.partial_shadow_pass, 1);
+  }
   add_relaxed(stats.token_count_sum, token_count);
   add_relaxed(stats.slow_check_ns, slow_check_ns);
 }
 
-static void record_guard_fastplan_enable(GuardFastPlanCandidateKind kind) {
+static void record_guard_fastplan_enable(
+    GuardFastPlanCandidateKind kind,
+    bool partial) {
   if (!guard_lookup_stats_enabled()) {
     return;
   }
   auto& stats = guard_fastplan_stats();
   add_relaxed(stats.enable, 1);
   add_guard_fastplan_kind_count(stats.enable_top, stats.enable_nested, kind);
+  if (partial) {
+    add_relaxed(stats.partial_enable, 1);
+  }
 }
 
 static void record_guard_fastplan_disabled(
@@ -913,6 +934,7 @@ static void record_guard_fastplan_disabled(
 
 static void record_guard_fastplan_hit(
     GuardFastPlanCandidateKind kind,
+    bool partial,
     size_t token_count,
     uint64_t token_check_ns) {
   if (!guard_lookup_stats_enabled()) {
@@ -921,6 +943,9 @@ static void record_guard_fastplan_hit(
   auto& stats = guard_fastplan_stats();
   add_relaxed(stats.hit, 1);
   add_guard_fastplan_kind_count(stats.hit_top, stats.hit_nested, kind);
+  if (partial) {
+    add_relaxed(stats.partial_hit, 1);
+  }
   add_relaxed(stats.token_count_sum, token_count);
   add_relaxed(stats.token_check_ns, token_check_ns);
 }
@@ -1745,8 +1770,10 @@ static bool guard_subtree_memo_tokens_match(
 struct GuardSubtreeMemoState {
   bool enabled{false};
   bool disabled{false};
+  bool partial{false};
   uint8_t shadow_passes{0};
   std::vector<GuardSubtreeEntryToken> tokens;
+  std::vector<size_t> slow_accessor_indices;
 };
 
 struct GuardSubtreeProbeState {
@@ -3555,6 +3582,165 @@ class GuardManager {
     return true;
   }
 
+  bool prepare_partial_subtree_memo(
+      GuardSubtreeMemoState& memo,
+      GuardSubtreeMemoSupportAnalysis* analysis) const {
+    memo.partial = false;
+    memo.slow_accessor_indices.clear();
+
+    bool has_supported_accessor = false;
+    bool has_slow_work = false;
+    for (const auto& guard : _leaf_guards) {
+      if (!guard->supports_subtree_memo()) {
+        has_slow_work = true;
+        if (analysis != nullptr) {
+          analysis->set_if_empty(
+              guard->subtree_memo_unsupported_reason(), _source);
+        }
+      }
+    }
+
+    for (size_t i = 0; i < _accessors.size(); ++i) {
+      const auto& accessor = _accessors[i];
+      GuardSubtreeMemoSupportAnalysis child_analysis;
+      GuardSubtreeMemoSupportAnalysis* child_analysis_ptr =
+          analysis == nullptr ? nullptr : &child_analysis;
+      const bool accessor_supported = accessor->supports_subtree_memo() &&
+          accessor->get_guard_manager()->supports_subtree_memo_recursive(
+              child_analysis_ptr);
+      if (accessor_supported) {
+        has_supported_accessor = true;
+        continue;
+      }
+
+      has_slow_work = true;
+      memo.slow_accessor_indices.push_back(i);
+      if (analysis != nullptr) {
+        if (!accessor->supports_subtree_memo()) {
+          analysis->set_if_empty(
+              accessor->subtree_memo_unsupported_reason(),
+              accessor->get_source());
+        } else {
+          analysis->set_if_empty(
+              child_analysis.reason.empty() ? "unsupported:unknown"
+                                            : child_analysis.reason.c_str(),
+              child_analysis.path.empty() ? accessor->get_source()
+                                          : child_analysis.path);
+        }
+      }
+    }
+
+    if (!has_supported_accessor || !has_slow_work) {
+      memo.slow_accessor_indices.clear();
+      return false;
+    }
+    memo.partial = true;
+    return true;
+  }
+
+  bool is_partial_slow_accessor(
+      const GuardSubtreeMemoState& memo,
+      size_t accessor_index) const {
+    return std::find(
+               memo.slow_accessor_indices.begin(),
+               memo.slow_accessor_indices.end(),
+               accessor_index) != memo.slow_accessor_indices.end();
+  }
+
+  void get_dict_tag_match_for_accessors(
+      PyObject* value,
+      bool& matches_dict_tag,
+      uint64_t& new_tag) {
+    matches_dict_tag = false;
+    new_tag = 0;
+    if (_is_dict) {
+      new_tag = get_dict_version_unchecked(value);
+      matches_dict_tag = (new_tag == _dict_tag);
+    }
+  }
+
+  void maybe_update_dict_tag_after_accessors(bool result, uint64_t new_tag) {
+    if (_is_dict && result) {
+      _dict_tag = new_tag;
+    }
+  }
+
+  bool check_accessor_nopybind_with_stats(
+      const std::unique_ptr<GuardAccessor>& accessor,
+      PyObject* value,
+      bool matches_dict_tag) {
+    const bool collect_stats = guard_lookup_stats_enabled();
+    const uint64_t accessor_start_ns =
+        collect_stats ? guard_lookup_time_ns() : 0;
+    const bool accessor_result =
+        accessor->check_nopybind(value, matches_dict_tag);
+    if (collect_stats) {
+      record_guard_accessor_type_stats(
+          accessor->stats_name(),
+          guard_lookup_time_ns() - accessor_start_ns,
+          !accessor_result);
+    }
+    return accessor_result;
+  }
+
+  bool check_partial_shadow_nopybind(
+      PyObject* value,
+      const GuardSubtreeMemoState& memo,
+      std::vector<GuardSubtreeEntryToken>* tokens) {
+    tokens->emplace_back(GuardSubtreeEntryToken::make(value));
+    if (!this->check_leaf_guards_nopybind(value)) {
+      return false;
+    }
+
+    bool matches_dict_tag = false;
+    uint64_t new_tag = 0;
+    get_dict_tag_match_for_accessors(value, matches_dict_tag, new_tag);
+    for (size_t i = 0; i < _accessors.size(); ++i) {
+      const auto& accessor = _accessors[i];
+      bool accessor_result = false;
+      if (is_partial_slow_accessor(memo, i)) {
+        accessor_result = check_accessor_nopybind_with_stats(
+            accessor, value, matches_dict_tag);
+      } else {
+        GuardSubtreeMemoRecorderScope recorder(tokens);
+        accessor_result = check_accessor_nopybind_with_stats(
+            accessor, value, matches_dict_tag);
+      }
+      if (!accessor_result) {
+        _fail_count += 1;
+        return false;
+      }
+    }
+
+    maybe_update_dict_tag_after_accessors(true, new_tag);
+    return true;
+  }
+
+  bool check_partial_slow_accessors_nopybind(
+      PyObject* value,
+      const GuardSubtreeMemoState& memo) {
+    if (!this->check_leaf_guards_nopybind(value)) {
+      return false;
+    }
+
+    bool matches_dict_tag = false;
+    uint64_t new_tag = 0;
+    get_dict_tag_match_for_accessors(value, matches_dict_tag, new_tag);
+    for (const size_t accessor_index : memo.slow_accessor_indices) {
+      if (accessor_index >= _accessors.size()) {
+        return false;
+      }
+      if (!check_accessor_nopybind_with_stats(
+              _accessors[accessor_index], value, matches_dict_tag)) {
+        _fail_count += 1;
+        return false;
+      }
+    }
+
+    maybe_update_dict_tag_after_accessors(true, new_tag);
+    return true;
+  }
+
   bool check_nopybind_with_fastplan(PyObject* value) {
     GuardSubtreeMemoState& memo = _subtree_probe_state.memo;
     const GuardFastPlanCandidateKind candidate_kind =
@@ -3573,11 +3759,13 @@ class GuardManager {
         collect_stats ? &analysis : nullptr;
     if (memo.tokens.empty() &&
         !supports_subtree_memo_recursive(analysis_ptr)) {
-      memo.disabled = true;
-      if (collect_stats) {
-        record_guard_fastplan_disabled(candidate_kind, analysis);
+      if (!prepare_partial_subtree_memo(memo, analysis_ptr)) {
+        memo.disabled = true;
+        if (collect_stats) {
+          record_guard_fastplan_disabled(candidate_kind, analysis);
+        }
+        return check_nopybind(value);
       }
-      return check_nopybind(value);
     }
 
     if (memo.enabled) {
@@ -3590,12 +3778,16 @@ class GuardManager {
       if (token_match) {
         if (collect_stats) {
           record_guard_fastplan_hit(
-              candidate_kind, memo.tokens.size(), token_check_ns);
+              candidate_kind, memo.partial, memo.tokens.size(), token_check_ns);
+        }
+        if (memo.partial) {
+          return check_partial_slow_accessors_nopybind(value, memo);
         }
         return true;
       }
 
       memo.disabled = true;
+      memo.partial = false;
       const uint64_t slow_start_ns =
           collect_stats ? guard_lookup_time_ns() : 0;
       const bool result = check_nopybind(value);
@@ -3616,7 +3808,9 @@ class GuardManager {
     const uint64_t slow_start_ns =
         collect_stats ? guard_lookup_time_ns() : 0;
     bool result = false;
-    {
+    if (memo.partial) {
+      result = check_partial_shadow_nopybind(value, memo, &tokens);
+    } else {
       GuardSubtreeMemoRecorderScope recorder(&tokens);
       result = check_nopybind(value);
     }
@@ -3639,12 +3833,12 @@ class GuardManager {
 
     if (collect_stats) {
       record_guard_fastplan_shadow_pass(
-          candidate_kind, memo.tokens.size(), slow_check_ns);
+          candidate_kind, memo.partial, memo.tokens.size(), slow_check_ns);
     }
     if (memo.shadow_passes >= 3) {
       memo.enabled = true;
       if (collect_stats) {
-        record_guard_fastplan_enable(candidate_kind);
+        record_guard_fastplan_enable(candidate_kind, memo.partial);
       }
     }
     return true;
