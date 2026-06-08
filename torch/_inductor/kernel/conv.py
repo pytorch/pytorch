@@ -716,18 +716,6 @@ def convolution(
             n_spatial_dimensions=ndim,
         )
 
-    # Fallback when no choices are available (e.g., unsupported TRITON config)
-    # Only fallback if the user didn't explicitly request zero backends ("")
-    if not choices and torch._inductor.config.max_autotune_conv_backends != "":
-        choices.append(
-            aten_convolution.bind(
-                args,
-                layout,
-                ordered_kwargs_for_cpp_kernel,
-                **kwargs,
-            )
-        )
-
     node, _ = autotune_select_algorithm("convolution", choices, args, layout)
     return node
 
@@ -1149,35 +1137,28 @@ def convolution_backward_lowering(
     # and other unsupported configurations we must use the fallback_handler
     # which calls aten.convolution_backward.default directly.
     if not has_triton_dx_choices and not has_triton_dw_choices:
-        # Respect explicitly empty configurations to allow NoValidChoicesError
+        # We should only fallback if ATEN is a valid backend!
         allow_fallback = (
             torch._inductor.utils._use_conv_bwd_weight_autotune_backend("ATEN")
             or torch._inductor.utils._use_conv_bwd_input_autotune_backend("ATEN")
-            or (
-                torch._inductor.config.max_autotune_conv_bwd_weight_backends != ""
-                and torch._inductor.config.max_autotune_conv_bwd_input_backends != ""
-            )
         )
         if allow_fallback:
             return aten_convolution_backward_fallback(
-            grad_out,
-            input,
-            weight,
-            bias_sizes,
-            stride,
-            padding,
-            dilation,
-            transposed,
-            output_padding,
-            groups,
-            output_mask,
-        )
+                grad_out,
+                input,
+                weight,
+                bias_sizes,
+                stride,
+                padding,
+                dilation,
+                transposed,
+                output_padding,
+                groups,
+                output_mask,
+            )
 
     if output_mask[1]:
-        if torch._inductor.utils._use_conv_bwd_weight_autotune_backend("ATEN") or (
-            not has_triton_dw_choices
-            and torch._inductor.config.max_autotune_conv_bwd_weight_backends != ""
-        ):
+        if torch._inductor.utils._use_conv_bwd_weight_autotune_backend("ATEN"):
             choices_dw.append(
                 ext_kn_aten_dw.bind(
                     input_nodes=args_w,
@@ -1208,10 +1189,7 @@ def convolution_backward_lowering(
         )
 
     if output_mask[0]:
-        if torch._inductor.utils._use_conv_bwd_input_autotune_backend("ATEN") or (
-            not has_triton_dx_choices
-            and torch._inductor.config.max_autotune_conv_bwd_input_backends != ""
-        ):
+        if torch._inductor.utils._use_conv_bwd_input_autotune_backend("ATEN"):
             choices_dx.append(
                 ext_kn_aten_dx.bind(
                     input_nodes=args_x,
