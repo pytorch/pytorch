@@ -81,6 +81,29 @@ def elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND,
 ):
+    def common_device():
+        device = None
+        for arg in args:
+            if isinstance(arg, TensorLike):
+                arg_device = getattr(arg, "fake_device", arg.device)
+                if utils.is_cpu_scalar_tensor(arg):
+                    if device is None:
+                        device = arg_device
+                else:
+                    return arg_device
+        return device
+
+    cuda_strides = None
+    if (device := common_device()) is not None and device.type == "cuda":
+        # CUDA TensorIterator chooses the output layout from the original
+        # operands, before any dtype-promotion temporaries are created.
+        try:
+            cuda_strides = utils.compute_elementwise_output_strides(
+                *_maybe_broadcast(*args)
+            )
+        except ValueError:
+            pass
+
     # Perform type promotion, as this is expected from prim_metafunction
     _, result_dtype = utils.elementwise_dtypes(
         *args,
@@ -92,9 +115,15 @@ def elementwise_meta(
     args = _maybe_broadcast(*args)
 
     # Perform prim checks
-    return _prim_elementwise_meta(
+    out = _prim_elementwise_meta(
         *args, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
     )
+
+    if cuda_strides is not None and out.stride() != cuda_strides:
+        return torch.empty_strided(
+            out.shape, cuda_strides, dtype=out.dtype, device=out.device
+        )
+    return out
 
 
 def toRealValueType(dtype):

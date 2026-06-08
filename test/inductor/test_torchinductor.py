@@ -14574,6 +14574,102 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
+    def test_stft_backward_complex_strides(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA-specific TensorIterator stride behavior")
+
+        def fn(x):
+            return (
+                torch.stft(x, n_fft=32, hop_length=16, return_complex=True).abs().sum()
+            )
+
+        x = torch.randn(128, device=self.device, requires_grad=True)
+        ref_x = x.detach().clone().requires_grad_(True)
+
+        fn(ref_x).backward()
+        torch.compile(fn, backend="inductor")(x).backward()
+        torch.cuda.synchronize()
+
+        self.assertEqual(x.grad, ref_x.grad)
+
+    def test_ifftn_backward_complex_strides(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA-specific TensorIterator stride behavior")
+
+        def fn(x):
+            return torch.fft.ifftn(x).abs().sum()
+
+        x = torch.randn(
+            2, 8, 8, 8, device=self.device, dtype=torch.cfloat, requires_grad=True
+        )
+        ref_x = x.detach().clone().requires_grad_(True)
+
+        fn(ref_x).backward()
+        torch.compile(fn, backend="inductor")(x).backward()
+        torch.cuda.synchronize()
+
+        self.assertEqual(x.grad, ref_x.grad)
+
+    def test_fftn_backward_complex_strides(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA-specific TensorIterator stride behavior")
+
+        def fn(x):
+            return torch.fft.fftn(x).abs().sum()
+
+        x = torch.randn(2, 4, 4, 4, device=self.device, requires_grad=True)
+        ref_x = x.detach().clone().requires_grad_(True)
+
+        fn(ref_x).backward()
+        torch.compile(fn, backend="inductor")(x).backward()
+        torch.cuda.synchronize()
+
+        self.assertEqual(x.grad, ref_x.grad)
+
+    def test_rfftn_backward_complex_strides(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA-specific TensorIterator stride behavior")
+
+        def fn(x):
+            return torch.fft.rfftn(x).abs().sum()
+
+        x = torch.randn(4, 8, 8, device=self.device, requires_grad=True)
+        ref_x = x.detach().clone().requires_grad_(True)
+
+        fn(ref_x).backward()
+        torch.compile(fn, backend="inductor")(x).backward()
+        torch.cuda.synchronize()
+
+        self.assertEqual(x.grad, ref_x.grad)
+
+    def test_mixed_dtype_binary_pointwise_complex_strides_dynamic(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA-specific TensorIterator stride behavior")
+
+        def fn(scale, x):
+            return (scale.expand_as(x) + x).abs().sum()
+
+        scale = torch.ones((), device=self.device, dtype=torch.float32)
+        x = (
+            torch.randn(1, 9, 17, device=self.device, dtype=torch.cfloat)
+            .permute(0, 2, 1)
+            .squeeze(0)
+            .requires_grad_(True)
+        )
+        ref_x = (
+            x.detach().clone(memory_format=torch.preserve_format).requires_grad_(True)
+        )
+
+        ref = fn(scale, ref_x)
+        actual = torch.compile(fn, backend="inductor", dynamic=True)(scale, x)
+        self.assertEqual(actual, ref)
+
+        ref.backward()
+        actual.backward()
+        torch.cuda.synchronize()
+
+        self.assertEqual(x.grad, ref_x.grad)
+
     def test_searchsorted(self):
         def fn(sorted_sequence, values, out_int32, right, side, sorter):
             return torch.searchsorted(
