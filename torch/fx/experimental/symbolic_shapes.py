@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sympy
 from sympy import S
+from sympy.core.relational import Relational
 
 from torch._prims_common import BoolLike, FloatLike, IntLike
 
@@ -858,13 +859,13 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     if isinstance(expr, (sympy.And, sympy.Or)):
         return type(expr)(*map(canonicalize_bool_expr, expr.args))
 
-    if isinstance(expr, sympy.Rel) and (
-        not isinstance(expr.lhs, sympy.Expr) or not isinstance(expr.rhs, sympy.Expr)
+    if isinstance(expr, Relational) and not (
+        isinstance(expr.lhs, sympy.Expr) and isinstance(expr.rhs, sympy.Expr)
     ):
         return expr
 
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
-    t: type[Any]
+    t: type[Relational]
     if isinstance(expr, tuple(opposite.keys())):
         rhs = expr.lhs - expr.rhs  # type: ignore[attr-defined]
         t = opposite[type(expr)]  # type: ignore[index]
@@ -3772,6 +3773,32 @@ class DimConstraints:
 TLS = threading.local()
 
 
+def _ignore_fresh_unbacked_symbols_tls() -> bool:
+    return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
+
+
+def _ignore_fresh_unbacked_symbols_set(b: bool) -> bool:
+    prev = _ignore_fresh_unbacked_symbols_tls()
+    TLS.ignore_fresh_unbacked_symbols = b
+    return prev
+
+
+@contextmanager
+def _ignore_fresh_unbacked_symbols_tls_context() -> Generator[None, None, None]:
+    """
+    Indicates that newly allocated unbacked SymInts are intentionally discarded.
+
+    This is used by tracing-only metadata paths that do not own a ShapeEnv, but
+    still create temporary fake tensors whose fresh symbols should not be bound
+    into the surrounding graph.
+    """
+    prev = _ignore_fresh_unbacked_symbols_set(True)
+    try:
+        yield
+    finally:
+        _ignore_fresh_unbacked_symbols_set(prev)
+
+
 @dataclass(frozen=True, slots=True)
 class ShapeEnvSettings:
     """
@@ -4465,13 +4492,11 @@ class ShapeEnv:
                 self.replacements[b.node.expr] = new_var
 
     def _ignore_fresh_unbacked_symbols_tls(self) -> bool:
-        return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
+        return _ignore_fresh_unbacked_symbols_tls()
 
     @record_shapeenv_event()
     def _ignore_fresh_unbacked_symbols_set(self, b: bool) -> bool:
-        prev = self._ignore_fresh_unbacked_symbols_tls()
-        TLS.ignore_fresh_unbacked_symbols = b
-        return prev
+        return _ignore_fresh_unbacked_symbols_set(b)
 
     @contextmanager
     def ignore_fresh_unbacked_symbols(self) -> Generator[None, None, None]:
@@ -4479,11 +4504,8 @@ class ShapeEnv:
         Indicates that the newly allocated unbacked SymInts are being
         discarded
         """
-        prev = self._ignore_fresh_unbacked_symbols_set(True)
-        try:
+        with _ignore_fresh_unbacked_symbols_tls_context():
             yield
-        finally:
-            self._ignore_fresh_unbacked_symbols_set(prev)
 
     @record_shapeenv_event()
     def freeze(self) -> None:
