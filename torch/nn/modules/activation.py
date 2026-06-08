@@ -1512,6 +1512,18 @@ class MultiheadAttention(Module):
                 average_attn_weights=average_attn_weights,
                 is_causal=is_causal,
             )
+        if need_weights and attn_output_weights is not None:
+            if torch.isnan(attn_output_weights).any():
+                warnings.warn(
+                    "MultiheadAttention: attention weights contain NaN. "
+                    "This typically occurs when a query position has ALL keys "
+                    "masked (via attn_mask + key_padding_mask), causing softmax "
+                    "to produce NaN over an all-(-inf) row. This will cause NaN "
+                    "gradients during backward. Ensure every query attends to at "
+                    "least one key. See https://github.com/pytorch/pytorch/issues/41508",
+                    UserWarning,
+                )
+
         if self.batch_first and is_batched:
             attn_output = attn_output.transpose(1, 0)
             if fast_path_blocked_by_tracing:
