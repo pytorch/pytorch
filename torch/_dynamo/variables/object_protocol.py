@@ -38,6 +38,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    CellContentsSource,
     DictGetItemSource,
     GetItemSource,
     GlobalSource,
@@ -92,7 +93,10 @@ def vt_identity_compare(
         return NO_SUCH_SUBOBJ
 
     def source_identity_value_from_source(source: object) -> object:
-        if isinstance(source, (GlobalSource, LocalSource, TypeSource, NNModuleSource)):
+        if isinstance(
+            source,
+            (GlobalSource, LocalSource, TypeSource, NNModuleSource, CellContentsSource),
+        ):
             return tx.output.resolve_source_value(source)
         if isinstance(source, DictGetItemSource):
             return tx.output.resolve_source_value(source)

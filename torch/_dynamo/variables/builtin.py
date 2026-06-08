@@ -785,15 +785,40 @@ class BuiltinVariable(BaseBuiltinVariable):
                 # Tensor is None, List is not None, etc
                 none_result = op(object(), None)
 
-                def never(
+                def never_none(
                     tx: "InstructionTranslatorBase",
-                    a: VariableTracker,
-                    b: VariableTracker,
+                    left: VariableTracker,
+                    right: VariableTracker,
                 ) -> VariableTracker:
-                    return VariableTracker.build(tx, none_result)
+                    if (
+                        isinstance(left, ConstantVariable)
+                        and left.as_python_constant() is None
+                    ) or (
+                        isinstance(right, ConstantVariable)
+                        and right.as_python_constant() is None
+                    ):
+                        return VariableTracker.build(tx, none_result)
 
-                obj_op_none = never
-                none_op_obj = never
+                    if isinstance(left, SymNodeVariable) or isinstance(
+                        right, SymNodeVariable
+                    ):
+                        result = None
+                    else:
+                        result = vt_identity_compare(tx, left, right)
+                    if result is None:
+                        unimplemented(
+                            gb_type="unsupported identity comparison",
+                            context=f"{op.__name__}({left}, {right})",
+                            explanation="Dynamo could not prove a guarded result for this identity comparison.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                    is_same = result.as_python_constant()
+                    return VariableTracker.build(
+                        tx, is_same if op.__name__ == "is_" else not is_same
+                    )
+
+                obj_op_none = never_none
+                none_op_obj = never_none
 
                 types_that_are_never_none = (
                     TensorVariable,
@@ -2644,6 +2669,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         from .tensor import supported_tensor_comparison_op_values
 
         op = self.fn
+
+        if op in (operator.is_, operator.is_not):
+            unimplemented(
+                gb_type="unsupported identity comparison",
+                context=f"{op.__name__}({left}, {right})",
+                explanation="Dynamo could not prove a guarded result for this identity comparison.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
         if op not in supported_tensor_comparison_op_values:
             unimplemented(

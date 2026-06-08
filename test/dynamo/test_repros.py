@@ -82,6 +82,7 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfRocm,
     skipIfWindows,
+    skipIfXpu,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
@@ -8130,6 +8131,49 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(result.item(), 3.0)
         self.assertEqual(counter.frame_count, 1)
 
+    def test_is_with_symnode_and_non_none_constant_graph_breaks(self):
+        sentinel = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(t, out):
+            y = t.item()
+            if y is sentinel:
+                return out + 1
+            return out + 2
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+        ):
+            f(torch.tensor(1), torch.tensor(0))
+
+    def test_is_with_symnodes_graph_breaks(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(t, out):
+            left = t.item()
+            right = t.item()
+            if left is right:
+                return out + 1
+            return out + 2
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+        ):
+            f(torch.tensor(1), torch.tensor(0))
+
+    def test_is_not_with_symnodes_graph_breaks(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(t, out):
+            left = t.item()
+            right = t.item()
+            if left is not right:
+                return out + 1
+            return out + 2
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+        ):
+            f(torch.tensor(1), torch.tensor(0))
+
     def test_is_with_treespec_class_identity(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f(x):
@@ -8211,6 +8255,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         peak_mem2 = torch.get_device_module(device).max_memory_allocated()
         self.assertTrue(peak_mem1 == peak_mem2)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3860")
     # test involves custom ops that return unbacked symints
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     # test requires the activation memory budget code to think
@@ -8571,6 +8616,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mem_after = torch.accelerator.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3835")
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)
@@ -9890,8 +9936,10 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
 
 instantiate_parametrized_tests(ReproTests)
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(ReproTestsDevice, globals(), only_for=devices)
+devices = ["cuda", "hpu", "xpu"]
+instantiate_device_type_tests(
+    ReproTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
