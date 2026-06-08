@@ -686,7 +686,7 @@ auto handle_torch_function_no_python_arg_parser(
          << '\n';
     }
     ss << "\nFor more information, try re-running with TORCH_LOGS=not_implemented";
-    const std::string& tmp = ss.str();
+    const std::string& tmp = std::move(ss).str();
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
     throw python_error();
   }
@@ -1599,7 +1599,7 @@ std::string FunctionSignature::toString() const {
           signature.name,
           num_missing,
           num_missing == 1 ? "s" : "",
-          ss.str()));
+          std::move(ss).str()));
 }
 
 static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {

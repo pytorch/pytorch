@@ -333,7 +333,7 @@ void check_inputs(
     std::stringstream err;
     err << "inputs and outputs sequences have to be of the same length, but got input of length "
         << len << " and output of length " << outputs.size();
-    TORCH_CHECK(false, err.str());
+    TORCH_CHECK(false, std::move(err).str());
   }
 
   device_set devices;

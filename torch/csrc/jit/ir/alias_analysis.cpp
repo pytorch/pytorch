@@ -481,7 +481,7 @@ std::string AliasDb::toString() const {
     ss << '\n';
   }
   ss << '\n';
-  return ss.str();
+  return std::move(ss).str();
 }
 
 bool AliasDb::dumpToGraphvizFile(const char* filename) const {
@@ -550,7 +550,7 @@ std::string AliasDb::toGraphviz() const {
   }
 
   dot << "}\n";
-  return dot.str();
+  return std::move(dot).str();
 }
 
 void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
@@ -2013,7 +2013,7 @@ void Lint(const AliasDb* db) {
          << "It was defined in " << *v->node();
     }
   }
-  TORCH_INTERNAL_ASSERT(!failed, ss.str());
+  TORCH_INTERNAL_ASSERT(!failed, std::move(ss).str());
 
   // Two checks that we want to add but can't until the mutation API is more
   // fully developed.
