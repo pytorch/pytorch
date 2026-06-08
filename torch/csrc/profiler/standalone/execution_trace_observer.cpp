@@ -217,7 +217,7 @@ struct FunctionCallContext : public ObserverContext { // NOLINT
       }
       i++;
     }
-    result += "}";
+    result += '}';
     return result;
   }
 };
