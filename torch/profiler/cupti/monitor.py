@@ -133,7 +133,7 @@ def _require_cupti_python():
         from cupti import cupti as imported_cc  # pyrefly: ignore[missing-import]
     except ModuleNotFoundError as exc:
         raise ImportError(
-            "torch.profiler._cupti_monitor requires the cupti-python package. "
+            "torch.profiler.cupti.monitor requires the cupti-python package. "
             "Install cupti-python to use the experimental CUPTI monitor."
         ) from exc
 
