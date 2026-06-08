@@ -3178,7 +3178,6 @@
 - func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function
-  tags: cpu_dll_cuda_kernel
   dispatch:
     CPU, CUDA, MPS: _index_put_impl_
     QuantizedCPU: _index_put_impl_quantized_cpu_
@@ -8358,7 +8357,7 @@
 - func: masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  tags: [cpu_dll_quantized_cuda_kernel, pointwise]
+  tags: pointwise
   dispatch:
     CompositeExplicitAutograd: masked_fill
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_masked_fill

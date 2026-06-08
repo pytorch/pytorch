@@ -1571,20 +1571,10 @@ def get_ns_grouped_kernels(
                 )
             decls_merged_by_equivalence_key = ns_grouped_kernels[namespace]
             for decl in native_function_decl_gen(f, backend_idx):
-                # Skip whitespace-only decl strings so they are not stored in the map.
                 if not decl.strip():
                     continue
-                # Normalized multiline text: equal for two decls that differ only by leading TORCH_* /
-                # other DLL export macros, so they bucket as one logical forward declaration.
+                # Collapse decls that differ only by TORCH_* / static prefix (Windows linkage).
                 equivalence_key = _decl_equivalence_key_for_dll_macros(decl)
-                # For this C++ namespace we store at most one declaration string per equivalence_key
-                # (same key when two decl strings only differ by TORCH_* DLL macros or static on the
-                # same signature).
-                # decls_merged_by_equivalence_key.get(equivalence_key) is None the first time we see
-                # this key, otherwise it is the declaration we already stored for that key.
-                # _merge_native_decl_variants(previous, decl): if previous is None, the result is decl;
-                # if previous is set, the result is one chosen string from the two (prefers TORCH_API,
-                # then static, else keeps previous). The assignment saves that single result here (replacing the old one for that key).
                 decls_merged_by_equivalence_key[equivalence_key] = _merge_native_decl_variants(
                     decls_merged_by_equivalence_key.get(equivalence_key), decl
                 )
@@ -1606,9 +1596,7 @@ def get_native_function_declarations_from_ns_grouped_kernels(
             entity_name="",
             max_level=4,
         )
-        # Convert to a set first to remove duplicate kernel names. Backends are
-        # allowed to repeat kernel names; only generate the declaration once!
-        # get_ns_grouped_kernels already merges decls that share a DLL-macro equivalence key.
+        # Backends may repeat kernel names; keep one declaration per string.
         ordered_kernels = list(OrderedDict.fromkeys(kernels))
         declarations.extend(
             f"""

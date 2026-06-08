@@ -38,8 +38,7 @@ def torch_api_key_word_prefix(backend_index: BackendIndex) -> str:
     return "TORCH_API"
 
 
-# Native forward-decl export macro: dispatch-key default, or TORCH_API when cpu_dll_* yaml marks
-# the CUDA-family kernel as defined in torch_cpu (TORCH_CUDA_CPP_API would mis-declare it for torch_cuda on Windows).
+# See tags.yaml for cpu_dll_* tag semantics; shared-name kernels are merged in get_ns_grouped_kernels.
 def dll_export_macro_for_kernel(
     backend_index: BackendIndex,
     g: NativeFunction | NativeFunctionsGroup | None,
@@ -85,7 +84,8 @@ def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> list
     metadata = backend_index.get_kernel(g)
     if metadata is None:
         return []
-    prefix = dll_export_macro_for_kernel(backend_index, g) + " "
+    macro = dll_export_macro_for_kernel(backend_index, g)
+    prefix = f"{macro} " if macro else ""
     return [
         f"""\
 struct {prefix}structured_{metadata.kernel} : public at::meta::structured_{meta_name} {{

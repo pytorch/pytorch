@@ -114,13 +114,12 @@
           Deprecated, does nothing. Use "out" instead.
 - tag: cpu_dll_cuda_kernel
   desc: |
-          This tag indicates a CUDA/HIP-dispatch kernel defined in a translation unit linked into
-          torch_cpu (shared aten/src/ATen/native/*.cpp). On Windows, torchgen emits
-          TORCH_API for the at::native forward declaration so it matches torch_cpu.dll
-          linkage (avoids dllimport from torch_cuda for a symbol exported from torch_cpu).
+          Windows linkage metadata (not operator semantics). Required only when a CUDA-family
+          dispatch uses a kernel name distinct from CPU/other backends and the implementation
+          lives in a torch_cpu TU. Shared-name kernels (e.g. CPU, CUDA: foo) are merged to
+          TORCH_API automatically; see torchgen/gen.py get_ns_grouped_kernels.
 - tag: cpu_dll_quantized_cuda_kernel
   desc: |
-          This tag indicates the QuantizedCUDA dispatch forward declaration only: the implementation
-          lives in torch_cpu while other CUDA-family dispatches on the same op may live in
-          torch_cuda. On Windows, torchgen emits TORCH_API only when the backend index is
-          QuantizedCUDA.
+          Windows linkage metadata (not operator semantics). Like cpu_dll_cuda_kernel, but only
+          overrides the QuantizedCUDA forward declaration when that dispatch lives in torch_cpu
+          while other CUDA-family dispatches on the same op live in torch_cuda.

@@ -10,6 +10,7 @@ from tools.autograd import gen_autograd_functions, load_derivatives
 
 from torchgen import dest
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
+from torchgen.dest.native_functions import dll_export_macro_for_kernel
 from torchgen.context import native_function_manager
 from torchgen.gen import (
     get_native_function_declarations,
@@ -325,6 +326,127 @@ TORCH_LIBRARY(custom2, m) {
   m.def("func() -> bool", {});
 
 };""",
+        )
+
+
+_WINDOWS_DLL_LINKAGE_TAGS = {
+    "cpu_dll_cuda_kernel",
+    "cpu_dll_quantized_cuda_kernel",
+}
+
+
+def _build_backend_indices_from_yaml(
+    yaml_entries: list[dict],
+) -> tuple[list[NativeFunction], dict[DispatchKey, BackendIndex]]:
+    raw_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = (
+        defaultdict(dict)
+    )
+    native_functions: list[NativeFunction] = []
+    for entry in yaml_entries:
+        func, indices = NativeFunction.from_yaml(
+            entry,
+            loc=Location(__file__, 1),
+            valid_tags=_WINDOWS_DLL_LINKAGE_TAGS,
+        )
+        native_functions.append(func)
+        BackendIndex.grow_index(raw_indices, indices)
+    backend_indices = {
+        k: BackendIndex(
+            dispatch_key=k,
+            use_out_as_primary=True,
+            external=False,
+            device_guard=False,
+            index=raw_indices[k],
+        )
+        for k in raw_indices
+    }
+    return native_functions, backend_indices
+
+
+class TestNativeDeclDllExportMacro(unittest.TestCase):
+    def test_cuda_distinct_kernel_uses_torch_cuda_cpp_api(self) -> None:
+        native_function, backend_indices = _build_backend_indices_from_yaml(
+            [
+                {
+                    "func": "cuda_only_op(Tensor self) -> Tensor",
+                    "dispatch": {"CUDA": "cuda_only_kernel"},
+                }
+            ]
+        )
+        decl = dest.compute_native_function_declaration(
+            native_function[0], backend_indices[DispatchKey.CUDA]
+        )
+        self.assertEqual(len(decl), 1)
+        self.assertTrue(decl[0].startswith("TORCH_CUDA_CPP_API "))
+        self.assertIn("cuda_only_kernel(", decl[0])
+
+    def test_cpu_dll_cuda_kernel_tag_uses_torch_api(self) -> None:
+        native_function, backend_indices = _build_backend_indices_from_yaml(
+            [
+                {
+                    "func": "count_nonzero_cuda(Tensor self) -> Tensor",
+                    "dispatch": {"CUDA": "count_nonzero_cuda"},
+                    "tags": ["cpu_dll_cuda_kernel"],
+                }
+            ]
+        )
+        decl = dest.compute_native_function_declaration(
+            native_function[0], backend_indices[DispatchKey.CUDA]
+        )
+        self.assertEqual(len(decl), 1)
+        self.assertTrue(decl[0].startswith("TORCH_API "))
+        self.assertIn("count_nonzero_cuda(", decl[0])
+
+    def test_shared_cpu_cuda_kernel_merges_to_single_torch_api_decl(self) -> None:
+        native_functions, backend_indices = _build_backend_indices_from_yaml(
+            [
+                {
+                    "func": "shared_op(Tensor self) -> Tensor",
+                    "dispatch": {"CPU": "shared_op", "CUDA": "shared_op"},
+                }
+            ]
+        )
+        declaration = get_native_function_declarations(
+            grouped_native_functions=native_functions,
+            backend_indices=backend_indices,
+            native_function_decl_gen=dest.compute_native_function_declaration,
+        )
+        joined = "\n".join(declaration)
+        self.assertEqual(joined.count("shared_op("), 1)
+        self.assertIn("TORCH_API ", joined)
+        self.assertIn("shared_op(", joined)
+        self.assertNotIn("TORCH_CUDA_CPP_API", joined)
+
+    def test_cpu_dll_quantized_cuda_kernel_tag_overrides_quantized_cuda_only(
+        self,
+    ) -> None:
+        native_function, backend_indices = _build_backend_indices_from_yaml(
+            [
+                {
+                    "func": "masked_fill_.Scalar(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)",
+                    "dispatch": {
+                        "CPU": "masked_fill__cpu",
+                        "CUDA": "masked_fill__cuda",
+                        "QuantizedCUDA": "masked_fill__quantized_cuda",
+                    },
+                    "tags": ["cpu_dll_quantized_cuda_kernel"],
+                }
+            ]
+        )
+        func = native_function[0]
+        self.assertEqual(
+            dll_export_macro_for_kernel(backend_indices[DispatchKey.CPU], func),
+            "TORCH_API",
+        )
+        self.assertEqual(
+            dll_export_macro_for_kernel(backend_indices[DispatchKey.CUDA], func),
+            "TORCH_CUDA_CPP_API",
+        )
+        self.assertEqual(
+            dll_export_macro_for_kernel(
+                backend_indices[DispatchKey.QuantizedCUDA], func
+            ),
+            "TORCH_API",
         )
 
 
