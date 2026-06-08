@@ -92,14 +92,12 @@ kernel void mpp_gemm(
       auto mA = tA.template slice<dynamic_extent, BM>(0, m_off);
       auto mB = tB.template slice<BN, dynamic_extent>(n_off, 0);
       auto mC = tC.template slice<BN, BM>(n_off, m_off);
-      auto cT = op.template get_destination_cooperative_tensor<decltype(mA), decltype(mB), float>();
-      op.run(mA, mB, cT);
       auto cO = op.template get_destination_cooperative_tensor<decltype(mA), decltype(mB), OUT_T>();
       if IF_CONSTEXPR (EPI == GemmEpilogue::None) {
-        for (uint16_t i = 0; i < cT.get_capacity(); ++i) {
-          cO[i] = (OUT_T)cT[i];
-        }
+        op.run(mA, mB, cO);
       } else {
+        auto cT = op.template get_destination_cooperative_tensor<decltype(mA), decltype(mB), float>();
+        op.run(mA, mB, cT);
         uint16_t e = 0;
         for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
           auto idx = it.get_multidimensional_index(); // [col, row]
@@ -114,17 +112,17 @@ kernel void mpp_gemm(
       auto mA = tA.slice(0, m_off);
       auto mB = tB.slice(n_off, 0);
       auto mC = tC.slice(n_off, m_off);
-      auto cT = op.template get_destination_cooperative_tensor<decltype(mA), decltype(mB), float>();
-      op.run(mA, mB, cT);
       auto cO = op.template get_destination_cooperative_tensor<decltype(mA), decltype(mB), OUT_T>();
-      uint16_t e = 0;
-      for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
-        if (!cT.is_valid_element(e)) {
-          continue;
-        }
-        if IF_CONSTEXPR (EPI == GemmEpilogue::None) {
-          cO[e] = (OUT_T)cT[e];
-        } else {
+      if IF_CONSTEXPR (EPI == GemmEpilogue::None) {
+        op.run(mA, mB, cO);
+      } else {
+        auto cT = op.template get_destination_cooperative_tensor<decltype(mA), decltype(mB), float>();
+        op.run(mA, mB, cT);
+        uint16_t e = 0;
+        for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
+          if (!cT.is_valid_element(e)) {
+            continue;
+          }
           auto idx = it.get_multidimensional_index();
           int r = m_off + int(idx[1]);
           int c = n_off + int(idx[0]);

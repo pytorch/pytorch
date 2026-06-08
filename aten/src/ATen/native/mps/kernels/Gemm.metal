@@ -296,8 +296,15 @@ MB_MPP_TILES(MB_MPP_FP, float)
   MAC(DT, 32, 256, 4) MAC(DT, 64, 32, 2) MAC(DT, 128, 32, 4)   \
   MAC(DT, 192, 32, 2) MAC(DT, 128, 64, 4)
 
+// Thin-N candidates. They are intentionally untransposed/low-precision only:
+// the packed thin-N autotuner is the only path that can select them.
+#define MB_MPP_UNTRANS_THIN_N_TILES(MAC, DT) \
+  MAC(DT, 512, 64, 32) MAC(DT, 256, 128, 32)
+
 MB_MPP_UNTRANS_TILES(MB_MPP_UNTRANS_LP, half)
 MB_MPP_UNTRANS_TILES(MB_MPP_UNTRANS_LP, bfloat)
+MB_MPP_UNTRANS_THIN_N_TILES(MB_MPP_UNTRANS_LP, half)
+MB_MPP_UNTRANS_THIN_N_TILES(MB_MPP_UNTRANS_LP, bfloat)
 MB_MPP_UNTRANS_TILES(MB_MPP_UNTRANS_FP, float)
 
 // ---------------------------------------------------------------------------

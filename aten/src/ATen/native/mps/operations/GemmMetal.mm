@@ -599,9 +599,26 @@ std::pair<std::vector<TensorTile>, double> mpp_tensor_tile_candidates(
     return {{primary}, kAutotuneMargin};
   }
   if (mn <= 256 && mx >= 1024) {
+    if (N == 64 && M >= 4096 && K >= 2048) {
+      return {{TensorTile{32, 64, 2}}, kAutotuneMargin};
+    }
+    if (N == 128 && M >= 4096 && K >= 2048) {
+      const TensorTile thin_n_tile =
+          M >= 8192 ? TensorTile{256, 128, 32} : TensorTile{512, 64, 32};
+      return {{thin_n_tile}, kAutotuneMargin};
+    }
+    if (N == 256 && M >= 4096 && K >= 2048) {
+      return {{primary}, kAutotuneMargin};
+    }
     std::vector<TensorTile> extra = {
         {128, 32, 2}, {256, 32, 4}, {32, 128, 2}, {32, 256, 4},
         {64, 64, 2}, {64, 32, 2}, {32, 64, 2}};
+    if (N == 128 && M >= 1024) {
+      extra.push_back({512, 64, 32});
+      if (M >= 8192) {
+        extra.push_back({256, 128, 32});
+      }
+    }
     if (mn <= 48) {
       extra.insert(extra.begin(), {{16, 64, 2}, {32, 64, 2}, {32, 128, 4}});
     }
@@ -673,7 +690,7 @@ struct ConvSpec {
 };
 
 bool is_splitk_regime(int64_t M, int64_t N, int64_t K, c10::ScalarType dt) {
-  return dt != kFloat && K >= 2048 && std::min(M, N) >= 64 && M * N <= 1500000 &&
+  return dt != kFloat && K >= 2048 && std::min(M, N) > 128 && M * N <= 1500000 &&
       (std::min(M, N) <= 256 || K >= 8 * std::max(M, N));
 }
 std::vector<SplitKSpec> splitk_specs(int64_t K) {
@@ -694,7 +711,9 @@ bool conv_k_supported(int64_t K) {
   return K == 512 || K == 1024 || K == 2048 || K == 4096;
 }
 bool is_conv_regime(int64_t M, int64_t N, int64_t K, c10::ScalarType dt) {
-  return dt != kFloat && N <= 64 && N % 32 == 0 && M >= 512 && conv_k_supported(K);
+  const bool use_n64_conv = N < 64 || M > 4096;
+  return dt != kFloat && N <= 64 && use_n64_conv && N % 32 == 0 && M >= 512 &&
+      conv_k_supported(K);
 }
 std::vector<ConvSpec> conv_specs(int64_t M, int64_t N) {
   std::vector<ConvSpec> s;
