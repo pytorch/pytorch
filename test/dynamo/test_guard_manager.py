@@ -1172,6 +1172,135 @@ print(json.dumps({
             any(value["attempt"] > 0 for value in stats["top_path_values"])
         )
 
+    def test_guard_fast_plan_subtree_memo_records_hits(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+model = Mod()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+modules_mgr.add_dict_length_check_guard(
+    len(model._modules), ["len(L['self']._modules) == 1"]
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "enabled": stats["guard_fastplan_enabled"],
+    "candidate": stats["guard_fastplan_candidate"],
+    "shadow_pass": stats["guard_fastplan_shadow_pass"],
+    "enable": stats["guard_fastplan_enable"],
+    "hit": stats["guard_fastplan_hit"],
+    "miss": stats["guard_fastplan_miss"],
+    "disabled": stats["guard_fastplan_disabled"],
+    "token_count_sum": stats["guard_fastplan_token_count_sum"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["enabled"])
+        self.assertGreater(stats["candidate"], 0)
+        self.assertGreater(stats["shadow_pass"], 0)
+        self.assertGreater(stats["enable"], 0)
+        self.assertGreater(stats["hit"], 0)
+        self.assertEqual(stats["miss"], 0)
+        self.assertEqual(stats["disabled"], 0)
+        self.assertGreater(stats["token_count_sum"], 0)
+
+    def test_guard_fast_plan_subtree_memo_miss_disables_and_falls_back(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+
+model = Mod()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", model, GuardManagerType.GUARD_MANAGER
+)
+dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", model.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    model._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+modules_mgr.add_dict_length_check_guard(
+    len(model._modules), ["len(L['self']._modules) == 1"]
+)
+
+f_locals = {"self": model}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+model.extra = torch.nn.ReLU()
+assert not root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "enabled": stats["guard_fastplan_enabled"],
+    "hit": stats["guard_fastplan_hit"],
+    "miss": stats["guard_fastplan_miss"],
+    "disabled": stats["guard_fastplan_disabled"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertTrue(stats["enabled"])
+        self.assertGreater(stats["hit"], 0)
+        self.assertGreater(stats["miss"], 0)
+        self.assertGreater(stats["disabled"], 0)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
