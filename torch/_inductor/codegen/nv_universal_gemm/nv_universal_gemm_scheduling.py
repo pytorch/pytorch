@@ -201,9 +201,16 @@ class NVUniversalGemmScheduling(BaseScheduling):
         device = ctb.layout.device
         device_index = device.index if device.index is not None else 0
 
+        import torch
+
+        device_capability = None
+        if torch.cuda.is_available():
+            device_capability = torch.cuda.get_device_capability(device_index)
+
         return {
             "precompile_shapes": precompile_shapes,
             "precompile_strides": precompile_strides,
             "precompile_dtypes": precompile_dtypes,
             "device_index": device_index,
+            "device_capability": device_capability,
         }

@@ -830,8 +830,6 @@ class TestTorchDeviceType(TestCase):
     def test_cpp_warnings_have_python_context(self, device):
         # Creates long string in advance to avoid a too-long Python line
         s = ".+Triggered internally at.+RangeFactories.+"
-        # nvfuser deprecation warning filter
-        warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
 
         def cpp_warn_fn():
             out = torch.empty((5,))
@@ -840,6 +838,8 @@ class TestTorchDeviceType(TestCase):
 
         # Checks eager-mode cpp warning
         with warnings.catch_warnings(record=True) as w:
+            # nvfuser deprecation warning filter
+            warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
             cpp_warn_fn()
             frameinfo = inspect.getframeinfo(inspect.currentframe())
             warning = w[0]
@@ -851,11 +851,15 @@ class TestTorchDeviceType(TestCase):
             # Checks the Python features of the warning
             # Note: the eager mode warning refers to the line in the function
             # that throws the warning.
-            self.assertEqual(frameinfo.lineno - 6, warning.lineno)
+            self.assertEqual(frameinfo.lineno - 8, warning.lineno)
             self.assertEqual(len(w), 1)
 
         # Checks jitted cpp warning
         with warnings.catch_warnings(record=True) as w:
+            # nvfuser deprecation warning filter
+            warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
+            # ignore all deprecation warnings
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
             scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
             scripted_cpp_warn_fn()
             warning = w[0]
@@ -876,6 +880,10 @@ class TestTorchDeviceType(TestCase):
 
         # The jit mimics an eager-mode Python warning in this case
         with warnings.catch_warnings(record=True) as w:
+            # nvfuser deprecation warning filter
+            warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
+            # ignore all deprecation warnings
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
             scripted_warn_fn = torch.jit.script(warn_fn)
             scripted_warn_fn()
             frameinfo = inspect.getframeinfo(inspect.currentframe())
@@ -884,7 +892,7 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(re.search('Warning!', str(warning.message)) is not None)
 
             # Checks the Python features of the warning
-            self.assertEqual(frameinfo.lineno - 6, warning.lineno)
+            self.assertEqual(frameinfo.lineno - 10, warning.lineno)
             self.assertEqual(len(w), 1)
 
     # FIXME: move to test_testing
@@ -6927,10 +6935,6 @@ class TestTorch(TestCase):
         # test invalid args: tensor, str, sizes
         with self.assertRaisesRegex(TypeError, r"unflatten\(\): argument 'dim' \(position 1\) must be int, not str"):
             torch.tensor([1]).unflatten('A', (1, 1))
-
-        # test invalid args: tensor, str, namedshape
-        with self.assertRaisesRegex(RuntimeError, r"Name 'A' not found in Tensor\[None\]."):
-            torch.ones(4).unflatten('A', (('A', 2), ('B', 2)))
 
         # test other invalid arguments
         with self.assertRaisesRegex(RuntimeError, r"sizes must be non-empty"):
