@@ -1,4 +1,4 @@
-![PyTorch Logo](https://github.com/importstring/pytorch/raw/main/docs/source/_static/img/pytorch-logo-light.png)
+![PyTorch Logo](https://github.com/importstring/pytorch/raw/main/docs/source/_static/img/pytorch-logo-highlight.png)
 
 --------------------------------------------------------------------------------
 
