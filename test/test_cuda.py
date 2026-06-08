@@ -252,10 +252,6 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/148607",
-    )
     @serialTest()
     def test_host_memory_stats(self):
         # Helper functions
