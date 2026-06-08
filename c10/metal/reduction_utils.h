@@ -1,10 +1,12 @@
 #pragma once
 
+#include <ATen/native/ReductionType.h>
 #include <c10/metal/utils.h>
 #include <metal_compute>
 
 namespace c10 {
 namespace metal {
+using at::native::ReductionType;
 namespace detail {
 template <typename T>
 struct simd_type {
@@ -412,6 +414,23 @@ IDX_T threadgroup_argmin(
   }
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
   return idx_data[0];
+}
+
+template <typename T>
+constexpr inline T get_initial_value(ReductionType reduction_type) {
+  switch (reduction_type) {
+    case ReductionType::SUM:
+    case ReductionType::MEAN:
+      return T(0);
+    case ReductionType::MAX:
+      return T(-INFINITY);
+    case ReductionType::MIN:
+      return T(INFINITY);
+    case ReductionType::PROD:
+      return T(1);
+    default:
+      return T(0);
+  }
 }
 
 } // namespace metal
