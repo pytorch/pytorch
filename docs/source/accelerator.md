@@ -62,3 +62,14 @@
      reset_accumulated_memory_stats
      reset_peak_memory_stats
 ```
+
+## Random Number Generator
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+     get_rng_state
+     get_rng_state_all
+     initial_seed
+```
