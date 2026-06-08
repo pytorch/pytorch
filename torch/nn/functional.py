@@ -20,6 +20,7 @@ from torch._jit_internal import (
     BroadcastingList1,
     BroadcastingList2,  # pyrefly: ignore [missing-module-attribute]
     BroadcastingList3,  # pyrefly: ignore [missing-module-attribute]
+    unused as _jit_unused,
 )
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
@@ -944,6 +945,17 @@ max_pool3d = boolean_dispatch(
 )
 
 
+@_jit_unused
+def _check_unpool_output_size(output_size: list[int], dim: int) -> None:
+    torch._check_value(
+        output_size[dim] >= 0,
+        lambda: (
+            "max_unpooling: output_size must contain non-negative spatial "
+            f"dimensions, but got output_size[{dim}]={output_size[dim]}"
+        ),
+    )
+
+
 def _unpool_output_size(
     input: Tensor,
     kernel_size: list[int],
@@ -978,6 +990,16 @@ def _unpool_output_size(
                 )
 
         ret = output_size
+    if torch.jit.is_scripting():
+        for d in range(len(kernel_size)):
+            if ret[d] < 0:
+                raise ValueError(
+                    "max_unpooling: output_size must contain non-negative spatial "
+                    f"dimensions, but got output_size[{d}]={ret[d]}"
+                )
+    else:
+        for d in range(len(kernel_size)):
+            _check_unpool_output_size(ret, d)
     return ret
 
 
@@ -1115,6 +1137,12 @@ def lp_pool3d(
             ceil_mode=ceil_mode,
         )
     kd, kw, kh = _triple(kernel_size)
+    if isinstance(norm_type, (int, float)):
+        if norm_type == float("inf"):
+            return max_pool3d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool3d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1156,6 +1184,12 @@ def lp_pool2d(
             ceil_mode=ceil_mode,
         )
     kw, kh = _pair(kernel_size)
+    if isinstance(norm_type, (int, float)):
+        if norm_type == float("inf"):
+            return max_pool2d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool2d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1193,6 +1227,12 @@ def lp_pool1d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
+    if isinstance(norm_type, (int, float)):
+        if norm_type == float("inf"):
+            return max_pool1d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool1d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:

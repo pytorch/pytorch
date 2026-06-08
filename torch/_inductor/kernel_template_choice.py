@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from .template_heuristics.params import DictKernelTemplateParams
+from .heuristics.template.params import DictKernelTemplateParams
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
     from .codegen.common import KernelTemplate
+    from .heuristics.template.params import KernelTemplateParams
     from .ir import ChoiceCaller, Layout
     from .kernel_inputs import KernelInputs
     from .select_algorithm import ExternKernelChoice
-    from .template_heuristics.params import KernelTemplateParams
 
 
 class KernelTemplateChoice:

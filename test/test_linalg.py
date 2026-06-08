@@ -4362,9 +4362,9 @@ class TestLinalg(TestCase):
 
             # Tolerance scales with the contraction dimension: the U @ H and
             # U^H @ U products accumulate O(m) rounding terms, which exceeds the
-            # default tolerance for low precision at larger sizes. The complex
-            # CUDA path (SVD-based, since cuSOLVER Xpolar is real-only) is the
-            # least tight, so leave generous headroom.
+            # default tolerance at the larger sizes below. The complex CUDA path
+            # (SVD-based, since cuSOLVER Xpolar is real-only) is the least tight,
+            # so leave generous headroom.
             eps = torch.finfo(dtype).eps
             atol, rtol = 50 * m * eps, 50 * m * eps
 
@@ -4395,7 +4395,8 @@ class TestLinalg(TestCase):
         # matrix with a wide spread of singular values (cond ~ 1e8) and check
         # the polar factors still reconstruct it.
         n = 64
-        Q, _ = torch.linalg.qr(make_tensor((n, n), device=device, dtype=dtype))
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        Q, _ = torch.linalg.qr(make_fullrank(n, n, device=device, dtype=dtype))
         s = torch.logspace(0, -8, n, device=device, dtype=dtype)
         A = (Q * s) @ Q.mH
         U, H = torch.linalg.polar(A)
@@ -4405,20 +4406,25 @@ class TestLinalg(TestCase):
         self.assertEqual(U @ H, A, atol=atol, rtol=atol)
         eye = torch.eye(n, device=device, dtype=dtype)
         self.assertEqual(U.mH @ U, eye, atol=atol, rtol=atol)
+        # H is symmetric/Hermitian positive-semidefinite.
+        self.assertEqual(H, H.mH, atol=atol, rtol=atol)
+        self.assertGreaterEqual(torch.linalg.eigvalsh(H).min().item(), -atol)
 
     @skipCUDAIfNoCusolver
     @skipIfNoNvmath
     @dtypes(torch.float, torch.double)
     def test_polar_matches_svd(self, device, dtype):
-        # On CUDA with nvmath present, the cuSOLVER QDWH (Xpolar) path and the
-        # SVD-based aten kernel should agree on the polar factors. Invoke the
-        # Xpolar kernel directly so the comparison exercises it specifically,
-        # and check the reported residual is small.
+        # On CUDA with nvmath present, the cuSOLVER Xpolar path and the SVD-based
+        # aten kernel should agree on the polar factors. Invoke the Xpolar kernel
+        # directly so the comparison exercises it specifically, and check the
+        # reported residual is small. A full-rank input makes the polar
+        # decomposition unique, so the two algorithms must match exactly.
         if torch.device(device).type != "cuda":
-            self.skipTest("cuSOLVER QDWH path is CUDA-only")
+            self.skipTest("cuSOLVER Xpolar path is CUDA-only")
         from torch._native.ops.polar import nvmath_impl as nv
 
-        A = make_tensor((32, 16), device=device, dtype=dtype, low=-2, high=2)
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        A = make_fullrank(32, 16, device=device, dtype=dtype)
         U, H, residual = nv.polar_xpolar(A, return_residual=True)
         self.assertLess(residual.item(), 1e-6)
         # SVD-based reference (the aten kernel that backs the CPU/fallback path).
@@ -4479,10 +4485,12 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             torch.linalg.polar(A, out=(U, H))
 
-        # Mis-sized outputs -> resized to the correct shape.
+        # Mis-sized outputs -> resized to the correct shape (with the standard
+        # deprecation warning that resizing a non-empty out tensor emits).
         U = torch.empty((4, 2), device=device, dtype=dtype)
         H = torch.empty((1, 1), device=device, dtype=dtype)
-        torch.linalg.polar(A, out=(U, H))
+        with self.assertWarnsRegex(UserWarning, "An output with one or more elements"):
+            torch.linalg.polar(A, out=(U, H))
         self.assertEqual(U.shape, (8, 4))
         self.assertEqual(H.shape, (4, 4))
         self.assertEqual(U @ H, A)
@@ -4491,15 +4499,25 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoCusolver
     @dtypes(torch.float, torch.double)
     def test_polar_noncontiguous(self, device, dtype):
-        # A transposed (non-contiguous) input must still decompose correctly.
-        base = make_tensor((4, 8), device=device, dtype=dtype, low=-2, high=2)
-        A = base.mT  # (8, 4), column-major
+        def check(A):
+            U, H = torch.linalg.polar(A)
+            self.assertEqual(U @ H, A)
+            # Outputs follow the contiguous layout the meta function promises.
+            self.assertTrue(U.is_contiguous())
+            self.assertTrue(H.is_contiguous())
+
+        # Column-major (transposed) input: one matrix dim still has unit stride.
+        A = make_tensor((4, 8), device=device, dtype=dtype, low=-2, high=2).mT
         self.assertFalse(A.is_contiguous())
-        U, H = torch.linalg.polar(A)
-        self.assertEqual(U @ H, A)
-        # Outputs follow the contiguous layout the meta function promises.
-        self.assertTrue(U.is_contiguous())
-        self.assertTrue(H.is_contiguous())
+        check(A)
+
+        # Fully non-dense input: a strided slice where neither matrix dim has a
+        # unit stride, exercising the general (non-row/col-major) layout path.
+        base = make_tensor((16, 8), device=device, dtype=dtype, low=-2, high=2)
+        A = base[::2, ::2]  # (8, 4), strides (16, 2) -- no unit stride
+        self.assertFalse(A.is_contiguous())
+        self.assertNotIn(1, A.stride())
+        check(A)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
