@@ -683,6 +683,39 @@ class TestStructuredCodegen(TestCase):
         self.assertEqual(ret.cpu(), torch.tensor([1.0, 2.0, 3.0]))
         self.assertEqual(out.cpu(), torch.tensor([1.0, 2.0, 3.0]))
 
+    def test_minimum_define_meta_captured_by_compile(self):
+        """define_meta puts the backend's meta() on the aten Meta key, so
+        torch.compile / FakeTensor shape propagation use it instead of aten's.
+        Assert the backend kernel is the active Meta registration for
+        aten::minimum, and that FakeTensor and torch.compile both produce the
+        broadcast shape with eager parity."""
+        # The generated registration overrides aten's meta on the Meta key.
+        dump = torch._C._dispatch_dump("aten::minimum")
+        active_meta = [
+            line for line in dump.splitlines() if line.strip().startswith("Meta:")
+        ]
+        self.assertEqual(len(active_meta), 1, dump)
+        self.assertIn("RegisterPrivateUse1", active_meta[0])
+
+        # The Meta key is device-agnostic, so FakeTensor shape-props through the
+        # backend meta even for CPU inputs (this is a global override of aten's).
+        with torch._subclasses.fake_tensor.FakeTensorMode() as fake_mode:
+            fx = fake_mode.from_tensor(torch.empty(1, 3))  # (1, 3)
+            fy = fake_mode.from_tensor(torch.empty(2, 1))  # (2, 1)
+            self.assertEqual(torch.minimum(fx, fy).shape, torch.Size([2, 3]))
+
+        # torch.compile traces through that meta and matches eager.
+        x = torch.tensor([[1.0, 5.0, 3.0]], device="openreg")  # (1, 3)
+        y = torch.tensor([[4.0], [2.0]], device="openreg")  # (2, 1)
+
+        def fn(a, b):
+            return torch.minimum(a, b)
+
+        eager = fn(x, y)
+        compiled = torch.compile(fn, backend="aot_eager")(x, y)
+        self.assertEqual(compiled.shape, torch.Size([2, 3]))
+        self.assertEqual(compiled.cpu(), eager.cpu())
+
     # div.out is registered non-structured (out-as-primary only): the backend
     # supplies div_out via TORCH_PRIVATEUSE1_FUNC and torchgen derives the functional
     # and inplace variants from it.

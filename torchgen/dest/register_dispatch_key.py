@@ -403,7 +403,6 @@ class RegisterDispatchKey:
         allocation_logic = ""
         call_args = []
 
-        out_sig = self.wrapper_kernel_sig(g.out)
         if k is SchemaKind.functional:
             args = f.func.arguments
             options_expr = ""
