@@ -7483,39 +7483,40 @@ class ExternKernel(InputsKernel):
             op_name = "unknown_op"
         return op_name
 
-    def should_assert_size_stride(self) -> bool:
-        if (
+    def is_inplace_view(self) -> bool:
+        return (
             isinstance(self.op_overload, torch._ops.OpOverload)
             and torch.Tag.inplace_view in self.op_overload.tags
-        ):
-            return False
-        return True
+        )
 
     def should_assert_dtype(self, op_name: str) -> bool:
         # FakeTensor does not support quantized meta tensors today, so
         # quantize_per_tensor's fake dtype intentionally remains non-quantized.
-        return not op_name.startswith("torch.ops.aten.quantize_per_tensor.") and (
-            self.op_overload
-            not in (
-                torch.ops.aten.quantize_per_tensor.default,
-                torch.ops.aten.quantize_per_tensor.tensor_qparams,
+        return (
+            not self.is_inplace_view()
+            and not op_name.startswith("torch.ops.aten.quantize_per_tensor.")
+            and (
+                self.op_overload
+                not in (
+                    torch.ops.aten.quantize_per_tensor.default,
+                    torch.ops.aten.quantize_per_tensor.tensor_qparams,
+                )
             )
         )
 
     def codegen_size_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if not config.size_asserts:
             return
-        if not self.should_assert_size_stride():
+        if self.is_inplace_view() and not V.graph.cpp_wrapper:
             return
         op_name = self.get_op_name()
         name = self.get_name()
         if V.graph.cpp_wrapper:
             # inplace_view ops (e.g. set_.source_Tensor) don't declare an
             # output variable; assert on the mutated input instead.
-            if isinstance(self.op_overload, torch._ops.OpOverload):
-                if torch.Tag.inplace_view in self.op_overload.tags:
-                    assert isinstance(self.inputs[0], IRNode)
-                    name = self.inputs[0].get_name()
+            if self.is_inplace_view():
+                assert isinstance(self.inputs[0], IRNode)
+                name = self.inputs[0].get_name()
         size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
         stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
         dtype = self.get_dtype() if self.should_assert_dtype(op_name) else None

@@ -480,9 +480,14 @@ inline void assert_size_stride(
     int32_t expected_dtype = -1,
     const char* expected_dtype_name = nullptr) {
   std::string op_msg = op_name ? std::string("\nError in op: ") + op_name : "";
+  bool is_defined = true;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(tensor, &is_defined));
+  if (!is_defined) {
+    return;
+  }
+  int32_t dtype = 0;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &dtype));
   if (expected_dtype >= 0) {
-    int32_t dtype = 0;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &dtype));
     if (dtype != expected_dtype) {
       std::string dtype_name = expected_dtype_name
           ? std::string(expected_dtype_name)
@@ -537,7 +542,7 @@ inline void assert_size_stride(
   if (num_errors) {
     AOTI_RUNTIME_CHECK(
         false,
-        msg.str() + op_msg +
+        std::move(msg).str() + op_msg +
             "\nThis error most often comes from a incorrect fake (aka meta) "
             "kernel for a custom op."
             "\nUse torch.library.opcheck to test your custom op."
