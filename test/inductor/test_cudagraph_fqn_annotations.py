@@ -41,10 +41,10 @@ from torch.testing._internal.common_utils import run_tests, TemporaryFileName, T
 class LeafModule(nn.Module):
     def __init__(self, dim):
         super().__init__()
-        self.weight = nn.Parameter(torch.ones(dim))
+        self.linear = nn.Linear(dim, dim)
 
     def forward(self, x):
-        return x * self.weight + 1.0
+        return self.linear(x)
 
 
 class LayerBlock(nn.Module):
