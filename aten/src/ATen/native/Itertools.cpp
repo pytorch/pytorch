@@ -81,8 +81,11 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   }
   c10::SymInt num_elements = self.sym_numel();
   c10::SymInt num_combinations = calculate_num_combinations(num_elements, r, with_replacement);
-  Tensor mask = _triu_mask(std::move(num_elements), r, with_replacement, self.options());
-  Tensor indices = at::nonzero_static_symint(mask, num_combinations);
+  Tensor indices;
+  {
+    Tensor mask = _triu_mask(std::move(num_elements), r, with_replacement, self.options());
+    indices = at::nonzero_static_symint(mask, num_combinations);
+  }
   return self.index_select(0, indices.flatten()).view_symint({num_combinations, r});
 }
 
