@@ -2,6 +2,7 @@
 import multiprocessing
 import os
 import queue
+import sys
 import tempfile
 import textwrap
 import traceback
@@ -271,6 +272,34 @@ class TestAsyncCompile(TestCase):
             AsyncCompile.wait_pool_ready()
             self.assertTrue(AsyncCompile._ready_future.done())
             self.assertTrue(AsyncCompile.use_process_pool())
+
+    def test_subprocess_pool_registers_multiprocessing_finalizer(self):
+        class FakeSubprocPool:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def shutdown(self):
+                pass
+
+        shutdown_compile_workers()
+        try:
+            with (
+                config.patch(worker_start_method="subprocess", compile_threads=2),
+                patch("torch._inductor.async_compile.SubprocPool", FakeSubprocPool),
+                patch(
+                    "torch._inductor.async_compile.multiprocessing.util.Finalize"
+                ) as finalize,
+            ):
+                pool = AsyncCompile.process_pool()
+
+                finalize.assert_called_once()
+                args, kwargs = finalize.call_args
+                self.assertIsNone(args[0])
+                self.assertIs(args[1].__self__, pool)
+                self.assertIs(args[1].__func__, FakeSubprocPool.shutdown)
+                self.assertEqual(kwargs, {"exitpriority": sys.maxsize})
+        finally:
+            shutdown_compile_workers()
 
     @requires_gpu()
     @requires_triton()
