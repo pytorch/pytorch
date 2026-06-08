@@ -1418,15 +1418,23 @@ def aot_export_joint_with_descriptors(
         # increase its scope
         stack.enter_context(compiled_autograd._disable())
 
-        aot_state = create_aot_state(
-            stack,
-            functional_call,
-            fake_flat_args,
-            full_args_descs,
-            aot_config,
-            fake_mode,
-            shape_env,
-        )
+        tracing_context = torch._guards.TracingContext.try_get()
+        if tracing_context is None:
+            tracing_context = torch._guards.TracingContext(fake_mode)
+            tracing_ctx = torch._guards.tracing(tracing_context)
+        else:
+            tracing_ctx = nullcontext()
+
+        with torch.compiler._non_strict_tracing_context(), tracing_ctx:
+            aot_state = create_aot_state(
+                stack,
+                functional_call,
+                fake_flat_args,
+                full_args_descs,
+                aot_config,
+                fake_mode,
+                shape_env,
+            )
         aot_state.fw_metadata.act_input_indices = act_input_indices
 
         # NB: no cache lookup!
