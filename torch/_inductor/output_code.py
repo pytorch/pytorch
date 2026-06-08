@@ -32,7 +32,12 @@ from typing import Any, cast, TYPE_CHECKING, TypeAlias
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, get_runtime_metrics_context
-from torch._guards import compile_context, CompileContext, detect_fake_mode
+from torch._guards import (
+    active_fake_mode,
+    compile_context,
+    CompileContext,
+    detect_fake_mode,
+)
 from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
@@ -56,7 +61,7 @@ from torch._inductor.utils import (
     set_tracing_context_output_strides,
 )
 from torch._opaque_base import OpaqueBase
-from torch._subclasses.fake_tensor import fake_tensor_tls, get_plain_tensors
+from torch._subclasses.fake_tensor import fake_tensor_tls, FakeTensor, get_plain_tensors
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
@@ -87,7 +92,21 @@ log = logging.getLogger(__name__)
 def _allow_fake_mode_to_fakify_compiled_region_tensors(
     inputs: Sequence[Any],
 ) -> Iterator[None]:
-    fake_mode = detect_fake_mode(inputs)
+    fake_mode = active_fake_mode()
+    if fake_mode is None:
+        for input in pytree.tree_leaves(inputs):
+            if isinstance(input, FakeTensor):
+                fake_mode = input.fake_mode
+                break
+            if is_traceable_wrapper_subclass(input):
+                plain_tensors: list[torch.Tensor | int | torch.SymInt | OpaqueBase] = []
+                get_plain_tensors(input, out=plain_tensors)
+                for plain_tensor in plain_tensors:
+                    if isinstance(plain_tensor, FakeTensor):
+                        fake_mode = plain_tensor.fake_mode
+                        break
+            if fake_mode is not None:
+                break
     if fake_mode is None:
         yield
         return
@@ -1272,7 +1291,6 @@ class RegionalOutputCode(OutputCode):
             return
         assert self._serialized_graph_module is not None
         # Get fake mode from example inputs
-        from torch._guards import detect_fake_mode
 
         fake_mode = detect_fake_mode(example_inputs)
         if fake_mode is None:

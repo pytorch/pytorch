@@ -345,7 +345,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
         input = fn(torch.ones(n, n, 10) * (self.rank + 1.0))
         output = fn(torch.zeros(10))
         expected_output = fn(torch.ones(10) * (n + 1) * n / 2)
-        fut = pg._reduce_scatter_base(output, input).get_future()
+        fut = pg.reduce_scatter_single(output, input).get_future()
         fut.wait()
         result = fut.value()
         self.assertEqual(result[0], expected_output)
