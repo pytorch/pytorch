@@ -866,8 +866,8 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         out = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
         self.assertEqual(out.count("torch.ops.aten._assert_scalar.default"), 2)
-        self.assertIn("l_y_ + 5", out)
-        self.assertIn("l_x_.size(0)", out)
+        self.assertRegex(out, r"l_(y|args_1)_ \+ 5")
+        self.assertRegex(out, r"l_(x|args_0)_\.size\(0\)")
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_split_aot_autograd(self):
