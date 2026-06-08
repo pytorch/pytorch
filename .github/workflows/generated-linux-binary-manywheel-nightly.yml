@@ -53,7 +53,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge.memory.ephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 280
     container:
       image: pytorch/manylinux2_28-builder:cpu
     env:
@@ -138,7 +138,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge.memory.ephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 280
     container:
       image: pytorch/manylinux2_28-builder:cuda12.6
     env:
@@ -224,7 +224,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge.memory.ephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 280
     container:
       image: pytorch/manylinux2_28-builder:cuda13.0
     env:
@@ -310,7 +310,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge.memory.ephemeral"
-    timeout-minutes: 240
+    timeout-minutes: 280
     container:
       image: pytorch/manylinux2_28-builder:cuda13.2
     env:
@@ -425,7 +425,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_10-xpu"
-            timeout_minutes: 240
+            timeout_minutes: 280
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0"
           - desired_python: "3.11"
             desired_cuda: "rocm7.1"
@@ -452,7 +452,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_11-xpu"
-            timeout_minutes: 240
+            timeout_minutes: 280
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0"
           - desired_python: "3.12"
             desired_cuda: "rocm7.1"
@@ -479,7 +479,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_12-xpu"
-            timeout_minutes: 240
+            timeout_minutes: 280
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0"
           - desired_python: "3.13"
             desired_cuda: "rocm7.1"
@@ -506,7 +506,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_13-xpu"
-            timeout_minutes: 240
+            timeout_minutes: 280
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0"
           - desired_python: "3.14"
             desired_cuda: "rocm7.1"
@@ -533,7 +533,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_14-xpu"
-            timeout_minutes: 240
+            timeout_minutes: 280
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0"
           - desired_python: "3.14t"
             desired_cuda: "rocm7.1"
@@ -560,7 +560,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_14t-xpu"
-            timeout_minutes: 240
+            timeout_minutes: 280
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0"
           - desired_python: "3.15"
             desired_cuda: "rocm7.1"
@@ -580,6 +580,15 @@ jobs:
             build_name: "manywheel-py3_15-rocm7_2"
             timeout_minutes: 420
             pytorch_extra_install_requirements: ""
+          - desired_python: "3.15"
+            desired_cuda: "xpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "xpu"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "xpu"
+            build_name: "manywheel-py3_15-xpu"
+            timeout_minutes: 280
+            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0"
           - desired_python: "3.15t"
             desired_cuda: "rocm7.1"
             gpu_arch_version: "7.1"
@@ -598,6 +607,15 @@ jobs:
             build_name: "manywheel-py3_15t-rocm7_2"
             timeout_minutes: 420
             pytorch_extra_install_requirements: ""
+          - desired_python: "3.15t"
+            desired_cuda: "xpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "xpu"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "xpu"
+            build_name: "manywheel-py3_15t-xpu"
+            timeout_minutes: 280
+            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0"
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -1078,6 +1096,18 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_14t-xpu"
+          - desired_python: "3.15"
+            desired_cuda: "xpu"
+            gpu_arch_type: "xpu"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "xpu"
+            build_name: "manywheel-py3_15-xpu"
+          - desired_python: "3.15t"
+            desired_cuda: "xpu"
+            gpu_arch_type: "xpu"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "xpu"
+            build_name: "manywheel-py3_15t-xpu"
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -1436,6 +1466,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_15-rocm7_2"
+          - desired_python: "3.15"
+            desired_cuda: "xpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "xpu"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "xpu"
+            build_name: "manywheel-py3_15-xpu"
           - desired_python: "3.15t"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -1478,6 +1515,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_15t-rocm7_2"
+          - desired_python: "3.15t"
+            desired_cuda: "xpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "xpu"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "xpu"
+            build_name: "manywheel-py3_15t-xpu"
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel

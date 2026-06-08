@@ -688,7 +688,6 @@ def _produce_aten_artifact(
     _preserve_requires_grad_pass(
         gm, export_graph_signature, fake_params_buffers, constants, flat_fake_args
     )
-    _normalize_slice_default_bounds(gm)
 
     return ATenExportArtifact(
         gm,
@@ -696,68 +695,6 @@ def _produce_aten_artifact(
         constants,
         inferred_out_spec=graph_signature.out_spec,
     )
-
-
-def _normalize_slice_default_bounds(gm: torch.fx.GraphModule) -> None:
-    """Represent traced Python slice defaults with aten.slice schema defaults."""
-
-    def is_plain_int(value, expected) -> bool:
-        return (
-            isinstance(value, int) and not isinstance(value, bool) and value == expected
-        )
-
-    def is_traced_tensor_getitem(node: torch.fx.Node) -> bool:
-        torch_fn = node.meta.get("torch_fn")
-        return (
-            isinstance(torch_fn, tuple)
-            and len(torch_fn) == 2
-            and torch_fn[1] == "wrapper_descriptor.__getitem__"
-        )
-
-    for _mod in gm.modules():
-        if not isinstance(_mod, torch.fx.GraphModule):
-            continue
-
-        graph_changed = False
-        for node in _mod.graph.nodes:
-            if (
-                node.op != "call_function"
-                or node.target is not torch.ops.aten.slice.Tensor
-            ):
-                continue
-            if not is_traced_tensor_getitem(node):
-                continue
-
-            node_changed = False
-            saw_default_end = False
-            args = list(node.args)
-            kwargs = dict(node.kwargs)
-
-            if len(args) > 3 and is_plain_int(args[3], sys.maxsize):
-                args[3] = None
-                node_changed = True
-                saw_default_end = True
-            if "end" in kwargs and is_plain_int(kwargs["end"], sys.maxsize):
-                kwargs["end"] = None
-                node_changed = True
-                saw_default_end = True
-
-            if saw_default_end:
-                if len(args) > 2 and is_plain_int(args[2], 0):
-                    args[2] = None
-                    node_changed = True
-                if "start" in kwargs and is_plain_int(kwargs["start"], 0):
-                    kwargs["start"] = None
-                    node_changed = True
-
-            if node_changed:
-                node.args = tuple(args)
-                node.kwargs = kwargs
-                graph_changed = True
-
-        if graph_changed:
-            _mod.graph.lint()
-            _mod.recompile()
 
 
 def _rename_constants_nodes(
@@ -1863,12 +1800,13 @@ def _export_to_aten_ir_make_fx(
         with enable_python_dispatcher():
             ctx = nullcontext()
             non_strict_root = getattr(mod, "_export_root", None)
+            assigned_buffers: dict[str, str] = {}
+            hook = None
             if non_strict_root is not None:
                 ctx = _detect_attribute_assignment(non_strict_root)  # type: ignore[assignment]
 
                 # For any buffer that is assigned, we want to associate it to the final proxy node
                 # that it is assigned to. This node can then be copied into the buffer.
-                assigned_buffers: dict[str, str] = {}
                 hook = register_buffer_assignment_hook(
                     non_strict_root, assigned_buffers
                 )
@@ -1969,16 +1907,21 @@ def _export_to_aten_ir_make_fx(
                 finally:
                     torch._C._set_grad_enabled(old_state)
 
-            with (
-                ctx,
-                override_getattribute_for_subclasses(flat_args),
-                _maybe_restore_grad_state(),
-            ):
-                gm = make_fx(
-                    wrapped_fn,
-                    record_module_stack=True,
-                    pre_dispatch=True,
-                )(*flat_args)
+            try:
+                with (
+                    ctx,
+                    override_getattribute_for_subclasses(flat_args),
+                    _maybe_restore_grad_state(),
+                ):
+                    gm = make_fx(
+                        wrapped_fn,
+                        record_module_stack=True,
+                        pre_dispatch=True,
+                    )(*flat_args)
+            finally:
+                if hook is not None:
+                    hook.remove()
+                    hook = None
 
             if non_strict_root is not None:
                 input_names = _graph_input_names(gm)
@@ -1989,7 +1932,7 @@ def _export_to_aten_ir_make_fx(
                 }
                 output_node = list(gm.graph.nodes)[-1]
                 # We copy nodes corresponding to buffer assignments to buffers in the graph.
-                for buf, name in assigned_buffers.items():  # type: ignore[possibly-undefined]
+                for buf, name in assigned_buffers.items():
                     buf_node = _find_node(gm, buffer_input_names[buf])
                     name_node = _find_node(gm, name)
                     with gm.graph.inserting_before(output_node):
@@ -1999,8 +1942,6 @@ def _export_to_aten_ir_make_fx(
                             args=(buf_node, name_node),
                         )
                         new_node.meta = name_node.meta
-
-                hook.remove()  # type: ignore[possibly-undefined]
 
             def _is_impure(node):
                 if node.op == "call_function" and node.target in (

@@ -97,12 +97,31 @@ foreach(sanitizer_name IN ITEMS address thread undefined leak memory)
     endif()
 
     if(sanitizer_name STREQUAL "address")
+      # Include HIP language so HIP-side TUs update libstdc++ container
+      # annotations consistently with cpu-side; without this the cpu-side
+      # _M_realloc_insert sets up redzones that the inlined HIP-side
+      # emplace_back fast path doesn't update, producing spurious
+      # container-overflow reports.
       target_compile_definitions(
         Sanitizer::${sanitizer_name}
         INTERFACE
-          $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:_GLIBCXX_SANITIZE_VECTOR>
-          $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:_GLIBCXX_SANITIZE_STD_ALLOCATOR>
+          $<$<AND:$<COMPILE_LANGUAGE:CXX,HIP>,$<BOOL:$__CXX_${sanitizer_name}_res>>:_GLIBCXX_SANITIZE_VECTOR>
+          $<$<AND:$<COMPILE_LANGUAGE:CXX,HIP>,$<BOOL:$__CXX_${sanitizer_name}_res>>:_GLIBCXX_SANITIZE_STD_ALLOCATOR>
       )
+      # Work around a Clang ASAN instrumentation issue where the global
+      # metadata references the original (potentially unaligned) global
+      # instead of the __sanitized_padded_global. Without private aliases,
+      # globals can end up at non-8-byte-aligned offsets, causing an
+      # unconditional alignment check failure in the ASAN runtime that is
+      # not suppressible via detect_odr_violation=0. Especially needed
+      # under ROCm Clang where ASAN + UBSan together exhibit the issue.
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(
+          Sanitizer::${sanitizer_name}
+          INTERFACE
+          "SHELL:-mllvm -asan-use-private-alias=1"
+        )
+      endif()
       target_link_options(
         Sanitizer::${sanitizer_name}
         INTERFACE
