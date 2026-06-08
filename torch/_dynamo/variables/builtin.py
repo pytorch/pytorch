@@ -19,6 +19,7 @@ handled during symbolic execution, either by executing them directly when safe
 or by creating appropriate graph nodes when needed.
 """
 
+import abc
 import ast
 import builtins
 import contextlib
@@ -419,6 +420,42 @@ class BaseBuiltinVariable(VariableTracker):
                     )
             return generic_repr(tx, arg)
         return super().call_method(tx, name, args, kwargs)
+
+
+def _uses_custom_instancecheck(type_info: Any) -> bool:
+    if isinstance(type_info, tuple):
+        return any(_uses_custom_instancecheck(item) for item in type_info)
+    if isinstance(type_info, types.UnionType):
+        return any(
+            _uses_custom_instancecheck(item) for item in typing.get_args(type_info)
+        )
+    if typing.get_origin(type_info) is typing.Union:
+        return any(
+            _uses_custom_instancecheck(item) for item in typing.get_args(type_info)
+        )
+    if isinstance(type_info, type):
+        instancecheck = getattr(type(type_info), "__instancecheck__", None)
+        if type_info in tensortype_to_dtype:
+            return False
+        if issubclass(type_info, torch.Tensor) and (
+            instancecheck is type.__instancecheck__
+            or (
+                type(type_info).__module__,
+                type(type_info).__qualname__,
+            )
+            in {
+                ("torch.nn.parameter", "_ParameterMeta"),
+                ("torch.nn.parameter", "_BufferMeta"),
+                ("torch.distributed.fsdp._flat_param", "_FlatParameterMeta"),
+            }
+        ):
+            return False
+        return (
+            instancecheck is not None
+            and instancecheck is not type.__instancecheck__
+            and instancecheck is not abc.ABCMeta.__instancecheck__
+        )
+    return False
 
 
 class BuiltinVariable(BaseBuiltinVariable):
@@ -2244,6 +2281,15 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
         isinstance_type = isinstance_type_var.as_python_constant()
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
+            if _uses_custom_instancecheck(isinstance_type):
+                unimplemented(
+                    gb_type="builtin isinstance() with custom __instancecheck__ on tensor",
+                    context=f"isinstance({arg}, {isinstance_type})",
+                    explanation="Dynamo cannot soundly trace arbitrary custom "
+                    "__instancecheck__ hooks on tensor values because the hook "
+                    "may read external mutable state.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
 
             def _tensor_isinstance(
                 tensor_var: VariableTracker, tensor_type: Any
