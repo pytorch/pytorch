@@ -1064,7 +1064,13 @@ typename std::enable_if_t<std::is_integral_v<T>> atomic_add(
     T offset) {
   static_assert(sizeof(std::atomic<T>) == sizeof(T), "std::atomic issue");
   std::atomic<T>* atomic_addr = (std::atomic<T>*)addr;
-  atomic_addr->fetch_add(offset, std::memory_order_relaxed);
+  if constexpr (std::is_same_v<T, bool>) {
+    if (offset) {
+      atomic_addr->store(true, std::memory_order_relaxed);
+    }
+  } else {
+    atomic_addr->fetch_add(offset, std::memory_order_relaxed);
+  }
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
@@ -1077,6 +1083,29 @@ void atomic_add_vec(
   constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
   static_assert(len <= at::vec::VectorizedN<T, NV>::size());
   __at_align__ std::array<T, len> tmpbuf;
+  __at_align__ std::array<int64_t, len> tmpidx;
+  offset.store(tmpbuf.data(), len);
+  index.store(tmpidx.data(), len);
+  int size = tail_size.has_value() ? tail_size.value() : len;
+  for (int i = 0; i < size; i++) {
+    atomic_add(addr + tmpidx[i], tmpbuf[i]);
+  }
+}
+
+template <
+    typename T,
+    int NI,
+    int NV,
+    typename mask_t,
+    std::enable_if_t<std::is_same_v<T, bool>, int> = 0>
+void atomic_add_vec(
+    T* addr,
+    at::vec::VectorizedN<int64_t, NI> index,
+    at::vec::VecMask<mask_t, NV> offset,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
+  static_assert(len <= at::vec::VecMask<mask_t, NV>::size());
+  __at_align__ std::array<bool, len> tmpbuf;
   __at_align__ std::array<int64_t, len> tmpidx;
   offset.store(tmpbuf.data(), len);
   index.store(tmpidx.data(), len);

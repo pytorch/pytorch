@@ -1472,6 +1472,25 @@ class CPUReproTests(TestCase):
             torch.compile(fn)(y_clone, index0_clone, index1_clone)
             self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
 
+    def test_index_put_bool_accumulate_codegen(self):
+        # https://github.com/pytorch/pytorch/issues/113692
+        def fn(x, index, values):
+            x = x.clone()
+            x.index_put_((index,), values, accumulate=True)
+            return x
+
+        x = torch.tensor([False, False, True, False], dtype=torch.bool)
+        index = torch.tensor([0, 1, 1, 3], dtype=torch.int64)
+        values = torch.tensor([True, True, False, True], dtype=torch.bool)
+
+        expected = fn(x, index, values)
+        with patch(
+            "torch._inductor.lowering.index_put_fallback",
+            side_effect=AssertionError("unexpected CPU index_put fallback"),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(x, index, values)
+        self.assertEqual(actual, expected)
+
     def test_index_add(self):
         # https://github.com/pytorch/pytorch/issues/138908
         def fn(x, y, scale_y, index):
