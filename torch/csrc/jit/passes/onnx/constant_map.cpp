@@ -297,7 +297,7 @@ void ConstantValueMap::PrintMaps() {
       }
     }
     ss << " (rank = " << x.second << ')';
-    std::cout << "node " << x.first << ": " << ss.str() << '\n';
+    std::cout << "node " << x.first << ": " << std::move(ss).str() << '\n';
   }
   std::cout << '\n';
   std::cout << "Value Map:" << '\n';
