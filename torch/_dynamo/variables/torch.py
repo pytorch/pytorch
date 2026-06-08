@@ -2248,7 +2248,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return tx.symbolic_torch_function_state.mode_stack[ind]
 
-
         @register(torch.utils._python_dispatch._get_current_dispatch_mode_stack)
         def handle_get_current_dispatch_mode_stack(
             self,
