@@ -2,6 +2,7 @@
 
 import torch
 import torch._inductor.config as inductor_config
+import torch.nn.functional as F
 from torch._C import FileCheck
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch._higher_order_ops import (
@@ -9,6 +10,7 @@ from torch._higher_order_ops import (
     baddbmm_epilogue,
     bmm_epilogue,
     gemm_epilogue_fusion,
+    grouped_mm_epilogue,
     matmul_epilogue,
     mm_epilogue,
 )
@@ -120,6 +122,16 @@ class GemmEpilogueFusionTests(TestCase):
         with self.assertRaisesRegex(NotImplementedError, "2D mm and 3D bmm"):
             matmul_epilogue(torch.randn(3), torch.randn(3), lambda acc: acc.relu())
 
+    def test_grouped_mm_epilogue_eager_matches_reference(self):
+        m_sizes = torch.tensor([16, 32], dtype=torch.int32)
+        offs = torch.cumsum(m_sizes, dim=0).to(torch.int32)
+        a = torch.randn(int(offs[-1]), 8, dtype=torch.bfloat16)
+        b = torch.randn(2, 8, 16, dtype=torch.bfloat16)
+
+        actual = grouped_mm_epilogue(a, b, lambda acc: acc.relu(), offs=offs)
+
+        torch.testing.assert_close(actual, F.grouped_mm(a, b, offs=offs).relu())
+
     def test_cutlass_backend_is_accepted(self):
         a = torch.randn(2, 3)
         b = torch.randn(3, 4)
@@ -166,6 +178,29 @@ class GemmEpilogueFusionTests(TestCase):
         self.assertIn("{'backend': 'TRITON'}", gm.code)
         self.assertIn("aten.mm.default", gm.gemm_epilogue_fusion_body_0.code)
         self.assertIn("relu", gm.gemm_epilogue_fusion_body_0.code)
+
+    @requires_cuda_and_triton
+    @inductor_config.patch(max_autotune_gemm=False)
+    def test_cuda_inductor_grouped_mm_epilogue_fuses(self):
+        if torch.cuda.get_device_capability() < (9, 0):
+            self.skipTest("TRITON grouped_mm template requires SM90+")
+
+        def fn(a, b, offs):
+            return grouped_mm_epilogue(a, b, lambda acc: acc.relu(), offs=offs)
+
+        m_sizes = torch.tensor([64, 96], device="cuda", dtype=torch.int32)
+        offs = torch.cumsum(m_sizes, dim=0).to(torch.int32)
+        a = torch.randn(int(offs[-1]), 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, offs
+        )
+
+        torch.testing.assert_close(actual, fn(a, b, offs), atol=1e-2, rtol=1e-2)
+        FileCheck().check("triton_").check("grouped_mm").check_not(
+            "extern_kernels._grouped_mm"
+        ).run(code)
 
     @requires_cuda_and_triton
     @inductor_config.patch(max_autotune_gemm=False)

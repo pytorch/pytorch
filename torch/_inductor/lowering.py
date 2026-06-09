@@ -8414,10 +8414,12 @@ def hints_wrapper_lowering(subgraph, args, kwargs, hints):
 def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     backend = kernel_options.get("backend", "TRITON")
     if backend == "QUACK":
-        if gemm_op not in GEMM_EPILOGUE_OPS:
+        if gemm_op not in GEMM_EPILOGUE_OPS or not GEMM_EPILOGUE_OPS[
+            gemm_op
+        ].supports_quack:
             raise NotImplementedError(
                 "QUACK GEMM epilogue backend currently supports only "
-                f"aten.{_SUPPORTED_GEMM_OP_NAMES}"
+                f"aten.{_SUPPORTED_GEMM_OP_NAMES} excluding grouped_mm"
             )
         from torch._inductor.kernel.quack_gemm_epilogue import (
             quack_gemm_epilogue_template,
