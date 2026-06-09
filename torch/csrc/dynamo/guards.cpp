@@ -5811,7 +5811,7 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
 static bool torch_function_mode_stack_guard_matches(const void* guard) {
   return guard != nullptr &&
       static_cast<const TORCH_FUNCTION_MODE_STACK*>(guard)
-          ->check_nopybind_template(nullptr);
+          ->check_nopybind_template(static_cast<PyObject*>(nullptr));
 }
 
 class DISPATCH_KEY_SET_MATCH : public LeafGuard {
