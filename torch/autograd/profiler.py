@@ -849,14 +849,14 @@ def _maybe_cupti_monitor():
     if not _cupti_monitor_checked:
         _cupti_monitor_checked = True
         try:
-            from torch.profiler.cupti import monitor as _cupti_monitor
+            from torch.profiler._cupti import monitor as _cupti_monitor
 
             _cupti_monitor_module = _cupti_monitor
         except ModuleNotFoundError:
             pass
         except Exception:
             log.warning(
-                "Unexpected error importing torch.profiler.cupti.monitor",
+                "Unexpected error importing torch.profiler._cupti.monitor",
                 exc_info=True,
             )
     return _cupti_monitor_module
