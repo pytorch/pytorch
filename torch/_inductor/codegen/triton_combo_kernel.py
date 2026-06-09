@@ -4,10 +4,14 @@ import textwrap
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 import sympy
 from sympy import Integer, Symbol
+
+
+if TYPE_CHECKING:
+    import triton
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -468,6 +472,7 @@ class ComboKernel(Kernel):
         self.num_warps = 8
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
+        self.no_bench_stitched_config: triton.Config | None = None
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel
@@ -622,7 +627,7 @@ class ComboKernel(Kernel):
     def select_combo_heuristics(
         self, heuristics_list: list[str], size_hints_list: list[dict[str, int]]
     ) -> tuple[str, dict[str, int], TritonKernel]:
-        if not self.enable_autotune:
+        if not self.enable_autotune and self.no_bench_stitched_config is None:
             return "foreach", size_hints_list[0], self.sub_kernels[0]
         if "reduction" in heuristics_list:
             i, _ = max(
@@ -835,9 +840,16 @@ class ComboKernel(Kernel):
 
     def codegen_blocks(self, code: IndentedBuffer) -> None:
         has_yblock = any(self.y_tree_list)
+        stitched_kwargs = (
+            self.no_bench_stitched_config.kwargs
+            if self.no_bench_stitched_config is not None
+            else None
+        )
 
         for block in self.block_args:
-            if "YBLOCK" in block:
+            if stitched_kwargs is not None and block in stitched_kwargs:
+                size = stitched_kwargs[block]
+            elif "YBLOCK" in block:
                 size = self.block_size_2d
             elif "XBLOCK" in block:
                 size = self.block_size_2d if has_yblock else self.block_size_1d
@@ -1101,7 +1113,7 @@ class ComboKernel(Kernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                f"ms = benchmarker.benchmark(call, fn_args=(args,), device={device.type},rep=40)"
+                f"ms = benchmarker.benchmark(call, fn_args=(args,), device='{device.type}',rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -1185,7 +1197,17 @@ class ComboKernel(Kernel):
 
         if not self.enable_autotune:
             default_config: dict[str, int] = {}
-            if self.per_subkernel_blocks:
+            if self.no_bench_stitched_config is not None:
+                stitched = self.no_bench_stitched_config
+                default_config = {
+                    k: int(v) for k, v in stitched.kwargs.items() if "BLOCK" in k
+                }
+                meta["stitched_backend_kwargs"] = {
+                    k: v for k, v in stitched.kwargs.items() if "BLOCK" not in k
+                }
+                meta["stitched_num_warps"] = stitched.num_warps
+                meta["stitched_num_stages"] = stitched.num_stages
+            elif self.per_subkernel_blocks:
                 # Per-subkernel block sizes: XBLOCK_0, XBLOCK_1, etc.
                 for num, sub_kernel in enumerate(self.sub_kernels):
                     if sub_kernel.no_x_dim:
