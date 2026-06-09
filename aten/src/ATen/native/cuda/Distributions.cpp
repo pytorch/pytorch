@@ -13,6 +13,7 @@
 #include <ATen/ops/_standard_gamma_native.h>
 #include <ATen/ops/binomial_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/poisson_native.h>
 #endif
 
@@ -21,7 +22,7 @@ namespace at::native {
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor _s_poisson_cuda(const Tensor& lambda, std::optional<Generator> gen_) {
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  Tensor ret = at::empty(lambda.sizes(), lambda.options());
+  Tensor ret = at::empty_like(lambda);
   launch_poisson_cuda_kernel(ret, lambda, gen);
   return ret;
 }
@@ -37,7 +38,7 @@ Tensor _s_binomial_cuda(const Tensor& count, const Tensor& prob, std::optional<G
       "binomial only supports floating-point dtypes for prob, got: ",
       prob.scalar_type());
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  Tensor ret = at::empty(count.sizes(), count.options());
+  Tensor ret = at::empty_like(count);
   at::TensorIterator iter = at::TensorIteratorConfig()
       .add_output(ret)
       .add_input(count)
@@ -50,7 +51,7 @@ Tensor _s_binomial_cuda(const Tensor& count, const Tensor& prob, std::optional<G
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor _s_gamma_cuda(const Tensor& alpha, std::optional<Generator> gen_) {
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  Tensor ret = at::empty(alpha.sizes(), alpha.options());
+  Tensor ret = at::empty_like(alpha);
   launch_gamma_kernel(ret, alpha, gen);
   return ret;
 }
@@ -58,7 +59,7 @@ Tensor _s_gamma_cuda(const Tensor& alpha, std::optional<Generator> gen_) {
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor _s_dirichlet_cuda(const Tensor& alpha, std::optional<Generator> gen_) {
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  Tensor ret = at::empty(alpha.sizes(), alpha.options());
+  Tensor ret = at::empty_like(alpha);
   launch_gamma_kernel(ret, alpha, gen);
   auto gamma_sum = ret.sum(/*dim=*/-1, /*keepdim=*/true);
   at::TensorIterator iter = at::TensorIteratorConfig()
@@ -71,7 +72,7 @@ Tensor _s_dirichlet_cuda(const Tensor& alpha, std::optional<Generator> gen_) {
 }
 
 Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
-  Tensor ret = at::empty(self.sizes(), self.options());
+  Tensor ret = at::empty_like(self);
   TensorIterator iter = at::TensorIteratorConfig()
       .add_output(ret)
       .add_input(self)
@@ -82,7 +83,7 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
 }
 
 Tensor _dirichlet_grad_cuda(const Tensor& x, const Tensor& alpha, const Tensor& total) {
-  Tensor ret = at::empty(x.sizes(), x.options());
+  Tensor ret = at::empty_like(x);
   TensorIterator iter = at::TensorIteratorConfig()
       .add_output(ret)
       .add_input(x)

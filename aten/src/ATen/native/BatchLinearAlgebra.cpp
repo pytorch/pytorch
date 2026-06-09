@@ -2562,11 +2562,7 @@ static Tensor& householder_product_out_helper(const Tensor& input, const Tensor&
   TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
 
   // tau tensor must be contiguous
-  Tensor tau_ = tau;
-  if (!tau.is_contiguous()) {
-    tau_ = at::empty(tau.sizes(), tau.options(), MemoryFormat::Contiguous);
-    tau_.copy_(tau);
-  }
+  Tensor tau_ = tau.contiguous();
 
   // orgqr_stub (apply_orgqr) performs calculations in-place and result must be a copy of input
   result.copy_(input);
@@ -2686,11 +2682,7 @@ static void ormqr_out_helper(const Tensor& input, const Tensor& tau, const Tenso
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.sizes().equals(other.sizes()));
 
   // 'tau' tensor must be contiguous
-  Tensor tau_ = tau;
-  if (!tau.is_contiguous()) {
-    tau_ = at::empty(tau.sizes(), tau.options(), MemoryFormat::Contiguous);
-    tau_.copy_(tau);
-  }
+  Tensor tau_ = tau.contiguous();
 
   // 'input' tensor must be Fortran contiguous
   Tensor input_ = input;
