@@ -370,9 +370,15 @@ class IterationRangesEntry(IterationRanges):
         return f"IterationRangesEntry({self.name}, {self.divisor}, {self.length}, {self.expr}, {self.var_ranges})"
 
     def set_name(self, name: str) -> None:
+        # range_tree_nodes is keyed by symbol(name); a rename must re-key it, else it's orphaned and lookups miss.
+        old_symbol = self.symbol()
         self.codegen = lambda: name  # type: ignore[assignment]
         self.codegen.cache_clear = lambda: None  # type: ignore[method-assign]
         self.name = name
+        nodes = self.kernel.range_tree_nodes
+        if nodes.get(old_symbol) is self:
+            del nodes[old_symbol]
+            nodes[self.symbol()] = self
 
     def cache_clear(self) -> None:
         self.codegen.cache_clear()
