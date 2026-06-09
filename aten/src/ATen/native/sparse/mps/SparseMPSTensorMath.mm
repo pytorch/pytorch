@@ -6,6 +6,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/sparse/SparseBinaryOpIntersectionCommon.h>
+#include <ATen/native/sparse/mps/CSRIndexUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -188,19 +189,21 @@ static void build_batch_ptr_mps(
   });
 }
 
-static void build_row_ptr_per_batch_mps(
+namespace mps::csr {
+
+void build_row_ptr_per_batch_mps(
     const Tensor& rows,
     const Tensor& batch_ptr,
     int64_t B,
     int64_t I,
     Tensor& row_ptr
 ) {
-  // Build per-batch CSR-style row pointer arrays from row indices sorted by batch
+  // Build per-batch row pointers as offsets into the flattened `rows` storage.
   // Given:
   //   rows: 1-D array of length nnz with row ids in [0, I), sorted within each batch
   //   batch_ptr: length B+1, where [batch_ptr[b], batch_ptr[b+1]) is the subrange for batch b
   // Produces:
-  //   - row_ptr: shape [B, I+1]
+  //   - row_ptr: shape [B, I+1], where each entry is a global offset into `rows`
   //
   // Example (B = 2, I = 4):
   // rows       = [0,   0,   1,  3,  0,   2,    2]   // 7 non-zero elements
@@ -210,10 +213,10 @@ static void build_row_ptr_per_batch_mps(
   //               │  └──── end of batch 0/start of batch 1
   //               └─────── start of batch 0
   //
-  // per-batch row pointers (I+1 entries each):
+  // per-batch row pointers (I+1 entries each, stored as global offsets):
   //   row_ptr[0] = [0, 2, 3, 3, 4]
-  //   row_ptr[1] = [0, 1, 1, 3, 3]
-  // laid out in memory: [0, 2, 3, 3, 4,  0, 1, 1, 3, 3]
+  //   row_ptr[1] = [4, 5, 5, 7, 7]
+  // laid out in memory: [0, 2, 3, 3, 4,  4, 5, 5, 7, 7]
   TORCH_CHECK(rows.is_mps() && batch_ptr.is_mps() && row_ptr.is_mps(), "MPS device expected");
   auto stream = getCurrentMPSStream();
 
@@ -241,6 +244,8 @@ static void build_row_ptr_per_batch_mps(
     }
   });
 }
+
+} // namespace mps::csr
 
 Tensor& bmm_out_sparse_mps(const SparseTensor& self_, const Tensor& mat2_, Tensor& result_) {
   TORCH_CHECK(result_.is_mps(), "bmm_sparse: expected 'out' to be MPS, got ", result_.device());
@@ -284,7 +289,7 @@ Tensor& bmm_out_sparse_mps(const SparseTensor& self_, const Tensor& mat2_, Tenso
   build_batch_ptr_mps(idx_b, B, batch_ptr);
   // build row_ptr per batch: for each (b, i) get [start, end) into rows/cols/vals
   auto row_ptr = at::empty({B * (I + 1)}, at::device(result_.device()).dtype(kLong));
-  build_row_ptr_per_batch_mps(idx_i, batch_ptr, B, I, row_ptr);
+  mps::csr::build_row_ptr_per_batch_mps(idx_i, batch_ptr, B, I, row_ptr);
 
   const bool out_needs_cast = (result_.scalar_type() != computeDtype) || !result_.is_contiguous();
   Tensor out_buf = out_needs_cast
@@ -1065,7 +1070,7 @@ Tensor sparse_sparse_matmul_mps(const Tensor& mat1_, const Tensor& mat2_) {
   {
     auto batch_ptr = at::tensor({0LL, nnzB}, at::device(device).dtype(at::kLong));
     row_ptr_B = at::empty({K + 1}, at::device(device).dtype(at::kLong));
-    build_row_ptr_per_batch_mps(B_k, batch_ptr, /*B=*/1, /*I=*/K, row_ptr_B);
+    mps::csr::build_row_ptr_per_batch_mps(B_k, batch_ptr, /*B=*/1, /*I=*/K, row_ptr_B);
   }
 
   auto row_ptr_B_lo = row_ptr_B.narrow(0, 0, K);
@@ -1325,7 +1330,7 @@ Tensor index_select_sparse_mps(const Tensor& self_, int64_t dim, const Tensor& i
   // Build row_ptr for lower/upper bound lookups
   auto batch_ptr = tensor({0LL, nnz}, at::device(self_.device()).dtype(kLong));
   auto row_ptr = empty({I + 1}, at::device(self_.device()).dtype(kLong));
-  build_row_ptr_per_batch_mps(sorted_dim_indices, batch_ptr, /*B=*/1, /*I=*/I, row_ptr);
+  mps::csr::build_row_ptr_per_batch_mps(sorted_dim_indices, batch_ptr, /*B=*/1, /*I=*/I, row_ptr);
 
   auto lower = row_ptr.index_select(0, nneg_index);
   auto nneg_index_plus1 = nneg_index.add(1);

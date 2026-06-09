@@ -1,12 +1,21 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/sparse/mps/CSRIndexUtils.h>
+
+#include <functional>
+#include <numeric>
+#include <optional>
+#include <c10/util/OptionalArrayRef.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_coalesce_native.h>
+#include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/zeros_native.h>
@@ -176,8 +185,93 @@ SparseTensor _coalesce_sparse_mps(const SparseTensor& self) {
     }
   });
 
-  SparseTensor result = _sparse_coo_tensor_unsafe_symint(out_indices, out_values, self.sym_sizes())._coalesced_(true);
+  Tensor tensor = at::native::_sparse_coo_tensor_unsafe_symint(
+      out_indices,
+      out_values,
+      self.sym_sizes(),
+      std::optional<ScalarType>(values.scalar_type()),
+      std::optional<Layout>(self.layout()),
+      std::optional<Device>(self.device()),
+      std::nullopt,
+      /*is_coalesced=*/true);
+  SparseTensor result = tensor._coalesced_(true);
   return result;
+}
+
+TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_mps)
+(const Tensor& input,
+ const int64_t size,
+ const bool out_int32,
+ const Tensor& result) {
+  TORCH_CHECK(
+      input.is_mps() && result.is_mps(),
+      "_convert_indices_from_coo_to_csr: expected MPS tensors");
+  TORCH_CHECK(
+      result.scalar_type() == (out_int32 ? kInt : kLong),
+      "_convert_indices_from_coo_to_csr: output dtype mismatch");
+
+  TORCH_CHECK(size >= 0, "_convert_indices_from_coo_to_csr: size must be non-negative");
+
+  result.zero_();
+
+  const int64_t nnz = input.numel();
+  if (nnz == 0 || size == 0) {
+    return;
+  }
+
+  Tensor rows = input.contiguous();
+  if (rows.scalar_type() != kLong) {
+    rows = rows.to(kLong);
+  }
+
+  auto options = rows.options().dtype(kLong);
+  Tensor batch_ptr = at::zeros({2}, options);
+  batch_ptr.narrow(0, 1, 1).fill_(nnz);
+
+  Tensor row_ptr_long = out_int32 ? at::empty(result.sizes(), options) : result;
+
+  mps::csr::build_row_ptr_per_batch_mps(
+      rows,
+      batch_ptr,
+      /*batch_count=*/1,
+      /*rows_per_batch=*/size,
+      row_ptr_long);
+
+  if (out_int32) {
+    result.copy_(row_ptr_long.to(kInt));
+  }
+}
+
+TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_mps)
+(const Tensor& crow_indices,
+ const Tensor& col_indices,
+ const bool out_int32,
+ const bool transpose,
+ const Tensor& result) {
+  TORCH_CHECK(
+      crow_indices.is_mps() && col_indices.is_mps() && result.is_mps(),
+      "_convert_indices_from_csr_to_coo: expected MPS tensors");
+
+  TORCH_CHECK(
+      result.scalar_type() == (out_int32 ? kInt : kLong),
+      "_convert_indices_from_csr_to_coo: output dtype mismatch");
+
+  if (result.numel() == 0) {
+    result.zero_();
+    return;
+  }
+
+  int64_t rows_per_batch = crow_indices.size(-1) - 1;
+  TORCH_CHECK(
+      rows_per_batch >= 0,
+      "_convert_indices_from_csr_to_coo: invalid crow_indices shape");
+
+  mps::csr::expand_csr_rows_to_coo_out(
+      crow_indices,
+      col_indices,
+      rows_per_batch,
+      transpose,
+      result);
 }
 
 } // namespace at::native

@@ -400,7 +400,11 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   if (!max_elements) {
     // Dynamic path: sync to learn output size
     const int64_t total_nonzero = total_nonzero_buf.item<int>();
-    at::native::resize_output(out_, {total_nonzero, nDim});
+    if (at::native::resize_output(out_, {total_nonzero, nDim})) {
+      // Match CPU nonzero's column-major 2D layout so column selects
+      // remain contiguous for downstream sparse conversions.
+      out_.as_strided_({total_nonzero, nDim}, {1, total_nonzero});
+    }
     max_elements = total_nonzero;
   }
 

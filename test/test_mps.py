@@ -969,6 +969,77 @@ class TestMPS(TestCaseMPS):
         res_cpu = x_cpu.exp()
         self.assertEqual(res, res_cpu)
 
+    def test_sparse_csr_tensor_factory(self):
+        for index_dtype in (torch.int32, torch.int64):
+            crow_indices = torch.tensor([0, 2, 2, 3], dtype=index_dtype, device="mps")
+            col_indices = torch.tensor([0, 1, 2], dtype=index_dtype, device="mps")
+            values = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32, device="mps")
+
+            csr = torch.sparse_csr_tensor(
+                crow_indices,
+                col_indices,
+                values,
+                size=(3, 3),
+                device="mps",
+            )
+
+            self.assertEqual(csr.device.type, "mps")
+            self.assertEqual(csr.layout, torch.sparse_csr)
+            self.assertEqual(csr.crow_indices().device.type, "mps")
+            self.assertEqual(csr.col_indices().device.type, "mps")
+            self.assertEqual(csr.values().device.type, "mps")
+
+            expected_dense = torch.tensor(
+                [[1.0, 2.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 3.0]],
+                device="mps",
+            )
+            self.assertEqual(csr.to_dense(), expected_dense)
+
+            expected_coo_indices = torch.tensor(
+                [[0, 0, 2], [0, 1, 2]],
+                dtype=index_dtype,
+            )
+            coo = csr.to_sparse()
+            coo_indices = torch.ops.aten._convert_indices_from_csr_to_coo(
+                crow_indices,
+                col_indices,
+                out_int32=index_dtype == torch.int32,
+                transpose=False,
+            )
+            coo_indices_t = torch.ops.aten._convert_indices_from_csr_to_coo(
+                crow_indices,
+                col_indices,
+                out_int32=index_dtype == torch.int32,
+                transpose=True,
+            )
+
+            self.assertEqual(coo.layout, torch.sparse_coo)
+            self.assertEqual(coo.device.type, "mps")
+            self.assertEqual(coo.indices().dtype, torch.int64)
+            self.assertEqual(coo.indices().to("cpu"), expected_coo_indices.to(torch.int64))
+            self.assertEqual(coo.values().to("cpu"), values.to("cpu"))
+            self.assertEqual(coo_indices.device.type, "mps")
+            self.assertEqual(coo_indices.to("cpu"), expected_coo_indices)
+            self.assertEqual(coo_indices_t.to("cpu"), expected_coo_indices.flip(0))
+
+            dense_roundtrip = expected_dense.to_sparse_csr()
+            self.assertEqual(dense_roundtrip.device.type, "mps")
+            self.assertEqual(dense_roundtrip.layout, torch.sparse_csr)
+            self.assertEqual(dense_roundtrip.to_dense(), expected_dense)
+
+            coo_roundtrip = coo.to_sparse_csr()
+            self.assertEqual(coo_roundtrip.device.type, "mps")
+            self.assertEqual(coo_roundtrip.layout, torch.sparse_csr)
+            self.assertEqual(coo_roundtrip.to_dense(), expected_dense)
+
+            crow_roundtrip = torch.ops.aten._convert_indices_from_coo_to_csr(
+                expected_coo_indices[0].to("mps"),
+                csr.size(0),
+                out_int32=index_dtype == torch.int32,
+            )
+            self.assertEqual(crow_roundtrip.device.type, "mps")
+            self.assertEqual(crow_roundtrip.to("cpu"), crow_indices.to("cpu"))
+
     def _testLeakyRelu(self, np_features, negative_slope, device):
         cpu_x = torch.from_numpy(np_features).requires_grad_()
         mps_x = torch.from_numpy(np_features).to('mps').requires_grad_()

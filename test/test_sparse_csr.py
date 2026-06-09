@@ -4312,8 +4312,248 @@ class TestSparseCompressedTritonKernels(TestCase):
                          dict(GROUP_SIZE_ROW=4, SPLIT_N=4, num_stages=1, num_warps=4))
 
 
+class TestSparseCSRMPS(TestCase):
+    # curated unary coverage for MPS sparse CSR.
+    ZERO_PRESERVING_UNARY_OPS = (
+        "abs",
+        "angle",
+        "asin",
+        "asinh",
+        "atan",
+        "atanh",
+        "ceil",
+        "deg2rad",
+        "erf",
+        "erfinv",
+        "expm1",
+        "floor",
+        "frac",
+        "isinf",
+        "isnan",
+        "isneginf",
+        "isposinf",
+        "log1p",
+        "rad2deg",
+        "sign",
+        "signbit",
+        "sin",
+        "sinh",
+        "sqrt",
+        "tan",
+        "tanh",
+        "trunc",
+    )
+
+    UNARY_OUT_OPS = (
+        ("asin", "bounded_dense", False, True),
+        ("asinh", "bounded_dense", False, True),
+        ("atan", "bounded_dense", False, True),
+        ("atanh", "bounded_dense", False, True),
+        ("erf", "bounded_dense", False, True),
+        ("erfinv", "bounded_dense", False, True),
+        ("expm1", "bounded_dense", False, True),
+        ("log1p", "bounded_dense", False, True),
+        ("sin", "bounded_dense", False, True),
+        ("sinh", "bounded_dense", False, True),
+        ("tan", "small_dense", False, True),
+        ("tanh", "bounded_dense", False, True),
+        ("deg2rad", "bounded_dense", False, True),
+        ("rad2deg", "bounded_dense", False, True),
+        ("ceil", "bounded_dense", False, True),
+        ("floor", "bounded_dense", False, True),
+        ("frac", "bounded_dense", False, True),
+        ("round", "bounded_dense", False, True),
+        ("sgn", "bounded_dense", False, True),
+        ("sign", "bounded_dense", False, True),
+        ("relu", "bounded_dense", False, False),
+        ("sqrt", "positive_dense", False, True),
+        ("angle", "bounded_dense", False, True),
+        ("isnan", "special_dense", False, False),
+        ("isinf", "special_dense", False, False),
+        ("isposinf", "special_dense", False, False),
+        ("isneginf", "special_dense", False, False),
+        ("signbit", "special_dense", False, False),
+    )
+
+    UNARY_INPLACE_OPS = (
+        ("asin", "bounded_dense", True, False),
+        ("asinh", "bounded_dense", True, False),
+        ("atan", "bounded_dense", True, False),
+        ("atanh", "bounded_dense", True, False),
+        ("erf", "bounded_dense", True, False),
+        ("erfinv", "bounded_dense", True, False),
+        ("expm1", "bounded_dense", True, False),
+        ("log1p", "bounded_dense", True, False),
+        ("sin", "bounded_dense", True, False),
+        ("sinh", "bounded_dense", True, False),
+        ("tan", "small_dense", True, False),
+        ("tanh", "bounded_dense", True, False),
+        ("deg2rad", "bounded_dense", True, False),
+        ("rad2deg", "bounded_dense", True, False),
+        ("ceil", "bounded_dense", True, False),
+        ("floor", "bounded_dense", True, False),
+        ("frac", "bounded_dense", True, False),
+        ("round", "bounded_dense", True, False),
+        ("sgn", "bounded_dense", True, False),
+        ("sign", "bounded_dense", True, False),
+        ("relu", "bounded_dense", True, False),
+        ("sqrt", "positive_dense", True, False),
+    )
+
+    def _to_sparse_csr_pair(self, dense_cpu):
+        cpu_sparse = dense_cpu.to_sparse_csr()
+        dense_mps = dense_cpu.to("mps")
+        return cpu_sparse, dense_mps.to_sparse_csr()
+
+    def _assert_sparse_csr_matches(self, cpu_sparse, mps_sparse):
+        self.assertEqual(mps_sparse.layout, torch.sparse_csr)
+        self.assertEqual(mps_sparse.device.type, "mps")
+        self.assertEqual(cpu_sparse.crow_indices(), mps_sparse.crow_indices().to("cpu"))
+        self.assertEqual(cpu_sparse.col_indices(), mps_sparse.col_indices().to("cpu"))
+        self.assertEqual(cpu_sparse.values(), mps_sparse.values().to("cpu"))
+        self.assertEqual(cpu_sparse.to_dense(), mps_sparse.to_dense().to("cpu"))
+
+    def _check_sparse_csr_unary_op(self, dense, op, *, check_inplace=True, check_out=True):
+        dense_cpu = dense.to("cpu")
+        cpu_sparse, mps_sparse = self._to_sparse_csr_pair(dense_cpu)
+
+        cpu_result = getattr(torch, op)(cpu_sparse)
+        mps_result = getattr(torch, op)(mps_sparse)
+        self._assert_sparse_csr_matches(cpu_result, mps_result)
+
+        inplace_name = f"{op}_"
+        if check_inplace and hasattr(cpu_sparse, inplace_name):
+            cpu_in, mps_in = self._to_sparse_csr_pair(dense_cpu)
+            getattr(cpu_in, inplace_name)()
+            getattr(mps_in, inplace_name)()
+            self._assert_sparse_csr_matches(cpu_in, mps_in)
+
+        if check_out:
+            cpu_sparse_out, mps_sparse_out = self._to_sparse_csr_pair(dense_cpu)
+            getattr(torch, op)(cpu_sparse, out=cpu_sparse_out)
+            getattr(torch, op)(mps_sparse, out=mps_sparse_out)
+            self._assert_sparse_csr_matches(cpu_sparse_out, mps_sparse_out)
+
+    def _make_dense_inputs(self):
+        bounded_dense = torch.tensor(
+            [[0.1, -0.2, 0.4], [-0.6, 0.0, 0.8]],
+            dtype=torch.float32,
+        )
+        positive_dense = torch.tensor(
+            [[0.0, 0.2, 0.4], [0.6, 0.9, 1.1]],
+            dtype=torch.float32,
+        )
+        special_dense = torch.tensor(
+            [[float("nan"), float("inf"), float("-inf")], [-0.0, 1.0, -1.0]],
+            dtype=torch.float32,
+        )
+
+        return {
+            "bounded_dense": bounded_dense,
+            "positive_dense": positive_dense,
+            "small_dense": bounded_dense * 0.25,
+            "special_dense": special_dense,
+        }
+
+    def _run_curated_unary_cases(self, cases):
+        dense_inputs = self._make_dense_inputs()
+        for op, dense_name, check_inplace, check_out in cases:
+            self._check_sparse_csr_unary_op(
+                dense_inputs[dense_name],
+                op,
+                check_inplace=check_inplace,
+                check_out=check_out,
+            )
+
+    def test_zero_to_zero_correspondence_unary(self):
+        zero = torch.zeros((1, 2), dtype=torch.float32, device="mps")
+        tensor_explicit_zeros = torch.sparse_csr_tensor(
+            [0, 1], [1], [0], dtype=torch.float32, device="mps"
+        )
+
+        for op in self.ZERO_PRESERVING_UNARY_OPS:
+            output_zero = getattr(torch, op)(zero)
+            expected_zero = zero.to(output_zero.dtype)
+
+            output_explicit_zeros = getattr(torch, op)(tensor_explicit_zeros).to_dense()
+            expected_explicit_zeros = tensor_explicit_zeros.to_dense().to(output_explicit_zeros.dtype)
+
+            for output, expected in [
+                (output_zero, expected_zero),
+                (output_explicit_zeros, expected_explicit_zeros),
+            ]:
+                self.assertEqual(
+                    output,
+                    expected,
+                    f"This operator ({op}) should not be supported for Sparse CSR as it breaks 0->0 correspondence.",
+                )
+
+            for inp in [zero.to_sparse_csr(), tensor_explicit_zeros]:
+                self.assertEqual(
+                    getattr(torch, op)(inp).values().numel(),
+                    inp.values().numel(),
+                    f"{op} fails to preserve sparsity pattern.",
+                )
+
+    def test_sparse_csr_unary_out(self):
+        self._run_curated_unary_cases(self.UNARY_OUT_OPS)
+
+    def test_sparse_csr_unary_inplace(self):
+        self._run_curated_unary_cases(self.UNARY_INPLACE_OPS)
+
+    def test_validate_mps_does_not_fallback_to_cpu(self, device):
+        crow_indices = torch.tensor([0, 2, 4], device=device, dtype=torch.int64)
+        col_indices = torch.tensor([0, 1, 0, 2], device=device, dtype=torch.int64)
+
+        with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU]) as prof:
+            torch._validate_compressed_sparse_indices(
+                True,
+                crow_indices,
+                col_indices,
+                2,
+                3,
+                4,
+            )
+
+        events = {event.key for event in prof.key_averages()}
+        forbidden_events = {"aten::cpu", "aten::to", "aten::_to_copy", "aten::copy_"}
+        self.assertFalse(
+            forbidden_events & events,
+            f"unexpected CPU fallback ops were recorded: {sorted(forbidden_events & events)}",
+        )
+
+    def test_validate_mps_reports_invalid_crow_indices(self, device):
+        crow_indices = torch.tensor([1, 2, 4], device=device, dtype=torch.int64)
+        col_indices = torch.tensor([0, 1, 0, 2], device=device, dtype=torch.int64)
+
+        with self.assertRaisesRegex(RuntimeError, r"`crow_indices\[\.\.\., 0\] == 0` is not satisfied\."):
+            torch._validate_compressed_sparse_indices(
+                True,
+                crow_indices,
+                col_indices,
+                2,
+                3,
+                4,
+            )
+
+    def test_validate_mps_checks_plain_indices_before_crow_structure(self, device):
+        crow_indices = torch.tensor([0, 0], device=device, dtype=torch.int64)
+        col_indices = torch.tensor([5], device=device, dtype=torch.int64)
+
+        with self.assertRaisesRegex(RuntimeError, r"`0 <= col_indices < ncols` is not satisfied\."):
+            torch._validate_compressed_sparse_indices(
+                True,
+                crow_indices,
+                col_indices,
+                1,
+                3,
+                1,
+            )
+
+
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())
+instantiate_device_type_tests(TestSparseCSRMPS, globals(), only_for="mps", allow_mps=True)
 instantiate_device_type_tests(TestSparseCompressed, globals())
 instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
 

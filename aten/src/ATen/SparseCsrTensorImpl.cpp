@@ -52,6 +52,7 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
 
   TORCH_INTERNAL_ASSERT(((key_set.has(DispatchKey::SparseCsrCPU) && device().type() == kCPU)
                          || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kCUDA)
+                         || (key_set.has(DispatchKey::SparseCsrMPS) && device().type() == kMPS)
                          || (key_set.has(DispatchKey::SparseCsrXPU) && device().type() == kXPU)
                          || (key_set.has(DispatchKey::SparseCsrMeta) && device().type() == kMeta)
                          || (key_set.has(DispatchKey::SparseCsrCPU) && device().type() == kMeta)   // fake tensor
