@@ -4,6 +4,7 @@ import functools
 import os
 import sys
 import tempfile
+import types
 import unittest
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch
@@ -61,6 +62,7 @@ from torch._inductor.runtime.triton_heuristics import (
     triton_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import fresh_cache
 
 
 @triton.jit
@@ -415,6 +417,43 @@ class TestTritonHeuristics(TestCase):
                 config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
             )
             self.assertEqual(len(configs), expected_count)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_compile_time_autotune_not_repeated_at_runtime(self):
+        def fn(x):
+            return (x + 1).sum(dim=1)
+
+        x = torch.randn(2048, 2048, device=GPU_TYPE)
+        benchmark_calls = []
+
+        def fake_benchmark_all_configs(autotuner, *args, **kwargs):
+            benchmark_calls.append(autotuner.inductor_meta.get("kernel_name"))
+            return {
+                launcher: float(idx) for idx, launcher in enumerate(autotuner.launchers)
+            }
+
+        torch._dynamo.reset()
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "triton.autotune_at_compile_time": True,
+                    "max_autotune_pointwise": True,
+                    "compile_threads": 1,
+                }
+            ),
+            patch.object(
+                CachingAutotuner,
+                "benchmark_all_configs",
+                fake_benchmark_all_configs,
+            ),
+        ):
+            compiled = torch.compile(fn, backend="inductor")
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(len(benchmark_calls), 1)
+
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(len(benchmark_calls), 1)
 
 
 _PLUGIN_FACTORY_PATH = (
@@ -1048,6 +1087,70 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
         self.assertEqual(x, 1)
         # y * z must cover all y blocks
         self.assertGreaterEqual(y * z, 131070)
+
+
+class TestFastLauncherDeviceSupport(TestCase):
+    @staticmethod
+    def _make_autotuner(device_type):
+        def triton_():
+            pass
+
+        device = DeviceProperties(
+            type=device_type,
+            index=0,
+            multi_processor_count=1,
+            cc=0,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+        triton_meta = {
+            "signature": {},
+            "device": device,
+            "constants": {},
+            "configs": [],
+        }
+        return CachingAutotuner(
+            fn=triton_,
+            triton_meta=triton_meta,
+            configs=[triton_config({"x": 1}, 1)],
+            save_cache_hook=False,
+            mutated_arg_names=[],
+            reset_to_zero_arg_names=[],
+            optimize_mem=False,
+            heuristic_type=HeuristicType.POINTWISE,
+            inductor_meta={"use_fast_triton_launcher": True},
+        )
+
+    @staticmethod
+    def _make_static_launcher():
+        class Kernel:
+            function = 1
+            num_warps = 4
+            shared = 0
+            arg_tys = ""
+            has_global_scratch = False
+            has_profile_scratch = False
+
+            def run(self):
+                pass
+
+        def launcher_template():
+            pass
+
+        kernel = Kernel()
+        launcher = types.FunctionType(
+            launcher_template.__code__, {"runner": kernel.run}, "launcher"
+        )
+        launcher._is_static = True
+        return launcher
+
+    def test_fast_launcher_not_built_for_xpu(self):
+        autotuner = self._make_autotuner("xpu")
+        launcher = self._make_static_launcher()
+
+        with patch("torch._C._FastCudaLauncher", create=True) as fast_launcher:
+            self.assertIsNone(autotuner._build_fast_launcher(launcher))
+            fast_launcher.assert_not_called()
 
 
 class TestDynamicScaleRblockCacheInteraction(TestCase):
