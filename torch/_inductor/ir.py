@@ -988,6 +988,8 @@ class Operation:
 
 @ir_dataclass
 class Loops(IRNode):
+    """Base class for pointwise and reduction loop-body IR nodes."""
+
     device: torch.device
     dtype: torch.dtype
     inner_fn: Callable[..., Any]
@@ -1071,7 +1073,15 @@ class Loops(IRNode):
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
         if threshold is None:
             threshold = 0
-        threshold = max(threshold, config.realize_opcount_threshold)
+        realize_opcount_threshold = config.realize_opcount_threshold
+        if realize_opcount_threshold is None:
+            if is_cpu(self):
+                realize_opcount_threshold = config.realize_cpu_opcount_threshold
+            else:
+                realize_opcount_threshold = config._realize_opcount_threshold_default
+        else:
+            assert isinstance(realize_opcount_threshold, int)
+        threshold = max(threshold, realize_opcount_threshold)
         return self.inner_fn_opcount().num_ops > threshold
 
     def inner_fn_free_symbols(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
@@ -3478,6 +3488,13 @@ class PermuteView(BaseView):
         size = self.data.get_size()
         return [size[i] for i in self.dims]
 
+    def get_stride(self) -> Sequence[Expr]:
+        assert OrderedSet(self._map_neg_dims(self.dims)) == OrderedSet(
+            range(len(self.dims))
+        )
+        stride = self.data.get_stride()
+        return [stride[i] for i in self.dims]
+
     def make_reindexer(
         self,
     ) -> Callable[[Sequence[Expr]], Sequence[Expr]]:
@@ -5760,6 +5777,15 @@ class TemplateBuffer(OperationBuffer):
     def get_allowed_prologue_inps(self) -> OrderedSet[str]:
         return self.allowed_prologue_inps
 
+    def has_aliasing_or_mutation_for_prologue_fusion(self, scheduler_node: Any) -> bool:
+        """Return whether this template's aliasing/mutation blocks prologue fusion.
+
+        The default preserves the scheduler's conservative behavior. External
+        template subclasses may override this when they can prove a prologue
+        producer only feeds independent, non-mutated template inputs.
+        """
+        return scheduler_node.has_aliasing_or_mutation()
+
     def _finalize_codegen(
         self, hook_outputs: dict[str, str]
     ) -> FinalizeCodegenResult | None:
@@ -7466,10 +7492,6 @@ class ExternKernel(InputsKernel):
         size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
         stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
         op_name = self.get_op_name()
-        name = self.get_assert_name()
-        wrapper.write_assert_size_stride(name, size, stride, op_name)
-
-    def get_assert_name(self) -> str:
         name = self.get_name()
         if V.graph.cpp_wrapper:
             # inplace_view ops (e.g. set_.source_Tensor) don't declare an
@@ -7478,18 +7500,20 @@ class ExternKernel(InputsKernel):
                 if torch.Tag.inplace_view in self.op_overload.tags:
                     assert isinstance(self.inputs[0], IRNode)
                     name = self.inputs[0].get_name()
-        return name
+        wrapper.write_assert_size_stride(name, size, stride, op_name)
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if config.alignment_asserts:
-            name = self.get_assert_name()
+        if config.alignment_asserts and not V.graph.cpp_wrapper:
+            name = self.get_name()
             aligned = name not in V.graph.unaligned_buffers
             op_name = self.get_op_name()
             if aligned:
-                wrapper.write_assert_alignment(name, GPU_ALIGN_BYTES, op_name)
+                wrapper.writeline(
+                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
+                )
             else:
                 wrapper.writeline(
-                    f"{wrapper.comment} buffer {name} (op: {op_name}) is assumed to be not aligned"
+                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
                 )
 
     def codegen_memory_tracking(self, wrapper: PythonWrapperCodegen) -> None:
@@ -8017,7 +8041,17 @@ class UserDefinedTritonKernel(ExternKernel):
             reset_to_zero_args,
         ) = self.get_kernel_and_metadata()
 
-        # Definition of kernel
+        # For an epilogue containing a cast, the output arg in kwargs must point to the
+        # epilogue's output so that the compiled signature uses the correct dtype.
+        kernel_kwargs = self.kwargs
+        epilogue_out_override: dict[str, Any] = {}
+        if epilogue_fusion:
+            assert len(self.arg_accesses.read_writes.writes) == 1
+            mutable_arg_name = next(iter(self.arg_accesses.read_writes.writes)).name
+            epilogue_computed_buffer, _ = epilogue_fusion
+            kernel_kwargs = {**self.kwargs, mutable_arg_name: epilogue_computed_buffer}
+            epilogue_out_override = {mutable_arg_name: epilogue_computed_buffer}
+
         (
             new_name,
             triton_meta,
@@ -8026,7 +8060,7 @@ class UserDefinedTritonKernel(ExternKernel):
         ) = wrapper.define_user_defined_triton_kernel(
             kernel,
             configs,
-            self.kwargs,
+            kernel_kwargs,
             restore_value_args,
             reset_to_zero_args,
             self.grid,
@@ -8035,13 +8069,7 @@ class UserDefinedTritonKernel(ExternKernel):
         named_args = {
             k: self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         }
-
-        if epilogue_fusion:
-            assert len(self.arg_accesses.read_writes.writes) == 1
-            mutable_arg_name = next(iter(self.arg_accesses.read_writes.writes)).name
-            assert mutable_arg_name in named_args
-            epilogue_computed_buffer, _ = epilogue_fusion
-            named_args[mutable_arg_name] = epilogue_computed_buffer
+        named_args.update(epilogue_out_override)
 
         arg_names = [p.name for p in kernel.params]  # type: ignore[attr-defined]
         constexprs = [p.num for p in kernel.params if p.is_constexpr]  # type: ignore[attr-defined]
@@ -9990,8 +10018,18 @@ class StorageBox(MutableBox):
         )
 
     def has_exceeded_max_reads(self) -> bool:
+        realize_acc_reads_threshold = config.realize_acc_reads_threshold
+        if realize_acc_reads_threshold is None:
+            if is_cpu(self.data):
+                realize_acc_reads_threshold = config.realize_cpu_acc_reads_threshold
+            else:
+                realize_acc_reads_threshold = (
+                    config._realize_acc_reads_threshold_default
+                )
+        else:
+            assert isinstance(realize_acc_reads_threshold, int)
         return isinstance(self.data, Pointwise) and (
-            self.num_reads() > config.realize_acc_reads_threshold
+            self.num_reads() > realize_acc_reads_threshold
             or self.has_large_inner_fn()
             or (
                 config.realize_acc_reads_size_threshold is not None
@@ -10017,6 +10055,7 @@ class StorageBox(MutableBox):
                     "log1p",
                     "log2",
                     "sigmoid",
+                    "tanh",
                 ]
                 if any(x in opcount.used_ops for x in heavy_ops):
                     return True

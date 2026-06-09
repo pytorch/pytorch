@@ -191,10 +191,18 @@ def remove_no_ops(
                 val = n.meta.get("val")
                 if isinstance(val, torch.Tensor) and val.device.type == "meta":
                     with graph.inserting_before(output_node):
+                        # size/stride may be symbolic under dynamic shapes;
+                        # materialize them so we never pass raw SymInts as args.
+                        # Use materialize_symints (roots backed sizes on input
+                        # placeholders) rather than create_size_node(n, d), which
+                        # would query `n` and pin it alive, blocking the
+                        # eliminate_dead_code() that removes this meta tensor.
+                        size = graph.materialize_symints(val.size())
+                        stride = graph.materialize_symints(val.stride())
                         n.replace_all_uses_with(
                             graph.call_function(
                                 torch.ops.aten.empty_strided.default,
-                                args=(val.size(), val.stride()),
+                                args=(size, stride),
                                 kwargs={"dtype": val.dtype, "device": val.device},
                             )
                         )
@@ -315,6 +323,13 @@ class UniformValueConstantFolder(ConstantFolder):
                 return isinstance(arg, int) and arg == 0
 
             if not any(is_zero_int(a) for a in op.args):
+                continue
+
+            # x * 0 is only uniformly 0 for integer/bool dtypes. For floating
+            # point (and complex) dtypes nan * 0 == nan and (+/-inf) * 0 == nan,
+            # so folding x * 0 -> 0 would incorrectly drop NaN/Inf when x is not
+            # known to be finite.
+            if tensor_val.dtype.is_floating_point or tensor_val.dtype.is_complex:
                 continue
 
             t = torch.full(
