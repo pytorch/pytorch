@@ -19,13 +19,11 @@ from typing import NamedTuple
 # PyTorch directory root
 def scm_root() -> str:
     path = os.path.abspath(os.getcwd())
-    # pyrefly: ignore [bad-assignment]
     while True:
         if os.path.exists(os.path.join(path, ".git")):
             return path
         if os.path.isdir(os.path.join(path, ".hg")):
             return path
-        # pyrefly: ignore [bad-argument-type]
         n = len(path)
         path = os.path.dirname(path)
         if len(path) == n:
@@ -138,6 +136,8 @@ include_dir = [
     "/usr/lib/llvm-11/include/openmp",
     get_python_include_dir(),
     os.path.join(PYTORCH_ROOT, "third_party/pybind11/include"),
+    # For header-only lints (no compile_commands.json entry) to resolve <ATen/...>.
+    os.path.join(PYTORCH_ROOT, "aten/src"),
     PYTORCH_ROOT,
 ] + clang_search_dirs()
 for dir in include_dir:
@@ -151,7 +151,13 @@ def check_file(
     std: str | None,
 ) -> list[LintMessage]:
     # Explicitly pass include path for linters that only check headers.
-    build_include_args = include_args + ["--extra-arg", f"-I{build_dir}"]
+    # build/aten/src covers generated <ATen/...> headers (Functions.h etc.).
+    build_include_args = include_args + [
+        "--extra-arg",
+        f"-I{build_dir}",
+        "--extra-arg",
+        f"-I{build_dir}/aten/src",
+    ]
     cmd = [
         binary,
         f"-p={build_dir}",

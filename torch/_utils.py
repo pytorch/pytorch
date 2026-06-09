@@ -77,6 +77,8 @@ def _to(self, device, non_blocking=False):
     if device.type == "cpu":
         pin_memory = non_blocking and self.device.type in (
             "cuda",
+            "xpu",
+            "mtia",
             torch._C._get_privateuse1_backend_name(),
         )
         untyped_storage = torch.empty(
@@ -456,6 +458,24 @@ def _rebuild_qtensor(
         )
     elif qscheme in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
         _, scales, zero_points, axis = quantizer_params
+        # The C++ constructor does not bound-check axis or the
+        # scales/zero_points length against size; values arriving from an
+        # untrusted weights_only checkpoint can otherwise be arbitrary.
+        if not 0 <= axis < len(size):
+            raise ValueError(
+                f"_rebuild_qtensor: per_channel axis {axis} out of range for size {tuple(size)}"
+            )
+        expected_len = int(size[axis])
+        scales_len = len(scales) if isinstance(scales, list) else scales.numel()
+        zero_points_len = (
+            len(zero_points) if isinstance(zero_points, list) else zero_points.numel()
+        )
+        if scales_len != expected_len or zero_points_len != expected_len:
+            raise ValueError(
+                "_rebuild_qtensor: per_channel scales/zero_points length must equal "
+                f"size[axis]={expected_len}, got scales={scales_len}, "
+                f"zero_points={zero_points_len}"
+            )
         if type(scales) is list and type(zero_points) is list:
             if qscheme == torch.per_channel_affine:
                 scales = torch.tensor(scales, dtype=torch.double, device=storage.device)
@@ -1381,3 +1401,17 @@ def _augment_memory_snapshot_stack_traces(
                 _augment_frames(trace_entry["frames"])
 
     return snapshot_dict
+
+
+def _is_privateuse1_backend_available():
+    """
+    Determines whether the privateuse1 backend is registered and available.
+
+    Returns:
+        Return True if the privateuse1 backend is registered and available.
+    """
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    privateuse1_backend_module = getattr(torch, privateuse1_backend_name, None)
+    return (
+        is_available := getattr(privateuse1_backend_module, "is_available", None)
+    ) and is_available()

@@ -1,12 +1,14 @@
 # Owner(s): ["module: dynamo"]
 
+import unittest
 from unittest.mock import Mock
 
 import torch
 from torch._dynamo.callback import callback_handler, CallbackArgs, CallbackTrigger
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._guards import CompileId
-from torch.testing._internal.triton_utils import HAS_CUDA_AND_TRITON, requires_gpu
+from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.triton_utils import HAS_CUDA_AND_TRITON
 
 
 device_type = (
@@ -61,7 +63,7 @@ class CallbackTests(TestCase):
             callback_handler._CompilationCallbackHandler__pending_callbacks_counter, 0
         )
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_triggers(self) -> None:
         torch._dynamo.reset()
@@ -107,7 +109,7 @@ end=CallbackArgs(callback_trigger=<CallbackTrigger.DYNAMO: 1>, compile_id='1/0')
 start=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='1/0')
 end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='1/0')
 start=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='0/0')
-end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='0/0')""",  # noqa: B950
+end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='0/0')""",
         )
         order.clear()
 
@@ -128,7 +130,7 @@ end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, comp
 start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
 end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
 start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
-end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')""",  # noqa: B950
+end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')""",
         )
         order.clear()
 

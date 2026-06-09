@@ -6,7 +6,7 @@ import os
 from typing import TYPE_CHECKING
 from typing_extensions import final, override
 
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch.fx
 from torch._inductor.compile_worker.subproc_pool import (
     AnyPool,
@@ -20,7 +20,6 @@ from .compile_fx_ext import (
     _WireProtocolPickledInput,
     _WireProtocolPickledOutput,
 )
-from .output_code import complex_memory_overlap  # noqa: F401
 
 
 if TYPE_CHECKING:

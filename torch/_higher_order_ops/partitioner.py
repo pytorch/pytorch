@@ -8,8 +8,6 @@ from torch._higher_order_ops.utils import create_bw_fn, materialize_as_graph
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-logger.setLevel(logging.DEBUG)
-
 
 def _find_hop_subgraph_outputs(gm: torch.fx.GraphModule) -> tuple[torch.fx.Node]:
     output_node_args = gm.graph.find_nodes(op="output")[0].args
@@ -65,7 +63,7 @@ class HopPartitionedGraph:
 
         if len(fw_outputs) != self.n_fw_outputs + self.n_intermediates:
             invalid_reasons.append(
-                f"len(fw_outputs) ({len(fw_outputs)}) != n_fw_outputs ({self.n_fw_outputs}) + n_intermediates ({self.n_intermediates})"  # noqa: B950
+                f"len(fw_outputs) ({len(fw_outputs)}) != n_fw_outputs ({self.n_fw_outputs}) + n_intermediates ({self.n_intermediates})"
             )
 
         bw_phs = list(self.bw_gm.graph.find_nodes(op="placeholder"))
@@ -121,7 +119,7 @@ class HopPartitionedGraph:
         are inputs that contain symints.
 
         To simplify downstream processing, this graph pass normalizes the output of fw_gm
-        to be consistent with the bacwkard inputs:
+        to be consistent with the backward inputs:
 
         fw_gm:
           - input: fw_args

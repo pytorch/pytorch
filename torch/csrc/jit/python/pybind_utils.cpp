@@ -74,13 +74,12 @@ static IValue listToIValue(py::handle obj) {
 IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
-      if (obj.ptr() == Py_None) {
+      if (Py_IsNone(obj.ptr())) {
         // None gets converted to undefined Tensors
         return autograd::Variable();
       }
       if (THPVariable_Check(obj.ptr())) {
         auto var = py::cast<autograd::Variable>(obj);
-        guardAgainstNamedTensor<autograd::Variable>(var);
         return var;
       } else {
         if (!allow_numbers_as_tensors) {
@@ -494,7 +493,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
             " is not compatible with interface ",
             interfaceType->repr_str(),
             "\n",
-            why_not.str()));
+            std::move(why_not).str()));
       }
       return res;
     }
@@ -643,7 +642,6 @@ py::object toPyObject(IValue ivalue) {
               " to a Python object");
       }
     } else {
-      guardAgainstNamedTensor<at::Tensor>(tensor);
       return py::cast(std::move(tensor));
     }
   } else if (ivalue.isStorage()) {
@@ -750,7 +748,7 @@ py::object toPyObject(IValue ivalue) {
     }
 
     auto pyCu = get_python_cu();
-    if (obj->name().find("__torch__.torch.classes") == 0) {
+    if (obj->name().starts_with("__torch__.torch.classes")) {
       return py::cast(Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
@@ -852,7 +850,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
       for (const auto& err : errors) {
         ss << err.what() << "\n\n";
       }
-      throw std::runtime_error(ss.str());
+      throw std::runtime_error(std::move(ss).str());
     }
 
     return std::make_pair(std::move(found_op), std::move(stack));
@@ -996,6 +994,10 @@ py::object _get_operation_for_overload_or_packet(
     const py::kwargs& kwargs,
     bool is_overload,
     std::optional<c10::DispatchKey> dk) {
+  if (consume_should_skip_torch_function()) {
+    return invokeOperatorFromPython(operations, args, kwargs, dk);
+  }
+
   std::string ns = symbol.ns().toUnqualString();
   std::string method_name = symbol.toUnqualString();
   std::string overload_name = operations[0]->schema().overload_name();

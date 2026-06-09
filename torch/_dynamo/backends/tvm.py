@@ -51,10 +51,17 @@ def tvm(
 ) -> Callable[..., Any]:
     if options is None:
         options = MappingProxyType({"scheduler": None, "trials": 20000, "opt_level": 3})
-    assert options is not None
-    import tvm  # type: ignore[import]
-    from tvm import relay  # type: ignore[import]
-    from tvm.contrib import graph_executor  # type: ignore[import]
+    if options is None:
+        raise AssertionError("options must not be None")
+    try:
+        import tvm  # type: ignore[import]
+        from tvm import relay  # type: ignore[import]
+        from tvm.contrib import graph_executor  # type: ignore[import]
+    except ImportError as e:
+        raise ImportError(
+            "Please install apache-tvm to use the tvm backend. "
+            "See https://tvm.apache.org/docs/install/index.html for instructions."
+        ) from e
 
     jit_mod = torch.jit.trace(gm, example_inputs)
     device = device_from_inputs(example_inputs)
@@ -103,7 +110,8 @@ def tvm(
                 )
             # TODO(shingjan): This could be replaced by tvm.contrib.torch.optimize_torch
             # once USE_PT_TVMDSOOP is updated and turned on by default in TVM.
-            assert trials > 0
+            if trials <= 0:
+                raise AssertionError(f"trials must be positive, got {trials}")
             database = ms.relay_integration.tune_relay(
                 mod=mod,
                 target=target,
@@ -152,7 +160,7 @@ def tvm(
     def exec_tvm(*i_args: torch.Tensor) -> list[torch.Tensor]:
         args = [a.contiguous() for a in i_args]
         shape_info, _ = m.get_input_info()
-        active_inputs = {name for name, _ in shape_info.items()}
+        active_inputs = set(shape_info.keys())
         for idx, arg in enumerate(args, 0):
             if arg.dim() != 0:
                 if arg.requires_grad:

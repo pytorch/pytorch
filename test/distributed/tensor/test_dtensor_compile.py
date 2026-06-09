@@ -36,6 +36,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     loss_parallel,
@@ -44,18 +45,21 @@ from torch.distributed.tensor.parallel import (
     PrepareModuleOutput,
     RowwiseParallel,
 )
-from torch.distributed.tensor.placement_types import _StridedShard
+from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     run_tests,
     skipIfHpu,
     skipIfTorchDynamo,
     skipIfXpu,
+    TEST_WITH_SLOW,
+    TEST_XPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -247,6 +251,10 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = fn(x)
         res.to_local().sum().backward()
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW or TEST_XPU,
+        "https://github.com/pytorch/pytorch/issues/178745",
+    )
     @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
     def test_dtensor_basic_compile(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -280,19 +288,20 @@ def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_s
     from_local = torch.distributed.tensor._api.from_local(l_x_, l_self_buffers_buffer_device_mesh, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_self_buffers_buffer_device_mesh = None
     inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
     to_local = inter.to_local();  inter = None
-    return (to_local,)""",  # noqa: B950
+    return (to_local,)""",
         )
         self.assertExpectedInline(
             str(backend.fw_graphs[0].code).strip(),
-            """\
+            f"""\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg3_1, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  arg3_1 = None
+    _to_copy = torch.ops.aten._to_copy.default(arg3_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg3_1 = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
-    return (view_1,)""",  # noqa: B950
+    return (view_1,)""",
         )
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179690")
     @skipIfXpu(msg="AssertionError: torch-xpu-ops: 2958")
     @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
     def test_dtensor_basic_export(self):
@@ -330,7 +339,7 @@ def forward(self, args_0):
     from_local = torch.distributed.tensor._api.from_local(l_x_, l_self_buffers_buffer_device_mesh, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_self_buffers_buffer_device_mesh = None
     inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
     to_local = inter.to_local();  inter = None
-    return self._dynamo_bytecode_unflatten((to_local,), _fn_args)""",  # noqa: B950
+    return self._dynamo_bytecode_unflatten((to_local,), _fn_args)""",
         )
 
         with tracing(tracing_context):
@@ -352,7 +361,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
-    return (view_1,)""",  # noqa: B950
+    return (view_1,)""",
         )
 
     def test_placement_compile(self):
@@ -382,6 +391,53 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             opt_fn = fn(x)
             compiled_out = compiled_fn(x)
             self.assertEqual(opt_fn, compiled_out)
+
+    def test_strided_shard_view_unbacked_local(self):
+        # Regression for torchtitan #3409: during compile-time sharding
+        # propagation for any _StridedShard view op,
+        # _StridedShard.local_shard_size_and_offset used to materialize
+        # offsets via .tolist() on a fake offsets tensor, allocating one
+        # unbacked SymInt per element. These symbols never reached the
+        # returned DTensor's tensor_meta, tripping the downstream
+        # PendingUnbackedSymbolNotFound check. The bug triggers for any
+        # _StridedShard view under compile regardless of whether the local
+        # tensor has backed or unbacked dims; torch.nonzero (producing an
+        # unbacked dim 0) is simply how torchtitan #3409 surfaced it.
+        #
+        # The bug lives in pure sharding-propagation arithmetic on rank 0
+        # alone (no collectives are issued during fake-tensor view tracing),
+        # so the FakeStore + world_size=2 setup used by this test class is
+        # equivalent to the multi-rank scenario for the no-offset path
+        # being exercised here.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        global_bs = 16
+        slen = 4
+        dim = 4
+        split_factor = 8
+
+        def fn(sentinel):
+            nz = torch.nonzero(sentinel).flatten()
+            n_unbacked = nz.size(0)
+            torch._check(n_unbacked >= 1)
+            torch._check(n_unbacked <= global_bs)
+            local = torch.randn(n_unbacked, slen, dim)
+            dt = DTensor.from_local(
+                local,
+                mesh,
+                (_StridedShard(dim=0, split_factor=split_factor),),
+                shape=(global_bs, slen, dim),
+                stride=(slen * dim, dim, 1),
+                run_check=False,
+            )
+            return dt.view(-1, dim)
+
+        sentinel = torch.ones(global_bs, dtype=torch.int64)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(sentinel)
+        self.assertEqual(
+            out.placements,
+            (_StridedShard(dim=0, split_factor=split_factor),),
+        )
+        self.assertEqual(out.shape, (global_bs * slen, dim))
 
     def test_device_mesh_compile(self):
         def fn(x: DeviceMesh):
@@ -580,6 +636,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/171934")
     def test_dtensor_input_mutations(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -953,6 +1010,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         self.assertEqual(cnt.frame_count, 2)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177751")
     @with_comms
     @torch._dynamo.config.patch(trace_autograd_ops=True)
     def test_dtensor_requires_grad_intermediate_backward(self):
@@ -1193,7 +1251,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # Temporarily ignore setUp(), and use rank3 graphs during tracing
         dist.destroy_process_group()
         fake_store = FakeStore()
-        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
+        dist.init_process_group("fake", store=fake_store, rank=3, world_size=4)
         mesh = DeviceMesh(self.device_type, [1, 3])
 
         x = torch.randn(10, 257, 160, requires_grad=True)
@@ -1234,7 +1292,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # Temporarily ignore setUp(), and use rank3 graphs during tracing
         dist.destroy_process_group()
         fake_store = FakeStore()
-        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
+        dist.init_process_group("fake", store=fake_store, rank=3, world_size=4)
         mesh = DeviceMesh(self.device_type, [1, 3])
 
         x = torch.randn(10, 257, 160, requires_grad=True)
@@ -1425,6 +1483,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         out_dt = torch.matmul(tmp_dt, x_dt).permute(0, 2, 1)
         out_dt.sum().backward()
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/180656"
+    )
     def test_dynamo_dtensor_from_local_redistribute(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -1450,7 +1511,7 @@ def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.D
     redistribute = dt.redistribute(l_mesh_, [torch.distributed.tensor.placement_types.Replicate()]);  dt = l_mesh_ = None
     to_local = redistribute.to_local();  redistribute = None
     add = to_local + 2;  to_local = None
-    return (add,)""",  # noqa: B950
+    return (add,)""",
         )
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
@@ -1481,7 +1542,7 @@ def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.D
     redistribute = dt.redistribute(device_mesh = l_mesh_, placements = [torch.distributed.tensor.placement_types.Replicate()]);  dt = l_mesh_ = None
     to_local = redistribute.to_local();  redistribute = None
     add = to_local + 2;  to_local = None
-    return (add,)""",  # noqa: B950
+    return (add,)""",
         )
 
         # This should not throw a BypassAOTAutogradCache error
@@ -1576,17 +1637,16 @@ def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.D
         x2 = x2.to_local()
         self.assertTrue(isinstance(x2, AsyncCollectiveTensor))
         opt_fn(x2)
-        # The important part: we get a wait_tensor() in the graph.
-        # At runtime, the input to the graph is an AsyncCollectiveTensor,
-        # and inside the graph we need to issue a wait() to synchronize.
+        # ACTs are unwrapped before AOT autograd tracing in
+        # process_inputs, so the graph receives a plain tensor with
+        # no wait_tensor op.
         self.assertExpectedInline(
             str(fw_graph_cell[0]).strip(),
             """\
-def forward(self, primals_1):
-    wait_tensor = torch.ops._c10d_functional.wait_tensor.default(primals_1)
-    sin = torch.ops.aten.sin.default(wait_tensor)
+def forward(self, arg0_1):
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     sin_1 = torch.ops.aten.sin.default(sin);  sin = None
-    return (sin_1, primals_1, wait_tensor)""",
+    return (sin_1,)""",
         )
 
     @skipIfTorchDynamo()
@@ -1792,7 +1852,7 @@ class outer_fn(torch.nn.Module):
             # No stacktrace found for following nodes
             all_gather_into_tensor: "f32[8, 4]" = torch.ops._c10d_functional.all_gather_into_tensor.default(arg0_1, 2, '0');  arg0_1 = None
             wait_tensor: "f32[8, 4]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
-            return (wait_tensor, arg2_1)""",  # noqa: B950
+            return (wait_tensor, arg2_1)""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1917,6 +1977,166 @@ class outer_fn(torch.nn.Module):
 
         # Test backward pass
         result.sum().backward()
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_flattened_submesh_no_getattr_compile_on_one_rank(self):
+        """When compile_on_one_rank=True, the flattened submesh should appear as a
+        custom op call_function node (derived from the mesh graph input) rather than
+        as a get_attr constant holding an unpicklable ProcessGroup."""
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+
+        mesh = init_device_mesh(self.device_type, (2, 2), mesh_dim_names=("dp", "tp"))
+        mesh["dp", "tp"]._flatten("dp_tp")
+
+        import torch._functorch._aot_autograd.graph_compile as gc
+
+        orig = gc._aot_stage2a_partition
+        device_mesh_getattr_count = [0]
+
+        def check_partition(fx_g, joint_inputs, *args, **kwargs):
+            result = orig(fx_g, joint_inputs, *args, **kwargs)
+            fw_module, bw_module = result[0], result[1]
+            count = 0
+            for gm in (fw_module, bw_module):
+                for node in gm.graph.nodes:
+                    if node.op != "get_attr":
+                        continue
+                    val = getattr(gm, node.target, None)
+                    if isinstance(val, FakeScriptObject):
+                        val = getattr(val, "real_obj", val)
+                    if isinstance(val, DeviceMesh):
+                        count += 1
+            device_mesh_getattr_count[0] = count
+            return result
+
+        gc._aot_stage2a_partition = check_partition
+        torch._functorch._aot_autograd.graph_compile._aot_stage2a_partition = (
+            check_partition
+        )
+        try:
+            torch._dynamo.reset()
+            with dist.config.patch(compile_on_one_rank=True):
+
+                def fn(x, mesh):
+                    dt = DTensor.from_local(
+                        x, mesh, [Shard(0), Shard(0)], run_check=False
+                    )
+                    return (
+                        dt.redistribute(mesh, [Replicate(), Replicate()])
+                        .to_local()
+                        .sum()
+                    )
+
+                compiled = torch.compile(fn)
+                x = torch.randn(4, 4, requires_grad=True)
+                loss = compiled(x, mesh)
+                loss.backward()
+
+            self.assertEqual(
+                device_mesh_getattr_count[0],
+                0,
+                "DeviceMesh get_attr nodes survived into partitioned graphs; "
+                "the flattened submesh should use a custom op instead",
+            )
+        finally:
+            gc._aot_stage2a_partition = orig
+            torch._functorch._aot_autograd.graph_compile._aot_stage2a_partition = orig
+            dist.destroy_process_group()
+            dist.init_process_group(
+                "fake", store=FakeStore(), rank=0, world_size=self.world_size
+            )
+
+    def test_sibling_submesh_reconstruct_from_ancestor(self):
+        """When a closure captures an FSDP submesh while a sibling mesh (the
+        concatenated fsdp+tp mesh) is a graph input, the closure-captured mesh
+        must be reconstructed via _get_submesh — not baked as a get_attr
+        constant that breaks serialization.
+
+        This reproduces the SimpleFSDP + TP pattern: ReplicateComputation
+        captures the FSDP submesh as self.device_mesh, while parameters are
+        DTensors on DeviceMesh._concatenate([fsdp_mesh, tp_mesh]). With a
+        1D world mesh unflattened into (fsdp, tp), the root mesh has dim
+        name 'world' — so the reconstruct_fn must find the concatenated
+        ancestor (which contains 'fsdp') rather than looking only at root.
+        """
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=8)
+
+        try:
+            # Build 1D world mesh → unflatten → (fsdp=4, tp=2)
+            world_mesh = init_device_mesh(
+                self.device_type, (8,), mesh_dim_names=("world",)
+            )
+            dense_mesh = world_mesh._unflatten(0, (4, 2), ("fsdp", "tp"))
+            fsdp_mesh = dense_mesh["fsdp"]
+            tp_mesh = dense_mesh["tp"]
+
+            # Concatenate like SimpleFSDP's _distribute_dtensor does
+            concat_mesh = DeviceMesh._concatenate([fsdp_mesh, tp_mesh])
+
+            with dist.config.patch(compile_on_one_rank=True):
+
+                def fn(local_tensor, concat_mesh_input):
+                    # concat_mesh_input is a graph input (placeholder).
+                    # Simulate SimpleFSDP: create DTensor on concat mesh,
+                    # extract local, re-wrap on the closure-captured
+                    # fsdp_mesh, then all-gather.
+                    dt = DTensor.from_local(
+                        local_tensor,
+                        concat_mesh_input,
+                        [Shard(0), Shard(1)],
+                        run_check=False,
+                    )
+                    local = dt.to_local()
+                    fsdp_dt = DTensor.from_local(
+                        local, fsdp_mesh, [Shard(0)], run_check=False
+                    )
+                    return (
+                        fsdp_dt.redistribute(fsdp_mesh, [Replicate()]).to_local().sum()
+                    )
+
+                local_t = torch.randn(4, 4)
+                gm = make_fx(fn, tracing_mode="fake")(local_t, concat_mesh)
+
+            device_mesh_getattr_count = 0
+            for node in gm.graph.nodes:
+                if node.op != "get_attr":
+                    continue
+                val = getattr(gm, node.target, None)
+                if isinstance(val, FakeScriptObject):
+                    val = getattr(val, "real_obj", val)
+                if isinstance(val, DeviceMesh):
+                    device_mesh_getattr_count += 1
+
+            self.assertEqual(
+                device_mesh_getattr_count,
+                0,
+                "DeviceMesh get_attr nodes found; the closure-captured FSDP "
+                "submesh should be reconstructed from the tracked concatenated "
+                "ancestor via _get_submesh, not baked as a constant",
+            )
+
+            submesh_ops = [
+                node
+                for node in gm.graph.nodes
+                if node.op == "call_function" and "get_submesh" in str(node.target)
+            ]
+            self.assertGreater(
+                len(submesh_ops),
+                0,
+                "Expected _get_submesh call to derive the FSDP submesh from "
+                "the tracked concatenated ancestor mesh",
+            )
+        finally:
+            dist.destroy_process_group()
+            dist.init_process_group(
+                "fake", store=FakeStore(), rank=0, world_size=self.world_size
+            )
 
     def test_to_local_symbolic_sizes_non_sharded_dims(self):
         # Checks that symbolic sizes are not polluted by the sharding
@@ -2057,6 +2277,287 @@ class outer_fn(torch.nn.Module):
         # Without compile_on_one_rank, _resolve_group returns a string name
         result = _resolve_group(mesh_1d)
         self.assertIsInstance(result, str)
+
+    @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
+    def test_no_device_mesh_getattr_in_tp_dp_joint_graph(self):
+        """Backward closures of DTensor ops should not capture DeviceMesh as
+        get_attr constants in the joint graph (they break AOTAutograd cache
+        serialization because ProcessGroups are unpicklable)."""
+        import torch.distributed.config as dist_config
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        # Need world_size=4 for a 2x2 mesh; re-init the fake PG.
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+
+        def _distribute_dtensor(
+            tensor: DTensor,
+            device_mesh: DeviceMesh,
+            dp_placements: tuple[Placement, ...],
+        ) -> DTensor:
+            inner_spec = tensor._spec
+            spanned_mesh = DeviceMesh._concatenate([device_mesh, inner_spec.mesh])
+            shard_dim = dp_placements[0].dim
+            split_factor = inner_spec.num_shards_map[shard_dim]
+            tensor_placement = (
+                (
+                    _StridedShard(shard_dim, split_factor=split_factor)
+                    if split_factor > 1
+                    else dp_placements[0]
+                ),
+            ) + inner_spec.placements
+            current_spec = DTensorSpec(
+                mesh=device_mesh,
+                placements=(Replicate(),) * len(dp_placements),
+                tensor_meta=inner_spec.tensor_meta,
+            )
+            target_spec = DTensorSpec(
+                mesh=device_mesh,
+                placements=tuple(dp_placements),
+                tensor_meta=inner_spec.tensor_meta,
+            )
+            result_tensor = redistribute_local_tensor(
+                tensor._local_tensor,
+                current_spec=current_spec,
+                target_spec=target_spec,
+            )
+            return DTensor(
+                result_tensor.requires_grad_(tensor.requires_grad),
+                DTensorSpec(
+                    mesh=spanned_mesh,
+                    placements=tensor_placement,
+                    tensor_meta=inner_spec.tensor_meta,
+                ),
+                requires_grad=tensor.requires_grad,
+            )
+
+        class ReplicateComputation(nn.Module):
+            def __init__(self, device_mesh, param_sharding):
+                super().__init__()
+                self.device_mesh = device_mesh
+                self.param_sharding = param_sharding
+                self.compute_placements = [Replicate()] * device_mesh.ndim
+                self.grad_placements = [Partial(reduce_op="sum")] * device_mesh.ndim
+
+            def forward(self, x):
+                non_dp_mesh_dims = x._spec.mesh.ndim - self.device_mesh.ndim
+                sharded_dtensor = DTensor.from_local(
+                    x.to_local(), self.device_mesh, self.param_sharding
+                )
+                replicated_local_tensor = sharded_dtensor.redistribute(
+                    placements=self.compute_placements,
+                ).to_local(grad_placements=self.grad_placements)
+                non_dp_placements = tuple(x._spec.placements[-non_dp_mesh_dims:])
+                non_dp_mesh_dim_names = tuple(
+                    x._spec.mesh.mesh_dim_names[-non_dp_mesh_dims:]
+                )
+                non_dp_mesh = x._spec.mesh[non_dp_mesh_dim_names]
+                return DTensor.from_local(
+                    replicated_local_tensor, non_dp_mesh, non_dp_placements
+                )
+
+        param_sharding = (Shard(0),)
+        wrap_idx = [0]
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(16, 16, bias=False)
+                self.linear2 = nn.Linear(16, 16, bias=False)
+
+            def forward(self, x):
+                return self.linear2(torch.relu(self.linear1(x))).sum()
+
+        with dist_config.patch("compile_on_one_rank", True):
+            device = torch.device(f"{self.device_type}:0")
+            torch.accelerator.set_device_index(0)
+            mesh_2d = init_device_mesh(
+                self.device_type, (2, 2), mesh_dim_names=("fsdp", "tp")
+            )
+            dp_mesh = mesh_2d["fsdp"]
+
+            with torch.device("meta"):
+                model = Model()
+            parallelize_module(
+                model,
+                mesh_2d["tp"],
+                {
+                    "linear1": ColwiseParallel(),
+                    "linear2": RowwiseParallel(),
+                },
+            )
+            # Apply data parallelism with parametrization
+            for mod in model.modules():
+                params_dict = dict(mod.named_parameters(recurse=False))
+                for p_name, p in params_dict.items():
+                    mod.register_parameter(
+                        p_name,
+                        nn.Parameter(_distribute_dtensor(p, dp_mesh, param_sharding)),
+                    )
+                parametrization = ReplicateComputation(dp_mesh, param_sharding)
+                props = {
+                    pn: property(
+                        lambda self, _pn=pn: parametrization(self._parameters[_pn])
+                    )
+                    for pn in params_dict
+                }
+                idx = wrap_idx[0]
+                wrap_idx[0] += 1
+                cls = type(
+                    f"SimpleFSDP{mod.__class__.__name__}_{idx}",
+                    (mod.__class__,),
+                    props,
+                )
+                mod.__class__ = cls
+                import sys
+
+                sys.modules[cls.__module__].__dict__[cls.__name__] = cls
+
+            model.to_empty(device=device)
+            with dist_config.patch("compile_on_one_rank", False), torch.no_grad():
+                for p in model.parameters():
+                    p.fill_(0.01)
+            model.train()
+
+            x = torch.randn(4, 16, device=device)
+            with (
+                torch._dynamo.config.patch(fake_tensor_cache_enabled=False),
+                torch.fx.traceback.preserve_node_meta(),
+            ):
+                gm = dynamo_graph_capture_for_export(model)(x)
+                tracing_context = gm.meta["tracing_context"]
+
+            with tracing(tracing_context), ExitStack() as stack:
+                jwd = aot_export_joint_with_descriptors(stack, gm, (x,))
+
+            for node in jwd.graph_module.graph.nodes:
+                if node.op != "get_attr":
+                    continue
+                val = getattr(jwd.graph_module, node.target, None)
+                if isinstance(val, FakeScriptObject):
+                    val = getattr(val, "real_obj", val)
+                self.assertNotIsInstance(
+                    val,
+                    DeviceMesh,
+                    "DeviceMesh should not appear as get_attr in the joint graph",
+                )
+
+    def test_compile_optimizer_grad_view_base_dim_mismatch(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/176667
+        # When param._local_tensor is a view of an N-D base but
+        # grad._local_tensor is a view of a 1-D base (as in FSDP2's flat
+        # gradient buffer), dynamo's meta tensor creation must not reuse the
+        # param's symbolic context for the grad.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # param: view of 2D base (simulates FSDP2 reshard padding)
+        param_local = torch.randn(32, 256)[:16]
+        param = DTensor.from_local(param_local, mesh, [Replicate()], run_check=False)
+        param.requires_grad_(True)
+        param.retain_grad()
+
+        # grad: view of 1D base (simulates FSDP2 flat gradient buffer)
+        grad_local = torch.randn(16 * 256 + 1000)[: 16 * 256].view(16, 256)
+        param.grad = DTensor.from_local(
+            grad_local, mesh, [Replicate()], run_check=False
+        )
+
+        opt = torch.optim.Adam([param], lr=1e-3)
+        compiled_step = torch.compile(opt.step, backend="aot_eager")
+        compiled_step()
+
+    def test_pad_tensor_no_guard_on_symbolic_pad_size(self):
+        """pad_tensor must not create a guard that concretizes symbolic pad sizes.
+
+        When tracing with make_fx in symbolic mode, pad_size may be a SymInt
+        (e.g., for uneven DTensor sharding where local shard sizes vary by
+        rank). guard_or_false(pad_size == 0) must not be evaluated during
+        tracing, otherwise it creates a guard that collapses the SymInt to its
+        hint value, making the graph rank-specific instead of rank-independent.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode, unset_fake_temporarily
+        from torch.distributed.tensor._collective_utils import pad_tensor
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env, static_shapes=False)
+
+        with unset_fake_temporarily():
+            real = torch.empty(400, 15, device="meta")
+        sym_ctx = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.STATIC, DimDynamic.DYNAMIC]
+        )
+        x = fake_mode.from_tensor(real, symbolic_context=sym_ctx)
+        with fake_mode:
+            x = x.to("cpu")
+
+        # Verify the symbol is alive before tracing
+        self.assertTrue(isinstance(x.shape[1], torch.SymInt))
+        self.assertFalse(x.shape[1].node.expr.is_number)
+
+        def fn(t):
+            pad_size = 15 - t.size(1)
+            return pad_tensor(t, 1, pad_size)
+
+        with fake_mode:
+            gm = make_fx(fn, tracing_mode="symbolic")(x)
+
+        # The symbol must survive — not be guarded to a concrete value
+        self.assertFalse(
+            x.shape[1].node.expr.is_number,
+            f"pad_tensor created a guard that concretized the symbolic dim: "
+            f"expr={x.shape[1].node.expr}",
+        )
+
+        # The traced graph should have a symbolic pad size, not concrete 0
+        placeholder = next(n for n in gm.graph.nodes if n.op == "placeholder")
+        val = placeholder.meta["val"]
+        self.assertTrue(
+            isinstance(val.shape[1], torch.SymInt),
+            "Placeholder dim should be symbolic",
+        )
+
+    def test_make_fx_tp_embedding_no_shadow_nodes(self):
+        """make_fx through a TP-sharded embedding must not produce dead shadow nodes.
+
+        DTensor's ShardingPropagator runs each op on fake global-shape tensors
+        to derive output metadata. Without disable_proxy_modes_tracing, make_fx
+        traces those internal metadata ops, leaving dead "shadow" nodes backed
+        by empty_strided placeholders. For aten.embedding, the shadow node reads
+        uninitialized indices and crashes with out-of-bounds access at runtime.
+        """
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        vocab_size, embed_dim = 32, 16
+        weight = distribute_tensor(torch.randn(vocab_size, embed_dim), mesh, [Shard(0)])
+
+        def fn(weight, indices):
+            dt_indices = DTensor.from_local(
+                indices, mesh, [Replicate()], run_check=False
+            )
+            return torch.nn.functional.embedding(dt_indices, weight).to_local()
+
+        indices = torch.randint(0, vocab_size, (4,))
+
+        traced = make_fx(fn, tracing_mode="fake")(weight, indices)
+
+        empty_strided_nodes = [
+            n
+            for n in traced.graph.nodes
+            if n.op == "call_function"
+            and n.target == torch.ops.aten.empty_strided.default
+        ]
+        self.assertEqual(
+            len(empty_strided_nodes),
+            0,
+            "Shadow empty_strided nodes from ShardingPropagator leaked into "
+            "the make_fx graph; disable_proxy_modes_tracing is not active",
+        )
 
 
 @instantiate_parametrized_tests
@@ -2521,6 +3022,76 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 2,
                 f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
             )
+
+
+class TestDTensorACCompile(DTensorTestBase):
+    """Regression test for DTensor + AC + compile interaction.
+
+    When a DTensor with independent inner/outer symbolic shapes is lifted
+    as a freevar into a checkpoint HOP subgraph, ``_lift_basic_symbols``
+    recurses into the inner tensor with ``source=None`` and tries to lift
+    an unbound inner symbol to the root tracer, crashing with::
+
+        AssertionError: Source of '<sym>' is None when lifting it
+        to input of top-level.
+    """
+
+    @property
+    def world_size(self):
+        return 2
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_tp_ac_compile_dtensor_inner_symbol(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # Embedding produces a DTensor whose inner/outer sizes get
+        # independent symbols (outer = global seq_len, inner = local
+        # seq_len). This is the pattern from TP with variable-length seqs.
+        class EmbedBlock(nn.Module):
+            def __init__(self, vocab, dim, device):
+                super().__init__()
+                self.embed = nn.Embedding(vocab, dim, device=device)
+                self.block = MLPModule(device)
+
+            def forward(self, ids):
+                return self.block(self.embed(ids))
+
+        model = EmbedBlock(32, 10, self.device_type)
+
+        parallelize_module(
+            model,
+            mesh,
+            {
+                "embed": RowwiseParallel(
+                    output_layouts=Shard(1), use_local_output=False
+                ),
+                "block.net1": ColwiseParallel(
+                    input_layouts=Shard(1), use_local_output=False
+                ),
+                "block.net2": RowwiseParallel(use_local_output=False),
+            },
+        )
+        model.block = checkpoint_wrapper(
+            model.block,
+            checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+            checkpoint_fn=checkpoint,
+            use_reentrant=False,
+        )
+        torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True
+
+        model.block.compile(backend="aot_eager", fullgraph=True)
+
+        ids1 = torch.randint(0, 32, (4, 20), device=self.device_type)
+        out1 = model(ids1)
+        out1.sum().backward()
+        model.zero_grad()
+
+        # Different seq_len triggers dynamic-shape recompilation where
+        # the DTensor inner symbol gets lifted through the AC HOP.
+        ids2 = torch.randint(0, 32, (4, 25), device=self.device_type)
+        out2 = model(ids2)
+        out2.sum().backward()
 
 
 if __name__ == "__main__":

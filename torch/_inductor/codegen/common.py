@@ -26,6 +26,7 @@ from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._config_module import ConfigModule
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Max
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -203,7 +204,7 @@ class WorkspaceArg(CodegenSymbol):
             a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
         )
         return WorkspaceArg(
-            count=sympy.Max(a.count, b.count),
+            count=Max(a.count, b.count),
             zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
             dtype=a.dtype,
             device=a.device,
@@ -327,6 +328,12 @@ class DeviceOpOverrides:
     def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
 
+    def current_stream(self) -> str:
+        raise NotImplementedError
+
+    def stream_handle(self, stream_name: str) -> str:
+        return f"{stream_name}.native_handle"
+
     def cpp_device_guard(self) -> str:
         raise NotImplementedError
 
@@ -371,6 +378,7 @@ class DeviceOpOverrides:
 
 
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
+_device_op_overrides_initialized = False
 custom_backend_passes: dict[str, CustomGraphModulePass | None] = {}
 custom_backend_codegen_configs: dict[str, ConfigModule | None] = {}
 
@@ -506,6 +514,7 @@ def init_backend_registration() -> None:
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
     from .wrapper_fxir import WrapperFxCodegen
+    from .xpu.xpu_combined_scheduling import XPUCombinedScheduling
 
     if get_scheduling_for_device("cpu") is None:
         cpu_backends = {
@@ -551,7 +560,7 @@ def init_backend_registration() -> None:
     if get_scheduling_for_device("xpu") is None:
         register_backend_for_device(
             "xpu",
-            TritonScheduling,
+            XPUCombinedScheduling,
             PythonWrapperCodegen,
             CppWrapperGpu,
             WrapperFxCodegen,
@@ -626,24 +635,28 @@ def register_device_op_overrides(
     device_op_overrides_dict[device] = device_op_overrides
 
 
+def _initialize_device_op_overrides():
+    # Use a flag rather than checking device_op_overrides_dict, since external/test
+    # code may partially populate it before we are called.
+    global _device_op_overrides_initialized
+    if _device_op_overrides_initialized:
+        return
+
+    from . import mps_device_op_overrides  # noqa: F401
+    from .cpu_device_op_overrides import CpuDeviceOpOverrides
+    from .cuda import device_op_overrides  # noqa: F401
+    from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
+    from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
+
+    # TPU uses Pallas for codegen and only needs no-op overrides
+    register_device_op_overrides("tpu", CpuDeviceOpOverrides())
+
+    _device_op_overrides_initialized = True
+
+
 def get_device_op_overrides(device: str) -> DeviceOpOverrides:
     assert isinstance(device, str), type(device)
-
-    if not device_op_overrides_dict:
-        from . import (  # noqa: F401  # noqa: F401
-            cpu_device_op_overrides,
-            mps_device_op_overrides,
-        )
-        from .cuda import device_op_overrides  # noqa: F401
-        from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
-        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
-
-    if device not in device_op_overrides_dict:
-        # For backends like TPU that only need no-op overrides (Pallas handles codegen)
-        from .cpu_device_op_overrides import CpuDeviceOpOverrides
-
-        register_device_op_overrides(device, CpuDeviceOpOverrides())
-
+    _initialize_device_op_overrides()
     return device_op_overrides_dict[device]
 
 
@@ -682,6 +695,7 @@ def deduce_output_dtype_by_name(
     elif op_name in (
         "to_dtype",
         "index_expr",
+        "value_expr",
     ):
         return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
@@ -711,11 +725,22 @@ def deduce_output_dtype_by_name(
     return None
 
 
+def _is_runtime_triton_assert_target() -> bool:
+    return (
+        get_current_backend() == "triton"
+        and V.graph.get_current_device_or_throw().type != "cpu"
+        and hasattr(V.kernel, "triton_tensor_ndim")
+    )
+
+
 def check_dtype(
     buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
 ) -> None:
     backend = get_current_backend()
-    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+    if (
+        config.test_configs.runtime_triton_dtype_assert
+        and _is_runtime_triton_assert_target()
+    ):
         buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
     elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
         from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
@@ -739,9 +764,11 @@ def check_dtype(
 def check_shape(
     buffer: IndentedBuffer, var: CSEVariableType, shape: BlockShapeType
 ) -> None:
-    backend = get_current_backend()
     assert shape is not None
-    if config.test_configs.runtime_triton_shape_assert and backend == "triton":
+    if (
+        config.test_configs.runtime_triton_shape_assert
+        and _is_runtime_triton_assert_target()
+    ):
         shape_str = (
             ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
         )
@@ -1011,34 +1038,42 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         return repr(value)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_not(x: OpVarT) -> OpVarT:
         return f"~{OpOverrides.paren(x)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_not(a: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(a)} == 0"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_and(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} & {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_or(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} | {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_xor(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} ^ {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_left_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} << {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_right_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def int_truediv(a: OpVarT, b: OpVarT) -> OpVarT:
         # TODO: this is wrong
         # TODO: an easy bandaid is to generate runtime asserts that it's
@@ -2599,7 +2634,7 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.info(  # noqa: G200
+            log.info(
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -2700,13 +2735,16 @@ class CSEProxy(DefaultHandler):
             if (
                 config.test_configs.runtime_triton_dtype_assert
                 or config.test_configs.static_cpp_dtype_assert
-            ):
-                assert var_dtype is not None
+            ) and var_dtype is not None:
                 check_dtype(V.kernel.compute, csevar, var_dtype)
 
-            if config.test_configs.runtime_triton_shape_assert:
-                assert output_shape is not None
-                check_shape(V.kernel.compute, csevar, output_shape)
+            if (
+                config.test_configs.runtime_triton_shape_assert
+                and _is_runtime_triton_assert_target()
+            ):
+                shape_to_check = csevar.shape if csevar.shape is not None else var_shape
+                if shape_to_check is not None:
+                    check_shape(V.kernel.compute, csevar, shape_to_check)
 
             if config.runtime_triton_nan_asserts:
                 check_nan(V.kernel.compute, csevar)
@@ -2785,9 +2823,15 @@ class CSEProxy(DefaultHandler):
             else:
                 stm = var
 
-            # Propagate bounds as we know how to compute them properly
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+            # Propagate bounds as we know how to compute them properly.
+            # When wrap_neg=False, negative indices stay negative and must keep
+            # their original bounds so lower-bound checks are not elided.
+            new_bounds = var.bounds if not wrap_neg else ValueRanges.unknown()
+            if (
+                wrap_neg
+                and var.bounds != ValueRanges.unknown()
+                and isinstance(size, sympy.Number)
+            ):
                 # Take the negative part of the bound and add size to it
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the cond

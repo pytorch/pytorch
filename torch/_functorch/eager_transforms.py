@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import contextlib
-from functools import partial, wraps
+from functools import partial
 from typing import Any, overload, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 
@@ -19,10 +19,7 @@ from torch._C._functorch import (
     _func_increment_nesting,  # type: ignore[attr-defined]
     _grad_decrement_nesting,
     _grad_increment_nesting,
-    _jvp_decrement_nesting,
-    _jvp_increment_nesting,
     _propagate_functional_input_mutation,  # type: ignore[attr-defined]
-    _unwrap_for_grad,
     _unwrap_functional_tensor,
     _wrap_for_grad,
     _wrap_functional_tensor,
@@ -30,6 +27,11 @@ from torch._C._functorch import (
     get_unwrapped,
     is_functorch_wrapped_tensor,
     set_inplace_requires_grad_allowed,
+)
+from torch._functorch.predispatch import (
+    _jvp_decrement_nesting,
+    _jvp_increment_nesting,
+    _unwrap_for_grad,
 )
 from torch._functorch.utils import argnums_t, exposed_in
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -45,7 +47,7 @@ from torch.utils._pytree import (
     treespec_pprint,
 )
 
-from .apis import vmap
+from .apis import _wraps_without_dynamo_attrs, vmap
 from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 
@@ -638,7 +640,7 @@ def jacrev(
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
-    @wraps(func)
+    @_wraps_without_dynamo_attrs(func)
     def wrapper_fn(*args: Any) -> Any:
         error_if_complex("jacrev", args, is_input=True)
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
@@ -1360,7 +1362,7 @@ def jacfwd(
 
     """
 
-    @wraps(func)
+    @_wraps_without_dynamo_attrs(func)
     def wrapper_fn(*args: Any) -> Any:
         error_if_complex("jacfwd", args, is_input=True)
         primals = args if argnums is None else _slice_argnums(args, argnums)
@@ -1763,7 +1765,7 @@ def functionalize(
             " replaced with their non-aliasing counterparts, {view}_copy.\n"
         )
 
-    @wraps(func)
+    @_wraps_without_dynamo_attrs(func)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
         try:
             func_level = _func_increment_nesting(reapply_views)

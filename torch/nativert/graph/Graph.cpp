@@ -964,10 +964,7 @@ void Value::addUser(Node* node) {
 }
 
 void Value::eraseUser(Node* node) {
-  users_.erase(
-      std::remove_if(
-          users_.begin(), users_.end(), [&](Node* el) { return el == node; }),
-      users_.end());
+  std::erase(users_, node);
 }
 
 std::vector<const Value*> Value::getListElements() const {
@@ -1660,7 +1657,7 @@ std::string graphToString(const Graph& g, bool include_signature) {
     ss << g.signature();
   }
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 } // namespace torch::nativert

@@ -20,6 +20,7 @@ EXPECTED_PLATFORM_TAGS: dict[str, str] = {
     "linux-aarch64": r"_aarch64$",
     "windows": r"^win_amd64$",
     "win32": r"^win_amd64$",
+    "windows-arm64": r"^win_arm64$",
     "macos-arm64": r"^macosx_\d+_\d+_arm64$",
     "darwin": r"^macosx_\d+_\d+_(arm64|x86_64)$",
 }
@@ -65,6 +66,8 @@ def check_wheel_platform_tag() -> None:
     target_os = os.getenv("TARGET_OS", sys.platform)
     if target_os == "linux" and platform.machine() == "aarch64":
         target_os = "linux-aarch64"
+    elif target_os in ("win32", "windows") and platform.machine().lower() == "arm64":
+        target_os = "windows-arm64"
     expected_python = f"cp{sys.version_info.major}{sys.version_info.minor}"
     import sysconfig
 
@@ -181,8 +184,14 @@ def _check_dylibs_minos(dylibs: list, expected_minos: str, source: str) -> None:
                         break
                 break
 
-        if minos and minos != expected_minos:
-            mismatches.append(f"{dylib.name}: minos={minos}, expected={expected_minos}")
+        # A dylib with a lower minos than the wheel tag is safe (forward compatible).
+        # Only flag dylibs that require a *higher* macOS than the wheel claims to support.
+        if minos and tuple(int(x) for x in minos.split(".")) > tuple(
+            int(x) for x in expected_minos.split(".")
+        ):
+            mismatches.append(
+                f"{dylib.name}: minos={minos}, expected<={expected_minos}"
+            )
 
     if mismatches:
         raise RuntimeError(

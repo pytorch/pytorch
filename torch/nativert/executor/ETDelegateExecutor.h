@@ -15,7 +15,7 @@ class ETDelegateExecutor : public DelegateExecutor {
               std::get_if<std::string>(&node.attributes()[0].value);
           TORCH_CHECK(
               path != nullptr,
-              "et hop's first attribute should correspond to it's path");
+              "et hop's first attribute should correspond to its path");
           return std::string(dir_prefix) + *path;
         }()) {
     VLOG(1) << "ETDelegateExecutor: " << delegate_dir_;

@@ -14,7 +14,7 @@ from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from .. import config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
-from ..utils import load_template
+from ..utils import load_template, triton_type
 
 
 log = logging.getLogger(__name__)
@@ -47,7 +47,9 @@ def persistent_grouped_mm_grid(*args):
 def acc_type(dtype):
     if dtype in (torch.float16, torch.bfloat16):
         return "tl.float32"
-    return f"tl.{dtype}".replace("torch.", "")
+    if dtype.is_floating_point and dtype.itemsize == 1:  # fp8 dtypes
+        return "tl.float32"
+    return triton_type(dtype)
 
 
 def mm_args(

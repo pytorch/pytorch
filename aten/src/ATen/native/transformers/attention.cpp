@@ -613,18 +613,13 @@ at::Tensor preprocess_mask(
 // This causes the kernel to maybe alias query, key, value
 // So instead we pad the head_dimensions to be a multiple of 8 in the composite
 // region
-template <bool slice>
 at::Tensor pad_last_dim(const at::Tensor& attn_bias, int alignment_size) {
   auto last_dim_size = attn_bias.sym_size(-1);
   if (last_dim_size % alignment_size == 0) {
     return attn_bias;
   }
   auto pad_count = alignment_size - (last_dim_size % alignment_size);
-  auto padded_bias = at::pad_symint(attn_bias, {c10::SymInt(0), pad_count});
-  if (slice) {
-    return padded_bias.slice_symint(-1, 0, last_dim_size);
-  }
-  return padded_bias;
+  return at::pad_symint(attn_bias, {c10::SymInt(0), pad_count});
 }
 
 at::Tensor post_process_flash_output(
@@ -728,17 +723,22 @@ Tensor scaled_dot_product_attention(
     bool enable_gqa) {
   using sdp::SDPBackend;
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
-  // NB: This op is CompositeImplicitAutograd — autograd traces through the
-  // implementation rather than using an explicit backward formula. We must
-  // return early here because the scale computation (1/sqrt(head_dim)) is
-  // undefined when head_dim is 0, and backends don't uniformly handle
-  // zero-element tensors. We use the sum()*0 trick (same pattern as
-  // _batch_norm_impl_index in Normalization.cpp) to make the output depend
-  // on all inputs so that backward() produces correctly-shaped zero
-  // gradients instead of None.
-  if (TORCH_GUARD_OR_FALSE(query_.sym_numel().sym_eq(0)) ||
-      TORCH_GUARD_OR_FALSE(key.sym_numel().sym_eq(0)) ||
-      TORCH_GUARD_OR_FALSE(value.sym_numel().sym_eq(0))) {
+  // NB: This op is CompositeImplicitAutograd -- autograd traces through the
+  // implementation rather than using an explicit backward formula.
+  // Return early when the output is truly empty or softmax is undefined.
+  // We guard on value.numel()==0 (covers B, H, L_k, or head_dim_v being 0)
+  // and on L_q==0 (the one output dimension not present in value).
+  // When only head_dim_qk is 0, the result is well-defined (uniform attention)
+  // and falls through to the math backend.
+  // We use the sum()*0 trick (same pattern as _batch_norm_impl_index in
+  // Normalization.cpp) to make the output depend on all inputs so that
+  // backward() produces correctly-shaped zero gradients instead of None.
+  // For nested tensors, dim -2 is irregular so sym_size(-2) is unavailable.
+  // Fall back to checking query numel for nested tensors.
+  if (TORCH_GUARD_OR_FALSE(value.sym_numel().sym_eq(0)) ||
+      (query_.is_nested()
+          ? TORCH_GUARD_OR_FALSE(query_.sym_numel().sym_eq(0))
+          : TORCH_GUARD_OR_FALSE(query_.sym_size(-2).sym_eq(0)))) {
     auto output_shape = query_.sym_sizes().vec();
     output_shape[output_shape.size() - 1] = value.sym_size(-1);
     auto out = at::zeros_symint(output_shape, query_.options());
@@ -764,9 +764,9 @@ Tensor scaled_dot_product_attention(
          query_device_type == DeviceType::XPU) {
         c10::SymInt og_size = query_.sym_size(-1);
         int alignment_size = (query_device_type == DeviceType::XPU) ? 64 : 8;
-        Tensor query_padded = pad_last_dim<false>(query_, alignment_size);
-        Tensor key_padded = pad_last_dim<false>(key, alignment_size);
-        Tensor value_padded = pad_last_dim<false>(value, alignment_size);
+        Tensor query_padded = pad_last_dim(query_, alignment_size);
+        Tensor key_padded = pad_last_dim(key, alignment_size);
+        Tensor value_padded = pad_last_dim(value, alignment_size);
         // We need to calculate the scale based off the OG head dim size
         auto og_scale = sdp::calculate_scale(query_, scale);
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
@@ -792,48 +792,8 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case SDPBackend::math: {
-#ifdef USE_MPS
-      TORCH_CHECK_NOT_IMPLEMENTED(
-        c10::isFloatingType(query_.scalar_type()),
-        "scaled_dot_product_attention for MPS does not support dtype ",
-        query_.scalar_type());
-      TORCH_CHECK_NOT_IMPLEMENTED(
-        c10::isFloatingType(key.scalar_type()),
-        "scaled_dot_product_attention for MPS does not support dtype ",
-        key.scalar_type());
-      TORCH_CHECK_NOT_IMPLEMENTED(
-        c10::isFloatingType(value.scalar_type()),
-        "scaled_dot_product_attention for MPS does not support dtype ",
-        value.scalar_type());
-      const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
       const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
-      const auto all_contiguous = query_.is_contiguous_or_false() && key.is_contiguous_or_false() && value.is_contiguous_or_false();
-      if (query_device_type == DeviceType::MPS && dropout_p == 0.0
-          && !(GradMode::is_enabled() && any_inputs_require_grad)
-          && (all_contiguous || mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS))
-          && !any_nested) {
-        if (enable_gqa) {
-          int64_t q_heads = query_.size(-3);
-          int64_t k_heads = key.size(-3);
-          int64_t repeat_factor = q_heads / k_heads;
-
-          if (repeat_factor > 1) {
-            TORCH_CHECK(q_heads % k_heads == 0,
-                          "For GQA, the query tensor's head dimension (" + std::to_string(q_heads) +
-                                    ") must be divisible by the key tensor's head dimension (" + std::to_string(k_heads) + ").");
-            auto repeated_key = key.repeat_interleave(repeat_factor, /*dim=*/-3);
-            auto repeated_value = value.repeat_interleave(repeat_factor, /*dim=*/-3);
-            return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
-              query_,
-              repeated_key,
-              repeated_value,
-              attn_mask,
-              dropout_p,
-              is_causal,
-              std::nullopt, /*dropout_mask*/
-              scale));
-          }
-        }
+      if (query_device_type == c10::kMPS && !(at::GradMode::is_enabled() && any_inputs_require_grad)) {
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
             key,
@@ -842,9 +802,9 @@ Tensor scaled_dot_product_attention(
             dropout_p,
             is_causal,
             std::nullopt, /*dropout_mask*/
-            scale));
+            scale,
+            enable_gqa));
       }
-#endif
       return std::get<0>(at::_scaled_dot_product_attention_math(
           query_,
           key,

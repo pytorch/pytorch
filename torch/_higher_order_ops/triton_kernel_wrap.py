@@ -19,11 +19,10 @@ import sympy
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._C import DispatchKey
-from torch._higher_order_ops.utils import redirect_to_mode
+from torch._C import _dispatch_keys, DispatchKey
+from torch._higher_order_ops.utils import redirect_to_mode, register_fake
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -41,9 +40,10 @@ if TYPE_CHECKING:
         operation as TritonIROperation,
     )
 
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
     from torch._dynamo.variables.functions import TritonKernelVariable
+    from torch._guards import Source
     from torch._inductor.dependencies import ReadWrites
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
     from torch.fx.proxy import Proxy
@@ -1198,8 +1198,10 @@ def identify_triton_stores(source_code: str) -> TritonStores:
 
     tl.store signature: store(pointer, value, mask=None, boundary_check=(), ...)
     """
+    return identify_triton_stores_from_ast(ast.parse(source_code))
 
-    tree = ast.parse(source_code)
+
+def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
     stores = []
 
     def _extract_arg(node, arg_name, positional_index):
@@ -1243,8 +1245,23 @@ def identify_triton_stores(source_code: str) -> TritonStores:
 # Triton Kernel Wrappers
 
 
+class _TritonKernelWrapper(HigherOrderOperator):
+    def _get_overloaded_args(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[Tensor, ...]:
+        overloaded_args = list(super()._get_overloaded_args(args, kwargs))
+        triton_kwargs = kwargs.get("kwargs")
+        if isinstance(triton_kwargs, dict):
+            overloaded_args.extend(
+                arg
+                for arg in triton_kwargs.values()
+                if isinstance(arg, Tensor) and _dispatch_keys(arg).has("Python")
+            )
+        return tuple(overloaded_args)
+
+
 # Used for wrapping a Triton Kernel
-class TritonKernelWrapperMutation(HigherOrderOperator):
+class TritonKernelWrapperMutation(_TritonKernelWrapper):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_mutation", cacheable=True)
 
@@ -1270,7 +1287,7 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
 
 # Used for wrapping a Triton Kernel in a functional manner
-class TritonKernelWrapperFunctional(HigherOrderOperator):
+class TritonKernelWrapperFunctional(_TritonKernelWrapper):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_functional", cacheable=True)
 
@@ -1338,7 +1355,7 @@ def triton_kernel_wrapper_mutation_dense(
         for k, v in tma_descriptor_metadata.items():
             tensor = kwargs[k]
             if (exp_meta := maybe_unpack_tma_experimental_metadata(v)) is not None:
-                from triton.tools.experimental_descriptor import (  # noqa: F401
+                from triton.tools.experimental_descriptor import (
                     create_1d_tma_descriptor,
                     create_2d_tma_descriptor,
                 )
@@ -1389,9 +1406,8 @@ def triton_kernel_wrapper_mutation_dense(
     kernel[grid_fn](*args, **kwargs, **constant_args)
 
 
-@triton_kernel_wrapper_mutation.py_impl(FakeTensorMode)
+@register_fake(triton_kernel_wrapper_mutation, skip_cache=True)
 def triton_kernel_wrapper_mutation_fake_tensor_mode(
-    mode: FakeTensorMode,
     *,
     kernel_idx: int,
     constant_args_idx: int,
@@ -1399,8 +1415,7 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
 ) -> None:
-    with mode:
-        return None
+    return None
 
 
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.Meta)
@@ -1560,9 +1575,8 @@ def triton_kernel_wrapper_functional_dense(
     return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
 
 
-@triton_kernel_wrapper_functional.py_impl(FakeTensorMode)
+@register_fake(triton_kernel_wrapper_functional, skip_cache=True)
 def triton_kernel_wrapper_functional_fake_tensor_mode(
-    mode: FakeTensorMode,
     *,
     kernel_idx: int,
     constant_args_idx: int,
@@ -1575,12 +1589,11 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     # `clone_preserve_strides` calls are never executed at runtime
     # (inductor should always optimize them away).
     # Requires https://github.com/pytorch/pytorch/issues/109240
-    with mode:
-        return {
-            key: clone_preserve_strides(val)
-            for key, val in kwargs.items()
-            if key in tensors_to_clone
-        }
+    return {
+        key: clone_preserve_strides(val)
+        for key, val in kwargs.items()
+        if key in tensors_to_clone
+    }
 
 
 @triton_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
@@ -1702,7 +1715,7 @@ class TritonHOPifier:
     def wrap_user_defined_obj(
         self,
         user_obj: Any,
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
         name: str,
     ) -> Any:
@@ -1713,13 +1726,13 @@ class TritonHOPifier:
         user_fn: Callable[..., Any],
         args: list,
         kwargs: dict,
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
     ) -> Any:
         raise NotImplementedError("abstract method")
 
     def maybe_unpack_configs(
-        self, configs: list["TritonConfig"], tx: Optional["InstructionTranslator"]
+        self, configs: list["TritonConfig"], tx: Optional["InstructionTranslatorBase"]
     ) -> list["TritonConfig"]:
         raise NotImplementedError("abstract method")
 
@@ -1737,7 +1750,7 @@ class TritonHOPifier:
         kwargs: dict,
     ) -> list["TritonConfig"]:
         # Reimplement autotuner.prune_configs(...) here
-        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py   # noqa: E501,B950
+        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py
         # We do this to avoid calling prune_configs, which in turn calls early_config_prune and perf_model
         # These are both user-defined functions which can contain side effects, so we want to sandbox them in Dynamo
 
@@ -1864,6 +1877,30 @@ class TritonHOPifier:
                     "pre_hook and post_hook are not supported in triton.Autotune or triton.Config"
                 )
 
+    @staticmethod
+    def get_kernel_source(
+        variable: "TritonKernelVariable | TraceableTritonKernelWrapper",
+    ) -> "Source | None":
+        kernel_source = getattr(variable, "kernel_source", None)
+        if kernel_source is None:
+            kernel_source = getattr(variable, "source", None)
+        return kernel_source
+
+    def recreate_variable(
+        self,
+        variable: "TritonKernelVariable | TraceableTritonKernelWrapper",
+        *,
+        kernel: "TritonKernelType",
+        kernel_idx: int | None,
+        grid: "TritonGridType | None",
+    ) -> "TritonKernelVariable | TraceableTritonKernelWrapper":
+        return type(variable)(
+            kernel=kernel,
+            kernel_idx=kernel_idx,
+            grid=grid,
+            kernel_source=self.get_kernel_source(variable),
+        )
+
     def call_getitem(
         self,
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
@@ -1876,7 +1913,8 @@ class TritonHOPifier:
                 "Triton kernels should be called with only a single grid"
             )
 
-        return type(variable)(
+        return self.recreate_variable(
+            variable,
             kernel=variable.kernel,
             kernel_idx=variable.kernel_idx,
             grid=args[0],
@@ -1887,7 +1925,7 @@ class TritonHOPifier:
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
         args: Sequence[Any],
         kwargs: dict[str, Any],
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
     ) -> Optional["ConstantVariable"]:
         if "grid" not in kwargs:
             self.raise_unsupported("Triton kernel requires to be called with a grid")
@@ -1895,8 +1933,11 @@ class TritonHOPifier:
         kwargs.pop("warmup", None)
         # rewrite kernel.run(*args, grid=grid) to kernel[grid](*args)
         return self.call_triton_kernel(
-            type(variable)(
-                kernel=variable.kernel, kernel_idx=variable.kernel_idx, grid=grid
+            self.recreate_variable(
+                variable,
+                kernel=variable.kernel,
+                kernel_idx=variable.kernel_idx,
+                grid=grid,
             ),
             args,
             kwargs,
@@ -1908,7 +1949,7 @@ class TritonHOPifier:
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
         args: Sequence[Any],
         kwargs: dict[str, Any],
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
     ) -> Optional["ConstantVariable"]:
         from triton import JITFunction
         from triton.runtime.autotuner import autotune, Autotuner, Config, Heuristics
@@ -2001,7 +2042,12 @@ class TritonHOPifier:
             )(iter_kernel)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
-            new_var = type(variable)(new_kernel, None, variable.grid)
+            new_var = self.recreate_variable(
+                variable,
+                kernel=new_kernel,
+                kernel_idx=None,
+                grid=variable.grid,
+            )
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         SPECIAL_CONFIG_NAMES = {
@@ -2046,7 +2092,12 @@ class TritonHOPifier:
 
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
-            new_var = type(variable)(new_kernel, None, variable.grid)
+            new_var = self.recreate_variable(
+                variable,
+                kernel=new_kernel,
+                kernel_idx=None,
+                grid=variable.grid,
+            )
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         if isinstance(variable.kernel, Autotuner):
@@ -2086,11 +2137,16 @@ class TritonHOPifier:
                     new_kernel = autotune(
                         configs=new_configs, prune_configs_by=prune_configs_by, key=[]
                     )(variable.kernel.fn)
-                    new_var = type(variable)(new_kernel, None, variable.grid)
+                    new_var = self.recreate_variable(
+                        variable,
+                        kernel=new_kernel,
+                        kernel_idx=None,
+                        grid=variable.grid,
+                    )
                     return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         # These are the default values in upstream Triton
-        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py # noqa: E501,B950
+        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py
         default_perf_model = None
         default_early_config_prune = None
 
@@ -2146,7 +2202,12 @@ class TritonHOPifier:
             new_kernel = autotune(configs=pruned_configs, key=[])(variable.kernel.fn)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
-            new_var = type(variable)(new_kernel, None, variable.grid)
+            new_var = self.recreate_variable(
+                variable,
+                kernel=new_kernel,
+                kernel_idx=None,
+                grid=variable.grid,
+            )
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         # Both for grid's meta as well as for the kernel, we need combined
@@ -2250,7 +2311,7 @@ class TracingTritonHOPifier(TritonHOPifier):
     def wrap_user_defined_obj(
         self,
         user_obj: Any,
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
         name: str,
     ) -> Any:
@@ -2263,7 +2324,7 @@ class TracingTritonHOPifier(TritonHOPifier):
         user_fn: Callable[..., Any],
         args: list,
         kwargs: dict,
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
     ) -> Any:
         if not isinstance(args, list):
@@ -2275,7 +2336,7 @@ class TracingTritonHOPifier(TritonHOPifier):
         return user_fn(*args, **kwargs)
 
     def maybe_unpack_configs(
-        self, configs: list["TritonConfig"], tx: Optional["InstructionTranslator"]
+        self, configs: list["TritonConfig"], tx: Optional["InstructionTranslatorBase"]
     ) -> list["TritonConfig"]:
         if not isinstance(configs, list):
             raise AssertionError(f"configs must be a list, got {type(configs)}")
@@ -2354,15 +2415,18 @@ class TraceableTritonKernelWrapper:
     kernel: "TritonKernelType"
     kernel_idx: int | None
     grid: Optional["TritonGridType"]
+    kernel_source: "Source | None"
 
     def __init__(
         self,
         kernel: "TritonKernelType",
         kernel_idx: int | None,
         grid: Optional["TritonGridType"],
+        kernel_source: "Source | None" = None,
     ) -> None:
         self.kernel = None
         self.grid = None
+        self.kernel_source = kernel_source
         tracing_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
         if self.kernel is None:
             raise AssertionError("kernel was not initialized properly")
