@@ -565,6 +565,43 @@ class TestGroupBatchFusion(TestCase):
 
     @requires_gpu()
     @torch._inductor.config.patch(
+        pre_grad_fusion_options={"batch_linear_lhs": {}},
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_fusion_nn_linear_inlined(self):
+        # Same shape pattern as test_batch_linear_lhs_fusion, but the linears
+        # are produced through nn.Linear modules. Dynamo inlines those to
+        # torch._C._nn.linear, which the upstream matcher used to miss.
+        class M(torch.nn.Module):
+            def __init__(self, z, n, has_bias):
+                super().__init__()
+                self.linears = torch.nn.ModuleList(
+                    [torch.nn.Linear(z, z - i % 5, bias=has_bias) for i in range(n)]
+                )
+
+            def forward(self, x):
+                x = x + 1.2
+                outs = [lin(x) for lin in self.linears]
+                return torch.sigmoid(torch.cat(outs, dim=1))
+
+        z, n = 10, 10
+        for has_bias in [True, False]:
+            counters.clear()
+            module = M(z, n, has_bias).to(GPU_TYPE)
+            input = [torch.randn(20, z, device=GPU_TYPE)]
+            traced = torch.compile(module)
+            ref = module(*input)
+            res = traced(*input)
+            self.compare_pred(module, traced, input)
+            self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+            ref.sum().backward()
+            res.sum().backward()
+            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            counters.clear()
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_linear": {}},
         post_grad_fusion_options={},
     )
