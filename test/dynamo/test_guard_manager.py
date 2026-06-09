@@ -2232,26 +2232,26 @@ print(json.dumps({
         self.assertIsInstance(stats["mismatch_token_kinds"], dict)
         self.assertIsInstance(stats["mismatch_top_paths"], dict)
 
-    def test_guard_last_success_frame_globals_ignores_unrelated_version(self):
+    def test_guard_last_success_global_dict_ignores_unrelated_version(self):
         script = r"""
 import json
 import torch
 from torch._C._dynamo import guards
 
-GLOBAL_CONST = 1
+GLOBAL_DICT = {"used": 1, "noise": 0}
 
 def fn(x):
-    return x + GLOBAL_CONST
+    return x + GLOBAL_DICT["used"]
 
 compiled = torch.compile(fn, backend="eager")
 x = torch.ones(4)
-assert torch.equal(compiled(x), x + GLOBAL_CONST)
+assert torch.equal(compiled(x), x + GLOBAL_DICT["used"])
 
 guards.reset_guard_lookup_stats()
 for i in range(5):
-    globals()["_unrelated_guard_last_success_noise"] = i
+    GLOBAL_DICT["noise"] = i
     out = compiled(x)
-    assert torch.equal(out, x + GLOBAL_CONST)
+    assert torch.equal(out, x + GLOBAL_DICT["used"])
 
 stats = guards.get_guard_lookup_stats()
 print(json.dumps({
@@ -2273,10 +2273,8 @@ print(json.dumps({
 
         self.assertGreater(stats["success"], 0)
         self.assertGreater(stats["stable"], 0)
-        self.assertNotEqual(
-            stats["mismatch_top_paths"].get("G", {}).get("reason"),
-            "version",
-        )
+        for path, item in stats["mismatch_top_paths"].items():
+            self.assertFalse(path.startswith("G") and item.get("reason") == "version")
 
     def test_guard_last_success_supports_default_device_token(self):
         script = r"""

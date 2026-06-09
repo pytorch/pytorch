@@ -2503,6 +2503,12 @@ static bool default_device_matches(
 
 static bool torch_function_mode_stack_guard_matches(const void* guard);
 
+static bool is_global_source_path(const std::string& source) {
+  return source == "G" ||
+      (source.size() > 1 && source[0] == 'G' &&
+       (source[1] == '[' || source[1] == '.'));
+}
+
 struct GuardSubtreeEntryToken {
   PyObject* object{nullptr};
   PyTypeObject* type{nullptr};
@@ -2568,7 +2574,7 @@ struct GuardSubtreeEntryToken {
   static GuardSubtreeEntryToken make_for_source(
       PyObject* obj,
       const std::string& source) {
-    if (source == "G" && PyDict_CheckExact(obj)) {
+    if (is_global_source_path(source) && PyDict_CheckExact(obj)) {
       GuardSubtreeEntryToken token;
       token.object = obj;
       token.type = Py_TYPE(obj);
