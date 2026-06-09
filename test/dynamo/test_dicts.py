@@ -506,6 +506,18 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d0, {})
         self.assertEqual(d1, {0: 1})
 
+    def test_dict_copy_mutate_delete_original_key(self):
+        def fn(x):
+            d = {1: x}
+            e = d.copy()
+            e[3] = x + 1
+            del e[1]
+            return e[3]
+
+        x = torch.ones(())
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_dict_subclass_get_method(self):
         class dotdict(dict):
             """dot.notation access to dictionary attributes"""

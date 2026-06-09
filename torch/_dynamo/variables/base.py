@@ -515,6 +515,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Sourceless: no real object to hash — fake id.
         return id(self), True
 
+    def container_key_hash_impl(
+        self, tx: InstructionTranslatorBase
+    ) -> tuple[int, bool]:
+        """Hash for Dynamo's internal dict/set key bookkeeping."""
+        return self.hash_impl(tx)
+
     def richcompare_impl(
         self,
         tx: InstructionTranslatorBase,
