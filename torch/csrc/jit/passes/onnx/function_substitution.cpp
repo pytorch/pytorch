@@ -21,7 +21,7 @@ std::string TidyClassNameFromTorchScript(
     bool is_mangle_atom = (atom.find("__torch_mangle") != std::string::npos);
     if (!is_internal_torch_atom && !is_mangle_atom) {
       if (!out.empty()) {
-        out += ".";
+        out += '.';
       }
       out += atom;
     }
