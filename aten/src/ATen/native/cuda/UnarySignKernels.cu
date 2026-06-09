@@ -81,8 +81,20 @@ void signbit_kernel_cuda(TensorIteratorBase& iter){
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cuda", [&]() {
-      using opmath_t = at::opmath_type<scalar_t>;
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return signbit(opmath_t{a}); });
+      if constexpr (std::is_same_v<scalar_t, at::Half> || std::is_same_v<scalar_t, at::BFloat16>) {
+        // FIX: For half-precision types, extract the sign bit directly from
+        // the raw 16-bit representation instead of promoting to float first.
+        // Promoting to float32 can canonicalize NaN values on CUDA, which
+        // strips the sign bit from negative NaNs (e.g. 0xFE00 becomes the
+        // canonical positive NaN 0x7FC00000).
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool {
+          const uint16_t bits = c10::bit_cast<uint16_t>(a);
+          return (bits >> 15) & 1;
+        });
+      } else {
+        using opmath_t = at::opmath_type<scalar_t>;
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return signbit(opmath_t{a}); });
+      }
     });
   }
 }

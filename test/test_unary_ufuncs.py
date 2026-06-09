@@ -1939,6 +1939,35 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
 
 
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_signbit_negative_nan_half(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/181806
+        # CUDA was losing the sign bit of negative NaN during half→float promotion
+        if dtype == torch.float16:
+            neg_nan = torch.from_numpy(
+                np.array([0xFE00, 0xFE00, 0xFE00], dtype=np.uint16).view(np.float16)
+            )
+        else:
+            neg_nan = torch.tensor(float("nan"), dtype=dtype).neg().expand(3).contiguous()
+
+        cpu_result = torch.signbit(neg_nan)
+        cuda_result = torch.signbit(neg_nan.to(device)).cpu()
+        self.assertEqual(cpu_result, cuda_result)
+        self.assertTrue(cuda_result.all())
+
+    @onlyCUDA
+    @dtypes(torch.float16)
+    def test_signbit_positive_nan_half(self, device, dtype):
+        pos_nan = torch.from_numpy(
+            np.array([0x7E00, 0x7E00, 0x7E00], dtype=np.uint16).view(np.float16)
+        )
+        cpu_result = torch.signbit(pos_nan)
+        cuda_result = torch.signbit(pos_nan.to(device)).cpu()
+        self.assertEqual(cpu_result, cuda_result)
+        self.assertFalse(cuda_result.any())
+
+
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 
 if __name__ == "__main__":
