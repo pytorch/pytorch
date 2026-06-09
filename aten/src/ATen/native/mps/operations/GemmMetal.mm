@@ -737,8 +737,8 @@ GemmPlan gemm_plan(GpuGen gen,
   }
 
   // 2. Transposed-B thin-M GEMV (x @ W.t(), the lm-head / vocab path).
-  if (b.trans && (dt == kHalf || dt == kBFloat16) && use_mpp && !a.trans && M >= 2 && M <= 16 && K >= 64 &&
-      N >= 16 && N <= 262144) {
+  if (b.trans && (dt == kHalf || dt == kBFloat16) && use_mpp && !a.trans && M >= 2 && M <= 16 && K >= 64 && N >= 16 &&
+      N <= 262144) {
     const int64_t align = b.ld | a.ld | a.view.storage_offset() | b.view.storage_offset() |
         (batched ? (a.view.stride(0) | b.view.stride(0)) : 0);
     const GemvBtSpec spec = tune.pick_gemv_bt(M, N, K, /*trans_b=*/true, align);
