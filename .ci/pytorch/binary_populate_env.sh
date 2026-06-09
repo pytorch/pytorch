@@ -113,7 +113,7 @@ if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_B
 fi
 
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* ]]; then
-  SPMD_TYPES_REQUIREMENT="spmd-types==0.2.0"
+  SPMD_TYPES_REQUIREMENT="spmd-types==0.2.1"
   if [[ -z "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
     export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${SPMD_TYPES_REQUIREMENT}"
   else
