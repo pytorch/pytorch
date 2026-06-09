@@ -12648,6 +12648,64 @@ def ___make_guard_fn():
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_itertools_accumulate_tensors_user_defined_mutation(self):
+        def udo_fn(a, b):
+            a.sin_()
+            return a + b
+
+        def fn(a, b, c, d, x):
+            l = [a, b, c, d, x]
+            return itertools.accumulate(l, udo_fn)
+
+        t_list = [torch.tensor([i]) for i in range(4)]
+        x = torch.tensor([[1, 2], [3, 4]])
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            compiled_fn(*t_list, x)
+
+    def test_itertools_accumulate_user_defined_generator_mutation(self):
+        seen = []
+
+        def gen(a):
+            yield a
+            seen.append(a)
+            yield a + 1
+
+        def udo_fn(a, b):
+            return gen(a + b)
+
+        def fn(a, b):
+            l = [a, b]
+            return itertools.accumulate(l, udo_fn)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            list(compiled_fn(torch.tensor([1]), torch.tensor([2])))
+
+    def test_itertools_accumulate_user_defined_input_mutation(self):
+        def fn(a, b, seen):
+            def udo_fn(x, y):
+                seen.append(x)
+                return x + y
+
+            return itertools.accumulate([a, b], udo_fn)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            compiled_fn(torch.tensor([1]), torch.tensor([2]), [])
+
     def test_pure_python_accumulate(self):
         def accumulate(iterable, func=lambda x, y: x + y):
             it = iter(iterable)
