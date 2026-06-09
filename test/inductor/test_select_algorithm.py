@@ -33,7 +33,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplateKernel,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import is_big_gpu, run_and_get_kernels
+from torch._inductor.utils import is_big_gpu, run_and_get_code, run_and_get_kernels
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.testing import FileCheck
@@ -496,11 +496,15 @@ class TestSelectAlgorithm(TestCase):
             fn = patcher(fn)
 
         # sizes picked so triton autotuning wins
-        fn(
+        _, (code,) = run_and_get_code(
+            fn,
             torch.randn(512, 1024, dtype=torch.float16, device=GPU_TYPE),
             torch.randn(384, 512, dtype=torch.float16, device=GPU_TYPE),
             torch.tensor(12345, device=GPU_TYPE),
         )
+        if GPU_TYPE == "cuda" and not torch.version.hip:
+            self.assertEqual(code.count("triton_helpers.rand4x"), 0)
+            self.assertEqual(code.count("tl.rand("), 1)
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
