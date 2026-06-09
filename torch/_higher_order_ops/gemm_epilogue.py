@@ -92,6 +92,32 @@ def _(amax: torch.Tensor, max_power: int = 8) -> torch.Tensor:
     )
 
 
+@torch.library.custom_op("flex_gemm::nvfp4_e4m3_scale", mutates_args=())
+def nvfp4_e4m3_scale(amax: torch.Tensor) -> torch.Tensor:
+    """Encode NVFP4 per-block scale as E4M3.
+
+    This captures the NVFP4 block-scale policy: scale = clamp(amax / 6,
+    tiny(e4m3), max(e4m3)).to(float8_e4m3fn).
+    """
+    scale = amax.to(torch.float32) / 6.0
+    scale = torch.clamp(
+        scale,
+        min=torch.finfo(torch.float8_e4m3fn).tiny,
+        max=torch.finfo(torch.float8_e4m3fn).max,
+    )
+    return scale.to(torch.float8_e4m3fn)
+
+
+@nvfp4_e4m3_scale.register_fake
+def _(amax: torch.Tensor) -> torch.Tensor:
+    return torch.empty_strided(
+        tuple(amax.shape),
+        tuple(amax.stride()),
+        device=amax.device,
+        dtype=torch.float8_e4m3fn,
+    )
+
+
 def _normalize_gemm_epilogue_op(gemm_op: Callable[..., Any]) -> Callable[..., Any]:
     import torch.nn.functional as F
 
@@ -743,8 +769,13 @@ def _match_quack_local_n_amax_scale_view(
     )
 
 
-def _match_quack_local_n_mx_scale_view(
-    node: Any, mm_node: torch.fx.Node
+def _match_quack_local_n_primitive_scale_view(
+    node: Any,
+    mm_node: torch.fx.Node,
+    *,
+    target: Any,
+    kind: str,
+    max_power: int = 8,
 ) -> QuackLocalReduceInfo | None:
     aux_view = _match_quack_view_or_reshape(node)
     if aux_view is None:
@@ -753,12 +784,14 @@ def _match_quack_local_n_mx_scale_view(
     if not (
         isinstance(scale_node, torch.fx.Node)
         and scale_node.op == "call_function"
-        and scale_node.target == torch.ops.flex_gemm.mx_e8m0_scale.default
+        and scale_node.target == target
     ):
         return None
-    max_power = scale_node.args[1] if len(scale_node.args) > 1 else scale_node.kwargs.get("max_power", 8)
-    if not isinstance(max_power, int):
-        return None
+    op_max_power = max_power
+    if target == torch.ops.flex_gemm.mx_e8m0_scale.default:
+        op_max_power = scale_node.args[1] if len(scale_node.args) > 1 else scale_node.kwargs.get("max_power", max_power)
+        if not isinstance(op_max_power, int):
+            return None
     reduce_node = scale_node.args[0]
     reduce_match = _match_quack_tensorssa_reduce(reduce_node)
     if reduce_match is None or reduce_match.kind != "amax":
@@ -799,10 +832,32 @@ def _match_quack_local_n_mx_scale_view(
         keepdim=False,
         group_size=grouped_shape[-1],
         dim=1,
-        kind="mx_e8m0_scale",
-        max_power=max_power,
+        kind=kind,
+        max_power=op_max_power,
         output_node=aux_view.node,
         extra_skip_nodes=frozenset((scale_node, reduce_node, abs_node, aux_view.node)),
+    )
+
+
+def _match_quack_local_n_mx_scale_view(
+    node: Any, mm_node: torch.fx.Node
+) -> QuackLocalReduceInfo | None:
+    return _match_quack_local_n_primitive_scale_view(
+        node,
+        mm_node,
+        target=torch.ops.flex_gemm.mx_e8m0_scale.default,
+        kind="mx_e8m0_scale",
+    )
+
+
+def _match_quack_local_n_nvfp4_scale_view(
+    node: Any, mm_node: torch.fx.Node
+) -> QuackLocalReduceInfo | None:
+    return _match_quack_local_n_primitive_scale_view(
+        node,
+        mm_node,
+        target=torch.ops.flex_gemm.nvfp4_e4m3_scale.default,
+        kind="nvfp4_e4m3_scale",
     )
 
 
@@ -986,6 +1041,7 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
                 or _match_quack_scaled_local_n_amax_reduce(aux_value, mm_node)
                 or _match_quack_local_n_amax_scale_view(aux_value, mm_node)
                 or _match_quack_local_n_mx_scale_view(aux_value, mm_node)
+                or _match_quack_local_n_nvfp4_scale_view(aux_value, mm_node)
             )
             if local_reduce is not None and not local_reduce.keepdim:
                 if not _quack_output_uses_node(output_value[0], local_reduce.aux_output_node):
@@ -1258,6 +1314,17 @@ def _compile_quack_pointwise_nodes(
                             f"cute.where({scale_exp} < -127.0, -127.0, "
                             f"cute.where({scale_exp} > 128.0, 128.0, {scale_exp}))"
                             ")",
+                            like=source,
+                        )
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
+                    if node.target == torch.ops.flex_gemm.nvfp4_e4m3_scale.default:
+                        source = _quack_cute_arg(node.args[0], env)
+                        raw_scale = f"({source} / 6.0)"
+                        env[node] = _emit_quack_tensorssa_expr(
+                            kernel,
+                            f"cute.where({raw_scale} < 0.015625, 0.015625, "
+                            f"cute.where({raw_scale} > 448.0, 448.0, {raw_scale}))",
                             like=source,
                         )
                         _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
