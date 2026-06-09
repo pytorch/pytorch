@@ -98,6 +98,7 @@ FILES=(
     sm80_utils.py
     sm90_utils.py
     tile_scheduler.py
+    trace.py
     utils.py
     varlen_utils.py
 )
