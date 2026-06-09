@@ -89,7 +89,7 @@ from torch.fx.experimental._dynamism import (
     clone_and_convert_to_meta,
     track_dynamism_across_examples,
 )
-from torch.fx.experimental.dynamic_spec import ShapesSpec
+from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -127,7 +127,6 @@ if TYPE_CHECKING:
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
     from torch._subclasses import fake_tensor
     from torch.export._trace import _DynamicShapesInput
-    from torch.fx.experimental.dynamic_spec import ParamsSpec
     from torch.fx.node import Argument, Node, Target
 
     from .types import (
@@ -2313,12 +2312,8 @@ def export(
     # spec, OR the new ShapesSpec/ParamsSpec API. If the latter is passed, we
     # route it through dynamo's `shapes_spec` mechanism and skip the legacy
     # constraint processing.
-    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
-    # constraint processing.
     from torch.fx.experimental.dynamic_spec import (
         _SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG,
-        ParamsSpec,
-        ShapesSpec,
     )
 
     shapes_spec: ShapesSpec | None = None
