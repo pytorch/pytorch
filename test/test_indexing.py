@@ -1205,7 +1205,7 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(RuntimeError, "shape mismatch"):
             func(t, ind, val)
 
-        with self.assertRaisesRegex(RuntimeError, "must match"):
+        with self.assertRaisesRegex(RuntimeError, "shape mismatch"):
             func(t.to(device), ind.to(device), val.to(device))
 
         val = torch.randn(2, 3, 1)
