@@ -1865,9 +1865,7 @@ class GemmEpilogueFusionTests(TestCase):
         torch.testing.assert_close(actual, expected, atol=1e-1, rtol=1e-1)
         FileCheck().check("main_output_transform='grouped_n_contract'").check(
             "main_output_transform_group=2"
-        ).check("main_output_expression='swiglu'").check_not("extern_kernels.mm").run(
-            code
-        )
+        ).check_not("main_output_expression").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_nvfp4_scale_aux_fuses(self):
