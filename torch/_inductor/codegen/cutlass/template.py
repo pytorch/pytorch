@@ -235,7 +235,7 @@ class CUTLASSTemplate(KernelTemplate):
             template_node: CUTLASSTemplateBuffer,
             epilogue_nodes: list[BaseSchedulerNode] | None = None,
         ) -> tuple[CUTLASSTemplateKernel, functools.partial[str]]:
-            if not (supports_epilogue_fusion or not epilogue_nodes):
+            if not supports_epilogue_fusion and epilogue_nodes:
                 raise AssertionError("epilogue fusion is not supported for this kernel")
             kernel = CUTLASSTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME),

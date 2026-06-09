@@ -730,7 +730,7 @@ def bucket_reduce_scatter_by_mb(
     """
     mode = mode or _default_bucket_mode()
 
-    if not (mode is None or "multidtype" not in mode):
+    if mode is not None and "multidtype" in mode:
         raise AssertionError("reduce scatter bucketing does not support multidtype")
 
     return greedy_bucket_collective_by_mb(

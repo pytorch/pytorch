@@ -38,7 +38,7 @@ class ChunkingMeta:
     need_sum: bool = False
 
     def __post_init__(self) -> None:
-        if not (self.chunk_dim is None or not self.need_sum):
+        if self.chunk_dim is not None and self.need_sum:
             raise AssertionError(
                 f"Can not have both a non-None chunk_dim and a true need_sum: {self.chunk_dim}"
             )

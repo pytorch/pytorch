@@ -126,7 +126,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         **kwargs: dict[str, Any],
     ) -> tuple[str, str, str, EVTArgRenames]:
         arch = int(cutlass_arch(device_type))
-        if not (device_type != "cuda" or arch >= 90):
+        if device_type == "cuda" and arch < 90:
             raise AssertionError("For CUDA, only SM90+ is supported for EVT")
         epilogue_functor = _trace(fn_src, example_tensors, arch, **kwargs)
         visitor = EpilogueFunctorVisitor(arch, epilogue_functor)
