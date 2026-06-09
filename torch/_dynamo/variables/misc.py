@@ -1771,6 +1771,21 @@ class NumpyVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        # NumpyVariable wraps singleton numpy module attrs (dtypes, ufuncs,
+        # constants); compare by the backed value for eq/ne, else NotImplemented.
+        if op not in ("__eq__", "__ne__") or not hasattr(other, "value"):
+            return ConstantVariable.create(NotImplemented)
+        result = (
+            self.value == other.value if op == "__eq__" else self.value != other.value
+        )
+        return ConstantVariable.create(result)
+
     @classmethod
     def can_constant_fold_through(cls, fn: types.FunctionType) -> bool:
         mod = fn.__module__.split(".")
@@ -2486,6 +2501,10 @@ class RandomVariable(VariableTracker):
             # shuffle's permutation depends only on the sequence length and the
             # RNG state, not on the elements, so shuffle a list of indices to
             # both advance the symbolic RNG and obtain the permutation to apply.
+            if not hasattr(seq, "items"):
+                raise AssertionError(
+                    "shuffle only supports ListVariable and TupleVariable"
+                )
             perm = list(range(len(seq.items)))
             self.random.shuffle(perm)
             tx.output.side_effects.mutation(seq)

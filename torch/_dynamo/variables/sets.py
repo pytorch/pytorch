@@ -31,7 +31,7 @@ from ..utils import (
     _item_debug_repr,
     cmp_name_to_op_mapping,
     istype,
-    lazily_unpack_and_apply_fn,
+    lazily_unpack,
     raise_args_mismatch,
     set_methods,
     tracked_repr,
@@ -149,6 +149,12 @@ class SetVariable(VariableTracker):
     def python_type(self) -> type:
         return set
 
+    def is_python_constant(self) -> bool:
+        # Avoid the base implementation, which probes as_python_constant() and
+        # thus rebuilds a real set, re-hashing the elements (wrong for elements
+        # with a side-effecting __hash__).  Check element constness directly.
+        return all(k.vt.is_python_constant() for k in self.set_items)
+
     def as_python_constant(self) -> Any:
         return {k.vt.as_python_constant() for k in self.set_items}
 
@@ -264,17 +270,18 @@ class SetVariable(VariableTracker):
     ) -> "Iterator[HashableTracker]":
         # Lazily yield HashableTracker keys for a set-operation operand, one
         # element at a time so callers that short-circuit (isdisjoint) observe
-        # the same generator side effects as CPython. A set operand's keys are
-        # reused directly (no re-hashing). HashableTracker raises
-        # ObservedTypeError for an unhashable element, matching CPython's
-        # hash-at-insert behavior.
-        if isinstance(other, SetVariable):
+        # the same generator side effects as CPython. A set or dict operand's
+        # keys are reused directly (no re-hashing), mirroring CPython's
+        # set_update_internal fast path for set/frozenset/dict operands.
+        # HashableTracker raises ObservedTypeError for an unhashable element,
+        # matching CPython's hash-at-insert behavior.
+        from .dicts import ConstDictVariable
+
+        if isinstance(other, (SetVariable, ConstDictVariable)):
             yield from other.items.keys()
             return
 
-        yield from lazily_unpack_and_apply_fn(
-            tx, other, lambda item: HashableTracker(item)
-        )
+        yield from (HashableTracker(item) for item in lazily_unpack(tx, other))
 
     def _operand_keys(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
@@ -282,7 +289,9 @@ class SetVariable(VariableTracker):
         # Eager variant: unpack_iterable takes the fast unpack_var_sequence
         # path for builtin iterables instead of the per-element iterator
         # protocol.
-        if isinstance(other, SetVariable):
+        from .dicts import ConstDictVariable
+
+        if isinstance(other, (SetVariable, ConstDictVariable)):
             return list(other.items.keys())
         return [HashableTracker(x) for x in unpack_iterable(tx, other)]
 
@@ -320,6 +329,7 @@ class SetVariable(VariableTracker):
     ) -> VariableTracker:
         from ..utils import check_constant_args
         from .builder import SourcelessBuilder
+        from .dicts import ConstDictVariable
 
         if (
             name
@@ -330,6 +340,12 @@ class SetVariable(VariableTracker):
                 "difference",
                 "symmetric_difference",
             )
+            # Set/dict operands route to the VT-level branches below, which reuse
+            # the operand's HashableTracker keys without re-hashing (CPython's
+            # do-not-rehash-dict-keys fast path).  Materializing them via
+            # as_python_constant() here would rebuild a real set/dict and re-hash
+            # every key, diverging from CPython for side-effecting __hash__.
+            and not any(isinstance(a, (SetVariable, ConstDictVariable)) for a in args)
             and check_constant_args(args, kwargs)
             # Exact builtin types only: a subclass may override these methods,
             # and OrderedSet is excluded because as_python_constant() loses
@@ -486,11 +502,14 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            if args[0] not in self:
-                raise_observed_exception(KeyError, tx, args=args)
+            if not self.sq_contains(tx, args[0]).as_python_constant():
+                raise_observed_exception(KeyError, tx, args=[args[0]])
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
-            self.items.pop(HashableTracker(args[0]))
+            # sq_contains validated/normalized args[0]; a set key was coerced to
+            # a frozenset, so pop that same normalized key.
+            key = args[0] if is_hashable(args[0]) else FrozensetVariable(args[0].items)  # type: ignore[missing-attribute]
+            self.items.pop(HashableTracker(key))
             return ConstantVariable.create(None)
         elif name == "discard":
             if kwargs or len(args) != 1:
@@ -500,10 +519,17 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            if args[0] in self:
+            if self.sq_contains(tx, args[0]).as_python_constant():
                 self.should_reconstruct_all = True
                 tx.output.side_effects.mutation(self)
-                self.items.pop(HashableTracker(args[0]))
+                # sq_contains validated/normalized args[0]; a set key was coerced
+                # to a frozenset, so pop that same normalized key.
+                key = (
+                    args[0]
+                    if is_hashable(args[0])
+                    else FrozensetVariable(args[0].items)  # type: ignore[missing-attribute]
+                )
+                self.items.pop(HashableTracker(key))
             return ConstantVariable.create(None)
         elif name in ("issubset", "issuperset"):
             if len(args) != 1:
