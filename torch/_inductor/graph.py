@@ -212,6 +212,10 @@ def get_user_visible_output_strides(g: Graph) -> dict[Node, tuple[int, ...]]:
     return ret
 
 
+def _is_cpu_strided_tensor_pinned(t: torch.Tensor) -> bool:
+    return t.device.type == "cpu" and t.layout == torch.strided and t.is_pinned()
+
+
 def extend_user_visible_output_strides(
     user_visible_outputs: dict[Node, tuple[int, ...]],
 ) -> dict[Node, object]:
@@ -1197,7 +1201,10 @@ class GraphLowering(torch.fx.Interpreter):
             ir.ConstantBuffer(
                 name=new_name,
                 layout=FixedLayout(
-                    data.device, data.dtype, *self.static_sizes_strides(data)
+                    data.device,
+                    data.dtype,
+                    *self.static_sizes_strides(data),
+                    is_pinned=_is_cpu_strided_tensor_pinned(data),
                 ),
             )
         )
@@ -1282,12 +1289,6 @@ class GraphLowering(torch.fx.Interpreter):
             return None
         # See note: Note: [Generator arguments in AOTDispatcher]
         elif isinstance(example, torch.Generator):
-            assert len(V.graph.current_node.users) == 1 and next(
-                iter(V.graph.current_node.users)
-            ).target in (
-                torch._prims.rng_prims.graphsafe_run_with_rng_state,
-                torch.ops.higher_order.invoke_subgraph,
-            )
             gen = ir.GeneratorState(name=target, device=example.device)
             self.graph_inputs[target] = gen  # type: ignore[assignment]
             self.graph_input_names.append(target)
@@ -1576,7 +1577,12 @@ class GraphLowering(torch.fx.Interpreter):
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 
-                return tensor(value.tolist(), dtype=value.dtype, device=value.device)
+                return tensor(
+                    value.tolist(),
+                    dtype=value.dtype,
+                    device=value.device,
+                    pin_memory=_is_cpu_strided_tensor_pinned(value),
+                )
 
         return self.add_tensor_constant(value, target)
 

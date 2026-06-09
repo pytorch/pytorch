@@ -646,13 +646,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
         raise NotImplementedError
 
-    def has_unpack_var_sequence(self, tx: Any) -> bool:
-        try:
-            self.unpack_var_sequence(tx)
-            return True
-        except NotImplementedError:
-            return False
-
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
@@ -920,6 +913,46 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_rshift_impl(tx, args[0], reverse=True)
         elif name == "__irshift__":
             return self.nb_inplace_rshift_impl(tx, args[0])
+        elif name == "__and__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_and_impl(tx, args[0])
+        elif name == "__rand__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_and_impl(tx, args[0], reverse=True)
+        elif name == "__iand__":
+            return self.nb_inplace_and_impl(tx, args[0])
+        elif name == "__xor__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_xor_impl(tx, args[0])
+        elif name == "__rxor__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_xor_impl(tx, args[0], reverse=True)
+        elif name == "__ixor__":
+            return self.nb_inplace_xor_impl(tx, args[0])
+        elif name == "__floordiv__":
+            return self.nb_floor_divide_impl(tx, args[0])
+        elif name == "__rfloordiv__":
+            return self.nb_floor_divide_impl(tx, args[0], reverse=True)
+        elif name == "__ifloordiv__":
+            return self.nb_inplace_floor_divide_impl(tx, args[0])
+        elif name == "__truediv__":
+            return self.nb_true_divide_impl(tx, args[0])
+        elif name == "__rtruediv__":
+            return self.nb_true_divide_impl(tx, args[0], reverse=True)
+        elif name == "__itruediv__":
+            return self.nb_inplace_true_divide_impl(tx, args[0])
+        elif name == "__mod__":
+            return self.nb_remainder_impl(tx, args[0])
+        elif name == "__rmod__":
+            return self.nb_remainder_impl(tx, args[0], reverse=True)
+        elif name == "__imod__":
+            return self.nb_inplace_remainder_impl(tx, args[0])
+        elif name == "__divmod__":
+            return self.nb_divmod_impl(tx, args[0])
+        elif name == "__rdivmod__":
+            return self.nb_divmod_impl(tx, args[0], reverse=True)
         elif name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
@@ -1427,6 +1460,125 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_rshift slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_and_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_and slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rand__`` instead of ``__and__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_and_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_and slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_xor_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_xor slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rxor__`` instead of ``__xor__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_xor_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_xor slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_floor_divide_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_floor_divide slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rfloordiv__`` instead of ``__floordiv__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_floor_divide_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_floor_divide slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_true_divide_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_true_divide slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rtruediv__`` instead of ``__truediv__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_true_divide_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_true_divide slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_remainder_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_remainder slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rmod__`` instead of ``__mod__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_remainder_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_remainder slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_divmod_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_divmod slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rdivmod__`` instead of ``__divmod__``). divmod has no
+        in-place form.
+        """
         return variables.ConstantVariable(NotImplemented)
 
     def nb_multiply_impl(
