@@ -133,7 +133,7 @@ class QuackLocalReduceInfo:
     reduce_node: torch.fx.Node
     source_node: torch.fx.Node
     keepdim: bool
-    group_size: int = 32
+    group_size: int
     feeds_main: bool = False
 
 
@@ -144,7 +144,7 @@ class QuackLocalNormInfo:
     view_node: torch.fx.Node
     reduce_node: torch.fx.Node
     source_node: torch.fx.Node
-    group_size: int = 32
+    group_size: int
 
 
 def _quack_cute_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
@@ -364,14 +364,15 @@ def _match_quack_local_n_reduce(
         shape = tuple(shape)
     if not isinstance(shape, (list, tuple)) or len(shape) != 3:
         return None
-    if shape[-2] != -1 or shape[-1] != 32:
+    if shape[-2] != -1 or not isinstance(shape[-1], int) or shape[-1] <= 0:
         return None
+    group_size = shape[-1]
     return QuackLocalReduceInfo(
         view_node=view_node,
         reduce_node=node,
         source_node=source_node,
         keepdim=bool(keepdim),
-        group_size=32,
+        group_size=group_size,
     )
 
 
@@ -475,7 +476,7 @@ def _quack_cute_epilogue_code(
             if local_reduce is None or local_reduce.keepdim:
                 raise NotImplementedError(
                     "QUACK tuple epilogue currently supports only "
-                    "(main, acc[.float()].view(M, -1, 32).sum(-1))"
+                    "(main, acc[.float()].view(M, -1, group).sum(-1))"
                 )
             output_value = output_value[0]
             skip_nodes.update((local_reduce.view_node, local_reduce.reduce_node))
@@ -524,6 +525,11 @@ def _quack_cute_epilogue_code(
             )
 
     if local_norm is not None:
+        if local_norm.group_size != 32:
+            raise NotImplementedError(
+                "QUACK reductions feeding the main output currently support only "
+                "same-fragment group size 32; aux reductions can use other static groups"
+            )
         source = _quack_cute_arg(local_norm.source_node, env)
         sum_name = f"tmp{kernel.cse.index}"
         kernel.cse.index += 1
