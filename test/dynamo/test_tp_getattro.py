@@ -503,6 +503,78 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(result, 7)
 
+    # --- object_generic_getattr edge cases ---
+
+    def test_constant_nonexistent_attr_raises(self):
+        """Step 7: mro_lookup returns NO_SUCH_SUBOBJ -> AttributeError."""
+
+        def fn():
+            x = 42
+            return x.nonexistent
+
+        with self.assertRaises(AttributeError):
+            torch.compile(fn, backend="eager")()
+
+    def test_range_start_stop_step(self):
+        """RangeVariable.getattro_impl fast path for start/stop/step."""
+
+        def fn():
+            r = range(2, 10, 3)
+            return r.start, r.stop, r.step
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, (2, 10, 3))
+
+    def test_class_flags(self):
+        class A:
+            pass
+
+        def fn():
+            return A.__flags__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, A.__flags__)
+
+    # --- Dunder __getattr__ explicit call ---
+
+    def test_dunder_getattr_explicit_call(self):
+        class MyObj:
+            def __getattr__(self, name):
+                if name == "dynamic":
+                    return 123
+                raise AttributeError(name)
+
+        def fn(obj):
+            return obj.__getattr__("dynamic")
+
+        result = torch.compile(fn, backend="eager")(MyObj())
+        self.assertEqual(result, 123)
+
+    # --- BoundBuiltinMethodVariable slots ---
+
+    def test_bound_builtin_method_hash(self):
+        """hash() on a bound builtin method produced by object_generic_getattr."""
+
+        def fn():
+            s = "hello"
+            h = hash(s.upper)
+            return isinstance(h, int)
+
+        result = torch.compile(fn, backend="eager")()
+        self.assertTrue(result)
+
+    def test_bound_builtin_method_identity_comparison(self):
+        """Bound builtin methods use identity comparison."""
+
+        def fn():
+            s = "hello"
+            m1 = s.upper
+            m2 = s.upper
+            return m1 is not m2
+
+        result = torch.compile(fn, backend="eager")()
+        self.assertTrue(result)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

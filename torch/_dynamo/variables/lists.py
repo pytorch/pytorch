@@ -886,12 +886,9 @@ class RangeVariable(BaseListVariable):
         if name in fields:
             return self.items[fields.index(name)]
 
-        from .object_protocol import _UnhandledDescriptorError, object_generic_getattr
+        from .object_protocol import object_generic_getattr
 
-        try:
-            return object_generic_getattr(tx, self, name)
-        except _UnhandledDescriptorError:
-            return super().getattro_impl(tx, name)
+        return object_generic_getattr(tx, self, name)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython range_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L572

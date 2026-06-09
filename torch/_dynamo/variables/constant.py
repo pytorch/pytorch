@@ -233,12 +233,9 @@ class ConstantVariable(VariableTracker):
     def getattro_impl(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker:
-        from .object_protocol import _UnhandledDescriptorError, object_generic_getattr
+        from .object_protocol import object_generic_getattr
 
-        try:
-            return object_generic_getattr(tx, self, name)
-        except _UnhandledDescriptorError:
-            return super().getattro_impl(tx, name)
+        return object_generic_getattr(tx, self, name)
 
     def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
