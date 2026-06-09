@@ -2005,6 +2005,93 @@ print(json.dumps({
             0,
         )
 
+    def test_guard_fast_plan_supports_object_aliasing_token(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+from torch._C._dynamo.guards import RootGuardManager
+from torch._dynamo.guards import GuardManagerType
+
+class Child(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a = torch.ones(2)
+        self.b = self.a
+
+container = torch.nn.Module()
+container.child = Child()
+root = RootGuardManager()
+self_mgr = root.getitem_manager(
+    "self", "L['self']", container, GuardManagerType.GUARD_MANAGER
+)
+self_dict_mgr = self_mgr.get_generic_dict_manager(
+    "L['self'].__dict__", container.__dict__, GuardManagerType.GUARD_MANAGER
+)
+modules_mgr = self_dict_mgr.getitem_manager(
+    "_modules",
+    "L['self']._modules",
+    container._modules,
+    GuardManagerType.GUARD_MANAGER,
+)
+child_mgr = modules_mgr.getitem_manager(
+    "child",
+    "L['self']._modules['child']",
+    container.child,
+    GuardManagerType.GUARD_MANAGER,
+)
+a_mgr = child_mgr.getattr_manager(
+    "a",
+    "L['self']._modules['child'].a",
+    container.child.a,
+    GuardManagerType.GUARD_MANAGER,
+)
+b_mgr = child_mgr.getattr_manager(
+    "b",
+    "L['self']._modules['child'].b",
+    container.child.b,
+    GuardManagerType.GUARD_MANAGER,
+)
+guards.install_object_aliasing_guard(
+    a_mgr,
+    b_mgr,
+    ["aliasing(a, b)"],
+)
+
+f_locals = {"self": container}
+guards.reset_guard_lookup_stats()
+for _ in range(6):
+    assert root.check(f_locals)
+
+container.child.b = torch.zeros(2)
+assert not root.check(f_locals)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "fastplan_hit": stats["guard_fastplan_hit"],
+    "fastplan_miss": stats["guard_fastplan_miss"],
+    "disabled_reasons": stats["guard_fastplan_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["fastplan_hit"], 0)
+        self.assertGreater(stats["fastplan_miss"], 0)
+        self.assertEqual(
+            stats["disabled_reasons"].get(
+                "unsupported_leaf:OBJECT_ALIASING", 0
+            ),
+            0,
+        )
+
     def test_guard_last_success_shadow_records_lookup_attempts(self):
         script = r"""
 import json
