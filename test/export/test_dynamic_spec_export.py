@@ -1481,12 +1481,8 @@ class TestContainerSpec(TestCase):
             )
 
     def test_object_spec_on_pytree_node_without_keys_fn_raises(self):
-        """ObjectSpec on a type registered via
-        ``pytree.register_pytree_node`` *without* a ``flatten_with_keys_fn``.
-        Export itself also requires a key fn (its input-path construction
-        uses ``tree_flatten_with_path``); the ObjectSpec walker just
-        catches the missing key fn earlier and raises with a clearer
-        message guiding the user to provide one."""
+        """ObjectSpec on a pytree-registered type missing
+        ``flatten_with_keys_fn`` raises a clear error."""
 
         class KeyslessContainer:
             def __init__(self, x):
