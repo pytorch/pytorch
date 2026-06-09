@@ -37,6 +37,9 @@ GEMM_EPILOGUE_OPS = {
         "baddbmm", 1, 2, is_batched=True
     ),
     torch.ops.aten._scaled_mm.default: GemmEpilogueOpInfo("scaled_mm", 0, 1),
+    torch.ops.aten._scaled_mm_v2.default: GemmEpilogueOpInfo(
+        "scaled_mm_v2", 0, 1, supports_quack=False
+    ),
     torch.ops.aten._grouped_mm.default: GemmEpilogueOpInfo("grouped_mm", 0, 1),
 }
 _GEMM_EPILOGUE_OP_ALIASES = {
@@ -47,7 +50,7 @@ _GEMM_EPILOGUE_OP_ALIASES = {
     torch._grouped_mm: torch.ops.aten._grouped_mm.default,
 }
 _SUPPORTED_BACKENDS = {"TRITON", "CUTLASS", "CUTEDSL", "QUACK"}
-_SUPPORTED_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_grouped_mm"
+_SUPPORTED_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_scaled_mm_v2/_grouped_mm"
 
 
 def _normalize_gemm_epilogue_op(gemm_op: Callable[..., Any]) -> Callable[..., Any]:
@@ -57,6 +60,18 @@ def _normalize_gemm_epilogue_op(gemm_op: Callable[..., Any]) -> Callable[..., An
         **_GEMM_EPILOGUE_OP_ALIASES,
         F.grouped_mm: torch.ops.aten._grouped_mm.default,
     }.get(gemm_op, gemm_op)
+
+
+def _as_list(value: Any | list[Any] | tuple[Any, ...] | None) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
+
+
+def _enum_values(value: Any | list[Any] | tuple[Any, ...] | None) -> list[Any]:
+    return [item.value if hasattr(item, "value") else item for item in _as_list(value)]
 
 
 def _find_single_quack_gemm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
@@ -485,6 +500,58 @@ def gemm_epilogue_fusion(
     if kernel_options is None:
         kernel_options = {"backend": "TRITON", "SPLIT_K": False}
     gemm_op = _normalize_gemm_epilogue_op(gemm_op)
+
+    if gemm_op == torch.ops.aten._scaled_mm_v2.default:
+        if len(gemm_args) != 4:
+            raise RuntimeError(
+                "_scaled_mm_v2 epilogue fusion expects gemm_args=(mat_a, mat_b, scale_a, scale_b)"
+            )
+        scale_a_args = _as_list(gemm_args[2])
+        scale_b_args = _as_list(gemm_args[3])
+        scale_a_len = len(scale_a_args)
+        body_kwargs = dict(gemm_kwargs)
+        recipe_a = _enum_values(
+            body_kwargs.pop("recipe_a", body_kwargs.pop("scale_recipe_a", None))
+        )
+        recipe_b = _enum_values(
+            body_kwargs.pop("recipe_b", body_kwargs.pop("scale_recipe_b", None))
+        )
+        swizzle_a = _enum_values(body_kwargs.pop("swizzle_a", None))
+        swizzle_b = _enum_values(body_kwargs.pop("swizzle_b", None))
+        bias = body_kwargs.pop("bias", None)
+        out_dtype = body_kwargs.pop(
+            "out_dtype", body_kwargs.pop("output_dtype", torch.bfloat16)
+        )
+        contraction_dim = list(body_kwargs.pop("contraction_dim", ()))
+        use_fast_accum = body_kwargs.pop("use_fast_accum", False)
+        if body_kwargs:
+            raise RuntimeError(f"unsupported _scaled_mm_v2 kwargs: {body_kwargs}")
+
+        def body_fn(mat_a, mat_b, *scale_args):
+            return epilogue_fn(
+                torch.ops.aten._scaled_mm_v2.default(
+                    mat_a,
+                    mat_b,
+                    list(scale_args[:scale_a_len]),
+                    recipe_a,
+                    swizzle_a,
+                    list(scale_args[scale_a_len:]),
+                    recipe_b,
+                    swizzle_b,
+                    bias,
+                    out_dtype,
+                    contraction_dim,
+                    use_fast_accum,
+                )
+            )
+
+        return _gemm_epilogue_fusion(
+            gemm_op,
+            body_fn,
+            (gemm_args[0], gemm_args[1], *scale_a_args, *scale_b_args),
+            {},
+            kernel_options,
+        )
 
     def body_fn(*args, **body_kwargs):
         return epilogue_fn(gemm_op(*args, **body_kwargs))
