@@ -6604,15 +6604,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # We need to distinguish autotuned symbols (kernel function args
             # whose values vary per-config) from fixed symbols (defined in
             # the kernel body with concrete values).
-            # Build a mapping of fixed block sizes from the range trees.
             _, _, signature, _ = self.args.python_argdefs()
             sig_arg_names = OrderedSet(
                 arg.name for arg in signature if hasattr(arg, "name")
             )
-            # Map non-argument block size symbols to concrete values.
-            # For persistent reductions, R0_BLOCK is defined in the kernel
-            # body (not a function arg) with a concrete value computed from
-            # the reduction dimension numel.
             fixed_blocks: dict[str, int] = {}
             if self.persistent_reduction:
                 for rt in self.range_trees:
@@ -6640,8 +6635,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             resolved = {}
             for inner, opts in self.host_tma_descriptor_args.items():
+                if isinstance(opts, dict):
+                    resolved[inner] = opts
+                    continue
                 dims = [_resolve_block_dim(s) for s in opts.block_shape]
-                # Skip buffers with degenerate block shapes (any dim <= 0)
                 if any(isinstance(d, int) and d <= 0 for d in dims):
                     continue
                 shape_dims = [_resolve_block_dim(s) for s in opts.shape]

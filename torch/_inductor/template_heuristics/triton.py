@@ -20,7 +20,7 @@ from torch.utils._triton import has_triton_stable_tma_api
 from .. import config
 from ..kernel.bmm import bmm_template
 from ..kernel.mm import (
-    blackwell_ws_persistent_device_tma_mm_template,
+    blackwell_ws_persistent_tma_mm_template,
     get_scaling_options,
     get_tile_size,
     mm_template,
@@ -2609,6 +2609,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 "NUM_SMS": get_num_sms(),
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
+                "HOST_SIDE_TMA": config.triton.enable_host_side_tma,
             }
 
     @staticmethod
@@ -2952,7 +2953,7 @@ class PersistentMMTemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    blackwell_ws_persistent_device_tma_mm_template.uid,
+    blackwell_ws_persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
 )
@@ -2980,7 +2981,7 @@ class CUDAAddmmPersistentTMATemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    blackwell_ws_persistent_device_tma_mm_template.uid,
+    blackwell_ws_persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="addmm",
@@ -3103,7 +3104,7 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
 
 @register_template_heuristic(
     # regular Blackwell MM template + scaling epilogue from ScaledMMConfigMixin
-    blackwell_ws_persistent_device_tma_mm_template.uid,
+    blackwell_ws_persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="scaled_mm",

@@ -777,7 +777,7 @@ class TestMaxAutotune(TestCase):
         torch._dynamo.maybe_mark_dynamic(a, 0)
 
         choice_name_regex = (
-            "blackwell_ws_persistent_device_tma"
+            "blackwell_ws_persistent_tma"
             if has_datacenter_blackwell_tma_device()
             else "mm_persistent_tma"
         )
@@ -1044,7 +1044,7 @@ class TestMaxAutotune(TestCase):
         torch._dynamo.maybe_mark_dynamic(a, 0)
 
         choice_name_regex = (
-            "blackwell_ws_persistent_device_tma"
+            "blackwell_ws_persistent_tma"
             if has_datacenter_blackwell_tma_device()
             else "mm_persistent_tma"
         )

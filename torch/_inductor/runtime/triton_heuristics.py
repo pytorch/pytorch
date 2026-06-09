@@ -2956,12 +2956,18 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                     continue
                 if isinstance(desc_info, dict):
                     block_shape_vals = [_eval_dim(s) for s in desc_info["block_shape"]]
-                    shape_vals = [_eval_dim(s) for s in desc_info["shape"]]
-                    stride_vals = [_eval_dim(s) for s in desc_info["strides"]]
+                    shape_vals = desc_info.get("shape")
+                    stride_vals = desc_info.get("strides")
+                    dim_order = desc_info.get("dim_order")
+                    if shape_vals:
+                        shape_vals = [_eval_dim(s) for s in shape_vals]
+                    if stride_vals:
+                        stride_vals = [_eval_dim(s) for s in stride_vals]
                 else:
                     block_shape_vals = [cfg_kwargs.get(s, s) for s in desc_info]
                     shape_vals = None
                     stride_vals = None
+                    dim_order = None
                 desc_var = f"{inner_name}_host_tma_desc"
                 aligned_var = f"{inner_name}_aligned"
                 pre_runner_lines.append(
@@ -2973,6 +2979,14 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                         f"{desc_var} = triton.tools.tensor_descriptor"
                         f".TensorDescriptor({aligned_var}, {shape_vals},"
                         f" {stride_vals}, {block_shape_vals})"
+                    )
+                elif dim_order and dim_order != list(range(len(dim_order))):
+                    pre_runner_lines.append(
+                        f"{desc_var} = triton.tools.tensor_descriptor"
+                        f".TensorDescriptor({aligned_var},"
+                        f" [{', '.join(f'{aligned_var}.shape[{d}]' for d in dim_order)}],"
+                        f" [{', '.join(f'{aligned_var}.stride({d})' for d in dim_order)}],"
+                        f" {block_shape_vals})"
                     )
                 else:
                     pre_runner_lines.append(
