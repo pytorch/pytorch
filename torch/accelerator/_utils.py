@@ -42,7 +42,9 @@ def _lazy_call(callable: Callable[[], None], **kwargs) -> None:
     """
     acc = torch.accelerator.current_accelerator()
     if acc is None:
-        raise RuntimeError("No accelerator is available; _lazy_call requires an active accelerator.")
+        raise RuntimeError(
+            "No accelerator is available; _lazy_call requires an active accelerator."
+        )
     device_module = torch.get_device_module(acc)
     if hasattr(device_module, "_lazy_call"):
         device_module._lazy_call(callable, **kwargs)
