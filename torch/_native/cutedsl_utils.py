@@ -30,6 +30,7 @@ _CUTEDSL_REQUIRED_VERSIONS: set[Version] = {
     #                   but > v26 of packaging.
     Version(f"{4}.{4}.{1}"),
     Version(f"{4}.{4}.{2}"),
+    Version(f"{4}.{5}.{2}"),
 }
 
 
