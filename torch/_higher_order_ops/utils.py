@@ -15,7 +15,7 @@ from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, maybe_get_fake_mode
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
     FunctionalTensor,
@@ -331,13 +331,23 @@ def _set_compilation_env():
 
 
 # The invariant here is that we always trace the branch with fake tensor
-def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
+def _detect_fake_mode_from_inputs(inputs: list[Any]):
     fake_mode_det = None
     for inp in pytree.tree_leaves(inputs):
-        if isinstance(inp, FakeTensor):
-            fake_mode_det = inp.fake_mode
-            break
+        fake_mode = maybe_get_fake_mode(inp)
+        if fake_mode is None:
+            continue
+        if fake_mode_det is None:
+            fake_mode_det = fake_mode
+        elif fake_mode_det is not fake_mode:
+            raise AssertionError(
+                f"Expected all fake inputs to use the same fake mode, got {fake_mode_det} and {fake_mode}"
+            )
+    return fake_mode_det
 
+
+def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
+    fake_mode_det = _detect_fake_mode_from_inputs(inputs)
     fake_mode: AbstractContextManager = nullcontext()
     tracing_mode = "fake"
     if fake_mode_det is not None:
@@ -348,12 +358,20 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
     # as fake tensor.
     with fake_mode, disable_proxy_modes_tracing():
-        gm = make_fx(
-            fn,
-            tracing_mode=tracing_mode,
-            pre_dispatch=pre_dispatch,
-            _error_on_data_dependent_ops=False,
-        )(*inputs)
+        from torch.fx.experimental.symbolic_shapes import (
+            _ignore_fresh_unbacked_symbols_tls_context,
+        )
+
+        # This graph is used only to answer alias/mutation questions. Fresh
+        # unbacked symbols created during the trace are therefore discarded with
+        # the graph and should not require bindings in the surrounding graph.
+        with _ignore_fresh_unbacked_symbols_tls_context():
+            gm = make_fx(
+                fn,
+                tracing_mode=tracing_mode,
+                pre_dispatch=pre_dispatch,
+                _error_on_data_dependent_ops=False,
+            )(*inputs)
         if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:  # type: ignore[attr-defined]
             insert_deferred_runtime_asserts(
                 gm,
