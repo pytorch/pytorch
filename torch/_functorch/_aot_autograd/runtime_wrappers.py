@@ -2611,6 +2611,10 @@ def _tangent_meta_arg_count(meta: PlainTensorMeta | SubclassCreationMeta) -> int
     raise AssertionError(f"unexpected tangent metadata: {type(meta)}")
 
 
+def _is_grad_tangent(node: torch.fx.Node) -> bool:
+    return _is_tangent(node) and "token" not in str(node.target)
+
+
 def _undefined_tangent_flat_indices(
     fw_metadata: ViewAndMutationMeta,
     undefined_grad_out_indices: Sequence[int],
@@ -2734,7 +2738,7 @@ def _materialize_missing_tangent_args(
         return
 
     placeholders = bw_module.graph.find_nodes(op="placeholder")
-    tangent_placeholders = [node for node in placeholders if _is_tangent(node)]
+    tangent_placeholders = [node for node in placeholders if _is_grad_tangent(node)]
     placeholder_positions = {node: i for i, node in enumerate(placeholders)}
 
     if len(tangent_placeholders) != sum(
@@ -2804,7 +2808,6 @@ class _TangentDependency:
 
 _PRUNED_ZERO = _PrunedZero()
 _UNHANDLED_ZERO_SIMPLIFICATION = object()
-_UNKNOWN_ZERO_SIMPLIFICATION = object()
 
 
 def _is_pruned_zero(x: Any) -> bool:
@@ -2966,7 +2969,8 @@ def _specialize_bw_module_for_undefined_grad_outputs(
 
     bw_module = copy.deepcopy(bw_module)
     placeholders = bw_module.graph.find_nodes(op="placeholder")
-    tangent_placeholders = [node for node in placeholders if _is_tangent(node)]
+    tangent_placeholders = [node for node in placeholders if _is_grad_tangent(node)]
+    placeholder_positions = {node: i for i, node in enumerate(placeholders)}
     if len(tangent_placeholders) != sum(
         _tangent_meta_arg_count(meta) for meta in fw_metadata.subclass_tangent_meta
     ):
@@ -3005,7 +3009,7 @@ def _specialize_bw_module_for_undefined_grad_outputs(
             new_node = new_graph.placeholder(node.target, type_expr=node.type)
             new_node.meta = copy.copy(node.meta)
             env[node] = new_node
-            idx = placeholders.index(node)
+            idx = placeholder_positions[node]
             new_placeholder_list.append(placeholder_list[idx])
             kept_arg_indices.append(idx)
             continue
@@ -3064,7 +3068,7 @@ def _pruned_backward_output_indices_for_undefined_grad_outputs(
         return ()
 
     placeholders = bw_module.graph.find_nodes(op="placeholder")
-    tangent_placeholders = [node for node in placeholders if _is_tangent(node)]
+    tangent_placeholders = [node for node in placeholders if _is_grad_tangent(node)]
     if len(tangent_placeholders) != sum(
         _tangent_meta_arg_count(meta) for meta in fw_metadata.subclass_tangent_meta
     ):

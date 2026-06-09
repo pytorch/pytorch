@@ -42,6 +42,8 @@ from torch._dynamo.utils import (
 )
 from torch._functorch._aot_autograd.runtime_wrappers import (
     _pruned_backward_output_indices_for_undefined_grad_outputs,
+    _specializable_user_grad_output_indices,
+    _specialize_bw_module_for_undefined_grad_outputs,
     AutogradLazyBackwardCompileInfo,
     CachedAutogradLazyBackwardCompileInfo,
 )
@@ -503,10 +505,17 @@ class AutogradCompilerInstance:
         bw_prologue_fn = CompiledFunction._bw_prologue_fn
         bw_epilogue_fn = CompiledFunction._bw_epilogue_fn
         del CompiledFunction
-        grad_output_prototypes = ctx._aot_grad_output_prototypes
         undefined_grad_out_indices = tuple(
             i for i, grad in enumerate(inputs) if grad is None
         )
+        if undefined_grad_out_indices:
+            undefined_grad_out_indices_set = set(undefined_grad_out_indices)
+            grad_output_prototypes = tuple(
+                prototype if i in undefined_grad_out_indices_set else None
+                for i, prototype in enumerate(ctx._aot_grad_output_prototypes)
+            )
+        else:
+            grad_output_prototypes = ()
         pruned_output_indices = (
             _pruned_backward_output_indices_for_undefined_grad_outputs(
                 cast(GraphModule, bw_module),
@@ -514,6 +523,25 @@ class AutogradCompilerInstance:
                 undefined_grad_out_indices,
             )
         )
+        ca_specialized_bw_module = None
+        ca_kept_arg_indices = None
+        skip_materialize_grad_output_indices = ()
+        if undefined_grad_out_indices:
+            bw_placeholders = bw_module.graph.find_nodes(op="placeholder")  # type: ignore[attr-defined]
+            ca_specialized = _specialize_bw_module_for_undefined_grad_outputs(
+                cast(GraphModule, bw_module),
+                list(range(len(bw_placeholders))),
+                metadata,
+                undefined_grad_out_indices,
+                list(range(len(bw_placeholders))),
+            )
+            if ca_specialized is not None:
+                ca_specialized_bw_module, _, ca_kept_arg_indices = ca_specialized
+                skip_materialize_grad_output_indices = (
+                    _specializable_user_grad_output_indices(
+                        metadata, undefined_grad_out_indices
+                    )
+                )
 
         if torch.is_grad_enabled():
             for output_alias_info in metadata.output_info:
@@ -536,7 +564,7 @@ class AutogradCompilerInstance:
                 ctx_opaque_objs,
                 flat_args_list,
                 grad_output_prototypes,
-                (),
+                skip_materialize_grad_output_indices,
             )
 
         pgrads = self.fx_tracer.create_proxy(
@@ -570,9 +598,15 @@ class AutogradCompilerInstance:
 
             # set up the proxy inputs to bw_module
             # the calling convention is: [*symints, *args (primals and tangents), backward_state]
-            num_args = num_inputs(bw_module.graph)  # type: ignore[attr-defined]
-            pall_args = [
-                pgrads[i] for i in range(num_args - int(pbackward_state is not None))
+            bw_module_to_copy = (
+                ca_specialized_bw_module
+                if ca_specialized_bw_module is not None
+                else bw_module
+            )
+            original_num_args = num_inputs(bw_module.graph)  # type: ignore[attr-defined]
+            original_pall_args = [
+                pgrads[i]
+                for i in range(original_num_args - int(pbackward_state is not None))
             ]
             # replace the symints with our symints
             symints = ctx._get_compiled_autograd_symints()
@@ -581,10 +615,14 @@ class AutogradCompilerInstance:
                     f"symints length mismatch: {len(symints)} vs {len(ctx.symints)}"
                 )
             psymints = [self.to_proxy(e) for e in symints]
-            pall_args[: len(symints)] = psymints
+            original_pall_args[: len(symints)] = psymints
             # Add backward_state
             if pbackward_state is not None:
-                pall_args.append(pbackward_state)
+                original_pall_args.append(pbackward_state)
+            if ca_kept_arg_indices is not None:
+                pall_args = [original_pall_args[i] for i in ca_kept_arg_indices]
+            else:
+                pall_args = original_pall_args
 
             # run over all nodes of the aot_backward graph.
             # copy and paste them all into the compiled autograd graph.
@@ -604,7 +642,7 @@ class AutogradCompilerInstance:
                 # make it both informative and unique
                 return f"aot{deduped_aot_id}_{node_name}"
 
-            for node in bw_module.graph.nodes:  # type: ignore[attr-defined]
+            for node in bw_module_to_copy.graph.nodes:  # type: ignore[attr-defined]
                 if node.op == "placeholder":
                     ph = pall_args[args_idx].node
                     ph.name = make_unique(node.name)
@@ -624,7 +662,9 @@ class AutogradCompilerInstance:
                 elif node.op == "get_attr":
                     name = node.target
                     qualname = self.fx_tracer.get_fresh_qualname(name)
-                    setattr(self.fx_tracer.root, qualname, getattr(bw_module, name))
+                    setattr(
+                        self.fx_tracer.root, qualname, getattr(bw_module_to_copy, name)
+                    )
                     result = self.fx_tracer.create_node("get_attr", qualname, (), {})
                     result.name = make_unique(node.name)
                     value_remap[node] = result
@@ -642,7 +682,9 @@ class AutogradCompilerInstance:
                 elif node.op == "call_module":
                     name = node.target
                     qualname = self.fx_tracer.get_fresh_qualname(name)
-                    setattr(self.fx_tracer.root, qualname, getattr(bw_module, name))
+                    setattr(
+                        self.fx_tracer.root, qualname, getattr(bw_module_to_copy, name)
+                    )
                     result = self.fx_tracer.graph.node_copy(
                         node, lambda n: value_remap[n]
                     )
@@ -1014,7 +1056,7 @@ class AutogradCompilerInstance:
     # Eager autograd backward implements scalars as 0-dim tensors, see DivBackward0::other_.
     # When compiled autograd traces those nodes, it lifts the scalar tensors, resulting in a graph
     # with some cpu 0-dim tensor inputs. To prevent the entire graph from skipping cudagraph, we move the
-    # scalars tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
+    # scalar tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
     def move_graph_nodes_to_cuda(self, graph: torch.fx.Graph) -> list[int]:
         to_move: dict[int, torch.fx.Node] = {}
         has_cuda_inputs = False
