@@ -19,6 +19,7 @@ in sets.py.
 
 import collections
 import functools
+import threading
 import types
 from collections.abc import Callable, Iterator
 from typing import Any, TYPE_CHECKING, Union
@@ -76,6 +77,12 @@ if TYPE_CHECKING:
 # - Implement hash_impl(self, tx) on the VariableTracker subclass (or rely on the
 #   base class default which uses get_real_python_backed_value())
 # - Implement is_python_equal() for key equality
+
+
+# Re-entrancy guard for ConstDictVariable.is_python_constant against
+# self-referential dicts (d[k] = d, directly or via an OrderedDict/defaultdict
+# _base_vt cycle). Keyed by id() so it never mutates the VT instances.
+_is_python_constant_tls = threading.local()
 
 
 def pydict_check(obj: VariableTracker) -> bool:
@@ -182,10 +189,23 @@ class ConstDictVariable(VariableTracker):
         # Avoid the base implementation, which probes as_python_constant() and
         # thus rebuilds a real dict, re-hashing the keys (wrong for keys with a
         # side-effecting __hash__).  Check element constness directly instead.
-        return all(
-            k.vt.is_python_constant() and v.is_python_constant()
-            for k, v in self.items.items()
-        )
+        # Re-entrancy guard: a self-referential dict (d[k] = d, directly or via
+        # an OrderedDict/defaultdict wrapper delegating to this _base_vt) would
+        # otherwise recurse forever. A cyclic dict is not a flat python
+        # constant; return False so reconstruct handles the cycle.
+        seen = getattr(_is_python_constant_tls, "ids", None)
+        if seen is None:
+            seen = _is_python_constant_tls.ids = set()
+        if id(self) in seen:
+            return False
+        seen.add(id(self))
+        try:
+            return all(
+                k.vt.is_python_constant() and v.is_python_constant()
+                for k, v in self.items.items()
+            )
+        finally:
+            seen.discard(id(self))
 
     def as_python_constant(self) -> dict[Any, Any]:
         return {
@@ -1345,6 +1365,8 @@ class DictItemsVariable(DictViewVariable):
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6433-L6451
+        from ..utils import iter_contains
+
         if not is_hashable(item):
             raise_type_error(tx, f"unhashable type: '{item.python_type_name()}'")
 
@@ -1355,13 +1377,11 @@ class DictItemsVariable(DictViewVariable):
             if key_ht not in self.dv_dict.items:
                 return VariableTracker.build(tx, False)
             stored = self.dv_dict.items[key_ht]
-            return generic_richcompare_bool(tx, val, stored, "__eq__")
+            # dictitems_contains: PyObject_RichCompareBool(found, value, Py_EQ)
+            # on the stored value, so a value whose __eq__ raises propagates.
+            return generic_richcompare_bool(tx, stored, val, "__eq__")
 
-        for el in self.view_items_vt:
-            r = generic_richcompare_bool(tx, el, item, "__eq__")
-            if r.is_constant_match(True):
-                return r
-        return ConstantVariable.create(False)
+        return iter_contains(self.view_items_vt, item, tx)
 
     def richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
