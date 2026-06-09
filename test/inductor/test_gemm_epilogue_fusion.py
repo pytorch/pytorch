@@ -2037,6 +2037,54 @@ class GemmEpilogueFusionTests(TestCase):
         ).check_not("extern_kernels.bmm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_bmm_local_amax_aux_fuses(self):
+        B = 2
+        M = 32
+        K = 64
+        N = 64
+        group = 16
+
+        cases = (
+            (
+                "amax_abs",
+                lambda x: x.abs().amax(-1),
+                torch.float32,
+                "local_reduce_op='amax_abs'",
+            ),
+        )
+        for name, aux_fn, aux_dtype, check_op in cases:
+            with self.subTest(name=name):
+
+                def fn(a, b):
+                    def epilogue(acc):
+                        x = acc.float().view(B, M, -1, group)
+                        return acc.relu(), aux_fn(x)
+
+                    return gemm_epilogue_fusion(
+                        torch.ops.aten.bmm.default,
+                        (a, b),
+                        epilogue,
+                        kernel_options={"backend": "QUACK"},
+                    )
+
+                a = torch.randn(B, M, K, device="cuda", dtype=torch.float16)
+                b = torch.randn(B, K, N, device="cuda", dtype=torch.float16)
+
+                actual, (code,) = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                )
+                expected = fn(a, b)
+
+                torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
+                self.assertEqual(actual[1].dtype, aux_dtype)
+                torch.testing.assert_close(
+                    actual[1].float(), expected[1].float(), atol=1e-1, rtol=1.25e-1
+                )
+                FileCheck().check(f"local_reduce_group={group}").check(
+                    "local_reduce_out="
+                ).check(check_op).check_not("extern_kernels.bmm").run(code)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_bmm_tuple_epilogue_generic_aux_fuses(self):
         def fn(a, b):
             def epilogue(acc):

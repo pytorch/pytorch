@@ -657,14 +657,14 @@ def _match_quack_local_n_amax_reduce(
     source_node = _match_quack_acc_source(view_match.base, mm_node)
     if source_node is None:
         return None
-    shape = _normalize_quack_shape(view_match.shape)
+    shape = _quack_grouped_n_fragment_shape(_normalize_quack_shape(view_match.shape))
     if not _is_quack_same_fragment_n_group_shape(shape):
         return None
     reduce_meta = node.meta.get("val") if isinstance(node, torch.fx.Node) else None
     mm_meta = mm_node.meta.get("val")
-    if reduce_meta is None or mm_meta is None:
+    if reduce_meta is None or mm_meta is None or len(mm_meta.shape) not in (2, 3):
         return None
-    expected_shape = (mm_meta.shape[0], mm_meta.shape[1] // shape[-1])
+    expected_shape = (*tuple(mm_meta.shape[:-1]), mm_meta.shape[-1] // shape[-1])
     if tuple(reduce_meta.shape) != tuple(expected_shape):
         return None
     return QuackLocalReduceInfo(
@@ -812,14 +812,16 @@ def _match_quack_local_n_amax_scale_view(
     source_node = _match_quack_acc_source(view_match.base, mm_node)
     if source_node is None:
         return None
-    grouped_shape = _normalize_quack_shape(view_match.shape)
+    grouped_shape = _quack_grouped_n_fragment_shape(
+        _normalize_quack_shape(view_match.shape)
+    )
     if not _is_quack_same_fragment_n_group_shape(grouped_shape):
         return None
     aux_meta = node.meta.get("val") if isinstance(node, torch.fx.Node) else None
     mm_meta = mm_node.meta.get("val")
-    if aux_meta is None or mm_meta is None:
+    if aux_meta is None or mm_meta is None or len(mm_meta.shape) not in (2, 3):
         return None
-    expected_shape = (mm_meta.shape[0], mm_meta.shape[1] // grouped_shape[-1])
+    expected_shape = (*tuple(mm_meta.shape[:-1]), mm_meta.shape[-1] // grouped_shape[-1])
     if tuple(aux_meta.shape) != tuple(expected_shape):
         return None
     return QuackLocalReduceInfo(
@@ -882,14 +884,16 @@ def _match_quack_local_n_primitive_scale_view(
     source_node = _match_quack_acc_source(view_match.base, mm_node)
     if source_node is None:
         return None
-    grouped_shape = _normalize_quack_shape(view_match.shape)
+    grouped_shape = _quack_grouped_n_fragment_shape(
+        _normalize_quack_shape(view_match.shape)
+    )
     if not _is_quack_same_fragment_n_group_shape(grouped_shape):
         return None
     aux_meta = node.meta.get("val") if isinstance(node, torch.fx.Node) else None
     mm_meta = mm_node.meta.get("val")
-    if aux_meta is None or mm_meta is None:
+    if aux_meta is None or mm_meta is None or len(mm_meta.shape) not in (2, 3):
         return None
-    expected_shape = (mm_meta.shape[0], mm_meta.shape[1] // grouped_shape[-1])
+    expected_shape = (*tuple(mm_meta.shape[:-1]), mm_meta.shape[-1] // grouped_shape[-1])
     if tuple(aux_meta.shape) != tuple(expected_shape):
         return None
     return QuackLocalReduceInfo(
