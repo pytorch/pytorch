@@ -8,7 +8,7 @@ import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list, reset_code
 from torch._dynamo.testing import CompileCounter
-from torch._dynamo.utils import CleanupHook, CleanupManager
+from torch._dynamo.utils import CleanupHook, CleanupManager, counters
 
 
 _variable = 0
@@ -394,6 +394,91 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(counter.frame_count, 1)
         finally:
             _condition_dependent_skip_flag = False
+
+    def test_condition_dependent_skip_with_tensor_shape_guard(self):
+        def fn(x):
+            if x.shape[0] == 3:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        x3 = torch.ones(3)
+        x4 = torch.ones(4)
+        self.assertEqual(opt_fn(x3), x3 - 1)
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(x4), x4 + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_tensor_len_guard(self):
+        def fn(x):
+            if len(x) == 3:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        x3 = torch.ones(3)
+        x4 = torch.ones(4)
+        self.assertEqual(opt_fn(x3), x3 - 1)
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(x4), x4 + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_tensor_state_guard(self):
+        def fn(x):
+            if x.requires_grad:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        x_grad = torch.ones(3, requires_grad=True)
+        x_no_grad = torch.ones(3)
+        self.assertEqual(opt_fn(x_grad), x_grad - 1)
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(x_no_grad), x_no_grad + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_graph_break_after_call_does_not_poison_code(self):
+        def fn(x, n):
+            y = x + 10
+            if n == 0:
+                torch._dynamo.graph_break()
+            return y + 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+        counters.clear()
+
+        self.assertEqual(opt_fn(x, 0), x + 11)
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(sum(counters["graph_break"].values()), 1)
+
+        self.assertEqual(opt_fn(x, 1), x + 11)
+        self.assertEqual(counter.frame_count, 3)
 
     def test_backend_skip_frame_preserves_fullgraph_failure(self):
         def backend(gm, args):

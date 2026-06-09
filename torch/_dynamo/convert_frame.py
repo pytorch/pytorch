@@ -413,8 +413,30 @@ def _has_condition_dependent_skip_guards(
     if not _has_tensor_related_state(code, output):
         return False
 
+    tensor_state_names = (
+        "shape",
+        "size",
+        "stride",
+        "dim",
+        "ndim",
+        "dtype",
+        "device",
+        "len",
+        "requires_grad",
+    )
     for guard in output.guards:
-        if guard.create_fn_name() not in {
+        guard_create_fn_name = guard.create_fn_name()
+        if guard_create_fn_name == "SHAPE_ENV" and any(
+            name in code.co_names for name in tensor_state_names
+        ):
+            return True
+        if guard_create_fn_name == "TENSOR_MATCH" and any(
+            name in code.co_names for name in tensor_state_names
+        ):
+            name = guard.name
+            if name.startswith(("L[", "G[")):
+                return True
+        if guard_create_fn_name not in {
             "CONSTANT_MATCH",
             "EQUALS_MATCH",
             "SEQUENCE_LENGTH",
@@ -2387,6 +2409,8 @@ def _compile(
                 == "Call to `torch._dynamo.graph_break()`"
                 and not one_graph
                 and not error_on_graph_break
+                and tracer_output is not None
+                and tracer_output.output_graph is not None
             ):
                 guarded_code = _guarded_eager_fallback(
                     code,
@@ -2397,6 +2421,9 @@ def _compile(
                     f"Dynamo decided to skip the frame while tracing: {e}",
                     package,
                 )
+                if guarded_code.guarded_code is not None:
+                    if isinstance(e, Unsupported) and e.category == "graph_break":
+                        e.remove_from_stats()
                 return guarded_code
             if (
                 isinstance(e, (Unsupported, UserError))
