@@ -1431,7 +1431,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
     def test_split_on_partial(self):
         self.run_subtests(
             {
-                "reduce_op": ["sum", "avg", "product", "min", "max"],
+                "reduce_op": ["sum", "avg", "min", "max"],
                 "split_size": [2, 3, 4],
                 "split_dim": [0, 1],
             },

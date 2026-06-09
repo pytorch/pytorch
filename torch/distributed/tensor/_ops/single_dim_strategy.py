@@ -79,6 +79,7 @@ class _SingleDimStrategyInfo:
     # than the op's compute mesh.  These args must be Replicate.
     # See Note [Multi-mesh args] in expand_to_full_mesh_op_strategy.
     different_mesh_args: list[int] | None = field(default=None)
+    allow_input_redistribution: bool = True
 
     # Delegate to func so this can be used interchangeably with a raw
     # _SingleDimStrategyFunc (e.g. in tests that call strategy functions directly).
@@ -370,9 +371,21 @@ class _PreparedSingleDimStrategy:
         # A mismatch means the strategy is missing kwargs placements or has
         # extra entries.
         if len(strategies_with_placeholders) > 0:
-            schema_num_outputs = sum(
-                1 for r in op_schema.op._schema.returns if "Tensor" in str(r.type)
-            )
+            if any(
+                isinstance(r.type, torch.ListType) for r in op_schema.op._schema.returns
+            ):
+                if isinstance(output_tensor_meta, Sequence) and not isinstance(
+                    output_tensor_meta, TensorMeta
+                ):
+                    schema_num_outputs = len(output_tensor_meta)
+                else:
+                    schema_num_outputs = (
+                        len(strategies_with_placeholders[0]) - num_inputs
+                    )
+            else:
+                schema_num_outputs = sum(
+                    1 for r in op_schema.op._schema.returns if "Tensor" in str(r.type)
+                )
             expected_len = schema_num_outputs + num_inputs
             actual_len = len(strategies_with_placeholders[0])
             if actual_len != expected_len:
@@ -664,6 +677,28 @@ def _expand_single_dim_strategy_to_mesh(
 
             element_mesh = prepared_strategy.element_mesh or mesh
 
+            is_valid_strategy_cb = None
+            if not strategy_info.allow_input_redistribution:
+                original_input_placements = [
+                    input_strategy.strategies[0].output_spec.placements
+                    for input_strategy in (
+                        op_schema.args_strategy + op_schema.kwargs_strategy
+                    )
+                ]
+
+                def input_placements_unchanged(
+                    input_specs: list[DTensorSpec],
+                    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
+                ) -> bool:
+                    return all(
+                        input_spec.placements == original_placement
+                        for input_spec, original_placement in zip(
+                            input_specs, original_input_placements, strict=True
+                        )
+                    )
+
+                is_valid_strategy_cb = input_placements_unchanged
+
             return expand_to_full_mesh_op_strategy(
                 element_mesh,
                 op_schema,
@@ -673,6 +708,7 @@ def _expand_single_dim_strategy_to_mesh(
                 input_index=prepared_strategy.num_outputs,
                 allow_unbacked_sharding=prepared_strategy.allow_unbacked_sharding,
                 allow_uneven_sharding=prepared_strategy.allow_uneven_sharding,
+                is_valid_strategy_cb=is_valid_strategy_cb,
                 different_mesh_args=prepared_strategy.remapped_different_mesh_args,
             )
 
@@ -781,6 +817,7 @@ def register_single_dim_strategy(
     allow_unbacked_sharding: bool | None = None,
     allow_uneven_sharding: bool = False,
     different_mesh_args: list[int] | None = None,
+    allow_input_redistribution: bool = True,
 ) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
     Registers a single_dim_strategy function for the given op.
@@ -830,6 +867,7 @@ def register_single_dim_strategy(
             allow_unbacked_sharding=allow_unbacked_sharding,
             allow_uneven_sharding=allow_uneven_sharding,
             different_mesh_args=different_mesh_args,
+            allow_input_redistribution=allow_input_redistribution,
         )
         registration_wrapper(info)
         return impl
