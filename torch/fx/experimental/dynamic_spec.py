@@ -693,3 +693,14 @@ class ShapesSpec:
             "params": None if self._params is None else self._params.to_jsonable(),
             "assumptions": [repr(a) for a in self._assumptions],
         }
+
+
+# Shared error message for rejecting `dynamic_shapes=ShapesSpec(...)`
+# combined with `prefer_deferred_runtime_asserts_over_guards=True`. Used
+# in multiple export entry points; lifted out so the wording can't drift.
+_SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG = (
+    "`prefer_deferred_runtime_asserts_over_guards=True` cannot be "
+    "combined with `dynamic_shapes=ShapesSpec(...)`. ShapesSpec "
+    "currently uses unbacked symbols only, which already emit "
+    "runtime assertions; the flag has no effect."
+)
