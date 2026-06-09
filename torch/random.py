@@ -142,35 +142,31 @@ def fork_rng(
         yield
         return
 
-    current_accelerator = torch.accelerator.current_accelerator()
-    if device_type is not None and current_accelerator is not None:
-        if device_type != "cpu" and device_type != current_accelerator.type:
-            raise ValueError(
-                f"Device type '{device_type}' doesn't match the current "
-                f"accelerator '{current_accelerator.type}'."
-            )
-
-    global _fork_rng_warned_already
-
-    # Internal arguments:
-    #   _caller: the function which called fork_rng, which the user used
-    #   _devices_kw: the devices keyword of _caller
-
     if not enabled:
         yield
         return
 
-    # Determine the effective accelerator type for device enumeration
-    if device_type == "cpu" or current_accelerator is None:
-        num_devices = 0
-    else:
-        num_devices = torch.accelerator.device_count()
+    acc = torch.accelerator.current_accelerator()
+    if device_type == "cpu" or acc is None:
+        cpu_rng_state = torch.get_rng_state()
+        try:
+            yield
+        finally:
+            torch.set_rng_state(cpu_rng_state)
+        return
+
+    if device_type != acc.type:
+        raise ValueError(
+            f"Device type '{device_type}' doesn't match the current "
+            f"accelerator '{acc.type}'."
+        )
+
+    global _fork_rng_warned_already
 
     if devices is None:
+        num_devices = torch.accelerator.device_count()
         if num_devices > 1 and not _fork_rng_warned_already:
-            acc_type = (
-                current_accelerator.type.upper()
-            )  # pyrefly: ignore [missing-attribute]
+            acc_type = acc.type  # pyrefly: ignore [missing-attribute]
             message = (
                 f"{acc_type} reports that you have {num_devices} available devices, and "
                 f"you have used {_caller} without explicitly specifying which devices are being used. "
@@ -183,7 +179,7 @@ def fork_rng(
                 f"set {acc_type}_VISIBLE_DEVICES=0 or devices=[0].  To initialize all devices "
                 f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
                 f"`range(torch.accelerator.device_count())`."
-            )
+            )  # pyrefly: ignore [missing-attribute]
             warnings.warn(message, stacklevel=2)
             _fork_rng_warned_already = True
         devices = list(range(num_devices))
