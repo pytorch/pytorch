@@ -772,6 +772,42 @@ def _nvshmemx_cumodule_init(module: int) -> None: ...
 # Check if NVSHMEM is available on current system.
 def _is_nvshmem_available() -> bool: ...
 
+# NCCL EP (contrib/nccl_ep) bindings; only registered in USE_C10D_NCCL builds.
+class _NcclEpGroup:
+    @staticmethod
+    def create(
+        pg: ProcessGroup,
+        num_experts: int,
+        max_dispatch_tokens_per_rank: int,
+        max_recv_tokens_per_rank: int,
+        max_token_bytes: int,
+    ) -> _NcclEpGroup: ...
+
+class _NcclEpHandle:
+    @staticmethod
+    def create(
+        group: _NcclEpGroup,
+        topk_idx: Tensor,
+        recv_expert_counter: Tensor | None = None,
+    ) -> _NcclEpHandle: ...
+    def get_num_recv_tokens(self) -> int: ...
+
+# handle is Any: the Python layer (torch.distributed._token_switch.Routing)
+# holds it opaquely as `object`, so callers don't carry the concrete type.
+def _nccl_ep_dispatch(
+    handle: Any,
+    tokens: Tensor,
+    topk_weights: Tensor,
+    out_tokens: Tensor,
+    out_topk_weights: Tensor,
+    out_topk_idx: Tensor,
+) -> None: ...
+def _nccl_ep_combine(
+    handle: Any,
+    expert_tokens: Tensor,
+    out_tokens: Tensor,
+) -> None: ...
+
 class _SymmetricMemory:
     @staticmethod
     def set_group_info(
