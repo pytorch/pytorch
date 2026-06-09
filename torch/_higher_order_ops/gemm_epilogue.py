@@ -146,6 +146,7 @@ class QuackLocalNormInfo:
     reduce_node: torch.fx.Node
     source_node: torch.fx.Node
     group_size: int
+    dim: int
 
 
 def _quack_cute_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
@@ -432,10 +433,12 @@ def _match_quack_local_m_reduce(
     mm_shape = tuple(mm_val.shape)
     if len(mm_shape) != 2 or shape[2] != mm_shape[1]:
         return None
-    if tuple(reduce_val.shape) != (
-        mm_shape[0] // shape[1],
-        mm_shape[1],
-    ):
+    expected_shape = (
+        (mm_shape[0] // shape[1], 1, mm_shape[1])
+        if keepdim
+        else (mm_shape[0] // shape[1], mm_shape[1])
+    )
+    if tuple(reduce_val.shape) != expected_shape:
         return None
     return QuackLocalReduceInfo(
         view_node=view_node,
@@ -489,6 +492,53 @@ def _match_quack_local_n_norm(
         reduce_node=local_reduce.reduce_node,
         source_node=local_reduce.source_node,
         group_size=local_reduce.group_size,
+        dim=1,
+    )
+
+
+def _match_quack_local_m_norm(
+    node: Any, mm_node: torch.fx.Node
+) -> QuackLocalNormInfo | None:
+    if not isinstance(node, torch.fx.Node):
+        return None
+    if node.op == "call_function" and node.target in (
+        torch.ops.aten.view.default,
+        torch.ops.aten.reshape.default,
+    ):
+        div_node = node.args[0]
+        output_shape = node.args[1]
+    elif node.op == "call_method" and node.target in ("view", "reshape"):
+        div_node = node.args[0]
+        output_shape = node.args[1:]
+    else:
+        return None
+    if not isinstance(div_node, torch.fx.Node):
+        return None
+    if not (div_node.op == "call_function" and div_node.target == torch.ops.aten.div.Tensor):
+        return None
+    lhs, rhs = div_node.args[:2]
+    local_reduce = _match_quack_local_m_reduce(rhs, mm_node)
+    if local_reduce is None or lhs is not local_reduce.view_node:
+        return None
+    if isinstance(output_shape, torch.Size):
+        output_shape = tuple(output_shape)
+    if not isinstance(output_shape, (list, tuple)) or len(output_shape) != 2:
+        return None
+    output_meta = node.meta.get("val")
+    mm_meta = mm_node.meta.get("val")
+    if output_meta is not None and mm_meta is not None:
+        if tuple(output_meta.shape) != tuple(mm_meta.shape):
+            return None
+    if not local_reduce.keepdim:
+        return None
+    return QuackLocalNormInfo(
+        output_node=node,
+        div_node=div_node,
+        view_node=local_reduce.view_node,
+        reduce_node=local_reduce.reduce_node,
+        source_node=local_reduce.source_node,
+        group_size=local_reduce.group_size,
+        dim=0,
     )
 
 
@@ -528,7 +578,9 @@ def _quack_cute_epilogue_code(
         raise NotImplementedError("QUACK GEMM epilogue backend expects one output")
     output_value = _unwrap_output(output_nodes[0])
     local_reduce = None
-    local_norm = _match_quack_local_n_norm(output_value, mm_node)
+    local_norm = _match_quack_local_n_norm(output_value, mm_node) or _match_quack_local_m_norm(
+        output_value, mm_node
+    )
     skip_nodes: set[torch.fx.Node] = set()
     if local_norm is not None:
         skip_nodes.update(
@@ -599,6 +651,13 @@ def _quack_cute_epilogue_code(
             )
 
     if local_norm is not None:
+        if local_norm.dim == 0:
+            raise NotImplementedError(
+                "local M-group reductions feeding the main output are not supported yet; "
+                "the current TensorSSA epilogue sees only one 32-wide N fragment and "
+                "cannot compute denominators across M lanes without a QuACK device-side "
+                "value-producing row reduction"
+            )
         if 32 % local_norm.group_size != 0:
             raise NotImplementedError(
                 "QUACK reductions feeding the main output currently require a "
