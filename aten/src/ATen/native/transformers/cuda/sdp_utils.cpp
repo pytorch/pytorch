@@ -14,7 +14,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
-#include <c10/util/Array.h>
+#include <array>
 #include <c10/util/Exception.h>
 #include <c10/util/string_view.h>
 
@@ -804,10 +804,10 @@ bool check_dtypes_low_precision(sdp_params const& params, bool debug) {
   auto dprop = at::cuda::getCurrentDeviceProperties();
   if (dprop->major >= 8) {
     constexpr auto sm80_dtypes =
-        c10::array_of<at::ScalarType>(at::kHalf, at::kBFloat16);
+        std::to_array<at::ScalarType>({at::kHalf, at::kBFloat16});
     return check_tensor_dtype(params, sm80_dtypes, debug);
   } else {
-    constexpr auto default_dtypes = c10::array_of<at::ScalarType>(at::kHalf);
+    constexpr auto default_dtypes = std::to_array<at::ScalarType>({at::kHalf});
     return check_tensor_dtype(params, default_dtypes, debug);
   }
 }
@@ -816,7 +816,7 @@ bool check_dtypes_flash_attention(sdp_params const& params, bool debug) {
   auto dprop = at::cuda::getCurrentDeviceProperties();
   if (dprop->major >= 9 and at::globalContext().userEnabledFA3SDP()) {
     constexpr auto fa3_dtypes =
-        c10::array_of<at::ScalarType>(at::kFloat8_e4m3fn, at::kHalf, at::kBFloat16);
+        std::to_array<at::ScalarType>({at::kFloat8_e4m3fn, at::kHalf, at::kBFloat16});
     return check_tensor_dtype(params, fa3_dtypes, debug);
   } else {
     return check_dtypes_low_precision(params, debug);
@@ -873,9 +873,8 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   }
 #endif
   // Define gate functions that determine if a flash kernel can be ran
-  // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints =
-      c10::array_of<bool (*)(sdp_params const&, bool)>(
+      std::to_array<bool (*)(sdp_params const&, bool)>({
           check_runtime_disabled_cudnn,
           check_for_nested_inputs,
           check_all_tensors_on_device,
@@ -885,19 +884,19 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_attn_mask_shape,
           check_cudnn_hardware_support,
           check_cudnn_dropout
-          );
+          });
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
     }
   }
   constexpr auto dense_constraints =
-      c10::array_of<bool (*)(sdp_params const&, bool)>(
+      std::to_array<bool (*)(sdp_params const&, bool)>({
       check_nonzero_sequence_lengths_dense,
       check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>,
       check_batch_size_and_num_heads_dense<true /*enable_gqa*/, false /*requires_same_num_heads*/>,
       check_cudnn_tensor_shapes
-  );
+  });
 
   if (has_only_dense_inputs(params)) {
     for (auto& constraint : dense_constraints) {
@@ -925,8 +924,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   return false;
 #else // defined(USE_FLASH_ATTENTION)
   // Define gate functions that determine if a flash kernel can be ran
-  // Replace with std::to_array when we migrate to c++20
-  constexpr auto general_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+  constexpr auto general_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
       check_runtime_disabled_flash,
       check_all_tensors_on_device,
       check_tensor_shapes,
@@ -935,7 +933,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_flash_attention_hardware_support,
       check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120,
       check_flash_causal_non_square_seqlens,
-      check_dtypes_flash_attention);
+      check_dtypes_flash_attention});
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -943,10 +941,10 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   }
 
   if (has_for_nested_inputs(params)) {
-    constexpr auto nested_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+    constexpr auto nested_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
         check_batch_size_nested,
         check_head_dim_size_flash_nested<false /*caller_is_meff*/>,
-        check_for_seq_len_0_nested_tensor);
+        check_for_seq_len_0_nested_tensor});
     for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -955,10 +953,10 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   }
   constexpr bool backend_supports_grouped_query_attention = true;
   if (has_only_dense_inputs(params)) {
-    constexpr auto dense_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+    constexpr auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
         check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention>,
         check_nonzero_sequence_lengths_dense,
-        check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>);
+        check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -976,26 +974,26 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #endif
   // Constraints specific to mem efficient attention
   constexpr auto less_than_sm80_mem_efficient_dtypes =
-      c10::array_of<at::ScalarType>(at::kHalf, at::kFloat);
+      std::to_array<at::ScalarType>({at::kHalf, at::kFloat});
 #ifdef USE_ROCM
   constexpr auto aotriton_mem_efficient_dtypes =
-      c10::array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+      std::to_array<at::ScalarType>({at::kHalf, at::kFloat, at::kBFloat16});
   constexpr auto ck_mem_efficient_dtypes =
-      c10::array_of<at::ScalarType>(at::kHalf, at::kBFloat16);
+      std::to_array<at::ScalarType>({at::kHalf, at::kBFloat16});
 #else
   constexpr auto greater_than_or_equal_sm80_mem_efficient_dtypes =
-      c10::array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+      std::to_array<at::ScalarType>({at::kHalf, at::kFloat, at::kBFloat16});
 #endif
 
   //  Define gate functions that determine if a mem efficient kernel can be ran
-  constexpr auto general_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+  constexpr auto general_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
       check_runtime_disabled_mem_efficient,
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
       check_head_dim_size_mem_efficient,
       check_data_ptr_alignment_mem_efficient
-  );
+  });
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -1003,9 +1001,9 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
 
   if (has_for_nested_inputs(params)) {
-    constexpr auto nested_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+    constexpr auto nested_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
         check_batch_size_nested,
-        check_for_seq_len_0_nested_tensor);
+        check_for_seq_len_0_nested_tensor});
     for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -1013,10 +1011,10 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
     }
   }
   if (has_only_dense_inputs(params)) {
-    constexpr auto dense_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+    constexpr auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>,
-        check_batch_size_and_num_heads_dense<false /*supports_grouped_query_attention=*/>);
+        check_batch_size_and_num_heads_dense<false /*supports_grouped_query_attention=*/>});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;
