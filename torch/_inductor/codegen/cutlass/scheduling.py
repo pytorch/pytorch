@@ -132,9 +132,12 @@ class CUTLASSScheduling(BaseScheduling):
             # gains a descriptive prefix (cutlass_fused_mm_<hash>), so the
             # exported symbol differs and we need a fresh compile.
             if V.graph.cpp_wrapper and not V.graph.aot_mode:
-                from ...codecache import CUDACodeCache
+                from ...codecache import CUDACodeCache, XPUCodeCache
 
-                so_path, _, _ = CUDACodeCache.compile(src_code, "so")
+                codecache_cls = (
+                    XPUCodeCache if V.graph.device_type == "xpu" else CUDACodeCache
+                )
+                so_path, _, _ = codecache_cls.compile(src_code, "so")
                 wrapper.external_kernel_libs.add(so_path)
         return kernel_name
 
