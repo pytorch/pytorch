@@ -877,7 +877,7 @@ void generateForwardBackwardLinks(
 
 static constexpr const char* indexKey = "Ev Idx";
 
-std::string sanitizeNameForKinetoJSON(std::string name) {
+static std::string sanitizeNameForKinetoJSON(std::string name) {
   // Kineto's Chrome trace writer quotes names itself but does not escape '"'.
   std::replace(name.begin(), name.end(), '"', '\'');
   return name;
@@ -1673,7 +1673,7 @@ RecordQueue::getRecords(
   }
 
   build_tree(out);
-  return {out, std::move(trace)};
+  return {std::move(out), std::move(trace)};
 }
 
 namespace {
