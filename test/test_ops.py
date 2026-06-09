@@ -321,9 +321,7 @@ class TestCommon(TestCase):
                     kernel = get_opoverloadpacket_from_dispatch(kernel)
                     overloadpacket = getattr(torch.ops.aten, kernel)
 
-                    for overload_name in overloadpacket.overloads():
-                        overload = getattr(overloadpacket, overload_name)
-
+                    for overload in overloadpacket.op_overloads():
                         if not torch._C._dispatch_has_kernel(overload.name()):
                             continue
 
@@ -399,9 +397,7 @@ class TestCommon(TestCase):
 
                     overloadpacket = getattr(torch.ops.aten, kernel)
 
-                    for overload_name in overloadpacket.overloads():
-                        overload = getattr(overloadpacket, overload_name)
-
+                    for overload in overloadpacket.op_overloads():
                         if not torch._C._dispatch_has_kernel(overload.name()):
                             continue
 
@@ -444,6 +440,11 @@ class TestCommon(TestCase):
                 reduction_factor = 1
                 for dim in reduction_dims:
                     reduction_factor *= sample.input.shape[dim]
+
+                # An empty reduction axis means there is nothing to reduce over
+                # and the numel-by-factor relationship below does not hold.
+                if reduction_factor == 0:
+                    continue
 
                 expected_numel = sample.input.numel() // reduction_factor
 
@@ -2560,6 +2561,9 @@ class TestRefsOpsInfo(TestCase):
         "_refs.nn.functional.poisson_nll_loss",
         "_refs.nn.functional.softmax",
         "_refs.nn.functional.softmin",
+        # The frontend ref validates min_val <= max_val, but aten.hardtanh
+        # preserves native ATen semantics and allows inverted bounds.
+        "_refs.nn.functional.hardtanh",
         "_refs.positive",
         "_refs.ravel",
         "_refs.reshape",

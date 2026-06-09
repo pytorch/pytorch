@@ -298,6 +298,10 @@ class SetVariable(VariableTracker):
     ) -> None:
         if _is_internal_nn_module_call_impl_tx(tx):
             return
+        if isinstance(other, variables.UserDefinedSetVariable):
+            if other._base_vt is None:
+                raise AssertionError("expected _base_vt to be set")
+            other = other._base_vt
         if not isinstance(other, SetVariable):
             return
         self_min_handle_id = self._min_removable_handle_id_key()

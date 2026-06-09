@@ -1622,11 +1622,12 @@ class Mod(torch.nn.Module):
         finally:
             RemovableHandle.next_id = old_next_id
 
-    def test_removable_handle_id_read_after_allocation_uses_runtime_id(self):
+    def test_removable_handle_id_public_access_uses_runtime_id(self):
         class Mod(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self, mode) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
+                self.mode = mode
                 with torch.no_grad():
                     self.linear.weight.zero_()
                     self.linear.bias.zero_()
@@ -1637,312 +1638,54 @@ class Mod(torch.nn.Module):
 
                 handle = self.linear.register_forward_hook(forward_hook)
                 try:
-                    return self.linear(x) + handle.id
+                    if self.mode == "id":
+                        value = handle.id
+                    elif self.mode == "hash":
+                        value = hash(handle.id)
+                    elif self.mode == "dunder_hash":
+                        value = handle.id.__hash__()
+                    elif self.mode == "dict_hit":
+                        value = {handle.id: 5}.get(600, 7)
+                    elif self.mode == "dict_miss_then_hit":
+                        value = {handle.id: 5}.get(601, 7)
+                    elif self.mode == "dict_float_miss_then_hit":
+                        value = {handle.id: 5}.get(601.0, 7)
+                    elif self.mode == "set_hit":
+                        value = 5 if 700 in {handle.id} else 7
+                    elif self.mode == "set_miss_then_hit":
+                        value = 5 if 701 in {handle.id} else 7
+                    else:
+                        value = 5 if 601.0 in {handle.id} else 7
+                    return self.linear(x) + value
                 finally:
                     handle.remove()
 
         old_next_id = RemovableHandle.next_id
         try:
-            RemovableHandle.next_id = 100
-            mod = Mod()
-            x = torch.randn(4, 4)
-            opt_mod = torch.compile(mod, backend="eager")
+            for mode, start_id, expected0, expected1 in (
+                ("id", 100, 100, 101),
+                ("hash", 600, 600, 601),
+                ("dunder_hash", 700, 700, 701),
+                ("dict_hit", 600, 5, 7),
+                ("dict_miss_then_hit", 600, 7, 5),
+                ("dict_float_miss_then_hit", 600, 7, 5),
+                ("set_hit", 700, 5, 7),
+                ("set_miss_then_hit", 700, 7, 5),
+                ("set_float_miss_then_hit", 600, 7, 5),
+            ):
+                with self.subTest(mode=mode):
+                    RemovableHandle.next_id = start_id
+                    mod = Mod(mode)
+                    x = torch.randn(4, 4)
+                    opt_mod = torch.compile(mod, backend="eager")
 
-            res0 = opt_mod(x)
-            res1 = opt_mod(x)
+                    res0 = opt_mod(x)
+                    res1 = opt_mod(x)
 
-            self.assertEqual(res0, torch.full_like(res0, 100))
-            self.assertEqual(res1, torch.full_like(res1, 101))
-            self.assertEqual(RemovableHandle.next_id, 102)
-            self.assertEqual(len(mod.linear._forward_hooks), 0)
-        finally:
-            RemovableHandle.next_id = old_next_id
-
-    def test_removable_handle_id_hash_after_allocation_uses_runtime_id(self):
-        class Mod(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                with torch.no_grad():
-                    self.linear.weight.zero_()
-                    self.linear.bias.zero_()
-
-            def forward(self, x):
-                def forward_hook(module, args, output):
-                    return output
-
-                handle = self.linear.register_forward_hook(forward_hook)
-                try:
-                    return self.linear(x) + hash(handle.id)
-                finally:
-                    handle.remove()
-
-        old_next_id = RemovableHandle.next_id
-        try:
-            RemovableHandle.next_id = 600
-            mod = Mod()
-            x = torch.randn(4, 4)
-            opt_mod = torch.compile(mod, backend="eager")
-
-            res0 = opt_mod(x)
-            res1 = opt_mod(x)
-
-            self.assertEqual(res0, torch.full_like(res0, 600))
-            self.assertEqual(res1, torch.full_like(res1, 601))
-            self.assertEqual(RemovableHandle.next_id, 602)
-            self.assertEqual(len(mod.linear._forward_hooks), 0)
-        finally:
-            RemovableHandle.next_id = old_next_id
-
-    def test_removable_handle_id_dunder_hash_after_allocation_uses_runtime_id(self):
-        class Mod(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                with torch.no_grad():
-                    self.linear.weight.zero_()
-                    self.linear.bias.zero_()
-
-            def forward(self, x):
-                def forward_hook(module, args, output):
-                    return output
-
-                handle = self.linear.register_forward_hook(forward_hook)
-                try:
-                    return self.linear(x) + handle.id.__hash__()
-                finally:
-                    handle.remove()
-
-        old_next_id = RemovableHandle.next_id
-        try:
-            RemovableHandle.next_id = 700
-            mod = Mod()
-            x = torch.randn(4, 4)
-            opt_mod = torch.compile(mod, backend="eager")
-
-            res0 = opt_mod(x)
-            res1 = opt_mod(x)
-
-            self.assertEqual(res0, torch.full_like(res0, 700))
-            self.assertEqual(res1, torch.full_like(res1, 701))
-            self.assertEqual(RemovableHandle.next_id, 702)
-            self.assertEqual(len(mod.linear._forward_hooks), 0)
-        finally:
-            RemovableHandle.next_id = old_next_id
-
-    def test_removable_handle_id_public_dict_key_uses_runtime_id(self):
-        class Mod(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                with torch.no_grad():
-                    self.linear.weight.zero_()
-                    self.linear.bias.zero_()
-
-            def forward(self, x):
-                def forward_hook(module, args, output):
-                    return output
-
-                handle = self.linear.register_forward_hook(forward_hook)
-                try:
-                    return self.linear(x) + {handle.id: 5}.get(600, 7)
-                finally:
-                    handle.remove()
-
-        old_next_id = RemovableHandle.next_id
-        try:
-            RemovableHandle.next_id = 600
-            mod = Mod()
-            x = torch.randn(4, 4)
-            opt_mod = torch.compile(mod, backend="eager")
-
-            res0 = opt_mod(x)
-            res1 = opt_mod(x)
-
-            self.assertEqual(res0, torch.full_like(res0, 5))
-            self.assertEqual(res1, torch.full_like(res1, 7))
-            self.assertEqual(RemovableHandle.next_id, 602)
-            self.assertEqual(len(mod.linear._forward_hooks), 0)
-        finally:
-            RemovableHandle.next_id = old_next_id
-
-    def test_removable_handle_id_public_dict_key_miss_uses_runtime_id(self):
-        class Mod(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                with torch.no_grad():
-                    self.linear.weight.zero_()
-                    self.linear.bias.zero_()
-
-            def forward(self, x):
-                def forward_hook(module, args, output):
-                    return output
-
-                handle = self.linear.register_forward_hook(forward_hook)
-                try:
-                    return self.linear(x) + {handle.id: 5}.get(601, 7)
-                finally:
-                    handle.remove()
-
-        old_next_id = RemovableHandle.next_id
-        try:
-            RemovableHandle.next_id = 600
-            mod = Mod()
-            x = torch.randn(4, 4)
-            opt_mod = torch.compile(mod, backend="eager")
-
-            res0 = opt_mod(x)
-            res1 = opt_mod(x)
-
-            self.assertEqual(res0, torch.full_like(res0, 7))
-            self.assertEqual(res1, torch.full_like(res1, 5))
-            self.assertEqual(RemovableHandle.next_id, 602)
-            self.assertEqual(len(mod.linear._forward_hooks), 0)
-        finally:
-            RemovableHandle.next_id = old_next_id
-
-    def test_removable_handle_id_public_dict_float_key_uses_runtime_id(self):
-        class Mod(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                with torch.no_grad():
-                    self.linear.weight.zero_()
-                    self.linear.bias.zero_()
-
-            def forward(self, x):
-                def forward_hook(module, args, output):
-                    return output
-
-                handle = self.linear.register_forward_hook(forward_hook)
-                try:
-                    return self.linear(x) + {handle.id: 5}.get(601.0, 7)
-                finally:
-                    handle.remove()
-
-        old_next_id = RemovableHandle.next_id
-        try:
-            RemovableHandle.next_id = 600
-            mod = Mod()
-            x = torch.randn(4, 4)
-            opt_mod = torch.compile(mod, backend="eager")
-
-            res0 = opt_mod(x)
-            res1 = opt_mod(x)
-
-            self.assertEqual(res0, torch.full_like(res0, 7))
-            self.assertEqual(res1, torch.full_like(res1, 5))
-            self.assertEqual(RemovableHandle.next_id, 602)
-            self.assertEqual(len(mod.linear._forward_hooks), 0)
-        finally:
-            RemovableHandle.next_id = old_next_id
-
-    def test_removable_handle_id_public_set_key_uses_runtime_id(self):
-        class Mod(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                with torch.no_grad():
-                    self.linear.weight.zero_()
-                    self.linear.bias.zero_()
-
-            def forward(self, x):
-                def forward_hook(module, args, output):
-                    return output
-
-                handle = self.linear.register_forward_hook(forward_hook)
-                try:
-                    return self.linear(x) + (5 if 700 in {handle.id} else 7)
-                finally:
-                    handle.remove()
-
-        old_next_id = RemovableHandle.next_id
-        try:
-            RemovableHandle.next_id = 700
-            mod = Mod()
-            x = torch.randn(4, 4)
-            opt_mod = torch.compile(mod, backend="eager")
-
-            res0 = opt_mod(x)
-            res1 = opt_mod(x)
-
-            self.assertEqual(res0, torch.full_like(res0, 5))
-            self.assertEqual(res1, torch.full_like(res1, 7))
-            self.assertEqual(RemovableHandle.next_id, 702)
-            self.assertEqual(len(mod.linear._forward_hooks), 0)
-        finally:
-            RemovableHandle.next_id = old_next_id
-
-    def test_removable_handle_id_public_set_key_miss_uses_runtime_id(self):
-        class Mod(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                with torch.no_grad():
-                    self.linear.weight.zero_()
-                    self.linear.bias.zero_()
-
-            def forward(self, x):
-                def forward_hook(module, args, output):
-                    return output
-
-                handle = self.linear.register_forward_hook(forward_hook)
-                try:
-                    return self.linear(x) + (5 if 701 in {handle.id} else 7)
-                finally:
-                    handle.remove()
-
-        old_next_id = RemovableHandle.next_id
-        try:
-            RemovableHandle.next_id = 700
-            mod = Mod()
-            x = torch.randn(4, 4)
-            opt_mod = torch.compile(mod, backend="eager")
-
-            res0 = opt_mod(x)
-            res1 = opt_mod(x)
-
-            self.assertEqual(res0, torch.full_like(res0, 7))
-            self.assertEqual(res1, torch.full_like(res1, 5))
-            self.assertEqual(RemovableHandle.next_id, 702)
-            self.assertEqual(len(mod.linear._forward_hooks), 0)
-        finally:
-            RemovableHandle.next_id = old_next_id
-
-    def test_removable_handle_id_public_set_float_key_uses_runtime_id(self):
-        class Mod(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                with torch.no_grad():
-                    self.linear.weight.zero_()
-                    self.linear.bias.zero_()
-
-            def forward(self, x):
-                def forward_hook(module, args, output):
-                    return output
-
-                handle = self.linear.register_forward_hook(forward_hook)
-                try:
-                    return self.linear(x) + (5 if 601.0 in {handle.id} else 7)
-                finally:
-                    handle.remove()
-
-        old_next_id = RemovableHandle.next_id
-        try:
-            RemovableHandle.next_id = 600
-            mod = Mod()
-            x = torch.randn(4, 4)
-            opt_mod = torch.compile(mod, backend="eager")
-
-            res0 = opt_mod(x)
-            res1 = opt_mod(x)
-
-            self.assertEqual(res0, torch.full_like(res0, 7))
-            self.assertEqual(res1, torch.full_like(res1, 5))
-            self.assertEqual(RemovableHandle.next_id, 602)
-            self.assertEqual(len(mod.linear._forward_hooks), 0)
+                    self.assertEqual(res0, torch.full_like(res0, expected0))
+                    self.assertEqual(res1, torch.full_like(res1, expected1))
+                    self.assertEqual(RemovableHandle.next_id, start_id + 2)
+                    self.assertEqual(len(mod.linear._forward_hooks), 0)
         finally:
             RemovableHandle.next_id = old_next_id
 
@@ -1991,50 +1734,6 @@ class Mod(torch.nn.Module):
                     self.assertEqual(res0, torch.full_like(res0, expected0))
                     self.assertEqual(res1, torch.full_like(res1, expected1))
                     self.assertEqual(RemovableHandle.next_id, 602)
-                    self.assertEqual(len(mod.linear._forward_hooks), 0)
-        finally:
-            RemovableHandle.next_id = old_next_id
-
-    def test_removable_handle_id_public_key_respects_next_id_reset(self):
-        class Mod(torch.nn.Module):
-            def __init__(self, mode) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.mode = mode
-                with torch.no_grad():
-                    self.linear.weight.zero_()
-                    self.linear.bias.zero_()
-
-            def forward(self, x):
-                def forward_hook(module, args, output):
-                    return output
-
-                handle = self.linear.register_forward_hook(forward_hook)
-                try:
-                    if self.mode == "dict":
-                        value = {handle.id: 5}.get(599, 7)
-                    else:
-                        value = 5 if 599 in {handle.id} else 7
-                    return self.linear(x) + value
-                finally:
-                    handle.remove()
-
-        old_next_id = RemovableHandle.next_id
-        try:
-            for mode in ("dict", "set"):
-                with self.subTest(mode=mode):
-                    RemovableHandle.next_id = 600
-                    mod = Mod(mode)
-                    x = torch.randn(4, 4)
-                    opt_mod = torch.compile(mod, backend="eager")
-
-                    res0 = opt_mod(x)
-                    RemovableHandle.next_id = 599
-                    res1 = opt_mod(x)
-
-                    self.assertEqual(res0, torch.full_like(res0, 7))
-                    self.assertEqual(res1, torch.full_like(res1, 5))
-                    self.assertEqual(RemovableHandle.next_id, 600)
                     self.assertEqual(len(mod.linear._forward_hooks), 0)
         finally:
             RemovableHandle.next_id = old_next_id
