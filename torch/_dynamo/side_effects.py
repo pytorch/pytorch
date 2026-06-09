@@ -36,6 +36,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
+from torch._guards import ChainedSource
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import is_structseq_class
 
@@ -408,9 +409,7 @@ class SideEffects:
             source = item.source
             if source is None:
                 return True
-            base = source
-            while hasattr(base, "base"):
-                base = base.base  # type: ignore[union-attr]
+            base = source.get_base() if isinstance(source, ChainedSource) else source
             return isinstance(base, GlobalSource) or (
                 isinstance(base, LocalSource) and base.is_input
             )
