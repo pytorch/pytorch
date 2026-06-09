@@ -3222,6 +3222,26 @@
       ]
     }
   ],
+  "GB6537": [
+    {
+      "Gb_type": "gemm_epilogue_fusion: unexpected kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "gemm_epilogue_fusion internal HOP expects positional args only.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB1885": [
+    {
+      "Gb_type": "gemm_epilogue_fusion: improper args/kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "gemm_epilogue_fusion expects 5 positional arguments: gemm_op, body_fn, args, kwargs, kernel_options. args is expected to be list/tuple and kwargs/kernel_options are expected to be dicts.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0231": [
     {
       "Gb_type": "call `torch.from_numpy` with `torch._dynamo.config.trace_numpy=False`",

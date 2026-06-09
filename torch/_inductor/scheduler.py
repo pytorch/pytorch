@@ -9226,6 +9226,14 @@ class Scheduler:
                 f"Expect {num_partitions} partition maps but got {len(V.graph.partition_maps)}"
             )
 
+    def _check_gemm_epilogue_fused(self, node: BaseSchedulerNode) -> None:
+        if node.is_template():
+            return
+
+        for snode in node.get_nodes():
+            if getattr(snode.node, "_gemm_epilogue_must_fuse", False):
+                raise RuntimeError("expected the GEMM epilogue to be fused")
+
     def _codegen(self, nodes: list[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:
             import torch._dynamo.convert_frame
@@ -9331,6 +9339,7 @@ class Scheduler:
 
             self.current_node = node
             self.buffer_names_to_free.update(node.last_usage)
+            self._check_gemm_epilogue_fused(node)
 
             if node.is_template():
                 prologue, template_node, epilogue = node.get_prologue_template_epilogue(
