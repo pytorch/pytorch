@@ -456,26 +456,6 @@ class ConstantVariable(VariableTracker):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
-    def is_python_equal(self, other: object) -> bool:
-        from .tensor import SymNodeVariable
-
-        if isinstance(other, SymNodeVariable):
-            return self.as_python_constant() == other.evaluate_expr()
-        if not isinstance(other, VariableTracker):
-            return False
-        if other.is_python_constant():
-            return self.as_python_constant() == other.as_python_constant()
-        # `other` is not a constant (e.g. a user-defined object that may define
-        # __eq__). Mirror CPython dict/set lookup, which compares keys via
-        # PyObject_RichCompareBool, so a user __eq__ runs and any exception it
-        # raises is observed instead of failing as an internal error.
-        from ..symbolic_convert import InstructionTranslator
-        from .object_protocol import generic_richcompare_bool
-
-        tx = InstructionTranslator.current_tx()
-        result = generic_richcompare_bool(tx, self, other, "__eq__")
-        return result.as_python_constant()
-
     def get_id(self, tx: InstructionTranslatorBase) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
         if self.value is None or self.value is True or self.value is False:
@@ -809,11 +789,6 @@ class FakeIdVariable(VariableTracker):
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
-
-    def is_python_equal(self, other: object) -> bool:
-        if isinstance(other, (FakeIdVariable, ConstantVariable)):
-            return self.value == other.as_python_constant()
-        return False
 
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(

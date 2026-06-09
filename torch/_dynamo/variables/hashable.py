@@ -114,6 +114,7 @@ class HashableTracker:
             and vt.is_hashable_lazy()
         ):
             self._hash = hash(vt.original_value())
+            self._hash_is_identity = False
             self.vt = vt
             return
 
@@ -124,7 +125,9 @@ class HashableTracker:
         from .object_protocol import generic_hash_impl
 
         tx = InstructionTranslator.current_tx()
-        self._hash, _ = generic_hash_impl(tx, vt)
+        # is_fake marks an identity-based hash (e.g. id(fake_tensor)); such VTs
+        # have no python-constant value, so their key equality is identity.
+        self._hash, self._hash_is_identity = generic_hash_impl(tx, vt)
         self.vt = vt
 
     @classmethod
@@ -172,8 +175,8 @@ class HashableTracker:
         """
         Checks equality between two HashableTracker instances.
 
-        Delegates to the VariableTracker's is_python_equal method to compare
-        the underlying variable trackers for Python-level equality.
+        Mirrors CPython's PyObject_RichCompareBool: routes the comparison
+        through generic_richcompare_bool so any user-defined __eq__ runs.
 
         Args:
             other: Another HashableTracker instance to compare with
@@ -191,4 +194,21 @@ class HashableTracker:
         if self_constant is not self._MISSING and other_constant is not self._MISSING:
             return self_constant == other_constant
 
-        return self.vt.is_python_equal(other.vt)
+        from ..symbolic_convert import InstructionTranslator
+        from .object_protocol import generic_richcompare_bool
+
+        tx = InstructionTranslator.current_tx()
+
+        result = generic_richcompare_bool(tx, self.vt, other.vt, op="__eq__")
+        if result.is_python_constant():
+            return bool(result.as_python_constant())
+
+        # Non-constant comparison (e.g. tensor/symnode keys whose __eq__ is
+        # elementwise/symbolic). CPython never reaches such a key's __eq__: its
+        # hash is id-based, so only identical objects collide. Mirror that by
+        # comparing identity-based hashes, which equals object identity here.
+        return (
+            self._hash_is_identity
+            and other._hash_is_identity
+            and self._hash == other._hash
+        )

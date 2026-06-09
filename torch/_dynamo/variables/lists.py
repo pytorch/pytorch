@@ -891,16 +891,6 @@ class RangeVariable(BaseListVariable):
         # CPython range_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L572
         return hash(self.as_python_constant()), False
 
-    def is_python_equal(self, other: object) -> bool:
-        if not isinstance(other, variables.RangeVariable):
-            return False
-
-        return (
-            self.start() == other.start()
-            and self.step() == other.step()
-            and self.stop() == other.stop()
-        )
-
 
 class CommonListMethodsVariable(BaseListVariable):
     """
@@ -1689,11 +1679,6 @@ class TupleVariable(BaseListVariable):
             is_fake = is_fake or fake
             raw_hashes.append(RawHash(h))
         return hash(tuple(raw_hashes)), is_fake
-
-    def is_python_equal(self, other: object) -> bool:
-        return isinstance(other, variables.TupleVariable) and all(
-            a.is_python_equal(b) for (a, b) in zip(self.items, other.items)
-        )
 
 
 class SizeVariable(TupleVariable):
