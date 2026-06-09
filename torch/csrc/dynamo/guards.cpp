@@ -125,6 +125,7 @@ enum class GuardSubtreeProbeTokenKind : uint8_t {
   TorchFunctionModeStack,
   NoTensorAliasing,
   ObjectAliasing,
+  BoundMethod,
 };
 
 enum class GuardFastPlanCandidateKind : uint8_t {
@@ -163,6 +164,7 @@ enum class GuardLastSuccessCompareMismatchReason : uint8_t {
   TorchFunctionModeStack,
   NoTensorAliasing,
   ObjectAliasing,
+  BoundMethod,
   Version,
   DictSize,
   ListItems,
@@ -188,6 +190,7 @@ struct GuardSubtreeProbeStats {
   std::atomic<uint64_t> token_torch_function_mode_stack{0};
   std::atomic<uint64_t> token_no_tensor_aliasing{0};
   std::atomic<uint64_t> token_object_aliasing{0};
+  std::atomic<uint64_t> token_bound_method{0};
 };
 
 struct GuardFastPlanStats {
@@ -291,6 +294,7 @@ struct GuardSubtreeProbePathStats {
   uint64_t token_torch_function_mode_stack{0};
   uint64_t token_no_tensor_aliasing{0};
   uint64_t token_object_aliasing{0};
+  uint64_t token_bound_method{0};
 };
 
 constexpr size_t kGuardAccessorDetailStatsTopK = 64;
@@ -572,6 +576,7 @@ void reset_guard_lookup_stats() {
   store_zero(subtree_stats.token_torch_function_mode_stack);
   store_zero(subtree_stats.token_no_tensor_aliasing);
   store_zero(subtree_stats.token_object_aliasing);
+  store_zero(subtree_stats.token_bound_method);
   store_zero(fastplan_stats.candidate);
   store_zero(fastplan_stats.candidate_top);
   store_zero(fastplan_stats.candidate_nested);
@@ -727,6 +732,8 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(subtree_stats.token_no_tensor_aliasing);
   subtree_token_kind_counts["ObjectAliasing"] =
       load_relaxed(subtree_stats.token_object_aliasing);
+  subtree_token_kind_counts["BoundMethod"] =
+      load_relaxed(subtree_stats.token_bound_method);
   result["guard_subtree_probe_token_kind_counts"] =
       subtree_token_kind_counts;
   auto& fastplan_stats = guard_fastplan_stats();
@@ -985,6 +992,14 @@ py::dict get_guard_lookup_stats() {
       token_counts["ExactList"] = items[i].second.token_exact_list;
       token_counts["ExactTuple"] = items[i].second.token_exact_tuple;
       token_counts["TensorMatch"] = items[i].second.token_tensor_match;
+      token_counts["DefaultDevice"] = items[i].second.token_default_device;
+      token_counts["GlobalState"] = items[i].second.token_global_state;
+      token_counts["TorchFunctionModeStack"] =
+          items[i].second.token_torch_function_mode_stack;
+      token_counts["NoTensorAliasing"] =
+          items[i].second.token_no_tensor_aliasing;
+      token_counts["ObjectAliasing"] = items[i].second.token_object_aliasing;
+      token_counts["BoundMethod"] = items[i].second.token_bound_method;
       item_stats["token_kind_counts"] = token_counts;
       path_stats[py::str(items[i].first)] = item_stats;
     }
@@ -1109,6 +1124,8 @@ static const char* guard_subtree_token_kind_name(
       return "NoTensorAliasing";
     case GuardSubtreeProbeTokenKind::ObjectAliasing:
       return "ObjectAliasing";
+    case GuardSubtreeProbeTokenKind::BoundMethod:
+      return "BoundMethod";
   }
   return "Unknown";
 }
@@ -1142,6 +1159,8 @@ static const char* guard_last_success_mismatch_reason_name(
       return "no_tensor_aliasing";
     case GuardLastSuccessCompareMismatchReason::ObjectAliasing:
       return "object_aliasing";
+    case GuardLastSuccessCompareMismatchReason::BoundMethod:
+      return "bound_method";
     case GuardLastSuccessCompareMismatchReason::Version:
       return "version";
     case GuardLastSuccessCompareMismatchReason::DictSize:
@@ -1221,6 +1240,9 @@ static void add_guard_subtree_probe_token_kind(
     case GuardSubtreeProbeTokenKind::ObjectAliasing:
       add_relaxed(stats.token_object_aliasing, 1);
       break;
+    case GuardSubtreeProbeTokenKind::BoundMethod:
+      add_relaxed(stats.token_bound_method, 1);
+      break;
     case GuardSubtreeProbeTokenKind::ObjectOnly:
       add_relaxed(stats.token_object_only, 1);
       break;
@@ -1257,6 +1279,9 @@ static void add_guard_subtree_probe_token_kind(
       break;
     case GuardSubtreeProbeTokenKind::ObjectAliasing:
       stats.token_object_aliasing += 1;
+      break;
+    case GuardSubtreeProbeTokenKind::BoundMethod:
+      stats.token_bound_method += 1;
       break;
     case GuardSubtreeProbeTokenKind::ObjectOnly:
       stats.token_object_only += 1;
@@ -2485,12 +2510,29 @@ struct GuardSubtreeEntryToken {
   const void* torch_function_mode_stack_guard{nullptr};
   const void* no_tensor_aliasing_guard{nullptr};
   const void* object_aliasing_guard{nullptr};
+  PyObject* bound_method_self{nullptr};
+  PyObject* bound_method_func{nullptr};
+  PyCFunction bound_c_method_func{nullptr};
+  PyTypeObject* bound_c_method_class{nullptr};
+  int bound_c_method_flags{0};
 
   static GuardSubtreeEntryToken make(PyObject* obj) {
     GuardSubtreeEntryToken token;
     token.object = obj;
     token.type = Py_TYPE(obj);
-    if (PyDict_CheckExact(obj)) {
+    if (PyMethod_Check(obj)) {
+      token.kind = GuardSubtreeProbeTokenKind::BoundMethod;
+      token.bound_method_self = PyMethod_GET_SELF(obj);
+      token.bound_method_func = PyMethod_GET_FUNCTION(obj);
+    } else if (PyCFunction_Check(obj)) {
+      token.kind = GuardSubtreeProbeTokenKind::BoundMethod;
+      token.bound_method_self = PyCFunction_GET_SELF(obj);
+      token.bound_c_method_func = PyCFunction_GET_FUNCTION(obj);
+      token.bound_c_method_flags = PyCFunction_GET_FLAGS(obj);
+#ifdef PyCFunction_GET_CLASS
+      token.bound_c_method_class = PyCFunction_GET_CLASS(obj);
+#endif
+    } else if (PyDict_CheckExact(obj)) {
       token.kind = GuardSubtreeProbeTokenKind::ExactDict;
       token.version = get_dict_version_unchecked(obj);
       token.size = PyDict_GET_SIZE(obj);
@@ -2677,7 +2719,17 @@ struct GuardSubtreeEntryToken {
   }
 
   bool matches(const GuardSubtreeEntryToken& other) const {
-    if (kind != other.kind || object != other.object || type != other.type) {
+    if (kind != other.kind || type != other.type) {
+      return false;
+    }
+    if (kind == GuardSubtreeProbeTokenKind::BoundMethod) {
+      return bound_method_self == other.bound_method_self &&
+          bound_method_func == other.bound_method_func &&
+          bound_c_method_func == other.bound_c_method_func &&
+          bound_c_method_class == other.bound_c_method_class &&
+          bound_c_method_flags == other.bound_c_method_flags;
+    }
+    if (object != other.object) {
       return false;
     }
     if (kind == GuardSubtreeProbeTokenKind::TensorMatch) {
@@ -2720,11 +2772,21 @@ guard_subtree_token_mismatch_reason(
   if (lhs.kind != rhs.kind) {
     return GuardLastSuccessCompareMismatchReason::Kind;
   }
-  if (lhs.object != rhs.object) {
-    return GuardLastSuccessCompareMismatchReason::Object;
-  }
   if (lhs.type != rhs.type) {
     return GuardLastSuccessCompareMismatchReason::Type;
+  }
+  if (lhs.kind == GuardSubtreeProbeTokenKind::BoundMethod) {
+    if (lhs.bound_method_self != rhs.bound_method_self ||
+        lhs.bound_method_func != rhs.bound_method_func ||
+        lhs.bound_c_method_func != rhs.bound_c_method_func ||
+        lhs.bound_c_method_class != rhs.bound_c_method_class ||
+        lhs.bound_c_method_flags != rhs.bound_c_method_flags) {
+      return GuardLastSuccessCompareMismatchReason::BoundMethod;
+    }
+    return GuardLastSuccessCompareMismatchReason::Unknown;
+  }
+  if (lhs.object != rhs.object) {
+    return GuardLastSuccessCompareMismatchReason::Object;
   }
   if (lhs.kind == GuardSubtreeProbeTokenKind::TensorMatch) {
     if (lhs.tensor_dispatch_key != rhs.tensor_dispatch_key ||
@@ -2950,8 +3012,10 @@ static bool guard_subtree_memo_tokens_match(
       }
       continue;
     }
-    if (i != 0 && token.kind == GuardSubtreeProbeTokenKind::ObjectOnly) {
-      // Parent dict/list tokens prove whether this object is still reachable.
+    if (i != 0 &&
+        (token.kind == GuardSubtreeProbeTokenKind::ObjectOnly ||
+         token.kind == GuardSubtreeProbeTokenKind::BoundMethod)) {
+      // Parent tokens prove whether this non-root object is still reachable.
       continue;
     }
     GuardSubtreeEntryToken current =
