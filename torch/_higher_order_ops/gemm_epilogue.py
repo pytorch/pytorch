@@ -53,6 +53,45 @@ _SUPPORTED_BACKENDS = {"TRITON", "CUTLASS", "CUTEDSL", "QUACK"}
 _SUPPORTED_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_scaled_mm_v2/_grouped_mm"
 
 
+@torch.library.custom_op("flex_gemm::mx_e8m0_scale", mutates_args=())
+def mx_e8m0_scale(amax: torch.Tensor, max_power: int = 8) -> torch.Tensor:
+    """Encode FLOOR-mode MX scale from an absolute max as biased E8M0.
+
+    This small op captures the nontrivial MX scale policy without turning the
+    whole quantization expression into a private marker. The returned dtype is
+    the biased E8M0 representation; consumers can call ``.float()`` to recover
+    the represented power-of-two scale for arithmetic.
+    """
+    mbits_f32 = 23
+    f32_exp_bias = 127
+    e8m0_exp_bias = 127
+    e8m0_nan_val = 255
+    max_abs = amax.to(torch.float32)
+    max_abs_int32 = max_abs.view(torch.int32)
+    extracted_pow2 = ((torch.bitwise_right_shift(max_abs_int32, mbits_f32)) & 0xFF) - f32_exp_bias
+    scale_e8m0_unbiased = extracted_pow2 - max_power
+    scale_e8m0_unbiased = torch.clamp(
+        scale_e8m0_unbiased, min=-e8m0_exp_bias, max=e8m0_exp_bias + 1
+    )
+    scale_e8m0_biased = (scale_e8m0_unbiased + e8m0_exp_bias).to(torch.uint8)
+    scale_e8m0_biased = torch.where(
+        torch.isnan(max_abs),
+        torch.full_like(scale_e8m0_biased, e8m0_nan_val),
+        scale_e8m0_biased,
+    )
+    return scale_e8m0_biased.view(torch.float8_e8m0fnu)
+
+
+@mx_e8m0_scale.register_fake
+def _(amax: torch.Tensor, max_power: int = 8) -> torch.Tensor:
+    return torch.empty_strided(
+        tuple(amax.shape),
+        tuple(amax.stride()),
+        device=amax.device,
+        dtype=torch.float8_e8m0fnu,
+    )
+
+
 def _normalize_gemm_epilogue_op(gemm_op: Callable[..., Any]) -> Callable[..., Any]:
     import torch.nn.functional as F
 
@@ -138,6 +177,7 @@ class QuackLocalReduceInfo:
     feeds_main: bool = False
     kind: str = "sum"
     scale: float = 1.0
+    max_power: int = 8
     extra_skip_nodes: frozenset[torch.fx.Node] = field(default_factory=frozenset)
 
 
@@ -329,8 +369,12 @@ def _quack_cute_call_function(
     if target == torch.ops.aten.full.default and args[0] == []:
         return args[1]
     if target == torch.ops.aten._to_copy.default:
+        if kwargs["dtype"] == torch.float32 and not hasattr(args[0], "to"):
+            return args[0]
         return ops.to_dtype(args[0], kwargs["dtype"]).value
     if target == torch.ops.prims.convert_element_type.default:
+        if args[1] == torch.float32 and not hasattr(args[0], "to"):
+            return args[0]
         return ops.to_dtype(args[0], args[1]).value
     if target in (torch.ops.aten.clamp.default, torch.clamp):
         result = args[0]
@@ -689,6 +733,68 @@ def _match_quack_local_n_amax_scale_view(
     )
 
 
+def _match_quack_local_n_mx_scale_view(
+    node: Any, mm_node: torch.fx.Node
+) -> QuackLocalReduceInfo | None:
+    aux_view = _match_quack_view_or_reshape(node)
+    if aux_view is None:
+        return None
+    scale_node = aux_view.base
+    if not (
+        isinstance(scale_node, torch.fx.Node)
+        and scale_node.op == "call_function"
+        and scale_node.target == torch.ops.flex_gemm.mx_e8m0_scale.default
+    ):
+        return None
+    max_power = scale_node.args[1] if len(scale_node.args) > 1 else scale_node.kwargs.get("max_power", 8)
+    if not isinstance(max_power, int):
+        return None
+    reduce_node = scale_node.args[0]
+    reduce_match = _match_quack_tensorssa_reduce(reduce_node)
+    if reduce_match is None or reduce_match.kind != "amax":
+        return None
+    if reduce_match.dims not in ((-1,), (2,)) or reduce_match.dtype is not None:
+        return None
+    if not bool(reduce_match.keepdim):
+        return None
+    abs_node = reduce_match.input_node
+    if not isinstance(abs_node, torch.fx.Node):
+        return None
+    is_abs = (
+        abs_node.op == "call_function"
+        and abs_node.target in (torch.ops.aten.abs.default, torch.abs)
+    ) or (abs_node.op == "call_method" and abs_node.target == "abs")
+    if not is_abs:
+        return None
+    view_match = _match_quack_view_or_reshape(abs_node.args[0])
+    if view_match is None:
+        return None
+    source_node = _match_quack_acc_source(view_match.base, mm_node)
+    if source_node is None:
+        return None
+    grouped_shape = _normalize_quack_shape(view_match.shape)
+    if not _is_quack_same_fragment_n_group_shape(grouped_shape):
+        return None
+    aux_meta = node.meta.get("val") if isinstance(node, torch.fx.Node) else None
+    mm_meta = mm_node.meta.get("val")
+    if aux_meta is None or mm_meta is None:
+        return None
+    expected_shape = (mm_meta.shape[0], mm_meta.shape[1] // grouped_shape[-1])
+    if tuple(aux_meta.shape) != tuple(expected_shape):
+        return None
+    return QuackLocalReduceInfo(
+        view_node=view_match.node,
+        reduce_node=aux_view.node,
+        source_node=source_node,
+        keepdim=False,
+        group_size=grouped_shape[-1],
+        dim=1,
+        kind="mx_e8m0_scale",
+        max_power=max_power,
+        extra_skip_nodes=frozenset((scale_node, aux_view.node)),
+    )
+
+
 def _match_quack_local_n_reduce(
     node: Any, mm_node: torch.fx.Node
 ) -> QuackLocalReduceInfo | None:
@@ -868,10 +974,14 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
                 or _match_quack_local_n_amax_reduce(aux_value, mm_node)
                 or _match_quack_scaled_local_n_amax_reduce(aux_value, mm_node)
                 or _match_quack_local_n_amax_scale_view(aux_value, mm_node)
+                or _match_quack_local_n_mx_scale_view(aux_value, mm_node)
             )
             if local_reduce is not None and not local_reduce.keepdim:
-                skip_nodes.update((local_reduce.reduce_node,))
-                skip_nodes.update(local_reduce.extra_skip_nodes)
+                if not _quack_output_uses_node(output_value[0], local_reduce.reduce_node):
+                    skip_nodes.add(local_reduce.reduce_node)
+                for skip_node in local_reduce.extra_skip_nodes:
+                    if not _quack_output_uses_node(output_value[0], skip_node):
+                        skip_nodes.add(skip_node)
                 if not _quack_output_uses_node(output_value[0], local_reduce.view_node):
                     skip_nodes.add(local_reduce.view_node)
                     if local_reduce.source_node is not mm_node:
@@ -1125,6 +1235,20 @@ def _compile_quack_pointwise_nodes(
                         _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                 if node.op == "call_function":
+                    if node.target == torch.ops.flex_gemm.mx_e8m0_scale.default:
+                        source = _quack_cute_arg(node.args[0], env)
+                        max_power = node.args[1] if len(node.args) > 1 else node.kwargs.get("max_power", 8)
+                        scale_exp = f"(cute.math.floor(cute.math.log2({source})) - {max_power})"
+                        env[node] = _emit_quack_tensorssa_expr(
+                            kernel,
+                            "cute.math.exp2("
+                            f"cute.where({scale_exp} < -127.0, -127.0, "
+                            f"cute.where({scale_exp} > 128.0, 128.0, {scale_exp}))"
+                            ")",
+                            like=source,
+                        )
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
                     env[node] = _quack_cute_call_function(
                         node.target,
                         tuple(_quack_cute_arg(arg, env) for arg in node.args),
