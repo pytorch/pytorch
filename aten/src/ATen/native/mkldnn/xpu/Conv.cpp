@@ -278,6 +278,36 @@ Tensor _convolution_out(
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
       "convolution only supports 3D, 4D, 5D tensor");
+  // oneDNN may choose a numerically divergent fp16 kernel for batch=1 Conv2d.
+  // Use fp32 compute for this narrow case to keep sliced-batch results aligned.
+  if (!transposed_ && ndim == 4 && input_r.scalar_type() == at::kHalf &&
+      input_r.size(0) == 1 && groups_ == 1 && input_r.size(2) >= 256 &&
+      input_r.size(3) >= 256 && !attr.with_binary() && !attr.with_sum()) {
+    Tensor output_f32;
+    auto input_f32 = input_r.to(at::kFloat);
+    auto weight_f32 = weight_r.to(at::kFloat);
+    auto bias_f32 = bias_r.defined() ? bias_r.to(at::kFloat) : bias_r;
+    auto result_f32 = _convolution_out(
+        output_f32,
+        input_f32,
+        weight_f32,
+        bias_f32,
+        stride_,
+        padding_,
+        dilation_,
+        transposed_,
+        output_padding_,
+        groups_,
+        attr,
+        pad_nd);
+    auto result = result_f32.to(input_r.scalar_type());
+    if (output_r.defined()) {
+      output_r.copy_(result);
+      return output_r;
+    }
+    return result;
+  }
+
   Tensor input = input_r, weight = weight_r;
   // PyTorch does not support ChannelsLast1D case,
   // thus we need the transformation here
