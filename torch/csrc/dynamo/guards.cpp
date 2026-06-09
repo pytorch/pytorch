@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <optional>
@@ -268,6 +269,17 @@ struct GuardLastSuccessStats {
 struct GuardFastPlanDisabledPathStats {
   uint64_t count{0};
   std::string reason;
+  bool has_mismatch_detail{false};
+  std::string old_kind;
+  std::string new_kind;
+  std::string old_type;
+  std::string new_type;
+  uint64_t old_object_id{0};
+  uint64_t new_object_id{0};
+  uint64_t old_version{0};
+  uint64_t new_version{0};
+  Py_ssize_t old_size{0};
+  Py_ssize_t new_size{0};
 };
 
 struct GuardAccessorTypeStats {
@@ -985,6 +997,18 @@ py::dict get_guard_lookup_stats() {
       py::dict item_stats;
       item_stats["count"] = path_items[i].second.count;
       item_stats["reason"] = path_items[i].second.reason;
+      if (path_items[i].second.has_mismatch_detail) {
+        item_stats["old_kind"] = path_items[i].second.old_kind;
+        item_stats["new_kind"] = path_items[i].second.new_kind;
+        item_stats["old_type"] = path_items[i].second.old_type;
+        item_stats["new_type"] = path_items[i].second.new_type;
+        item_stats["old_object_id"] = path_items[i].second.old_object_id;
+        item_stats["new_object_id"] = path_items[i].second.new_object_id;
+        item_stats["old_version"] = path_items[i].second.old_version;
+        item_stats["new_version"] = path_items[i].second.new_version;
+        item_stats["old_size"] = path_items[i].second.old_size;
+        item_stats["new_size"] = path_items[i].second.new_size;
+      }
       last_success_mismatch_top_paths[py::str(path_items[i].first)] =
           item_stats;
     }
@@ -2995,6 +3019,50 @@ static bool guard_subtree_token_vectors_match(
   return true;
 }
 
+static std::string guard_subtree_token_type_name(
+    const GuardSubtreeEntryToken* token) {
+  if (token == nullptr || token->type == nullptr) {
+    return std::string();
+  }
+  return token->type->tp_name == nullptr ? std::string()
+                                         : std::string(token->type->tp_name);
+}
+
+static uint64_t guard_subtree_token_object_id(
+    const GuardSubtreeEntryToken* token) {
+  if (token == nullptr || token->object == nullptr) {
+    return 0;
+  }
+  return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(token->object));
+}
+
+static void record_guard_last_success_compare_mismatch_detail(
+    const std::string& path,
+    const GuardSubtreeEntryToken* old_token,
+    const GuardSubtreeEntryToken* new_token) {
+  if (!guard_lookup_stats_enabled() || path.empty()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(
+      guard_last_success_mismatch_stats_mutex());
+  auto& path_stats = guard_last_success_mismatch_path_stats()[path];
+  path_stats.has_mismatch_detail = true;
+  path_stats.old_kind = old_token == nullptr
+      ? std::string()
+      : guard_subtree_token_kind_name(old_token->kind);
+  path_stats.new_kind = new_token == nullptr
+      ? std::string()
+      : guard_subtree_token_kind_name(new_token->kind);
+  path_stats.old_type = guard_subtree_token_type_name(old_token);
+  path_stats.new_type = guard_subtree_token_type_name(new_token);
+  path_stats.old_object_id = guard_subtree_token_object_id(old_token);
+  path_stats.new_object_id = guard_subtree_token_object_id(new_token);
+  path_stats.old_version = old_token == nullptr ? 0 : old_token->version;
+  path_stats.new_version = new_token == nullptr ? 0 : new_token->version;
+  path_stats.old_size = old_token == nullptr ? 0 : old_token->size;
+  path_stats.new_size = new_token == nullptr ? 0 : new_token->size;
+}
+
 struct GuardLastSuccessReceipt {
   void reset() {
     entry_key = nullptr;
@@ -3058,6 +3126,15 @@ struct GuardLastSuccessReceipt {
           mismatch_kind,
           mismatch_index,
           mismatch_path == nullptr ? std::string() : *mismatch_path);
+      if (mismatch_path != nullptr) {
+        const GuardSubtreeEntryToken* old_token =
+            mismatch_index < tokens.size() ? &tokens[mismatch_index] : nullptr;
+        const GuardSubtreeEntryToken* new_token =
+            mismatch_index < new_tokens.size() ? &new_tokens[mismatch_index]
+                                               : nullptr;
+        record_guard_last_success_compare_mismatch_detail(
+            *mismatch_path, old_token, new_token);
+      }
     }
 
     if (stable) {
