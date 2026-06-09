@@ -146,11 +146,19 @@ _WINDOWS_ARM64_WHEEL_CONFIGS = generate_binary_build_matrix.generate_wheels_matr
 # extract_libtorch_from_wheel.py to produce the debug libtorch zips.
 # Matches the CUDA matrix the legacy debug-libtorch nightly published
 # (cpu + each CUDA arch); shared-with-deps only.
-_WINDOWS_WHEEL_DEBUG_CONFIGS = generate_binary_build_matrix.generate_wheels_matrix(
-    OperatingSystem.WINDOWS,
-    python_versions=["3.10"],
-    debug=True,
-)
+_WINDOWS_WHEEL_DEBUG_CONFIGS = [
+    config
+    for config in generate_binary_build_matrix.generate_wheels_matrix(
+        OperatingSystem.WINDOWS,
+        python_versions=["3.10"],
+        debug=True,
+    )
+    # Exclude XPU: torch_xpu_ops PUBLIC-links torch_xpu unconditionally on
+    # Windows, forming a SHARED<->STATIC target cycle that CMake's generate step
+    # rejects under Debug (release XPU is unaffected). The legacy libtorch-debug
+    # nightly never shipped XPU either.
+    if config["gpu_arch_type"] != "xpu"
+]
 _WINDOWS_ARM64_WHEEL_DEBUG_CONFIGS = (
     generate_binary_build_matrix.generate_wheels_matrix(
         OperatingSystem.WINDOWS_ARM64,
