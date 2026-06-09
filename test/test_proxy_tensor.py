@@ -1,7 +1,12 @@
 # Owner(s): ["module: ProxyTensor"]
 # ruff: noqa: F841
 
-from torch.testing._internal.common_utils import TestCase, run_tests, xfailIfNoAcceleratorTriton
+from torch.testing._internal.common_utils import (
+    TestCase,
+    run_tests,
+    skipIfTorchDynamo,
+    xfailIfNoAcceleratorTriton,
+)
 import torch
 import torch._dynamo
 import unittest
@@ -207,6 +212,7 @@ def forward(self, a_1):
         out2.sum().backward()
         self.assertEqual(a1.grad, a2.grad)
 
+    @skipIfTorchDynamo("make_fx tracing is incompatible with dynamo")
     def test_pre_dispatch_traces_saved_variable_detach(self):
         def f(x):
             x = x.clone().requires_grad_(True)
@@ -250,6 +256,7 @@ def forward(self, a_1):
         self.assertEqual(y, x)
         self.assertFalse(y.requires_grad)
 
+    @skipIfTorchDynamo("make_fx tracing is incompatible with dynamo")
     def test_pre_dispatch_precedes_normal_mode_for_saved_variable_detach(self):
         from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -2148,7 +2155,6 @@ only_fake_tensor_failures = {
 fake_tensor_failures = set()
 
 symbolic_tensor_failures = {
-    xfail('combinations', ''),
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
