@@ -135,6 +135,15 @@ class TestQuantization(TestCase):
         self.assertEqual(quantized_tensor.device, torch.device("openreg:0"))
         self.assertEqual(quantized_tensor.dtype, torch.qint8)
 
+    def test_make_per_tensor_quantized_tensor(self):
+        """Test _make_per_tensor_quantized_tensor on OpenReg device"""
+        int_data = torch.randint(0, 100, (3, 4, 5), dtype=torch.uint8, device="openreg")
+        scale, zero_point = 0.1, 10
+        q = torch._make_per_tensor_quantized_tensor(int_data, scale, zero_point)
+        self.assertEqual(q.device.type, "openreg")
+        self.assertEqual(q.dtype, torch.quint8)
+        self.assertEqual(q.shape, torch.Size([3, 4, 5]))
+
     def test_dequantize(self):
         """Test that .dequantize() on an OpenReg quantized tensor no longer crashes"""
         x = torch.randn(3, 4, 5, dtype=torch.float32, device="openreg")

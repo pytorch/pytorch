@@ -1,5 +1,7 @@
 #include "Extra.h"
 
+#include <ATen/Dispatch.h>
+
 namespace at::native::openreg {
 
 at::Tensor quantize_per_tensor(
@@ -34,6 +36,15 @@ void dequantize_tensor_per_tensor_affine_stub(
     at::Tensor& rtensor,
     double scale,
     int64_t zero_point) {}
+
+at::Tensor make_per_tensor_quantized_tensor(
+    const at::Tensor& self,
+    double scale,
+    int64_t zero_point) {
+  auto dtype = toQIntType(self.scalar_type());
+  auto empty = at::empty(self.sizes(), self.options().dtype(at::kFloat));
+  return at::quantize_per_tensor(empty, scale, zero_point, dtype);
+}
 
 std::tuple<
     at::Tensor,
