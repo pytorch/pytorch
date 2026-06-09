@@ -1019,9 +1019,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def codegen_additional_funcs(self):
         pass
 
-    def codegen_model_kernels(self):
-        self.prefix.writeline("namespace {")
-
+    def codegen_initialized_kernel_decls(self):
         # Tell compiler we need to link with the non-mangled symbols
         for kernel in self.initialized_kernels.values():
             assert hasattr(kernel, "get_signature"), (
@@ -1030,6 +1028,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             signature = kernel.get_signature()
             self.prefix.writeline(f'extern "C" {signature};')
 
+    def codegen_model_kernels(self):
+        self.prefix.writeline("namespace {")
+        self.codegen_initialized_kernel_decls()
         self.prefix.writeline(
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
@@ -1395,6 +1396,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.aot_mode and not V.graph.is_const_graph:
             with self._target_buf("prefix", aot_mode_decls):
                 self._codegen_aoti_model_class()
+        elif not V.graph.is_const_graph and self.initialized_kernels:
+            # JIT cpp_wrapper: emit extern "C" decls for kernels (CUTLASS,
+            # ROCm CK) whose precompiled .so files are linked into the
+            # wrapper via extra_flags.
+            self.codegen_initialized_kernel_decls()
 
         self.prefix = make_codegen_buffer()
         for dtype in self.used_cached_dtypes:
@@ -1551,8 +1557,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def _codegen_entry_impl_prologue(self):
         """Hook for subclasses to emit code at the top of inductor_entry_impl,
         before the GIL is released. Default no-op."""
-        if config.triton.debug_sync_graph:
-            self.generate_debug_sync(self.prefix)
 
     def generate_before_suffix(self, result):
         if not V.graph.is_const_graph:
@@ -1598,6 +1602,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
             kernel_code = "None"
             needs_vec_isa = str(self.needs_vec_isa)
             kernel_needs_vec_isa = "None"
+        # Link any precompiled kernel .so files (CUTLASS, ROCm CK) into the
+        # wrapper. The .so files are built without -Wl,-soname, so passing
+        # their absolute paths positionally to the linker encodes them as
+        # absolute DT_NEEDED entries that resolve at module load (same
+        # mechanism HalideCodeCache uses for its standalone runtime).
+        extra_flags_repr = repr(tuple(self.external_kernel_libs))
         # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
@@ -1609,6 +1619,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 kernel_needs_vec_isa={kernel_needs_vec_isa},
                 num_outputs={len(V.graph.graph_outputs)},
                 kernel_code={kernel_code},
+                extra_flags={extra_flags_repr},
             )
             """
         )
@@ -2098,9 +2109,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"auto {new_name} = std::move({old_name});  // reuse"
-
-    def generate_debug_sync(self, buffer):
-        pass
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
