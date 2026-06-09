@@ -96,7 +96,7 @@ std::string XNNSerializer::finishAndSerialize(
   ss.write(
       reinterpret_cast<char*>(_builder.GetBufferPointer()), _builder.GetSize());
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 } // namespace delegate
