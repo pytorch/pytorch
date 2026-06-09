@@ -33,3 +33,27 @@ def copy_to_cudagraphs_fake(
 
 
 copy_to_cudagraphs.register_fake(copy_to_cudagraphs_fake)
+
+
+@torch.library.custom_op("aten_cudagraphs::disable_cudagraphs_begin", mutates_args={})
+def disable_cudagraphs_begin() -> None:
+    return None
+
+
+def disable_cudagraphs_begin_fake() -> None:
+    return None
+
+
+disable_cudagraphs_begin.register_fake(disable_cudagraphs_begin_fake)
+
+
+@torch.library.custom_op("aten_cudagraphs::disable_cudagraphs_end", mutates_args={})
+def disable_cudagraphs_end() -> None:
+    return None
+
+
+def disable_cudagraphs_end_fake() -> None:
+    return None
+
+
+disable_cudagraphs_end.register_fake(disable_cudagraphs_end_fake)
