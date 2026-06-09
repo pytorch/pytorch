@@ -24,6 +24,11 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
+from torch._higher_order_ops.gemm_epilogue import (
+    _gemm_epilogue_fusion,
+    materialize_quack_epilogue,
+)
+from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
@@ -8394,6 +8399,110 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
 
     if output is _MISSING:
         raise RuntimeError("No output node found in graph")
+
+    return output
+
+
+@register_lowering(hints_wrapper, type_promotion_kind=None)
+def hints_wrapper_lowering(subgraph, args, kwargs, hints):
+    return process_subgraph_nodes(subgraph.graph_module, list(args))
+
+
+@register_lowering(_gemm_epilogue_fusion, type_promotion_kind=None)
+def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
+    backend = kernel_options.get("backend", "TRITON")
+    if backend == "QUACK":
+        quack_gemm_ops = {
+            torch.ops.aten.mm.default: ("mm", 0, 1),
+            torch.ops.aten.addmm.default: ("addmm", 1, 2),
+            torch.ops.aten.bmm.default: ("bmm", 0, 1),
+            torch.ops.aten.baddbmm.default: ("baddbmm", 1, 2),
+            torch.ops.aten._scaled_mm.default: ("scaled_mm", 0, 1),
+        }
+        if gemm_op not in quack_gemm_ops:
+            raise NotImplementedError(
+                "QUACK GEMM epilogue backend currently supports only "
+                "aten.mm/addmm/bmm/baddbmm/_scaled_mm"
+            )
+        from torch._inductor.kernel.quack_gemm_epilogue import (
+            quack_gemm_epilogue_template,
+        )
+        from torch._inductor.select_algorithm import autotune_select_algorithm
+
+        alpha = gemm_kwargs.get("alpha", 1.0)
+        beta = gemm_kwargs.get("beta", 1.0)
+        if gemm_op == torch.ops.aten._scaled_mm.default and (
+            len(args) != 4
+            or gemm_kwargs.get("out_dtype") is None
+            or gemm_kwargs.get("bias") is not None
+            or gemm_kwargs.get("scale_result") is not None
+            or gemm_kwargs.get("use_fast_accum", False)
+        ):
+            raise NotImplementedError(
+                "QUACK _scaled_mm epilogue currently supports only "
+                "(A, B, scale_a, scale_b) with explicit out_dtype"
+            )
+        epilogue_key, epilogue_source = materialize_quack_epilogue(
+            subgraph.graph_module
+        )
+        gemm_op_name, mat1_idx, mat2_idx = quack_gemm_ops[gemm_op]
+        mat1, mat2 = args[mat1_idx], args[mat2_idx]
+        if gemm_op_name in ("mm", "addmm", "scaled_mm"):
+            m, n = mat1.get_size()[0], mat2.get_size()[1]
+            size = [m, n]
+            stride = [n, 1]
+        else:
+            b, m, n = mat1.get_size()[0], mat1.get_size()[1], mat2.get_size()[2]
+            size = [b, m, n]
+            stride = [m * n, n, 1]
+        layout = ir.FixedLayout(
+            mat1.get_device_or_error(),
+            gemm_kwargs.get("out_dtype", mat1.get_dtype()),
+            size,
+            stride,
+        )
+        input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
+        choices: list[Any] = []
+        quack_gemm_epilogue_template.maybe_append_choice(
+            choices,
+            input_nodes=input_nodes,
+            layout=layout,
+            epilogue_name=epilogue_key,
+            epilogue_source=epilogue_source,
+            gemm_op=gemm_op_name,
+            alpha=alpha,
+            beta=beta,
+            out_dtype=gemm_kwargs.get("out_dtype"),
+        )
+        node, _ = autotune_select_algorithm(
+            "quack_gemm_epilogue", choices, input_nodes, layout
+        )
+        return (node,)
+
+    fusible_template_backends = {"TRITON", "CUTLASS"}
+    if backend not in fusible_template_backends:
+        raise NotImplementedError(
+            f"GEMM epilogue backend {backend} does not support Inductor template "
+            "epilogue fusion yet"
+        )
+
+    operation_len = len(V.graph.operations)
+    patches = [
+        patch.object(config, "max_autotune_gemm", True),
+        patch.object(config, "max_autotune_gemm_backends", backend),
+    ]
+    if backend == "CUTLASS":
+        patches.append(
+            patch.object(config.cutlass, "cutlass_epilogue_fusion_enabled", True)
+        )
+
+    with contextlib.ExitStack() as stack:
+        for config_patch in patches:
+            stack.enter_context(config_patch)
+        output = process_subgraph_nodes(subgraph.graph_module, list(args))
+
+    for op in V.graph.operations[operation_len:]:
+        op._gemm_epilogue_must_fuse = True
 
     return output
 
