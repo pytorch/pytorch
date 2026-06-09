@@ -2408,6 +2408,7 @@ from torch._linalg_utils import (  # type: ignore[misc]
     eig,
     lstsq,
     matrix_rank,
+    qr,
     solve,
 )
 from torch.utils.dlpack import from_dlpack, to_dlpack
