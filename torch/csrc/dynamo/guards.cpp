@@ -123,6 +123,7 @@ enum class GuardSubtreeProbeTokenKind : uint8_t {
   DefaultDevice,
   GlobalState,
   TorchFunctionModeStack,
+  NoTensorAliasing,
 };
 
 enum class GuardFastPlanCandidateKind : uint8_t {
@@ -164,6 +165,7 @@ struct GuardSubtreeProbeStats {
   std::atomic<uint64_t> token_default_device{0};
   std::atomic<uint64_t> token_global_state{0};
   std::atomic<uint64_t> token_torch_function_mode_stack{0};
+  std::atomic<uint64_t> token_no_tensor_aliasing{0};
 };
 
 struct GuardFastPlanStats {
@@ -260,6 +262,7 @@ struct GuardSubtreeProbePathStats {
   uint64_t token_default_device{0};
   uint64_t token_global_state{0};
   uint64_t token_torch_function_mode_stack{0};
+  uint64_t token_no_tensor_aliasing{0};
 };
 
 constexpr size_t kGuardAccessorDetailStatsTopK = 64;
@@ -506,6 +509,7 @@ void reset_guard_lookup_stats() {
   store_zero(subtree_stats.token_default_device);
   store_zero(subtree_stats.token_global_state);
   store_zero(subtree_stats.token_torch_function_mode_stack);
+  store_zero(subtree_stats.token_no_tensor_aliasing);
   store_zero(fastplan_stats.candidate);
   store_zero(fastplan_stats.candidate_top);
   store_zero(fastplan_stats.candidate_nested);
@@ -645,6 +649,8 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(subtree_stats.token_global_state);
   subtree_token_kind_counts["TorchFunctionModeStack"] =
       load_relaxed(subtree_stats.token_torch_function_mode_stack);
+  subtree_token_kind_counts["NoTensorAliasing"] =
+      load_relaxed(subtree_stats.token_no_tensor_aliasing);
   result["guard_subtree_probe_token_kind_counts"] =
       subtree_token_kind_counts;
   auto& fastplan_stats = guard_fastplan_stats();
@@ -1015,6 +1021,9 @@ static void add_guard_subtree_probe_token_kind(
     case GuardSubtreeProbeTokenKind::TorchFunctionModeStack:
       add_relaxed(stats.token_torch_function_mode_stack, 1);
       break;
+    case GuardSubtreeProbeTokenKind::NoTensorAliasing:
+      add_relaxed(stats.token_no_tensor_aliasing, 1);
+      break;
     case GuardSubtreeProbeTokenKind::ObjectOnly:
       add_relaxed(stats.token_object_only, 1);
       break;
@@ -1045,6 +1054,9 @@ static void add_guard_subtree_probe_token_kind(
       break;
     case GuardSubtreeProbeTokenKind::TorchFunctionModeStack:
       stats.token_torch_function_mode_stack += 1;
+      break;
+    case GuardSubtreeProbeTokenKind::NoTensorAliasing:
+      stats.token_no_tensor_aliasing += 1;
       break;
     case GuardSubtreeProbeTokenKind::ObjectOnly:
       stats.token_object_only += 1;
@@ -2209,6 +2221,7 @@ struct GuardSubtreeEntryToken {
   PyObject* default_device{nullptr};
   GlobalStateGuard* global_state_guard{nullptr};
   const void* torch_function_mode_stack_guard{nullptr};
+  const void* no_tensor_aliasing_guard{nullptr};
 
   static GuardSubtreeEntryToken make(PyObject* obj) {
     GuardSubtreeEntryToken token;
@@ -2309,6 +2322,17 @@ struct GuardSubtreeEntryToken {
     return token;
   }
 
+  static GuardSubtreeEntryToken make_no_tensor_aliasing(
+      PyObject* obj,
+      const void* guard) {
+    GuardSubtreeEntryToken token;
+    token.object = obj;
+    token.type = Py_TYPE(obj);
+    token.kind = GuardSubtreeProbeTokenKind::NoTensorAliasing;
+    token.no_tensor_aliasing_guard = guard;
+    return token;
+  }
+
   bool matches_tensor_current(
       const LocalState* state,
       GuardFastPlanTensorTokenMissReason& reason) const {
@@ -2403,6 +2427,9 @@ struct GuardSubtreeEntryToken {
     if (kind == GuardSubtreeProbeTokenKind::TorchFunctionModeStack) {
       return torch_function_mode_stack_guard ==
           other.torch_function_mode_stack_guard;
+    }
+    if (kind == GuardSubtreeProbeTokenKind::NoTensorAliasing) {
+      return no_tensor_aliasing_guard == other.no_tensor_aliasing_guard;
     }
     return version == other.version && size == other.size &&
         list_items == other.list_items;
@@ -2504,6 +2531,12 @@ static bool guard_subtree_memo_tokens_match(
     if (token.kind == GuardSubtreeProbeTokenKind::TorchFunctionModeStack) {
       if (!torch_function_mode_stack_guard_matches(
               token.torch_function_mode_stack_guard)) {
+        return false;
+      }
+      continue;
+    }
+    if (token.kind == GuardSubtreeProbeTokenKind::NoTensorAliasing) {
+      if (token.object == nullptr || Py_TYPE(token.object) != token.type) {
         return false;
       }
       continue;
@@ -3815,8 +3848,24 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     _unique_tensors.clear();
   }
 
+  bool supports_subtree_memo() const override {
+    return true;
+  }
   const char* subtree_memo_unsupported_reason() const override {
     return "unsupported_leaf:NO_TENSOR_ALIASING";
+  }
+  bool emits_subtree_memo_token() const override {
+    return true;
+  }
+  bool append_subtree_memo_token(
+      PyObject* value,
+      std::vector<GuardSubtreeEntryToken>* tokens) override {
+    if (!check_nopybind(value)) {
+      return false;
+    }
+    tokens->emplace_back(GuardSubtreeEntryToken::make_no_tensor_aliasing(
+        value, static_cast<const void*>(this)));
+    return true;
   }
 
  private:
