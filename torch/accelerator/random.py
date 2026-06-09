@@ -8,6 +8,9 @@ def initial_seed() -> int:
     r"""Return the initial seed of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
     on the current device (:func:`torch.accelerator.current_device_index`).
 
+    Returns:
+        int: the initial seed of the default generator for the current device.
+
     .. warning::
         This function eagerly initializes the accelerator runtime.
     """
@@ -18,11 +21,14 @@ def initial_seed() -> int:
 
 def get_rng_state(device: _device_t = None, /) -> Tensor:
     r"""Return the RNG state of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
-    as a :attr:`torch.uint8` Tensor on the specified accelerator device.
+    as a `torch.Tensor` of dtype `torch.uint8` on the specified accelerator device.
 
     Args:
         device (:class:`torch.device`, str, int, optional): The device to return the RNG state of.
             If not given, uses :func:`torch.accelerator.current_device_index` by default.
+
+    Returns:
+        torch.Tensor: the RNG state of the default generator for the specified device.
 
     .. warning::
         This function eagerly initializes the accelerator runtime.
@@ -33,7 +39,11 @@ def get_rng_state(device: _device_t = None, /) -> Tensor:
 
 
 def get_rng_state_all() -> list[Tensor]:
-    r"""Return a list of :attr:`torch.uint8` Tensors representing the RNG states of all devices for the current :ref:`accelerator<accelerators>`.
+    r"""Return a list of `torch.Tensor` of dtype `torch.uint8` representing the RNG states of all devices for
+    the current :ref:`accelerator<accelerators>`.
+
+    Returns:
+        list[torch.Tensor]: the RNG states of the default generators for all devices.
 
     .. warning::
         This function eagerly initializes the accelerator runtime.
