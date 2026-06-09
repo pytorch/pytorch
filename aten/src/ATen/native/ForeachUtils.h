@@ -240,6 +240,7 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
             " but got ",
             scalarList_.size(0),
             " instead.");
+        scalarList.reserve(scalarList_.size(0));
         for (int64_t i = 0; i < scalarList_.size(0); i++) {
           scalarList.emplace_back(scalar_data[i]);
         }

@@ -80,6 +80,7 @@ from torch.testing._internal.common_utils import (
     MACOS_VERSION,
     NAVI_ARCH,
     parametrize,
+    random_matrix_with_scaled_reduction_dim,
     runOnRocm,
     skipIfRocm,
     skipIfRocmArch,
@@ -273,6 +274,33 @@ class AOTInductorTestsTemplate:
             self.code_check_count(
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
+
+    @common_utils.parametrize("embed_kernel_binary", [False, True])
+    def test_loaded_modules_tracking(self, embed_kernel_binary):
+        # Verify that AOTI codegen on CUDA/HIP passes &kernels_.loaded_modules_
+        # to loadKernel so CUmodule handles are tracked and unloaded on
+        # destruction, preventing GPU code object leaks.
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA/HIP")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        model = Model().to(self.device)
+        with config.patch({"aot_inductor.embed_kernel_binary": embed_kernel_binary}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            FileCheck().check("&kernels_.loaded_modules_").run(code)
 
     def test_triton_kernel_bool_param(self):
         if self.device != GPU_TYPE or self.device == "mps":
@@ -1838,6 +1866,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179958")
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
@@ -1853,22 +1882,29 @@ class AOTInductorTestsTemplate:
         dtype = torch.float16
         model = Model()
 
+        # Scale inputs so this grid-size test is not sensitive to FP16 BMM noise.
+        def make_inputs(batch):
+            return (
+                0.5
+                * random_matrix_with_scaled_reduction_dim(
+                    M, K, batch, device=self.device, dtype=dtype, reduction_dim=-1
+                ),
+                0.5
+                * random_matrix_with_scaled_reduction_dim(
+                    K, N, batch, device=self.device, dtype=dtype, reduction_dim=-2
+                ),
+            )
+
         # Compile with small batch, then run with batch > 65535 (CUDA grid.y limit)
         compile_batch = 100
-        a = torch.randn(compile_batch, M, K, device=self.device, dtype=dtype)
-        b = torch.randn(compile_batch, K, N, device=self.device, dtype=dtype)
+        a, b = make_inputs(compile_batch)
         dim0_a = Dim("dim0_a", min=1, max=2**17)
         dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_a}}
         list_example_inputs = [(a, b)]
 
         # Large batch exceeding CUDA grid.y limit of 65535
         large_batch = 70000
-        list_example_inputs.append(
-            (
-                torch.randn(large_batch, M, K, device=self.device, dtype=dtype),
-                torch.randn(large_batch, K, N, device=self.device, dtype=dtype),
-            ),
-        )
+        list_example_inputs.append(make_inputs(large_batch))
         self.check_model_with_multiple_inputs(
             model,
             list_example_inputs,
@@ -6494,6 +6530,38 @@ class AOTInductorTestsTemplate:
         # Try it again without runtime assertions.
         with config.patch({"scalar_asserts": False}):
             AOTIRunnerUtil.run_multiple(model, [example_inputs, unexpected_inputs])
+
+    def test_multi_input_nonzero_slice_shared_dim(self):
+        # Regression: when multiple inputs share a dynamic batch dim and are
+        # sliced with the same nonzero result, the generated C++ guard code
+        # referenced symbolic variables that were replaced during constraint
+        # solving but never defined in the wrapper.
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(4, 4)
+
+            def forward(self, x, a, b, mask):
+                n = torch.nonzero(mask).shape[0]
+                return self.linear(x[n:]) + a[n:] + b[n:]
+
+        B = Dim("B", min=1, max=1024)
+        dynamic_shapes = {
+            "x": {0: B},
+            "a": {0: B},
+            "b": {0: B},
+            "mask": {0: B},
+        }
+        example_inputs = (
+            torch.randn(8, 4, device=self.device),
+            torch.randn(8, 4, device=self.device),
+            torch.randn(8, 4, device=self.device),
+            torch.tensor(
+                [True, True, False, True, False, False, True, True],
+                device=self.device,
+            ),
+        )
+        self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     def test_none_args_aot_codegen(self):
         if self.device != GPU_TYPE:

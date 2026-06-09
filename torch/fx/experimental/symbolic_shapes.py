@@ -721,7 +721,7 @@ def rebind_unbacked(
 
             if not isinstance(raw_u1, sympy.Symbol):
                 if raw_u1.free_symbols:
-                    raise AssertionError(f"should have been constant, but got {raw_u1}")
+                    shape_env._eliminate_unbacked(raw_u0, raw_u1)
                 continue
 
             # The old and new could be the same if you improperly hit the memo
@@ -2363,6 +2363,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
     """
 
     inner_contexts: dict[str, SymbolicContext] = field(default_factory=dict)
+    track_outer_size_stride: bool = True
 
 
 @dataclass(slots=True)
@@ -3766,6 +3767,32 @@ class DimConstraints:
 TLS = threading.local()
 
 
+def _ignore_fresh_unbacked_symbols_tls() -> bool:
+    return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
+
+
+def _ignore_fresh_unbacked_symbols_set(b: bool) -> bool:
+    prev = _ignore_fresh_unbacked_symbols_tls()
+    TLS.ignore_fresh_unbacked_symbols = b
+    return prev
+
+
+@contextmanager
+def _ignore_fresh_unbacked_symbols_tls_context() -> Generator[None, None, None]:
+    """
+    Indicates that newly allocated unbacked SymInts are intentionally discarded.
+
+    This is used by tracing-only metadata paths that do not own a ShapeEnv, but
+    still create temporary fake tensors whose fresh symbols should not be bound
+    into the surrounding graph.
+    """
+    prev = _ignore_fresh_unbacked_symbols_set(True)
+    try:
+        yield
+    finally:
+        _ignore_fresh_unbacked_symbols_set(prev)
+
+
 @dataclass(frozen=True, slots=True)
 class ShapeEnvSettings:
     """
@@ -4152,6 +4179,25 @@ class ShapeEnv:
         # all dims with the same shape_id are treated as the same symbol.
         self._shape_id_to_unbacked_symbol: dict[str, sympy.Expr] = {}
 
+        # Spec-wiring state, used by `_wire_spec_slot` /
+        # `_drain_shape_spec_pending_assumptions` /
+        # `_finalize_spec_wiring` in `torch/_dynamo/variables/builder.py`
+        # when wiring a `ShapesSpec` into this ShapeEnv during compile.
+        #
+        # `_spec_symbol_to_compile_symbol` maps each spec sympy.Symbol (from a spec
+        # `IntVar`) to the real unbacked sympy.Symbol allocated for the
+        # input that binds it.
+        self._spec_symbol_to_compile_symbol: dict[sympy.Symbol, sympy.Expr] = {}
+
+        # `_shape_spec_pending_assumptions` entries are
+        # `(free_spec_symbols, bool_expr)`: a deferred boolean waiting for
+        # its free spec symbols to be bound in `_spec_symbol_to_compile_symbol`.
+        # Substituted and emitted as a runtime assert once all deps are
+        # bound.
+        self._shape_spec_pending_assumptions: list[
+            tuple[set[sympy.Symbol], sympy.Expr]
+        ] = []
+
     @property
     def allow_scalar_outputs(self) -> bool:
         return self.settings.allow_scalar_outputs
@@ -4440,13 +4486,11 @@ class ShapeEnv:
                 self.replacements[b.node.expr] = new_var
 
     def _ignore_fresh_unbacked_symbols_tls(self) -> bool:
-        return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
+        return _ignore_fresh_unbacked_symbols_tls()
 
     @record_shapeenv_event()
     def _ignore_fresh_unbacked_symbols_set(self, b: bool) -> bool:
-        prev = self._ignore_fresh_unbacked_symbols_tls()
-        TLS.ignore_fresh_unbacked_symbols = b
-        return prev
+        return _ignore_fresh_unbacked_symbols_set(b)
 
     @contextmanager
     def ignore_fresh_unbacked_symbols(self) -> Generator[None, None, None]:
@@ -4454,11 +4498,8 @@ class ShapeEnv:
         Indicates that the newly allocated unbacked SymInts are being
         discarded
         """
-        prev = self._ignore_fresh_unbacked_symbols_set(True)
-        try:
+        with _ignore_fresh_unbacked_symbols_tls_context():
             yield
-        finally:
-            self._ignore_fresh_unbacked_symbols_set(prev)
 
     @record_shapeenv_event()
     def freeze(self) -> None:
@@ -5364,6 +5405,24 @@ class ShapeEnv:
         """Check if a sympy symbol matches the naming convention for unbacked symbols"""
         return symbol_is_type(symbol, SymT.UNBACKED_INT)
 
+    def _add_shape_id_eq_check(self, sym_int: SymInt, shape_id: str | None) -> None:
+        """
+        Dedup unbacked symbols sharing a `shape_id` via a runtime equality
+        check. The first symbol for a `shape_id` is recorded; subsequent
+        symbols emit `torch._check(new == existing)` so the ShapeEnv learns
+        the equality without changing symbol identity.
+
+        No-op when `shape_id` is None.
+        """
+        if shape_id is None:
+            return
+        existing_sym = self._shape_id_to_unbacked_symbol.get(shape_id)
+        if existing_sym is None:
+            self._shape_id_to_unbacked_symbol[shape_id] = sym_int.node.expr
+            return
+        existing_symint = self.create_symintnode(existing_sym, hint=None)
+        torch._check(sym_int == existing_symint)
+
     @record_shapeenv_event()
     def create_unbacked_symbool(self) -> SymBool:
         """Create a symbolic boolean without a hint value"""
@@ -5520,14 +5579,10 @@ class ShapeEnv:
 
             # Add runtime equality check for shape_id if applicable
             if shape_id is not None:
-                if shape_id in self._shape_id_to_unbacked_symbol:
-                    # Add runtime equality check instead of reusing the same symbol
-                    existing_sym = self._shape_id_to_unbacked_symbol[shape_id]
-                    existing_symint = self.create_symintnode(existing_sym, hint=None)
-                    out_symint = self.create_symintnode(out, hint=None)
-                    torch._check(out_symint == existing_symint)
-                else:
-                    self._shape_id_to_unbacked_symbol[shape_id] = out
+                # `out` is freshly created from an unbacked symbol, so
+                # create_symintnode always wraps it as a SymInt (never an int).
+                out_sym = cast(SymInt, self.create_symintnode(out, hint=None))
+                self._add_shape_id_eq_check(out_sym, shape_id)
 
             self.unbacked_inputs.add(out)
 
@@ -6160,6 +6215,14 @@ class ShapeEnv:
                         constraint.warn_only, self._debug_name(source), msg
                     )
 
+        def track_singletonint_source(source: Source, val: IntLikeType) -> None:
+            if isinstance(val, SymInt) and is_symbolic(val):
+                s = val.node.expr
+                if isinstance(s, sympy.Symbol) and isinstance(
+                    self.backed_var_to_val.get(s), SingletonInt
+                ):
+                    symbol_to_source[s].append(source)
+
         def track_symfloat(source: Source, val: FloatLikeType) -> None:
             log.debug("track_symfloat %s %s", LazyString(lambda: source.name), val)
             if isinstance(val, SymFloat) and not is_symbolic(val):
@@ -6206,12 +6269,31 @@ class ShapeEnv:
                         f"Expected SubclassSymbolicContext, got {type(context)}"
                     )
 
-                # For subclasses, we need to track symints on BOTH the outer
-                # and inner tensors.
+                # For most subclasses, we need to track symints on BOTH the
+                # outer and inner tensors.  Some wrapper subclasses expose an
+                # outer size/stride that is fully derived from inner tensors
+                # and metadata; for those, the outer guards are redundant and
+                # can be costly to evaluate on small compiled graphs.
                 # TODO: type this better
-                sources_tensors_constraints: list[tuple[Source, Any, Any, Any]] = [
-                    (source, t, context.constraint_sizes, context.constraint_strides)
-                ]
+                sources_tensors_constraints: list[tuple[Source, Any, Any, Any]] = []
+                if context.track_outer_size_stride:
+                    sources_tensors_constraints.append(
+                        (
+                            source,
+                            t,
+                            context.constraint_sizes,
+                            context.constraint_strides,
+                        )
+                    )
+                else:
+                    for i, ss in enumerate(t.size()):
+                        track_singletonint_source(
+                            TensorPropertySource(source, TensorProperty.SIZE, i), ss
+                        )
+                    for i, ss in enumerate(t.stride()):
+                        track_singletonint_source(
+                            TensorPropertySource(source, TensorProperty.STRIDE, i), ss
+                        )
                 attrs, _ = t.__tensor_flatten__()
                 for attr in attrs:
                     match getattr(t, attr):

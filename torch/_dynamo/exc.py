@@ -31,6 +31,7 @@ import logging
 import re
 import sys
 import textwrap
+import types
 import typing
 from enum import auto, Enum
 from functools import lru_cache
@@ -46,8 +47,6 @@ from .utils import counters
 
 
 if TYPE_CHECKING:
-    import types
-
     from torch._dynamo.variables import VariableTracker
     from torch._guards import CompileId
 
@@ -68,6 +67,53 @@ log = logging.getLogger(__name__)
 graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
+_EXCEPTION_STATE_ATTRS_TO_DROP = frozenset(
+    (
+        "_torch_dynamo_tracer_output",
+        "first_useful_frame",
+        "frame_exec_strategy",
+    )
+)
+
+
+def _safe_exception_args(args: tuple[Any, ...]) -> tuple[Any, ...]:
+    return args
+
+
+class _SerializedException(RuntimeError):
+    _dynamo_original_exception_type: str
+
+    def __init__(self, exc: BaseException) -> None:
+        super().__init__(str(exc))
+        self._dynamo_original_exception_type = (
+            f"{type(exc).__module__}.{type(exc).__qualname__}"
+        )
+
+
+def _safe_inner_exception(exc: BaseException) -> _SerializedException:
+    return _SerializedException(exc)
+
+
+def _safe_exception_state(state: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for name, value in state.items():
+        if name in _EXCEPTION_STATE_ATTRS_TO_DROP or isinstance(value, types.FrameType):
+            result[name] = None
+        elif name == "inner_exception" and isinstance(value, BaseException):
+            result[name] = _safe_inner_exception(value)
+        else:
+            result[name] = value
+    return result
+
+
+def _reconstruct_torch_dynamo_exception(
+    exc_type: type[TorchDynamoException], args: tuple[Any, ...]
+) -> TorchDynamoException:
+    exc = exc_type.__new__(exc_type)
+    BaseException.__init__(exc, *args)
+    return exc
+
+
 class TorchDynamoException(RuntimeError):
     """Base exception class for all TorchDynamo-specific exceptions.
 
@@ -84,6 +130,20 @@ class TorchDynamoException(RuntimeError):
         super().__init__(*args, **kwargs)
         self._torch_dynamo_tracer_output: DynamoTracerOutput | None = None
         self.frame_exec_strategy: FrameExecStrategy | None = None
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _reconstruct_torch_dynamo_exception,
+            (type(self), _safe_exception_args(self.args)),
+            self.__getstate__(),
+        )
+
+    def __getstate__(self) -> dict[str, Any]:
+        return _safe_exception_state(self.__dict__)
+
+    def __setstate__(self, state: dict[str, Any] | None, /) -> None:
+        if state is not None:
+            self.__dict__.update(state)
 
 
 class InternalTorchDynamoError(TorchDynamoException):
