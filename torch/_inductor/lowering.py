@@ -1547,7 +1547,10 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
         elif fn(sympy.Lt(index, 0)):
             # If index < 0, wrap and clamp: the resolved index is at least 0.
             return Max(index + size, 0)
-        return None
+        # Symbolic fallback for unbacked symbols where sign is unknown.
+        # Mirrors _compute_slice_index in fake_impls.py.
+        adjusted = sympy.Piecewise((index, index >= 0), (index + size, True))
+        return Max(Min(adjusted, size), 0)
 
     start_index, end_index = None, None
     # ambiguous_slice=False means we know what semantics this slice call follows,

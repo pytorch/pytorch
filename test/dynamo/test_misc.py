@@ -16228,6 +16228,49 @@ def forward(self, L_x_ : torch.Tensor):
         opt = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt(), "1:2:3")
 
+    def test_compile_tensor_derived_slice_bounds(self):
+        # https://github.com/pytorch/pytorch/issues/185185
+        class TensorDerivedSliceBounds(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "crop_size", torch.tensor(224, dtype=torch.float32)
+                )
+
+            def forward(self, x):
+                h = x.shape[2]
+                w = x.shape[3]
+                h = torch.tensor(h, device=x.device, dtype=torch.float32)
+                w = torch.tensor(w, device=x.device, dtype=torch.float32)
+                h0 = (h - self.crop_size) / 2
+                w0 = (w - self.crop_size) / 2
+                h1 = h0 + self.crop_size
+                w1 = w0 + self.crop_size
+                return x[:, :, h0.long() : h1.long(), w0.long() : w1.long()]
+
+        model = TensorDerivedSliceBounds().eval()
+        x = torch.randn(1, 3, 224, 224)
+
+        with torch.no_grad():
+            eager_out = model(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(model, backend="eager", fullgraph=True)
+        with torch.no_grad():
+            compiled_out = compiled(x)
+
+        self.assertEqual(eager_out, compiled_out)
+
+        x2 = torch.randn(1, 3, 256, 300)
+        with torch.no_grad():
+            eager_out2 = model(x2)
+        torch._dynamo.reset()
+        compiled2 = torch.compile(model, backend="eager", fullgraph=True)
+        with torch.no_grad():
+            compiled_out2 = compiled2(x2)
+
+        self.assertEqual(eager_out2, compiled_out2)
+
 
 instantiate_parametrized_tests(MiscTests)
 

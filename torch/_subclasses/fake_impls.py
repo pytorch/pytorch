@@ -1338,7 +1338,7 @@ def _padded_dense_to_jagged_forward(
     return padded.new_empty(output_shape)  # type: ignore[return]
 
 
-def _compute_slice_index(size: IntLikeType, index: IntLikeType) -> IntLikeType | None:
+def _compute_slice_index(size: IntLikeType, index: IntLikeType) -> IntLikeType:
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
 
     if guard_or_false(sym_and(index >= 0, index <= size)):
@@ -1354,7 +1354,8 @@ def _compute_slice_index(size: IntLikeType, index: IntLikeType) -> IntLikeType |
     elif guard_or_false(index < 0):
         return torch.sym_max(index + size, 0)
 
-    return None
+    adjusted = torch.sym_ite(index >= 0, index, index + size)
+    return torch.sym_max(torch.sym_min(adjusted, size), 0)
 
 
 @register_op_impl(torch.ops.aten.slice.Tensor)

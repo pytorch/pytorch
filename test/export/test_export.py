@@ -4656,11 +4656,12 @@ def forward(self, causal_mask, fill_value):
             self.assertTrue(torch.allclose(ep.module()(x, xs), mod(x, xs)))
 
         # check unbacked bindings
-        # should be 4 symbols: u0, u1, output size, output storage offset
+        # should be 2 symbols: u0, u1 (output size and storage offset
+        # are derived symbolically from u0/u1 via sym_ite/sym_min/sym_max)
         bound_unbacked = set()
         for node in ep.graph.nodes:
             bound_unbacked |= node.meta.get("unbacked_bindings", {}).keys()
-        self.assertEqual(len(bound_unbacked), 4)
+        self.assertEqual(len(bound_unbacked), 2)
 
     def test_dim_hint_ranges(self):
         class Foo(torch.nn.Module):
