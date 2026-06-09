@@ -167,6 +167,7 @@ class FSDPParam:
     orig_dtype: torch.dtype
     param_dtype: torch.dtype | None
     reduce_dtype: torch.dtype | None
+    _zero_buf: torch.Tensor
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
     contiguous_sharded_stride: tuple[int, ...]
@@ -598,6 +599,10 @@ class FSDPParam:
             param_dtype = None
         self.param_dtype = param_dtype
         self.reduce_dtype = reduce_dtype
+        grad_dtype = self.param_dtype or self.orig_dtype
+        self._zero_buf = torch.zeros(
+            1, dtype=grad_dtype, device=self.sharded_param.device
+        )
         # None indicates that the mixed precision is not enabled
 
     def _init_extensions(self) -> None:
@@ -929,7 +934,7 @@ class FSDPParam:
 
     @property
     def unsharded_zero_grad_data(self) -> torch.Tensor:
-        return self._get_grad_inner_tensor(torch.zeros_like(self.unsharded_param))
+        return self._get_grad_inner_tensor(self._zero_buf.expand(self._orig_size))
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
         if self.is_dtensor:
