@@ -42,7 +42,7 @@ _R = TypeVar("_R")
 log = logging.getLogger(__name__)
 
 
-# These canonicalization are needed here (and not decompositions), as the ops
+# These canonicalizations are needed here (and not decompositions), as the ops
 # we're trying to canonicalize to CompositeImplicitAutograd.
 def _canonicalize(fx_g: fx.GraphModule) -> fx.GraphModule:
     for node in fx_g.graph.find_nodes(
@@ -396,7 +396,7 @@ def _save_fx_default(
     where the two inner lists have the same format.
     If dump_example_input is True, example_inputs will be stored in .pt file.
     Since each function might produce multiple graphs,
-    the graph_index is used to distinguish difference graphs
+    the graph_index is used to distinguish different graphs
     """
     from functorch.compile import aot_module_simplified
 
