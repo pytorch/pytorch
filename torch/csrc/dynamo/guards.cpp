@@ -223,6 +223,8 @@ struct GuardLastSuccessStats {
   std::atomic<uint64_t> shadow_max_passes{0};
   std::atomic<uint64_t> token_count_sum{0};
   std::atomic<uint64_t> token_cap_disabled{0};
+  std::atomic<uint64_t> token_cap_count_sum{0};
+  std::atomic<uint64_t> token_cap_count_max{0};
   std::atomic<uint64_t> support_check_ns{0};
   std::atomic<uint64_t> receipt_update_ns{0};
   std::atomic<uint64_t> receipt_compare_ns{0};
@@ -272,6 +274,7 @@ constexpr size_t kGuardAccessorDetailStatsTopK = 64;
 constexpr size_t kGuardSubtreeProbeTopK = 64;
 constexpr size_t kGuardFastPlanDisabledTopK = 64;
 constexpr size_t kGuardFastPlanMaxTokens = 1024;
+constexpr size_t kGuardLastSuccessShadowMaxTokens = 65536;
 constexpr size_t kGuardSubtreeMemoSupportAnalysisMaxItems = 1024;
 
 struct GuardSubtreeMemoSupportAnalysis {
@@ -572,6 +575,8 @@ void reset_guard_lookup_stats() {
   store_zero(last_success_stats.shadow_max_passes);
   store_zero(last_success_stats.token_count_sum);
   store_zero(last_success_stats.token_cap_disabled);
+  store_zero(last_success_stats.token_cap_count_sum);
+  store_zero(last_success_stats.token_cap_count_max);
   store_zero(last_success_stats.support_check_ns);
   store_zero(last_success_stats.receipt_update_ns);
   store_zero(last_success_stats.receipt_compare_ns);
@@ -799,6 +804,10 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(last_success_stats.token_count_sum);
   result["guard_last_success_token_cap_disabled"] =
       load_relaxed(last_success_stats.token_cap_disabled);
+  result["guard_last_success_token_cap_count_sum"] =
+      load_relaxed(last_success_stats.token_cap_count_sum);
+  result["guard_last_success_token_cap_count_max"] =
+      load_relaxed(last_success_stats.token_cap_count_max);
   result["guard_last_success_support_check_ns"] =
       load_relaxed(last_success_stats.support_check_ns);
   result["guard_last_success_receipt_update_ns"] =
@@ -1334,7 +1343,8 @@ static void record_guard_last_success_disabled_item_locked(
 
 static void record_guard_last_success_incomplete(
     const char* reason,
-    const std::string& path = "") {
+    const std::string& path = "",
+    size_t token_count = 0) {
   if (!guard_lookup_stats_enabled()) {
     return;
   }
@@ -1345,6 +1355,8 @@ static void record_guard_last_success_incomplete(
   add_relaxed(stats.shadow_incomplete, 1);
   if (std::strcmp(reason, "token_cap_exceeded") == 0) {
     add_relaxed(stats.token_cap_disabled, 1);
+    add_relaxed(stats.token_cap_count_sum, token_count);
+    max_relaxed(stats.token_cap_count_max, token_count);
   }
   std::lock_guard<std::mutex> lock(
       guard_last_success_disabled_stats_mutex());
@@ -8229,8 +8241,9 @@ bool run_root_guard_manager_with_last_success_receipt(
     state->reset();
     return true;
   }
-  if (tokens.size() > kGuardFastPlanMaxTokens) {
-    record_guard_last_success_incomplete("token_cap_exceeded", "L");
+  if (tokens.size() > kGuardLastSuccessShadowMaxTokens) {
+    record_guard_last_success_incomplete(
+        "token_cap_exceeded", "L", tokens.size());
     state->reset();
     return true;
   }

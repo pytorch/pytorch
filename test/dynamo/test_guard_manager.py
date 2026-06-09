@@ -2202,6 +2202,8 @@ print(json.dumps({
     "success": stats["guard_last_success_shadow_success"],
     "incomplete": stats["guard_last_success_shadow_incomplete"],
     "support_check_ns": stats["guard_last_success_support_check_ns"],
+    "token_cap_count_sum": stats["guard_last_success_token_cap_count_sum"],
+    "token_cap_count_max": stats["guard_last_success_token_cap_count_max"],
     "disabled_reasons": stats["guard_last_success_disabled_reasons"],
 }))
 """
@@ -2219,6 +2221,8 @@ print(json.dumps({
         self.assertGreater(stats["attempt"], 0)
         self.assertGreater(stats["incomplete"] + stats["success"], 0)
         self.assertGreaterEqual(stats["support_check_ns"], 0)
+        self.assertGreaterEqual(stats["token_cap_count_sum"], 0)
+        self.assertGreaterEqual(stats["token_cap_count_max"], 0)
 
     def test_guard_last_success_supports_default_device_token(self):
         script = r"""
