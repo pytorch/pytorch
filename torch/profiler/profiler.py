@@ -323,7 +323,7 @@ class _KinetoProfile:
                 else None,
             )
         if self._use_cupti_monitor:
-            from torch.profiler.cupti.observers.profiler import (
+            from torch.profiler._cupti.observers.profiler import (
                 ProfilerObserver,
                 set_active_profiler_observer,
             )
@@ -393,7 +393,7 @@ class _KinetoProfile:
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before stopping trace")
         if self._use_cupti_monitor:
-            from torch.profiler.cupti.observers.profiler import (
+            from torch.profiler._cupti.observers.profiler import (
                 set_active_profiler_observer,
             )
 
@@ -422,7 +422,7 @@ class _KinetoProfile:
                 raise AssertionError(
                     "CUPTI monitor trace window must exist before exporting chrome trace"
                 )
-            from torch.profiler.cupti.monitor_trace import (
+            from torch.profiler._cupti.monitor_trace import (
                 merge_trace_window_into_chrome_trace,
             )
 

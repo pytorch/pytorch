@@ -16,7 +16,7 @@ a no-profiling baseline. Modes:
 ``_hw`` variants enable HES (hardware kernel timestamps) before CUDA init.
 
 Ported from ``cupti_monitor_bench.py``. Two API changes:
-  * ``torch.profiler._cupti_monitor`` -> ``torch.profiler.cupti.monitor``
+  * ``torch.profiler._cupti_monitor`` -> ``torch.profiler._cupti.monitor``
     (``enable_hes_early`` / ``is_hes_enabled`` are unchanged).
   * the old ``start_collection(output_dir)`` raw-dump-to-disk path is gone -- the
     new monitor is observer-based and always decodes. ``monitor`` now
@@ -39,7 +39,7 @@ from pathlib import Path
 import torch
 from torch._C._profiler import _ExperimentalConfig
 from torch.profiler import profile, ProfilerActivity, schedule
-from torch.profiler.cupti import monitor as cupti_monitor
+from torch.profiler._cupti import monitor as cupti_monitor
 
 
 def build_mixed_graph(groups: int, tensor_size: int, sleep_cycles: int):
@@ -175,7 +175,7 @@ def run_baseline(step_fn, warmup_steps: int, samples: int, measure_steps: int = 
 
 
 def _profiler_fields():
-    from torch.profiler.cupti.observers.profiler import PROFILER_FIELDS
+    from torch.profiler._cupti.observers.profiler import PROFILER_FIELDS
 
     return PROFILER_FIELDS
 
@@ -184,8 +184,8 @@ def _node_timer_fields():
     # The NodeTimerObserver field selection: just the compact kernel timing fields.
     # Far fewer fields than PROFILER_FIELDS and a single kind -> the monitor's
     # vectorized stride decode, so its always-on cost should be the lower bound.
-    from torch.profiler.cupti.cupti_python import ActivityKind
-    from torch.profiler.cupti.records import Kernel
+    from torch.profiler._cupti.cupti_python import ActivityKind
+    from torch.profiler._cupti.records import Kernel
 
     return {
         ActivityKind.CONCURRENT_KERNEL: {

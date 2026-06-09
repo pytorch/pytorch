@@ -101,7 +101,7 @@ def _cupti_version() -> int:
     if not TEST_CUPTI_PYTHON:
         return 0
     try:
-        from torch.profiler.cupti.cupti_python import pylibcupti
+        from torch.profiler._cupti.cupti_python import pylibcupti
 
         return pylibcupti().get_version()
     except Exception:
@@ -444,7 +444,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 "-c",
                 """
 import torch
-from torch.profiler.cupti import monitor as _cupti_monitor
+from torch.profiler._cupti import monitor as _cupti_monitor
 
 _cupti_monitor.enable_hes_early()
 assert _cupti_monitor.is_hes_enabled()
@@ -460,7 +460,7 @@ assert _cupti_monitor.is_hes_enabled()
                 "-c",
                 """
 import torch
-from torch.profiler.cupti import monitor as _cupti_monitor
+from torch.profiler._cupti import monitor as _cupti_monitor
 
 torch.randn(1, device="cuda")
 _cupti_monitor.enable_hes_early()
@@ -478,8 +478,8 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_cupti_monitor_collection_smoke(self):
-        from torch.profiler.cupti import monitor as _cupti_monitor
-        from torch.profiler.cupti.observers.profiler import ProfilerObserver
+        from torch.profiler._cupti import monitor as _cupti_monitor
+        from torch.profiler._cupti.observers.profiler import ProfilerObserver
 
         obs = ProfilerObserver()
         self.assertTrue(obs.available)
@@ -508,8 +508,8 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_cupti_monitor_collection_repeated_lifecycle(self):
-        from torch.profiler.cupti import monitor as _cupti_monitor
-        from torch.profiler.cupti.observers.profiler import ProfilerObserver
+        from torch.profiler._cupti import monitor as _cupti_monitor
+        from torch.profiler._cupti.observers.profiler import ProfilerObserver
 
         # Register/collect/unregister twice: the last observer leaving stops the
         # monitor, so the second pass exercises the start-after-stop restart path.
@@ -728,7 +728,7 @@ _cupti_monitor.enable_hes_early()
             # monitor can subscribe -- cuptiFinalize() now, with nothing else using
             # CUPTI, instead of Kineto's async TEARDOWN_CUPTI finalize (which races
             # and can deadlock the monitor's teardown).
-            from torch.profiler.cupti.cupti_python import pylibcupti
+            from torch.profiler._cupti.cupti_python import pylibcupti
             pylibcupti().finalize()
             monitor_ops, monitor_kernels = trace_summary(True)
             assert stock_kernels > 0, f"stock kernels={stock_kernels}"

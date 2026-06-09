@@ -2,7 +2,7 @@
 """Base class for CUPTI activity-monitor observers.
 
 An observer registers the activity kinds it wants with the shared CUPTI monitor
-(``torch.profiler.cupti.monitor.instance()``) and, on the monitor's worker
+(``torch.profiler._cupti.monitor.instance()``) and, on the monitor's worker
 thread, gets handed the columns the monitor demuxed from each completed buffer
 (``{ActivityKind: {field_id: column}}``) sliced to its selection. What it does
 with them is up to the subclass's ``_on_activities`` hook. This base handles
@@ -129,7 +129,7 @@ class CuptiMonitorObserver:
         # another subscriber (Kineto) holds it, or libcupti lacks the v2 API. The
         # profiler must not crash because the optional monitor couldn't start.
         try:
-            from torch.profiler.cupti.monitor import instance
+            from torch.profiler._cupti.monitor import instance
 
             self._monitor = instance()
             self._obs = self._monitor.register(activities, self._on_activities)
@@ -153,8 +153,8 @@ class CuptiMonitorObserver:
         only emits the former when the correlated API kind is enabled; the RUNTIME
         records themselves go unused -- it's just the carrier for the join). Expects a
         ``{kind: fields}`` map (the eager path always selects fields)."""
-        from torch.profiler.cupti.cupti_python import ActivityKind
-        from torch.profiler.cupti.records import CORRELATION_FIELD, ExternalCorrelation
+        from torch.profiler._cupti.cupti_python import ActivityKind
+        from torch.profiler._cupti.records import CORRELATION_FIELD, ExternalCorrelation
 
         aug: dict[int, set[int]] = {}
         for kind, sel in dict(activities).items():

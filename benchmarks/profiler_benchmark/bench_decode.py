@@ -8,7 +8,7 @@ the decode (not CUPTI, not the GPU) becomes the bottleneck.
 
 It is pure CPU + numpy: it synthesizes the byte buffer and the captured record
 layout by hand and calls the real ``decode()``, so it needs only a torch build
-with ``torch.profiler.cupti`` -- no GPU, no CUPTI, no libcupti preload.
+with ``torch.profiler._cupti`` -- no GPU, no CUPTI, no libcupti preload.
 
 Three things it reports:
 
@@ -32,9 +32,9 @@ import json
 import time
 from typing import Any
 
-from torch.profiler.cupti.cupti_python import ActivityKind
-from torch.profiler.cupti.monitor import CuptiMonitorBuffer
-from torch.profiler.cupti.records import Kernel
+from torch.profiler._cupti.cupti_python import ActivityKind
+from torch.profiler._cupti.monitor import CuptiMonitorBuffer
+from torch.profiler._cupti.records import Kernel
 
 
 _KERNEL = int(ActivityKind.CONCURRENT_KERNEL)
