@@ -191,6 +191,7 @@ jobs:
       !{{ common.wait_and_kill_ssh_windows() }}
 {% endif %}
 
+{%- if not build_only %}
   wheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -298,8 +299,9 @@ jobs:
 {%- if os != "windows-arm64" %}
       !{{ common.wait_and_kill_ssh_windows() }}
 {%- endif %}
+{%- endif %}
 
-{%- if branches == "nightly" %}
+{%- if branches == "nightly" and not build_only %}
 
   wheel-upload:
     name: ${{ matrix.build_name }}-upload

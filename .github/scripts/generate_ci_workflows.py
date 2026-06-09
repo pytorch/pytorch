@@ -62,6 +62,10 @@ class BinaryBuildWorkflow:
     macos_runner: str = "macos-14-xlarge"
     # Mainly used for libtorch builds
     build_variant: str = ""
+    # Build-only workflow: emit just the build job, no test/upload. Used for
+    # debug wheels, which are extraction intermediates -- not published, and
+    # not importable (a /MDd wheel only loads under a debug interpreter).
+    build_only: bool = False
     # Libtorch extraction configs: lightweight jobs that extract libtorch
     # from a wheel build instead of building libtorch from scratch
     libtorch_extraction_configs: list[dict[str, str]] = field(default_factory=list)
@@ -147,11 +151,13 @@ _WINDOWS_WHEEL_DEBUG_CONFIGS = generate_binary_build_matrix.generate_wheels_matr
     python_versions=["3.10"],
     debug=True,
 )
-_WINDOWS_ARM64_WHEEL_DEBUG_CONFIGS = generate_binary_build_matrix.generate_wheels_matrix(
-    OperatingSystem.WINDOWS_ARM64,
-    arches=["cpu"],
-    python_versions=["3.11"],
-    debug=True,
+_WINDOWS_ARM64_WHEEL_DEBUG_CONFIGS = (
+    generate_binary_build_matrix.generate_wheels_matrix(
+        OperatingSystem.WINDOWS_ARM64,
+        arches=["cpu"],
+        python_versions=["3.11"],
+        debug=True,
+    )
 )
 
 WINDOWS_BINARY_BUILD_WORKFLOWS = [
@@ -189,6 +195,7 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         os=OperatingSystem.WINDOWS,
         package_type="wheel",
         build_variant=generate_binary_build_matrix.DEBUG,
+        build_only=True,
         build_configs=_WINDOWS_WHEEL_DEBUG_CONFIGS,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -223,6 +230,7 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         os=OperatingSystem.WINDOWS_ARM64,
         package_type="wheel",
         build_variant=generate_binary_build_matrix.DEBUG,
+        build_only=True,
         build_configs=_WINDOWS_ARM64_WHEEL_DEBUG_CONFIGS,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
