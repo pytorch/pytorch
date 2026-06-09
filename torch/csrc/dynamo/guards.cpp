@@ -122,6 +122,7 @@ enum class GuardSubtreeProbeTokenKind : uint8_t {
   TensorMatch,
   DefaultDevice,
   GlobalState,
+  TorchFunctionModeStack,
 };
 
 enum class GuardFastPlanCandidateKind : uint8_t {
@@ -162,6 +163,7 @@ struct GuardSubtreeProbeStats {
   std::atomic<uint64_t> token_tensor_match{0};
   std::atomic<uint64_t> token_default_device{0};
   std::atomic<uint64_t> token_global_state{0};
+  std::atomic<uint64_t> token_torch_function_mode_stack{0};
 };
 
 struct GuardFastPlanStats {
@@ -257,6 +259,7 @@ struct GuardSubtreeProbePathStats {
   uint64_t token_tensor_match{0};
   uint64_t token_default_device{0};
   uint64_t token_global_state{0};
+  uint64_t token_torch_function_mode_stack{0};
 };
 
 constexpr size_t kGuardAccessorDetailStatsTopK = 64;
@@ -502,6 +505,7 @@ void reset_guard_lookup_stats() {
   store_zero(subtree_stats.token_tensor_match);
   store_zero(subtree_stats.token_default_device);
   store_zero(subtree_stats.token_global_state);
+  store_zero(subtree_stats.token_torch_function_mode_stack);
   store_zero(fastplan_stats.candidate);
   store_zero(fastplan_stats.candidate_top);
   store_zero(fastplan_stats.candidate_nested);
@@ -639,6 +643,8 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(subtree_stats.token_default_device);
   subtree_token_kind_counts["GlobalState"] =
       load_relaxed(subtree_stats.token_global_state);
+  subtree_token_kind_counts["TorchFunctionModeStack"] =
+      load_relaxed(subtree_stats.token_torch_function_mode_stack);
   result["guard_subtree_probe_token_kind_counts"] =
       subtree_token_kind_counts;
   auto& fastplan_stats = guard_fastplan_stats();
@@ -1006,6 +1012,9 @@ static void add_guard_subtree_probe_token_kind(
     case GuardSubtreeProbeTokenKind::GlobalState:
       add_relaxed(stats.token_global_state, 1);
       break;
+    case GuardSubtreeProbeTokenKind::TorchFunctionModeStack:
+      add_relaxed(stats.token_torch_function_mode_stack, 1);
+      break;
     case GuardSubtreeProbeTokenKind::ObjectOnly:
       add_relaxed(stats.token_object_only, 1);
       break;
@@ -1033,6 +1042,9 @@ static void add_guard_subtree_probe_token_kind(
       break;
     case GuardSubtreeProbeTokenKind::GlobalState:
       stats.token_global_state += 1;
+      break;
+    case GuardSubtreeProbeTokenKind::TorchFunctionModeStack:
+      stats.token_torch_function_mode_stack += 1;
       break;
     case GuardSubtreeProbeTokenKind::ObjectOnly:
       stats.token_object_only += 1;
@@ -2166,6 +2178,8 @@ static bool default_device_matches(
   return result == 1;
 }
 
+static bool torch_function_mode_stack_guard_matches(const void* guard);
+
 struct GuardSubtreeEntryToken {
   PyObject* object{nullptr};
   PyTypeObject* type{nullptr};
@@ -2185,6 +2199,7 @@ struct GuardSubtreeEntryToken {
   PyObject* default_device_dict{nullptr};
   PyObject* default_device{nullptr};
   GlobalStateGuard* global_state_guard{nullptr};
+  const void* torch_function_mode_stack_guard{nullptr};
 
   static GuardSubtreeEntryToken make(PyObject* obj) {
     GuardSubtreeEntryToken token;
@@ -2274,6 +2289,14 @@ struct GuardSubtreeEntryToken {
     GuardSubtreeEntryToken token;
     token.kind = GuardSubtreeProbeTokenKind::GlobalState;
     token.global_state_guard = guard;
+    return token;
+  }
+
+  static GuardSubtreeEntryToken make_torch_function_mode_stack(
+      const void* guard) {
+    GuardSubtreeEntryToken token;
+    token.kind = GuardSubtreeProbeTokenKind::TorchFunctionModeStack;
+    token.torch_function_mode_stack_guard = guard;
     return token;
   }
 
@@ -2368,6 +2391,10 @@ struct GuardSubtreeEntryToken {
     if (kind == GuardSubtreeProbeTokenKind::GlobalState) {
       return global_state_guard == other.global_state_guard;
     }
+    if (kind == GuardSubtreeProbeTokenKind::TorchFunctionModeStack) {
+      return torch_function_mode_stack_guard ==
+          other.torch_function_mode_stack_guard;
+    }
     return version == other.version && size == other.size &&
         list_items == other.list_items;
   }
@@ -2461,6 +2488,13 @@ static bool guard_subtree_memo_tokens_match(
     }
     if (token.kind == GuardSubtreeProbeTokenKind::GlobalState) {
       if (!token.matches_global_state_current()) {
+        return false;
+      }
+      continue;
+    }
+    if (token.kind == GuardSubtreeProbeTokenKind::TorchFunctionModeStack) {
+      if (!torch_function_mode_stack_guard_matches(
+              token.torch_function_mode_stack_guard)) {
         return false;
       }
       continue;
@@ -5704,7 +5738,7 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
   }
 
   template <typename T>
-  bool check_nopybind_template(T* value) {
+  bool check_nopybind_template(T* value) const {
     // Ignore value arg, only used to satisfy the interface
     const size_t len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
     const size_t ref_stack_size = this->_ref_stack.size();
@@ -5735,15 +5769,50 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
   }
 
   bool supports_subtree_memo() const override {
-    return false;
+    return true;
   }
   const char* subtree_memo_unsupported_reason() const override {
     return "unsupported_leaf:TORCH_FUNCTION_MODE_STACK";
   }
+  bool emits_subtree_memo_token() const override {
+    return true;
+  }
+  bool emits_subtree_memo_token_for_frame_locals() const override {
+    return true;
+  }
+  bool append_subtree_memo_token(
+      PyObject* value,
+      std::vector<GuardSubtreeEntryToken>* tokens) override {
+    return append_subtree_memo_token_template(value, tokens);
+  }
+  bool append_subtree_memo_token(
+      FrameLocalsMapping* value,
+      std::vector<GuardSubtreeEntryToken>* tokens) override {
+    return append_subtree_memo_token_template(value, tokens);
+  }
 
  private:
+  template <typename T>
+  bool append_subtree_memo_token_template(
+      T* value,
+      std::vector<GuardSubtreeEntryToken>* tokens) {
+    if (!check_nopybind_template(value)) {
+      return false;
+    }
+    tokens->emplace_back(
+        GuardSubtreeEntryToken::make_torch_function_mode_stack(
+            static_cast<const void*>(this)));
+    return true;
+  }
+
   std::vector<PyTypeObject*> _ref_stack;
 };
+
+static bool torch_function_mode_stack_guard_matches(const void* guard) {
+  return guard != nullptr &&
+      static_cast<const TORCH_FUNCTION_MODE_STACK*>(guard)
+          ->check_nopybind_template(nullptr);
+}
 
 class DISPATCH_KEY_SET_MATCH : public LeafGuard {
  public:
