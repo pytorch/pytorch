@@ -29,11 +29,11 @@ def _get_device_index(device: _device_t, optional: bool = False) -> int:
 
 
 def _lazy_call(callable: Callable[[], None], **kwargs) -> None:
-    r"""Queue a callable for execution after accelerator initialization, or run it immediately if already initialized.
+    r"""Defer a callable until the :ref:`accelerator<accelerators>` runtime is initialized.
 
-    If the backend supports lazy initialization (i.e., exposes ``_lazy_call``),
-    the callable is deferred until the runtime is ready. Otherwise, it executes
-    immediately. See :ref:`lazy-initialization-and-fork-safety-note`.
+    If the runtime is already initialized or the backend does not support lazy
+    initialization, the callable runs immediately. If no accelerator is
+    available, the callable is silently dropped.
 
     Args:
         callable (Callable[[], None]): The function to be called.
@@ -42,11 +42,10 @@ def _lazy_call(callable: Callable[[], None], **kwargs) -> None:
     """
     acc = torch.accelerator.current_accelerator()
     if acc is None:
-        raise RuntimeError(
-            "No accelerator is available; _lazy_call requires an active accelerator."
-        )
+        return
     device_module = torch.get_device_module(acc)
     if hasattr(device_module, "_lazy_call"):
         device_module._lazy_call(callable, **kwargs)
     else:
+        # Backend does not support lazy initialization; run immediately.
         callable()
