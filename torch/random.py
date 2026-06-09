@@ -179,7 +179,7 @@ def fork_rng(
                 f"set {acc_type}_VISIBLE_DEVICES=0 or devices=[0].  To initialize all devices "
                 f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
                 f"`range(torch.accelerator.device_count())`."
-            )  # pyrefly: ignore [missing-attribute]
+            )
             warnings.warn(message, stacklevel=2)
             _fork_rng_warned_already = True
         devices = list(range(num_devices))
