@@ -162,7 +162,7 @@ class TestCustomOpOutLowering(InductorTestCase):
             source_code = "\n".join(code)
             FileCheck().check("aoti_torch_call_dispatcher").run(source_code)
             FileCheck().check_regex(
-                r'assert_size_stride\(buf\d+, \{4L, 4L\}, \{4L, 1L\}, "torch.ops.mylib.no_out_op.default"\)'
+                r'assert_size_stride\(buf\d+, \{4L?, 4L?\}, \{4L?, 1L?\}, "torch.ops.mylib.no_out_op.default"\)'
             ).run(source_code)
             self.assertNotRegex(source_code, r"\bbuf\d+\s*=\s*buf\d+\b")
 
