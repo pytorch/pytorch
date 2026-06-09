@@ -34,6 +34,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     has_free_symbols,
     is_symbolic,
+    rebind_unbacked,
     ShapeEnv,
     StatelessSymbolicContext,
     statically_known_false,
@@ -1448,18 +1449,18 @@ def forward(self, x_1):
             out.strip(),
             """\
 class f(torch.nn.Module):
-    def forward(self, a_1: "f32[s75, s96]", b_1: "f32[s57, s96]"):
+    def forward(self, a_1: "f32[s75, s96]", b_1: "f32[s57, s9]"):
         # No stacktrace found for following nodes
         sym_size_int: "Sym(s75)" = torch.ops.aten.sym_size.int(a_1, 0)
         sym_size_int_1: "Sym(s57)" = torch.ops.aten.sym_size.int(b_1, 0)
         add: "Sym(s57 + s75)" = sym_size_int + sym_size_int_1;  sym_size_int = sym_size_int_1 = None
         sym_size_int_2: "Sym(s96)" = torch.ops.aten.sym_size.int(a_1, 1)
-        sym_size_int_3: "Sym(s96)" = torch.ops.aten.sym_size.int(b_1, 1);  b_1 = None
-        add_1: "Sym(2*s96)" = sym_size_int_2 + sym_size_int_3;  sym_size_int_2 = sym_size_int_3 = None
-        new_empty: "f32[s57 + s75, 2*s96]" = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
+        sym_size_int_3: "Sym(s9)" = torch.ops.aten.sym_size.int(b_1, 1);  b_1 = None
+        add_1: "Sym(s9 + s96)" = sym_size_int_2 + sym_size_int_3;  sym_size_int_2 = sym_size_int_3 = None
+        new_empty: "f32[s57 + s75, s9 + s96]" = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
-        getitem: "f32[s57 + s75, 2*s96]" = native_dropout[0]
-        getitem_1: "b8[s57 + s75, 2*s96]" = native_dropout[1];  native_dropout = None
+        getitem: "f32[s57 + s75, s9 + s96]" = native_dropout[0]
+        getitem_1: "b8[s57 + s75, s9 + s96]" = native_dropout[1];  native_dropout = None
         return (getitem, getitem_1)""",
         )
 
@@ -3730,6 +3731,27 @@ def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
 
 
 class TestUnbacked(TestCase):
+    def test_rebind_unbacked_to_symbolic_expression(self):
+        shape_env = ShapeEnv()
+        fake_mode = torch._subclasses.FakeTensorMode(
+            allow_non_fake_inputs=True, shape_env=shape_env
+        )
+        graph = torch.fx.Graph()
+        node = graph.call_function(operator.add, args=(1, 1))
+
+        with fake_mode:
+            old = shape_env.create_unbacked_symint()
+            base = shape_env.create_unbacked_symint()
+            result = (base + 1) // 2
+
+        old_expr = old.node.expr
+        result_expr = result.node.expr
+        node.meta["unbacked_bindings"] = {old_expr: ()}
+
+        rebind_unbacked(shape_env, node, result)
+
+        self.assertEqual(shape_env.replacements[old_expr], result_expr)
+
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
@@ -4013,6 +4035,27 @@ class TestUnbacked(TestCase):
                 Exception, "Pending unbacked symbols.*not in returned outputs"
             ):
                 func_negative(x)
+
+    def test_ignore_fresh_unbacked_symbols_preserves_existing_pending(self):
+        shape_env = ShapeEnv()
+        fake_mode = torch._subclasses.FakeTensorMode(
+            allow_non_fake_inputs=True, shape_env=shape_env
+        )
+        with fake_mode:
+            pending = shape_env.create_unbacked_symint().node.expr
+
+            with shape_env.ignore_fresh_unbacked_symbols():
+                ignored = shape_env.create_unbacked_symint().node.expr
+                example_value = torch.empty(2)
+            with self.assertRaisesRegex(
+                Exception, f"Pending unbacked symbols {{{pending}}}"
+            ):
+                torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+                    shape_env,
+                    example_value,
+                )
+
+        self.assertNotIn(ignored, shape_env.pending_fresh_unbacked_symbols)
 
     def test_meta_copy(self):
         """
@@ -4780,9 +4823,9 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             output,
             """\
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        select: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.select.int(arg2_1, 0, _local_scalar_dense)
-        select_1: "f32[s77, s77][s77**2, 1]cpu" = torch.ops.aten.select.int(arg2_1, 1, _local_scalar_dense)
-        select_2: "f32[s77, s77][s77**2, s77]cpu" = torch.ops.aten.select.int(arg2_1, 2, _local_scalar_dense);  arg2_1 = _local_scalar_dense = None
+        select: "f32[s27, s53][s53, 1]cpu" = torch.ops.aten.select.int(arg4_1, 0, _local_scalar_dense)
+        select_1: "f32[s77, s53][s27*s53, 1]cpu" = torch.ops.aten.select.int(arg4_1, 1, _local_scalar_dense)
+        select_2: "f32[s77, s27][s27*s53, s53]cpu" = torch.ops.aten.select.int(arg4_1, 2, _local_scalar_dense);  arg4_1 = _local_scalar_dense = None
         return (select, select_1, select_2)""",
             ignore_comments=True,
             ignore_empty_lines=True,

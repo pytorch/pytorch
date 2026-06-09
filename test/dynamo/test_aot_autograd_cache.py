@@ -467,12 +467,30 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             else:
-                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 4)
-                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
-            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 2)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+                self.assertEqual(
+                    counters["inductor"]["fxgraph_cache_miss"],
+                    6 if dynamic else 4,
+                )
+                self.assertEqual(
+                    counters["inductor"]["fxgraph_cache_hit"],
+                    0 if dynamic else 2,
+                )
+            self.assertEqual(
+                counters["inductor"]["fxgraph_lookup_write_file"],
+                0 if dynamic else 2,
+            )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_miss"],
+                3 if dynamic else 2,
+            )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_hit"],
+                0 if dynamic else 1,
+            )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_saved"],
+                3 if dynamic else 2,
+            )
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)

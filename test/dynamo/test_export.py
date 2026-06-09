@@ -1937,8 +1937,8 @@ def forward(self, x):
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, (l_x_,));  le = cond_true_0 = cond_false_0 = l_x_ = None
     getitem_3 = cond[0]
-    sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_3, 0);  getitem_3 = None
-    ge = sym_size_int_1 >= 2;  sym_size_int_1 = None
+    sym_size_int_2 = torch.ops.aten.sym_size.int(getitem_3, 0);  getitem_3 = None
+    ge = sym_size_int_2 >= 2;  sym_size_int_2 = None
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 2 on node 'ge'");  ge = _assert_scalar_default = None
     getitem_2 = cond[0];  cond = None
     return pytree.tree_unflatten([getitem_2], self._out_spec)""",

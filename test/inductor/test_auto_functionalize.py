@@ -416,10 +416,10 @@ arg3_1 = arg0_1 = arg1_1 = foo_default = None
                     self.assertExpectedInline(
                         post_grad_graphs,
                         """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77][1]cpu", arg2_1: "f32[s77][1]cpu", arg3_1: "f32[s77][1]cpu", arg4_1: "f32[s77][1]cpu", arg5_1: "f32[s77][1]cpu"):
-        foo_default = torch.ops.mylib.foo.default(arg1_1, [arg4_1, arg5_1], arg2_1, 2, arg3_1);  arg4_1 = arg5_1 = arg3_1 = foo_default = None
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77][1]cpu", arg2_1: "Sym(s68)", arg3_1: "f32[s68][1]cpu", arg4_1: "Sym(s72)", arg5_1: "f32[s72][1]cpu", arg6_1: "Sym(s10)", arg7_1: "f32[s10][1]cpu", arg8_1: "Sym(s42)", arg9_1: "f32[s42][1]cpu"):
+        foo_default = torch.ops.mylib.foo.default(arg1_1, [arg7_1, arg9_1], arg3_1, 2, arg5_1);  arg7_1 = arg9_1 = arg5_1 = foo_default = None
         copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy_ = None
-        copy__1: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg2_1, arg2_1);  arg2_1 = copy__1 = None
+        copy__1: "f32[s68][1]cpu" = torch.ops.aten.copy_.default(arg3_1, arg3_1);  arg3_1 = copy__1 = None
         return ()""",
                         ignore_comments=True,
                         ignore_empty_lines=True,

@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     munge_exc,
     parametrize,
+    skipIfXpu,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
@@ -43,9 +44,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.triton_utils import (
-    requires_cuda_and_triton,
-    requires_gpu_and_triton,
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
 
@@ -193,6 +196,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(cnt.op_count, expected_opcount)
                 graph = backend.graphs[0]
                 wrap_node = find_first_node(graph, wrap)
+
                 self.assertEqual(len(wrap_node.args), expected_num_wrap_args)
         # We always return/check the graph from the first run if return_graph = True
         if return_graph:
@@ -1039,7 +1043,7 @@ class GraphModule(torch.nn.Module):
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x, y)),
-            6,
+            7,
             2,
             return_graph=True,
         )
@@ -1047,24 +1051,24 @@ class GraphModule(torch.nn.Module):
             out_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", s27: "Sym(s27)", L_x_: "f32[s77, s27]", s94: "Sym(s94)", L_y_: "f32[s27, s94]"):
+    def forward(self, s77: "Sym(s77)", s27: "Sym(s17)", L_x_: "f32[s77, s17]", s17: "Sym(s17)", s94: "Sym(s94)", L_y_: "f32[s17, s94]"):
         l_x_ = L_x_
         l_y_ = L_y_
 
         wrap_body_1 = self.wrap_body_1
-        wrap = torch.ops.higher_order.wrap(wrap_body_1, s77, s27, l_x_, s94, l_y_);  wrap_body_1 = s77 = s27 = l_x_ = s94 = l_y_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_1, s77, s27, l_x_, s17, s94, l_y_);  wrap_body_1 = s77 = s27 = l_x_ = s17 = s94 = l_y_ = None
         getitem: "f32[s77, s94]" = wrap[0];  wrap = None
         return (getitem,)
 
     class wrap_body_1(torch.nn.Module):
-        def forward(self, s77: "Sym(s77)", s27: "Sym(s27)", l_x_: "f32[s77, s27]", s94: "Sym(s94)", l_y_: "f32[s27, s94]"):
+        def forward(self, s77: "Sym(s77)", s27: "Sym(s17)", l_x_: "f32[s77, s17]", s17: "Sym(s17)", s94: "Sym(s94)", l_y_: "f32[s17, s94]"):
             wrap_body_0 = self.wrap_body_0
-            wrap = torch.ops.higher_order.wrap(wrap_body_0, s77, s27, l_x_, s94, l_y_);  wrap_body_0 = s77 = s27 = l_x_ = s94 = l_y_ = None
+            wrap = torch.ops.higher_order.wrap(wrap_body_0, s77, s27, l_x_, s17, s94, l_y_);  wrap_body_0 = s77 = s27 = l_x_ = s17 = s94 = l_y_ = None
             getitem: "f32[s77, s94]" = wrap[0];  wrap = None
             return (getitem,)
 
         class wrap_body_0(torch.nn.Module):
-            def forward(self, s77: "Sym(s77)", s27: "Sym(s27)", l_x_: "f32[s77, s27]", s94: "Sym(s94)", l_y_: "f32[s27, s94]"):
+            def forward(self, s77: "Sym(s77)", s27: "Sym(s17)", l_x_: "f32[s77, s17]", s17: "Sym(s17)", s94: "Sym(s94)", l_y_: "f32[s17, s94]"):
                 matmul: "f32[s77, s94]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
                 return (matmul,)
 """,
@@ -6951,7 +6955,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             for arg, cloned_arg in zip(args, cloned_args):
                 self.assertEqual(arg.grad, cloned_arg.grad)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function(self):
         def gn(x, y):
@@ -6970,7 +6975,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function_with_kwargs(self):
         def gn(x, y):
@@ -6993,7 +6999,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout(self):
         def gn(x, y):
@@ -7004,8 +7011,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device_type, requires_grad=True)
+        y = torch.randn(4, 4, device=device_type, requires_grad=True)
 
         fw_compiler = functools.partial(
             count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
@@ -7019,7 +7026,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout_inductor(self):
         def gn(x, y):
@@ -7030,8 +7038,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device_type, requires_grad=True)
+        y = torch.randn(4, 4, device=device_type, requires_grad=True)
 
         backend = "inductor"
         self._validate(
@@ -7069,7 +7077,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 2)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
         class MockModule(torch.nn.Module):
@@ -7323,7 +7332,7 @@ xfail_hops_compile = {
 
 
 class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(
         list(filter(lambda op: op.name not in xfail_hops_compile, hop_db)),
@@ -7357,7 +7366,9 @@ class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
             self.assertEqual(eager_out, compiled_out)
 
 
-instantiate_device_type_tests(TestHigherOrderOpsOpInfo, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestHigherOrderOpsOpInfo, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
