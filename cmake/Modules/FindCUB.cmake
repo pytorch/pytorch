@@ -4,6 +4,7 @@
 
 find_path(CUB_INCLUDE_DIR
         HINTS "${CUDAToolkit_INCLUDE_DIRS}"
+        PATH_SUFFIXES . cccl
         NAMES cub/cub.cuh
         DOC "The directory where CUB includes reside"
 )
