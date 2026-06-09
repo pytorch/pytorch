@@ -6395,6 +6395,11 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(tensor_nd(), correction=0, keepdim=True)
     yield SampleInput(make_tensor(3, 4, 5, device=device, dtype=dtype, requires_grad=requires_grad), dim=-3)
 
+    if not requires_grad:
+        yield SampleInput(make_tensor((0,), device=device, dtype=dtype))
+        yield SampleInput(make_tensor((0, S), device=device, dtype=dtype))
+        yield SampleInput(make_tensor((0, S), device=device, dtype=dtype), dim=0)
+
 
 def sample_inputs_std_var_unbiased(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype,
@@ -6403,6 +6408,10 @@ def sample_inputs_std_var_unbiased(op_info, device, dtype, requires_grad, **kwar
     # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
     yield SampleInput(make_arg((S, S)), True)
     yield SampleInput(make_arg((S,)), False)
+
+    if not requires_grad:
+        yield SampleInput(make_arg((0,)), False)
+        yield SampleInput(make_arg((0, S)), True)
 
 
 def _generate_correlation_inputs(device, dtype, requires_grad, **kwargs):
@@ -13661,8 +13670,6 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                         # https://github.com/pytorch/pytorch/issues/70904
                         DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
-                        # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
                     )),
     BinaryUfuncInfo('bitwise_right_shift',
                     op=torch.bitwise_right_shift,
@@ -13678,8 +13685,6 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncsDevice', 'test_type_promotion'),
                         # https://github.com/pytorch/pytorch/issues/70904
                         DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
-                        # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
                     )),
     OpInfo('combinations',
            op=torch.combinations,
@@ -15415,9 +15420,6 @@ op_db: list[OpInfo] = [
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-           dtypesIfMPS=floating_and_complex_types_and(
-               torch.half, torch.bfloat16, torch.int32, torch.uint8, torch.bool, torch.int8, torch.int16
-           ),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: some signatures of var_mean do support out
            supports_out=False,
@@ -15434,9 +15436,6 @@ op_db: list[OpInfo] = [
            variant_test_name='unbiased',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-           dtypesIfMPS=floating_and_complex_types_and(
-               torch.half, torch.bfloat16, torch.int32, torch.uint8, torch.bool, torch.int8, torch.int16
-           ),
            sample_inputs_func=sample_inputs_std_var_unbiased,
            # TODO: some signatures of var_mean do support out
            supports_out=False,
@@ -15452,9 +15451,6 @@ op_db: list[OpInfo] = [
     OpInfo('std_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-           dtypesIfMPS=floating_and_complex_types_and(
-               torch.half, torch.bfloat16, torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32
-           ),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: some signatures of std_mean do support out
            supports_out=False,
@@ -15469,9 +15465,6 @@ op_db: list[OpInfo] = [
            variant_test_name='unbiased',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-           dtypesIfMPS=floating_and_complex_types_and(
-               torch.half, torch.bfloat16, torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32
-           ),
            sample_inputs_func=sample_inputs_std_var_unbiased,
            # TODO: some signatures of var_mean do support out
            supports_out=False,
@@ -16958,9 +16951,6 @@ op_db: list[OpInfo] = [
                    "test_comprehensive",
                    device_type="cpu"
                ),
-               # MPS supports int8/uint8 but CPU does not, so consistency test cannot run
-               DecorateInfo(unittest.expectedFailure, 'TestConsistency', 'test_output_match',
-                            device_type='mps', dtypes=(torch.int8, torch.uint8)),
            ],
            sample_inputs_func=sample_inputs_group_norm,
            reference_inputs_func=reference_inputs_group_norm,
@@ -24214,10 +24204,7 @@ python_ref_db = [
         torch_opinfo_name="geometric",
         supports_out=True,
         decorators=(
-            # dtypes that do not support check_uniform_bounds of rand_like
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
-                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
 
@@ -27189,15 +27176,6 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 device_type='mps', dtypes=(torch.complex64,)
             ),
-            # RuntimeError: mean(): could not infer output dtype. Input dtype must be either a floating point or complex dtype
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
-                dtypes=(torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32)
-            ),
         ),
     ),
     ReductionPythonRefInfo(
@@ -27310,22 +27288,6 @@ python_ref_db = [
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 device_type='mps', dtypes=(torch.complex64,)
-            ),
-            # RuntimeError: mean(): could not infer output dtype. Input dtype must be either a floating point or complex dtype
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps',
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
-                dtypes=(torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
-                dtypes=(torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool)
             ),
         ),
     ),
