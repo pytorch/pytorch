@@ -1008,16 +1008,19 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         final_key = resolve_key(self, key)
 
-        backend_autograd_python_kernel = (
-            functionality_key == DispatchKey.AutogradFunctionality
+        # Python dispatcher overrides in self.py_kernels are not backend
+        # registrations from torch.library; export uses them for CIA plumbing.
+        backend_autograd_dispatcher_python_kernel = (
+            self.namespace == "aten"
+            and functionality_key == DispatchKey.AutogradFunctionality
             and torch._C._to_functionality_key(final_key)  # type: ignore[attr-defined]
             == DispatchKey.AutogradFunctionality
             and final_key != DispatchKey.Autograd
-            and final_key in self.py_kernels
+            and final_key not in self.py_kernels
         )
 
         if (
-            backend_autograd_python_kernel
+            backend_autograd_dispatcher_python_kernel
             and not torch._C._dispatch_tls_is_dispatch_key_excluded(DispatchKey.Python)
         ):
             from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1033,7 +1036,8 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
         cache_result = (
-            key != DispatchKey.PreDispatch and not backend_autograd_python_kernel
+            key != DispatchKey.PreDispatch
+            and not backend_autograd_dispatcher_python_kernel
         )
 
         # TODO: We could potentially have lots of debugging wrappers against

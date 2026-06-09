@@ -107,19 +107,24 @@ class PythonKernelHolder : public c10::OperatorKernel {
     // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
     const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
     if (mode_stack_len > 0) {
+      const auto& cur_torch_dispatch_mode_state =
+          c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+      const auto fake_mode = c10::impl::TorchDispatchModeTLS::get_mode(
+          c10::impl::TorchDispatchModeKey::FAKE);
+      const auto functional_mode = c10::impl::TorchDispatchModeTLS::get_mode(
+          c10::impl::TorchDispatchModeKey::FUNCTIONAL);
       if (c10::toFunctionalityKey(dispatch_key_) ==
               c10::DispatchKey::AutogradFunctionality &&
           dispatch_key_ != c10::DispatchKey::Autograd &&
-          (c10::impl::TorchDispatchModeTLS::get_mode(
-               c10::impl::TorchDispatchModeKey::FAKE) ||
-           c10::impl::TorchDispatchModeTLS::get_mode(
-               c10::impl::TorchDispatchModeKey::FUNCTIONAL)) &&
+          op.operator_name().getNamespace() == "aten" &&
+          ((fake_mode.has_value() &&
+            cur_torch_dispatch_mode_state == *fake_mode) ||
+           (functional_mode.has_value() &&
+            cur_torch_dispatch_mode_state == *functional_mode)) &&
           !c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::Python)) {
         op.callBoxedForDispatchKey(c10::DispatchKey::Autograd, *stack);
         return;
       }
-      const auto& cur_torch_dispatch_mode_state =
-          c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
       cur_torch_dispatch_mode_state->pyinterpreter()
           ->python_op_registration_trampoline(
               op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
