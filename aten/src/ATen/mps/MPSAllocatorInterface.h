@@ -4,6 +4,7 @@
 
 #include <ATen/core/ATen_fwd.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/CachingDeviceAllocator.h>
 #include <c10/core/Storage.h>
 #include <c10/util/Registry.h>
 
@@ -13,10 +14,9 @@ namespace at::mps {
 
 // this is a public interface to access MPSAllocator.
 // Do not declare methods that would depend on MPS or Metal frameworks.
-class IMPSAllocator : public c10::Allocator {
+class IMPSAllocator : public c10::DeviceAllocator {
  public:
   // see the comments in MPSAllocator.h for the description of these methods.
-  virtual void emptyCache() const = 0;
   virtual void freeInactiveBuffers() const = 0;
   virtual ssize_t getUnalignedBufferSize(const void* ptr) const = 0;
   virtual IntArrayRef getBufferShape(const void* ptr) const = 0;
