@@ -365,7 +365,8 @@ struct ScaleSpec {
     //     This gives outer_dim scales (M for SRC, N for WEI)
     // For blockwise 1x128: groups = {1, 128} for SRC, {128, 1} for WEI
     //     scale shape: [outer_dim, ceil_div(inner_dim, 128)]
-    // For blockwise 1x32 (MXFP8/MXFP4): groups = {1, 32} for SRC, {32, 1} for WEI
+    // For blockwise 1x32 (MXFP8/MXFP4): groups = {1, 32} for SRC, {32, 1} for
+    // WEI
     //     scale shape: [outer_dim, ceil_div(inner_dim, 32)]
     // For blockwise 1x16 (NVFP4): groups = {1, 16} for SRC, {16, 1} for WEI
     //     scale shape: [outer_dim, ceil_div(inner_dim, 16)]
@@ -535,10 +536,12 @@ sycl::event scaled_matmul(
   dnnl::memory::desc src_md, weights_md;
   if (is_fp4) {
     src_md = dnnl::memory::desc(
-        {M, K}, get_onednn_dtype_include_double(mat1),
+        {M, K},
+        get_onednn_dtype_include_double(mat1),
         dnnl::memory::format_tag::ab);
     weights_md = dnnl::memory::desc(
-        {K, N}, get_onednn_dtype_include_double(mat2),
+        {K, N},
+        get_onednn_dtype_include_double(mat2),
         dnnl::memory::format_tag::ba);
   } else {
     src_md = get_onednn_md(mat1);
