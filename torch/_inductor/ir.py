@@ -5995,6 +5995,28 @@ class CppTemplateBuffer(TemplateBuffer):
             return super().get_layout()
 
 
+class QuackGemmEpilogueTemplateBuffer(TemplateBuffer):
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: Sequence[IRNode],
+        epilogue_name: str,
+        epilogue_source: str,
+        gemm_op: str,
+        alpha: float,
+        beta: float,
+    ) -> None:
+        super().__init__(layout, inputs, make_kernel_render=None)
+        self.epilogue_name = epilogue_name
+        self.epilogue_source = epilogue_source
+        self.gemm_op = gemm_op
+        self.alpha = alpha
+        self.beta = beta
+
+    def should_allocate(self) -> bool:
+        return False
+
+
 class CuteDSLTemplateBuffer(TemplateBuffer):
     """
     Buffer for CuteDSL (CUTLASS Python DSL) template kernels.
