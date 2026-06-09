@@ -232,7 +232,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
                 if not name.startswith("imm_"):
                     return None
 
-                value_part, _, _ = name[len("imm_"):].rpartition("_k")
+                value_part, _, _ = name[len("imm_") :].rpartition("_k")
                 if not value_part:
                     return None
                 try:
