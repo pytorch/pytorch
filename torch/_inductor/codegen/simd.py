@@ -203,7 +203,7 @@ class IterationRangesRoot(IterationRanges):
         # True if the dimension is implemented as a single program looping over
         # the full dimension (currently only used for non-persistent reduction)
 
-        if not (not is_loop or (self.is_reduction and grid_dim is None)):
+        if is_loop and not (self.is_reduction and grid_dim is None):
             raise AssertionError("loop ranges must be reduction with no grid_dim")
         self.is_loop = is_loop
         # Index of corresponding dimension on triton tensors
@@ -2194,7 +2194,7 @@ class SIMDScheduling(BaseScheduling):
                 why("nodes numel incompatibility")
             return numel1 == numel2
 
-        if not (node1.is_reduction() and not node2.is_reduction()):
+        if not node1.is_reduction() or node2.is_reduction():
             raise AssertionError(
                 "expected node1 to be a reduction and node2 not a reduction"
             )
@@ -2644,7 +2644,7 @@ class SIMDScheduling(BaseScheduling):
             outer_rnumel,
             coalesce_analysis,
         )
-        if not ("y" not in tiling and "z" not in tiling):
+        if "y" in tiling or "z" in tiling:
             raise AssertionError("nested reduction does not support tiled reductions")
 
         metrics.codegen_nested_reduction += 1
