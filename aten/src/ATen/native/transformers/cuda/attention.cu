@@ -1615,11 +1615,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     auto seed = use_dropout
         ? (use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr)
                             : mk_aoscalartensor(seed_t))
-        : mk_philoxtensor(nullptr);
+        : mk_aoscalartensor(seed_t);
     auto offset1 = use_dropout
         ? (use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr)
                             : mk_aoscalartensor(offset_t))
-        : mk_philoxtensor(nullptr);
+        : mk_aoscalartensor(offset_t);
     auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
     auto seed_output = mk_philoxtensor(use_philox_state ? seed_t.data_ptr<int64_t>() : nullptr);
     auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);

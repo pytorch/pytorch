@@ -587,7 +587,6 @@ _efficient_attention_backward(
     hipError_t err;
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
-    using sdp::aotriton_adapter::mk_philoxtensor;
     using sdp::aotriton_adapter::cast_dtype;
     aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
     using aotriton::v3::flash::CausalType;
@@ -609,10 +608,8 @@ _efficient_attention_backward(
     params.Max_seqlen_q = max_seqlen_q;        // Unused if cu_seqlens_q is empty
     params.Max_seqlen_k = max_seqlen_k;        // Unused if cu_seqlens_k is empty
     params.dropout_p = float(dropout_p);
-    params.philox_seed_ptr =
-        use_dropout ? mk_aoscalartensor(philox_seed) : mk_philoxtensor(nullptr);
-    params.philox_offset1 =
-        use_dropout ? mk_aoscalartensor(philox_offset) : mk_philoxtensor(nullptr);
+    params.philox_seed_ptr = mk_aoscalartensor(philox_seed);
+    params.philox_offset1 = mk_aoscalartensor(philox_offset);
     params.philox_offset2 = 0;
     params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
     if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
