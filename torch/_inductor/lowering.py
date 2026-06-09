@@ -8624,9 +8624,9 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             tensor_placeholders.index(node) for node in epilogue_arg_placeholders
         )
         if local_reduce is not None:
-            if gemm_op != torch.ops.aten.mm.default or len(size) != 2:
+            if gemm_op not in (torch.ops.aten.mm.default, torch.ops.aten.bmm.default):
                 raise NotImplementedError(
-                    "QUACK local-reduce tuple epilogues currently support only 2D aten.mm"
+                    "QUACK local-reduce tuple epilogues currently support only aten.mm and aten.bmm"
                 )
             if epilogue_arg_indices:
                 raise NotImplementedError(
@@ -8663,7 +8663,6 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         aux_out_index = None
         mutated_inputs = []
         if local_reduce is not None and not local_reduce.feeds_main:
-            m, n = size
             group_size = local_reduce.group_size
             local_reduce_val = local_reduce.aux_output_node.meta.get("val")
             local_reduce_dtype = getattr(local_reduce_val, "dtype", torch.float32)
@@ -8671,12 +8670,13 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 local_reduce_size = list(local_reduce_val.shape)
                 local_reduce_stride = list(local_reduce_val.stride())
             else:
+                *prefix, m, n = size
                 if local_reduce.dim == 0:
-                    local_reduce_size = [FloorDiv(m, group_size), n]
-                    local_reduce_stride = [n, 1]
+                    local_reduce_size = [*prefix, FloorDiv(m, group_size), n]
+                    local_reduce_stride = [n * FloorDiv(m, group_size), n, 1]
                 else:
-                    local_reduce_size = [m, FloorDiv(n, group_size)]
-                    local_reduce_stride = [FloorDiv(n, group_size), 1]
+                    local_reduce_size = [*prefix, m, FloorDiv(n, group_size)]
+                    local_reduce_stride = [m * FloorDiv(n, group_size), FloorDiv(n, group_size), 1]
             local_reduce_out = empty_strided(
                 local_reduce_size,
                 local_reduce_stride,
