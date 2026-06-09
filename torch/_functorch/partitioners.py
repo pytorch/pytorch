@@ -28,6 +28,7 @@ from torch._functorch._activation_checkpointing.ac_logging_utils import (
 )
 from torch._functorch._aot_autograd.utils import is_with_effects
 from torch._inductor import config as inductor_config
+from torch._inductor.cudagraph_utils import should_assert_cudagraph_output_stack_trace
 from torch._inductor.custom_graph_pass import (
     CustomKnapsackSolver,
     CustomRuntimeEstimator,
@@ -412,6 +413,14 @@ def _extract_graph_with_inputs_outputs(
             x.meta.get("stack_trace") or _get_first_user_stack_trace(x)
             if isinstance(x, fx.Node)
             else None
+        )
+        for x in outputs
+    ]
+    out.meta["output_stack_trace_required"] = [
+        isinstance(x, fx.Node)
+        and (
+            should_assert_cudagraph_output_stack_trace(x)
+            or _get_first_user_stack_trace(x) is not None
         )
         for x in outputs
     ]

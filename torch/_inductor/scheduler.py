@@ -8672,13 +8672,14 @@ class Scheduler:
 
         return name_to_node
 
-    def compute_graph_partition_maps(
+    def compute_graph_partition_map(
         self,
-        signatures: list[GraphPartitionSignature],
-    ) -> None:
+        partition_id: int,
+        signature: GraphPartitionSignature,
+    ) -> GraphPartitionMap:
         """
-        computes a mapping from partition input/output indices to graph input/output
-        indices for each partition.
+        computes a mapping from partition input/output indices to graph
+        input/output indices for a partition.
         """
         name_to_graph_input_index = {
             name: idx for idx, name in enumerate(V.graph.graph_inputs)
@@ -8687,35 +8688,49 @@ class Scheduler:
             name: idx for idx, name in enumerate(V.graph.get_output_names())
         }
 
+        input_mapping = []
+        for name in signature.input_nodes:
+            input_mapping.append(name_to_graph_input_index.get(name))
+
+        output_mapping = []
+        output_stack_traces: list[str | None] = []
+        output_stack_trace_required: list[bool] = []
+        for node in signature.output_nodes:
+            output_mapping.append(name_to_graph_output_index.get(node.get_name()))
+            traces = node.get_stack_traces()
+            output_stack_traces.append(next(iter(traces)) if traces else None)
+            output_stack_trace_required.append(bool(traces))
+
+        return GraphPartitionMap(
+            partition_id,
+            input_mapping,
+            output_mapping,
+            signature.constant_names,
+            output_stack_traces,
+            output_stack_trace_required,
+        )
+
+    def compute_graph_partition_maps(
+        self,
+        signatures: list[GraphPartitionSignature],
+    ) -> None:
+        """
+        computes a mapping from partition input/output indices to graph input/output
+        indices for each partition.
+        """
         V.graph.partition_maps = []
-        for partition_id, signature in enumerate(signatures):
+        partition_id = 0
+        for signature in signatures:
             if signature.skip_cudagraph:
                 # Note: [Graph Partition Map for CUDAGraph]
                 # number of partition map should be the same as the number of generated
                 # partition functions. This assumption will be used when cudagraphify
                 # each partition function.
                 continue
-
-            input_mapping = []
-            for name in signature.input_nodes:
-                input_mapping.append(name_to_graph_input_index.get(name))
-
-            output_mapping = []
-            output_stack_traces: list[str | None] = []
-            for node in signature.output_nodes:
-                output_mapping.append(name_to_graph_output_index.get(node.get_name()))
-                traces = node.get_stack_traces()
-                output_stack_traces.append(next(iter(traces)) if traces else None)
-
             V.graph.partition_maps.append(
-                GraphPartitionMap(
-                    partition_id,
-                    input_mapping,
-                    output_mapping,
-                    signature.constant_names,
-                    output_stack_traces,
-                )
+                self.compute_graph_partition_map(partition_id, signature)
             )
+            partition_id += 1
 
     def get_graph_partition_symbol_inputs(
         self,
@@ -9252,6 +9267,10 @@ class Scheduler:
             )
             signature = self.clean_removed_buffer_from_partition_signatures(
                 signature, removed_buffers_during_codegen
+            )
+            assert V.graph.partition_maps is not None
+            V.graph.partition_maps[graph_partition_id] = (
+                self.compute_graph_partition_map(graph_partition_id, signature)
             )
             V.graph.wrapper_code.partition_signatures = signature
             V.graph.wrapper_code.write_prefix()

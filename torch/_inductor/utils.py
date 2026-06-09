@@ -234,6 +234,9 @@ class GraphPartitionMap:
     # stack traces for each partition output, populated from IR node origins
     stack_traces: list[str | None] = dataclasses.field(default_factory=list)
 
+    # whether runtime should assert a partition output stack trace is present
+    stack_trace_required: list[bool] = dataclasses.field(default_factory=list)
+
 
 def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
     """

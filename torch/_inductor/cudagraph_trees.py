@@ -504,6 +504,7 @@ def cudagraphify(
     is_backward: bool,
     is_inference: bool,
     stack_traces: StackTraces | None = None,
+    stack_trace_required: StackTraceRequired | None = None,
     constants: tuple[torch.Tensor, ...] = (),
     placeholders: tuple[PlaceholderInfo, ...] = (),
     mutated_input_idxs: tuple[int, ...] = (),
@@ -526,6 +527,7 @@ def cudagraphify(
         inputs,
         static_input_idxs,
         stack_traces,
+        stack_trace_required,
         mode,
         constants,
         placeholders,
@@ -703,6 +705,7 @@ PathOutputIndex = tuple[int, int]
 PathLiveness = list[list[bool]]
 
 StackTraces = list[str | None]
+StackTraceRequired = list[bool]
 
 
 class CUDAWarmupNode:
@@ -732,6 +735,7 @@ class CUDAWarmupNode:
         existing_cuda_graph: torch.cuda.CUDAGraph | None,
         device_index: int,
         stack_traces: StackTraces | None,
+        stack_trace_required: StackTraceRequired | None,
         stream: torch.cuda.Stream,
         already_warm: bool,
         id: GraphID,
@@ -745,6 +749,7 @@ class CUDAWarmupNode:
         self.has_run = False
         self.device_index = device_index
         self.stack_traces = stack_traces
+        self.stack_trace_required = stack_trace_required
         self.stream = stream
         self.already_warm = already_warm
         self.id = id
@@ -805,6 +810,20 @@ class CUDAWarmupNode:
         cloned_output_idxs = expand_cloned_output_idxs(
             out, self.wrapped_function.cloned_output_idxs
         )
+        if self.stack_traces is None:
+            self.stack_traces = [None for _ in range(len(out))]
+        else:
+            assert len(self.stack_traces) == len(out), (
+                "Wrong number of stack traces passed in"
+            )
+        if self.stack_trace_required is None:
+            self.stack_trace_required = [
+                stack_trace is not None for stack_trace in self.stack_traces
+            ]
+        else:
+            assert len(self.stack_trace_required) == len(out), (
+                "Wrong number of stack trace requirements passed in"
+            )
 
         def allocated_in_pool(o: Any) -> bool:
             # sdpa returns cpu tensors when not recording cuda graph
@@ -933,6 +952,7 @@ class CUDAGraphNode:
         cuda_graphs_pool: _POOL_HANDLE,
         device_index: int,
         stack_traces: StackTraces | None,
+        stack_trace_required: StackTraceRequired | None,
         stream: torch.cuda.Stream,
         mode: CompilationMode | None,
         compile_id: CompileId | None,
@@ -943,6 +963,7 @@ class CUDAGraphNode:
         self.id = id
         self.device = device_index
         self.stack_traces = stack_traces
+        self.stack_trace_required = stack_trace_required
         self.stream = stream
 
         # Enable re-record a cudagraph when static tensor address changed.
@@ -1538,6 +1559,14 @@ class CUDAGraphNode:
         else:
             assert len(self.stack_traces) == len(outputs), (
                 "Wrong number of stack traces passed in"
+            )
+        if self.stack_trace_required is None:
+            self.stack_trace_required = [
+                stack_trace is not None for stack_trace in self.stack_traces
+            ]
+        else:
+            assert len(self.stack_trace_required) == len(outputs), (
+                "Wrong number of stack trace requirements passed in"
             )
 
         assert not self.outputs_weakrefs
@@ -2157,6 +2186,9 @@ class CUDAGraphTreeManager:
         self.ids_to_funcs: dict[FunctionID, WrappedFunction] = {}
 
         self.ids_to_stack_traces: dict[FunctionID, StackTraces | None] = {}
+        self.ids_to_stack_trace_required: dict[
+            FunctionID, StackTraceRequired | None
+        ] = {}
 
         self.warmed_up_functions: OrderedSet[FunctionID] = OrderedSet()
         # if we fail to increment generation, and are stuck warming up,
@@ -2650,6 +2682,7 @@ class CUDAGraphTreeManager:
                 self.cuda_graphs_thread_pool,
                 self.device_index,
                 self.ids_to_stack_traces[function_id],
+                self.ids_to_stack_trace_required[function_id],
                 self.stream,
                 self.mode,
                 self.compile_id,
@@ -2700,6 +2733,7 @@ class CUDAGraphTreeManager:
             self.graph,
             self.device_index,
             self.ids_to_stack_traces[function_id],
+            self.ids_to_stack_trace_required[function_id],
             self.stream,
             already_warm,
             self.new_warmup_node_id(),
@@ -2724,6 +2758,7 @@ class CUDAGraphTreeManager:
         inputs: list[InputType],
         static_input_idxs: Sequence[int],
         stack_traces: StackTraces | None,
+        stack_trace_required: StackTraceRequired | None,
         mode: CompilationMode,
         constants: tuple[torch.Tensor, ...],
         placeholders: tuple[PlaceholderInfo, ...],
@@ -2737,6 +2772,7 @@ class CUDAGraphTreeManager:
     ]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
+        self.ids_to_stack_trace_required[id] = stack_trace_required
         self.ids_to_funcs[id] = WrappedFunction(
             model,
             list(static_input_idxs),
@@ -2928,21 +2964,31 @@ class CUDAGraphTreeManager:
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
 
-        stor_dealloc_info: dict[int, tuple[str | None, bool]] = {}
+        stor_dealloc_info: dict[int, tuple[str | None, bool, bool]] = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
+            assert node.stack_trace_required is not None
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            assert len(node.stack_trace_required) == len(node.stack_traces)
             is_grad_output = (
                 self.id_to_mode[node.wrapped_function.id] == CompilationMode.BACKWARD
             )
-            for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
+            for t, stack_trace, stack_trace_required in zip(
+                node.tensor_weakrefs,
+                node.stack_traces,
+                node.stack_trace_required,
+            ):
                 ten = None if t is None else t()
                 if ten is None:
                     continue
 
                 torch._C._set_storage_access_error_msg(
                     ten,
-                    self.format_dealloc_msg(stack_trace, is_grad_output=is_grad_output),
+                    self.format_dealloc_msg(
+                        stack_trace,
+                        is_grad_output=is_grad_output,
+                        assert_stack_trace=stack_trace_required and not is_grad_output,
+                    ),
                 )
 
             # we would to enable the following assertion, but an internal model failed with a command
@@ -2952,8 +2998,10 @@ class CUDAGraphTreeManager:
             if self.disable_invalidate_aliases:
                 continue
 
-            for storage_ref, stack_trace in zip(
-                node.outputs_weakrefs, node.stack_traces
+            for storage_ref, stack_trace, stack_trace_required in zip(
+                node.outputs_weakrefs,
+                node.stack_traces,
+                node.stack_trace_required,
             ):
                 if not storage_ref:
                     continue
@@ -2961,6 +3009,7 @@ class CUDAGraphTreeManager:
                 stor_dealloc_info[storage_ref.data_ptr()] = (
                     stack_trace,
                     is_grad_output,
+                    stack_trace_required,
                 )
 
         deleted = OrderedSet[Any]()
@@ -2971,13 +3020,17 @@ class CUDAGraphTreeManager:
 
                 dealloc_info = stor_dealloc_info.get(storage_ref.data_ptr())
                 if dealloc_info is None:
-                    stack_trace, is_grad_output = None, False
+                    stack_trace, is_grad_output, stack_trace_required = (
+                        None,
+                        False,
+                        False,
+                    )
                 else:
-                    stack_trace, is_grad_output = dealloc_info
+                    stack_trace, is_grad_output, stack_trace_required = dealloc_info
                 msg = self.format_dealloc_msg(
                     stack_trace,
                     is_grad_output=is_grad_output,
-                    assert_stack_trace=dealloc_info is not None,
+                    assert_stack_trace=stack_trace_required and not is_grad_output,
                 )
                 torch._C._free_And_Remove_DeleterFn(_storage_deref)
 

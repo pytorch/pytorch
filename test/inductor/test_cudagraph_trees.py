@@ -2613,7 +2613,6 @@ if HAS_CUDA_AND_TRITON:
 
             FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
 
-        @config.patch("test_configs.cudagraph_assert_stack_traces", False)
         def test_grad_accumulation_dealloc_error_message(self):
             model = torch.nn.Linear(10, 1, device="cuda")
             compiled_model = torch.compile(

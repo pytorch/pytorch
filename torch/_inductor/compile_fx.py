@@ -70,6 +70,7 @@ from torch._inductor.cudagraph_utils import (
     format_default_skip_message,
     log_cudagraph_skip_and_bump_counter,
     PlaceholderInfo,
+    should_assert_cudagraph_output_stack_trace,
 )
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.debug import (
@@ -1891,6 +1892,7 @@ def cudagraphify(
     stack_traces: list[str | None],
     is_backward: bool,
     is_inference: bool,
+    stack_trace_required: list[bool] | None = None,
     constants: tuple[torch.Tensor, ...] = (),
     placeholders: Sequence[PlaceholderInfo] = (),
     mutated_input_idxs: tuple[int, ...] = (),
@@ -1907,6 +1909,7 @@ def cudagraphify(
             new_cudagraphify_impl,
             device_index=device_index,
             stack_traces=stack_traces,
+            stack_trace_required=stack_trace_required,
             is_backward=is_backward,
             is_inference=is_inference,
             constants=constants,
@@ -2499,6 +2502,10 @@ def compile_fx_forward(
                 if isinstance(arg, torch.fx.node.Node)
                 else None
             )
+            for arg in _output.args[0]  # type: ignore[union-attr]
+        ]
+        _output.meta["output_stack_trace_required"] = [
+            should_assert_cudagraph_output_stack_trace(arg)
             for arg in _output.args[0]  # type: ignore[union-attr]
         ]
 
