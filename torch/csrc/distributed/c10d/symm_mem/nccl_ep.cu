@@ -8,8 +8,6 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <nccl_ep.h>
 
-#include <array>
-
 namespace c10d::nccl_ep {
 
 // Wraps an at::Tensor as ncclEpTensor_t. Holding the at::Tensor by value bumps
@@ -20,10 +18,10 @@ struct EpTensor {
     ncclEpTensor_t desc = NCCL_EP_TENSOR_INIT;
 
     explicit EpTensor(at::Tensor tensor) : t(std::move(tensor)) {
-        TORCH_CHECK(
+        TORCH_CHECK_VALUE(
             t.is_contiguous(),
             "nccl_ep tensors must be memory-contiguous (call .contiguous())");
-        TORCH_CHECK(t.dim() > 0, "nccl_ep tensor must have rank >= 1");
+        TORCH_CHECK_VALUE(t.dim() > 0, "nccl_ep tensor must have rank >= 1");
         desc.ndim = static_cast<unsigned int>(t.dim());
         desc.datatype = c10d::getNcclDataType(t.scalar_type());
         desc.data = t.data_ptr();
