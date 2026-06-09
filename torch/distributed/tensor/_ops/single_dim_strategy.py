@@ -68,7 +68,7 @@ _SingleDimStrategyFunc: TypeAlias = Callable[
 _ExpandedSingleDimStrategyFunc: TypeAlias = Callable[
     [OpOverload, ArgsType, KwargsType], _StrategyTypeT
 ]
-_SingleDimStrategyValidityFunc: TypeAlias = Callable[
+_FullMeshStrategyFilter: TypeAlias = Callable[
     [
         DeviceMesh,
         OpSchema,
@@ -84,7 +84,7 @@ class _SingleDimStrategyInfo:
     func: _SingleDimStrategyFunc
     allow_unbacked_sharding: bool | None = field(default=None)
     allow_uneven_sharding: bool = field(default=False)
-    is_valid_strategy_cb: _SingleDimStrategyValidityFunc | None = field(default=None)
+    full_mesh_strategy_filter: _FullMeshStrategyFilter | None = field(default=None)
     # Positions (in args_schema) of args that may live on a different mesh
     # than the op's compute mesh.  These args must be Replicate.
     # See Note [Multi-mesh args] in expand_to_full_mesh_op_strategy.
@@ -315,13 +315,13 @@ class _PreparedSingleDimStrategy:
         if isinstance(strategy_fn, _SingleDimStrategyInfo):
             self.allow_unbacked_sharding = strategy_fn.allow_unbacked_sharding
             self.allow_uneven_sharding = strategy_fn.allow_uneven_sharding
-            self.is_valid_strategy_cb = strategy_fn.is_valid_strategy_cb
+            self.full_mesh_strategy_filter = strategy_fn.full_mesh_strategy_filter
             different_mesh_args = strategy_fn.different_mesh_args
             func = strategy_fn.func
         else:
             self.allow_unbacked_sharding = None
             self.allow_uneven_sharding = False
-            self.is_valid_strategy_cb = None
+            self.full_mesh_strategy_filter = None
             different_mesh_args = None
             func = strategy_fn
 
@@ -673,16 +673,16 @@ def _expand_single_dim_strategy_to_mesh(
             is_inplace = base_name.endswith("_")
 
             element_mesh = prepared_strategy.element_mesh or mesh
-            valid_strategy_cb = None
-            if prepared_strategy.is_valid_strategy_cb is not None:
+            full_mesh_strategy_filter = None
+            if prepared_strategy.full_mesh_strategy_filter is not None:
 
-                def valid_strategy_cb(
+                def full_mesh_strategy_filter(
                     input_specs: list[DTensorSpec],
                     output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
                 ) -> bool:
-                    if prepared_strategy.is_valid_strategy_cb is None:
+                    if prepared_strategy.full_mesh_strategy_filter is None:
                         raise AssertionError
-                    return prepared_strategy.is_valid_strategy_cb(
+                    return prepared_strategy.full_mesh_strategy_filter(
                         element_mesh, op_schema, input_specs, output_specs
                     )
 
@@ -695,7 +695,7 @@ def _expand_single_dim_strategy_to_mesh(
                 input_index=prepared_strategy.num_outputs,
                 allow_unbacked_sharding=prepared_strategy.allow_unbacked_sharding,
                 allow_uneven_sharding=prepared_strategy.allow_uneven_sharding,
-                is_valid_strategy_cb=valid_strategy_cb,
+                full_mesh_strategy_filter=full_mesh_strategy_filter,
                 different_mesh_args=prepared_strategy.remapped_different_mesh_args,
             )
 
@@ -803,7 +803,7 @@ def register_single_dim_strategy(
     schema_info: RuntimeSchemaInfo | None = None,
     allow_unbacked_sharding: bool | None = None,
     allow_uneven_sharding: bool = False,
-    is_valid_strategy_cb: _SingleDimStrategyValidityFunc | None = None,
+    full_mesh_strategy_filter: _FullMeshStrategyFilter | None = None,
     different_mesh_args: list[int] | None = None,
 ) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
@@ -853,7 +853,7 @@ def register_single_dim_strategy(
             func=impl,
             allow_unbacked_sharding=allow_unbacked_sharding,
             allow_uneven_sharding=allow_uneven_sharding,
-            is_valid_strategy_cb=is_valid_strategy_cb,
+            full_mesh_strategy_filter=full_mesh_strategy_filter,
             different_mesh_args=different_mesh_args,
         )
         registration_wrapper(info)

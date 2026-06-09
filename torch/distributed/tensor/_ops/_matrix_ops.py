@@ -1250,7 +1250,7 @@ def _valid_grouped_mm_strides(
 
 @register_single_dim_strategy(
     aten._grouped_mm.default,
-    is_valid_strategy_cb=_valid_grouped_mm_strides,
+    full_mesh_strategy_filter=_valid_grouped_mm_strides,
 )
 def grouped_mm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
