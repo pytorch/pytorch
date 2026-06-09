@@ -1848,14 +1848,24 @@ class TestPatternMatcher(TestCase):
         def test(x, y):
             return x + (y * 0)
 
-        x = torch.rand([256], device=GPU_TYPE)
-        y = torch.rand([256], device=GPU_TYPE)
-
-        test_c = torch.compile(test)
-
-        out, code = run_and_get_code(test_c, x, y)
+        # For integer dtypes, x * 0 is uniformly 0, so the multiply is folded
+        # away entirely and no kernel needs to run.
+        xi = torch.randint(0, 10, [256], device=GPU_TYPE)
+        yi = torch.randint(0, 10, [256], device=GPU_TYPE)
+        out, code = run_and_get_code(torch.compile(test), xi, yi)
         FileCheck().check_not(".run").run(code[0])
-        self.assertEqual(out, test(x, y))
+        self.assertEqual(out, test(xi, yi))
+
+        # For floating point dtypes, x * 0 must NOT be folded to 0: nan * 0 == nan
+        # and (+/-inf) * 0 == nan, so the multiply has to run to match eager.
+        xf = torch.rand([8], device=GPU_TYPE)
+        yf = torch.tensor(
+            [float("nan"), float("inf"), float("-inf"), 0.0, 1.0, -1.0, 2.0, -3.0],
+            device=GPU_TYPE,
+        )
+        out, code = run_and_get_code(torch.compile(test), xf, yf)
+        FileCheck().check(".run").run(code[0])
+        self.assertEqual(out, test(xf, yf))
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
