@@ -113,6 +113,8 @@ def _sanitize_llvm_ir_for_rocm(llvm_ir_path: str) -> str:
     Currently strips:
         - nocreateundeforpoison: function attribute (upstream LLVM, not in ROCm)
         - dwarfAddressSpace: debug metadata field (upstream LLVM, not in ROCm)
+        - i64 NumRecords operand on llvm.amdgcn.make.buffer.rsrc calls
+          (upstream LLVM emits it, ROCm LLVM 7.0 expects i32)
 
     Returns:
         Path to sanitized .ll file, or original path if no changes needed.
@@ -123,6 +125,18 @@ def _sanitize_llvm_ir_for_rocm(llvm_ir_path: str) -> str:
     sanitized = content
     sanitized = re.sub(r"\bnocreateundeforpoison\b\s*", "", sanitized)
     sanitized = re.sub(r",\s*dwarfAddressSpace:\s*\d+", "", sanitized)
+    sanitized = re.sub(
+        r"(@llvm\.amdgcn\.make\.buffer\.rsrc(?:\.[^(]+)?\("
+        r"ptr(?:\s+addrspace\(\d+\))?(?:\s+\w+)*,\s*i16,\s*)i64(\s*,\s*i32\))",
+        r"\1i32\2",
+        sanitized,
+    )
+    sanitized = re.sub(
+        r"(@llvm\.amdgcn\.make\.buffer\.rsrc(?:\.[^(]+)?\("
+        r"ptr(?:\s+addrspace\(\d+\))?[^,]*,\s*i16\s+[^,]+,\s*)i64(\s+[-]?\d+\s*,\s*i32\s+[^)]+\))",
+        r"\1i32\2",
+        sanitized,
+    )
 
     if sanitized == content:
         return llvm_ir_path
