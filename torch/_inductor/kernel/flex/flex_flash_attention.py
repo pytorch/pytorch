@@ -126,6 +126,20 @@ def _get_flex_flash_bwd_configs() -> list[FlexFlashConfig]:
 aten = torch.ops.aten
 prims = torch.ops.prims
 
+FLASH_ATTENTION_INSTALL_MESSAGE = (
+    "Install a compatible Flash Attention package, for example "
+    '`pip install --pre flash-attn-4` (`pip install --pre "flash-attn-4[cu13]"` '
+    "for CUDA 13), and see https://pypi.org/project/flash-attn-4/ "
+    "for PyPI packaging details."
+)
+
+
+def _flash_attention_unavailable_message() -> str:
+    return (
+        "CUTE flash attention library is not available. "
+        f"{FLASH_ATTENTION_INSTALL_MESSAGE}"
+    )
+
 
 @functools.lru_cache(maxsize=1)
 def ensure_flash_available() -> bool:
@@ -327,7 +341,7 @@ def _can_use_flex_flash_attention(
         tuple: (can_use, reason) where reason explains why it can't be used if can_use is False
     """
     if not ensure_flash_available():
-        return False, "CUTE flash attention library is not available"
+        return False, _flash_attention_unavailable_message()
 
     if input_buffers_require_grads(subgraph.graph_module, num_score_mod_placeholders):
         return (
@@ -403,7 +417,7 @@ def create_flex_flash_attention_kernel(
             f"and value.dtype: {value.dtype}."
         )
     if not ensure_flash_available():
-        raise RuntimeError("CUTE flash attention not available")
+        raise RuntimeError(_flash_attention_unavailable_message())
 
     # Get dimensions
     batch_size, num_heads, seq_len_q, head_dim = query.get_size()
@@ -540,7 +554,7 @@ def _can_use_flex_flash_attention_backward(
     num_score_mod_placeholders: int = 5,
 ) -> tuple[bool, str]:
     if not ensure_flash_available():
-        return False, "CUTE flash attention is not available"
+        return False, _flash_attention_unavailable_message()
 
     if input_buffers_require_grads(
         fw_subgraph.graph_module, num_score_mod_placeholders
@@ -629,7 +643,7 @@ def create_flex_flash_attention_backward_kernel(
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
-        raise RuntimeError("CUTE flash attention not available")
+        raise RuntimeError(_flash_attention_unavailable_message())
 
     batch_size, num_heads, seq_len_q, head_dim = query.get_size()
     _, num_heads_kv, seq_len_kv, v_head_dim = value.get_size()
