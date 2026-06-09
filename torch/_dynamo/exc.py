@@ -201,6 +201,10 @@ class SkipFrame(TorchDynamoException):
     pass
 
 
+class EmptyGraph(SkipFrame):
+    """Skip an empty frame and disable Dynamo recursively during eager fallback."""
+
+
 class TorchRuntimeError(TorchDynamoException):
     def __init__(self, msg: str, real_stack: StackSummary | None = None) -> None:
         super().__init__(msg)
