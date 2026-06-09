@@ -1109,7 +1109,11 @@ class _PyTreeCodeGen(CodeGen):
         if expanded_def:
             return "\n    " + "\n    ".join(has_annotation)
         else:
-            return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
+            # Use join() instead of f"{x}; " per item so the trailing
+            # newline isn't preceded by a stray space. Trailing whitespace
+            # is silently stripped by lintrunner / editors, making any
+            # expecttest snapshot consuming this output flaky.
+            return "\n    " + "; ".join(has_annotation) + ";\n"
 
     def gen_var_bindings(
         self, fn_args: list[str], free_vars: list[str], expanded_def: bool

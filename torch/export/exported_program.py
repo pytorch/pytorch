@@ -1454,10 +1454,15 @@ class ExportedProgram:
             print_output=False, colored=False
         ).replace("\n", "\n    ")
         graph_signature = str(self.graph_signature).replace("\n", "\n    ")
+        # Note: no literal space after "Graph signature:" — graph_signature
+        # always starts with a newline (renders on its own line), so a literal
+        # space here would always be trailing whitespace before that newline.
+        # Trailing whitespace is silently stripped by lintrunner / many
+        # editors, making expecttest snapshots flaky.
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph signature: {graph_signature}\n"
+            f"Graph signature:{graph_signature}\n"
             f"Range constraints: {self.range_constraints}\n"
         )
         return string
