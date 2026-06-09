@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     munge_exc,
     parametrize,
+    skipIfXpu,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
@@ -43,9 +44,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.triton_utils import (
-    requires_cuda_and_triton,
-    requires_gpu_and_triton,
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
 
@@ -193,6 +196,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(cnt.op_count, expected_opcount)
                 graph = backend.graphs[0]
                 wrap_node = find_first_node(graph, wrap)
+
                 self.assertEqual(len(wrap_node.args), expected_num_wrap_args)
         # We always return/check the graph from the first run if return_graph = True
         if return_graph:
@@ -3836,12 +3840,6 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[4, 3]"):
         l_x_ = L_x_
 
-        tensor: "i64[1]" = torch.tensor((12,))
-        cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
-        neg: "i64[0]" = getitem.neg();  getitem = None
-        unbind = neg.unbind();  neg = unbind = None
-
         chunk: "f32[12, 12]" = l_x_.new_zeros(12, 12)
 
         diagonal: "f32[12]" = chunk.diagonal(0)
@@ -3883,12 +3881,6 @@ class GraphModule(torch.nn.Module):
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
 
-        tensor_1: "i64[1]" = torch.tensor((12,))
-        cumsum_1: "i64[1]" = tensor_1.cumsum(dim = 0);  tensor_1 = None
-        getitem_1: "i64[0]" = cumsum_1[slice(None, -1, None)];  cumsum_1 = None
-        neg_1: "i64[0]" = getitem_1.neg();  getitem_1 = None
-        unbind_1 = neg_1.unbind();  neg_1 = unbind_1 = None
-
         chunk_1: "f32[12, 12]" = results.new_zeros(12, 12);  results = None
 
         diagonal_1: "f32[12]" = chunk_1.diagonal(0)
@@ -3909,7 +3901,7 @@ class GraphModule(torch.nn.Module):
 
         _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
-        split = chunked_result.split((12,), dim = 0);  chunked_result = None
+        split = torch.functional.split(chunked_result, [12], dim = 0);  chunked_result = None
         split_1: "f32[12, 4, 3]" = split[0];  split = None
 
         output_input: "f32[4, 3, 4, 3]" = split_1.view((4, 3, 4, 3));  split_1 = None
@@ -3930,7 +3922,8 @@ class GraphModule(torch.nn.Module):
         _vmap_decrement_nesting_1 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
 
         movedim: "f32[4, 3, 4, 3, 12]" = results_1.movedim(0, -1);  results_1 = None
-        split_2 = movedim.split((12,), dim = -1);  movedim = None
+
+        split_2 = torch.functional.split(movedim, [12], dim = -1);  movedim = None
         jac_out_in: "f32[4, 3, 4, 3, 12]" = split_2[0];  split_2 = None
 
         unflatten: "f32[4, 3, 4, 3, 4, 3]" = jac_out_in.unflatten(-1, (4, 3));  jac_out_in = None
@@ -3962,12 +3955,6 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[4, 3]", L_y_: "f32[3, 4]"):
         l_x_ = L_x_
         l_y_ = L_y_
-
-        tensor: "i64[1]" = torch.tensor((12,))
-        cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
-        neg: "i64[0]" = getitem.neg();  getitem = None
-        unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = l_y_.new_zeros(12, 12)
 
@@ -4012,12 +3999,6 @@ class GraphModule(torch.nn.Module):
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
 
-        tensor_1: "i64[1]" = torch.tensor((12,))
-        cumsum_1: "i64[1]" = tensor_1.cumsum(dim = 0);  tensor_1 = None
-        getitem_1: "i64[0]" = cumsum_1[slice(None, -1, None)];  cumsum_1 = None
-        neg_1: "i64[0]" = getitem_1.neg();  getitem_1 = None
-        unbind_1 = neg_1.unbind();  neg_1 = unbind_1 = None
-
         chunk_1: "f32[12, 12]" = results.new_zeros(12, 12);  results = None
 
         diagonal_1: "f32[12]" = chunk_1.diagonal(0)
@@ -4038,7 +4019,7 @@ class GraphModule(torch.nn.Module):
 
         _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
-        split = child_6.split((12,), dim = 0);  child_6 = None
+        split = torch.functional.split(child_6, [12], dim = 0);  child_6 = None
         split_1: "f32[12, 3, 4]" = split[0];  split = None
 
         child_7: "f32[4, 3, 3, 4]" = split_1.view((4, 3, 3, 4));  split_1 = None
@@ -4060,7 +4041,8 @@ class GraphModule(torch.nn.Module):
         _vmap_decrement_nesting_1 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
 
         movedim: "f32[4, 3, 3, 4, 12]" = child_10.movedim(0, -1);  child_10 = None
-        split_2 = movedim.split((12,), dim = -1);  movedim = None
+
+        split_2 = torch.functional.split(movedim, [12], dim = -1);  movedim = None
         jac_out_in: "f32[4, 3, 3, 4, 12]" = split_2[0];  split_2 = None
 
         unflatten: "f32[4, 3, 3, 4, 3, 4]" = jac_out_in.unflatten(-1, (3, 4));  jac_out_in = None""",
@@ -4109,12 +4091,6 @@ class GraphModule(torch.nn.Module):
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
 
-        tensor: "i64[1]" = torch.tensor((12,))
-        cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
-        neg: "i64[0]" = getitem.neg();  getitem = None
-        unbind = neg.unbind();  neg = unbind = None
-
         chunk: "f32[12, 12]" = results.new_zeros(12, 12);  results = None
 
         diagonal: "f32[12]" = chunk.diagonal(0)
@@ -4135,7 +4111,7 @@ class GraphModule(torch.nn.Module):
 
         _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
-        split = chunked_result.split((12,), dim = 0);  chunked_result = None
+        split = torch.functional.split(chunked_result, [12], dim = 0);  chunked_result = None
         split_1: "f32[12, 4, 3]" = split[0];  split = None
 
         output_input: "f32[4, 3, 4, 3]" = split_1.view((4, 3, 4, 3));  split_1 = None
@@ -4160,9 +4136,7 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(
-            actual,
-            """\
+        expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[4, 3]", L_y_: "f32[3, 4]"):
         l_x_ = L_x_
@@ -4187,12 +4161,6 @@ class GraphModule(torch.nn.Module):
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
 
-        tensor: "i64[1]" = torch.tensor((12,))
-        cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
-        neg: "i64[0]" = getitem.neg();  getitem = None
-        unbind = neg.unbind();  neg = unbind = None
-
         chunk: "f32[12, 12]" = results.new_zeros(12, 12);  results = None
 
         diagonal: "f32[12]" = chunk.diagonal(0)
@@ -4213,12 +4181,15 @@ class GraphModule(torch.nn.Module):
 
         _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
-        split = chunked_result.split((12,), dim = 0);  chunked_result = None
+        split = torch.functional.split(chunked_result, [12], dim = 0);  chunked_result = None
         split_1: "f32[12, 3, 4]" = split[0];  split = None
 
         output_input: "f32[3, 4, 3, 4]" = split_1.view((3, 4, 3, 4));  split_1 = None
         return (output_input,)
-""",
+"""
+        self.assertExpectedInline(
+            empty_line_normalizer(actual),
+            empty_line_normalizer(normalize_gm(expected)),
         )
 
     def test_jacrev_has_aux(self):
@@ -4266,12 +4237,6 @@ class GraphModule(torch.nn.Module):
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
 
-        tensor: "i64[1]" = torch.tensor((12,))
-        cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
-        neg: "i64[0]" = getitem.neg();  getitem = None
-        unbind = neg.unbind();  neg = unbind = None
-
         chunk: "f32[12, 12]" = results.new_zeros(12, 12);  results = None
 
         diagonal: "f32[12]" = chunk.diagonal(0)
@@ -4292,7 +4257,7 @@ class GraphModule(torch.nn.Module):
 
         _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
-        split = chunked_result.split((12,), dim = 0);  chunked_result = None
+        split = torch.functional.split(chunked_result, [12], dim = 0);  chunked_result = None
         split_1: "f32[12, 3, 4]" = split[0];  split = None
 
         output_input: "f32[3, 4, 3, 4]" = split_1.view((3, 4, 3, 4));  split_1 = None
@@ -5250,12 +5215,6 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[4, 3]"):
         l_x_ = L_x_
 
-        tensor: "i64[1]" = torch.tensor((12,))
-        cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
-        neg: "i64[0]" = getitem.neg();  getitem = None
-        unbind = neg.unbind();  neg = unbind = None
-
         chunk: "f32[12, 12]" = l_x_.new_zeros(12, 12)
 
         diagonal: "f32[12]" = chunk.diagonal(0)
@@ -5297,7 +5256,8 @@ class GraphModule(torch.nn.Module):
         _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
         movedim: "f32[4, 3, 12]" = results.movedim(0, -1);  results = None
-        split = movedim.split((12,), dim = -1);  movedim = None
+
+        split = torch.functional.split(movedim, [12], dim = -1);  movedim = None
         jac_out_in: "f32[4, 3, 12]" = split[0];  split = None
 
         unflatten: "f32[4, 3, 4, 3]" = jac_out_in.unflatten(-1, (4, 3));  jac_out_in = None
@@ -5329,12 +5289,6 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[4, 3]", L_y_: "f32[3, 4]"):
         l_x_ = L_x_
         l_y_ = L_y_
-
-        tensor: "i64[1]" = torch.tensor((12,))
-        cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
-        neg: "i64[0]" = getitem.neg();  getitem = None
-        unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = l_y_.new_zeros(12, 12)
 
@@ -5378,7 +5332,8 @@ class GraphModule(torch.nn.Module):
         _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
         movedim: "f32[3, 4, 12]" = results.movedim(0, -1);  results = None
-        split = movedim.split((12,), dim = -1);  movedim = None
+
+        split = torch.functional.split(movedim, [12], dim = -1);  movedim = None
         jac_out_in: "f32[3, 4, 12]" = split[0];  split = None
 
         unflatten: "f32[3, 4, 3, 4]" = jac_out_in.unflatten(-1, (3, 4));  jac_out_in = None
@@ -5410,12 +5365,6 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[4, 3]", L_y_: "f32[3, 4]"):
         l_x_ = L_x_
         l_y_ = L_y_
-
-        tensor: "i64[1]" = torch.tensor((12,))
-        cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
-        neg: "i64[0]" = getitem.neg();  getitem = None
-        unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = l_y_.new_zeros(12, 12)
 
@@ -5464,7 +5413,8 @@ class GraphModule(torch.nn.Module):
         aux_3: "f32[4, 3]" = aux_2[0];  aux_2 = None
 
         movedim: "f32[3, 4, 12]" = results.movedim(0, -1);  results = None
-        split = movedim.split((12,), dim = -1);  movedim = None
+
+        split = torch.functional.split(movedim, [12], dim = -1);  movedim = None
         jac_out_in: "f32[3, 4, 12]" = split[0];  split = None
 
         unflatten: "f32[3, 4, 3, 4]" = jac_out_in.unflatten(-1, (3, 4));  jac_out_in = None
@@ -5496,12 +5446,6 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[4, 3]", L_y_: "f32[3, 4]"):
         l_x_ = L_x_
         l_y_ = L_y_
-
-        tensor: "i64[1]" = torch.tensor((12,))
-        cumsum: "i64[1]" = tensor.cumsum(dim = 0);  tensor = None
-        getitem: "i64[0]" = cumsum[slice(None, -1, None)];  cumsum = None
-        neg: "i64[0]" = getitem.neg();  getitem = None
-        unbind = neg.unbind();  neg = unbind = None
 
         chunk: "f32[12, 12]" = l_x_.new_zeros(12, 12)
 
@@ -5553,13 +5497,15 @@ class GraphModule(torch.nn.Module):
         _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
         movedim: "f32[3, 4, 12]" = child_8.movedim(0, -1);  child_8 = None
-        split = movedim.split((12,), dim = -1);  movedim = None
+
+        split = torch.functional.split(movedim, [12], dim = -1);  movedim = None
         jac_out_in: "f32[3, 4, 12]" = split[0];  split = None
 
         unflatten: "f32[3, 4, 4, 3]" = jac_out_in.unflatten(-1, (4, 3));  jac_out_in = None
 
         movedim_1: "f32[4, 3, 12]" = child_9.movedim(0, -1);  child_9 = None
-        split_1 = movedim_1.split((12,), dim = -1);  movedim_1 = None
+
+        split_1 = torch.functional.split(movedim_1, [12], dim = -1);  movedim_1 = None
         jac_out_in_1: "f32[4, 3, 12]" = split_1[0];  split_1 = None
 
         unflatten_1: "f32[4, 3, 4, 3]" = jac_out_in_1.unflatten(-1, (4, 3));  jac_out_in_1 = None
@@ -6950,7 +6896,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             for arg, cloned_arg in zip(args, cloned_args):
                 self.assertEqual(arg.grad, cloned_arg.grad)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function(self):
         def gn(x, y):
@@ -6969,7 +6916,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function_with_kwargs(self):
         def gn(x, y):
@@ -6992,7 +6940,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout(self):
         def gn(x, y):
@@ -7003,8 +6952,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device_type, requires_grad=True)
+        y = torch.randn(4, 4, device=device_type, requires_grad=True)
 
         fw_compiler = functools.partial(
             count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
@@ -7018,7 +6967,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout_inductor(self):
         def gn(x, y):
@@ -7029,8 +6979,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device_type, requires_grad=True)
+        y = torch.randn(4, 4, device=device_type, requires_grad=True)
 
         backend = "inductor"
         self._validate(
@@ -7068,7 +7018,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 2)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
         class MockModule(torch.nn.Module):
@@ -7322,7 +7273,7 @@ xfail_hops_compile = {
 
 
 class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(
         list(filter(lambda op: op.name not in xfail_hops_compile, hop_db)),
@@ -7356,7 +7307,9 @@ class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
             self.assertEqual(eager_out, compiled_out)
 
 
-instantiate_device_type_tests(TestHigherOrderOpsOpInfo, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestHigherOrderOpsOpInfo, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

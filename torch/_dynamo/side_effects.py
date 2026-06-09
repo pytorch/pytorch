@@ -1127,19 +1127,6 @@ class SideEffects:
                     collect_from_real_value(item)
                 return
 
-            tracked_var = self.id_to_variable.get(id(value))
-            if isinstance(
-                tracked_var,
-                (
-                    variables.UserDefinedObjectVariable,
-                    variables.UserDefinedClassVariable,
-                    variables.UserFunctionVariable,
-                    variables.PythonModuleVariable,
-                ),
-            ):
-                collect_from_python_backed_vt(tracked_var)
-                return
-
             if isinstance(value, CellType):
                 tracked_cell = self.id_to_variable.get(id(value))
                 if isinstance(tracked_cell, variables.CellVariable):
@@ -1151,44 +1138,12 @@ class SideEffects:
                     pass
                 return
 
-            if isinstance(value, types.FunctionType):
-                collect_from_real_value(value.__defaults__)
-                collect_from_real_value(value.__kwdefaults__)
-                collect_from_real_value(value.__dict__)
-                collect_from_real_value(value.__closure__)
-                return
-
-            if isinstance(value, types.ModuleType):
-                if value is torch or value.__name__.startswith("torch."):
-                    return
-                collect_from_real_value(vars(value))
-                return
-
-            if isinstance(value, type):
-                for cls in value.__mro__:
-                    collect_from_real_value(dict(cls.__dict__))
-                return
-
-            try:
-                instance_dict = object.__getattribute__(value, "__dict__")
-            except AttributeError:
-                instance_dict = None
-            if instance_dict is not None:
-                collect_from_real_value(instance_dict)
-
-            for cls in type(value).__mro__:
-                slots = cls.__dict__.get("__slots__")
-                if slots is None:
-                    continue
-                if isinstance(slots, str):
-                    slots = (slots,)
-                for slot in slots:
-                    if slot in ("__dict__", "__weakref__"):
-                        continue
-                    try:
-                        collect_from_real_value(object.__getattribute__(value, slot))
-                    except AttributeError:
-                        pass
+            # Arbitrary Python objects can have enormous reachable graphs
+            # (for example unittest TestCase instances under dynamo-wrapped
+            # tests).  Only Python-backed VariableTrackers should trigger
+            # attribute scans; values merely reached through an attribute or
+            # container are handled when/if Dynamo loads them later.
+            return
 
         def collect_from_vt(var: VariableTracker) -> None:
             if isinstance(var, variables.DictViewVariable):
@@ -1239,13 +1194,6 @@ class SideEffects:
                     except AttributeError:
                         pass
 
-        def collect_class_dicts(value: type, skip_names: set[str]) -> None:
-            for cls in value.__mro__:
-                collect_dict_values(
-                    dict(cls.__dict__),
-                    skip_names if cls is value else None,
-                )
-
         def collect_from_python_backed_vt(var: VariableTracker) -> None:
             value = var.get_real_python_backed_value()
             if value is variables.base.NO_SUCH_SUBOBJ:
@@ -1269,7 +1217,6 @@ class SideEffects:
                 return
 
             if isinstance(var, variables.UserDefinedClassVariable):
-                collect_class_dicts(cast(type, value), pending_names)
                 return
 
             if isinstance(var, variables.UserDefinedObjectVariable):
@@ -1281,7 +1228,6 @@ class SideEffects:
                     if instance_dict is not None:
                         collect_dict_values(instance_dict, pending_names)
                 collect_instance_slots(value, pending_names)
-                collect_class_dicts(type(value), set())
 
         def visit_vt(value: Any, cache: dict[int, Any] | None = None) -> None:
             if cache is None:
@@ -1329,11 +1275,12 @@ class SideEffects:
                 if tx.instruction_pointer is not None
                 else set(tx.symbolic_locals)
             )
-            visit_vt(tx.stack)
+            vt_cache: dict[int, Any] = {}
+            visit_vt(tx.stack, vt_cache)
             for name, local_vt in tx.symbolic_locals.items():
                 if name not in live_locals:
                     continue
-                visit_vt(local_vt)
+                visit_vt(local_vt, vt_cache)
 
             for name, value in tx.f_locals.items():
                 if name in tx.cell_and_freevars() or name not in live_locals:
