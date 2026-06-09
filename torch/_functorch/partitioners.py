@@ -3095,7 +3095,13 @@ def estimate_runtime(node: fx.Node) -> float:
         from torch.utils.flop_counter import FlopCounterMode
 
         args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
-        with FlopCounterMode(display=False) as mode:
+        # AutoAC can add or remove collectives in the backward graph. Keep
+        # data-dependent flop estimates rank-invariant to avoid desyncs when
+        # ranks have different local data, e.g. variable sequence lengths.
+        # See #146707.
+        with FlopCounterMode(
+            display=False, data_dependent_flop_mode="worst_case"
+        ) as mode:
             # pyrefly: ignore[not-callable]
             node.target(*args, **kwargs)
         counted_flops = mode.get_total_flops()
