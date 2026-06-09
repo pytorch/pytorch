@@ -8323,7 +8323,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if self.device_type != 'cpu':
             sub_test(False)
 
-    @slowTest
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
     @dtypes(*floating_and_complex_types())
