@@ -363,6 +363,75 @@ class GemmEpilogueFusionTests(TestCase):
         self._run_split_k_addmm_epilogue_test("QUACK", "quack_gemm")
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_triton_epilogue_reads_closure_tensor(self):
+        def fn(a, b, bias):
+            return mm_epilogue(
+                a,
+                b,
+                lambda acc: (acc + bias).relu(),
+                kernel_options={"backend": "TRITON"},
+            )
+
+        a = torch.randn(16, 32, device="cuda", dtype=torch.float16)
+        b = torch.randn(32, 16, device="cuda", dtype=torch.float16)
+        bias = torch.randn(16, 16, device="cuda", dtype=torch.float16)
+
+        actual, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, bias
+        )
+
+        torch.testing.assert_close(actual, fn(a, b, bias), atol=1e-2, rtol=1e-2)
+        FileCheck().check("triton_tem_fused").check("tl.load").check_not(
+            "extern_kernels.mm"
+        ).run("\n".join(codes))
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_triton_epilogue_reads_broadcast_closure_tensor(self):
+        def fn(a, b, bias):
+            return mm_epilogue(
+                a,
+                b,
+                lambda acc: (acc + bias).relu(),
+                kernel_options={"backend": "TRITON"},
+            )
+
+        a = torch.randn(16, 32, device="cuda", dtype=torch.float16)
+        b = torch.randn(32, 16, device="cuda", dtype=torch.float16)
+        bias = torch.randn(16, device="cuda", dtype=torch.float16)
+
+        actual, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, bias
+        )
+
+        torch.testing.assert_close(actual, fn(a, b, bias), atol=1e-2, rtol=1e-2)
+        FileCheck().check("triton_tem_fused").check("tl.load").check_not(
+            "extern_kernels.mm"
+        ).run("\n".join(codes))
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_triton_epilogue_reads_mask_closure_tensor(self):
+        def fn(a, b, mask):
+            return mm_epilogue(
+                a,
+                b,
+                lambda acc: torch.where(mask, acc, torch.zeros_like(acc)),
+                kernel_options={"backend": "TRITON"},
+            )
+
+        a = torch.randn(16, 32, device="cuda", dtype=torch.float16)
+        b = torch.randn(32, 16, device="cuda", dtype=torch.float16)
+        mask = torch.randn(16, 16, device="cuda") > 0
+
+        actual, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, mask
+        )
+
+        torch.testing.assert_close(actual, fn(a, b, mask), atol=1e-2, rtol=1e-2)
+        FileCheck().check("triton_tem_fused").check("tl.load").check_not(
+            "extern_kernels.mm"
+        ).run("\n".join(codes))
+
+    @requires_cuda_and_triton
     @inductor_config.patch(max_autotune_gemm=False)
     @inductor_config.patch("triton.num_decompose_k_splits", 2)
     @inductor_config.patch("triton.decompose_k_threshold", 0)
