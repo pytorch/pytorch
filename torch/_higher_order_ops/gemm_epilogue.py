@@ -1099,96 +1099,42 @@ def _match_quack_grouped_n_select(
     return view.node, node.args[2], shape[-1]
 
 
-def _strip_quack_dtype_cast(node: Any) -> Any:
-    if (
-        isinstance(node, torch.fx.Node)
-        and node.op == "call_function"
-        and node.target
-        in (torch.ops.prims.convert_element_type.default, torch.ops.aten._to_copy.default)
-    ):
-        return node.args[0]
-    return node
-
-
-def _strip_quack_silu(node: Any) -> Any | None:
-    if not isinstance(node, torch.fx.Node):
-        return None
-    if node.op == "call_function" and node.target in (
-        torch.ops.aten.silu.default,
-        torch.nn.functional.silu,
-    ):
-        return node.args[0]
-
-    # F.silu is often decomposed before the HOP is materialized:
-    #   cast(x / (1 + exp(-cast(x))))
-    div = _strip_quack_dtype_cast(node)
-    if not (
-        isinstance(div, torch.fx.Node)
-        and div.op == "call_function"
-        and div.target == torch.ops.aten.div.Tensor
-        and len(div.args) >= 2
-    ):
-        return None
-    numerator = _strip_quack_dtype_cast(div.args[0])
-    denom = div.args[1]
-    if not (
-        isinstance(denom, torch.fx.Node)
-        and denom.op == "call_function"
-        and denom.target in (torch.ops.aten.add.Tensor, operator.add)
-        and len(denom.args) >= 2
-    ):
-        return None
-    add_lhs, add_rhs = denom.args[:2]
-    exp_node = add_lhs if add_rhs == 1 else add_rhs if add_lhs == 1 else None
-    if not (
-        isinstance(exp_node, torch.fx.Node)
-        and exp_node.op == "call_function"
-        and exp_node.target == torch.ops.aten.exp.default
-    ):
-        return None
-    neg_node = exp_node.args[0]
-    if not (
-        isinstance(neg_node, torch.fx.Node)
-        and neg_node.op == "call_function"
-        and neg_node.target == torch.ops.aten.neg.default
-    ):
-        return None
-    neg_arg = _strip_quack_dtype_cast(neg_node.args[0])
-    return numerator if numerator is neg_arg else None
-
-
 def _match_quack_grouped_n_contract_main(
     output_value: Any, mm_node: torch.fx.Node
 ) -> QuackMainOutputTransformInfo | None:
-    if not (
-        isinstance(output_value, torch.fx.Node)
-        and output_value.op == "call_function"
-        and output_value.target in (torch.ops.aten.mul.Tensor, operator.mul)
-        and len(output_value.args) >= 2
-    ):
-        return None
-    lhs, rhs = output_value.args[:2]
-    lhs_silu_arg = _strip_quack_silu(lhs)
-    rhs_silu_arg = _strip_quack_silu(rhs)
-    if lhs_silu_arg is not None:
-        gate, up = lhs_silu_arg, rhs
-    elif rhs_silu_arg is not None:
-        gate, up = rhs_silu_arg, lhs
-    else:
-        return None
-    gate_select = _match_quack_grouped_n_select(gate, mm_node)
-    up_select = _match_quack_grouped_n_select(up, mm_node)
-    if gate_select is None or up_select is None:
-        return None
-    gate_view, gate_index, gate_group = gate_select
-    up_view, up_index, up_group = up_select
-    if not (gate_view is up_view and gate_index == 0 and up_index == 1):
-        return None
-    if gate_group != up_group or gate_group != 2:
+    select_view = None
+    select_group = None
+    saw_select = False
+    seen: set[torch.fx.Node] = set()
+
+    def visit(value: Any) -> bool:
+        nonlocal saw_select, select_view, select_group
+        if not isinstance(value, torch.fx.Node):
+            return True
+        if value in seen:
+            return True
+        seen.add(value)
+        select = _match_quack_grouped_n_select(value, mm_node)
+        if select is not None:
+            view_node, _index, group_size = select
+            if select_view is None:
+                select_view = view_node
+                select_group = group_size
+            elif select_view is not view_node or select_group != group_size:
+                return False
+            saw_select = True
+            return True
+        if value is mm_node:
+            return False
+        if _match_quack_view_or_reshape(value) is not None and _quack_output_uses_node(value, mm_node):
+            return False
+        return all(visit(arg) for arg in pytree.tree_leaves((value.args, value.kwargs)))
+
+    if not visit(output_value) or not saw_select or select_group != 2:
         return None
     return QuackMainOutputTransformInfo(
         kind="grouped_n_contract",
-        group_size=gate_group,
+        group_size=select_group,
     )
 
 
@@ -1322,6 +1268,12 @@ def _emit_quack_tensorssa_broadcast_to(
     return _emit_quack_tensorssa_expr(kernel, f"{value}.broadcast_to({shape})", like=value)
 
 
+def _emit_quack_tensorssa_select(
+    kernel: _QuackCuteDSLKernel, value: Any, coord: str
+) -> Any:
+    return _emit_quack_tensorssa_expr(kernel, f"{value}[{coord}]", like=value)
+
+
 def _is_quack_n_group_shape(shape: Any) -> bool:
     return (
         isinstance(shape, (list, tuple))
@@ -1365,6 +1317,32 @@ def _lower_quack_view_or_reshape_node(
     ):
         return _emit_quack_tensorssa_reshape(kernel, source, f"{env[mm_node]}.shape")
     raise NotImplementedError(f"unsupported QUACK epilogue view/reshape: {node.format_node()}")
+
+
+def _lower_quack_grouped_n_select_node(
+    node: torch.fx.Node,
+    env: dict[torch.fx.Node, Any],
+    kernel: _QuackCuteDSLKernel,
+    grouped_tensors: dict[torch.fx.Node, QuackGroupedTensorSSAInfo],
+) -> Any | None:
+    if not (
+        node.op == "call_function"
+        and node.target == torch.ops.aten.select.int
+        and len(node.args) >= 3
+        and node.args[1] in (-1, 2)
+        and isinstance(node.args[2], int)
+    ):
+        return None
+    view_node = node.args[0]
+    info = grouped_tensors.get(view_node)
+    if info is None or not (0 <= node.args[2] < info.group_size):
+        return None
+    source = _quack_cute_arg(view_node, env)
+    return _emit_quack_tensorssa_select(
+        kernel,
+        source,
+        f"((0, {node.args[2]}, None), None, None)",
+    )
 
 
 def _lower_quack_tensorssa_reduce_node(
@@ -1468,6 +1446,16 @@ def _compile_quack_pointwise_nodes(
                             group_size=shape[-1],
                             groups_per_fragment=32 // shape[-1],
                         )
+                    continue
+                select_value = _lower_quack_grouped_n_select_node(
+                    node, env, kernel, grouped_tensors
+                )
+                if select_value is not None:
+                    env[node] = select_value
+                    grouped_tensors[node] = QuackGroupedTensorSSAInfo(
+                        group_size=1,
+                        groups_per_fragment=1,
+                    )
                     continue
                 reduce_match = _match_quack_tensorssa_reduce(node)
                 if reduce_match is not None:
@@ -1587,14 +1575,6 @@ def _quack_cute_epilogue_code(
             raise NotImplementedError(
                 "QUACK shape-changing main epilogues cannot be combined with aux outputs yet"
             )
-        return (
-            kernel.body.lines,
-            "acc",
-            aux_placeholder_nodes,
-            None,
-            None,
-            main_output_transform,
-        )
 
     _compile_quack_pointwise_nodes(
         graph_module, mm_node, output_plan.skip_nodes, env, kernel, handler
