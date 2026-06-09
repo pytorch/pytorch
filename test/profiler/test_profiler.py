@@ -15,7 +15,6 @@ import struct
 import subprocess
 import sys
 import tempfile
-import textwrap
 import threading
 import time
 import unittest
@@ -95,22 +94,6 @@ if TYPE_CHECKING:
 # cupti-python is pip-installable on ROCm hosts too, but CUPTI itself is a no-op
 # there, so gate the monitor tests off ROCm as well.
 TEST_CUPTI_PYTHON = _check_module_exists("cupti") and not TEST_WITH_ROCM
-
-
-def _cupti_version() -> int:
-    if not TEST_CUPTI_PYTHON:
-        return 0
-    try:
-        from torch.profiler._cupti.cupti_python import pylibcupti
-
-        return pylibcupti().get_version()
-    except Exception:
-        return 0
-
-
-# The CUPTI monitor needs libcupti >= 13.3 (v2 user-defined records + populated
-# pBufferCompleteInfo->ppRecordLayouts); its collection tests skip below that.
-TEST_CUPTI_V13_3 = TEST_CUPTI_PYTHON and _cupti_version() >= 130300
 
 
 def get_profiler_activities(device_type):
@@ -476,60 +459,78 @@ _cupti_monitor.enable_hes_early()
             p.stderr,
         )
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_cupti_monitor_collection_smoke(self):
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_collection_raw_dump_smoke(self):
         from torch.profiler._cupti import monitor as _cupti_monitor
-        from torch.profiler._cupti.observers.profiler import ProfilerObserver
 
-        obs = ProfilerObserver()
-        self.assertTrue(obs.available)
+        with TemporaryDirectoryName() as out_dir:
+            self.assertIsNone(_cupti_monitor.get_monitor())
+            monitor = _cupti_monitor.start_collection(out_dir)
+            self.assertIs(monitor, _cupti_monitor.get_monitor())
 
-        x = torch.randn(64, 64, device="cuda")
-        y = torch.relu(x + 1)
-        y.sum().item()
-        torch.cuda.synchronize()
-
-        monitor = _cupti_monitor.instance()
-        monitor.flush(forced=True, sync=True)
-        stats = monitor.stats()
-        window = obs.drain()
-        obs.close()
-
-        # The native C++ pool must actually have been exercised: catches a silent
-        # regression to a no-op (e.g. broken callback registration or symbol
-        # export) that would still pass if the worker never saw a buffer. The
-        # monitor demuxes to columns and the observer builds events, so a real
-        # kernel event must come out the other end.
-        self.assertGreater(stats["buffers_allocated"], 0)
-        self.assertGreater(stats["buffers_completed"], 0)
-        self.assertEqual(stats["buffers_pending"], 0)
-        self.assertGreater(len(window["events"]), 0)
-        self.assertTrue(any(e["kind"] == "kernel" for e in window["events"]))
-
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_cupti_monitor_collection_repeated_lifecycle(self):
-        from torch.profiler._cupti import monitor as _cupti_monitor
-        from torch.profiler._cupti.observers.profiler import ProfilerObserver
-
-        # Register/collect/unregister twice: the last observer leaving stops the
-        # monitor, so the second pass exercises the start-after-stop restart path.
-        for _ in range(2):
-            obs = ProfilerObserver()
-            self.assertTrue(obs.available)
-
-            x = torch.randn(32, 32, device="cuda")
-            y = torch.sigmoid(x)
+            x = torch.randn(64, 64, device="cuda")
+            y = torch.relu(x + 1)
             y.sum().item()
             torch.cuda.synchronize()
 
-            monitor = _cupti_monitor.instance()
-            monitor.flush(forced=True, sync=True)
-            window = obs.drain()
-            obs.close()
+            stats = _cupti_monitor.stop_collection()
+            self.assertIsNotNone(stats)
+            self.assertIsNone(_cupti_monitor.get_monitor())
+            # The native C++ pool must actually have been exercised: catches a
+            # silent regression to a no-op (e.g. broken callback registration or
+            # symbol export) that would still produce passing file-existence
+            # checks if the worker never saw a buffer.
+            self.assertGreater(stats["buffers_allocated"], 0)
+            self.assertGreater(stats["buffers_completed"], 0)
+            self.assertEqual(stats["buffers_pending"], 0)
+            self.assertTrue(
+                os.path.exists(os.path.join(out_dir, _cupti_monitor._META_FILE))
+            )
+            self.assertTrue(
+                os.path.exists(os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE))
+            )
+            self.assertGreater(
+                os.path.getsize(os.path.join(out_dir, _cupti_monitor._META_FILE)), 0
+            )
+            self.assertGreater(
+                os.path.getsize(os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE)),
+                0,
+            )
 
-            self.assertGreater(len(window["events"]), 0)
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_collection_repeated_lifecycle(self):
+        from torch.profiler._cupti import monitor as _cupti_monitor
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+        for _ in range(2):
+            with TemporaryDirectoryName() as out_dir:
+                self.assertIsNone(_cupti_monitor.get_monitor())
+                _cupti_monitor.start_collection(out_dir)
+
+                x = torch.randn(32, 32, device="cuda")
+                y = torch.sigmoid(x)
+                y.sum().item()
+                torch.cuda.synchronize()
+
+                stats = _cupti_monitor.stop_collection()
+                self.assertIsNotNone(stats)
+                self.assertIsNone(_cupti_monitor.get_monitor())
+
+                self.assertTrue(
+                    os.path.exists(os.path.join(out_dir, _cupti_monitor._META_FILE))
+                )
+                self.assertTrue(
+                    os.path.exists(
+                        os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE)
+                    )
+                )
+                self.assertGreater(
+                    os.path.getsize(
+                        os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE)
+                    ),
+                    0,
+                )
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_multithread_runtime_thread_assignment(self):
         x1 = torch.randn(256, 256, device="cuda")
         x2 = torch.randn(256, 256, device="cuda")
@@ -603,7 +604,7 @@ _cupti_monitor.enable_hes_early()
         self.assertGreater(len(launch_tids), 0)
         self.assertTrue(set(launch_tids).issubset(set(worker_tids)))
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_trace_has_expected_events(self):
         cfg = _ExperimentalConfig(
             custom_profiler_config='{"backend":"cupti_monitor"}',
@@ -653,7 +654,7 @@ _cupti_monitor.enable_hes_early()
         }
         self.assertIn("monitor_region", user_names)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_record_shapes(self):
         cfg = _ExperimentalConfig(
             custom_profiler_config='{"backend":"cupti_monitor"}',
@@ -683,76 +684,41 @@ _cupti_monitor.enable_hes_early()
         self.assertEqual(shaped_cpu_ops(record_shapes=False), [])
         self.assertGreater(len(shaped_cpu_ops(record_shapes=True)), 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_matches_stock_op_and_kernel_names(self):
-        # Run in a FRESH process. This test needs a stock (Kineto) CUDA baseline and
-        # then a cupti_monitor session, so it must start from a process that hasn't
-        # touched CUPTI -- immune to whatever earlier tests did to this process's
-        # CUPTI. Inside it, stock (Kineto) runs first, then cuptiFinalize() releases
-        # CUPTI synchronously (rather than Kineto's async TEARDOWN_CUPTI, whose
-        # deferred global finalize races and can deadlock the monitor's teardown) so
-        # the following monitor session can subscribe.
-        import subprocess
+        def trace_summary(use_monitor):
+            cfg = _ExperimentalConfig(
+                custom_profiler_config='{"backend":"cupti_monitor"}'
+                if use_monitor
+                else ""
+            )
+            with TemporaryFileName(mode="w+") as trace_path:
+                with profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    experimental_config=cfg,
+                ) as prof:
+                    a = torch.randn(128, 128, device="cuda")
+                    b = torch.randn(128, 128, device="cuda")
+                    (a @ b).relu().sum()
+                    torch.cuda.synchronize()
+                prof.export_chrome_trace(trace_path)
+                with open(trace_path) as f:
+                    events = json.load(f)["traceEvents"]
+            aten_ops = {
+                e["name"]
+                for e in events
+                if e.get("cat") == "cpu_op" and e.get("name", "").startswith("aten::")
+            }
+            n_kernels = sum(
+                1 for e in events if e.get("cat") == "kernel" and e.get("ph") == "X"
+            )
+            return aten_ops, n_kernels
 
-        script = textwrap.dedent(
-            """
-            import json, tempfile
-            import torch
-            from torch.profiler import profile, ProfilerActivity
-            from torch._C._profiler import _ExperimentalConfig
-
-            def trace_summary(use_monitor):
-                cfg = _ExperimentalConfig(
-                    custom_profiler_config='{"backend":"cupti_monitor"}'
-                    if use_monitor else "")
-                with tempfile.NamedTemporaryFile("w+", suffix=".json") as f:
-                    with profile(
-                        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                        experimental_config=cfg,
-                    ) as prof:
-                        a = torch.randn(128, 128, device="cuda")
-                        b = torch.randn(128, 128, device="cuda")
-                        (a @ b).relu().sum()
-                        torch.cuda.synchronize()
-                    prof.export_chrome_trace(f.name)
-                    events = json.load(open(f.name))["traceEvents"]
-                aten = {e["name"] for e in events
-                        if e.get("cat") == "cpu_op"
-                        and e.get("name", "").startswith("aten::")}
-                nker = sum(1 for e in events
-                           if e.get("cat") == "kernel" and e.get("ph") == "X")
-                return aten, nker
-
-            stock_ops, stock_kernels = trace_summary(False)
-            # Synchronously release CUPTI from the stock (Kineto) session so the
-            # monitor can subscribe -- cuptiFinalize() now, with nothing else using
-            # CUPTI, instead of Kineto's async TEARDOWN_CUPTI finalize (which races
-            # and can deadlock the monitor's teardown).
-            from torch.profiler._cupti.cupti_python import pylibcupti
-            pylibcupti().finalize()
-            monitor_ops, monitor_kernels = trace_summary(True)
-            assert stock_kernels > 0, f"stock kernels={stock_kernels}"
-            assert monitor_kernels > 0, f"monitor kernels={monitor_kernels}"
-            assert monitor_ops == stock_ops, (
-                f"ops differ: only_stock={sorted(stock_ops - monitor_ops)} "
-                f"only_monitor={sorted(monitor_ops - stock_ops)}")
-            print("OK", stock_kernels, monitor_kernels)
-            """
-        )
-        # The child inherits this process's libcupti (LD_PRELOAD/LD_LIBRARY_PATH) via
-        # the environment.
-        p = subprocess.run(
-            [sys.executable, "-c", script],
-            text=True,
-            capture_output=True,
-            timeout=120,
-        )
-        self.assertEqual(
-            p.returncode,
-            0,
-            f"subprocess failed:\nstdout={p.stdout}\nstderr={p.stderr}",
-        )
-        self.assertIn("OK", p.stdout)
+        stock_ops, stock_kernels = trace_summary(use_monitor=False)
+        monitor_ops, monitor_kernels = trace_summary(use_monitor=True)
+        self.assertGreater(stock_kernels, 0)
+        self.assertGreater(monitor_kernels, 0)
+        self.assertEqual(monitor_ops, stock_ops)
 
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
@@ -786,14 +752,16 @@ class TestProfilerITT(TestCase):
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
-    def test_cupti_monitor_buffer_pool_reuse(self):
+    @parametrize("version", [1, 2])
+    def test_cupti_monitor_buffer_pool_reuse(self, version):
         # The CUPTI monitor's buffer pool is pure C++ (no CUDA/cupti-python), so
         # drive its native buffer-requested / buffer-completed callbacks directly
         # via ctypes to verify returned buffers are recycled rather than
-        # reallocated. The callbacks match cuptiActivityRegisterCallbacks_v2: the
-        # request takes a trailing (ignored) info pointer, and the completion takes
-        # the buffer + a complete-info pointer (no CUcontext/streamId -- those are
-        # selectable record fields -- so completed buffers report ctx/stream of 0).
+        # reallocated. Both the v1 (cuptiActivityRegisterCallbacks) and v2
+        # (cuptiActivityRegisterCallbacks_v2) callback signatures feed the same
+        # pool/queue; v2's request appends an (ignored) info pointer, and v2's
+        # complete reorders args and drops the (CUcontext, streamId) that v1
+        # carries, so v2-completed buffers report ctx/stream of 0.
         import ctypes
 
         pyprof = torch._C._profiler
@@ -802,37 +770,63 @@ class TestProfiler(TestCase):
         buffer_size = 64 * 1024
         pyprof._cupti_monitor.configure_buffers(buffer_size)
 
-        request_t = ctypes.CFUNCTYPE(
-            None,
-            ctypes.POINTER(ctypes.c_void_p),
-            ctypes.POINTER(ctypes.c_size_t),
-            ctypes.POINTER(ctypes.c_size_t),
-            ctypes.c_void_p,
+        if version == 1:
+            request_t = ctypes.CFUNCTYPE(
+                None,
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_size_t),
+                ctypes.POINTER(ctypes.c_size_t),
+            )
+            complete_t = ctypes.CFUNCTYPE(
+                None,
+                ctypes.c_void_p,
+                ctypes.c_uint32,
+                ctypes.c_void_p,
+                ctypes.c_size_t,
+                ctypes.c_size_t,
+            )
+        else:
+            request_t = ctypes.CFUNCTYPE(
+                None,
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_size_t),
+                ctypes.POINTER(ctypes.c_size_t),
+                ctypes.c_void_p,
+            )
+            complete_t = ctypes.CFUNCTYPE(
+                None,
+                ctypes.c_void_p,
+                ctypes.c_size_t,
+                ctypes.c_size_t,
+                ctypes.c_void_p,
+            )
+        request = request_t(
+            pyprof._cupti_monitor.buffer_request_callback_address(version)
         )
-        complete_t = ctypes.CFUNCTYPE(
-            None,
-            ctypes.c_void_p,
-            ctypes.c_size_t,
-            ctypes.c_size_t,
-            ctypes.c_void_p,
+        complete = complete_t(
+            pyprof._cupti_monitor.buffer_complete_callback_address(version)
         )
-        request = request_t(pyprof._cupti_monitor.buffer_request_callback_address())
-        complete = complete_t(pyprof._cupti_monitor.buffer_complete_callback_address())
 
         def do_request():
             buf = ctypes.c_void_p()
             size = ctypes.c_size_t()
             max_records = ctypes.c_size_t()
-            request(
-                ctypes.byref(buf),
-                ctypes.byref(size),
-                ctypes.byref(max_records),
-                None,  # CUpti_BufferCallbackRequestInfo*
-            )
+            args = [ctypes.byref(buf), ctypes.byref(size), ctypes.byref(max_records)]
+            if version == 2:
+                args.append(None)  # CUpti_BufferCallbackRequestInfo*
+            request(*args)
             return buf.value, size.value
 
         def do_complete(ptr):
-            complete(ctypes.c_void_p(ptr), buffer_size, 4096, None)
+            if version == 1:
+                complete(
+                    ctypes.c_void_p(0xABCD), 7, ctypes.c_void_p(ptr), buffer_size, 4096
+                )
+            else:
+                complete(ctypes.c_void_p(ptr), buffer_size, 4096, None)
+
+        # v1 carries ctx/stream through to the completed record; v2 reports 0.
+        expected_ctx, expected_stream = (0xABCD, 7) if version == 1 else (0, 0)
 
         # First request has an empty free list, so it allocates.
         ptr_a, size_a = do_request()
@@ -843,9 +837,8 @@ class TestProfiler(TestCase):
         do_complete(ptr_a)
         self.assertEqual(pyprof._cupti_monitor.pending_buffers(), 1)
         item = pyprof._cupti_monitor.get_completed()
-        # (ptr, valid_size, ctx, stream, layouts): ctx/stream 0 (not delivered to the
-        # completion callback) and layouts empty (driven with a null complete_info).
-        self.assertEqual(item, (ptr_a, 4096, 0, 0, []))
+        # 5th field is layout_epoch, 0 here (no reconfiguration in this test).
+        self.assertEqual(item, (ptr_a, 4096, expected_ctx, expected_stream, 0))
         self.assertEqual(pyprof._cupti_monitor.pending_buffers(), 0)
         pyprof._cupti_monitor.return_buffer(ptr_a)
 
@@ -861,12 +854,13 @@ class TestProfiler(TestCase):
 
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
     def test_cupti_monitor_v2_record_layout_capture(self):
-        # The v2 complete callback parses the CUPTI user-defined record layout
-        # (pBufferCompleteInfo->ppRecordLayouts, valid only during the callback) and
-        # attaches it to the completed buffer, so the decode thread parses records
-        # against each buffer's own layout. Build the CUPTI >= 13.3 complete-info /
-        # record-layout structs with ctypes and drive the native v2 callbacks
-        # directly (no CUDA/cupti-python); this also pins the C++ ABI mirror.
+        # The v2 complete callback snapshots the CUPTI user-defined record layout
+        # (valid only during the callback) into the current layout epoch, so the
+        # decode thread can parse records afterward and reconfiguring (a new
+        # epoch) does not clobber the layout of buffers still queued under the old
+        # one. Build the CUPTI >= 13.2 complete-info / record-layout structs with
+        # ctypes and drive the native v2 callbacks directly (no CUDA/cupti-python);
+        # this also pins the C++ ABI mirror of those structs.
         import ctypes
 
         pyprof = torch._C._profiler
@@ -935,8 +929,8 @@ class TestProfiler(TestCase):
             ctypes.c_size_t,
             ctypes.c_void_p,
         )
-        request = request_t(pyprof._cupti_monitor.buffer_request_callback_address())
-        complete = complete_t(pyprof._cupti_monitor.buffer_complete_callback_address())
+        request = request_t(pyprof._cupti_monitor.buffer_request_callback_address(2))
+        complete = complete_t(pyprof._cupti_monitor.buffer_complete_callback_address(2))
 
         buf = ctypes.c_void_p()
         size = ctypes.c_size_t()
@@ -948,15 +942,19 @@ class TestProfiler(TestCase):
             16,
             ctypes.cast(ctypes.pointer(info), ctypes.c_void_p),
         )
-        # The completed buffer carries CUPTI's parsed layout as its 5th field: the
-        # per-kind (kind, record_size, [(field_id, offset, size), ...]) list (here
-        # kind 9). No epoch / shared state -- the layout travels with the buffer.
+        # Drain the completed buffer so the pool is tidy for the reset cleanup.
         item = pyprof._cupti_monitor.get_completed()
-        self.assertEqual(item[4], [(9, 16, [(0, 0, 4), (5, 8, 8)])])
         pyprof._cupti_monitor.return_buffer(item[0])
+        # Captured under the initial epoch 0, and the buffer is tagged with it.
+        self.assertEqual(item[4], 0)
+        self.assertEqual(
+            pyprof._cupti_monitor.record_layouts(0),
+            [(9, 16, [(0, 0, 4), (5, 8, 8)])],
+        )
 
-        # A second buffer with a different selection carries its own layout -- each
-        # buffer decodes against the layout it was completed with.
+        # Reconfiguring opens a new epoch with a different layout; the old epoch's
+        # layout is retained so buffers still queued under it decode correctly.
+        self.assertEqual(pyprof._cupti_monitor.next_layout_epoch(), 1)
         entries_b = (FieldEntry * 1)(FieldEntry(ctypes.sizeof(FieldEntry), 0, 0, 4, 4))
         layout_b = RecordLayout(
             ctypes.sizeof(RecordLayout),
@@ -980,8 +978,17 @@ class TestProfiler(TestCase):
             ctypes.cast(ctypes.pointer(info_b), ctypes.c_void_p),
         )
         item_b = pyprof._cupti_monitor.get_completed()
-        self.assertEqual(item_b[4], [(3, 8, [(0, 0, 4)])])
         pyprof._cupti_monitor.return_buffer(item_b[0])
+        self.assertEqual(item_b[4], 1)
+        self.assertEqual(
+            pyprof._cupti_monitor.record_layouts(1),
+            [(3, 8, [(0, 0, 4)])],
+        )
+        # Epoch 0 still holds the original layout.
+        self.assertEqual(
+            pyprof._cupti_monitor.record_layouts(0),
+            [(9, 16, [(0, 0, 4), (5, 8, 8)])],
+        )
 
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."

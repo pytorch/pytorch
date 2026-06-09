@@ -276,9 +276,8 @@ class _KinetoProfile:
         self._use_cupti_monitor = self._custom_profiler_config.get(
             "backend"
         ) == "cupti_monitor" or bool(self._custom_profiler_config.get("cupti_monitor"))
-        # The ProfilerObserver driving the shared CUPTI monitor for this session
-        # (created in prepare_trace, drained in stop_trace).
-        self._cupti_profiler_observer: Any = None
+        self._monitor_started_here = False
+        self._monitor_tempdir: tempfile.TemporaryDirectory[str] | None = None
         self._monitor_trace_window: dict[str, object] | None = None
         if self._use_cupti_monitor and ProfilerActivity.CPU not in self.activities:
             raise ValueError(
@@ -323,17 +322,16 @@ class _KinetoProfile:
                 else None,
             )
         if self._use_cupti_monitor:
-            from torch.profiler._cupti.observers.profiler import (
-                ProfilerObserver,
-                set_active_profiler_observer,
-            )
+            from torch.profiler._cupti import monitor as _mon
 
+            if _mon.get_monitor() is None:
+                self._monitor_tempdir = tempfile.TemporaryDirectory(
+                    prefix="torch_cupti_profiler_"
+                )
+                _mon.start_collection(self._monitor_tempdir.name)
+                self._monitor_started_here = True
             self._monitor_trace_window = None
-            # Constructing the observer registers it with the shared CUPTI
-            # monitor and starts collection; mark it active so record_function
-            # user annotations route to it.
-            self._cupti_profiler_observer = ProfilerObserver()
-            set_active_profiler_observer(self._cupti_profiler_observer)
+            _mon.prepare_trace_window()
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
@@ -342,10 +340,10 @@ class _KinetoProfile:
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before starting trace")
         self.profiler._start_trace()
-        if self._use_cupti_monitor and self._cupti_profiler_observer is not None:
-            # Discard records collected during prepare so the trace window
-            # starts here (drain resets the observer's window boundary).
-            self._cupti_profiler_observer.drain()
+        if self._use_cupti_monitor:
+            from torch.profiler._cupti import monitor as _mon
+
+            _mon.start_trace_window()
 
         if self.profile_memory:
             self.add_metadata_json("profile_memory", "1")
@@ -393,20 +391,20 @@ class _KinetoProfile:
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before stopping trace")
         if self._use_cupti_monitor:
-            from torch.profiler._cupti.observers.profiler import (
-                set_active_profiler_observer,
-            )
+            from torch.profiler._cupti import monitor as _mon
 
             if self.use_device:
                 torch.accelerator.synchronize()
-            set_active_profiler_observer(None)
-            if self._cupti_profiler_observer is not None:
-                self._monitor_trace_window = self._cupti_profiler_observer.drain()
+            self._monitor_trace_window = _mon.end_trace_window()
         self.profiler.__exit__(None, None, None)
-        if self._use_cupti_monitor and self._cupti_profiler_observer is not None:
-            # Unregister from the monitor (stops it once the last observer goes).
-            self._cupti_profiler_observer.close()
-            self._cupti_profiler_observer = None
+        if self._use_cupti_monitor and self._monitor_started_here:
+            from torch.profiler._cupti import monitor as _mon
+
+            _mon.stop_collection()
+            self._monitor_started_here = False
+            if self._monitor_tempdir is not None:
+                self._monitor_tempdir.cleanup()
+                self._monitor_tempdir = None
 
     def export_chrome_trace(self, path: str, use_python_export: bool = False):
         """
