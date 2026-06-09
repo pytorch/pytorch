@@ -1402,8 +1402,12 @@ def run_tests(argv=None):
         _print_test_names()
         return
 
+    testLoader = unittest.loader.defaultTestLoader
+    if HARDWARE_REQUIREMENT is not None:
+        testLoader = HardwareRequirementTestLoader()
+
     # Before running the tests, lint to check that every test class extends from TestCase
-    suite = unittest.TestLoader().loadTestsFromModule(__main__)
+    suite = testLoader.loadTestsFromModule(__main__)
     if not lint_test_case_extension(suite):
         sys.exit(1)
 
@@ -1413,10 +1417,6 @@ def run_tests(argv=None):
             *(["--showlocals", "--tb=long", "--color=yes"] if USE_PYTEST else ["--locals"]),
             *argv[1:],
         ]
-
-    testLoader = unittest.loader.defaultTestLoader
-    if HARDWARE_REQUIREMENT is not None:
-        testLoader = HardwareRequirementTestLoader()
 
     if TEST_IN_SUBPROCESS:
         other_args = []
@@ -1477,8 +1477,6 @@ def run_tests(argv=None):
         processes = []
         for i in range(RUN_PARALLEL):
             command = [sys.executable] + argv + [f'--log-suffix=-shard-{i + 1}'] + test_batches[i]
-            if HARDWARE_REQUIREMENT is not None:
-                command += ['--hardware-requirement'] + [req.name for req in HARDWARE_REQUIREMENT]
             processes.append(subprocess.Popen(command, universal_newlines=True))
         failed = False
         for p in processes:
