@@ -37,12 +37,26 @@ GEMM_EPILOGUE_OPS = {
         "baddbmm", 1, 2, is_batched=True
     ),
     torch.ops.aten._scaled_mm.default: GemmEpilogueOpInfo("scaled_mm", 0, 1),
-    torch.ops.aten._grouped_mm.default: GemmEpilogueOpInfo(
-        "grouped_mm", 0, 1, supports_quack=False
-    ),
+    torch.ops.aten._grouped_mm.default: GemmEpilogueOpInfo("grouped_mm", 0, 1),
+}
+_GEMM_EPILOGUE_OP_ALIASES = {
+    torch.mm: torch.ops.aten.mm.default,
+    torch.addmm: torch.ops.aten.addmm.default,
+    torch.bmm: torch.ops.aten.bmm.default,
+    torch.baddbmm: torch.ops.aten.baddbmm.default,
+    torch._grouped_mm: torch.ops.aten._grouped_mm.default,
 }
 _SUPPORTED_BACKENDS = {"TRITON", "CUTLASS", "CUTEDSL", "QUACK"}
 _SUPPORTED_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_grouped_mm"
+
+
+def _normalize_gemm_epilogue_op(gemm_op: Callable[..., Any]) -> Callable[..., Any]:
+    import torch.nn.functional as F
+
+    return {
+        **_GEMM_EPILOGUE_OP_ALIASES,
+        F.grouped_mm: torch.ops.aten._grouped_mm.default,
+    }.get(gemm_op, gemm_op)
 
 
 def _find_single_quack_gemm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
@@ -414,6 +428,7 @@ class GemmEpilogueFusion(HigherOrderOperator):
                 f"kernel_options must be a dict, got {type(kernel_options)}"
             )
 
+        kernel_options = {"backend": "TRITON", "SPLIT_K": False, **kernel_options}
         backend = kernel_options.get("backend", "TRITON")
         if backend not in _SUPPORTED_BACKENDS:
             raise RuntimeError(
@@ -430,7 +445,7 @@ _gemm_epilogue_fusion = GemmEpilogueFusion()
 
 
 def gemm_epilogue_fusion(
-    gemm_op: torch._ops.OpOverload,
+    gemm_op: Callable[..., Any],
     gemm_args: tuple[Any, ...],
     epilogue_fn: Callable[[Any], Any],
     *,
@@ -440,7 +455,8 @@ def gemm_epilogue_fusion(
     if gemm_kwargs is None:
         gemm_kwargs = {}
     if kernel_options is None:
-        kernel_options = {"backend": "TRITON"}
+        kernel_options = {"backend": "TRITON", "SPLIT_K": False}
+    gemm_op = _normalize_gemm_epilogue_op(gemm_op)
 
     def body_fn(*args, **body_kwargs):
         return epilogue_fn(gemm_op(*args, **body_kwargs))
