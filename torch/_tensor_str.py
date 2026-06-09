@@ -607,9 +607,9 @@ def _str_intern(inp, *, tensor_contents=None):
         tensor_str = repr(torch._from_functional_tensor(self))
     else:
         # Circular import problem, so we import it here
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake
 
-        if self.is_meta or isinstance(self, FakeTensor):
+        if self.is_meta or is_fake(self):
             suffixes.append("size=" + str(tuple(self.shape)))
             if self.dtype != torch.get_default_dtype():
                 suffixes.append("dtype=" + str(self.dtype))
