@@ -2962,7 +2962,7 @@ class CppVecKernel(CppKernel):
         :param accu_store: whether accumulate the store_value to store_ptr. If True, a store_value should be provided
         :return: a CppCSEVariable that represents the loaded vector or None if it is a store.
         """
-        if not (not store_value or var is not None):
+        if store_value and var is None:
             raise AssertionError("store var must be provided")
         if accu_store:
             if not store_value:
