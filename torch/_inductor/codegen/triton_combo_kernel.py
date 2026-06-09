@@ -25,12 +25,11 @@ from ..runtime.triton_heuristics import (
 )
 from ..scheduler import BaseSchedulerNode
 from ..stream_utils import get_raw_stream_name
-from ..utils import Placeholder, triton_version_uses_attrs_dict
+from ..utils import DeferredLineBase, Placeholder, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
     ArgName,
     ConstexprArg,
-    DeferredLine,
     IndentedBuffer,
     InplacedBuffer,
     Kernel,
@@ -1000,6 +999,7 @@ class ComboKernel(Kernel):
                     uniquify = self.codegen_static_numels_sub_kernel(
                         code, sub_kernel, num
                     )
+                    sub_kernel.codegen_prologue(sub_kernel.body)
                     sub_kernel.codegen_body()
                     sub_kernel._filter_pdl(sub_kernel.body)
                     uniquified_body = self.uniquify_block_sizes(
@@ -1146,7 +1146,7 @@ class ComboKernel(Kernel):
                         block, f"{block}_{num_kernel}"
                     )
                 modified.writeline(modified_line)
-            elif isinstance(line, DeferredLine) and (
+            elif isinstance(line, DeferredLineBase) and (
                 blocks := [e for e in uniquify if e in line.line]
             ):
                 modified_line = line.line
@@ -1154,7 +1154,7 @@ class ComboKernel(Kernel):
                     modified_line = modified_line.replace(
                         block, f"{block}_{num_kernel}"
                     )
-                new_line = DeferredLine(line.name, modified_line)
+                new_line = line._new_line(modified_line)
                 modified.writeline(new_line)
             else:
                 modified.writeline(line)
