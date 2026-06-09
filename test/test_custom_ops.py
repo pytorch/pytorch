@@ -331,15 +331,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             @staticmethod
             def forward(ctx, x):
                 # Emulate AutoDispatchBelowADInplaceOrView, which is not bound into python
-                guard = torch._C._AutoDispatchBelowAutograd()
-                guard2 = torch._C.ExcludeDispatchKeyGuard(
-                    torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
-                )
-                try:
+                with (
+                    torch._C._AutoDispatchBelowAutograd(),
+                    torch._C._ExcludeDispatchKeyGuard(
+                        torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
+                    ),
+                ):
                     return op(x)
-                finally:
-                    del guard
-                    del guard2
 
             @staticmethod
             def backward(ctx, gx):
@@ -3465,8 +3463,48 @@ class TestCustomOpAPI(TestCase):
             ctx.save_for_backward(x)
 
         def backward(ctx, grad_output):
+            self.assertEqual(ctx.needs_input_grad, (True,))
             (x,) = ctx.saved_tensors
             return grad_output * x.cos(), None, None, None
+
+        f.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        f(x).sum().backward()
+        self.assertEqual(x.grad, x.cos())
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @parametrize(
+        "op_factory, opname",
+        [
+            subtest((torch.library.custom_op, "custom"), name="custom_op"),
+            subtest((torch.library.triton_op, "triton"), name="triton_op"),
+        ],
+    )
+    def test_register_autograd_defaulted_inputs_actual_gradients(
+        self, op_factory, opname
+    ):
+        @op_factory(
+            f"_torch_testing::defaulted_input_actual_gradients_{opname}",
+            mutates_args=(),
+        )
+        def f(
+            x: Tensor,
+            y: Optional[Tensor] = None,
+            scale: float = 2.0,
+            enabled: bool = False,
+        ) -> Tensor:
+            return x.sin()
+
+        def setup_context(ctx, inputs, output):
+            self.assertEqual(len(inputs), 4)
+            (x, _, _, _) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad_output):
+            self.assertEqual(ctx.needs_input_grad, (True,))
+            (x,) = ctx.saved_tensors
+            return grad_output * x.cos()
 
         f.register_autograd(backward, setup_context=setup_context)
 
@@ -3510,7 +3548,7 @@ class TestCustomOpAPI(TestCase):
         x = torch.randn(3, requires_grad=True)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"incorrect number of gradients \(expected 4, got 3\)",
+            r"incorrect number of gradients \(expected 1 or 4, got 3\)",
         ):
             f(x).sum().backward()
 
@@ -3555,7 +3593,10 @@ class TestCustomOpAPI(TestCase):
             ctx.scale = scale
 
         def backward(ctx, grad_output):
-            self.assertEqual(ctx.needs_input_grad, ([True, True], False))
+            if ctx.scale == 2.0:
+                self.assertEqual(ctx.needs_input_grad, ([True, True],))
+            else:
+                self.assertEqual(ctx.needs_input_grad, ([True, True], False))
             grads = [grad_output * x.cos() * ctx.scale for x in ctx.saved_tensors]
             return grads, None
 
@@ -3588,7 +3629,10 @@ class TestCustomOpAPI(TestCase):
             ctx.scale = scale
 
         def backward(ctx, grad_outputs):
-            self.assertEqual(ctx.needs_input_grad, (True, False))
+            if ctx.scale == 2.0:
+                self.assertEqual(ctx.needs_input_grad, (True,))
+            else:
+                self.assertEqual(ctx.needs_input_grad, (True, False))
             (x,) = ctx.saved_tensors
             grad_x = (
                 grad_outputs[0] * x.cos() * ctx.scale
@@ -3826,7 +3870,7 @@ class TestCustomOpAPI(TestCase):
             def backward(ctx, grad):
                 nonlocal called
                 called = True
-                return grad * ctx.c, None
+                return grad * ctx.c
 
             def setup_context(ctx, inputs, keyword_only_inputs, output):
                 if len(inputs) != 2:
