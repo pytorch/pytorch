@@ -52,7 +52,6 @@ from ..bytecode_transformation import create_call_function, create_rot_n, is_gen
 from ..exc import (
     format_frame_info,
     get_dynamo_observed_exception,
-    handle_observed_exception,
     InfiniteGeneratorError,
     ObservedException,
     ObservedGeneratorExit,
@@ -82,10 +81,12 @@ from ..utils import (
     cmp_name_to_op_mapping,
     identity,
     is_function,
+    is_lru_cache_wrapper_trace_without_warning_allowed,
     is_tensor_base_attr_getter,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    unpack_iterable,
 )
 from .base import (
     AsPythonConstantNotImplementedError,
@@ -213,21 +214,11 @@ def bind_args_cached(
     spec.update_defaults(func)
     ba = {}
     rem_kw = dict(kwargs)
+    guarded_pos_defaults_len = False
 
     # 1) Bind all positional (pos-only + pos-or-kw)
-    # 1.1) Apply pos-defaults first (maybe overridden later)
-    for name, idx in spec.pos_default_map.items():
-        default_source = None
-        if fn_source and not (
-            ConstantVariable.is_literal(spec.defaults[idx])
-            and config.skip_guards_on_constant_func_defaults
-        ):
-            default_source = DefaultsSource(fn_source, idx)
-        ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
-    # 1.2) Fill in provided positional args
     for i, name in enumerate(spec.all_pos_names):
         if i < len(args):
-            # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, args[i])
         elif name in rem_kw and (
             # `kwargs` can have the same key as a pos-only arg `name`.
@@ -238,9 +229,26 @@ def bind_args_cached(
             #   (1, {'a': 2})
             name not in spec.posonly_names
         ):
-            # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
-        elif name not in ba:
+        elif name in spec.pos_default_map:
+            idx = spec.pos_default_map[name]
+            if fn_source and not guarded_pos_defaults_len:
+                # The parameter-to-default mapping depends on __defaults__
+                # length; guard it without wrapping every default value.
+                install_guard(
+                    AttrSource(fn_source, "__defaults__").make_guard(
+                        GuardBuilder.SEQUENCE_LENGTH
+                    )
+                )
+                guarded_pos_defaults_len = True
+            default_source = None
+            if fn_source and not (
+                ConstantVariable.is_literal(spec.defaults[idx])
+                and config.skip_guards_on_constant_func_defaults
+            ):
+                default_source = DefaultsSource(fn_source, idx)
+            ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
+        else:
             raise TypeError(f"missing required positional argument: {name}")
 
     # 2) *args
@@ -284,7 +292,7 @@ def wrap_bound_arg(
     else:
         # Create a lazy variable to avoid guarding on __defaults__ unless really
         # needed.
-        return variables.LazyVariableTracker.create(val, source)
+        return variables.LazyVariableTracker.create(val, source, tx=tx)
 
 
 def wrap_args_kwargs(tx: "InstructionTranslatorBase", result: dict[str, Any]) -> None:
@@ -383,7 +391,7 @@ def fn_var_getattr(
     if name in fn_known_dunder_attrs:
         subobj = getattr(fn, name)
     if source:
-        return variables.LazyVariableTracker.create(subobj, source)
+        return variables.LazyVariableTracker.create(subobj, source, tx=tx)
     return VariableTracker.build(tx, subobj)
 
 
@@ -398,6 +406,9 @@ class BaseUserFunctionVariable(VariableTracker):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
+
+    def self_args(self) -> list[VariableTracker]:
+        return []
 
     def get_source(self) -> Source | None:
         return self.source
@@ -505,7 +516,12 @@ class BaseUserFunctionVariable(VariableTracker):
             and self.get_filename().endswith("torch/optim/lr_scheduler.py")
         ):
             return ConstantVariable.create(None)
-        return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)  # type: ignore[attr-defined]
+        return tx.inline_user_function_return(
+            self,
+            [*self.self_args(), *args],
+            kwargs,
+            allow_nested_graph_breaks=True,
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -625,6 +641,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def get_globals(self) -> dict[str, Any]:
         return self.fn.__globals__
+
+    def should_allow_nested_graph_breaks(self) -> bool:
+        from torch._dynamo.trace_rules import BUILTIN_INLINE_WHEN_CALLED
+
+        filename = self.get_filename()
+        if any(filename.startswith(d) for d in BUILTIN_INLINE_WHEN_CALLED):
+            return False
+        return True
 
     def get_source(self) -> Source:
         source = self.source
@@ -1162,7 +1186,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         with save, disallow, temp:
             tracer = self.inline_tracer
             if not tracer.generator_exhausted:
-                self.remaining_items = self.force_unpack_var_sequence(tx)
+                self.remaining_items = unpack_iterable(tx, self)  # type: ignore[bad-argument-type]
             variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
 
     def get_globals(self) -> dict[str, Any]:
@@ -1171,8 +1195,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L832
+    def gen_send_ex2(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker:
+        # https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Objects/genobject.c#L259
         tracer = self.inline_tracer
 
         if self._is_generator_exhausted():
@@ -1182,6 +1208,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Hierarchically, tx can be seen as the parent of the inline tracer
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
+            tracer.push(arg)
             return tracer.inline_call_()
         except ObservedException as e:
             tracer.generator_exhausted = True
@@ -1205,6 +1232,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 e.msg += "\n\nSkipping frame due to graph break in a generator's next() call."
             raise
 
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L832
+        return self.gen_send_ex2(tx, ConstantVariable.create(None))
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
@@ -1215,29 +1246,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L831
         return self
-
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return False
-
-    def has_force_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return True
-
-    def force_unpack_var_sequence(
-        self, tx: "InstructionTranslatorBase"
-    ) -> list[VariableTracker]:
-        result: list[VariableTracker] = []
-        self.force_apply_to_var_sequence(tx, result.append)
-        return result
-
-    def force_apply_to_var_sequence(
-        self, tx: "InstructionTranslatorBase", fn: Callable[[VariableTracker], Any]
-    ) -> None:
-        while True:
-            try:
-                fn(self.tp_iternext_impl(tx))
-            except ObservedUserStopIteration:
-                handle_observed_exception(tx)
-                break
 
     # no nested graph breaks in generators
     def should_allow_nested_graph_breaks(self) -> Literal[False]:
@@ -1255,7 +1263,14 @@ class LocalGeneratorObjectVariable(VariableTracker):
             tracer.exception_handler(e)
 
     def _is_generator_just_started(self) -> bool:
-        return self.inline_tracer is None or self.inline_tracer.instruction_pointer == 0
+        if sys.version_info < (3, 11):
+            first_inst = 0
+        else:
+            first_inst = 1
+        return (
+            self.inline_tracer is None
+            or self.inline_tracer.instruction_pointer == first_inst
+        )
 
     def _is_generator_exhausted(self) -> bool:
         return getattr(self.inline_tracer, "generator_exhausted", False)
@@ -1276,9 +1291,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 # Test: GeneratorCPythonTests.test_send_non_none_to_new_gen
                 if not all(arg.is_constant_none() for arg in args):
                     raise_observed_exception(TypeError, tx)
-            tracer = self.inline_tracer
-            tracer.push_many(args)
-            return self.tp_iternext_impl(tx)
+            return self.gen_send_ex2(tx, args[0])
         elif name == "close":
             # * Raises a GeneratorExit at the point where the generator function was paused.
             # * If the generator function catches the exception and returns a
@@ -1333,7 +1346,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
             try:
                 # Raise RuntimeError if the generator yields any other value
-                if self.tp_iternext_impl(tx):
+                # TODO seems like this should send None
+                if tracer.inline_call_():
                     raise_observed_exception(RuntimeError, tx)
             except ObservedGeneratorExit:
                 tracer.generator_exhausted = True
@@ -1367,7 +1381,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 # propagate the exception back to the parent caller
                 raise
 
-            retval = self.tp_iternext_impl(tx)
+            retval = tracer.inline_call_()
 
             # The exception raised before is still active. We need to check the exception
             # table one more time to find the next target. But why? Let's walk
@@ -1433,7 +1447,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
             try:
                 self._setup_exception(tx, variables.ExceptionVariable(exc_type, []))
-                self.next_variable(tx)
+                tracer.inline_call_()
             except get_dynamo_observed_exception(exc_type):
                 # We should get back the exception raised before.
                 pass
@@ -1531,6 +1545,8 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         code = self.vt.get_code()
         f_globals = self.vt.get_globals()
 
+        if sys.version_info >= (3, 11):
+            inline_tracer.inline_call_()
         # calling a generator returns a generator object
         return self.generator_cls(
             code,
@@ -2549,8 +2565,14 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         if hasattr(self.wrapper_obj, "cache_info"):
             target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
             module_name = getattr(target_fn, "__module__", "") or ""
+            is_allowed_lru_cache_wrapper = (
+                is_lru_cache_wrapper_trace_without_warning_allowed(self.wrapper_obj)
+            )
 
-            if module_name.split(".", maxsplit=1)[0] != "torch":
+            if (
+                module_name.split(".", maxsplit=1)[0] != "torch"
+                and not is_allowed_lru_cache_wrapper
+            ):
                 frame_summary = tx.frame_summary()
                 filename = os.path.basename(frame_summary.filename)
                 lineno = frame_summary.lineno
@@ -2819,6 +2841,8 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
         if self.fn in (
             dist.all_reduce,
+            dist.reduce_scatter_single,
+            # pyrefly: ignore [deprecated]
             dist.reduce_scatter_tensor,
             # pyrefly: ignore [deprecated]
             dist._reduce_scatter_base,
@@ -3109,7 +3133,11 @@ class PolyfilledFunctionVariable(VariableTracker):
             )
 
         traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
-        return traceable_function_variable.call_function(tx, args, kwargs)
+        return tx.inline_user_function_return(
+            traceable_function_variable,
+            list(args),
+            dict(kwargs),
+        )
 
     def call_method(
         self,
@@ -3258,7 +3286,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
         self, configs: Any, tx: Optional["InstructionTranslatorBase"]
     ) -> list[Any]:
         # unpack the list of configs
-        configs = configs.unpack_var_sequence(tx)
+        if tx is None:
+            raise AssertionError("tx must not be None")
+        configs = unpack_iterable(tx, configs)
 
         # guard_as_python_constant inserts guards for Dynamo to check if the configs object changed.
         configs = [config.guard_as_python_constant() for config in configs]
