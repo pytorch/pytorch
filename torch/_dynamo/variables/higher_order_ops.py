@@ -3832,6 +3832,7 @@ class GemmEpilogueFusionHigherOrderVariable(WrapHigherOrderVariable):
 
         _check_supported_callable_arg(tx, args[1], "body_fn")
         operands = args[2].unpack_var_sequence(tx)
+        fn_kwargs_vt = args[3].keys_as_python_constant()
         fn_kwargs = args[3].as_python_constant()
         kernel_options = args[4].as_python_constant()
         (
@@ -3847,7 +3848,7 @@ class GemmEpilogueFusionHigherOrderVariable(WrapHigherOrderVariable):
             tx,
             args[1],
             operands,
-            fn_kwargs,
+            fn_kwargs_vt,
             self._HOP_NAME,
         )
 

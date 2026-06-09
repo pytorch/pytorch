@@ -219,6 +219,30 @@ class GemmEpilogueFusionTests(TestCase):
         ).check_not("extern_kernels.addmm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_routes_addmm_alpha_beta_to_quack_hook(self):
+        def fn(bias, a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.addmm.default,
+                (bias, a, b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={"alpha": 0.5, "beta": 0.25},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        bias = torch.randn(128, 64, device="cuda", dtype=torch.float16)
+        a = torch.randn(128, 128, device="cuda", dtype=torch.float16)
+        b = torch.randn(128, 64, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), bias, a, b
+        )
+
+        torch.testing.assert_close(actual, fn(bias, a, b), atol=1e-2, rtol=1e-2)
+        FileCheck().check("gemm_epilogue(").check("alpha=0.5").check(
+            "beta=0.25"
+        ).check_not("extern_kernels.addmm").run(code)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_routes_bmm_relu_to_quack_hook(self):
         def fn(a, b):
             return gemm_epilogue_fusion(
@@ -239,6 +263,30 @@ class GemmEpilogueFusionTests(TestCase):
         FileCheck().check("@cute.jit").check("gemm_epilogue(").check_not(
             "extern_kernels.bmm"
         ).run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_routes_baddbmm_alpha_beta_to_quack_hook(self):
+        def fn(bias, a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.baddbmm.default,
+                (bias, a, b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={"alpha": 0.5, "beta": 0.25},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        bias = torch.randn(4, 64, 32, device="cuda", dtype=torch.float16)
+        a = torch.randn(4, 64, 128, device="cuda", dtype=torch.float16)
+        b = torch.randn(4, 128, 32, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), bias, a, b
+        )
+
+        torch.testing.assert_close(actual, fn(bias, a, b), atol=1e-2, rtol=1e-2)
+        FileCheck().check("gemm_epilogue(").check("alpha=0.5").check(
+            "beta=0.25"
+        ).check_not("extern_kernels.baddbmm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_routes_baddbmm_relu_to_quack_hook(self):
