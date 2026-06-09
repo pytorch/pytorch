@@ -39,7 +39,6 @@ from functools import cache
 from typing import Literal
 
 import torch
-from torch._prims_common import is_non_overlapping_and_dense_or_false
 
 from ... import registry
 from ...common_utils import _unavailable_reason
@@ -99,9 +98,9 @@ def _foreach_mm_cond(
         # K or N == 0 not supported by cutlass_grouped_mm
         if a.size(1) == 0 or b.size(1) == 0:
             return False
-        if not is_non_overlapping_and_dense_or_false(a):
+        if not torch.ops.aten.is_non_overlapping_and_dense.default(a):
             return False
-        if not is_non_overlapping_and_dense_or_false(b):
+        if not torch.ops.aten.is_non_overlapping_and_dense.default(b):
             return False
         if not a.is_cuda or not b.is_cuda:
             return False
