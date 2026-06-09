@@ -324,6 +324,18 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         torch.testing.assert_close(actual, epilogue_fn(a @ b))
 
+    def test_autograd_is_not_implemented(self):
+        a = torch.randn(8, 16, requires_grad=True)
+        b = torch.randn(16, 12, requires_grad=True)
+
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        actual = flex_gemm(torch.mm, (a, b), epilogue_fn)
+
+        with self.assertRaisesRegex(RuntimeError, "flex_gemm"):
+            actual.sum().backward()
+
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")

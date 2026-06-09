@@ -156,7 +156,7 @@ flex_gemm_hop.py_autograd_impl(
 @flex_gemm_hop.py_impl(FakeTensorMode)
 def flex_gemm_fake_tensor_mode(mode, gemm_op, body_fn, args, kwargs, kernel_options):
     with mode:
-        return _call_flex_gemm_body(body_fn, tuple(args), {})
+        return _call_flex_gemm_body(body_fn, tuple(args), kwargs)
 
 
 @flex_gemm_hop.py_functionalize_impl
