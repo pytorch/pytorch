@@ -41,7 +41,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
     skipIfRocmArch,
-    skipIfXpu,
     TEST_WITH_ROCM,
     TEST_XPU,
 )
@@ -322,7 +321,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184490")
     @patches
     def test_mm_plus_mm(self):
         @torch.compile
@@ -337,10 +335,11 @@ class TestSelectAlgorithm(TestCase):
         )
         # Autotuning checks correctness of each version
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
-            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+            expected = 0 if GPU_TYPE == "xpu" else 1
+            self.assertEqual(
+                counters["inductor"]["select_algorithm_autotune"], expected
+            )
 
-    # TODO: fix accuracy failure of the triton template on XPU.
-    # and enable this test case.
     @patches
     def test_mm_plus_mm2(self):
         @torch.compile
@@ -355,7 +354,10 @@ class TestSelectAlgorithm(TestCase):
         )
         # Autotuning checks correctness of each version
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
-            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+            expected = 0 if GPU_TYPE == "xpu" else 1
+            self.assertEqual(
+                counters["inductor"]["select_algorithm_autotune"], expected
+            )
 
     @patches
     def test_mm_plus_mm3(self):
@@ -371,7 +373,10 @@ class TestSelectAlgorithm(TestCase):
         )
         # Autotuning checks correctness of each version
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
-            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+            expected = 0 if GPU_TYPE == "xpu" else 1
+            self.assertEqual(
+                counters["inductor"]["select_algorithm_autotune"], expected
+            )
 
     @patches
     def test_mm_dup_args(self):
