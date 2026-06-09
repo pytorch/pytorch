@@ -4,7 +4,7 @@
 # It recompiles each named source with -g (in place of -O2/-O3), reusing the
 # exact compile command CMake recorded for it, then relinks libtorch_python
 # and symlinks the result into torch/lib so an editable `import torch` picks
-# it up.
+# it up. Use --dry-run to print the plan without building.
 #
 # Why not `ninja -n torch_python | sed 's/-O[23]/-g/' | sh` (the old approach):
 # the build uses file(GLOB ... CONFIGURE_DEPENDS), which wires a glob-check
@@ -43,6 +43,11 @@ def parse_args() -> Any:
 
     parser = ArgumentParser(description="Incremental build PyTorch with debinfo")
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the rebuild plan (compile + link commands) without building.",
+    )
     parser.add_argument("files", nargs="*")
     return parser.parse_args()
 
@@ -89,14 +94,19 @@ def debugify(cmd: str) -> str:
     return cmd
 
 
-def load_compile_commands() -> dict[str, dict[str, Any]]:
+def index_compile_commands(
+    entries: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
     """Map each absolute source path to its compile_commands.json entry."""
-    entries = json.loads(COMPILE_COMMANDS.read_text())
     result: dict[str, dict[str, Any]] = {}
     for entry in entries:
         src = (Path(entry["directory"]) / entry["file"]).resolve()
         result[str(src)] = entry
     return result
+
+
+def load_compile_commands() -> dict[str, dict[str, Any]]:
+    return index_compile_commands(json.loads(COMPILE_COMMANDS.read_text()))
 
 
 def entry_command(entry: dict[str, Any]) -> str:
@@ -106,20 +116,14 @@ def entry_command(entry: dict[str, Any]) -> str:
     return cmd
 
 
-def torch_python_link_command() -> str:
-    """Return the libtorch_python link command via a ninja graph walk.
+def extract_link_command(ninja_commands: str, lib: str) -> str:
+    """Pick the link command producing `lib` from `ninja -t commands` output.
 
-    `ninja -t commands` expands a target's commands without the dry-run
-    staleness logic that CONFIGURE_DEPENDS defeats. The link is the last
-    command that produces libtorch_python; ninja wraps linker rules as
-    `: && <cmd> && :`.
+    The link is the last command mentioning `lib`; ninja wraps linker rules
+    as `: && <cmd> && :`.
     """
-    output = check_output(
-        ["ninja", "-t", "commands", "torch_python"], cwd=str(BUILD_DIR)
-    )
-    lib = f"libtorch_python.{get_lib_extension()}"
     link = None
-    for line in output.split("\n"):
+    for line in ninja_commands.split("\n"):
         if lib not in line:
             continue
         line = line.strip()
@@ -127,22 +131,27 @@ def torch_python_link_command() -> str:
             line = line[4:-4].strip()
         link = line
     if link is None:
-        raise RuntimeError(
-            f"Could not find the {lib} link command in `ninja -t commands torch_python`"
-        )
+        raise RuntimeError(f"Could not find the {lib} link command")
     return link
+
+
+def torch_python_link_command() -> str:
+    """Return the libtorch_python link command via a ninja graph walk.
+
+    `ninja -t commands` expands a target's commands without the dry-run
+    staleness logic that CONFIGURE_DEPENDS defeats.
+    """
+    output = check_output(
+        ["ninja", "-t", "commands", "torch_python"], cwd=str(BUILD_DIR)
+    )
+    return extract_link_command(output, f"libtorch_python.{get_lib_extension()}")
 
 
 def main() -> None:
     if sys.platform == "win32":
         print("Not supported on Windows yet")
         sys.exit(-95)
-    if not is_devel_setup():
-        print(
-            "Not a devel setup of PyTorch, "
-            "please run `python -m pip install --no-build-isolation -v -e .` first"
-        )
-        sys.exit(-1)
+    args = parse_args()
     if not has_build_ninja():
         print("Only ninja build system is supported at the moment")
         sys.exit(-1)
@@ -152,7 +161,16 @@ def main() -> None:
             "CMAKE_EXPORT_COMPILE_COMMANDS=ON (PyTorch's build sets this by default)"
         )
         sys.exit(-1)
-    args = parse_args()
+    # The symlink step rewrites torch/lib, so a real run must target the in-tree
+    # (editable) torch. --dry-run only reads the build tree, so it works against
+    # any build -- e.g. a CI wheel-build job where torch isn't installed -e.
+    if not args.dry_run and not is_devel_setup():
+        print(
+            "Not a devel setup of PyTorch, "
+            "please run `python -m pip install --no-build-isolation -v -e .` first"
+        )
+        sys.exit(-1)
+
     files = [f for f in args.files if f]
     if not files:
         return print("Nothing to do")
@@ -170,13 +188,22 @@ def main() -> None:
             sys.exit(-1)
         plan.append((src, debugify(entry_command(entry)), entry["directory"]))
 
+    link = torch_python_link_command()
+
+    if args.dry_run:
+        for name, cmd, _ in plan:
+            print(f"# debug rebuild: {name}")
+            print(cmd)
+        print("# relink libtorch_python")
+        print(link)
+        return
+
     for idx, (name, cmd, cwd) in enumerate(plan):
         print(f"[{idx + 1} / {len(plan)}] Building {Path(name).name} with debug info")
         if args.verbose:
             print(cmd)
         subprocess.check_call(["sh", "-c", cmd], cwd=cwd)
 
-    link = torch_python_link_command()
     print("Relinking libtorch_python")
     if args.verbose:
         print(link)
