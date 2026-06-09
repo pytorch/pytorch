@@ -36,13 +36,13 @@ def _lazy_call(callable: Callable[[], None], **kwargs) -> None:
     immediately. See :ref:`lazy-initialization-and-fork-safety-note`.
 
     Args:
-        callable (callable): The function to be called.
+        callable (Callable[[], None]): The function to be called.
         **kwargs: Additional keyword arguments forwarded to the backend's ``_lazy_call``
             (e.g., ``seed=True``, ``seed_all=True``).
     """
     acc = torch.accelerator.current_accelerator()
     if acc is None:
-        raise RuntimeError("No accelerator is available.")
+        raise RuntimeError("No accelerator is available; _lazy_call requires an active accelerator.")
     device_module = torch.get_device_module(acc)
     if hasattr(device_module, "_lazy_call"):
         device_module._lazy_call(callable, **kwargs)
