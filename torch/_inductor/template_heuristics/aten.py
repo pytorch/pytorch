@@ -4,8 +4,8 @@ from typing import Any, TYPE_CHECKING
 
 from torch._inductor import config as inductor_config
 
-from ...kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
-from ...kernel.mm import (
+from ..kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
+from ..kernel.mm import (
     aten__fp8_mm,
     aten__int_mm,
     aten_addmm,
@@ -13,7 +13,7 @@ from ...kernel.mm import (
     aten_mm,
     aten_mm_dtype,
 )
-from ...kernel.mm_plus_mm import aten_mm_plus_mm
+from ..kernel.mm_plus_mm import aten_mm_plus_mm
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
@@ -22,7 +22,7 @@ from .registry import register_template_heuristic
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from ...kernel_inputs import KernelInputs
+    from ..kernel_inputs import KernelInputs
 
 
 # These are all labeled as device type None to indicate that they
