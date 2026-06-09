@@ -1138,10 +1138,9 @@ def convolution_backward_lowering(
     # which calls aten.convolution_backward.default directly.
     if not has_triton_dx_choices and not has_triton_dw_choices:
         # We should only fallback if ATEN is a valid backend!
-        allow_fallback = (
-            torch._inductor.utils._use_conv_bwd_weight_autotune_backend("ATEN")
-            or torch._inductor.utils._use_conv_bwd_input_autotune_backend("ATEN")
-        )
+        allow_fallback = torch._inductor.utils._use_conv_bwd_weight_autotune_backend(
+            "ATEN"
+        ) or torch._inductor.utils._use_conv_bwd_input_autotune_backend("ATEN")
         if allow_fallback:
             return aten_convolution_backward_fallback(
                 grad_out,
