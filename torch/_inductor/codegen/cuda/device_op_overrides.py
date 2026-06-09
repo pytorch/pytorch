@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 
+from ...runtime.hints import get_warp_size
 from ..common import (
     DeviceOpOverrides,
     register_device_op_overrides,
@@ -140,10 +141,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         """
         if torch.version.hip is not None:
             # Adjusting the warp size to GPU supported wavefront size on AMD GPU
-            prop = torch.cuda.get_device_properties(torch.cuda.current_device())
-            source_codes = source_codes.replace(
-                "32*numWarps", str(prop.warp_size) + "*numWarps"
-            )
+            device = torch.device("cuda", torch.cuda.current_device())
+            warp_size = get_warp_size(device)
+            source_codes = source_codes.replace("32*numWarps", f"{warp_size}*numWarps")
         return source_codes
 
     def tma_descriptor_helpers(self) -> str:

@@ -19220,7 +19220,7 @@ if RUN_GPU:
         )
         @config.patch("triton.persistent_reductions", True)
         def test_has_constant_mask_small_persistent_reduction(self, rnumel):
-            from torch._inductor.runtime.hints import DeviceProperties
+            from torch._inductor.runtime.hints import get_warp_size
 
             def fn(x):
                 return x.sum(dim=-1)
@@ -19230,7 +19230,7 @@ if RUN_GPU:
             code = run_and_get_triton_code(opt_fn, x)
 
             device = torch.device(GPU_TYPE, 0)
-            warp_size = DeviceProperties.create(device).warp_size or 32
+            warp_size = get_warp_size(device)
 
             rblock = 1
             while rblock < rnumel:
