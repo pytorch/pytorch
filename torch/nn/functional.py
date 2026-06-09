@@ -20,6 +20,7 @@ from torch._jit_internal import (
     BroadcastingList1,
     BroadcastingList2,  # pyrefly: ignore [missing-module-attribute]
     BroadcastingList3,  # pyrefly: ignore [missing-module-attribute]
+    unused as _jit_unused,
 )
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
@@ -962,6 +963,17 @@ max_pool3d = boolean_dispatch(
 )
 
 
+@_jit_unused
+def _check_unpool_output_size(output_size: list[int], dim: int) -> None:
+    torch._check_value(
+        output_size[dim] >= 0,
+        lambda: (
+            "max_unpooling: output_size must contain non-negative spatial "
+            f"dimensions, but got output_size[{dim}]={output_size[dim]}"
+        ),
+    )
+
+
 def _unpool_output_size(
     input: Tensor,
     kernel_size: list[int],
@@ -996,6 +1008,16 @@ def _unpool_output_size(
                 )
 
         ret = output_size
+    if torch.jit.is_scripting():
+        for d in range(len(kernel_size)):
+            if ret[d] < 0:
+                raise ValueError(
+                    "max_unpooling: output_size must contain non-negative spatial "
+                    f"dimensions, but got output_size[{d}]={ret[d]}"
+                )
+    else:
+        for d in range(len(kernel_size)):
+            _check_unpool_output_size(ret, d)
     return ret
 
 
