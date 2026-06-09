@@ -39,6 +39,7 @@ class _DispatchAutograd(torch.autograd.Function):
         return out_tokens, out_topk_weights, out_topk_idx
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(
         ctx: Any,
         grad_out_tokens: torch.Tensor,
@@ -70,6 +71,7 @@ class _CombineAutograd(torch.autograd.Function):
         return out_tokens
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(ctx: Any, grad_out_tokens: torch.Tensor) -> tuple:
         M, H = ctx.expert_shape
         N = grad_out_tokens.shape[0]
