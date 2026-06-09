@@ -205,7 +205,7 @@ namespace c10d::nccl_ep {
 NcclEpGroup::~NcclEpGroup() = default;
 NcclEpHandle::~NcclEpHandle() = default;
 
-static void not_supported() {
+[[noreturn]] static void not_supported() {
     TORCH_CHECK(false, "PyTorch was not built with USE_NCCL_EP=1");
 }
 
