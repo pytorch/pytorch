@@ -1471,7 +1471,9 @@ static bool tensor_match_source_supports_subtree_memo(
     const std::string& source) {
   return source.find("._parameters[") != std::string::npos ||
       source.find("._buffers[") != std::string::npos ||
-      source_ends_with(source, "._cached_tensor");
+      source_ends_with(source, "._cached_tensor") ||
+      (source.find("L['self']._modules[") != std::string::npos &&
+       source_ends_with(source, ".scale"));
 }
 
 std::string guard_accessor_stats_key(PyObject* key) {
