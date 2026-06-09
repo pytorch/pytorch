@@ -8,7 +8,6 @@ import operator
 import unittest
 
 import numpy as np
-import pytest
 import sympy
 
 import torch
@@ -35,6 +34,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     has_free_symbols,
     is_symbolic,
+    rebind_unbacked,
     ShapeEnv,
     StatelessSymbolicContext,
     statically_known_false,
@@ -1252,6 +1252,68 @@ def forward(self, x_1):
 
         result = gm(2, 3, 4)  # should be 2 + 3 + 4 = 9
         self.assertEqual(result, 9)
+
+    def test_build_proxy_for_nary_min_max(self):
+        """
+        Test that _build_proxy_for_sym_expr correctly handles flattened
+        sympy.Max/sympy.Min expressions with more than 2 arguments.
+
+        sympy flattens Max(a, Max(b, c)) -> Max(a, b, c) (and likewise for
+        Min). _build_proxy_for_sym_expr must rebuild these even though
+        torch.sym_max/sym_min are binary; a binary handler would raise
+        TypeError on a 3-arg Max/Min.
+        """
+        import torch.fx as fx
+        from torch.fx.experimental.proxy_tensor import (
+            _build_proxy_for_sym_expr,
+            _SympyExprTrackerValue,
+            PythonKeyTracer,
+            set_meta,
+        )
+        from torch.utils._thunk import Thunk
+
+        # min/max of (2, 3, 4) -> 2 for min, 4 for max
+        for sym_op, expected in [(torch.sym_max, 4), (torch.sym_min, 2)]:
+            with self.subTest(op=sym_op.__name__):
+                shape_env = ShapeEnv()
+                # Unbacked symints keep the expression symbolic (backed symints
+                # would specialize away the Max/Min).
+                u0 = shape_env.create_unbacked_symint()
+                u1 = shape_env.create_unbacked_symint()
+                u2 = shape_env.create_unbacked_symint()
+
+                flattened = sym_op(sym_op(u0, u1), u2)
+                self.assertEqual(len(flattened.node.expr.args), 3)
+
+                # Case 1: out=None must not raise TypeError on the 3-arg expr.
+                tracer_none = PythonKeyTracer()
+                for sym in [u0, u1, u2]:
+                    tracer_none.sympy_expr_tracker[sym.node.expr] = (
+                        _SympyExprTrackerValue(proxy=sym, value=sym)
+                    )
+                result = _build_proxy_for_sym_expr(tracer_none, flattened.node.expr)
+                self.assertEqual(result.node.expr, flattened.node.expr)
+
+                # Case 2: out=flattened (the typical get_proxy_slot path). The
+                # rebuilt node must execute correctly (a binary handler would
+                # have dropped the third argument or crashed).
+                tracer = PythonKeyTracer()
+                tracer.root = torch.nn.Module()
+                tracer.graph = fx.Graph(tracer_cls=PythonKeyTracer)
+                for sym, name in [(u0, "u0"), (u1, "u1"), (u2, "u2")]:
+                    node = tracer.graph.placeholder(name)
+                    proxy = fx.Proxy(node, tracer)
+                    set_meta(proxy, sym)
+                    tracer.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                        proxy=proxy, value=sym
+                    )
+                    tracer.symnode_tracker[sym] = Thunk(lambda p=proxy: p)
+
+                _build_proxy_for_sym_expr(tracer, flattened.node.expr, out=flattened)
+                out_proxy = tracer.symnode_tracker[flattened].force()
+                tracer.graph.output(out_proxy.node)
+                gm = fx.GraphModule(tracer.root, tracer.graph)
+                self.assertEqual(gm(2, 3, 4), expected)
 
     def test_sym_max_multi_max_simplify(self):
         shape_env = ShapeEnv()
@@ -3669,6 +3731,27 @@ def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
 
 
 class TestUnbacked(TestCase):
+    def test_rebind_unbacked_to_symbolic_expression(self):
+        shape_env = ShapeEnv()
+        fake_mode = torch._subclasses.FakeTensorMode(
+            allow_non_fake_inputs=True, shape_env=shape_env
+        )
+        graph = torch.fx.Graph()
+        node = graph.call_function(operator.add, args=(1, 1))
+
+        with fake_mode:
+            old = shape_env.create_unbacked_symint()
+            base = shape_env.create_unbacked_symint()
+            result = (base + 1) // 2
+
+        old_expr = old.node.expr
+        result_expr = result.node.expr
+        node.meta["unbacked_bindings"] = {old_expr: ()}
+
+        rebind_unbacked(shape_env, node, result)
+
+        self.assertEqual(shape_env.replacements[old_expr], result_expr)
+
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
@@ -3804,7 +3887,6 @@ class TestUnbacked(TestCase):
         or IS_WINDOWS,
         "https://github.com/pytorch/pytorch/issues/163953",
     )
-    @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/163785")
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_do_not_guard_unbacked_inputs(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
@@ -3953,6 +4035,27 @@ class TestUnbacked(TestCase):
                 Exception, "Pending unbacked symbols.*not in returned outputs"
             ):
                 func_negative(x)
+
+    def test_ignore_fresh_unbacked_symbols_preserves_existing_pending(self):
+        shape_env = ShapeEnv()
+        fake_mode = torch._subclasses.FakeTensorMode(
+            allow_non_fake_inputs=True, shape_env=shape_env
+        )
+        with fake_mode:
+            pending = shape_env.create_unbacked_symint().node.expr
+
+            with shape_env.ignore_fresh_unbacked_symbols():
+                ignored = shape_env.create_unbacked_symint().node.expr
+                example_value = torch.empty(2)
+            with self.assertRaisesRegex(
+                Exception, f"Pending unbacked symbols {{{pending}}}"
+            ):
+                torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+                    shape_env,
+                    example_value,
+                )
+
+        self.assertNotIn(ignored, shape_env.pending_fresh_unbacked_symbols)
 
     def test_meta_copy(self):
         """
