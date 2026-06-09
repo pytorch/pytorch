@@ -5524,6 +5524,14 @@
       ]
     }
   ],
+  "GB5967": [
+    {
+      "Gb_type": "AutogradFunction with generated vmap rule",
+      "Context": "vmap over {self.fn_cls.__name__}",
+      "Explanation": "Dynamo does not support tracing autograd.Function generated vmap rules yet.",
+      "Hints": []
+    }
+  ],
   "GB0369": [
     {
       "Gb_type": "Frozen dataclass with missing field",

@@ -2938,6 +2938,110 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         for compiled, eager in zip(compiled_inputs, eager_inputs):
             self.assertEqual(compiled.grad, eager.grad)
 
+    def test_vmap_generated_rule_is_unsupported_not_silent(self):
+        class GeneratedVmap(torch.autograd.Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(x):
+                return x * 3
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 7
+
+        def fn(x):
+            return torch.vmap(lambda y: GeneratedVmap.apply(y))(x)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        ref = fn(x_ref)
+        ref.sum().backward()
+        self.assertEqual(x_ref.grad, torch.full_like(x_ref, 7))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "generated vmap rules",
+        ):
+            opt_fn(x.detach().clone().requires_grad_(True))
+
+    def test_vmap_no_rule_matches_eager_error(self):
+        class NoVmap(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 3
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 3
+
+        def fn(x):
+            return torch.vmap(lambda y: NoVmap.apply(y))(x)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "does not have vmap support"):
+            fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(RuntimeError, "does not have vmap support"):
+            opt_fn(x)
+
+    def test_vmap_old_style_matches_eager_error(self):
+        class OldStyle(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 3
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 3
+
+        def fn(x):
+            return torch.vmap(lambda y: OldStyle.apply(y))(x)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "must override the setup_context"):
+            fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(RuntimeError, "must override the setup_context"):
+            opt_fn(x)
+
+    def test_grad_with_custom_vmap_does_not_use_vmap_rule(self):
+        class ScaleWithCustomVmap(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 3
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 3
+
+            @staticmethod
+            def vmap(info, in_dims, x):
+                return x * 5, in_dims[0]
+
+        def fn(x):
+            return ScaleWithCustomVmap.apply(x).sum()
+
+        x = torch.randn(4, 3, requires_grad=True)
+        ref = torch.func.grad(fn)(x)
+        res = torch.compile(torch.func.grad(fn), backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, ref)
+
     def test_vmap_custom_rule_binds_default_args(self):
         class ScaleDefault(torch.autograd.Function):
             @staticmethod

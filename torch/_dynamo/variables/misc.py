@@ -962,9 +962,8 @@ class AutogradFunctionVariable(VariableTracker):
             AttrSource(self.source, "forward") if self.source is not None else None
         )
         signature = inspect.signature(self.fn_cls.forward)
-        explicitly_bound = signature.bind(*args, **kwargs)
-        explicit_names = set(explicitly_bound.arguments)
         bound_args = signature.bind(*args, **kwargs)
+        explicit_names = set(bound_args.arguments)
         bound_args.apply_defaults()
 
         positional_params = [
@@ -1077,12 +1076,31 @@ class AutogradFunctionVariable(VariableTracker):
 
         args, kwargs = self._bind_default_args_for_setup_context(tx, args, kwargs)
         is_setup_ctx_defined = _is_setup_context_defined(self.fn_cls.setup_context)
-        has_custom_vmap = self.fn_cls.vmap is not torch.autograd.Function.vmap
-        functorch_transforms_active = (
-            is_setup_ctx_defined
-            and has_custom_vmap
-            and torch._C._are_functorch_transforms_active()
+        active_functorch_interpreter = torch._C._functorch.peek_interpreter_stack()
+        is_vmap_active = (
+            active_functorch_interpreter is not None
+            and active_functorch_interpreter.key()
+            is torch._C._functorch.TransformType.Vmap
         )
+        has_batched_tensor_arg = False
+
+        def check_batched_tensor(vt: VariableTracker) -> None:
+            nonlocal has_batched_tensor_arg
+            if not vt.is_tensor():
+                return
+            try:
+                example_value = vt.as_proxy().node.meta.get("example_value")
+            except NotImplementedError:
+                return
+            if example_value is not None and torch._C._functorch.is_batchedtensor(
+                example_value
+            ):
+                has_batched_tensor_arg = True
+
+        VariableTracker.visit(check_batched_tensor, (args, kwargs))
+        is_vmap_active = is_vmap_active or has_batched_tensor_arg
+        has_custom_vmap = self.fn_cls.vmap is not torch.autograd.Function.vmap
+        has_generated_vmap = self.fn_cls.generate_vmap_rule
         if kwargs:
             resolved = self._resolve_kwargs(args, kwargs)
             if resolved is None:
@@ -1095,8 +1113,41 @@ class AutogradFunctionVariable(VariableTracker):
             args = resolved
             kwargs = {}
 
-        if functorch_transforms_active:
-            return self._call_custom_function_call(tx, args, kwargs)
+        if is_vmap_active:
+            if not is_setup_ctx_defined:
+                raise_observed_exception(
+                    RuntimeError,
+                    tx,
+                    args=[
+                        "In order to use an autograd.Function with functorch transforms "
+                        "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
+                        "staticmethod. For more details, please see "
+                        "https://pytorch.org/docs/main/notes/extending.func.html"
+                    ],
+                )
+            if has_custom_vmap:
+                return self._call_custom_function_call(tx, args, kwargs)
+            if has_generated_vmap:
+                unimplemented(
+                    gb_type="AutogradFunction with generated vmap rule",
+                    context=f"vmap over {self.fn_cls.__name__}",
+                    explanation=(
+                        "Dynamo does not support tracing autograd.Function "
+                        "generated vmap rules yet."
+                    ),
+                    hints=[],
+                )
+            raise_observed_exception(
+                RuntimeError,
+                tx,
+                args=[
+                    f"You tried to vmap over {self.fn_cls.__name__}, but "
+                    f"it does not have vmap support. Please override and implement the "
+                    f"vmap staticmethod or set generate_vmap_rule=True. "
+                    f"For more details, please see "
+                    f"https://pytorch.org/docs/main/notes/extending.func.html"
+                ],
+            )
 
         requires_grad = False
 
