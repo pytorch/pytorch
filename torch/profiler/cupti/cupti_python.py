@@ -193,9 +193,10 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
             ctypes.POINTER(ctypes.c_uint64),
         ]
         lib.cuptiGetTimestamp_v2.restype = ctypes.c_int
-    # External correlation is process-global (not subscription-scoped), and the
-    # _v2 variants aren't present in all libcupti, so the monitor uses the plain
-    # push/pop even on the v2 path.
+    # External correlation push/pop. The plain (v1) calls return
+    # CUPTI_ERROR_NOT_COMPATIBLE while a user-defined-record subscriber is active
+    # (same as cuptiGetTimestamp), so the subscriber-aware _v2 variants are required
+    # on the v2 path; bind them when present (libcupti >= 13.3) and fall back to v1.
     lib.cuptiActivityPushExternalCorrelationId.argtypes = [
         ctypes.c_int,
         ctypes.c_uint64,
@@ -206,6 +207,20 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
         ctypes.POINTER(ctypes.c_uint64),
     ]
     lib.cuptiActivityPopExternalCorrelationId.restype = ctypes.c_int
+    if hasattr(lib, "cuptiActivityPushExternalCorrelationId_v2"):
+        lib.cuptiActivityPushExternalCorrelationId_v2.argtypes = [
+            ctypes.c_void_p,  # CUpti_SubscriberHandle subscriber
+            ctypes.c_int,
+            ctypes.c_uint64,
+        ]
+        lib.cuptiActivityPushExternalCorrelationId_v2.restype = ctypes.c_int
+    if hasattr(lib, "cuptiActivityPopExternalCorrelationId_v2"):
+        lib.cuptiActivityPopExternalCorrelationId_v2.argtypes = [
+            ctypes.c_void_p,  # CUpti_SubscriberHandle subscriber
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint64),
+        ]
+        lib.cuptiActivityPopExternalCorrelationId_v2.restype = ctypes.c_int
 
 
 # --- v2 user-defined-record ctypes structs --------------------------------
@@ -428,27 +443,50 @@ class _PyLibCupti:
         )
 
     def activity_push_external_correlation_id(
-        self, external_id: int, kind: ExternalCorrelationKind | None = None
+        self,
+        external_id: int,
+        kind: ExternalCorrelationKind | None = None,
+        sub_handle: int | None = None,
     ) -> bool:
         """Push an external-correlation id (default kind CUSTOM1) onto CUPTI's
-        process-global stack. Best-effort: returns False on failure. Global, not
-        subscription-scoped, so it serves the v2 path too."""
+        process-global stack. Best-effort: returns False on failure. Pass
+        ``sub_handle`` on the v2 path -- the plain call returns NOT_COMPATIBLE while
+        a user-defined-record subscriber is active, so the subscriber-aware _v2
+        variant is used when a handle is given and it's available."""
         if kind is None:
             kind = _cupti().ExternalCorrelationKind.CUSTOM1
-        rc = self._lib.cuptiActivityPushExternalCorrelationId(
-            kind, ctypes.c_uint64(external_id)
-        )
+        if sub_handle is not None and hasattr(
+            self._lib, "cuptiActivityPushExternalCorrelationId_v2"
+        ):
+            rc = self._lib.cuptiActivityPushExternalCorrelationId_v2(
+                sub_handle, int(kind), ctypes.c_uint64(external_id)
+            )
+        else:
+            rc = self._lib.cuptiActivityPushExternalCorrelationId(
+                int(kind), ctypes.c_uint64(external_id)
+            )
         return rc == CUPTI_SUCCESS
 
     def activity_pop_external_correlation_id(
-        self, kind: ExternalCorrelationKind | None = None
+        self,
+        kind: ExternalCorrelationKind | None = None,
+        sub_handle: int | None = None,
     ) -> int | None:
         """Pop the most recent external-correlation id (default kind CUSTOM1), or
-        None on failure."""
+        None on failure. Pass ``sub_handle`` on the v2 path (see the push docstring)."""
         if kind is None:
             kind = _cupti().ExternalCorrelationKind.CUSTOM1
         last = ctypes.c_uint64()
-        rc = self._lib.cuptiActivityPopExternalCorrelationId(kind, ctypes.byref(last))
+        if sub_handle is not None and hasattr(
+            self._lib, "cuptiActivityPopExternalCorrelationId_v2"
+        ):
+            rc = self._lib.cuptiActivityPopExternalCorrelationId_v2(
+                sub_handle, int(kind), ctypes.byref(last)
+            )
+        else:
+            rc = self._lib.cuptiActivityPopExternalCorrelationId(
+                int(kind), ctypes.byref(last)
+            )
         return last.value if rc == CUPTI_SUCCESS else None
 
 
