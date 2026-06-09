@@ -87,7 +87,11 @@ from torch.export.dynamic_shapes import (
 )
 from torch.export.exported_program import OutputKind
 from torch.fx._symbolic_trace import _ConstantAttributeType
-from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+from torch.fx.experimental.dynamic_spec import (
+    _SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG,
+    ParamsSpec,
+    ShapesSpec,
+)
 from torch.fx.experimental.proxy_tensor import (
     get_proxy_slot,
     make_fx,
@@ -878,7 +882,7 @@ def _export_to_torch_ir(
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None = None,
     dynamic_shapes: _DynamicShapesInput = None,
-    strict: bool = True,
+    *,
     preserve_module_call_signature: tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
     prefer_deferred_runtime_asserts_over_guards: bool = False,
@@ -2353,12 +2357,7 @@ def _export_for_training(
     is_shapes_spec = isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec))
 
     if is_shapes_spec and prefer_deferred_runtime_asserts_over_guards:
-        raise ValueError(
-            "`prefer_deferred_runtime_asserts_over_guards=True` cannot be "
-            "combined with `dynamic_shapes=ShapesSpec(...)`. ShapesSpec "
-            "currently uses unbacked symbols only, which already emit "
-            "runtime assertions; the flag has no effect."
-        )
+        raise ValueError(_SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG)
 
     (
         args,
@@ -2581,12 +2580,7 @@ def _export(
     range_constraints_dynamic_shapes = None if is_shapes_spec else dynamic_shapes
 
     if is_shapes_spec and prefer_deferred_runtime_asserts_over_guards:
-        raise ValueError(
-            "`prefer_deferred_runtime_asserts_over_guards=True` cannot be "
-            "combined with `dynamic_shapes=ShapesSpec(...)`. ShapesSpec "
-            "currently uses unbacked symbols only, which already emit "
-            "runtime assertions; the flag has no effect."
-        )
+        raise ValueError(_SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG)
 
     global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
