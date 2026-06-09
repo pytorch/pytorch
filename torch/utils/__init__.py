@@ -40,10 +40,16 @@ def swap_tensors(t1, t2):
 
     This will not work if t1 and t2 have different slots.
     """
-    # Ensure there are no weakrefs
-    if weakref.getweakrefs(t1):
+    # Ensure there are no weakrefs that could observe swapped tensor contents.
+    # Import lazily because torch.utils is imported while torch is still initializing.
+    from torch.utils.weak import TensorWeakRef
+
+    def has_unsafe_weakrefs(t):
+        return any(not isinstance(wr, TensorWeakRef) for wr in weakref.getweakrefs(t))
+
+    if has_unsafe_weakrefs(t1):
         raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
-    if weakref.getweakrefs(t2):
+    if has_unsafe_weakrefs(t2):
         raise RuntimeError("Cannot swap t2 because it has weakref associated with it")
     t1_slots = set(copyreg._slotnames(t1.__class__))  # type: ignore[attr-defined]
     t2_slots = set(copyreg._slotnames(t2.__class__))  # type: ignore[attr-defined]
