@@ -10,7 +10,6 @@ In particular, the following analyses are provided:
 """
 
 import contextlib
-import itertools
 from typing import Any
 
 import torch
@@ -438,6 +437,7 @@ def create_graph_signature(
     trace_joint: bool,
     num_user_fw_outs: int | None,
     loss_index: int | None,
+    traced_gradient_input_indices: list[int] | None = None,
 ) -> GraphSignature:
     # Retrieve graph input names
     graph_input_names = _graph_input_names(fx_g)
@@ -455,32 +455,46 @@ def create_graph_signature(
             raise AssertionError(
                 "num_user_fw_outs must not be None when trace_joint=True"
             )
-        num_fw_outs = num_user_fw_outs + fw_metadata.num_mutated_inp_runtime_indices
+        num_fw_outs = (
+            num_tokens + num_user_fw_outs + fw_metadata.num_mutated_inp_runtime_indices
+        )
         backward_output_names = graph_output_names[num_fw_outs:]
 
-        grad_index = itertools.count(0)
-        gradients_to_parameters = {
-            backward_output_names[next(grad_index)]: param_names[i]
-            for i, param in enumerate(params_and_buffers_flat)
-            if param.requires_grad
-        }
-
-        gradients_to_user_inputs = {
-            backward_output_names[next(grad_index)]: graph_input_names[
-                i + len(params_and_buffers_flat)
+        if traced_gradient_input_indices is None:
+            traced_gradient_input_indices = [
+                i
+                for i, param in enumerate(params_and_buffers_flat)
+                if isinstance(param, Tensor) and param.requires_grad
+            ] + [
+                len(params_and_buffers_flat) + i
+                for i, user_input in enumerate(user_args_flat)
+                if isinstance(user_input, Tensor) and user_input.requires_grad
             ]
-            for i, user_input in enumerate(user_args_flat)
-            if user_input.requires_grad
-        }
 
-        if len(gradients_to_parameters) + len(gradients_to_user_inputs) != len(
-            backward_output_names
-        ):
+        if len(traced_gradient_input_indices) != len(backward_output_names):
             raise AssertionError(
-                f"len(gradients_to_parameters)={len(gradients_to_parameters)} + "
-                f"len(gradients_to_user_inputs)={len(gradients_to_user_inputs)} != "
+                f"len(traced_gradient_input_indices)={len(traced_gradient_input_indices)} != "
                 f"len(backward_output_names)={len(backward_output_names)}"
             )
+
+        gradients_to_parameters = {}
+        gradients_to_user_inputs = {}
+        num_params = len(param_names)
+        num_params_and_buffers = len(params_and_buffers_flat)
+        for backward_output_name, input_index in zip(
+            backward_output_names, traced_gradient_input_indices
+        ):
+            if input_index < num_params:
+                gradients_to_parameters[backward_output_name] = param_names[input_index]
+            elif input_index < num_params_and_buffers:
+                raise AssertionError(
+                    f"Unexpected gradient output for buffer input at index {input_index}"
+                )
+            else:
+                user_input_index = input_index - num_params_and_buffers
+                gradients_to_user_inputs[backward_output_name] = graph_input_names[
+                    num_tokens + num_params_and_buffers + user_input_index
+                ]
 
         # Check that we have fully accounted for all graph outputs
         if loss_index is None:
@@ -488,7 +502,9 @@ def create_graph_signature(
         backward_signature = BackwardSignature(
             gradients_to_parameters,
             gradients_to_user_inputs,
-            graph_output_names[loss_index],
+            graph_output_names[
+                num_tokens + fw_metadata.num_mutated_inp_runtime_indices + loss_index
+            ],
         )
     else:
         backward_signature = None
