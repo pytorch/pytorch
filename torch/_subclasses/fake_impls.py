@@ -574,6 +574,49 @@ def _spdiags(
     )
 
 
+@register_op_impl(aten._to_dense.default)
+def _to_dense(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    dtype: torch.dtype | None = None,
+    masked_grad: bool | None = None,
+) -> FakeTensor:
+    if self.is_mkldnn:
+        dtype = dtype if dtype is not None else self.dtype
+        if dtype not in _MKLDNN_TO_DENSE_SUPPORTED_DTYPES:
+            raise RuntimeError(
+                "Unsupported dtype for ideep public tensor: "
+                f"{_mkldnn_public_dtype_name(dtype)}"
+            )
+
+        with in_kernel_invocation_manager(fake_mode):
+            out = torch.empty_strided(
+                self.shape,
+                make_contiguous_strides_for(self.shape),
+                dtype=dtype,
+                device="meta",
+            )
+        return FakeTensor(fake_mode, out, self.fake_device)
+
+    if self.layout is torch.sparse_coo:
+        if dtype is not None:
+            raise RuntimeError("dtype argument is not supported by sparse_to_dense")
+        with in_kernel_invocation_manager(fake_mode):
+            out = torch.empty(
+                tuple(self.shape),
+                dtype=self.dtype,
+                device="meta",
+            )
+        return FakeTensor(fake_mode, out, self.fake_device)
+
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(self, dtype=dtype, masked_grad=masked_grad)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, self.fake_device
+    )
+
+
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags
@@ -678,6 +721,20 @@ def unique2(
     return_counts: bool = False,
 ) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
+
+
+@register_op_impl(aten._unique.default)
+def unique(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    arg: FakeTensor,
+    sorted: bool = True,
+    return_inverse: bool = False,
+) -> tuple[FakeTensor, FakeTensor]:
+    uniques, inverse, _counts = _unique(
+        fake_mode, func, arg, None, sorted, return_inverse, False
+    )
+    return uniques, inverse
 
 
 @register_op_impl(aten.select.int)
@@ -1309,6 +1366,14 @@ def _mkldnn_max_pool2d_with_indices(
     )
     input_ = new_kwargs["self"] if "self" in new_kwargs else new_kwargs["input"]
     if input_.is_mkldnn:
+        stride = new_kwargs["stride"]
+        if any(s == 0 for s in stride):
+            raise RuntimeError("stride should not be zero")
+        if any(s <= 0 for s in stride):
+            raise RuntimeError(
+                "stride should be greater than zero, "
+                f"but got dH: {stride[0]} dW: {stride[1]}"
+            )
         raise RuntimeError(
             "'memory_format' argument is incompatible with mkldnn tensor"
         )
@@ -1444,8 +1509,7 @@ def _mkldnn_reshape(
 
 
 @register_op_impl(aten.to_dense.default)
-@register_op_impl(aten._to_dense.default)
-def _mkldnn_to_dense(
+def _mkldnn_to_dense_default(
     fake_mode: FakeTensorMode,
     func: OpOverload,
     input_: FakeTensor,
@@ -1455,21 +1519,7 @@ def _mkldnn_to_dense(
     if not input_.is_mkldnn:
         return NotImplemented
 
-    dtype = dtype if dtype is not None else input_.dtype
-    if dtype not in _MKLDNN_TO_DENSE_SUPPORTED_DTYPES:
-        raise RuntimeError(
-            "Unsupported dtype for ideep public tensor: "
-            f"{_mkldnn_public_dtype_name(dtype)}"
-        )
-
-    with in_kernel_invocation_manager(fake_mode):
-        output = torch.empty_strided(
-            input_.shape,
-            make_contiguous_strides_for(input_.shape),
-            dtype=dtype,
-            device="meta",
-        )
-    return FakeTensor(fake_mode, output, input_.fake_device)
+    return aten._to_dense.default(input_, dtype, masked_grad)
 
 
 @register_op_impl(aten.repeat_interleave.Tensor)
@@ -1921,6 +1971,28 @@ def embedding_bag(
 
     with fake_mode:
         return meta_embedding_bag(*args, **kwargs)
+
+
+@register_op_impl(aten.embedding.default)
+def embedding(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> Any:
+    from torch._meta_registrations import embedding as meta_embedding
+
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    weight = new_kwargs["weight"]
+    indices = new_kwargs["indices"]
+    if (
+        weight.device != indices.device
+        and weight.device.type != "meta"
+        and indices.device.type != "meta"
+    ):
+        return NotImplemented
+
+    with fake_mode:
+        return typing_cast(FakeTensor, meta_embedding(*args, **kwargs))
 
 
 # takes in multiple-devices, don't default to default device handling
@@ -2380,11 +2452,19 @@ def make_fast_binary_impl(
 def fast_detach(
     fake_mode: FakeTensorMode, x: FakeTensor, include_real: bool = False
 ) -> FakeTensor:
-    with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
+    with (
+        torch._C.DisableTorchFunctionSubclass(),
+        no_python_dispatcher(),
+        in_kernel_invocation_manager(fake_mode),
+    ):
         out = torch.ops.aten.detach.default(x)
     if include_real:
-        return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
-    return FakeTensor(fake_mode, out, x.device)
+        fake_out = FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
+    else:
+        fake_out = FakeTensor(fake_mode, out, x.device)
+    if x.is_mkldnn:
+        fake_out._fake_is_mkldnn = True
+    return fake_out
 
 
 @functools.cache

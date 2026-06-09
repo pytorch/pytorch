@@ -15,7 +15,7 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict, Unpack
 from weakref import ReferenceType
 
 import torch
@@ -82,9 +82,42 @@ T = TypeVar("T")
 
 aten = torch._ops.ops.aten
 
+_MKLDNN_PROPAGATE_OPS = {
+    aten.clone.default,
+    aten.detach.default,
+    aten.relu.default,
+    aten.transpose.int,
+}
+
 CONSTANT_NUMEL_LIMIT = 1
 
 RECURSION_COUNT = 0
+
+
+class _FakeTensorConstructorIgnoredState(TypedDict, total=False):
+    # Recompute memo descriptor state when reconstructing from
+    # FakeTensor.__dict__.
+    _nonzero_memo: object
+    _nonzero_memo_vc: object
+    _nonzero_memo_epoch: object
+    _item_memo: object
+    _item_memo_vc: object
+    _item_memo_epoch: object
+    _unique_memo: object
+    _unique_memo_vc: object
+    _unique_memo_epoch: object
+    _unique_consecutive_memo: object
+    _unique_consecutive_memo_vc: object
+    _unique_consecutive_memo_epoch: object
+    _nested_int_memo: object
+    _nested_int_memo_vc: object
+    _nested_int_memo_epoch: object
+    _debug_trace: object
+
+
+_FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS = frozenset(
+    _FakeTensorConstructorIgnoredState.__annotations__
+)
 
 
 # Check if device type supports device index
@@ -738,6 +771,84 @@ class SymNumberMemoDescriptor:
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
 
 
+def _fake_tensor_dim_order(
+    self: FakeTensor, *, ambiguity_check: bool | list[torch.memory_format] = False
+) -> tuple[int, ...]:
+    if not isinstance(ambiguity_check, bool):
+        with torch._C.DisableTorchFunctionSubclass():
+            return cast(
+                tuple[int, ...],
+                torch.Tensor.dim_order(self, ambiguity_check=ambiguity_check),
+            )
+
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    ndim = self.ndim
+    if ndim == 0:
+        return ()
+    if ndim == 1:
+        return (0,)
+
+    shape = torch.ops.aten.sym_size.default(self)
+    strides = torch.ops.aten.sym_stride.default(self)
+
+    if ambiguity_check and any(guard_or_false(size == 1) for size in shape):
+        raise RuntimeError(
+            "The tensor does not have unique dim order, or cannot map to exact one of the given memory formats."
+        )
+
+    def ge(a: IntLikeType, b: IntLikeType) -> bool:
+        if guard_or_false(b == 0):
+            return True
+        if guard_or_false(a == 0):
+            return False
+        return guard_or_false(a >= b) or guard_or_false(cast(Any, a) % b == 0)
+
+    def should_swap(idx_a: int, idx_b: int) -> int:
+        stride_a = strides[idx_a]
+        stride_b = strides[idx_b]
+
+        if guard_or_false(stride_a == 0) or guard_or_false(stride_b == 0):
+            return 0
+
+        if guard_or_false(stride_a == stride_b):
+            if ge(shape[idx_b], shape[idx_a]):
+                return 0
+            return 1
+
+        if ge(stride_b, stride_a):
+            return -1
+
+        if ge(stride_a, stride_b):
+            return 1
+
+        return 0
+
+    perm = list(reversed(range(ndim)))
+    for i in range(1, ndim):
+        dim1 = i
+        for dim0 in reversed(range(i)):
+            comparison = should_swap(perm[dim0], perm[dim1])
+            if comparison > 0:
+                perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
+                dim1 = dim0
+            elif comparison < 0:
+                break
+
+    if ambiguity_check:
+        for i, j in zip(range(ndim - 1), range(1, ndim)):
+            if should_swap(perm[i], perm[j]) != -1:
+                raise RuntimeError("The tensor does not have unique dim order.")
+
+    return tuple(reversed(perm))
+
+
+def _should_propagate_mkldnn(func: OpOverload, flat_args: Sequence[object]) -> bool:
+    return func in _MKLDNN_PROPAGATE_OPS and any(
+        isinstance(arg, FakeTensor) and arg.is_mkldnn for arg in flat_args
+    )
+
+
 class FakeTensor(Tensor):
     """
     Meta tensors give you the ability to run PyTorch code without having to
@@ -848,18 +959,87 @@ class FakeTensor(Tensor):
     @staticmethod
     def __new__(
         cls,
-        fake_mode: FakeTensorMode,
-        elem: Tensor,
-        device: torch.device,
+        fake_mode_or_elem: FakeTensorMode | Tensor | None = None,
+        elem: Tensor | None = None,
+        device: torch.device | str | None = None,
         constant: Tensor | None = None,
         real_tensor: Tensor | None = None,
         pytype: type[Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
+        *,
+        fake_mode: FakeTensorMode | None = None,
+        fake_device: torch.device | str | None = None,
+        _fake_device: torch.device | str | None = None,
+        _fake_is_mkldnn: bool = False,
+        requires_grad: bool | None = None,
+        _is_param: bool = False,
+        **state: Unpack[_FakeTensorConstructorIgnoredState],
     ) -> Self:
+        state_dict = cast(dict[str, object], state)
+        for attr_name in _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS:
+            state_dict.pop(attr_name, None)
+        if state_dict:
+            unexpected = next(iter(state_dict))
+            raise TypeError(
+                "FakeTensor.__new__() got an unexpected keyword argument "
+                f"{unexpected!r}"
+            )
+
+        if isinstance(fake_mode_or_elem, FakeTensorMode):
+            if fake_mode is not None and fake_mode is not fake_mode_or_elem:
+                raise TypeError("FakeTensor.__new__() got conflicting fake_mode values")
+            fake_mode = fake_mode_or_elem
+        else:
+            # Support bounded state-based reconstruction from known FakeTensor
+            # attrs, e.g. type(fake_tensor)(new_elem, **fake_tensor.__dict__).
+            if fake_mode_or_elem is not None:
+                if not isinstance(fake_mode_or_elem, Tensor):
+                    raise TypeError(
+                        "FakeTensor.__new__() expected a FakeTensorMode or Tensor "
+                        f"as the first argument, got {type(fake_mode_or_elem)}"
+                    )
+                if elem is not None:
+                    raise TypeError(
+                        "FakeTensor.__new__() expected either "
+                        "(fake_mode, elem, ...) or (elem, fake_mode=..., ...)"
+                    )
+                elem = fake_mode_or_elem
+            if fake_mode is None:
+                raise TypeError(
+                    "FakeTensor.__new__() missing required argument: 'fake_mode'"
+                )
+
+        if elem is None:
+            raise TypeError("FakeTensor.__new__() missing required argument: 'elem'")
+
+        specified_devices = [
+            (name, FakeTensor._normalize_fake_device(torch.device(value)))
+            for name, value in (
+                ("device", device),
+                ("fake_device", fake_device),
+                ("_fake_device", _fake_device),
+            )
+            if value is not None
+        ]
+        if specified_devices:
+            first_name, resolved_device = specified_devices[0]
+            for name, candidate_device in specified_devices[1:]:
+                if resolved_device != candidate_device:
+                    raise ValueError(
+                        "FakeTensor.__new__() got conflicting device values: "
+                        f"{first_name}={resolved_device}, {name}={candidate_device}"
+                    )
+            device = resolved_device
+        else:
+            raise TypeError(
+                "FakeTensor.__new__() missing required argument: "
+                "'device' (or 'fake_device')"
+            )
+
         self = Tensor._make_subclass(
             cls,
             elem,
-            elem.requires_grad,
+            elem.requires_grad if requires_grad is None else requires_grad,
             dispatch_device=True,
             device_for_backend_keys=device,
         )
@@ -872,7 +1052,6 @@ class FakeTensor(Tensor):
             raise AssertionError(
                 f"elem.device.type must be 'meta', got {elem.device.type}"
             )
-        device = device if isinstance(device, torch.device) else torch.device(device)
         # NB: it is fine, if a little confusing, for device to be meta
         # (we are faking a meta tensor in that case).  However, it often
         # indicates some sort of confusion (e.g., you accidentally passed
@@ -887,6 +1066,7 @@ class FakeTensor(Tensor):
                 )
         self.fake_device = device
         self.fake_mode = fake_mode
+        self._fake_is_mkldnn = _fake_is_mkldnn
         self.constant = constant
         self.pytype = pytype
         self.dispatch_keys = dispatch_keys
@@ -898,6 +1078,9 @@ class FakeTensor(Tensor):
         self.unique_memo = None
         self.unique_consecutive_memo = None
         self.nested_int_memo = None
+
+        if _is_param:
+            self._is_param = _is_param
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
@@ -942,6 +1125,21 @@ class FakeTensor(Tensor):
         kwargs: Mapping[str, object] | None = None,
     ) -> object:
         kwargs = kwargs or {}
+
+        if func is torch.Tensor.dim_order:
+            input_arg = args[0]
+            if not isinstance(input_arg, FakeTensor):
+                return super().__torch_function__(func, types, args, kwargs)
+            return _fake_tensor_dim_order(
+                input_arg,
+                ambiguity_check=cast(
+                    bool | list[torch.memory_format],
+                    kwargs.get("ambiguity_check", False),
+                ),
+            )
+
+        if func is aten.item.default:
+            return super().__torch_function__(func, types, args, kwargs)
 
         missing = object()
 
@@ -1014,8 +1212,36 @@ class FakeTensor(Tensor):
                 with torch._C.DisableTorchFunctionSubclass():
                     return aten._to_dense.default(input_, dtype, masked_grad)
 
-        with torch._C.DisableTorchFunctionSubclass():
-            return cast(Any, func)(*args, **kwargs)
+            if func in (torch.Tensor.clone, torch.clone, aten.clone.default):
+                explicit_memory_format = len(args) > 1 or "memory_format" in kwargs
+                memory_format = get_arg(1, ("memory_format",), None)
+                if explicit_memory_format:
+                    memory_format_name = cast(
+                        dict[object, str],
+                        {
+                            torch.contiguous_format: "Contiguous",
+                            torch.preserve_format: "Preserve",
+                            torch.channels_last: "ChannelsLast",
+                            torch.channels_last_3d: "ChannelsLast3d",
+                        },
+                    ).get(memory_format, str(memory_format))
+                    raise RuntimeError(
+                        f"unsupported memory format option {memory_format_name}"
+                    )
+                with torch._C.DisableTorchFunctionSubclass():
+                    output = aten.clone.default(input_, memory_format=memory_format)
+                if isinstance(output, FakeTensor):
+                    output._fake_is_mkldnn = True
+                return output
+
+            if func in (torch.Tensor.permute, torch.permute, aten.permute.default):
+                raise NotImplementedError("aten::as_strided")
+
+        if isinstance(func, torch._ops.OpOverload):
+            with torch._C.DisableTorchFunctionSubclass():
+                return cast(Any, func)(*args, **kwargs)
+
+        return super().__torch_function__(func, types, args, kwargs)
 
     @classmethod
     @count
@@ -1568,7 +1794,7 @@ class FakeTensorMode(TorchDispatchMode):
     # to distinguish between our fake tensor and other fake tensors.  That's
     # what this function does.
     def is_our_fake(self, t: object) -> TypeGuard[FakeTensor]:
-        return isinstance(t, FakeTensor) and t.fake_mode is self
+        return isinstance(t, FakeTensor) and getattr(t, "fake_mode", None) is self
 
     # If we should avoid device init. This changes the behavior of various APIs:
     # - We avoid constant-prop on Tensors with ops that move them to another device
@@ -2109,7 +2335,10 @@ class FakeTensorMode(TorchDispatchMode):
         _BypassDispatchCache if the output tensor has characteristics that
         prevent caching it.
         """
-        from torch._higher_order_ops.utils import registered_hop_fake_fns
+        from torch._higher_order_ops.utils import (
+            hops_that_skip_faketensor_cache,
+            registered_hop_fake_fns,
+        )
         from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
         self._validate_cache_key(func, args, kwargs)
@@ -2119,22 +2348,26 @@ class FakeTensorMode(TorchDispatchMode):
         # caching.
         # NB: Note that the HOPs that sta alive till FakeTensor are functional,
         # once they support mutations, we will have to revisit this logic.
+        # Skipping caching for HOPs that used to be registered with @py.impl(FakeTensorMode)
+        # to preserve original behaviour
         if (
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
         ):
-            if not isinstance(output, tuple) and output is not None:
-                raise AssertionError(
-                    f"Expected tuple output for HOP {func}, got {type(output)}"
-                )
-            if output is not None:
-                non_cacheable = any(
+            outs = output if isinstance(output, tuple) else (output,)
+            non_cacheable = (
+                any(
                     isinstance(o, (torch.Tensor, torch.SymInt))
                     and has_free_unbacked_symbols(o)
-                    for o in output  # pyrefly: ignore[not-iterable]
+                    for o in outs
                 )
-                if non_cacheable:
-                    raise _BypassDispatchCache(f"unbacked symbol in HOP {func} output")
+                or func in hops_that_skip_faketensor_cache
+            )
+            if non_cacheable:
+                raise _BypassDispatchCache(
+                    f"unbacked symbol in HOP {func} output \
+                    or {func} in hops_that_skip_faketensor_cache"
+                )
 
         if isinstance(output, (int, torch.SymInt, type(None))):
             output_info = _DispatchCacheEntryOutputInfo(
@@ -3193,6 +3426,7 @@ class FakeTensorMode(TorchDispatchMode):
         # Lazily initialized, in case there are no tensor returns
         common_device = None
         has_scalar_only_inputs = False
+        propagate_mkldnn = _should_propagate_mkldnn(func, flat_args)
 
         def wrap(e: T) -> T | FakeTensor:
             nonlocal common_device
@@ -3213,17 +3447,22 @@ class FakeTensorMode(TorchDispatchMode):
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
+                if propagate_mkldnn:
+                    e._fake_is_mkldnn = True
                 return cast(T, e)
             elif converter is not None:
                 if has_scalar_only_inputs:
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
                     # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
                     # We thus directly convert real tensor to fake tensor.
-                    return converter.from_real_tensor(self, e)
+                    out = converter.from_real_tensor(self, e)
                 else:
-                    return converter.from_meta_and_device(
+                    out = converter.from_meta_and_device(
                         self, e, device or common_device
                     )
+                if propagate_mkldnn:
+                    out._fake_is_mkldnn = True
+                return out
             else:
                 # pyrefly: ignore [bad-return]
                 return e
