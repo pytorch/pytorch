@@ -1161,6 +1161,15 @@ class OverFusionTest(TestBase):
     regression. See #179423.
     """
 
+    @skipIfXpu(
+        msg="https://github.com/pytorch/pytorch/issues/181699 — "
+        "Mix-order reduction does not trigger on XPU Triton backend for "
+        "this transformer model. The model compiles and produces correct "
+        "numerical results, but the scheduler metrics assertions (codegen_"
+        "mix_order_reduction > 0, rejected_mix_order_reduction_fusion > 0) "
+        "fail because the XPU graph structure differs from CUDA. Root cause "
+        "investigation requires XPU hardware access."
+    )
     @inductor_config.patch(
         {
             "triton.mix_order_reduction": True,
