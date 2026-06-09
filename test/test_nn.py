@@ -9798,9 +9798,9 @@ class TestNNDeviceType(NNTestCase):
                     msg=f"dbeta mismatch: N={N} C={C} G={G} dtype={dtype}",
                 )
 
-    @expectedFailureMPS  # Double is not supported on MPS
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_pad(self, device, dtype):
         # Assert assertion errors are raised for invalid circular padding values
         inputs = torch.randn(1, 1, 4, device=device, dtype=dtype, requires_grad=True)
@@ -9830,9 +9830,9 @@ class TestNNDeviceType(NNTestCase):
             out.fill_(4)
             self.assertTrue(torch.all(torch.abs(inputs) < 2))
 
-    @expectedFailureMPS  # Unsupported float64/complex128
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_ReplicationPad_empty(self, device, dtype):
         for mod, inp in [
                 (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device, dtype=dtype)),
