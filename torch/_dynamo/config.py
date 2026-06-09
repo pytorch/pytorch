@@ -560,7 +560,7 @@ enable_cpp_symbolic_shape_guards = False
 enable_trace_contextlib = True
 
 # Enable tracing through unittest
-enable_trace_unittest = False
+enable_trace_unittest = True
 
 # Enable tracing LOAD_BUILD_CLASS bytecode
 enable_trace_load_build_class = False

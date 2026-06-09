@@ -118,15 +118,6 @@ class NotReversibleNone:
 class TestIterators(torch._dynamo.test_case.TestCase):
     """Test iterator support in Dynamo"""
 
-    def setUp(self):
-        super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
-
     @make_dynamo_test
     def test_list_iteration(self):
         """Test iteration over list"""
@@ -926,15 +917,6 @@ class GeneratorIterIterable:
 class TestCustomIteratorMethods(torch._dynamo.test_case.TestCase):
     """Test custom __iter__ implementations on user-defined subclasses"""
 
-    def setUp(self):
-        super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
-
     @make_dynamo_test
     def test_custom_object_with_custom_iter(self):
         obj = CustomListWithReverseIter()
@@ -989,15 +971,6 @@ class TestIteratorMutationSemantics(torch._dynamo.test_case.TestCase):
     These tests explore whether Dynamo preserves CPython's iterator semantics
     when the underlying container is modified.
     """
-
-    def setUp(self):
-        super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
 
     @make_dynamo_test
     def test_dict_mutation_during_iteration(self):
@@ -1115,15 +1088,6 @@ class Priority(enum.IntEnum):
 class TestEnumIteration(torch._dynamo.test_case.TestCase):
     """Test iteration over enum classes"""
 
-    def setUp(self):
-        super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
-
     @make_dynamo_test
     def test_enum_iter(self):
         result = list(iter(Color))
@@ -1166,15 +1130,6 @@ class TestEnumIteration(torch._dynamo.test_case.TestCase):
 
 class TestIterWithBuiltins(torch._dynamo.test_case.TestCase):
     """Test iter() with builtin iterators like zip, map, filter, reversed"""
-
-    def setUp(self):
-        super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
 
     @make_dynamo_test
     def test_iter_of_zip(self):
@@ -1399,15 +1354,6 @@ class BlockedLen:
 
 class TestIterErrors(torch._dynamo.test_case.TestCase):
     """Test that iter() raises the correct exceptions"""
-
-    def setUp(self):
-        super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
 
     @make_dynamo_test
     def test_iter_non_iterable_raises_type_error(self):

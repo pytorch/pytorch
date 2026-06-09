@@ -493,15 +493,6 @@ class WithGetattribute:
 class TestSlotsFromCPython(TestCase):
     """Slot tests extracted from CPython's test_descr.py::test_slots."""
 
-    def setUp(self):
-        super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
-
     def test_slots_empty(self):
         class C:
             __slots__ = []
@@ -918,14 +909,11 @@ class TestUserDefinedSetitem(TestCase):
 
     def setUp(self):
         super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
         self._b_prev = torch._dynamo.config.enable_trace_load_build_class
-        torch._dynamo.config.enable_trace_unittest = True
         torch._dynamo.config.enable_trace_load_build_class = True
 
     def tearDown(self):
         super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
         torch._dynamo.config.enable_trace_load_build_class = self._b_prev
 
     # -- instance __setitem__ --

@@ -3484,7 +3484,6 @@ class _IssubclassRegisteredViaABC:
 _IssubclassMyABC.register(_IssubclassRegisteredViaABC)
 
 
-@torch._dynamo.config.patch(enable_trace_unittest=True)
 class TestIssubclass(torch._dynamo.test_case.TestCase):
     # --- Built-in types ---
 
