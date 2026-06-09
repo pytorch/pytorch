@@ -24,7 +24,10 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
-from torch._higher_order_ops.gemm_epilogue import _gemm_epilogue_fusion
+from torch._higher_order_ops.gemm_epilogue import (
+    _gemm_epilogue_fusion,
+    materialize_quack_epilogue,
+)
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
@@ -8408,13 +8411,50 @@ def hints_wrapper_lowering(subgraph, args, kwargs, hints):
 @register_lowering(_gemm_epilogue_fusion, type_promotion_kind=None)
 def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     backend = kernel_options.get("backend", "TRITON")
+    if backend == "QUACK":
+        if gemm_op != torch.ops.aten.mm.default or gemm_kwargs:
+            raise NotImplementedError(
+                "QUACK GEMM epilogue backend currently supports only aten.mm.default"
+            )
+        from torch._inductor.kernel.quack_gemm_epilogue import (
+            quack_gemm_epilogue_template,
+        )
+        from torch._inductor.select_algorithm import autotune_select_algorithm
+
+        epilogue_key, epilogue_source = materialize_quack_epilogue(
+            subgraph.graph_module
+        )
+        m, n = args[0].get_size()[0], args[1].get_size()[1]
+        layout = ir.FixedLayout(
+            args[0].get_device_or_error(),
+            args[0].get_dtype(),
+            [m, n],
+            [n, 1],
+        )
+        input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
+        choices: list[Any] = []
+        quack_gemm_epilogue_template.maybe_append_choice(
+            choices,
+            input_nodes=input_nodes,
+            layout=layout,
+            epilogue_name=epilogue_key,
+            epilogue_source=epilogue_source,
+        )
+        node, _ = autotune_select_algorithm(
+            "quack_gemm_epilogue", choices, input_nodes, layout
+        )
+        return (node,)
+
     if backend != "TRITON":
         raise NotImplementedError(
             f"GEMM epilogue backend {backend} is not implemented in Inductor"
         )
 
     operation_len = len(V.graph.operations)
-    with patch.object(config, "max_autotune_gemm", True):
+    with (
+        patch.object(config, "max_autotune_gemm", True),
+        patch.object(config, "max_autotune_gemm_backends", "TRITON"),
+    ):
         output = process_subgraph_nodes(subgraph.graph_module, list(args))
 
     for op in V.graph.operations[operation_len:]:
