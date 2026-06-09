@@ -5959,7 +5959,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         return m.group(0)
 
     s = re.sub(
-        r'( *)File "([^"]+)", line \d+, in (.+)\n(\1  .+\n( +[~^]+ *\n)?)+',
+        r'( *)File "([^"]+)", line \d+, in (.+)\n(\1  .+\n( +[~^]+ *\n)?)*',
         repl_frame,
         s,
     )
@@ -5982,6 +5982,9 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
+    # Normalize caret-only lines by stripping leading whitespace, since
+    # col_offset in bytecode positions can vary across Python point releases
+    s = re.sub(r"^[ ]+(\^+)$", r"\1", s, flags=re.MULTILINE)
     return s
 
 
