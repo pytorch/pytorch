@@ -13,17 +13,18 @@ annotation join, and windowing around it.
 
 from __future__ import annotations
 
-import contextlib
 import ctypes
 import os
 import threading
-from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.profiler.cupti.cupti_python import ActivityKind, OVERHEAD_KIND_NAMES
 from torch.profiler.cupti.monitor_trace import merge_trace_window_into_chrome_trace
-from torch.profiler.cupti.observers.base import CuptiMonitorObserver
+from torch.profiler.cupti.observers.base import (
+    CuptiMonitorObserver,
+    ObserverAnnotationSettings,
+)
 from torch.profiler.cupti.records import (
     Api,
     ExternalCorrelation,
@@ -35,18 +36,17 @@ from torch.profiler.cupti.records import (
 )
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch.profiler.cupti.observers.base import AnnotationResolver
+
+
 def _current_thread_resource_tuple() -> tuple[int, int, int]:
     # (pid, opaque 32-bit thread id, system thread id) for trace lane naming.
     opaque_tid = ctypes.c_int32(threading.get_ident() & 0xFFFFFFFF).value
     return (os.getpid(), opaque_tid, threading.get_native_id())
 
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-
-# (graph_node_id, activity_kind, correlation_id) -> annotation, or None.
-AnnotationResolver = Callable[[int, int, int], "Any | None"]
 
 _DEMANGLE_CACHE: dict[str, str] = {}
 
@@ -56,22 +56,6 @@ def _demangle_symbol(name: str) -> str:
     if cached is None:
         cached = _DEMANGLE_CACHE[name] = torch._C._demangle(name)
     return cached
-
-
-def default_graph_annotation_resolver(
-    graph_node_id: int, activity_kind: int, correlation_id: int
-) -> Any | None:
-    """Default resolver: map a CUDA-graph node id to its registered annotation."""
-    del activity_kind, correlation_id
-    if graph_node_id == 0:
-        return None
-    try:
-        from torch.cuda._graph_annotations import get_kernel_annotations
-
-        annotations = get_kernel_annotations()
-    except Exception:
-        return None
-    return annotations.get(graph_node_id)
 
 
 # The CUPTI fields ProfilerObserver requests: GPU work plus the CPU-side
@@ -164,16 +148,19 @@ class ProfilerObserver(CuptiMonitorObserver):
     def __init__(self, annotation_resolver: AnnotationResolver | None = None) -> None:
         self._lock = threading.Lock()
         self._events: list[dict[str, Any]] = []
-        # external_id -> user-annotation name (this observer's metadata for the
-        # monitor's global external-correlation pushes).
-        self._ext_names: dict[int, str] = {}
         # pid -> {opaque_tid: system_tid}, for naming GPU/CPU lanes in the trace.
         self._thread_resource_map: dict[int, dict[int, int]] = {}
         self._window_start_ns = 0
-        self._annotation_resolver = (
-            annotation_resolver or default_graph_annotation_resolver
+        # Graph-node naming via the base resolver (self._resolver; custom or default).
+        # PROFILER_FIELDS already selects RUNTIME + EXTERNAL_CORRELATION + correlation
+        # ids and the eager join happens in monitor_trace, so this doesn't opt into the
+        # base's eager augmentation.
+        super().__init__(
+            {k: set(v) for k, v in PROFILER_FIELDS.items()},
+            annotations=ObserverAnnotationSettings(
+                graph=True, custom_graph_annotation_resolver=annotation_resolver
+            ),
         )
-        super().__init__({k: set(v) for k, v in PROFILER_FIELDS.items()})
         if self.available:
             self._window_start_ns = self.now_ns()
 
@@ -188,7 +175,7 @@ class ProfilerObserver(CuptiMonitorObserver):
                     int(kind),
                     cols,
                     convert_time=self.convert_time,
-                    annotation_resolver=self._annotation_resolver,
+                    annotation_resolver=self._resolver,
                 )
             )
         if new_events:
@@ -196,33 +183,10 @@ class ProfilerObserver(CuptiMonitorObserver):
                 self._events.extend(new_events)
 
     def push_annotation(self, name: str) -> int | None:
-        """Push a global external-correlation id (mapped here to ``name``) so
-        kernels recorded until the matching pop are attributed to the region in
-        the trace via correlation_id -> external_id -> name. The push is the
-        monitor's (global) concern; the id->name mapping is this observer's.
-        Eager only -- external ids do not survive CUDA-graph capture/replay."""
-        if not self.available:
-            return None
+        # Record the calling thread (for trace-lane naming) on top of the base
+        # external-correlation push (which owns the id -> name mapping).
         self._record_calling_thread()
-        ext_id = self._monitor.push_external_correlation_id()
-        if ext_id is not None:
-            with self._lock:
-                self._ext_names[ext_id] = name
-        return ext_id
-
-    def pop_annotation(self) -> int | None:
-        if not self.available:
-            return None
-        return self._monitor.pop_external_correlation_id()
-
-    @contextlib.contextmanager
-    def annotate(self, name: str) -> Iterator[int | None]:
-        """Context-manager form of push_annotation/pop_annotation."""
-        ext_id = self.push_annotation(name)
-        try:
-            yield ext_id
-        finally:
-            self.pop_annotation()
+        return super().push_annotation(name)
 
     def _record_calling_thread(self) -> None:
         pid, opaque_tid, sys_tid = _current_thread_resource_tuple()
@@ -237,11 +201,10 @@ class ProfilerObserver(CuptiMonitorObserver):
         if self._monitor is not None:
             self._monitor.flush(forced=True, sync=True)
         now = self.now_ns()
+        user_annotations = self.annotation_names(reset=True)
         with self._lock:
             events = self._events
             self._events = []
-            user_annotations = self._ext_names
-            self._ext_names = {}
             thread_resource_map = {
                 pid: dict(mapping) for pid, mapping in self._thread_resource_map.items()
             }
@@ -283,14 +246,16 @@ def events_from_columns(
     cols: dict[int, Any],
     *,
     convert_time: Callable[[int], int],
-    annotation_resolver: AnnotationResolver,
+    annotation_resolver: AnnotationResolver | None,
 ) -> list[dict[str, Any]]:
     """Turn one kind's columns (``{field_id: column}``) into chrome-trace event
-    dicts. Returns [] for kinds this builder doesn't render."""
+    dicts. Returns [] for kinds this builder doesn't render. A None resolver means
+    no graph-node naming (every annotation resolves to None)."""
     builder = _BUILDERS.get(kind)
     if builder is None:
         return []
-    return builder(cols, convert_time, annotation_resolver)
+    resolver = annotation_resolver or (lambda *_: None)
+    return builder(cols, convert_time, resolver)
 
 
 def _col_len(cols: dict[int, Any]) -> int:

@@ -185,6 +185,20 @@ STRING_FIELDS: dict[int, frozenset[int]] = {
     kind: frozenset(f.id for f in fields if f.string) for kind, fields in FIELDS.items()
 }
 
+# kind -> its CORRELATION_ID field id. The launch correlation id a kernel shares with
+# its runtime call; used to join activity to external-correlation (eager annotation).
+CORRELATION_FIELD: dict[int, int] = {
+    ActivityKind.CONCURRENT_KERNEL: int(Kernel.CORRELATION_ID),
+    ActivityKind.MEMCPY: int(Memcpy.CORRELATION_ID),
+    ActivityKind.MEMSET: int(Memset.CORRELATION_ID),
+    ActivityKind.RUNTIME: int(Api.CORRELATION_ID),
+    ActivityKind.DRIVER: int(Api.CORRELATION_ID),
+    ActivityKind.EXTERNAL_CORRELATION: int(ExternalCorrelation.CORRELATION_ID),
+    ActivityKind.OVERHEAD: int(Overhead.CORRELATION_ID),
+    ActivityKind.CUDA_EVENT: int(CudaEvent.CORRELATION_ID),
+    ActivityKind.SYNCHRONIZATION: int(Sync.CORRELATION_ID),
+}
+
 
 # A record layout as captured by CUPTI (pBufferCompleteInfo->ppRecordLayouts) and
 # attached to a completed buffer by the native layer: a list of

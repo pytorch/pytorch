@@ -133,7 +133,12 @@ _PROFILER_NUMERIC = [
     int(Kernel.GRAPH_ID),
 ]
 _SELECTIONS = {
-    "timer (KIND/START/END)": [int(Kernel.START), int(Kernel.END)],
+    # The NodeTimerObserver selection: KIND + START/END/GRAPH_NODE_ID.
+    "node-timer (START/END/GRAPH_NODE_ID)": [
+        int(Kernel.START),
+        int(Kernel.END),
+        int(Kernel.GRAPH_NODE_ID),
+    ],
     "profiler numeric (9 fields)": _PROFILER_NUMERIC,
     "profiler + NAME str (10 fields)": _PROFILER_NUMERIC + [_NAME_ID],
 }

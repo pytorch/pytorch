@@ -6,8 +6,10 @@ a no-profiling baseline. Modes:
 
   baseline            : graph replay only (the reference step time)
   monitor[_hw]        : the CUPTI monitor running always-on (subscription +
-                        per-buffer columnar decode + observer dispatch), outside
-                        any torch.profiler window
+                        per-buffer columnar decode + observer dispatch over the full
+                        profiler field selection), outside any torch.profiler window
+  node_timer[_hw]     : the monitor always-on over just the NodeTimerObserver timing
+                        fields (single kind, vectorized decode -> the lower bound)
   stock_window[_hw]   : a stock Kineto torch.profiler window
   monitor_window[_hw] : a torch.profiler window using the cupti_monitor backend
 
@@ -172,16 +174,36 @@ def run_baseline(step_fn, warmup_steps: int, samples: int, measure_steps: int = 
     return summarize(values)
 
 
-def run_monitor(step_fn, warmup_steps: int, samples: int, measure_steps: int):
-    # The monitor is observer-based: its always-on cost is the CUPTI subscription
-    # + per-buffer columnar decode + per-observer dispatch, so register a no-op
-    # observer over the full profiler field selection and run the workload under
-    # it. flush_period_s=0.0 means no background flush thread (buffers deliver as
-    # they fill), isolating the monitor's collection overhead from any flushing.
+def _profiler_fields():
     from torch.profiler.cupti.observers.profiler import PROFILER_FIELDS
 
+    return PROFILER_FIELDS
+
+
+def _node_timer_fields():
+    # The NodeTimerObserver field selection: just the compact kernel timing fields.
+    # Far fewer fields than PROFILER_FIELDS and a single kind -> the monitor's
+    # vectorized stride decode, so its always-on cost should be the lower bound.
+    from torch.profiler.cupti.cupti_python import ActivityKind
+    from torch.profiler.cupti.records import Kernel
+
+    return {
+        ActivityKind.CONCURRENT_KERNEL: {
+            Kernel.START,
+            Kernel.END,
+            Kernel.GRAPH_NODE_ID,
+        }
+    }
+
+
+def run_monitor(step_fn, warmup_steps: int, samples: int, measure_steps: int, fields):
+    # The monitor is observer-based: its always-on cost is the CUPTI subscription
+    # + per-buffer columnar decode + per-observer dispatch, so register a no-op
+    # observer over ``fields`` and run the workload under it. flush_period_s=0.0
+    # means no background flush thread (buffers deliver as they fill), isolating the
+    # monitor's collection overhead from any flushing.
     mon = cupti_monitor.CuptiMonitor(flush_period_s=0.0)
-    obs = mon.register(PROFILER_FIELDS, lambda _cols: None)
+    obs = mon.register(fields, lambda _cols: None)
     try:
         for _ in range(warmup_steps):
             step_fn()
@@ -250,6 +272,8 @@ def main():
             "baseline",
             "monitor",
             "monitor_hw",
+            "node_timer",
+            "node_timer_hw",
             "stock_window",
             "stock_window_hw",
             "monitor_window",
@@ -296,6 +320,15 @@ def main():
             args.warmup_steps,
             args.samples,
             args.measure_steps,
+            _profiler_fields(),
+        )
+    elif args.mode in {"node_timer", "node_timer_hw"}:
+        result["node_timer"] = run_monitor(
+            step_fn,
+            args.warmup_steps,
+            args.samples,
+            args.measure_steps,
+            _node_timer_fields(),
         )
     else:
         result["window"] = run_window(
