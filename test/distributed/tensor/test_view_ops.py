@@ -280,6 +280,18 @@ class TestViewOps(DTensorContinuousTestBase):
         with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
             shard.view(8, 2, -1)
 
+    def test_split_flatten_non_first_shard_falls_back_to_replicate(self):
+        rule = view_groups((32, 4), (4, 32))
+        input_tgt, output = propagate_shape_and_sharding(
+            [Shard(1)],
+            (32, 4),
+            rule,
+            (4,),
+            strict_view=True,
+        )
+        self.assertEqual(input_tgt, [Replicate()])
+        self.assertEqual(output, [Replicate()])
+
     def test_double_shard_split_validation(self):
         """[Shard(0), Shard(0)] through Split correctly validates divisibility."""
         # Compatible: reshape (24,)→(6,4) with [Shard(0), Shard(0)] on mesh (2,3)
@@ -736,12 +748,43 @@ class TestViewOps(DTensorContinuousTestBase):
             view_shapes.extend(trailing_dims)
         return tuple(view_shapes)
 
+    def _split_flatten_replicate_fallback_mesh_dims(self, rules, placements):
+        fallback_mesh_dims = []
+        for mesh_dim, placement in enumerate(placements):
+            if not isinstance(placement, Shard):
+                continue
+
+            for rule in rules:
+                if not (
+                    isinstance(rule, Split) and isinstance(rule.input_dim, Flatten)
+                ):
+                    continue
+
+                input_dims = rule.input_dim.input_dims
+                if not all(isinstance(input_dim, InputDim) for input_dim in input_dims):
+                    raise AssertionError(f"Expected InputDim list, got {input_dims}")
+                flattened_dims = cast(list[InputDim], input_dims)
+                if any(
+                    input_dim.input_dim == placement.dim for input_dim in flattened_dims
+                ):
+                    first_dim = flattened_dims[0].input_dim
+                    if placement.dim != first_dim:
+                        fallback_mesh_dims.append(mesh_dim)
+                    break
+        return fallback_mesh_dims
+
     def _test_dtensor_flatten_split_case(self, in_shape, out_shape, placements, mesh):
         """Test a single Split(Flatten) view case.
 
-        Representable cases must produce zero communication and correct output.
-        Unrepresentable cases must raise RuntimeError with a specific message.
+        Representable cases must produce zero communication and correct output. Cases
+        that require sharding a non-first flattened input dim fall back to Replicate
+        with communication, because the plain Shard is not exactly representable.
+        Other unrepresentable cases must raise RuntimeError with a specific message.
         """
+        rules = view_groups(list(in_shape), list(out_shape))
+        fallback_mesh_dims = self._split_flatten_replicate_fallback_mesh_dims(
+            rules, placements
+        )
         nelem = math.prod(in_shape)
         global_tensor = torch.arange(nelem).view(in_shape)
         in_dt = distribute_tensor(global_tensor, mesh, placements, src_data_rank=None)
@@ -756,9 +799,14 @@ class TestViewOps(DTensorContinuousTestBase):
                 r"|is not evenly divisible by mesh dimension",
             )
             return
-        self.assertEqual(comm_mode.get_total_counts(), 0)
         expected = global_tensor.view(list(out_shape))
         self.assertEqual(out_dt.full_tensor(), expected)
+        if fallback_mesh_dims:
+            self.assertGreater(comm_mode.get_total_counts(), 0)
+            for mesh_dim in fallback_mesh_dims:
+                self.assertIsInstance(out_dt.placements[mesh_dim], Replicate)
+        else:
+            self.assertEqual(comm_mode.get_total_counts(), 0)
 
     def test_dtensor_flatten_split_multi_mesh(self):
         """Test views producing Split(Flatten) rules.
