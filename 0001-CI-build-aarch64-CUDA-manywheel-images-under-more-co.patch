@@ -1,0 +1,67 @@
+From 334c5ea972cd536fa814dd058c6c482d03ddf3af Mon Sep 17 00:00:00 2001
+From: Keanu Czirjak <keanu.czirjak@arm.com>
+Date: Thu, 26 Mar 2026 11:42:00 +0000
+Subject: [LOW RISK] [CI] build aarch64 CUDA manywheel images under more consistent name
+
+Build Docker images under both manylinuxaarch64-builder and manylinux2_28_aarch64-builder names for all CUDA aarch64 variants.
+This is because for an unknown reason the cpu-aarch64 builds are on the manylinux2_28_aarch64-builder image, but the CUDA aarch64 builds are on the manylinuxaarch64-builder image, which is confusing and inconsistent.
+
+It makes more sense if we group both CUDA and non-CUDA aarch64 builds under the same manylinux2_28_aarch64-builder name, making it consistent with the x86_64 image names also.
+
+- Adds manylinux2_28_aarch64-builder CUDA entries to the build matrix in build-manywheel-images.yml alongside the existing manylinuxaarch64-builder entries
+- Adds manylinux2_28_aarch64-builder:cuda* case to build.sh using the same Dockerfile_cuda_aarch64 and cuda_final target
+
+Self-assessment: LOW RISK
+      1. Do you have any doubt about letting this patch go outside Arm, or do you think others in the team might? No
+      2. Is the patch based on a previously IP approved patch with trivial changes? No
+      3. Are all changes in this patch either written by yourself or copy-pasted from the same project? Yes
+      4. Is the contribution in Arm’s commercial Interest? Yes
+      5. Is this the first time that Arm has made a significant modification to any of the files changed in this patch or does it add a new file? No
+      6. Does this patch disclose anything that is not the public knowledge? No
+      7. Does the patch mention any company name other than Arm? No
+      8. Does the patch contain any inappropriate use of trademarks? No
+      9. Does the patch contribute beyond the scope that has been approved? No
+      10. Does the patch contain a patentable idea for which a patent has not yet been filed? No
+      11. Does the patch disclose any aspects of micro-architecture of any Arm HW IP? No
+      12. Does the patch use HW architecture features not previously used in the project? No
+      13. Does the patch contain generative AI output? No
+---
+ .ci/docker/manywheel/build.sh                | 5 +++++
+ .github/workflows/build-manywheel-images.yml | 5 +++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/.ci/docker/manywheel/build.sh b/.ci/docker/manywheel/build.sh
+index d01b8f5430e..ea05ae30b91 100755
+--- a/.ci/docker/manywheel/build.sh
++++ b/.ci/docker/manywheel/build.sh
+@@ -74,6 +74,11 @@ case ${image} in
+         MANY_LINUX_VERSION="aarch64"
+         DOCKERFILE_SUFFIX="_cuda_aarch64"
+         ;;
++    manylinux2_28_aarch64-builder:cuda*)
++        TARGET=cuda_final
++        DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
++        DOCKERFILE_SUFFIX="_cuda_aarch64"
++        ;;
+     manylinux2_28-builder:rocm*)
+         # we want the patch version of 7.2 instead
+         if [[ "$GPU_ARCH_VERSION" == *"7.2"* ]]; then
+diff --git a/.github/workflows/build-manywheel-images.yml b/.github/workflows/build-manywheel-images.yml
+index 2ada12e59a5..0b7efd15908 100644
+--- a/.github/workflows/build-manywheel-images.yml
++++ b/.github/workflows/build-manywheel-images.yml
+@@ -56,6 +56,11 @@ jobs:
+           { name: "manylinuxaarch64-builder",       tag: "cuda12.9",          runner: "linux.arm64.2xlarge.ephemeral" },
+           { name: "manylinuxaarch64-builder",       tag: "cuda12.8",          runner: "linux.arm64.2xlarge.ephemeral" },
+           { name: "manylinuxaarch64-builder",       tag: "cuda12.6",          runner: "linux.arm64.2xlarge.ephemeral" },
++          { name: "manylinux2_28_aarch64-builder",  tag: "cuda13.2",          runner: "linux.arm64.2xlarge.ephemeral" },
++          { name: "manylinux2_28_aarch64-builder",  tag: "cuda13.0",          runner: "linux.arm64.2xlarge.ephemeral" },
++          { name: "manylinux2_28_aarch64-builder",  tag: "cuda12.9",          runner: "linux.arm64.2xlarge.ephemeral" },
++          { name: "manylinux2_28_aarch64-builder",  tag: "cuda12.8",          runner: "linux.arm64.2xlarge.ephemeral" },
++          { name: "manylinux2_28_aarch64-builder",  tag: "cuda12.6",          runner: "linux.arm64.2xlarge.ephemeral" },
+           { name: "manylinux2_28-builder",          tag: "rocm7.0",           runner: "linux.9xlarge.ephemeral" },
+           { name: "manylinux2_28-builder",          tag: "rocm7.1",           runner: "linux.9xlarge.ephemeral" },
+           { name: "manylinux2_28-builder",          tag: "rocm7.2",           runner: "linux.9xlarge.ephemeral" },
+--
+2.46.0
+

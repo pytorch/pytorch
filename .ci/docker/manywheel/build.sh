@@ -74,6 +74,12 @@ case ${image} in
         MANY_LINUX_VERSION="aarch64"
         DOCKERFILE_SUFFIX="_cuda_aarch64"
         ;;
+    manylinux2_28_aarch64-builder:cuda*)
+        TARGET=cuda_final
+        GPU_IMAGE=arm64v8/almalinux:8
+        DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
+        DOCKERFILE_SUFFIX="_cuda_aarch64"
+        ;;
     manylinux2_28-builder:rocm*)
         # we want the patch version of 7.2 instead
         if [[ "$GPU_ARCH_VERSION" == *"7.2"* ]]; then
