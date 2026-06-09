@@ -382,7 +382,21 @@ class FunctionalTensor(torch.Tensor):
         *,
         masked_grad: builtins.bool | None = None,
     ) -> torch.Tensor:
-        return self.elem.to_dense()
+        if self.layout == torch.strided:
+            if dtype is None:
+                return self
+            return self.to(dtype=dtype)
+
+        out = self.elem.to_dense(dtype=dtype, masked_grad=masked_grad)
+        if isinstance(out, torch.Tensor) and torch._is_functional_tensor(out):
+            functional_mode = _detect_infra_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            )
+            if functional_mode is None:
+                raise AssertionError("functional_mode must not be None")
+            with functional_mode:
+                return FunctionalTensor(out, functional_mode)
+        return out
 
     @property
     # pyrefly: ignore[bad-override]
@@ -544,7 +558,12 @@ class FunctionalTensorMode(TorchDispatchMode):
             FunctionalTensor, unwrap, (args, kwargs)
         )
 
-        if func is torch.ops.aten.copy_.default and len(args_unwrapped) >= 2:
+        if (
+            func is torch.ops.aten.copy_.default
+            and len(args_unwrapped) >= 2
+            and isinstance(args_unwrapped[0], torch.Tensor)
+            and isinstance(args_unwrapped[1], torch.Tensor)
+        ):
             from torch.fx.experimental.symbolic_shapes import statically_known_true
 
             self_arg = args_unwrapped[0]
