@@ -101,13 +101,17 @@ def _assign_attr(
             if not hasattr(to_module, item):
                 setattr(to_module, item, torch.nn.Module())
             if item in to_module._modules:
-                ts.add(to_module._modules[item])
+                module = to_module._modules[item]
+                if module is not None:
+                    ts.add(module)
             i = 1
             while True:
                 variant = f"{item}@{i}"
                 if variant not in to_module._modules:
                     break
-                ts.add(to_module._modules[variant])
+                module = to_module._modules[variant]
+                if module is not None:
+                    ts.add(module)
                 i += 1
         to_modules = ts
 
