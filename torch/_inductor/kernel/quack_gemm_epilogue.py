@@ -39,6 +39,8 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
         local_reduce_max_power = kwargs.pop("local_reduce_max_power", 8)
         local_reduce_feeds_main = kwargs.pop("local_reduce_feeds_main", False)
         main_output_transform = kwargs.pop("main_output_transform", None)
+        main_output_transform_group = kwargs.pop("main_output_transform_group", None)
+        main_output_expression = kwargs.pop("main_output_expression", None)
         mutated_inputs = kwargs.pop("mutated_inputs", None)
         return QuackGemmEpilogueTemplateCaller(
             name=f"quack_gemm_epilogue_{next(self.index_counter)}",
@@ -60,6 +62,8 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
             local_reduce_max_power=local_reduce_max_power,
             local_reduce_feeds_main=local_reduce_feeds_main,
             main_output_transform=main_output_transform,
+            main_output_transform_group=main_output_transform_group,
+            main_output_expression=main_output_expression,
             mutated_inputs=mutated_inputs,
         )
 
@@ -86,6 +90,8 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         local_reduce_max_power: int = 8,
         local_reduce_feeds_main: bool = False,
         main_output_transform: str | None = None,
+        main_output_transform_group: int | None = None,
+        main_output_expression: str | None = None,
         mutated_inputs: list[Buffer] | None = None,
     ) -> None:
         super().__init__(
@@ -110,6 +116,8 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         self.local_reduce_max_power = local_reduce_max_power
         self.local_reduce_feeds_main = local_reduce_feeds_main
         self.main_output_transform = main_output_transform
+        self.main_output_transform_group = main_output_transform_group
+        self.main_output_expression = main_output_expression
         self.mutated_inputs = mutated_inputs
 
     def benchmark(self, *args: Any, out: Any) -> float:
@@ -136,6 +144,8 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
                 local_reduce_max_power=self.local_reduce_max_power,
                 local_reduce_feeds_main=self.local_reduce_feeds_main,
                 main_output_transform=self.main_output_transform,
+                main_output_transform_group=self.main_output_transform_group,
+                main_output_expression=self.main_output_expression,
                 mutated_inputs=self.mutated_inputs,
             )
         )
@@ -152,7 +162,8 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
             f"{self.epilogue_arg_indices}\n{self.local_reduce_out_index}\n{self.aux_out_index}\n"
             f"{self.local_reduce_group}\n{self.local_reduce_dim}\n{self.local_reduce_op}\n"
             f"{self.local_reduce_scale}\n{self.local_reduce_max_power}\n{self.local_reduce_feeds_main}\n"
-            f"{self.main_output_transform}\n{self.epilogue_name}\n{self.epilogue_source}"
+            f"{self.main_output_transform}\n{self.main_output_transform_group}\n"
+            f"{self.main_output_expression}\n{self.epilogue_name}\n{self.epilogue_source}"
         )
 
     def info_dict(self) -> dict[str, Any]:

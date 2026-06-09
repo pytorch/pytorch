@@ -308,13 +308,20 @@ class QuackAuxOutputInfo:
 
 
 @dataclass(frozen=True)
+class QuackMainOutputTransformInfo:
+    kind: str
+    group_size: int | None = None
+    expression: str | None = None
+
+
+@dataclass(frozen=True)
 class QuackOutputPlan:
     output_value: Any
     skip_nodes: frozenset[torch.fx.Node]
     local_reduce: QuackLocalReduceInfo | None
     local_norm: QuackLocalNormInfo | None
     aux_output: QuackAuxOutputInfo | None
-    main_output_transform: str | None = None
+    main_output_transform: QuackMainOutputTransformInfo | None = None
 
 
 @dataclass(frozen=True)
@@ -1066,9 +1073,9 @@ def _quack_output_uses_node(value: Any, needle: torch.fx.Node) -> bool:
     return visit(value)
 
 
-def _match_quack_group2_select(
+def _match_quack_grouped_n_select(
     node: Any, mm_node: torch.fx.Node
-) -> tuple[torch.fx.Node, int] | None:
+) -> tuple[torch.fx.Node, int, int] | None:
     if not isinstance(node, torch.fx.Node):
         return None
     if not (
@@ -1076,16 +1083,21 @@ def _match_quack_group2_select(
         and node.target == torch.ops.aten.select.int
         and len(node.args) >= 3
         and node.args[1] in (-1, 2)
-        and node.args[2] in (0, 1)
+        and isinstance(node.args[2], int)
     ):
         return None
     view = _match_quack_view_or_reshape(node.args[0])
     if view is None or not _quack_output_uses_node(view.base, mm_node):
         return None
     shape = _normalize_quack_shape(view.shape)
-    if not (isinstance(shape, (list, tuple)) and len(shape) == 3 and shape[-1] == 2):
+    if not (
+        isinstance(shape, (list, tuple))
+        and len(shape) == 3
+        and isinstance(shape[-1], int)
+        and 0 <= node.args[2] < shape[-1]
+    ):
         return None
-    return view.node, node.args[2]
+    return view.node, node.args[2], shape[-1]
 
 
 def _strip_quack_dtype_cast(node: Any) -> Any:
@@ -1146,14 +1158,16 @@ def _strip_quack_silu(node: Any) -> Any | None:
     return numerator if numerator is neg_arg else None
 
 
-def _match_quack_swiglu_main(output_value: Any, mm_node: torch.fx.Node) -> bool:
+def _match_quack_grouped_n_contract_main(
+    output_value: Any, mm_node: torch.fx.Node
+) -> QuackMainOutputTransformInfo | None:
     if not (
         isinstance(output_value, torch.fx.Node)
         and output_value.op == "call_function"
         and output_value.target in (torch.ops.aten.mul.Tensor, operator.mul)
         and len(output_value.args) >= 2
     ):
-        return False
+        return None
     lhs, rhs = output_value.args[:2]
     lhs_silu_arg = _strip_quack_silu(lhs)
     rhs_silu_arg = _strip_quack_silu(rhs)
@@ -1162,14 +1176,22 @@ def _match_quack_swiglu_main(output_value: Any, mm_node: torch.fx.Node) -> bool:
     elif rhs_silu_arg is not None:
         gate, up = rhs_silu_arg, lhs
     else:
-        return False
-    gate_select = _match_quack_group2_select(gate, mm_node)
-    up_select = _match_quack_group2_select(up, mm_node)
+        return None
+    gate_select = _match_quack_grouped_n_select(gate, mm_node)
+    up_select = _match_quack_grouped_n_select(up, mm_node)
     if gate_select is None or up_select is None:
-        return False
-    gate_view, gate_index = gate_select
-    up_view, up_index = up_select
-    return gate_view is up_view and gate_index == 0 and up_index == 1
+        return None
+    gate_view, gate_index, gate_group = gate_select
+    up_view, up_index, up_group = up_select
+    if not (gate_view is up_view and gate_index == 0 and up_index == 1):
+        return None
+    if gate_group != up_group or gate_group != 2:
+        return None
+    return QuackMainOutputTransformInfo(
+        kind="grouped_n_contract",
+        group_size=gate_group,
+        expression="swiglu",
+    )
 
 
 def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOutputPlan:
@@ -1248,8 +1270,7 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
                 "QUACK GEMM epilogue backend expects one output or one supported "
                 "local-reduce aux output"
             )
-    if _match_quack_swiglu_main(output_value, mm_node):
-        main_output_transform = "swiglu"
+    main_output_transform = _match_quack_grouped_n_contract_main(output_value, mm_node)
     return QuackOutputPlan(
         output_value=output_value,
         skip_nodes=frozenset(skip_nodes),
@@ -1524,7 +1545,7 @@ def _quack_cute_epilogue_code(
     list[torch.fx.Node],
     QuackLocalReduceInfo | None,
     QuackAuxOutputInfo | None,
-    str | None,
+    QuackMainOutputTransformInfo | None,
 ]:
     from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
         ModificationWrapperCuteDSL,
@@ -1568,7 +1589,14 @@ def _quack_cute_epilogue_code(
             raise NotImplementedError(
                 "QUACK shape-changing main epilogues cannot be combined with aux outputs yet"
             )
-        return kernel.body.lines, "acc", aux_placeholder_nodes, None, None, main_output_transform
+        return (
+            kernel.body.lines,
+            "acc",
+            aux_placeholder_nodes,
+            None,
+            None,
+            main_output_transform,
+        )
 
     _compile_quack_pointwise_nodes(
         graph_module, mm_node, output_plan.skip_nodes, env, kernel, handler
@@ -1622,7 +1650,7 @@ def materialize_quack_epilogue(
     list[torch.fx.Node],
     QuackLocalReduceInfo | None,
     QuackAuxOutputInfo | None,
-    str | None,
+    QuackMainOutputTransformInfo | None,
 ]:
     lines, result, aux_placeholder_nodes, local_reduce, aux_output, main_output_transform = (
         _quack_cute_epilogue_code(graph_module)
