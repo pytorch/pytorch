@@ -9,11 +9,14 @@
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <ATen/native/mps/TensorFactory.h>
 #include <c10/core/ScalarType.h>
 #include <fmt/format.h>
 #include <torch/library.h>
+#include <limits>
+#include <type_traits>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -76,6 +79,28 @@ static inline std::string scalarToMetalTypeString(const TensorBase& t) {
 static inline std::string scalarToMetalTypeString(const std::optional<Tensor>& t) {
   return t.has_value() ? scalarToMetalTypeString(t.value()) : "void";
 }
+
+// True iff every tensor's max element offset fits in Offset32 (signed -> 2^31, unsigned -> 2^32).
+template <typename Offset32, typename... Tensors>
+inline bool offsetsFitIn(const Tensors&... tensors) {
+  constexpr int64_t kMaxOffset = std::numeric_limits<Offset32>::max();
+  return (... && at::native::canUse32BitIndexMath(tensors, kMaxOffset));
+}
+
+inline std::string_view mtlIdxSuffix(bool use32) {
+  return use32 ? "_u32" : "_u64";
+}
+
+// Lower the runtime use32 bool to a compile-time offset type and pass it to fn as a std::type_identity tag.
+template <typename Offset32, typename Offset64, typename Fn>
+inline void mtlDispatchByIndexWidth(bool use32, Fn&& fn) {
+  if (use32) {
+    fn(std::type_identity<Offset32>{});
+  } else {
+    fn(std::type_identity<Offset64>{});
+  }
+}
+
 NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);
@@ -132,6 +157,12 @@ class Placeholder {
 
 void resize_tensor(Tensor* output);
 Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device);
+// Argsort `keys` (1-D contiguous integer tensor) by only its low `n_passes * 8`
+// bits via the radix sorter, returning the permutation indices. Used by
+// randperm: for random keys the unsorted high bits are irrelevant, so fewer
+// passes give a uniform permutation more cheaply. Index dtype is int16 for
+// numel <= 65536, else int32; callers cast as needed.
+Tensor randperm_argsort_lowbits_metal(const Tensor& keys, int n_passes, Tensor& sorted_keys);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph* mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph* mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
 MPSGraphTensor* castMPSTensor(MPSGraph* mpsGraph, MPSGraphTensor* tensor, MPSDataType toType);
@@ -541,6 +572,10 @@ template <>
 inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const std::optional<Tensor>& val, unsigned idx) {
   if (val.has_value()) {
     mtl_setBuffer(encoder, val.value(), idx);
+  } else {
+    // Clear the slot so the kernel sees a null pointer instead of a stale
+    // binding left at this index on the shared command encoder.
+    [encoder setBuffer:nil offset:0 atIndex:idx];
   }
 }
 
