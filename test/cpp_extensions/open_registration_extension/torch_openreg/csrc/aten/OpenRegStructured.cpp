@@ -9,10 +9,11 @@
 // only has to provide impl(), which we delegate to CPU here (openreg tensors are
 // host-backed), mirroring abs_out in native/Extra.cpp.
 //
-// minimum.out additionally sets `define_meta: true`, so the generated
-// struct also declares a backend-defined meta(); we provide one that reuses the
-// native meta via the generated `base` alias (a real backend could add
-// hardware-specific shape/type checks here).
+// openreg deliberately does NOT set `define_meta: true`. define_meta emits a
+// TORCH_LIBRARY_IMPL(aten, Meta) that overrides aten's meta on the device-agnostic,
+// process-global Meta key -- as an autoloaded in-tree test fixture, openreg must not
+// mutate global aten state. The define_meta codegen is covered by the gen_backend_stubs
+// unit tests; the runtime Meta-override mechanism is exercised RAII-scoped in tests/test_ops.py.
 #include <ATen/ops/div.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
@@ -29,13 +30,7 @@ TORCH_PRIVATEUSE1_IMPL_FUNC(maximum_out)
   out.copy_(at::maximum(self.cpu(), other.cpu()));
 }
 
-// structured: true + define_meta: true -- the backend provides its own
-// meta(); here we just reuse the native logic through the generated `base` alias.
-TORCH_PRIVATEUSE1_META_FUNC(minimum_out)
-(const at::Tensor& self, const at::Tensor& other) {
-  base::meta(self, other);
-}
-
+// structured: true, native meta -- only impl() is needed.
 TORCH_PRIVATEUSE1_IMPL_FUNC(minimum_out)
 (const at::Tensor& self, const at::Tensor& other, const at::Tensor& out) {
   out.copy_(at::minimum(self.cpu(), other.cpu()));

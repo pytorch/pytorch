@@ -642,9 +642,9 @@ class TestStructuredCodegen(TestCase):
     """maximum.out and minimum.out are registered for openreg through torchgen
     (gen_backend_stubs) with structured: true + use_out_as_primary: true; see
     csrc/aten/openreg_native_functions.yaml and csrc/aten/OpenRegStructured.cpp.
-    maximum.out reuses the native meta; minimum.out additionally sets
-    define_meta: true and supplies a backend meta(). These exercise the
-    generated structured wrappers end to end."""
+    Both reuse aten's native meta and only provide impl(). These exercise the
+    generated structured wrappers end to end. (openreg avoids define_meta so the
+    fixture never registers on the global aten Meta key -- see the scoped test below.)"""
 
     def test_maximum_functional(self):
         """Functional variant: out-as-primary allocates an out and reuses it."""
@@ -663,10 +663,9 @@ class TestStructuredCodegen(TestCase):
         self.assertEqual(ret.cpu(), torch.tensor([4.0, 5.0, 6.0]))
         self.assertEqual(out.cpu(), torch.tensor([4.0, 5.0, 6.0]))
 
-    def test_minimum_define_meta_functional(self):
-        """define_meta: the backend's own meta() drives the functional op.
-        Uses broadcasting so the output shape comes from meta() -- a no-op meta
-        would fail to allocate the (2, 3) result."""
+    def test_minimum_functional(self):
+        """Functional variant on a structured op: out-as-primary allocates an out
+        and reuses it. Broadcasting checks the native meta computed the shape."""
         x = torch.tensor([[1.0, 5.0, 3.0]], device="openreg")  # (1, 3)
         y = torch.tensor([[4.0], [2.0]], device="openreg")  # (2, 1)
         z = torch.minimum(x, y)  # broadcasts to (2, 3)
@@ -674,8 +673,8 @@ class TestStructuredCodegen(TestCase):
         self.assertEqual(z.shape, torch.Size([2, 3]))
         self.assertEqual(z.cpu(), torch.tensor([[1.0, 4.0, 3.0], [1.0, 2.0, 2.0]]))
 
-    def test_minimum_define_meta_out(self):
-        """define_meta out variant: backend meta() + impl()."""
+    def test_minimum_out(self):
+        """Out variant: the wrapper drives op.meta() + op.impl()."""
         x = torch.tensor([1.0, 5.0, 3.0], device="openreg")
         y = torch.tensor([4.0, 2.0, 6.0], device="openreg")
         out = torch.empty(3, device="openreg")
@@ -683,38 +682,39 @@ class TestStructuredCodegen(TestCase):
         self.assertEqual(ret.cpu(), torch.tensor([1.0, 2.0, 3.0]))
         self.assertEqual(out.cpu(), torch.tensor([1.0, 2.0, 3.0]))
 
-    def test_minimum_define_meta_captured_by_compile(self):
-        """define_meta puts the backend's meta() on the aten Meta key, so
-        torch.compile / FakeTensor shape propagation use it instead of aten's.
-        Assert the backend kernel is the active Meta registration for
-        aten::minimum, and that FakeTensor and torch.compile both produce the
-        broadcast shape with eager parity."""
-        # The generated registration overrides aten's meta on the Meta key.
-        dump = torch._C._dispatch_dump("aten::minimum")
-        active_meta = [
-            line for line in dump.splitlines() if line.strip().startswith("Meta:")
-        ]
-        self.assertEqual(len(active_meta), 1, dump)
-        self.assertIn("RegisterPrivateUse1", active_meta[0])
+    def test_define_meta_meta_override_is_scoped(self):
+        """A `define_meta` op registers its meta() on aten's device-agnostic global
+        Meta key, which torch.compile / FakeTensor shape propagation use (the generated
+        registration is covered by the gen_backend_stubs unit tests). openreg deliberately
+        does NOT register globally -- a static registration is permanent and would override
+        aten's meta for every device in the test process. Exercise the same mechanism with a
+        RAII-scoped registration: plugin -> verify FakeTensor routes through it -> plugout
+        (scope exit) -> verify it is gone, leaving aten's meta intact."""
+        import torch.library
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
-        # The Meta key is device-agnostic, so FakeTensor shape-props through the
-        # backend meta even for CPU inputs (this is a global override of aten's).
-        with torch._subclasses.fake_tensor.FakeTensorMode() as fake_mode:
-            fx = fake_mode.from_tensor(torch.empty(1, 3))  # (1, 3)
-            fy = fake_mode.from_tensor(torch.empty(2, 1))  # (2, 1)
-            self.assertEqual(torch.minimum(fx, fy).shape, torch.Size([2, 3]))
+        hit = []
 
-        # torch.compile traces through that meta and matches eager.
-        x = torch.tensor([[1.0, 5.0, 3.0]], device="openreg")  # (1, 3)
-        y = torch.tensor([[4.0], [2.0]], device="openreg")  # (2, 1)
+        def override_meta(a, b):
+            hit.append(1)
+            return a.new_empty(torch.broadcast_shapes(a.shape, b.shape))
 
-        def fn(a, b):
-            return torch.minimum(a, b)
+        with torch.library._scoped_library("aten", "IMPL") as lib:  # plugin
+            lib.impl("minimum", override_meta, "Meta")
+            with FakeTensorMode() as fake_mode:
+                fx = fake_mode.from_tensor(torch.empty(1, 3))  # (1, 3)
+                fy = fake_mode.from_tensor(torch.empty(2, 1))  # (2, 1)
+                self.assertEqual(torch.minimum(fx, fy).shape, torch.Size([2, 3]))
+            self.assertTrue(hit, "FakeTensor did not route through the Meta override")
 
-        eager = fn(x, y)
-        compiled = torch.compile(fn, backend="aot_eager")(x, y)
-        self.assertEqual(compiled.shape, torch.Size([2, 3]))
-        self.assertEqual(compiled.cpu(), eager.cpu())
+        # plugout: scope exit unregisters; aten's meta is restored, no leak
+        hit.clear()
+        with FakeTensorMode() as fake_mode:
+            torch.minimum(
+                fake_mode.from_tensor(torch.empty(1, 3)),
+                fake_mode.from_tensor(torch.empty(2, 1)),
+            )
+        self.assertFalse(hit, "Meta override leaked after the scoped library closed")
 
     # div.out is registered non-structured (out-as-primary only): the backend
     # supplies div_out via TORCH_PRIVATEUSE1_FUNC and torchgen derives the functional
