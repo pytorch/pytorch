@@ -1178,11 +1178,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
   C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
   constexpr int64_t MAX_BATCH_SIZE = (1LL << 16) - 1;
   int64_t batch_size = query.size(0);
+  int64_t num_heads = query.size(1);
 
-  if (batch_size > MAX_BATCH_SIZE) {
+  if (batch_size > MAX_BATCH_SIZE || num_heads > MAX_BATCH_SIZE) {
     TORCH_CHECK(dropout_p == 0.0,
                 "Efficient attention cannot produce valid seed and offset outputs when "
-                "the batch size exceeds (", MAX_BATCH_SIZE, ").");
+                "the batch size or number of heads exceeds (", MAX_BATCH_SIZE, ").");
   }
   auto process_chunk = [&](const Tensor& q_chunk,
                            const Tensor& k_chunk,
@@ -1219,7 +1220,73 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
                            std::move(offset));
   };
 
-  // when bs is larger than allowed maximum, process in chunks
+  // Wrapper that chunks along the heads dimension (dim 1 in B,H,M,K format)
+  // when num_heads exceeds the CUDA grid dimension limit.
+  auto process_chunk_with_head_splitting = [&](const Tensor& q,
+                                               const Tensor& k,
+                                               const Tensor& v,
+                                               const std::optional<Tensor>& bias)
+      -> std::tuple<Tensor, Tensor, Tensor, Tensor> {
+    int64_t h = q.size(1);
+    if (h <= MAX_BATCH_SIZE) {
+      return process_chunk(q, k, v, bias);
+    }
+
+    Tensor final_attn, final_lse;
+    // Only the first chunk's seed/offset are kept; this is safe because
+    // the dropout guard above ensures dropout_p == 0.0 whenever
+    // head-chunking is active, so seed/offset are unused.
+    Tensor seed, offset;
+    bool first = true;
+
+    for (int64_t h_start = 0; h_start < h; h_start += MAX_BATCH_SIZE) {
+      int64_t h_end = std::min(h_start + MAX_BATCH_SIZE, h);
+
+      Tensor q_h = q.slice(1, h_start, h_end);
+      Tensor k_h = k.slice(1, h_start, h_end);
+      Tensor v_h = v.slice(1, h_start, h_end);
+      std::optional<Tensor> bias_h;
+      if (bias.has_value()) {
+        bias_h = bias.value().slice(1, h_start, h_end);
+      }
+
+      auto [attn, lse, s, o] = process_chunk(q_h, k_h, v_h, bias_h);
+
+      if (first) {
+        std::vector<int64_t> attn_sizes = {q.size(0), h};
+        for (int i = 2; i < attn.dim(); i++) {
+          attn_sizes.push_back(attn.size(i));
+        }
+        final_attn = at::empty(attn_sizes, attn.options());
+
+        if (compute_log_sumexp && lse.numel() > 0) {
+          std::vector<int64_t> lse_sizes = {q.size(0), h};
+          for (int i = 2; i < lse.dim(); i++) {
+            lse_sizes.push_back(lse.size(i));
+          }
+          final_lse = at::empty(std::move(lse_sizes), lse.options());
+        }
+        seed = std::move(s);
+        offset = std::move(o);
+        first = false;
+      }
+
+      // _efficient_attention_forward allocates its own output, so we
+      // must copy into the pre-allocated full tensor. This matches the
+      // existing batch-chunking pattern above.
+      final_attn.slice(1, h_start, h_end).copy_(attn);
+      if (compute_log_sumexp && lse.numel() > 0) {
+        final_lse.slice(1, h_start, h_end).copy_(lse);
+      }
+    }
+
+    return std::make_tuple(std::move(final_attn),
+                           std::move(final_lse),
+                           std::move(seed),
+                           std::move(offset));
+  };
+
+  // when bs or num_heads is larger than allowed maximum, process in chunks
   if (batch_size > MAX_BATCH_SIZE) {
     int64_t start = 0;
     int64_t end = std::min(start + MAX_BATCH_SIZE, batch_size);
@@ -1232,7 +1299,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       bias_chunk = attn_bias.value().slice(0, start, end);
     }
     auto [attn, log_sumexp, seed, offset] =
-        process_chunk(query_chunk, key_chunk, value_chunk, bias_chunk);
+        process_chunk_with_head_splitting(query_chunk, key_chunk, value_chunk, bias_chunk);
     int dim = attn.dim();
     std::vector<int64_t> sizes;
     sizes.reserve(dim);
@@ -1266,7 +1333,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       }
 
       auto [chunk_attn, chunk_log_sumexp, chunk_seed, chunk_offset] =
-          process_chunk(query_chunk, key_chunk, value_chunk, bias_chunk);
+          process_chunk_with_head_splitting(query_chunk, key_chunk, value_chunk, bias_chunk);
       final_attention.slice(0, start, end).copy_(chunk_attn);
       if (compute_log_sumexp && chunk_log_sumexp.numel() > 0) {
         final_log_sumexp.slice(0, start, end).copy_(chunk_log_sumexp);
@@ -1278,9 +1345,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
               std::move(seed),
               std::move(offset));
   }
-  // when bs is within the allowed size, no need to chunk it
+  // when bs is within the allowed size, only head chunking may be needed
   else {
-    return process_chunk(query, key, value, attn_bias);
+    return process_chunk_with_head_splitting(query, key, value, attn_bias);
   }
 }
 
