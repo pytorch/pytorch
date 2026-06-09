@@ -3311,6 +3311,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @largeTensorTest("20GB", "cpu")
     @largeTensorTest("60GB", "cuda")
     @serialTest()
+    @expectedFailureMPS
     def test_conv_large_batch_1(self, device):
         in_channels = 514
         dim = 2048

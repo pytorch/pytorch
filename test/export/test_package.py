@@ -1,6 +1,9 @@
 # Owner(s): ["oncall: export"]
 import io
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import torch
@@ -147,6 +150,24 @@ class TestAOTIPackageDeviceValidation(TestCase):
                     "Cannot load AOTInductor package.*(CUDA|ROCm) is not available",
                 ):
                     load_package(package_path)
+
+    @unittest.skipIf(
+        torch.cuda.is_available(), "requires CUDA to be unavailable in this process"
+    )
+    def test_cpp_aoti_package_loader_validates_cuda_availability(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            model_dir = Path(tmp) / "data" / "aotinductor" / "model"
+            model_dir.mkdir(parents=True)
+            (model_dir / "model.so").touch()
+            (model_dir / "model_metadata.json").write_text(
+                json.dumps({"AOTI_DEVICE_KEY": "cuda"}), encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Cannot load AOTInductor package.*(CUDA|ROCm) is not available",
+            ):
+                torch._C._aoti.AOTIModelPackageLoader(str(tmp), "model", False, 1, -1)
 
 
 if __name__ == "__main__":
