@@ -1361,54 +1361,6 @@ def lazily_unpack(
             break
 
 
-def iter_contains(
-    items: Iterable[VariableTracker],
-    search: VariableTracker,
-    tx: InstructionTranslatorBase,
-) -> VariableTracker:
-    """Dynamo's PySequence_Contains: ``search in items``.
-
-    Mirrors CPython list_contains/set_contains, which compare each element via
-    ``PyObject_RichCompareBool(elem, search, Py_EQ)`` in order, short-circuiting
-    on the first True. A symbolic comparison (e.g. a SymInt element/search)
-    cannot be resolved at trace time, so its result is OR-accumulated rather
-    than dropped.
-    """
-    from .variables import ConstantVariable
-    from .variables.object_protocol import generic_richcompare_bool
-
-    items = list(items)
-    # Constant fast path only when search AND every element are python
-    # constants; otherwise a non-constant element's __eq__ must run in order (it
-    # may have side effects / raise), so fall through to the per-element path.
-    # The all-constant case also mirrors PyObject_RichCompareBool's identity
-    # shortcut (matters for NaN).
-    if search.is_python_constant() and all(x.is_python_constant() for x in items):
-        search_val = search.as_python_constant()
-        found_const = any(
-            x.as_python_constant() is search_val or x.as_python_constant() == search_val
-            for x in items
-        )
-        return ConstantVariable.create(found_const)
-
-    found: VariableTracker | None = None
-    for x in items:
-        check = generic_richcompare_bool(tx, x, search, "__eq__")
-        if check.is_constant_match(True):
-            return check
-        if check.is_constant_match(False):
-            continue
-        if found is None:
-            found = check
-        else:
-            from .variables.builder import SourcelessBuilder
-
-            found = SourcelessBuilder.create(tx, operator.or_).call_function(
-                tx, [found, check], {}
-            )
-    return found if found is not None else ConstantVariable.create(False)
-
-
 @overload
 def is_lru_cache_wrapped_function(
     value: Callable[..., T],
@@ -3325,6 +3277,48 @@ def raise_args_mismatch(
         tx,
         args=[msg_str],
     )
+
+
+def iter_contains(
+    items: Iterable[VariableTracker],
+    search: VariableTracker,
+    tx: InstructionTranslatorBase,
+) -> VariableTracker:
+    from .variables import ConstantVariable
+    from .variables.object_protocol import generic_richcompare_bool
+
+    if search.is_python_constant():
+        search_val = search.as_python_constant()
+        # CPython's list_contains/set_contains use PyObject_RichCompareBool
+        # which has an identity shortcut: if v is w, return True for eq.
+        # Check identity first (matters for NaN).
+        found_const = any(
+            x.is_python_constant()
+            and (
+                x.as_python_constant() is search_val
+                or x.as_python_constant() == search_val
+            )
+            for x in items
+        )
+        return ConstantVariable.create(found_const)
+    found: VariableTracker | None = None
+    for x in items:
+        check = generic_richcompare_bool(tx, x, search, "__eq__")
+        if check.is_constant_match(True):
+            return check
+        if check.is_constant_match(False):
+            continue
+        if found is None:
+            found = check
+        else:
+            from torch._dynamo.variables.builder import SourcelessBuilder
+
+            found = SourcelessBuilder.create(tx, operator.or_).call_function(
+                tx, [check, found], {}
+            )
+    if found is None:
+        found = ConstantVariable.create(False)
+    return found
 
 
 def key_is_id(
