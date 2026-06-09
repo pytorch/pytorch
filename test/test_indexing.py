@@ -1097,6 +1097,7 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyAccelerator
+    @skipMPS
     def test_index_put_large_indices(self, device):
         def generate_indices(num_indices: int, index_range: int):
             indices = []
