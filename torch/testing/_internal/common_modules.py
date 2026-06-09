@@ -1794,10 +1794,14 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
         return torch.randn((*batch_dims, in_features), device=device, dtype=dtype, requires_grad=requires_grad)
 
     def reference_fn(m, p, i, t):
-        # p[0] is linear.weight(bias=False)
+        # p[0] is linear.weight; p[1] is linear.bias when bias=True.
         linear_weight = p[0].reshape(m.num_classes, *m.out_features, i.shape[-1])
+        linear_bias = (
+            p[1].reshape(m.num_classes, *m.out_features) if len(p) > 1 else None
+        )
         return linear_cross_entropy_loss_reference(
             i, linear_weight, t,
+            linear_bias=linear_bias,
             weight=m.weight,
             reduction=m.reduction, ignore_index=m.ignore_index, label_smoothing=m.label_smoothing)
 
@@ -1913,6 +1917,59 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                         input = make_input(batch_dims, in_features)
                         target = torch.full_like(target, ii)
                         yield module_args, module_kwargs, (input, target)
+
+        # Minimal bias=True coverage: one sample per (size, out_features,
+        # options-variant) with the rest of the parametrization fixed at
+        # defaults. Bias is orthogonal to reduction / ignore_index /
+        # label_smoothing / weight / target_dtype (linear adds a
+        # constant to every logit element regardless of how
+        # cross_entropy reduces or weights them), so we don't expand
+        # against those axes. We DO emit one chunked variant
+        # (``options != None``) per (size, out_features) so the chunked
+        # ``linear_bias`` path -- including the mixed-precision
+        # acc_dtype scratch + post-yield commit on fp16/bf16 inputs --
+        # gets gradient coverage through ``_test_linear_cross_entropy_loss``.
+        for sizes in [(8, 5, 4), (None, 8, 4)]:
+            num_batches, in_features, num_classes = sizes
+            batch_dims = () if num_batches is None else (num_batches,)
+            for of in [(), (3, 2, 4)]:
+                if num_batches is None and of:
+                    continue  # K-dim loss requires a batch dim.
+                module_args = (in_features, num_classes)
+                base_module_kwargs = dict(
+                    out_features=of,
+                    bias=True,
+                    device=device,
+                    dtype=dtype,
+                    reduction="mean",
+                    weight=None,
+                    ignore_index=None,
+                    label_smoothing=0.0,
+                )
+                # options=None: reference-path bias coverage.
+                # options=LinearCrossEntropyOptions(...): chunked-path
+                #   bias coverage (only fires when out_features == ();
+                #   K-dim chunked + bias falls back to the reference
+                #   path with a warning -- not a useful test sample).
+                #   ``batch_chunk_size=2`` forces >=2 chunks on every
+                #   device so the post-yield ``bias_grad_acc.zero_()``
+                #   reset between chunks gets exercised even on CPU
+                #   (where the ``aspect_ratio`` auto-heuristic for the
+                #   small (8, 5, 4) shape would otherwise produce a
+                #   single chunk).
+                options_variants = [None]
+                if not of:
+                    options_variants.append(
+                        torch.nn.LinearCrossEntropyOptions(
+                            allow_retain_graph=allow_retain_graph,
+                            batch_chunk_size=2,
+                        )
+                    )
+                for options in options_variants:
+                    module_kwargs = dict(base_module_kwargs, options=options)
+                    input = make_input(batch_dims, in_features)
+                    target = make_target(num_classes, (*batch_dims, *of), torch.int64)
+                    yield module_args, module_kwargs, (input, target)
 
     module_inputs = []
     for module_args, module_kwargs, (input, target) in samples():
@@ -3991,6 +4048,19 @@ def module_error_inputs_torch_nn_Pad3d(module_info, device, dtype, requires_grad
     ]
 
 
+def module_error_inputs_torch_nn_HuberLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(delta=1.0 + 0.0j),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex=r"delta must be a float or int, got: <class 'complex'>",
+        ),
+    ]
+
+
 _macos15_or_newer = torch.backends.mps.is_available() and torch.backends.mps.is_macos_or_newer(15, 0)
 
 
@@ -4520,6 +4590,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.HuberLoss,
                module_inputs_func=module_inputs_torch_nn_HuberLoss,
+               module_error_inputs_func=module_error_inputs_torch_nn_HuberLoss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
@@ -4590,6 +4661,13 @@ module_db: list[ModuleInfo] = [
                                 "test_save_load", device_type="cuda", dtypes=[torch.bfloat16]),
                ),
                skips=(
+                   # The chunked reduction='none' backward recomputes grads
+                   # via in-place buffer accumulation, which gradcheck's
+                   # batched-grad path (vmapped cotangent) cannot handle.
+                   # Grad correctness is covered by the fp64 gradcheck and
+                   # ULP comparisons in test_nn.py and the OpInfo variants.
+                   DecorateInfo(unittest.skip("chunked none backward not batched-grad compatible"),
+                                'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("jacobian mismatch"), 'TestModule', 'test_gradgrad'),),
                ),
     ModuleInfo(torch.nn.CTCLoss,

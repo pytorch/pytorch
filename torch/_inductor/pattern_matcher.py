@@ -594,7 +594,7 @@ class _TargetExpr(PatternExpr):
         fns = [fns] if callable(fns) or isinstance(fns, str) else list(fns)
         for fn in fns:
             if isinstance(fn, torch._ops.OpOverloadPacket):
-                fns.extend(getattr(fn, overload) for overload in fn.overloads())  # noqa: B909
+                fns.extend(fn.op_overloads())  # noqa: B909
 
         self.fns = fns
         self.fns_set = OrderedSet(fns)
@@ -2763,7 +2763,7 @@ def get_arg_value(
 def filter_nodes(nodes: Iterable[torch.fx.Node], fn: Any) -> list[torch.fx.Node]:
     fns = [fn]
     if isinstance(fn, torch._ops.OpOverloadPacket):
-        fns.extend([getattr(fn, overload) for overload in fn.overloads()])
+        fns.extend(fn.op_overloads())
 
     return [node for node in nodes if node.target in fns]
 

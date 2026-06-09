@@ -25,6 +25,7 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
+from torch._functorch.apis import _DYNAMO_WRAPPER_ATTRS
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.common_device_type import (
@@ -35,6 +36,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     munge_exc,
     parametrize,
+    skipIfXpu,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
@@ -42,9 +44,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.triton_utils import (
-    requires_cuda_and_triton,
-    requires_gpu_and_triton,
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
 
@@ -192,6 +196,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(cnt.op_count, expected_opcount)
                 graph = backend.graphs[0]
                 wrap_node = find_first_node(graph, wrap)
+
                 self.assertEqual(len(wrap_node.args), expected_num_wrap_args)
         # We always return/check the graph from the first run if return_graph = True
         if return_graph:
@@ -6057,6 +6062,72 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(torch._dynamo.exc.RecompileError):
             torch.vmap(fn, randomness="different")(x)
 
+    def test_compile_vmap_compiled_fn_jacrev_has_aux(self):
+        def fn(x):
+            grad_res, _ = torch.func.jacrev(lambda x: tuple([x] * 2), has_aux=True)(x)
+            return grad_res
+
+        compile_options = dict(backend="eager", fullgraph=True, dynamic=False)
+        compiled_fn = torch.compile(fn, **compile_options)
+        vmapped_fn = torch.vmap(compiled_fn)
+        for attr in _DYNAMO_WRAPPER_ATTRS:
+            self.assertFalse(hasattr(vmapped_fn, attr), attr)
+        compiled_vmapped_fn = torch.compile(vmapped_fn, **compile_options)
+
+        x = torch.randn(8, dtype=torch.float64)
+        expected = vmapped_fn(x)
+        actual = compiled_vmapped_fn(x)
+
+        self.assertEqual(expected.shape, torch.Size([8]))
+        self.assertEqual(actual.shape, expected.shape)
+        self.assertEqual(actual, expected)
+
+    def test_compile_function_transform_wrappers_compiled_fn(self):
+        def scalar_fn(x):
+            return x.sin().sum()
+
+        def vector_fn(x):
+            return x.sin()
+
+        compile_options = dict(backend="eager", fullgraph=True, dynamic=False)
+
+        cases = (
+            (torch.func.grad, scalar_fn, torch.randn((), dtype=torch.float64)),
+            (
+                torch.func.grad_and_value,
+                scalar_fn,
+                torch.randn((), dtype=torch.float64),
+            ),
+            (torch.func.jacrev, vector_fn, torch.randn(3, dtype=torch.float64)),
+            (torch.func.jacfwd, vector_fn, torch.randn(3, dtype=torch.float64)),
+            (torch.func.hessian, scalar_fn, torch.randn((), dtype=torch.float64)),
+        )
+        for transform, fn, x in cases:
+            with self.subTest(transform=transform.__name__):
+                compiled_fn = torch.compile(fn, **compile_options)
+                transformed_fn = transform(compiled_fn)
+                for attr in _DYNAMO_WRAPPER_ATTRS:
+                    self.assertFalse(hasattr(transformed_fn, attr), attr)
+
+                compiled_transformed_fn = torch.compile(
+                    transformed_fn, **compile_options
+                )
+
+                self.assertEqual(compiled_transformed_fn(x), transform(fn)(x))
+
+    def test_functionalize_compiled_fn_does_not_copy_dynamo_attrs(self):
+        def fn(x):
+            y = x.clone()
+            y.add_(1)
+            return y.sin()
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=False)
+        transformed_fn = torch.func.functionalize(compiled_fn)
+        for attr in _DYNAMO_WRAPPER_ATTRS:
+            self.assertFalse(hasattr(transformed_fn, attr), attr)
+        x = torch.randn(3)
+        self.assertEqual(transformed_fn(x), torch.func.functionalize(fn)(x))
+
     def test_vmap_call_torch_compile_fn(self):
         def wrapped_fn(x):
             return x.sin()
@@ -6883,7 +6954,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             for arg, cloned_arg in zip(args, cloned_args):
                 self.assertEqual(arg.grad, cloned_arg.grad)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function(self):
         def gn(x, y):
@@ -6902,7 +6974,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function_with_kwargs(self):
         def gn(x, y):
@@ -6925,7 +6998,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout(self):
         def gn(x, y):
@@ -6936,8 +7010,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device_type, requires_grad=True)
+        y = torch.randn(4, 4, device=device_type, requires_grad=True)
 
         fw_compiler = functools.partial(
             count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
@@ -6951,7 +7025,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout_inductor(self):
         def gn(x, y):
@@ -6962,8 +7037,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device_type, requires_grad=True)
+        y = torch.randn(4, 4, device=device_type, requires_grad=True)
 
         backend = "inductor"
         self._validate(
@@ -7001,7 +7076,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 2)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
         class MockModule(torch.nn.Module):
@@ -7255,7 +7331,7 @@ xfail_hops_compile = {
 
 
 class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(
         list(filter(lambda op: op.name not in xfail_hops_compile, hop_db)),
@@ -7289,7 +7365,9 @@ class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
             self.assertEqual(eager_out, compiled_out)
 
 
-instantiate_device_type_tests(TestHigherOrderOpsOpInfo, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestHigherOrderOpsOpInfo, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
