@@ -13,7 +13,7 @@
 #include <ATen/ops/full.h>
 #include <ATen/ops/meshgrid.h>
 #include <ATen/ops/stack.h>
-#include <ATen/ops/index_select.h>
+#include <ATen/ops/index.h>
 #include <ATen/ops/nonzero_static.h>
 #endif
 
@@ -86,7 +86,7 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
     Tensor mask = _triu_mask(std::move(num_elements), r, with_replacement, self.options());
     indices = at::nonzero_static_symint(mask, num_combinations);
   }
-  return self.index_select(0, indices.flatten()).view_symint({num_combinations, r});
+  return self.index({indices});
 }
 
 }  // namespace at::native
