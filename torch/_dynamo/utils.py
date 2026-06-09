@@ -1295,34 +1295,19 @@ def is_numpy_float_type(value: Any) -> bool:
     )
 
 
-def unpack_iterable(
-    tx: InstructionTranslatorBase, iterable: VariableTracker
-) -> list[VariableTracker]:
-    items: list[VariableTracker] = []
-    unpack_and_apply_fn(tx, iterable, items.append)
-    return items
+_unpack_fast_types_cache: tuple[type, ...] | None = None
 
 
-def unpack_and_apply_fn(
-    tx: InstructionTranslatorBase,
-    iterable: VariableTracker,
-    apply_fn,
-) -> None:
-    list(lazily_unpack_and_apply_fn(tx, iterable, apply_fn))
+def _unpack_fast_types() -> tuple[type, ...]:
+    # Builtin iterables whose elements we can get directly via
+    # unpack_var_sequence, skipping the generic iter/getiter/iternext protocol
+    # (a bottleneck for large iterables). Built lazily since `variables` is a
+    # circular import at module load.
+    global _unpack_fast_types_cache
+    if _unpack_fast_types_cache is None:
+        from . import variables
 
-
-def lazily_unpack_and_apply_fn(
-    tx: InstructionTranslatorBase,
-    iterable: VariableTracker,
-    apply_fn,
-):
-    from . import variables
-    from .exc import handle_observed_exception, ObservedUserStopIteration
-    from .variables.object_protocol import generic_getiter, generic_iternext
-
-    if isinstance(
-        iterable,
-        (
+        _unpack_fast_types_cache = (
             variables.ConstDictVariable,
             variables.DictViewVariable,
             variables.DequeVariable,
@@ -1332,19 +1317,44 @@ def lazily_unpack_and_apply_fn(
             variables.SetVariable,
             variables.TensorVariable,
             variables.TupleVariable,
-        ),
-    ):
-        # avoid going through the generic iter/getiter/iternext protocol for
-        # common builtin iterables, since it can be a bottleneck for large
-        # iterables (e.g. unpacking a list of 1000 items)
-        yield from [apply_fn(item) for item in iterable.unpack_var_sequence(tx)]  # type: ignore[bad-argument-type]
+        )
+    return _unpack_fast_types_cache
+
+
+def unpack_iterable(
+    tx: InstructionTranslatorBase, iterable: VariableTracker
+) -> list[VariableTracker]:
+    if isinstance(iterable, _unpack_fast_types()):
+        # unpack_var_sequence returns a fresh list, so hand it back directly:
+        # no generator, no per-element callback, single allocation.
+        return iterable.unpack_var_sequence(tx)
+    return list(lazily_unpack(tx, iterable))
+
+
+def unpack_and_apply_fn(
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+    apply_fn,
+) -> None:
+    for item in lazily_unpack(tx, iterable):
+        apply_fn(item)
+
+
+def lazily_unpack(
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+):
+    from .exc import handle_observed_exception, ObservedUserStopIteration
+    from .variables.object_protocol import generic_getiter, generic_iternext
+
+    if isinstance(iterable, _unpack_fast_types()):
+        yield from iterable.unpack_var_sequence(tx)
         return
 
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
     while True:
         try:
-            item = generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
-            yield apply_fn(item)
+            yield generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
