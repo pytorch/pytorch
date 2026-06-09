@@ -2204,6 +2204,203 @@ def visualize_overlap(order):
     overlap_log.debug(f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}")
 
 
+def _swap_nodes(
+    a: BaseSchedulerNode,
+    b: BaseSchedulerNode,
+    _prev: dict,
+    _next: dict,
+) -> BaseSchedulerNode | None:
+    """Swap adjacent nodes a, b (a before b). Returns new head if it changed."""
+    pp, nn = _prev[a], _next[b]
+    if pp is not None:
+        _next[pp] = b
+    _prev[b] = pp
+    _next[b] = a
+    _prev[a] = b
+    _next[a] = nn
+    if nn is not None:
+        _prev[nn] = a
+    return b if pp is None else None
+
+
+def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
+    """Move collectives earlier and waits later via adjacent swaps.
+    Each swap is safe: no collective reordering, no memory regression."""
+    import time as _time
+
+    if len(snodes) < 2:
+        return snodes
+
+    collectives = [s for s in snodes if contains_async_collective(s)]
+    waits = [s for s in snodes if contains_wait(s)]
+    if not collectives and not waits:
+        return snodes
+
+    t0 = _time.perf_counter()
+
+    graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
+    graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+
+    outputs_of: dict[BaseSchedulerNode, frozenset[str]] = {
+        s: frozenset(o.get_name() for o in s.get_outputs()) for s in snodes
+    }
+    deps_of: dict[BaseSchedulerNode, frozenset[str]] = {
+        s: frozenset(d.name for d in s.unmet_dependencies if not _is_fake_dep(d))
+        for s in snodes
+    }
+    # Buffers mutated in-place (e.g., all_reduce_). A node that mutates buf0
+    # cannot be swapped past a node that reads buf0.
+    graph_mutated: frozenset[str] = frozenset(
+        getattr(V.graph, "mutated_buffers", OrderedSet())
+    )
+    mutations_of: dict[BaseSchedulerNode, frozenset[str]] = {
+        s: deps_of[s] & graph_mutated for s in snodes
+    }
+
+    _prev, _next, _head = _initialize_double_linked_list(snodes)
+    (
+        peak_memory,
+        _curr_memory,
+        snodes_allocfree,
+        _buf_last_use,
+        _freeable,
+        _cand_buf_map,
+    ) = _initialize_memory_tracking(snodes, graph_inputs, graph_outputs)
+
+    n_moved_colls = 0
+    n_moved_waits = 0
+
+    # Phase 1: move each collective earlier via adjacent swaps
+    # Swap [pred, coll] -> [coll, pred]: pred is the "candidate" (moves later)
+    for coll in collectives:
+        coll_deps = deps_of[coll]
+        coll_muts = mutations_of[coll]
+        moved = False
+
+        pred = _prev[coll]
+        while pred is not None:
+            if outputs_of[pred] & coll_deps:
+                break
+            if coll_muts & deps_of[pred]:
+                break
+            if contains_async_collective(pred):
+                break
+
+            # Memory check using full liveness-aware tracking (reorder direction)
+            candidate_af = snodes_allocfree[pred]
+            candidate_delta = candidate_af.size_alloc - candidate_af.size_free
+            changed_bufs = _find_buffers_with_changed_last_use(
+                pred, [coll], _buf_last_use, _cand_buf_map
+            )
+            potential_peak, post_alloc_cache = _calculate_potential_peak_memory_reorder(
+                pred,
+                [coll],
+                coll,
+                _curr_memory[coll][0],
+                candidate_delta,
+                candidate_af,
+                changed_bufs,
+                _curr_memory,
+            )
+            if potential_peak > peak_memory:
+                break
+
+            new_head = _swap_nodes(pred, coll, _prev, _next)
+            if new_head is not None:
+                _head = new_head
+
+            _update_memory_tracking_after_swap_reorder(
+                pred,
+                [coll],
+                coll,
+                candidate_delta,
+                candidate_af,
+                changed_bufs,
+                post_alloc_cache,
+                _curr_memory,
+                _buf_last_use,
+                snodes_allocfree,
+            )
+            moved = True
+            pred = _prev[coll]
+
+        if moved:
+            n_moved_colls += 1
+
+    # Phase 2: move each wait later via adjacent swaps
+    # Swap [wait, succ] -> [succ, wait]: succ is the "candidate" (moves earlier)
+    for wait in waits:
+        wait_outs = outputs_of[wait]
+        wait_muts = mutations_of[wait]
+        moved = False
+
+        succ = _next[wait]
+        while succ is not None:
+            if deps_of[succ] & wait_outs:
+                break
+            if mutations_of[succ] & deps_of[wait]:
+                break
+            if wait_muts & deps_of[succ]:
+                break
+            if contains_wait(succ):
+                break
+
+            # Memory check using full liveness-aware tracking (sink_waits direction)
+            candidate_af = snodes_allocfree[succ]
+            candidate_delta = candidate_af.size_alloc - candidate_af.size_free
+            changed_bufs = _find_buffers_with_changed_last_use_sink_waits(
+                succ, [wait], _buf_last_use, _cand_buf_map
+            )
+            potential_peak, post_alloc_cache, size_free_cache = (
+                _calculate_potential_peak_memory_sink_waits(
+                    succ,
+                    [wait],
+                    wait,
+                    _curr_memory[wait][0],
+                    candidate_delta,
+                    candidate_af,
+                    changed_bufs,
+                    _curr_memory,
+                    snodes_allocfree,
+                )
+            )
+            if potential_peak > peak_memory:
+                break
+
+            new_head = _swap_nodes(wait, succ, _prev, _next)
+            if new_head is not None:
+                _head = new_head
+
+            _update_memory_tracking_after_swap_sink_waits(
+                succ,
+                [wait],
+                candidate_delta,
+                candidate_af,
+                changed_bufs,
+                post_alloc_cache,
+                size_free_cache,
+                _curr_memory,
+                snodes_allocfree,
+            )
+            moved = True
+            succ = _next[wait]
+
+        if moved:
+            n_moved_waits += 1
+
+    elapsed = _time.perf_counter() - t0
+    if n_moved_colls or n_moved_waits:
+        log.info(
+            "simple_overlap: moved %d collectives, %d waits (peak %d MB, %.3fs)",
+            n_moved_colls,
+            n_moved_waits,
+            peak_memory // (1024 * 1024),
+            elapsed,
+        )
+
+    return _group_nodes_from_linked_list(_head, None, _next)
+
+
 def reorder_compute_and_comm_for_overlap(
     snodes: list[BaseSchedulerNode],
 ) -> list[BaseSchedulerNode]:
