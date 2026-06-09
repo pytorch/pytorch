@@ -4694,6 +4694,19 @@ class AOTInductorTestsTemplate:
 
             self.check_model(Model(), inputs)
 
+    def test_special_fallback_guard_stays_out_of_aoti_codegen(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU-only ABI codegen check")
+
+        def copy_fn(x):
+            return x.to(torch.complex64)
+
+        inputs = (torch.randn(4, device=self.device),)
+        _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, copy_fn, inputs)
+        self.assertIn("aoti_torch_copy_", code)
+        self.assertNotIn("ATen/core/LegacyTypeDispatch.h", code)
+        self.assertNotIn("at::AutoDispatchBelowADInplaceOrView guard;", code)
+
     def test_narrow_fallback(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:

@@ -69,6 +69,7 @@ _lowp_fp_dtypes = (
     torch.bfloat16,
     torch.float16,
 )
+run_and_get_code = test_torchinductor.run_and_get_code
 run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
@@ -142,6 +143,181 @@ class LstmModule(torch.nn.Module):
 @instantiate_parametrized_tests
 class CPUReproTests(TestCase):
     common = check_model
+
+    def _check_fallback_dispatch_runs_below_autograd(self, namespace):
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            lib.define("foo(Tensor x) -> Tensor")
+            calls = {"autograd": 0, "cpu": 0}
+            op = getattr(torch.ops, namespace).foo.default
+
+            def foo_cpu(x):
+                calls["cpu"] += 1
+                return x.sin()
+
+            def foo_meta(x):
+                return torch.empty_like(x)
+
+            def foo_autograd(keyset, x):
+                calls["autograd"] += 1
+                return op.redispatch(keyset & torch._C._after_autograd_keyset, x)
+
+            lib.impl("foo", foo_cpu, "CPU")
+            lib.impl("foo", foo_meta, "Meta")
+            lib.impl("foo", foo_autograd, "Autograd", with_keyset=True)
+
+            def fn(x):
+                return op(x).cos()
+
+            x = torch.randn(4)
+            expected = fn(x)
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            torch.testing.assert_close(compiled(x), expected)
+
+            calls["autograd"] = 0
+            calls["cpu"] = 0
+            torch.testing.assert_close(compiled(x), expected)
+            self.assertEqual(calls["autograd"], 0)
+            self.assertEqual(calls["cpu"], 1)
+
+    def _check_out_variant_fallback_dispatch_runs_below_autograd(
+        self, namespace, *, expect_out_variant
+    ):
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            lib.define("foo(Tensor x) -> Tensor")
+            lib.define(
+                "foo.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
+                tags=(torch.Tag.out,),
+            )
+            calls = {
+                "functional_autograd": 0,
+                "functional_cpu": 0,
+                "out_autograd": 0,
+                "out_cpu": 0,
+            }
+            op = getattr(torch.ops, namespace).foo.default
+            out_op = getattr(torch.ops, namespace).foo.out
+
+            def foo_cpu(x):
+                calls["functional_cpu"] += 1
+                return x.sin()
+
+            def foo_out_cpu(x, *, out):
+                calls["out_cpu"] += 1
+                out.copy_(x.sin())
+                return out
+
+            def foo_meta(x):
+                return torch.empty_like(x)
+
+            def foo_out_meta(x, *, out):
+                return out
+
+            def foo_autograd(keyset, x):
+                calls["functional_autograd"] += 1
+                return op.redispatch(keyset & torch._C._after_autograd_keyset, x)
+
+            def foo_out_autograd(keyset, x, *, out):
+                calls["out_autograd"] += 1
+                return out_op.redispatch(
+                    keyset & torch._C._after_autograd_keyset, x, out=out
+                )
+
+            lib.impl("foo", foo_cpu, "CPU")
+            lib.impl("foo.out", foo_out_cpu, "CPU")
+            lib.impl("foo", foo_meta, "Meta")
+            lib.impl("foo.out", foo_out_meta, "Meta")
+            lib.impl("foo", foo_autograd, "Autograd", with_keyset=True)
+            lib.impl("foo.out", foo_out_autograd, "Autograd", with_keyset=True)
+
+            def fn(x):
+                return op(x).cos()
+
+            x = torch.randn(4)
+            expected = fn(x)
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            torch.testing.assert_close(compiled(x), expected)
+
+            calls["functional_autograd"] = 0
+            calls["functional_cpu"] = 0
+            calls["out_autograd"] = 0
+            calls["out_cpu"] = 0
+            torch.testing.assert_close(compiled(x), expected)
+            self.assertEqual(calls["functional_autograd"], 0)
+            self.assertEqual(calls["out_autograd"], 0)
+            self.assertEqual(calls["functional_cpu"], 0 if expect_out_variant else 1)
+            self.assertEqual(calls["out_cpu"], 1 if expect_out_variant else 0)
+
+    @config.patch(implicit_fallbacks=True, cpp_wrapper=False)
+    def test_fallback_dispatch_runs_below_autograd(self):
+        self._check_fallback_dispatch_runs_below_autograd("issue139629")
+
+    @config.patch(implicit_fallbacks=True, cpp_wrapper=True)
+    def test_fallback_dispatch_runs_below_autograd_cpp_wrapper(self):
+        self._check_fallback_dispatch_runs_below_autograd("issue139629_cpp")
+
+    @config.patch(implicit_fallbacks=True, cpp_wrapper=False)
+    def test_out_variant_fallback_dispatch_runs_below_autograd(self):
+        self._check_out_variant_fallback_dispatch_runs_below_autograd(
+            "issue139629_out", expect_out_variant=True
+        )
+
+    @config.patch(implicit_fallbacks=True, cpp_wrapper=True)
+    def test_out_variant_fallback_dispatch_runs_below_autograd_cpp_wrapper(self):
+        self._check_out_variant_fallback_dispatch_runs_below_autograd(
+            "issue139629_out_cpp", expect_out_variant=False
+        )
+
+    @config.patch(cpp_wrapper=False)
+    def test_special_fallback_codegen_runs_below_autograd(self):
+        def copy_fn(x):
+            return x.to(torch.complex64)
+
+        _, (copy_code,) = run_and_get_code(
+            torch.compile(copy_fn, backend="inductor", fullgraph=True),
+            torch.randn(4),
+        )
+        FileCheck().check("with torch._C._AutoDispatchBelowADInplaceOrView():").check(
+            ".copy_("
+        ).run(copy_code)
+
+        def bernoulli_fn(x):
+            y = x.clone()
+            y.bernoulli_(0.5)
+            return y
+
+        _, (bernoulli_code,) = run_and_get_code(
+            torch.compile(bernoulli_fn, backend="inductor", fullgraph=True),
+            torch.rand(4),
+        )
+        FileCheck().check("with torch._C._AutoDispatchBelowADInplaceOrView():").check(
+            "bernoulli"
+        ).run(bernoulli_code)
+
+    @config.patch(cpp_wrapper=True)
+    def test_special_fallback_codegen_runs_below_autograd_cpp_wrapper(self):
+        def copy_fn(x):
+            return x.to(torch.complex64)
+
+        _, copy_code = run_and_get_cpp_code(
+            torch.compile(copy_fn, backend="inductor", fullgraph=True),
+            torch.randn(4),
+        )
+        FileCheck().check("#include <ATen/core/LegacyTypeDispatch.h>").check(
+            "at::AutoDispatchBelowADInplaceOrView guard;"
+        ).check("aoti_torch_copy_").run(copy_code)
+
+        def bernoulli_fn(x):
+            y = x.clone()
+            y.bernoulli_(0.5)
+            return y
+
+        _, bernoulli_code = run_and_get_cpp_code(
+            torch.compile(bernoulli_fn, backend="inductor", fullgraph=True),
+            torch.rand(4),
+        )
+        FileCheck().check("#include <ATen/core/LegacyTypeDispatch.h>").check(
+            "at::AutoDispatchBelowADInplaceOrView guard;"
+        ).check("bernoulli").run(bernoulli_code)
 
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):

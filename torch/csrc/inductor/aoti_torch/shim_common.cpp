@@ -1,3 +1,4 @@
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/native/quantized/cpu/qlinear.h>
 #include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
@@ -971,6 +972,7 @@ AOTITorchError aoti_torch_copy_(
     AtenTensorHandle src,
     int32_t non_blocking) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::AutoDispatchBelowADInplaceOrView guard;
     tensor_handle_to_tensor_pointer(self)->copy_(
         *tensor_handle_to_tensor_pointer(src), non_blocking);
   });
@@ -1162,6 +1164,7 @@ AOTITorchError aoti_torch_scatter_out(
     AtenTensorHandle index,
     AtenTensorHandle src) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::AutoDispatchBelowADInplaceOrView guard;
     at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     at::Tensor* index_tensor = tensor_handle_to_tensor_pointer(index);
@@ -1179,6 +1182,7 @@ AOTITorchError aoti_torch_scatter_reduce_out(
     const char* reduce,
     int32_t include_self) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::AutoDispatchBelowADInplaceOrView guard;
     at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     at::Tensor* index_tensor = tensor_handle_to_tensor_pointer(index);
@@ -1203,6 +1207,7 @@ AOTITorchError aoti_torch_index_put_out(
     const AtenTensorHandle values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::AutoDispatchBelowADInplaceOrView guard;
     c10::List<std::optional<at::Tensor>> indices_;
     indices_.reserve(num_indices);
     for (const auto i : c10::irange(num_indices)) {
@@ -1365,6 +1370,7 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
           "PT2 artifact.");
     }
     ProxyExecutor* executor = reinterpret_cast<ProxyExecutor*>(proxy_executor);
+    at::AutoDispatchBelowADInplaceOrView guard;
     executor->call_function(
         extern_node_index,
         num_ints,
@@ -1536,6 +1542,8 @@ AOTITorchError aoti_torch_get_current_stream(
 }
 
 AOTITorchError aoti_torch_get_current_device_index(int32_t* ret_device_index) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { *ret_device_index = at::accelerator::getDeviceIndex(); });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+    *ret_device_index = static_cast<int32_t>(at::accelerator::getDeviceIndex());
+  });
 }
