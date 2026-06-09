@@ -1,27 +1,44 @@
 """
 Python override for aten::_foreach_mm. Supports bf16 and fp32.
 
-Dispatch (CUDA, SM90+):
+Dispatch prerequisites:
+  CUDA SM90+, not HIP
+  equal-length lists with >= 2 tensors
+  same CUDA device, same bf16/fp32 dtype
+  2D dense/non-overlapping tensors
+  same row/column-major orientation across groups
+  matching K, K,N > 0, K,N 16-byte aligned
 
-  bf16 + nvmath + N,K 16-byte aligned?
-  |-- YES --> nvmath cublasLt grouped GEMM (uniform and mixed shapes)
+Dispatch:
+  nvmath cublasLt grouped GEMM:
+  - bf16
+  - nvmath installed
+  |-- YES --> nvmath cublasLt grouped GEMM (uniform and mixed shapes, any G)
   |
-  bf16/fp32 + uniform K,N + aligned + min(M,N,K) < 2048?
-  |-- YES --> torch.cat + _grouped_mm with offs (CUTLASS, uniform or variable-M)
+  torch._grouped_mm with offs:
+  - non-nvmath path
+  - max(M,N,K) < 2048
+  - uniform K,N
+  - G < 1024
+  |-- YES --> torch.cat + torch._grouped_mm with offs (uniform or variable-M)
   |
-  |-- else -> C++ fallback (loop of at::mm)
+  fallback loop:
+  - non-nvmath path
+  - max(M,N,K) < 2048
+  |-- YES --> fallback loop: torch.mm per input pair
+  |
+  |-- else -> native _foreach_mm fallback (loop of at::mm)
 
 Notes:
 - cublasLt grouped GEMM is bf16-only (fp32 returns CUBLAS_STATUS_NOT_SUPPORTED).
-- cublasLt grouped GEMM requires N and K to be 16-byte aligned.
-- At dim >= 2048 each mm saturates the GPU; loop fallback is equivalent.
+- At dim >= 2048 each mm saturates the GPU; native fallback is equivalent.
 """
 
 import warnings
 from functools import cache
+from typing import Literal
 
 import torch
-from torch._prims_common import is_non_overlapping_and_dense_or_false
 
 from ... import registry
 from ...common_utils import _unavailable_reason
@@ -39,6 +56,10 @@ def _check_nvmath_cublaslt() -> bool:
     return _unavailable_reason(_NVMATH_DEPS) is None
 
 
+def _k_n_16_byte_aligned(a: torch.Tensor, b: torch.Tensor, elem_size: int) -> bool:
+    return (a.size(1) * elem_size) % 16 == 0 and (b.size(1) * elem_size) % 16 == 0
+
+
 def _foreach_mm_cond(
     self: list[torch.Tensor],
     mat2: list[torch.Tensor],
@@ -53,8 +74,9 @@ def _foreach_mm_cond(
         return False
     if torch.version.hip:
         return False
-    _SUPPORTED_DTYPES = {torch.bfloat16, torch.float32}
-    if first_a.dtype not in _SUPPORTED_DTYPES or first_b.dtype not in _SUPPORTED_DTYPES:
+    if first_a.dtype != first_b.dtype:
+        return False
+    if first_a.dtype not in {torch.bfloat16, torch.float32}:
         return False
     props = torch.cuda.get_device_properties(first_a.device)
     if props.major < 9:
@@ -64,7 +86,6 @@ def _foreach_mm_cond(
     first_b_rm = first_b.stride(-1) == 1
 
     elem_size = first_a.element_size()
-    alignment = 16 // elem_size
     nvmath_ok = first_a.dtype == torch.bfloat16 and _check_nvmath_cublaslt()
     max_dim = 0
 
@@ -74,24 +95,27 @@ def _foreach_mm_cond(
             return False
         if a.size(1) != b.size(0):
             return False
-        if not is_non_overlapping_and_dense_or_false(a):
+        # K or N == 0 not supported by cutlass_grouped_mm
+        if a.size(1) == 0 or b.size(1) == 0:
             return False
-        if not is_non_overlapping_and_dense_or_false(b):
+        if not torch.ops.aten.is_non_overlapping_and_dense.default(a):
+            return False
+        if not torch.ops.aten.is_non_overlapping_and_dense.default(b):
             return False
         if not a.is_cuda or not b.is_cuda:
             return False
         if a.device != first_a.device or b.device != first_a.device:
             return False
+        if a.dtype != first_a.dtype or b.dtype != first_a.dtype:
+            return False
         K_i, N_i = a.size(1), b.size(1)
-        if nvmath_ok and (N_i % alignment != 0 or K_i % alignment != 0):
+        aligned = _k_n_16_byte_aligned(a, b, elem_size)
+        if nvmath_ok and not aligned:
             nvmath_ok = False
-        if not nvmath_ok:
-            if (K_i * elem_size) % 16 != 0 or (N_i * elem_size) % 16 != 0:
-                return False
+        if not nvmath_ok and not aligned:
+            return False
         max_dim = max(max_dim, a.size(0), K_i, N_i)
         if i > 0:
-            if a.dtype != first_a.dtype or b.dtype != first_b.dtype:
-                return False
             if (a.stride(-1) == 1) != first_a_rm or (b.stride(-1) == 1) != first_b_rm:
                 return False
 
@@ -105,23 +129,16 @@ def _foreach_mm_impl_stack(
     self: list[torch.Tensor],
     mat2: list[torch.Tensor],
 ) -> list[torch.Tensor]:
-    # _grouped_mm with offs handles both uniform and variable-M shapes
-    # (K and N must be uniform across groups)
-    K = self[0].size(1)
-    N = mat2[0].size(1)
-    if all(a.size(1) == K for a in self) and all(
-        b.size(0) == K and b.size(1) == N for b in mat2
-    ):
-        M_sizes = [a.size(0) for a in self]
-        A_cat = torch.cat(self, dim=0)  # (sum_M, K)
-        B_3d = torch.stack(mat2)  # (G, K, N)
-        offs = torch.tensor(M_sizes, dtype=torch.int32, device=self[0].device).cumsum(
-            0, dtype=torch.int32
-        )
-        out_cat = torch._grouped_mm(A_cat, B_3d, offs=offs)  # (sum_M, N)
-        return list(out_cat.split(M_sizes, dim=0))
-
-    return [torch.mm(a, b) for a, b in zip(self, mat2)]
+    # Router guarantees uniform K,N and group count < _CUTLASS_GROUPED_MM_GROUP_LIMIT.
+    # _grouped_mm with offs handles uniform and variable-M shapes in one kernel.
+    M_sizes = [a.size(0) for a in self]
+    A_cat = torch.cat(self, dim=0)  # (sum_M, K)
+    B_3d = torch.stack(mat2)  # (G, K, N)
+    offs = torch.tensor(M_sizes, dtype=torch.int32, device=self[0].device).cumsum(
+        0, dtype=torch.int32
+    )
+    out_cat = torch._grouped_mm(A_cat, B_3d, offs=offs)  # (sum_M, N)
+    return list(out_cat.split(M_sizes, dim=0))
 
 
 _ForeachMMCublasLt = None
@@ -156,25 +173,76 @@ def _foreach_mm_impl_nvmath(
     return _nvmath_cache[key](self, mat2)  # pyrefly: ignore[not-callable]
 
 
+# torch._grouped_mm's bf16 kernel requires group_count < 1024; nvmath has no cap.
+_CUTLASS_GROUPED_MM_GROUP_LIMIT = 1024
+
+_Route = Literal["nvmath_cublaslt_grouped_mm", "cutlass_grouped_mm", "mm_loop"]
+
+
+def _can_use_nvmath_cublaslt_grouped_mm(
+    self: list[torch.Tensor],
+    mat2: list[torch.Tensor],
+) -> bool:
+    # Metadata check only (bf16 + 16-byte-aligned N,K); does not check nvmath is installed
+    # (_check_nvmath_cublaslt). dtype on [0]; _foreach_mm_cond ensures uniform.
+    if self[0].dtype != torch.bfloat16 or mat2[0].dtype != torch.bfloat16:
+        return False
+    elem_size = self[0].element_size()
+    return all(_k_n_16_byte_aligned(a, b, elem_size) for a, b in zip(self, mat2))
+
+
+def _can_use_cutlass_grouped_mm(
+    self: list[torch.Tensor],
+    mat2: list[torch.Tensor],
+) -> bool:
+    # torch._grouped_mm needs uniform K,N; its bf16 kernel needs < cap groups
+    if len(self) >= _CUTLASS_GROUPED_MM_GROUP_LIMIT:
+        return False
+    K, N = self[0].size(1), mat2[0].size(1)
+    return all(a.size(1) == K for a in self) and all(
+        b.size(0) == K and b.size(1) == N for b in mat2
+    )
+
+
+def _foreach_mm_route(self: list[torch.Tensor], mat2: list[torch.Tensor]) -> _Route:
+    """Choose a backend route; assumes _foreach_mm_cond already validated inputs."""
+    if _check_nvmath_cublaslt() and _can_use_nvmath_cublaslt_grouped_mm(self, mat2):
+        return "nvmath_cublaslt_grouped_mm"
+    if _can_use_cutlass_grouped_mm(self, mat2):
+        return "cutlass_grouped_mm"
+    return "mm_loop"
+
+
+def _warn_nvmath_unavailable_once() -> None:
+    global _nvmath_warned
+    if _nvmath_warned:
+        return
+    _nvmath_warned = True
+    reason = _unavailable_reason(_NVMATH_DEPS)
+    warnings.warn(
+        f"_foreach_mm: nvmath cublasLt grouped GEMM unavailable ({reason}), "
+        f"using slower fallback.",
+        stacklevel=3,
+    )
+
+
 def _foreach_mm_impl(
     self: list[torch.Tensor],
     mat2: list[torch.Tensor],
 ) -> list[torch.Tensor]:
-    if self[0].dtype == torch.bfloat16:
-        global _nvmath_warned
-        if _check_nvmath_cublaslt():
-            return _foreach_mm_impl_nvmath(self, mat2)
-        else:
-            if not _nvmath_warned:
-                _nvmath_warned = True
-                reason = _unavailable_reason(_NVMATH_DEPS)
-                warnings.warn(
-                    f"_foreach_mm: nvmath cublasLt grouped GEMM unavailable ({reason}), "
-                    f"using slower fallback.",
-                    stacklevel=3,
-                )
-
-    return _foreach_mm_impl_stack(self, mat2)
+    route = _foreach_mm_route(self, mat2)
+    if route == "nvmath_cublaslt_grouped_mm":
+        return _foreach_mm_impl_nvmath(self, mat2)
+    # warn once when nvmath-eligible inputs fall back only because nvmath is absent.
+    if (
+        not _nvmath_warned
+        and _can_use_nvmath_cublaslt_grouped_mm(self, mat2)
+        and not _check_nvmath_cublaslt()
+    ):
+        _warn_nvmath_unavailable_once()
+    if route == "cutlass_grouped_mm":
+        return _foreach_mm_impl_stack(self, mat2)
+    return [torch.mm(a, b) for a, b in zip(self, mat2)]  # mm_loop
 
 
 def register_to_dispatch() -> None:
