@@ -1608,6 +1608,8 @@ def _should_save_eager_input_vals(
         # the arg_kwarg_vals
         return False
     if isinstance(target, torch._ops.HigherOrderOperator):
+        if target.name() == "gemm_epilogue_fusion":
+            return False
         if pytree.tree_any(_should_save_eager_input_vals, args_kwargs):
             raise RuntimeError(
                 f"NYI: The HOP {target} has an input that is an OpOverload that "
