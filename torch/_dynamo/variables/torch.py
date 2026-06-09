@@ -3999,6 +3999,62 @@ class DispatchKeySetVariable(BaseTorchVariable):
 
         return python_constant_richcompare_impl(self, tx, other, op)
 
+    def _dispatch_key_set_binop(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: Callable[[DispatchKeySet, DispatchKeySet], DispatchKeySet],
+        reverse: bool = False,
+    ) -> VariableTracker:
+        try:
+            other_value = other.as_python_constant()
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+        if not isinstance(other_value, DispatchKeySet):
+            return ConstantVariable.create(NotImplemented)
+
+        lhs, rhs = (other_value, self.value) if reverse else (self.value, other_value)
+        return DispatchKeySetVariable.create(op(lhs, rhs))
+
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self._dispatch_key_set_binop(tx, other, lambda a, b: a & b, reverse)
+
+    def nb_inplace_and_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        return self.nb_and_impl(tx, other)
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self._dispatch_key_set_binop(tx, other, lambda a, b: a | b, reverse)
+
+    def nb_inplace_or_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        return self.nb_or_impl(tx, other)
+
+    def nb_subtract_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self._dispatch_key_set_binop(tx, other, lambda a, b: a - b, reverse)
+
+    def nb_inplace_subtract_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        return self.nb_subtract_impl(tx, other)
+
     def is_constant_fold_method(self, name: str) -> bool:
         return name == "has"
 
