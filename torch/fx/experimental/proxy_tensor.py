@@ -1684,6 +1684,8 @@ def _normalize_cudagraph_marker_kwargs(op: torch.fx.Node) -> dict[str, Any]:
 def mark_cudagraph_meta(graph: torch.fx.Graph) -> None:
     exclude_op = _get_cudagraph_op("exclude_from_cudagraphs")
     copy_op = _get_cudagraph_op("copy_to_cudagraphs")
+    disable_begin_op = _get_cudagraph_op("disable_cudagraphs_begin")
+    disable_end_op = _get_cudagraph_op("disable_cudagraphs_end")
 
     output_clone_markers = (
         []
@@ -1701,7 +1703,28 @@ def mark_cudagraph_meta(graph: torch.fx.Graph) -> None:
             target=copy_op.default,
         )
     )
-    cudagraph_markers = output_clone_markers + input_copy_markers
+    disable_begin_markers = (
+        []
+        if disable_begin_op is None
+        else graph.find_nodes(
+            op="call_function",
+            target=disable_begin_op.default,
+        )
+    )
+    disable_end_markers = (
+        []
+        if disable_end_op is None
+        else graph.find_nodes(
+            op="call_function",
+            target=disable_end_op.default,
+        )
+    )
+    cudagraph_markers = (
+        output_clone_markers
+        + input_copy_markers
+        + disable_begin_markers
+        + disable_end_markers
+    )
     if not cudagraph_markers:
         return
 
@@ -1724,6 +1747,22 @@ def mark_cudagraph_meta(graph: torch.fx.Graph) -> None:
         storage = get_node_storage(new_kwargs["inp"])
         if storage is not None:
             copy_input_storages.add(storage)
+
+    disable_begin_markers_set = set(disable_begin_markers)
+    disable_end_markers_set = set(disable_end_markers)
+    disable_depth = 0
+    for node in graph.nodes:
+        if node in disable_begin_markers_set:
+            disable_depth += 1
+            continue
+        if node in disable_end_markers_set:
+            torch._check(disable_depth > 0, lambda: "unmatched cudagraph disable end")
+            disable_depth -= 1
+            continue
+        if disable_depth and node.op not in ("placeholder", "output"):
+            node.meta["cudagraph_unsafe"] = True
+
+    torch._check(disable_depth == 0, lambda: "unmatched cudagraph disable begin")
 
     output_nodes = graph.find_nodes(op="output")
     torch._check(len(output_nodes) == 1)

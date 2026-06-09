@@ -307,8 +307,13 @@ override the default CUDAGraph handling for specific tensors:
   remain stable. Mutated inputs and inputs that alias another graph input are
   not captured with copy semantics because copying would change user-visible
   behavior.
-These annotations preserve eager behavior and return `None`; they are metadata
-markers consumed by `torch.compile`.
+- `torch.compiler.cudagraph_disable()` disables CUDA graph capture for the
+  operations traced inside the context manager. Without graph partitioning, this
+  skips CUDA graph capture for the compiled function. With graph partitioning,
+  the compiler partitions around the marked region where possible.
+
+These annotations preserve eager behavior; they are metadata markers consumed by
+`torch.compile`.
 
 
 ### Limitations

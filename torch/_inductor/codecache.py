@@ -1195,22 +1195,29 @@ class FxGraphHashDetails:
     @staticmethod
     def _cudagraph_metadata_for_cache_key(
         gm: torch.fx.GraphModule,
-    ) -> tuple[tuple[str, tuple[tuple[int, ...], tuple[int, ...]]], ...]:
-        metadata: list[tuple[str, tuple[tuple[int, ...], tuple[int, ...]]]] = []
+    ) -> tuple[
+        tuple[str, tuple[tuple[int, ...], tuple[int, ...]], tuple[str, ...]], ...
+    ]:
+        metadata: list[
+            tuple[str, tuple[tuple[int, ...], tuple[int, ...]], tuple[str, ...]]
+        ] = []
         for module_name, module in gm.named_modules():
             if not isinstance(module, torch.fx.GraphModule):
                 continue
 
             output_metadata: tuple[tuple[int, ...], tuple[int, ...]] = ((), ())
+            unsafe_nodes: list[str] = []
             for node in module.graph.nodes:
                 if node.op == "output":
                     output_metadata = (
                         tuple(node.meta.get("cloned_idxs", ())),
                         tuple(node.meta.get("cudagraph_copy_input_idxs", ())),
                     )
+                elif node.meta.get("cudagraph_unsafe", False):
+                    unsafe_nodes.append(node.name)
 
-            if output_metadata != ((), ()):
-                metadata.append((module_name, output_metadata))
+            if output_metadata != ((), ()) or unsafe_nodes:
+                metadata.append((module_name, output_metadata, tuple(unsafe_nodes)))
 
         return tuple(metadata)
 

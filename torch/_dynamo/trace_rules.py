@@ -194,6 +194,8 @@ manual_torch_name_rule_map: dict[
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
     "torch.compiler.cudagraph_mark_output_clone": TorchInGraphFunctionVariable,
     "torch.compiler.cudagraph_mark_input_copy": TorchInGraphFunctionVariable,
+    "torch.compiler.cudagraph_disable#__enter__": UserFunctionVariable,
+    "torch.compiler.cudagraph_disable#__exit__": UserFunctionVariable,
     "torch._dynamo.eval_frame._is_in_optimized_module": TorchInGraphFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
     "torch._C._group_tensors_by_device_and_dtype": TorchInGraphFunctionVariable,

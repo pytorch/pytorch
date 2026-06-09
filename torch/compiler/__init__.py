@@ -28,6 +28,7 @@ __all__ = [
     "cudagraph_mark_step_begin",
     "cudagraph_mark_output_clone",
     "cudagraph_mark_input_copy",
+    "cudagraph_disable",
     "load_compiled_function",
     "wrap_numpy",
     "is_compiling",
@@ -475,6 +476,29 @@ def cudagraph_mark_input_copy(tensor: torch.Tensor) -> None:
     from torch._inductor import cudagraph_prims
 
     torch.ops.aten_cudagraphs.copy_to_cudagraphs(tensor)
+
+
+class cudagraph_disable:
+    """
+    Disable CUDA graph capture for a region.
+
+    The marker is only interpreted by ``torch.compile`` with CUDA graphs
+    enabled. It preserves eager behavior. The compiler uses the marker to skip
+    or partition CUDA graph capture around operations traced inside the region.
+
+    This is useful when user code knows a region should not be captured by CUDA
+    graphs but should still otherwise remain in the compiled program.
+    """
+
+    def __enter__(self) -> None:
+        from torch._inductor import cudagraph_prims
+
+        torch.ops.aten_cudagraphs.disable_cudagraphs_begin()
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        from torch._inductor import cudagraph_prims
+
+        torch.ops.aten_cudagraphs.disable_cudagraphs_end()
 
 
 def wrap_numpy(fn):
