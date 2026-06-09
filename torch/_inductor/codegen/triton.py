@@ -5601,7 +5601,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 accumulator = self.cse.newvar(dtype=dtype, shape=reduced_size)
                 reduced_size_str = f"[{', '.join(reduced_size)}]"
 
-                default = "float('nan')" if dtype.is_floating_point else "-1"
+                default = "float('nan')" if dtype.is_floating_point else "0"
                 self.body.writeline(
                     f"{accumulator} = tl.full({reduced_size_str}, {default}, {acc_type})"
                 )
