@@ -8643,7 +8643,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         if local_reduce is not None and not local_reduce.feeds_main:
             m, n = size
             group_size = local_reduce.group_size
-            local_reduce_val = local_reduce.reduce_node.meta.get("val")
+            local_reduce_val = local_reduce.aux_output_node.meta.get("val")
             local_reduce_dtype = getattr(local_reduce_val, "dtype", torch.float32)
             if local_reduce_val is not None:
                 local_reduce_size = list(local_reduce_val.shape)
