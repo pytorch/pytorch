@@ -4122,6 +4122,68 @@ class TestSDPACudaOnly(NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
     )
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_SDPA,
+        "Regression is specific to the ROCm CK SDPA backend",
+    )
+    @setSdpaBackendsToDefaultFinally
+    def test_flash_attention_ck_gqa_seqlen_q_1(self, device):
+        # Regression: the CK flash-attention host wrapper mis-ported the
+        # seqlenq_ngroups_swapped optimization, which triggers for GQA
+        # (num_heads_q > num_heads_kv) with seqlen_q == 1 (single-query decode).
+        # It fed the un-swapped q / original-shaped output to the kernel, so the
+        # kernel strided out of bounds and returned finite garbage (up to ~FLT_MAX)
+        # that overflowed to NaN/Inf downstream. Verify the CK output is finite and
+        # matches the math reference for this previously-untested shape.
+        torch.backends.cuda.preferred_rocm_fa_library("ck")
+        if (
+            torch.backends.cuda.preferred_rocm_fa_library()
+            != torch._C._ROCmFABackend.Ck
+        ):
+            self.skipTest("CK SDPA backend not available")
+        batch_size, head_dim, seqlen_q = 8, 128, 1
+        for dtype in (torch.float16, torch.bfloat16):
+            for num_heads_q, num_heads_kv in ((8, 2), (16, 8)):
+                for seqlen_k in (4, 256, 1024):
+                    q = torch.rand(
+                        batch_size, num_heads_q, seqlen_q, head_dim,
+                        device=device, dtype=dtype,
+                    )
+                    k = torch.rand(
+                        batch_size, num_heads_kv, seqlen_k, head_dim,
+                        device=device, dtype=dtype,
+                    )
+                    v = torch.rand(
+                        batch_size, num_heads_kv, seqlen_k, head_dim,
+                        device=device, dtype=dtype,
+                    )
+                    with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+                        out = F.scaled_dot_product_attention(
+                            q, k, v, dropout_p=0.0, is_causal=False, enable_gqa=True
+                        )
+                    with sdpa_kernel(backends=[SDPBackend.MATH]):
+                        ref = F.scaled_dot_product_attention(
+                            q.double(), k.double(), v.double(),
+                            dropout_p=0.0, is_causal=False, enable_gqa=True,
+                        )
+                    msg = (
+                        f"dtype={dtype}, num_heads_q={num_heads_q}, "
+                        f"num_heads_kv={num_heads_kv}, seqlen_k={seqlen_k}"
+                    )
+                    self.assertFalse(
+                        torch.isnan(out).any().item(),
+                        f"CK GQA seqlen_q==1 produced NaN ({msg})",
+                    )
+                    self.assertFalse(
+                        torch.isinf(out).any().item(),
+                        f"CK GQA seqlen_q==1 produced Inf ({msg})",
+                    )
+                    self.assertEqual(out, ref.to(out.dtype), atol=2e-2, rtol=2e-2)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support SDPA or pre-SM80 hardware",
+    )
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @setSdpaBackendsToDefaultFinally
     @parametrize("batch_size", [1, 8])
