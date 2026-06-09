@@ -2085,10 +2085,11 @@ def _new_process_group_helper(
     else:
         if Backend.NCCL in backend_config.device_backend_map.values():
             pg._set_default_backend(ProcessGroup.BackendType.NCCL)
-        elif Backend._plugins.keys():
-            custom_backend = next(iter(Backend._plugins.keys()))
-            if custom_backend in backend_config.device_backend_map.values():
-                pg._set_default_backend(ProcessGroup.BackendType.CUSTOM)
+        elif any(
+            k.lower() in backend_config.device_backend_map.values()
+            for k in Backend._plugins
+        ):
+            pg._set_default_backend(ProcessGroup.BackendType.CUSTOM)
         else:
             pg._set_default_backend(ProcessGroup.BackendType.GLOO)
 
@@ -2277,6 +2278,7 @@ def _new_process_group_helper(
         # ProcessGroup instance
         if issubclass(type(backend_class), ProcessGroup):
             pg = backend_class  # type: ignore[assignment]
+            pg._set_default_backend(backend_type)
             break
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set

@@ -1936,6 +1936,25 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         dist.barrier()
         dist.destroy_process_group()
 
+    def test_custom_backend_default_type_in_multi_backend_config(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178756
+        # Without a case-insensitive comparison in _new_process_group_helper,
+        # the default backend type is never set to CUSTOM for multi-backend
+        # configs because _plugins stores uppercase keys while BackendConfig
+        # normalizes values to lowercase.
+        dist.Backend.register_backend(
+            "dummy", PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group(
+            "cpu:dummy,cuda:dummy", rank=self.rank, world_size=self.world_size
+        )
+
+        dist.barrier()
+        dist.destroy_process_group()
+
     class Options:
         group_name = None
         split_from = None
