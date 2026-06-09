@@ -1610,7 +1610,7 @@ def _should_save_eager_input_vals(
     if isinstance(target, torch._ops.HigherOrderOperator):
         # The GEMM epilogue HOP re-traces its body with fake tensors, so Inductor
         # recovers output layout from the body graph instead of eager input vals.
-        if target.name() == "gemm_epilogue_fusion":
+        if target.name() == "flex_gemm":
             return False
         if pytree.tree_any(_should_save_eager_input_vals, args_kwargs):
             raise RuntimeError(

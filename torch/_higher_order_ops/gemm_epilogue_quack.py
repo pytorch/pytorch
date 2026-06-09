@@ -8,14 +8,14 @@ import torch
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.gemm_epilogue import (
     GEMM_EPILOGUE_OPS,
-    supported_gemm_epilogue_op_names,
+    supported_flex_gemm_op_names,
 )
 
 
 QUACK_GEMM_OPS = tuple(
     op for op, info in GEMM_EPILOGUE_OPS.items() if info.supports_quack
 )
-SUPPORTED_QUACK_GEMM_OP_NAMES = supported_gemm_epilogue_op_names(quack_only=True)
+SUPPORTED_QUACK_GEMM_OP_NAMES = supported_flex_gemm_op_names(quack_only=True)
 QUACK_TENSORSSA_FRAGMENT_N = 32
 QUACK_REDUCE_DIM_M = 0
 QUACK_REDUCE_DIM_N = 1

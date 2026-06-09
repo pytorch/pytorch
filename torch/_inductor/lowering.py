@@ -25,7 +25,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.gemm_epilogue import (
-    _gemm_epilogue_fusion,
+    _flex_gemm,
     _SUPPORTED_GEMM_OP_NAMES,
     GEMM_EPILOGUE_OPS,
 )
@@ -90,9 +90,9 @@ from .utils import (
     ceildiv,
     convert_symint_to_expr,
     decode_device,
+    infer_scale_swizzle_ir,
     is_dynamic,
     is_gpu,
-    infer_scale_swizzle_ir,
     is_pointwise_use,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
@@ -8526,9 +8526,7 @@ def _validate_quack_scaled_mm(gemm_kwargs, quack_args) -> None:
         )
     from torch.nn.functional import ScalingType
 
-    scale_a_type, scale_a_swizzle = infer_scale_swizzle_ir(
-        quack_args[0], quack_args[2]
-    )
+    scale_a_type, scale_a_swizzle = infer_scale_swizzle_ir(quack_args[0], quack_args[2])
     scale_b_type, scale_b_swizzle = infer_scale_swizzle_ir(
         quack_args[1], quack_args[3], transpose=True
     )
@@ -8725,12 +8723,16 @@ def _infer_quack_main_layout(
 
     size = [normalize_layout_expr(value) for value in size]
     stride = [normalize_layout_expr(value) for value in stride]
-    return ir.FixedLayout(
-        mat1.get_device_or_error(),
+    return (
+        ir.FixedLayout(
+            mat1.get_device_or_error(),
+            main_output_dtype,
+            size,
+            stride,
+        ),
         main_output_dtype,
         size,
-        stride,
-    ), main_output_dtype, size
+    )
 
 
 def _quack_epilogue_arg_indices(graph_module, epilogue_arg_placeholders):
@@ -8739,12 +8741,12 @@ def _quack_epilogue_arg_indices(graph_module, epilogue_arg_placeholders):
         for node in graph_module.graph.nodes
         if node.op == "placeholder" and isinstance(node.meta.get("val"), torch.Tensor)
     ]
-    return tuple(
-        tensor_placeholders.index(node) for node in epilogue_arg_placeholders
-    )
+    return tuple(tensor_placeholders.index(node) for node in epilogue_arg_placeholders)
 
 
-def _validate_quack_aux_outputs(gemm_op, epilogue_arg_indices, local_reduce, aux_output):
+def _validate_quack_aux_outputs(
+    gemm_op, epilogue_arg_indices, local_reduce, aux_output
+):
     if local_reduce is not None:
         if gemm_op not in (torch.ops.aten.mm.default, torch.ops.aten.bmm.default):
             raise NotImplementedError(
@@ -8899,8 +8901,8 @@ def _build_quack_epilogue_config(
     )
 
 
-@register_lowering(_gemm_epilogue_fusion, type_promotion_kind=None)
-def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
+@register_lowering(_flex_gemm, type_promotion_kind=None)
+def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Lower GEMM epilogue HOPs through backend-specific fused template paths."""
     backend = kernel_options.get("backend", "TRITON")
     split_k = kernel_options.get("SPLIT_K", False)
@@ -9045,9 +9047,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         epilogue_arg_kinds = _infer_quack_epilogue_arg_kinds(
             gemm_op, quack_args, epilogue_arg_indices, size
         )
-        local_reduce_out = _allocate_quack_local_reduce_out(
-            local_reduce, size, mat1
-        )
+        local_reduce_out = _allocate_quack_local_reduce_out(local_reduce, size, mat1)
         aux_out = _allocate_quack_aux_out(aux_output, mat1)
         (
             input_nodes,
@@ -9087,7 +9087,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             mutated_inputs=mutated_inputs or None,
         )
         node, _ = autotune_select_algorithm(
-            "quack_gemm_epilogue", choices, input_nodes, layout
+            "quack_flex_gemm", choices, input_nodes, layout
         )
         if local_reduce_out is not None:
             return (node, local_reduce_out)
@@ -9116,7 +9116,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         output = process_subgraph_nodes(subgraph.graph_module, list(args))
 
     for op in V.graph.operations[operation_len:]:
-        op._gemm_epilogue_must_fuse = True
+        op._flex_gemm_must_fuse = True  # pyrefly: ignore [missing-attribute]
 
     return output
 

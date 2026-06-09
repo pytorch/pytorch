@@ -10,7 +10,7 @@ from torch._higher_order_ops import (
     addmm_epilogue,
     baddbmm_epilogue,
     bmm_epilogue,
-    gemm_epilogue_fusion,
+    flex_gemm,
     grouped_mm_epilogue,
     matmul_epilogue,
     mm_epilogue,
@@ -43,7 +43,7 @@ from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils._triton import has_triton_tma_device
 
 
-class GemmEpilogueFusionTests(TestCase):
+class FlexGemmTests(TestCase):
     def _grouped_mm_inputs(self, op, device):
         dtype = torch.bfloat16
         match op:
@@ -116,7 +116,7 @@ class GemmEpilogueFusionTests(TestCase):
 
     def _quack_codegen_invariants(self, *checks, extern="extern_kernels.mm"):
         return ("@cute.jit", "gemm_epilogue(", *checks), (
-            "call_quack_gemm_epilogue",
+            "call_quack_flex_gemm",
             "torch.ops.flex_gemm",
             extern,
         )
@@ -163,13 +163,12 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.randn(2, 3)
         b = torch.randn(3, 4)
 
-        actual = gemm_epilogue_fusion(
-            torch.ops.aten.mm.default,
-            (a, b),
-            lambda acc: acc.relu(),
-        )
+        def epilogue_fn(acc):
+            return (acc + 1).relu()
 
-        torch.testing.assert_close(actual, (a @ b).relu())
+        actual = flex_gemm(torch.mm, (a, b), epilogue_fn)
+
+        torch.testing.assert_close(actual, epilogue_fn(a @ b))
 
     def test_rejects_tensor_gemm_kwargs(self):
         bias = torch.randn(2, 4)
@@ -179,7 +178,7 @@ class GemmEpilogueFusionTests(TestCase):
         with self.assertRaisesRegex(
             RuntimeError, "gemm_kwargs must not contain tensor"
         ):
-            gemm_epilogue_fusion(
+            flex_gemm(
                 torch.ops.aten.addmm.default,
                 (bias, a, b),
                 lambda acc: acc.relu(),
@@ -193,7 +192,7 @@ class GemmEpilogueFusionTests(TestCase):
         scale_b = torch.ones(())
 
         with self.assertRaisesRegex(RuntimeError, "cannot specify both"):
-            gemm_epilogue_fusion(
+            flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -207,7 +206,7 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.randn(2, 3)
         b = torch.randn(3, 4)
 
-        actual = gemm_epilogue_fusion(
+        actual = flex_gemm(
             torch.mm,
             (a, b),
             lambda acc: acc.relu(),
@@ -220,7 +219,7 @@ class GemmEpilogueFusionTests(TestCase):
         b = torch.randn(3, 4)
 
         with self.assertRaisesRegex(RuntimeError, "unsupported GEMM epilogue backend"):
-            gemm_epilogue_fusion(
+            flex_gemm(
                 torch.mm,
                 (a, b),
                 lambda acc: acc.relu(),
@@ -232,7 +231,7 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.randn(M, 3)
         b = torch.randn(3, 64)
 
-        actual = gemm_epilogue_fusion(
+        actual = flex_gemm(
             torch.ops.aten.mm.default,
             (a, b),
             lambda acc: (acc.relu(), acc.float().view(M, -1, 32).sum(-1)),
@@ -247,7 +246,7 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.randn(2, 3)
         b = torch.randn(3, 4)
 
-        actual = gemm_epilogue_fusion(
+        actual = flex_gemm(
             torch.ops.aten.addmm.default,
             (bias, a, b),
             lambda acc: acc.relu(),
@@ -259,7 +258,7 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.randn(5, 2, 3)
         b = torch.randn(5, 3, 4)
 
-        actual = gemm_epilogue_fusion(
+        actual = flex_gemm(
             torch.ops.aten.bmm.default,
             (a, b),
             lambda acc: acc.relu(),
@@ -272,7 +271,7 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.randn(5, 2, 3)
         b = torch.randn(5, 3, 4)
 
-        actual = gemm_epilogue_fusion(
+        actual = flex_gemm(
             torch.ops.aten.baddbmm.default,
             (bias, a, b),
             lambda acc: acc.relu(),
@@ -333,7 +332,7 @@ class GemmEpilogueFusionTests(TestCase):
 
     def test_make_fx_preserves_gemm_kwargs(self):
         def fn(bias, a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.addmm.default,
                 (bias, a, b),
                 lambda acc: acc.relu(),
@@ -354,7 +353,7 @@ class GemmEpilogueFusionTests(TestCase):
         M = 2
 
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: (acc.relu(), acc.float().view(M, -1, 32).sum(-1)),
@@ -372,15 +371,15 @@ class GemmEpilogueFusionTests(TestCase):
         body = next(
             module
             for name, module in gm.named_modules()
-            if name.startswith("gemm_epilogue_fusion_body_graph")
+            if name.startswith("flex_gemm_body_graph")
         )
         FileCheck().check("aten.mm.default").check("relu").check("view").check(
             "sum"
         ).run(body.code)
 
-    def test_exports_as_gemm_epilogue_fusion_region(self):
+    def test_exports_as_flex_gemm_region(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: acc.relu(),
@@ -388,14 +387,14 @@ class GemmEpilogueFusionTests(TestCase):
 
         gm, _ = torch._dynamo.export(fn, torch.randn(2, 3), torch.randn(3, 4))
 
-        self.assertIn("gemm_epilogue_fusion", gm.code)
+        self.assertIn("flex_gemm", gm.code)
         self.assertIn("{'backend': 'TRITON', 'SPLIT_K': False}", gm.code)
-        self.assertIn("aten.mm.default", gm.gemm_epilogue_fusion_body_0.code)
-        self.assertIn("relu", gm.gemm_epilogue_fusion_body_0.code)
+        self.assertIn("aten.mm.default", gm.flex_gemm_body_0.code)
+        self.assertIn("relu", gm.flex_gemm_body_0.code)
 
-    def test_shorthand_mm_exports_as_gemm_epilogue_fusion_region(self):
+    def test_shorthand_mm_exports_as_flex_gemm_region(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.mm,
                 (a, b),
                 lambda acc: acc.relu(),
@@ -403,9 +402,9 @@ class GemmEpilogueFusionTests(TestCase):
 
         gm, _ = torch._dynamo.export(fn, torch.randn(2, 3), torch.randn(3, 4))
 
-        self.assertIn("gemm_epilogue_fusion", gm.code)
+        self.assertIn("flex_gemm", gm.code)
         self.assertIn("aten.mm.default", gm.code)
-        self.assertIn("aten.mm.default", gm.gemm_epilogue_fusion_body_0.code)
+        self.assertIn("aten.mm.default", gm.flex_gemm_body_0.code)
 
     @requires_cuda_and_triton
     @inductor_config.patch(max_autotune_gemm=False)
@@ -605,7 +604,7 @@ class GemmEpilogueFusionTests(TestCase):
                 self.skipTest("QuACK is not available")
 
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: acc.relu(),
@@ -642,7 +641,7 @@ class GemmEpilogueFusionTests(TestCase):
                 self.skipTest("QuACK is not available")
 
         def fn(bias, a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.addmm.default,
                 (bias, a, b),
                 lambda acc: acc.relu(),
@@ -1087,7 +1086,7 @@ class GemmEpilogueFusionTests(TestCase):
     @inductor_config.patch("triton.decompose_k_threshold", 0)
     def test_cuda_inductor_triton_epilogue_disables_decompose_k(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: acc.relu(),
@@ -1107,7 +1106,7 @@ class GemmEpilogueFusionTests(TestCase):
     @inductor_config.patch(max_autotune_gemm=False)
     def test_cuda_inductor_forces_template_epilogue_fusion(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: acc.relu(),
@@ -1125,7 +1124,7 @@ class GemmEpilogueFusionTests(TestCase):
     @inductor_config.patch(max_autotune_gemm=False)
     def test_cuda_inductor_addmm_epilogue_fuses(self):
         def fn(bias, a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.addmm.default,
                 (bias, a, b),
                 lambda acc: acc.relu(),
@@ -1146,7 +1145,7 @@ class GemmEpilogueFusionTests(TestCase):
     @inductor_config.patch(max_autotune_gemm=False)
     def test_cuda_inductor_addmm_alpha_beta_epilogue_fuses(self):
         def fn(bias, a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.addmm.default,
                 (bias, a, b),
                 lambda acc: acc.relu(),
@@ -1168,7 +1167,7 @@ class GemmEpilogueFusionTests(TestCase):
     @inductor_config.patch(max_autotune_gemm=False)
     def test_cuda_inductor_bmm_epilogue_fuses(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.bmm.default,
                 (a, b),
                 lambda acc: acc.relu(),
@@ -1188,7 +1187,7 @@ class GemmEpilogueFusionTests(TestCase):
     @inductor_config.patch(max_autotune_gemm=False)
     def test_cuda_inductor_baddbmm_epilogue_fuses(self):
         def fn(bias, a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.baddbmm.default,
                 (bias, a, b),
                 lambda acc: acc.relu(),
@@ -1212,7 +1211,7 @@ class GemmEpilogueFusionTests(TestCase):
             self.skipTest("FP8 is not supported")
 
         def fn(a, b, scale_a, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -1273,7 +1272,7 @@ class GemmEpilogueFusionTests(TestCase):
             self.skipTest("cuBLAS 128-element blockwise scaling is SM90-only")
 
         def fn(a, b, scale_a, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -1325,7 +1324,7 @@ class GemmEpilogueFusionTests(TestCase):
             self.skipTest("FP8 is not supported")
 
         def fn(a, b, scale_a, scale_b, row_scale):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc * row_scale,
@@ -1369,7 +1368,7 @@ class GemmEpilogueFusionTests(TestCase):
         )
 
         def fn(a, b, scale_a, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -1418,7 +1417,7 @@ class GemmEpilogueFusionTests(TestCase):
             self.skipTest("NVFP4 GEMM is not supported")
 
         def fn(a, b, scale_a, global_scale, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, [scale_a, global_scale], [scale_b, global_scale]),
                 lambda acc: acc.relu(),
@@ -1487,7 +1486,7 @@ class GemmEpilogueFusionTests(TestCase):
         )
 
         def fn(a, b, scale_a, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -1534,7 +1533,7 @@ class GemmEpilogueFusionTests(TestCase):
 
     def test_scaled_grouped_mm_v2_epilogue_hop_accepts_supported_op(self):
         def fn(a, b, scale_a, scale_b, offs):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_grouped_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -1557,7 +1556,7 @@ class GemmEpilogueFusionTests(TestCase):
 
     def test_scaled_grouped_mm_v2_rejects_duplicate_kwarg_aliases(self):
         def fn(a, b, scale_a, scale_b, offs):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_grouped_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -1581,7 +1580,7 @@ class GemmEpilogueFusionTests(TestCase):
 
     def test_scaled_grouped_mm_epilogue_hop_accepts_supported_op(self):
         def fn(a, b, scale_a, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_grouped_mm.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -1602,7 +1601,7 @@ class GemmEpilogueFusionTests(TestCase):
             self.skipTest("FP8 grouped GEMM is not supported")
 
         def fn(a, b, scale_a, scale_b, offs, row_bias, col_scale, tile_bias):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_grouped_mm.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: torch.where(
@@ -1655,7 +1654,7 @@ class GemmEpilogueFusionTests(TestCase):
             self.skipTest("FP8 grouped GEMM is not supported")
 
         def fn(a, b, scale_a, scale_b, offs, row_bias, col_scale):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_grouped_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: ((acc.float() + row_bias) * col_scale).relu(),
@@ -1712,7 +1711,7 @@ class GemmEpilogueFusionTests(TestCase):
         groups, m, n, k = 2, 128, 128, 128
 
         def fn(a, b, scale_a, scale_b, offs):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_grouped_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -1789,7 +1788,7 @@ class GemmEpilogueFusionTests(TestCase):
         groups, m, n, k = 2, 128, 128, 128
 
         def fn(a, b, scale_a, scale_b, offs):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_grouped_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -1859,7 +1858,7 @@ class GemmEpilogueFusionTests(TestCase):
             self.skipTest("FP8 grouped GEMM is not supported")
 
         def fn(a, b, scale_a, scale_b, offs):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_grouped_mm.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -1901,7 +1900,7 @@ class GemmEpilogueFusionTests(TestCase):
         )
 
         def fn(a, b, scale_a, scale_b, row_bias, col_scale, tile_bias, epilogue):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: epilogue(acc.float(), row_bias, col_scale, tile_bias),
@@ -2056,7 +2055,7 @@ class GemmEpilogueFusionTests(TestCase):
                 denom = x.sum(dim=-1, keepdim=True) + 32.0
                 return (x * denom.reciprocal()).view(m, n)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 epilogue,
@@ -2131,7 +2130,7 @@ class GemmEpilogueFusionTests(TestCase):
                 x = acc.float().view(m, -1, group)
                 return acc.relu(), x.sum(dim=-1)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 epilogue,
@@ -2163,7 +2162,7 @@ class GemmEpilogueFusionTests(TestCase):
         )
 
         def fn(a, b, scale_a, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: (acc.relu(), acc.float().abs()),
@@ -2189,7 +2188,7 @@ class GemmEpilogueFusionTests(TestCase):
             self.skipTest("FP8 is not supported")
 
         def fn(a, b, scale_a, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -2217,7 +2216,7 @@ class GemmEpilogueFusionTests(TestCase):
             self.skipTest("NVFP4 GEMM is not supported")
 
         def fn(a, b, scale_a, global_scale_a, scale_b, global_scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, [scale_a, global_scale_a], [scale_b, global_scale_b]),
                 lambda acc: acc.relu(),
@@ -2297,7 +2296,7 @@ class GemmEpilogueFusionTests(TestCase):
         self.assertEqual(result, expected)
 
         def fn_shared_global_with_aux(a, b, scale_a, global_scale, scale_b, row_bias):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, [scale_a, global_scale], [scale_b, global_scale]),
                 lambda acc: (acc + row_bias).relu(),
@@ -2356,7 +2355,7 @@ class GemmEpilogueFusionTests(TestCase):
         )
 
         def fn(a, b, scale_a, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -2388,7 +2387,7 @@ class GemmEpilogueFusionTests(TestCase):
         )
 
         def fn(a, b, scale_a, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -2420,7 +2419,7 @@ class GemmEpilogueFusionTests(TestCase):
         )
 
         def fn(a, b, scale_a, scale_b, bias):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -2454,7 +2453,7 @@ class GemmEpilogueFusionTests(TestCase):
         )
 
         def fn(a, b, scale_a, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -2479,7 +2478,7 @@ class GemmEpilogueFusionTests(TestCase):
             self.skipTest("MX GEMM is not supported")
 
         def fn(a, b, scale_a, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -2532,7 +2531,7 @@ class GemmEpilogueFusionTests(TestCase):
             self.skipTest("MX GEMM is not supported")
 
         def fn(a, b, scale_a, scale_b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten._scaled_mm.default,
                 (a, b, scale_a, scale_b),
                 lambda acc: acc.relu(),
@@ -2578,7 +2577,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_routes_addmm_relu_to_quack_hook(self):
         def fn(bias, a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.addmm.default,
                 (bias, a, b),
                 lambda acc: acc.relu(),
@@ -2601,7 +2600,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_routes_addmm_alpha_beta_to_quack_hook(self):
         def fn(bias, a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.addmm.default,
                 (bias, a, b),
                 lambda acc: acc.relu(),
@@ -2625,7 +2624,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_routes_bmm_relu_to_quack_hook(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.bmm.default,
                 (a, b),
                 lambda acc: acc.relu(),
@@ -2647,7 +2646,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_routes_baddbmm_alpha_beta_to_quack_hook(self):
         def fn(bias, a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.baddbmm.default,
                 (bias, a, b),
                 lambda acc: acc.relu(),
@@ -2671,7 +2670,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_routes_baddbmm_relu_to_quack_hook(self):
         def fn(bias, a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.baddbmm.default,
                 (bias, a, b),
                 lambda acc: acc.relu(),
@@ -2694,7 +2693,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_routes_relu_to_quack_hook(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: acc.relu(),
@@ -2712,7 +2711,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_generates_pointwise_epilogue(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: (acc + 1.0).relu(),
@@ -2730,7 +2729,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_positional_clamp_matches_reference(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: acc.clamp(-0.5, 0.5),
@@ -2757,7 +2756,7 @@ class GemmEpilogueFusionTests(TestCase):
                         denom = x.sum(dim=-1, keepdim=True)
                         return (x * denom.reciprocal()).view(M, N)
 
-                    return gemm_epilogue_fusion(
+                    return flex_gemm(
                         torch.ops.aten.mm.default,
                         (a, b),
                         epilogue,
@@ -2799,7 +2798,7 @@ class GemmEpilogueFusionTests(TestCase):
                         denom = x.abs().amax(dim=-1, keepdim=True)
                         return (x * denom.reciprocal()).view(M, N)
 
-                    return gemm_epilogue_fusion(
+                    return flex_gemm(
                         torch.ops.aten.mm.default,
                         (a, b),
                         epilogue,
@@ -2839,7 +2838,7 @@ class GemmEpilogueFusionTests(TestCase):
                 denom = x.amax(-1, keepdim=True)
                 return (x * denom.reciprocal()).view(M, N)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -2866,7 +2865,7 @@ class GemmEpilogueFusionTests(TestCase):
                         denom = x.sum(1, keepdim=True)
                         return (x * denom.reciprocal()).view(M, N)
 
-                    return gemm_epilogue_fusion(
+                    return flex_gemm(
                         torch.ops.aten.mm.default,
                         (a, b),
                         epilogue,
@@ -2904,7 +2903,7 @@ class GemmEpilogueFusionTests(TestCase):
                 denom = x.sum(-1, keepdim=True)
                 return (x * denom.reciprocal()).view(M, N)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -2925,7 +2924,7 @@ class GemmEpilogueFusionTests(TestCase):
         group = 256
 
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: (acc.relu(), acc.float().view(M, -1, group).sum(-1)),
@@ -2949,7 +2948,7 @@ class GemmEpilogueFusionTests(TestCase):
                 with self.subTest(dtype=dtype, group=group):
 
                     def fn(a, b):
-                        return gemm_epilogue_fusion(
+                        return flex_gemm(
                             torch.ops.aten.mm.default,
                             (a, b),
                             lambda acc: (
@@ -2981,7 +2980,7 @@ class GemmEpilogueFusionTests(TestCase):
         group = 4
 
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: (
@@ -3011,7 +3010,7 @@ class GemmEpilogueFusionTests(TestCase):
         N = 64
 
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: (
@@ -3033,7 +3032,7 @@ class GemmEpilogueFusionTests(TestCase):
         N = 64
 
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: (
@@ -3057,7 +3056,7 @@ class GemmEpilogueFusionTests(TestCase):
             with self.subTest(group=group):
 
                 def fn(a, b):
-                    return gemm_epilogue_fusion(
+                    return flex_gemm(
                         torch.ops.aten.mm.default,
                         (a, b),
                         lambda acc: (
@@ -3086,7 +3085,7 @@ class GemmEpilogueFusionTests(TestCase):
         M = 128
 
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: (acc.relu(), acc.float().view(M, -1, 16).sum(-1)),
@@ -3113,7 +3112,7 @@ class GemmEpilogueFusionTests(TestCase):
             with self.subTest(group=group):
 
                 def fn(a, b):
-                    return gemm_epilogue_fusion(
+                    return flex_gemm(
                         torch.ops.aten.mm.default,
                         (a, b),
                         lambda acc: (
@@ -3150,7 +3149,7 @@ class GemmEpilogueFusionTests(TestCase):
                 denom = x.sum(-1, keepdim=True)
                 return (x * denom.reciprocal()).view(M, N)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -3175,7 +3174,7 @@ class GemmEpilogueFusionTests(TestCase):
         M = 128
 
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: (acc.relu(), acc.float().view(M, -1, 32).sum(-1)),
@@ -3195,7 +3194,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_generic_aux_fuses(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: (acc.relu(), acc.float().abs()),
@@ -3216,7 +3215,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_generic_aux_only_is_live(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: (acc.relu(), acc.float().abs()),
@@ -3246,7 +3245,7 @@ class GemmEpilogueFusionTests(TestCase):
                         x = acc.float().view(M, -1, group)
                         return acc.relu(), x.abs().amax(-1)
 
-                    return gemm_epilogue_fusion(
+                    return flex_gemm(
                         torch.ops.aten.mm.default,
                         (a, b),
                         epilogue,
@@ -3282,7 +3281,7 @@ class GemmEpilogueFusionTests(TestCase):
                 x = acc.float().view(M, -1, group)
                 return acc.relu(), x.abs().amax(-1) / 448.0
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -3326,7 +3325,7 @@ class GemmEpilogueFusionTests(TestCase):
                 # independently for now.
                 return q, x.abs().amax(-1) / 448.0
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -3364,7 +3363,7 @@ class GemmEpilogueFusionTests(TestCase):
                 q = (x * scale.reciprocal()).view(M, N)
                 return q, scale.view(M, -1)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -3402,7 +3401,7 @@ class GemmEpilogueFusionTests(TestCase):
                 q = (x * scale.reciprocal()).clamp(min=-448.0, max=448.0).view(M, N)
                 return q.to(torch.float8_e4m3fn), scale.view(M, -1)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -3447,7 +3446,7 @@ class GemmEpilogueFusionTests(TestCase):
                     torch.float8_e8m0fnu
                 )
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -3496,7 +3495,7 @@ class GemmEpilogueFusionTests(TestCase):
                         )
                         return q.to(torch.float8_e4m3fn), scale_e8m0.view(M, -1)
 
-                    return gemm_epilogue_fusion(
+                    return flex_gemm(
                         torch.ops.aten.mm.default,
                         (a, b),
                         epilogue,
@@ -3539,7 +3538,7 @@ class GemmEpilogueFusionTests(TestCase):
                 scale = x.abs().amax(-1, keepdim=True) / 448.0
                 return acc.relu(), scale.view(M, -1)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -3575,7 +3574,7 @@ class GemmEpilogueFusionTests(TestCase):
                 q = (x * scale.reciprocal()).view(M, N)
                 return q, scale.view(M, -1)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -3614,7 +3613,7 @@ class GemmEpilogueFusionTests(TestCase):
                 q = (x * scale.reciprocal()).view(M, N)
                 return q, scale.view(M, -1)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -3649,7 +3648,7 @@ class GemmEpilogueFusionTests(TestCase):
                 scale = mx_e8m0_scale(x.abs().amax(-1, keepdim=True))
                 return acc.relu(), scale.view(M, -1)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -3770,7 +3769,7 @@ class GemmEpilogueFusionTests(TestCase):
                             )
                         return out.to(acc.dtype) if cast_acc else out
 
-                    return gemm_epilogue_fusion(
+                    return flex_gemm(
                         torch.ops.aten.mm.default,
                         (a, b),
                         epilogue,
@@ -3821,7 +3820,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_bmm_fp8_main_output_fuses(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.bmm.default,
                 (a, b),
                 lambda acc: acc.clamp(min=-448.0, max=448.0).to(torch.float8_e4m3fn),
@@ -3865,7 +3864,7 @@ class GemmEpilogueFusionTests(TestCase):
                             + lanes[..., 3]
                         )
 
-                    return gemm_epilogue_fusion(
+                    return flex_gemm(
                         torch.ops.aten.bmm.default,
                         (a, b),
                         epilogue,
@@ -3903,7 +3902,7 @@ class GemmEpilogueFusionTests(TestCase):
                 x = acc.float().view(B, M, -1, group)
                 return acc.relu(), x.sum(-1)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.bmm.default,
                 (a, b),
                 epilogue,
@@ -3938,7 +3937,7 @@ class GemmEpilogueFusionTests(TestCase):
                 denom = x.sum(2, keepdim=True)
                 return (x * denom.reciprocal()).view(B, M, N)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.bmm.default,
                 (a, b),
                 epilogue,
@@ -3975,7 +3974,7 @@ class GemmEpilogueFusionTests(TestCase):
                 x = acc.float().view(B, -1, group, N)
                 return acc.relu(), x.sum(2)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.bmm.default,
                 (a, b),
                 epilogue,
@@ -4034,7 +4033,7 @@ class GemmEpilogueFusionTests(TestCase):
                         x = acc.float().view(B, M, -1, group)
                         return acc.relu(), aux_fn(x)
 
-                    return gemm_epilogue_fusion(
+                    return flex_gemm(
                         torch.ops.aten.bmm.default,
                         (a, b),
                         epilogue,
@@ -4077,7 +4076,7 @@ class GemmEpilogueFusionTests(TestCase):
                 )
                 return q.to(torch.float8_e4m3fn), scale.view(B, M, -1)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.bmm.default,
                 (a, b),
                 epilogue,
@@ -4135,7 +4134,7 @@ class GemmEpilogueFusionTests(TestCase):
                         denom = reduce_fn(x)
                         return (x * denom.reciprocal()).view(B, M, N)
 
-                    return gemm_epilogue_fusion(
+                    return flex_gemm(
                         torch.ops.aten.bmm.default,
                         (a, b),
                         epilogue,
@@ -4161,7 +4160,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 return acc.relu(), acc.float().abs()
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.bmm.default,
                 (a, b),
                 epilogue,
@@ -4191,7 +4190,7 @@ class GemmEpilogueFusionTests(TestCase):
                 gate, up = acc.chunk(2, dim=-1)
                 return torch.nn.functional.silu(gate) * up
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -4210,7 +4209,7 @@ class GemmEpilogueFusionTests(TestCase):
                 x = acc.view(M, -1, 3)
                 return x[..., 0] + x[..., 1]
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -4227,7 +4226,7 @@ class GemmEpilogueFusionTests(TestCase):
                 x = acc.view(M, -1, 8)
                 return x[..., 0] + x[..., 1]
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -4243,7 +4242,7 @@ class GemmEpilogueFusionTests(TestCase):
                 x = acc.view(-1, 2, N)
                 return x[:, 0, :] + x[:, 1, :]
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -4266,7 +4265,7 @@ class GemmEpilogueFusionTests(TestCase):
                 bad_aux = acc.float().view(1, -1, group).sum(-1)
                 return acc.relu(), bad_aux
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -4291,7 +4290,7 @@ class GemmEpilogueFusionTests(TestCase):
                 scale = nvfp4_e4m3_scale(x.abs().amax(-1, keepdim=True))
                 return acc.relu(), scale.view(M, -1)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -4330,7 +4329,7 @@ class GemmEpilogueFusionTests(TestCase):
                 q = (x * scale.float().reciprocal()).clamp(min=-6.0, max=6.0).view(M, N)
                 return q, scale.view(M, -1)
 
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 epilogue,
@@ -4346,7 +4345,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_addmm_fp8_main_output_fuses(self):
         def fn(c, a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.addmm.default,
                 (c, a, b),
                 lambda acc: acc.clamp(min=-448.0, max=448.0).to(torch.float8_e4m3fn),
@@ -4373,7 +4372,7 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_honors_epilogue_add_alpha(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: torch.add(acc, 1.0, alpha=2.0).relu(),
@@ -4389,13 +4388,13 @@ class GemmEpilogueFusionTests(TestCase):
 
         torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
         FileCheck().check("@cute.jit").check("gemm_epilogue(").check_not(
-            "call_quack_gemm_epilogue"
+            "call_quack_flex_gemm"
         ).run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_generates_cutedsl_math_epilogue(self):
         def fn(a, b):
-            return gemm_epilogue_fusion(
+            return flex_gemm(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: torch.abs(acc),
@@ -4412,7 +4411,7 @@ class GemmEpilogueFusionTests(TestCase):
         torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
         FileCheck().check("from cutlass._mlir.dialects import math as mlir_math").check(
             "mlir_math.absf"
-        ).check("gemm_epilogue(").check_not("call_quack_gemm_epilogue").run(code)
+        ).check("gemm_epilogue(").check_not("call_quack_flex_gemm").run(code)
 
 
 if __name__ == "__main__":

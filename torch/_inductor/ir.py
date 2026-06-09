@@ -6037,26 +6037,6 @@ class QuackGemmEpilogueConfig:
     tuned: bool = True
 
 
-class QuackGemmEpilogueTemplateBuffer(TemplateBuffer):
-    def __init__(
-        self,
-        layout: Layout,
-        inputs: Sequence[IRNode],
-        config: QuackGemmEpilogueConfig,
-        mutated_inputs: Iterable[IRNode] | None = None,
-    ) -> None:
-        super().__init__(
-            layout, inputs, make_kernel_render=None, mutated_inputs=mutated_inputs
-        )
-        self.config = config
-
-    def should_allocate(self) -> bool:
-        return False
-
-    def get_outputs(self) -> list[Buffer]:
-        return [self, *self.mutation_outputs]
-
-
 class CuteDSLTemplateBuffer(TemplateBuffer):
     """
     Buffer for CuteDSL (CUTLASS Python DSL) template kernels.

@@ -3780,8 +3780,8 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class GemmEpilogueFusionHigherOrderVariable(WrapHigherOrderVariable):
-    _HOP_NAME = "torch.ops.higher_order.gemm_epilogue_fusion"
+class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
+    _HOP_NAME = "torch.ops.higher_order.flex_gemm"
     _ALLOW_FALLBACK_TO_EAGER = False
 
     def install_subgraph_in_output_graph(
@@ -3794,7 +3794,7 @@ class GemmEpilogueFusionHigherOrderVariable(WrapHigherOrderVariable):
         attr_name: str = "wrap_body",
     ) -> str:
         return tx.output.install_subgraph(
-            "gemm_epilogue_fusion_body",
+            "flex_gemm_body",
             body_gmod,
         )
 
@@ -3806,9 +3806,9 @@ class GemmEpilogueFusionHigherOrderVariable(WrapHigherOrderVariable):
     ) -> VariableTracker:
         if kwargs:
             unimplemented(
-                gb_type="gemm_epilogue_fusion: unexpected kwargs",
+                gb_type="flex_gemm: unexpected kwargs",
                 context=f"args: {args}, kwargs: {kwargs}",
-                explanation="gemm_epilogue_fusion internal HOP expects positional args only.",
+                explanation="flex_gemm internal HOP expects positional args only.",
                 hints=[*graph_break_hints.USER_ERROR],
             )
 
@@ -3819,10 +3819,10 @@ class GemmEpilogueFusionHigherOrderVariable(WrapHigherOrderVariable):
             or not isinstance(args[4], ConstDictVariable)
         ):
             unimplemented(
-                gb_type="gemm_epilogue_fusion: improper args/kwargs",
+                gb_type="flex_gemm: improper args/kwargs",
                 context=f"args: {args}, kwargs: {kwargs}",
                 explanation=(
-                    "gemm_epilogue_fusion expects 5 positional arguments: "
+                    "flex_gemm expects 5 positional arguments: "
                     "gemm_op, body_fn, args, kwargs, kernel_options. args is "
                     "expected to be list/tuple and kwargs/kernel_options are "
                     "expected to be dicts."
@@ -3835,6 +3835,9 @@ class GemmEpilogueFusionHigherOrderVariable(WrapHigherOrderVariable):
         fn_kwargs_vt = args[3].keys_as_python_constant()
         fn_kwargs = args[3].as_python_constant()
         kernel_options = args[4].as_python_constant()
+        hop_name = self._HOP_NAME
+        if hop_name is None:
+            raise AssertionError("FlexGEMM HOP name must be set")
         (
             p_args,
             _,
@@ -3849,15 +3852,15 @@ class GemmEpilogueFusionHigherOrderVariable(WrapHigherOrderVariable):
             args[1],
             operands,
             fn_kwargs_vt,
-            self._HOP_NAME,
+            hop_name,
         )
 
-        from torch._higher_order_ops.gemm_epilogue import _normalize_gemm_epilogue_op
+        from torch._higher_order_ops.gemm_epilogue import _normalize_flex_gemm_op
 
         body_node = p_args[0]
         lifted_args = p_args[1:]
         p_args = (
-            _normalize_gemm_epilogue_op(args[0].as_python_constant()),
+            _normalize_flex_gemm_op(args[0].as_python_constant()),
             body_node,
             tuple(lifted_args),
             fn_kwargs,
@@ -6049,7 +6052,7 @@ _hop_name_to_variable_class = {
     "executorch_call_delegate": ExecutorchCallDelegateHigherOrderVariable,
     "out_dtype": OutDtypeHigherOrderVariable,
     "wrap": WrapHigherOrderVariable,
-    "gemm_epilogue_fusion": GemmEpilogueFusionHigherOrderVariable,
+    "flex_gemm": FlexGemmHigherOrderVariable,
     "hints_wrapper": HintsWrapperHigherOrderVariable,
     "flex_attention": FlexAttentionHigherOrderVariable,
     "flex_attention_backward": FlexAttentionBackwardHighOrderVariable,

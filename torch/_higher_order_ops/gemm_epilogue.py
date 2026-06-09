@@ -2,7 +2,7 @@
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.utils._pytree as pytree
@@ -57,7 +57,7 @@ _GEMM_EPILOGUE_OP_ALIASES = {
 _SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
 
 
-def supported_gemm_epilogue_op_names(*, quack_only: bool = False) -> str:
+def supported_flex_gemm_op_names(*, quack_only: bool = False) -> str:
     return "/".join(
         op.name().removeprefix("aten::")
         for op, info in GEMM_EPILOGUE_OPS.items()
@@ -65,7 +65,7 @@ def supported_gemm_epilogue_op_names(*, quack_only: bool = False) -> str:
     )
 
 
-_SUPPORTED_GEMM_OP_NAMES = supported_gemm_epilogue_op_names()
+_SUPPORTED_GEMM_OP_NAMES = supported_flex_gemm_op_names()
 
 
 @torch.library.custom_op("flex_gemm::mx_e8m0_scale", mutates_args=())
@@ -258,7 +258,7 @@ def _(x: torch.Tensor) -> torch.Tensor:
     )
 
 
-def _normalize_gemm_epilogue_op(gemm_op: Callable[..., Any]) -> Callable[..., Any]:
+def _normalize_flex_gemm_op(gemm_op: Callable[..., Any]) -> Callable[..., Any]:
     import torch.nn.functional as F
 
     return {
@@ -287,9 +287,9 @@ def _enum_values(value: Any | list[Any] | tuple[Any, ...] | None) -> list[Any]:
     ]
 
 
-class GemmEpilogueFusion(HigherOrderOperator):
+class FlexGemm(HigherOrderOperator):
     def __init__(self):
-        super().__init__("gemm_epilogue_fusion")
+        super().__init__("flex_gemm")
 
     def __call__(
         self,
@@ -352,7 +352,7 @@ class GemmEpilogueFusion(HigherOrderOperator):
         )
 
 
-_gemm_epilogue_fusion = GemmEpilogueFusion()
+_flex_gemm = FlexGemm()
 
 
 def _pop_kwarg_alias(
@@ -369,7 +369,7 @@ def _pop_kwarg_alias(
     return default
 
 
-def gemm_epilogue_fusion(
+def flex_gemm(
     gemm_op: Callable[..., Any],
     gemm_args: tuple[Any, ...],
     epilogue_fn: Callable[[Any], Any],
@@ -387,7 +387,7 @@ def gemm_epilogue_fusion(
         gemm_kwargs = {}
     if kernel_options is None:
         kernel_options = {"backend": "TRITON", "SPLIT_K": False}
-    gemm_op = _normalize_gemm_epilogue_op(gemm_op)
+    gemm_op = cast(torch._ops.OpOverload, _normalize_flex_gemm_op(gemm_op))
 
     if gemm_op in (
         torch.ops.aten._scaled_mm_v2.default,
@@ -488,7 +488,7 @@ def gemm_epilogue_fusion(
                 "use_fast_accum": use_fast_accum,
             },
         }
-        return _gemm_epilogue_fusion(
+        return _flex_gemm(
             gemm_op,
             body_fn,
             (gemm_args[0], gemm_args[1], *scale_a_args, *scale_b_args, *extra_args),
@@ -499,10 +499,8 @@ def gemm_epilogue_fusion(
     def body_fn(*args, **body_kwargs):
         return epilogue_fn(gemm_op(*args, **body_kwargs))
 
-    body_fn._gemm_epilogue_accepts_kwargs = True
-    return _gemm_epilogue_fusion(
-        gemm_op, body_fn, gemm_args, gemm_kwargs, kernel_options
-    )
+    body_fn._flex_gemm_accepts_kwargs = True  # pyrefly: ignore [missing-attribute]
+    return _flex_gemm(gemm_op, body_fn, gemm_args, gemm_kwargs, kernel_options)
 
 
 def mm_epilogue(
@@ -512,7 +510,7 @@ def mm_epilogue(
     *,
     kernel_options: dict[str, Any] | None = None,
 ):
-    return gemm_epilogue_fusion(
+    return flex_gemm(
         torch.ops.aten.mm.default,
         (input, mat2),
         epilogue_fn,
@@ -530,7 +528,7 @@ def addmm_epilogue(
     alpha: float = 1.0,
     kernel_options: dict[str, Any] | None = None,
 ):
-    return gemm_epilogue_fusion(
+    return flex_gemm(
         torch.ops.aten.addmm.default,
         (input, mat1, mat2),
         epilogue_fn,
@@ -546,7 +544,7 @@ def bmm_epilogue(
     *,
     kernel_options: dict[str, Any] | None = None,
 ):
-    return gemm_epilogue_fusion(
+    return flex_gemm(
         torch.ops.aten.bmm.default,
         (input, mat2),
         epilogue_fn,
@@ -564,7 +562,7 @@ def baddbmm_epilogue(
     alpha: float = 1.0,
     kernel_options: dict[str, Any] | None = None,
 ):
-    return gemm_epilogue_fusion(
+    return flex_gemm(
         torch.ops.aten.baddbmm.default,
         (input, batch1, batch2),
         epilogue_fn,
@@ -611,7 +609,7 @@ def grouped_mm_epilogue(
     )
     kernel_options["grouped_mm_has_offs"] = offs is not None
     kernel_options["grouped_mm_has_bias"] = bias is not None
-    return _gemm_epilogue_fusion(
+    return _flex_gemm(
         torch.ops.aten._grouped_mm.default,
         body_fn,
         tuple(gemm_args),
@@ -645,41 +643,35 @@ def matmul_epilogue(
 def _body_accepts_kwargs(body_fn, kwargs) -> bool:
     if not kwargs or isinstance(body_fn, torch.fx.GraphModule):
         return False
-    if getattr(body_fn, "_gemm_epilogue_accepts_kwargs", False):
+    if getattr(body_fn, "_flex_gemm_accepts_kwargs", False):
         return True
     signature = inspect.signature(body_fn)
     return all(key in signature.parameters for key in kwargs)
 
 
-def _call_gemm_epilogue_body(body_fn, args, kwargs):
+def _call_flex_gemm_body(body_fn, args, kwargs):
     if _body_accepts_kwargs(body_fn, kwargs):
         return body_fn(*args, **kwargs)
     return body_fn(*args)
 
 
-@_gemm_epilogue_fusion.py_impl(DispatchKey.CompositeExplicitAutograd)
-def gemm_epilogue_fusion_dense(gemm_op, body_fn, args, kwargs, kernel_options):
-    return _call_gemm_epilogue_body(body_fn, args, kwargs)
+@_flex_gemm.py_impl(DispatchKey.CompositeExplicitAutograd)
+def flex_gemm_dense(gemm_op, body_fn, args, kwargs, kernel_options):
+    return _call_flex_gemm_body(body_fn, args, kwargs)
 
 
-_gemm_epilogue_fusion.py_autograd_impl(
-    autograd_not_implemented(_gemm_epilogue_fusion, deferred_error=True)
-)
+_flex_gemm.py_autograd_impl(autograd_not_implemented(_flex_gemm, deferred_error=True))
 
 
-@_gemm_epilogue_fusion.py_impl(FakeTensorMode)
-def gemm_epilogue_fusion_fake_tensor_mode(
-    mode, gemm_op, body_fn, args, kwargs, kernel_options
-):
+@_flex_gemm.py_impl(FakeTensorMode)
+def flex_gemm_fake_tensor_mode(mode, gemm_op, body_fn, args, kwargs, kernel_options):
     flat_args = pytree.tree_leaves(args)
     with mode:
-        return _call_gemm_epilogue_body(body_fn, flat_args, kwargs)
+        return _call_flex_gemm_body(body_fn, flat_args, kwargs)
 
 
-@_gemm_epilogue_fusion.py_functionalize_impl
-def gemm_epilogue_fusion_functionalize(
-    ctx, gemm_op, body_fn, args, kwargs, kernel_options
-):
+@_flex_gemm.py_functionalize_impl
+def flex_gemm_functionalize(ctx, gemm_op, body_fn, args, kwargs, kernel_options):
     from torch._higher_order_ops.utils import _check_alias_and_mutation
 
     unwrapped_args = ctx.unwrap_tensors(args)
@@ -688,11 +680,9 @@ def gemm_epilogue_fusion_functionalize(
     with ctx.redispatch_to_next():
         functional_body_fn = ctx.functionalize(body_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        _check_alias_and_mutation(
-            body_fn, unwrapped_args, "gemm_epilogue_fusion", pre_dispatch
-        )
+        _check_alias_and_mutation(body_fn, unwrapped_args, "flex_gemm", pre_dispatch)
 
-        outputs = _gemm_epilogue_fusion(
+        outputs = _flex_gemm(
             gemm_op,
             functional_body_fn,
             unwrapped_args,
@@ -702,20 +692,18 @@ def gemm_epilogue_fusion_functionalize(
         return ctx.wrap_tensors(outputs)
 
 
-@_gemm_epilogue_fusion.py_impl(ProxyTorchDispatchMode)
-def gemm_epilogue_fusion_proxy_torch_dispatch_mode(
+@_flex_gemm.py_impl(ProxyTorchDispatchMode)
+def flex_gemm_proxy_torch_dispatch_mode(
     proxy_mode, gemm_op, body_fn, args, kwargs, kernel_options
 ):
     if proxy_mode.enable_tracing:
         flat_args = tuple(pytree.tree_leaves(args))
 
         def tracing_body_fn(*flat_body_args):
-            return _call_gemm_epilogue_body(body_fn, flat_body_args, kwargs)
+            return _call_flex_gemm_body(body_fn, flat_body_args, kwargs)
 
         body_graph = reenter_make_fx(tracing_body_fn)(*flat_args)
-        _, body_graph_name = unique_graph_id(
-            proxy_mode, prefix="gemm_epilogue_fusion_body_graph"
-        )
+        _, body_graph_name = unique_graph_id(proxy_mode, prefix="flex_gemm_body_graph")
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
         proxy_args = pytree.tree_map(
             proxy_mode.tracer.unwrap_proxy,
@@ -723,13 +711,13 @@ def gemm_epilogue_fusion_proxy_torch_dispatch_mode(
         )
         out_proxy = proxy_mode.tracer.create_proxy(
             "call_function",
-            _gemm_epilogue_fusion,
+            _flex_gemm,
             proxy_args,
             {},
-            name="gemm_epilogue_fusion",
+            name="flex_gemm",
         )
-        out = _call_gemm_epilogue_body(body_fn, flat_args, kwargs)
+        out = _call_flex_gemm_body(body_fn, flat_args, kwargs)
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
-    return _gemm_epilogue_fusion(gemm_op, body_fn, args, kwargs, kernel_options)
+    return _flex_gemm(gemm_op, body_fn, args, kwargs, kernel_options)
