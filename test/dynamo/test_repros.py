@@ -6897,6 +6897,34 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         opt_f(torch.randn(4))
         self.assertEqual(len(torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos), 2)
 
+    @parametrize("fullgraph", [True, False])
+    def test_empty_graph_skip_is_recursive(self, fullgraph):
+        def k(x):
+            return x
+
+        def g(x):
+            return k(x)
+
+        def f(x):
+            return g(x)
+
+        torch._dynamo.eval_frame.clear_dynamo_tls()
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=fullgraph, dynamic=False)
+        x = torch.randn(3)
+        self.assertEqual(opt_f(x), f(x))
+        x2 = torch.randn(3)
+        self.assertEqual(opt_f(x2), f(x2))
+
+        frame_names = [
+            info.split()[0]
+            for info in torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos
+        ]
+        top_frame_name = (
+            "inner" if torch._dynamo.config.debug_force_nested_calls else "f"
+        )
+        self.assertEqual(frame_names, [top_frame_name])
+
     def test_torchname(self):
         def fn(obj):
             return torch.typename(obj)
