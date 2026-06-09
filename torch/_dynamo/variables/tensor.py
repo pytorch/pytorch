@@ -268,6 +268,9 @@ class TensorVariable(VariableTracker):
         specialized_props = get_specialized_props(
             target_cls, tx, example_value, infer_subclass_type(example_value)
         )
+        self._size = None
+        self.stride = None
+        self.is_contiguous = None
         for k, v in specialized_props.items():
             setattr(self, k, v)
 
