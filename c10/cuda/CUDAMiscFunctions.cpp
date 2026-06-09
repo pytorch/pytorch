@@ -32,18 +32,20 @@ namespace {
 
 const char* get_cuda_blocking_message() {
   static const char* default_message =
-    "\nCUDA kernel errors might be asynchronously reported at some"
-    " other API call, so the stacktrace below might be incorrect."
-    "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1";
+      "\nCUDA kernel errors might be asynchronously reported at some"
+      " other API call, so the stacktrace below might be incorrect."
+      "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1";
 #ifndef USE_ROCM
-  static auto device_blocking_flag = c10::utils::check_env("CUDA_LAUNCH_BLOCKING");
+  static auto device_blocking_flag =
+      c10::utils::check_env("CUDA_LAUNCH_BLOCKING");
   if (device_blocking_flag.value_or(false)) {
     return "";
   } else {
     return default_message;
   }
 #else
-  static auto device_blocking_flag = c10::utils::get_env("AMD_SERIALIZE_KERNEL");
+  static auto device_blocking_flag =
+      c10::utils::get_env("AMD_SERIALIZE_KERNEL");
   static auto effective_flag = device_blocking_flag.value_or("0");
   static std::string rocm_message;
   static const char* rocm_message_view = [&]() -> const char* {
@@ -54,8 +56,9 @@ const char* get_cuda_blocking_message() {
       return "";
     }
     if (effective_flag == "1" || effective_flag == "2") {
-      return ("\nSet AMD_SERIALIZE_KERNEL=3 to wait for completion before AND after kernel enqueue."
-              "\n1/2 Only waits before or after enqueue.");
+      return (
+          "\nSet AMD_SERIALIZE_KERNEL=3 to wait for completion before AND after kernel enqueue."
+          "\n1/2 Only waits before or after enqueue.");
     }
     // rocm_message is constructed only in rare cases
     rocm_message = "\nUnsupported AMD_SERIALIZE_KERNEL value ";
@@ -67,7 +70,7 @@ const char* get_cuda_blocking_message() {
 #endif
 }
 
-}
+} // namespace
 
 // NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
 const char* get_cuda_check_suffix() noexcept {
