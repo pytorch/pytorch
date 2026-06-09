@@ -2,6 +2,7 @@
 import contextlib
 
 import torch
+from torch._inductor.codegen.cpp_utils import CppCSEVariable
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import (
@@ -15,6 +16,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 class TestDependencies(InductorTestCase):
@@ -140,6 +142,22 @@ class TestDependencies(InductorTestCase):
         )
         self.assertEqual(dep1.get_offset(), 0)
         self.assertEqual(dep2.get_offset(), 1024)
+
+    def test_cpp_cse_value_expr_tracks_dependent_itervars(self):
+        x = sympy_index_symbol("x")
+
+        class DummyCSE:
+            varname_map = {}
+
+        class DummyKernel:
+            cse = DummyCSE()
+            itervars = {x}
+
+        var = CppCSEVariable("tmp0", ValueRanges.unknown(), torch.int64)
+        with V.set_kernel_handler(DummyKernel()):
+            var.update_on_args("value_expr", (x + 1, torch.int64), {})
+
+        self.assertTrue(var.depends_on(x))
 
     def test_normalize_with_stride_order_equal(self):
         x = sympy_index_symbol("x")
