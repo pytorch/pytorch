@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 # Workflow: Inductor Unit Test
 # 1. runs unit tests for inductor.
 # 2. performs daily memory leak checks and reruns of disabled tests, scheduled at `29 8 * * *`.
