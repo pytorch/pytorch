@@ -2219,9 +2219,7 @@ class CudaKernelParamCache:
                 "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
             )
             base_path, _ = os.path.splitext(bin_path)
-            # ROCm bundles are built from the raw HSACO; keep both cache files.
-            bundle_suffix = ".bundle" if bin_type == "hsaco" else ""
-            bin_path = base_path + bundle_suffix + bin_type_to_ext[bin_type]
+            bin_path = base_path + bin_type_to_ext[bin_type]
 
         asm_path: str = ""
 
