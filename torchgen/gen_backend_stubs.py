@@ -553,36 +553,31 @@ def gen_define_meta_registrations(
         ret_expr = moved[0] if num_out == 1 else f"std::make_tuple({', '.join(moved)})"
         struct_name = f"structured_{metadata.kernel}_define_meta"
         wrapper_name = f"wrapper_Meta_define_{meta_name}"
-        # The set_output_* signature depends on the structured meta base: ops that inherit
-        # TensorIteratorBase take a trailing at::DimnameList names; MetaBase-derived ops do not.
-        uses_names = g.out.structured_inherits == "TensorIteratorBase"
-        names_param = ", at::DimnameList names" if uses_names else ""
-        names_arg = ", names" if uses_names else ""
-        propagate = (
-            "\n        if (!names.empty()) {\n"
-            "            at::namedinference::propagate_names(outputs_[output_idx], names);\n"
-            "        }"
-            if uses_names
-            else ""
-        )
+        # Both MetaBase and TensorIteratorBase declare set_output_* with a trailing
+        # at::DimnameList names (TensorMeta.h), so emit it unconditionally -- a 4-arg override
+        # does not match the 5-arg virtual and fails to compile for MetaBase/precompute ops.
+        # propagate_names is a no-op when names is empty (the MetaBase case).
         blocks.append(
             f"""\
 namespace {{
 struct {struct_name} final : public {backend_struct} {{
     void set_output_raw_strided(
         int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
-        at::TensorOptions options{names_param}
+        at::TensorOptions options, at::DimnameList names
     ) override {{
         outputs_[output_idx] = strides.empty()
             ? at::detail::empty_meta(sizes, options.device(at::kMeta))
-            : at::detail::empty_strided_meta(sizes, strides, options.device(at::kMeta));{propagate}
-        at::meta::structured_{meta_name}::set_output_raw_strided(output_idx, sizes, strides, options{names_arg});
+            : at::detail::empty_strided_meta(sizes, strides, options.device(at::kMeta));
+        if (!names.empty()) {{
+            at::namedinference::propagate_names(outputs_[output_idx], names);
+        }}
+        at::meta::structured_{meta_name}::set_output_raw_strided(output_idx, sizes, strides, options, names);
     }}
     void set_output_strided(
         int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
-        at::TensorOptions options{names_param}
+        at::TensorOptions options, at::DimnameList names
     ) override {{
-        set_output_raw_strided(output_idx, sizes, strides, options{names_arg});
+        set_output_raw_strided(output_idx, sizes, strides, options, names);
     }}
     const at::Tensor & maybe_get_output(int64_t output_idx) override {{
         return outputs_[output_idx];
