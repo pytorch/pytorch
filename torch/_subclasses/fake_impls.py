@@ -705,6 +705,52 @@ def meta_select(
     return self.as_strided(new_size, new_stride, new_storage_offset)
 
 
+@register_op_impl(aten.select_copy.int)
+def meta_select_copy(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    dim: int,
+    index: IntLikeType,
+) -> FakeTensor:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if self.is_sparse:
+        return NotImplemented
+
+    ndim = self.dim()
+    torch._check_index(
+        ndim != 0,
+        lambda: "select() cannot be applied to a 0-dim tensor.",
+    )
+
+    dim = dim if dim >= 0 else dim + ndim
+    size = self.size(dim)
+
+    if guard_or_false(index >= size) or guard_or_false(index < -size):
+        torch._check_index(
+            False,
+            lambda: f"select(): index {index} out of range for tensor of size "
+            f"{list(self.size())} at dimension {dim}",
+        )
+
+    # select_copy returns a contiguous copy, so the index never appears in the
+    # output. Discharge an unbound (pending) index symbol the same way and for
+    # the same reason as meta_select.
+    if isinstance(index, torch.SymInt) and fake_mode.shape_env is not None:
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+        pending = fake_mode.shape_env.pending_fresh_unbacked_symbols
+        for s in free_unbacked_symbols(index):
+            if s in pending:
+                fake_mode.shape_env.ignorable_fresh_unbacked_symbols.append(s)
+
+    new_size = list(self.size())
+    del new_size[dim]
+    # pyrefly: ignore[bad-return]
+    return self.new_empty(new_size)
+
+
 @register_op_impl(aten.unique_dim.default)
 def unique_dim(
     fake_mode: FakeTensorMode,
