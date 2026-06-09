@@ -618,6 +618,7 @@ class TestFFT(TestCase):
                     actual = fn(input, s, dim, norm)
                     self.assertEqual(actual, expected)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.complex64)

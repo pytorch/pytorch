@@ -12,6 +12,7 @@ from tempfile import NamedTemporaryFile
 from typing import Any
 
 import torch
+import torch._dynamo.config
 import torch.nn as nn
 from torch.testing._internal.common_nn import _create_basic_net, NNTestCase
 from torch.testing._internal.common_utils import (
@@ -1343,6 +1344,7 @@ class TestModuleHookNN(NNTestCase):
         test_fwd.remove()
         test_bwd.remove()
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_hooks(self):
         self._test_hooks("register_backward_hook")
         self._test_hooks("register_full_backward_hook")
