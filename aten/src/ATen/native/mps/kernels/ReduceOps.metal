@@ -155,10 +155,10 @@ kernel void norm(
       }
     }
 
-    if (p == 2) {
-      output_val = static_cast<TA>(::precise::sqrt(output_val));
-    } else if (p != 0 && p != 1 && p != INFINITY && p != -INFINITY) {
-      output_val = static_cast<TA>(::precise::pow(output_val, 1 / p));
+    if (p != 0 && p != 1 && p != INFINITY && p != -INFINITY) {
+      output_val = (p == 2)
+          ? static_cast<TA>(::precise::sqrt(output_val))
+          : static_cast<TA>(::precise::pow(output_val, 1 / p));
     }
     output[output_offset] = static_cast<TO>(output_val);
   }
@@ -262,9 +262,20 @@ inline opmath_t<TI> load_val(TI v) {
   return r * r;
 }
 
-template <FinalizeOp FINAL, typename T>
+template <
+    FinalizeOp FINAL,
+    typename T,
+    ::metal::enable_if_t<FINAL == FINAL_NONE, bool> = true>
 inline T finalize_val(T v) {
-  return FINAL == FINAL_SQRT ? static_cast<T>(::precise::sqrt(v)) : v;
+  return v;
+}
+
+template <
+    FinalizeOp FINAL,
+    typename T,
+    ::metal::enable_if_t<FINAL == FINAL_SQRT, bool> = true>
+inline T finalize_val(T v) {
+  return static_cast<T>(::precise::sqrt(v));
 }
 
 // Sum reduction kernel with multiple independent accumulation chains (ILP).

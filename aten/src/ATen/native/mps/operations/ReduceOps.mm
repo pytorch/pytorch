@@ -301,19 +301,17 @@ static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
       constexpr uint32_t rows_per_tg = TG_SIZE / 32;
       const auto num_tgs = c10::metal::ceil_div(M, rows_per_tg);
       MPSStream* stream = getCurrentMPSStream();
-      dispatch_sync_with_rethrow(stream->queue(), ^() {
+      return dispatch_sync_with_rethrow(stream->queue(), ^() {
         @autoreleasepool {
           id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
           auto ps = lib.getPipelineStateForFunc(kernel_name);
           getMPSProfiler().beginProfileKernel(ps, "norm_reduction_inner", {input});
-          const float divisor = 0.0f;
           [ce setComputePipelineState:ps];
-          mtl_setArgs(ce, input, output, std::array<uint32_t, 2>{M, N}, divisor);
+          mtl_setArgs(ce, input, output, std::array<uint32_t, 2>{M, N}, 0.0f);
           [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
           getMPSProfiler().endProfileKernel(ps);
         }
       });
-      return;
     }
   }
 
