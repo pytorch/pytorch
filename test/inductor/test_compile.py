@@ -116,13 +116,20 @@ class TestStandaloneInductor(TestCase):
 
         self.assertEqual(opcounter.getvalue().num_ops, 5)
 
-    def test_bounded_opcount_saturates_linear_counts(self):
+    def test_bounded_opcount_preserves_linear_counts_past_threshold(self):
         opcounter = OpCounterCSE(MockHandler(), max_ops=3)
+        for i in range(5):
+            opcounter.add(str(i), "1")
+
+        self.assertEqual(opcounter.getvalue().num_ops, 5)
+
+    def test_bounded_opcount_stops_at_work_limit(self):
+        opcounter = OpCounterCSE(MockHandler(), max_ops=1)
         with self.assertRaises(OpCountLimitExceeded):
-            for i in range(5):
+            for i in range(101):
                 opcounter.add(str(i), "1")
 
-        self.assertEqual(opcounter.getvalue().num_ops, 4)
+        self.assertGreater(opcounter.getvalue().num_ops, 1)
 
     def test_inductor_via_bare_module(self):
         mod = MyModule3().eval()

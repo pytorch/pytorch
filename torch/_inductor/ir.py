@@ -10012,8 +10012,8 @@ class StorageBox(MutableBox):
         """
         if not isinstance(self.data, (Pointwise, Reduction)):
             return
-        threshold, opcount = self.data.bounded_inner_fn_opcount_for_large_check()
-        if opcount.num_ops <= threshold and opcount.nontrivial_read_count > 1:
+        _threshold, opcount = self.data.bounded_inner_fn_opcount_for_large_check()
+        if opcount.nontrivial_read_count > 1:
             self.realize()
 
     def has_accumulated_enough_reads_by_size(self, threshold: int) -> bool:

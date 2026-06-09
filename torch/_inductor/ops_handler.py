@@ -1191,7 +1191,7 @@ class _BoundedOpCounterCSE(OpCounterCSE):
         self.max_ops = max_ops
         # This is a work bound, not the op-count threshold. Keep it looser so
         # common CSE-heavy expressions can still get exact counts.
-        self.max_visits = max_ops * 100
+        self.max_visits = max(max_ops, 1) * 100
         self.visit_count = 0
         self.limit_exceeded = False
 
@@ -1200,13 +1200,6 @@ class _BoundedOpCounterCSE(OpCounterCSE):
         if self.visit_count > self.max_visits:
             self.limit_exceeded = True
             raise OpCountLimitExceeded
-
-    def _update_count(self, val):
-        result = super()._update_count(val)
-        if self.op_count > self.max_ops:
-            self.limit_exceeded = True
-            raise OpCountLimitExceeded
-        return result
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         self._record_visit()
