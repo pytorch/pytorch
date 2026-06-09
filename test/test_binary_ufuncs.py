@@ -26,7 +26,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCPU,
     onlyNativeDeviceTypes,
     OpDTypes,
     ops,
