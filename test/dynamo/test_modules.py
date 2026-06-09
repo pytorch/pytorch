@@ -1406,6 +1406,28 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     def test_construct_module_with_tensor_constant_attr_without_buffer(self):
         self._check_construct_module_with_tensor_constant_attr(register_buffer=False)
 
+    def test_construct_module_with_nested_non_module_parameter_ctor_graph_breaks(self):
+        class Helper:
+            def __init__(self) -> None:
+                self.param = torch.nn.Parameter(torch.ones(2, 2))
+
+        class MyMod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.helper = Helper()
+
+            def forward(self, x):
+                return x + self.helper.param
+
+        def fn(x):
+            return MyMod()(x)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamo does not know how to trace the function .*Helper",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2, 2))
+
     def test_simple_torch_function(self):
         def foo(x):
             # function call, twice to test wrapping

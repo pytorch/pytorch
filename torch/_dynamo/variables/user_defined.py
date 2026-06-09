@@ -1505,10 +1505,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
             # Module constructors commonly create Parameter attributes; keep the
-            # general sourceless Parameter graph break for other user classes.
+            # general sourceless Parameter graph break for partial-graph tracing.
             parameter_ctor_context = (
                 allow_convert_to_tracable_parameter()
-                if issubclass(self.value, torch.nn.Module)
+                if tx.one_graph and issubclass(self.value, torch.nn.Module)
                 else do_not_convert_to_tracable_parameter()
             )
             with parameter_ctor_context:
@@ -2523,6 +2523,91 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         other: VariableTracker,
     ) -> VariableTracker:
         return self.call_method(tx, "__imul__", [other], {})
+
+    def nb_floor_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10323-L10326
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__floordiv__",
+            "__rfloordiv__",
+            nb_slot=PyNumberSlots.NB_FLOOR_DIVIDE,
+            reverse=reverse,
+        )
+
+    def nb_inplace_floor_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__ifloordiv__", [other], {})
+
+    def nb_true_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10327-L10330
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__truediv__",
+            "__rtruediv__",
+            nb_slot=PyNumberSlots.NB_TRUE_DIVIDE,
+            reverse=reverse,
+        )
+
+    def nb_inplace_true_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__itruediv__", [other], {})
+
+    def nb_remainder_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10331-L10334
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__mod__",
+            "__rmod__",
+            nb_slot=PyNumberSlots.NB_REMAINDER,
+            reverse=reverse,
+        )
+
+    def nb_inplace_remainder_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__imod__", [other], {})
+
+    def nb_divmod_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10335-L10336
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__divmod__",
+            "__rdivmod__",
+            nb_slot=PyNumberSlots.NB_DIVMOD,
+            reverse=reverse,
+        )
 
     def call_method(
         self,

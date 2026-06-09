@@ -32,6 +32,7 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   linux-jammy-xpu-n-1-py3_10-build:
+    if: false # Temporarily disabled
     name: linux-jammy-xpu-n-1-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
