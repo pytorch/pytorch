@@ -5608,6 +5608,23 @@ if HAS_CUDA_AND_TRITON:
             f_compiled(inp)
             self.assertEqual(out1_y, expected)
 
+        @torch._inductor.config.patch("graph_partition", False)
+        def test_cudagraph_disable_region_skips_capture(self):
+            def foo(x):
+                y = x + 1
+                with torch.compiler.cudagraph_disable():
+                    z = y.sin()
+                    w = z.cos()
+                return w + 1
+
+            inp = torch.randn(4, device="cuda")
+            f_compiled = torch.compile(foo, mode="reduce-overhead")
+
+            for _ in range(3):
+                self.assertEqual(f_compiled(inp), foo(inp))
+
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
     class TestCUDAGraphPolicy(TestCase):
         def setUp(self):
             super().setUp()
@@ -6347,6 +6364,54 @@ if torch.cuda.is_available():
 
             for node in gm.graph.nodes:
                 self.assertNotIn("copy_to_cudagraphs", str(node.target))
+
+        def test_cudagraph_disable_region_annotation(self):
+            """cudagraph_disable marks traced nodes inside the region."""
+
+            def f(x):
+                a = x + 1
+                with torch.compiler.cudagraph_disable():
+                    b = a.sin()
+                    c = b.cos()
+                return c + 1
+
+            gm = make_fx(f, tracing_mode="fake")(torch.randn(4, device="cuda"))
+            unsafe_targets = [
+                node.target
+                for node in gm.graph.nodes
+                if node.meta.get("cudagraph_unsafe", False)
+            ]
+            self.assertEqual(
+                unsafe_targets,
+                [torch.ops.aten.sin.default, torch.ops.aten.cos.default],
+            )
+
+            for node in gm.graph.nodes:
+                self.assertNotIn("disable_cudagraphs", str(node.target))
+
+        def test_cudagraph_disable_region_nested_view(self):
+            """Region annotations cover all traced nodes without view chasing."""
+
+            def f(x):
+                a = x + 1
+                with torch.compiler.cudagraph_disable():
+                    b = a.view(-1)
+                    c = b[1:]
+                    d = c.sin()
+                return d + 1
+
+            gm = make_fx(f, tracing_mode="fake")(torch.randn(4, device="cuda"))
+            unsafe_targets = [
+                node.target
+                for node in gm.graph.nodes
+                if node.meta.get("cudagraph_unsafe", False)
+            ]
+            self.assertIn(torch.ops.aten.view.default, unsafe_targets)
+            self.assertIn(torch.ops.aten.slice.Tensor, unsafe_targets)
+            self.assertIn(torch.ops.aten.sin.default, unsafe_targets)
+
+            for node in gm.graph.nodes:
+                self.assertNotIn("disable_cudagraphs", str(node.target))
 
 
 if __name__ == "__main__":
