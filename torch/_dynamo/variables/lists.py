@@ -43,7 +43,6 @@ from ..utils import (
     cmp_name_to_op_mapping,
     get_fake_value,
     guard_if_dyn,
-    iter_contains,
     odict_values,
     raise_args_mismatch,
     range_iterator,
@@ -57,6 +56,7 @@ from .constant import ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
 from .object_protocol import (
+    generic_richcompare_bool,
     pyindex_check,
     type_implements_nb_index,
     validate_sequence_index,
@@ -215,9 +215,12 @@ class BaseListVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L635-L652
-        # TODO(dynamo-team): Replace iter_contains by a proper impl. once we
-        # implement PyObject_RichCompare
-        return iter_contains(unpack_iterable(tx, self), item, tx)
+
+        for other in self.items:
+            r = generic_richcompare_bool(tx, other, item, "__eq__")
+            if r.is_constant_match(True):
+                return r
+        return ConstantVariable.create(False)
 
     def call_tree_map_branch(
         self,
