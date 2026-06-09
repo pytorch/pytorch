@@ -3063,7 +3063,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
 
     def can_fuse_with(self, node2: BaseSchedulerNode) -> bool:
         """
-        Allow unary a unary pointwise epilogue pointwise to be fused into this kernel.
+        Allow a unary pointwise epilogue pointwise to be fused into this kernel.
 
         Fusion of user-defined kernels is initially gated on `config.epilogue_fusion_user_defined_triton_kernel`
         (see `Scheduler.unfusable_nodes`).
