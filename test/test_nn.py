@@ -14518,6 +14518,34 @@ if __name__ == '__main__':
             self.assertEqual(len(w), 1)
             self.assertEqual(str(w[0].message), "`parameters` is an empty generator, no gradient clipping will occur.")
 
+    # issue #133586: CPU norm optimizations in _get_total_norm
+    @onlyCPU
+    @parametrize_test('norm_type', (1.0, 2.0, 3.0, float('inf')))
+    def test_clip_grad_norm_flat_cat_small_tensors(self, norm_type, device):
+        # flat-cat path: all tensors numel<=512, result must match foreach=True reference
+        tensors = [torch.randn(512, device=device) for _ in range(2000)]
+        result = get_total_norm(tensors, norm_type=norm_type, foreach=None)
+        reference = get_total_norm(tensors, norm_type=norm_type, foreach=True)
+        self.assertEqual(result, reference, atol=1e-5, rtol=1e-5)
+
+    @onlyCPU
+    def test_clip_grad_norm_flat_cat_mixed_numel(self, device):
+        # group with mixed numel: flat-cat must not activate when any tensor exceeds threshold
+        small = [torch.randn(512, device=device) for _ in range(50)]
+        large = [torch.randn(1024, device=device) for _ in range(50)]
+        result = get_total_norm(small + large, norm_type=2.0, foreach=None)
+        reference = get_total_norm(small + large, norm_type=2.0, foreach=True)
+        self.assertEqual(result, reference, atol=1e-5, rtol=1e-5)
+
+    @onlyCPU
+    @parametrize_test('norm_type', (1.0, 2.0, float('inf')))
+    def test_clip_grad_norm_skip_to_single_device(self, norm_type, device):
+        # skip-no-op-.to(): large tensors all on same device should still be correct
+        tensors = [torch.randn(4096, device=device) for _ in range(200)]
+        result = get_total_norm(tensors, norm_type=norm_type, foreach=None)
+        reference = get_total_norm(tensors, norm_type=norm_type, foreach=True)
+        self.assertEqual(result, reference, atol=1e-5, rtol=1e-5)
+
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA
     @largeTensorTest("42GB", "cuda")
