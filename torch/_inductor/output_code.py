@@ -168,7 +168,7 @@ def maybe_handle_backward_generation(
 
     # See [Backward Generation Handling]
     # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
-    # know we are we running the backward even if we will not run it in cudagraphs
+    # know we are running the backward even if we will not run it in cudagraphs
     if is_backward and config.triton.cudagraph_trees:
         if boxed_forward_device_index is None:
             raise AssertionError("boxed_forward_device_index must not be None")
@@ -313,7 +313,7 @@ def cudagraph_partition_post_compile(
     boxed_forward_device_index: BoxedDeviceIndex | None,
 ) -> None:
     """
-    Cudagraphify each partition functions, which first prepares the necessary
+    Cudagraphify each partition function, which first prepares the necessary
     metadata and then applies the cudagraphify function to each partition.
 
     Assuming all partition functions are cudagraphified and share the same order
