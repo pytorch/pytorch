@@ -6237,8 +6237,8 @@ def forward(self, a_1, b_1):
     sum_1 = torch.ops.aten.sum.default(a_1)
     gt = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
     sym_size_int = torch.ops.aten.sym_size.int(a_1, 1)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(b_1, 0)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(b_1, 1)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(b_1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(b_1, 0)
     sym_size_int_3 = torch.ops.aten.sym_size.int(a_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
@@ -7620,7 +7620,7 @@ def forward(self, x_1):
     false_graph_0 = self.false_graph_0
     _tensor_constant0 = self._tensor_constant0
     _tensor_constant1 = self._tensor_constant1
-    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1, _tensor_constant0, sym_size_int_1, sym_size_int, _tensor_constant1));  eq = true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = sym_size_int_1 = sym_size_int = _tensor_constant1 = None
+    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1, sym_size_int_1, sym_size_int, _tensor_constant0, _tensor_constant1));  eq = true_graph_0 = false_graph_0 = x_1 = sym_size_int_1 = sym_size_int = _tensor_constant0 = _tensor_constant1 = None
     getitem = cond[0];  cond = None
     return getitem""",
         )
@@ -7628,7 +7628,16 @@ def forward(self, x_1):
             gm.true_graph_0.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
-    add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    sym_size_int_4 = torch.ops.aten.sym_size.int(arg0_1, 0)
+    sym_size_int_5 = torch.ops.aten.sym_size.int(arg0_1, 1)
+    add = torch.ops.aten.add.Tensor(arg0_1, arg3_1);  arg0_1 = arg3_1 = None
+    eq_2 = sym_size_int_5 == 3;  sym_size_int_5 = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(s96, 3) on node 'eq_2'");  eq_2 = _assert_scalar_default = None
+    eq_3 = sym_size_int_4 == 2;  sym_size_int_4 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(eq_3, "Runtime assertion failed for expression Eq(s75, 2) on node 'eq_3'");  eq_3 = _assert_scalar_default_1 = None
+    eq = arg1_1 == 3;  arg1_1 = None
+    _assert_scalar = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s12, 3) on node 'eq'");  _assert_scalar = None
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s85, 2) on node 'eq_1'");  eq = _assert_scalar_1 = None
     return (add,)""",
         )
 
@@ -9499,7 +9508,11 @@ class GraphModule(torch.nn.Module):
 
     class false_graph_0(torch.nn.Module):
         def forward(self, x: "f32[s68, 3]", sym_size_int_4: "Sym(s17)", sym_size_int_5: "Sym(s68)", z: "f32[s68, 3]"):
-            mul: "f32[s68, 3]" = torch.ops.aten.mul.Tensor(z, sym_size_int_5);  z = sym_size_int_5 = None
+            sym_size_int_2: "Sym(s68)" = torch.ops.aten.sym_size.int(x, 0)
+
+            mul: "f32[s68, 3]" = torch.ops.aten.mul.Tensor(z, sym_size_int_5);  z = None
+            eq_1: "Sym(True)" = sym_size_int_2 == sym_size_int_5;  sym_size_int_2 = sym_size_int_5 = None
+            _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq_1, "Runtime assertion failed for expression Eq(s77, s68) on node 'eq_1'");  eq_1 = _assert_scalar_default = None
 
             add: "f32[s68, 3]" = torch.ops.aten.add.Tensor(x, mul);  x = mul = None
             return (add,)
@@ -9589,6 +9602,17 @@ class GraphModule(torch.nn.Module):
 
         for case in valid_test_cases:
             _inner(case)
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode:
+            t1_base = torch.empty(20)
+            t2_base = torch.empty(20)
+            t1 = t1_base.as_strided((2, 4), (4, 1), storage_offset=4)
+            t2 = t2_base.as_strided((2, 4), (4, 1), storage_offset=4)
+        out = _merge_output(t1, t2, fake_mode)
+        self.assertEqual(tuple(out.size()), (2, 4))
+        self.assertEqual(tuple(out.stride()), (4, 1))
+        self.assertEqual(out.storage_offset(), 4)
 
         # The shapes and strides are from raondomly generated pairs of tensors then swapaxes
         invalid_test_cases = [
@@ -9687,7 +9711,17 @@ class GraphModule(torch.nn.Module):
             l_x__1 = l_x_
             s94_1 = s94
 
-            add: "f32[s17, s94]" = l_x__1 + s17_true_branch;  l_x__1 = s17_true_branch = None
+            add: "f32[s17, s94]" = l_x__1 + s17_true_branch;  l_x__1 = None
+            sym_sum: "Sym(s17 - 2)" = torch.sym_sum([-2, s17_true_branch]);  s17_true_branch = None
+            mul: "Sym(s94*(s17 - 2))" = s94_1 * sym_sum;  s94_1 = None
+            ge: "Sym(s94*(s17 - 2) >= 2)" = mul >= 2;  mul = None
+            _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression s94*(s17 - 2) >= 2 on node 'ge'");  ge = _assert_scalar_default = None
+            eq: "Sym(Eq(s17 - 2, 1))" = sym_sum == 1
+            sym_not: "Sym(Ne(s17 - 2, 1))" = torch.sym_not(eq);  eq = None
+            _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(sym_not, "Runtime assertion failed for expression Ne(s17 - 2, 1) on node 'sym_not'");  sym_not = _assert_scalar_default_1 = None
+            eq_1: "Sym(Eq(s17 - 2, 0))" = sym_sum == 0;  sym_sum = None
+            sym_not_1: "Sym(Ne(s17 - 2, 0))" = torch.sym_not(eq_1);  eq_1 = None
+            _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(sym_not_1, "Runtime assertion failed for expression Ne(s17 - 2, 0) on node 'sym_not_1'");  sym_not_1 = _assert_scalar_default_2 = None
             getitem: "f32[s17 - 2, s94]" = add[slice(2, None, None)];  add = None
             clone: "f32[s17 - 2, s94]" = getitem.clone();  getitem = None
             return (clone,)

@@ -92,6 +92,40 @@ class CondOp(HigherOrderOperator):
 cond_op = CondOp()
 
 
+def _trace_branch_with_isolated_shape_env(fn, operands, name):
+    shape_env = _branch_shape_env(operands)
+    if shape_env is None:
+        return reenter_make_fx(fn)(*operands)
+
+    guard_start = len(shape_env.guards)
+    deferred_runtime_asserts_start = shape_env._snapshot_deferred_runtime_asserts()
+    var_to_range_start = dict(shape_env.var_to_range)
+    with shape_env.isolate_branch_shape_env():
+        graph = reenter_make_fx(fn)(*operands)
+        shape_env._insert_branch_runtime_asserts(
+            graph,
+            name,
+            guard_start,
+            deferred_runtime_asserts_start,
+            var_to_range_start,
+        )
+        return graph
+
+
+@contextlib.contextmanager
+def _maybe_isolate_branch_shape_env(shape_env):
+    if shape_env is None:
+        yield
+    else:
+        with shape_env.isolate_branch_shape_env():
+            yield
+
+
+def _branch_shape_env(operands):
+    fake_mode = torch._guards.detect_fake_mode(operands)
+    return fake_mode.shape_env if fake_mode is not None else None
+
+
 @exposed_in("torch")
 def cond(
     pred: bool | int | float | torch.Tensor,
@@ -252,8 +286,10 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
             f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
         )
 
-    true_graph = reenter_make_fx(true_fn)(*operands)
-    false_graph = reenter_make_fx(false_fn)(*operands)
+    true_graph = _trace_branch_with_isolated_shape_env(true_fn, operands, "cond_true")
+    false_graph = _trace_branch_with_isolated_shape_env(
+        false_fn, operands, "cond_false"
+    )
 
     true_outs = []
     false_outs = []
@@ -416,8 +452,12 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         ignore_fresh_unbacked = mode.shape_env.ignore_fresh_unbacked_symbols()
 
     with mode, ignore_fresh_unbacked:
-        flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
-        flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
+        # FakeTensorMode only computes output metadata here. Branch-local checks
+        # are preserved by the branch graphs themselves, not inserted here.
+        with _maybe_isolate_branch_shape_env(mode.shape_env):
+            flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
+        with _maybe_isolate_branch_shape_env(mode.shape_env):
+            flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
         if true_out_spec != false_out_spec:
             raise RuntimeError(
                 "Unmatched output spec from torch.cond branches: "
@@ -491,6 +531,18 @@ def _merge_output(
             f"expected both a and b to be FakeTensor, got a={type(a)}, b={type(b)}"
         )
 
+    def _empty_strided_matching_offset(size, stride, storage_offset, *, dtype, device):
+        with mode:
+            if isinstance(storage_offset, int) and storage_offset == 0:
+                return torch.empty_strided(size, stride, dtype=dtype, device=device)
+
+            from torch._prims_common import compute_required_storage_length
+
+            storage_size = compute_required_storage_length(size, stride, storage_offset)
+            return torch.empty((storage_size,), dtype=dtype, device=device).as_strided(
+                size, stride, storage_offset
+            )
+
     # Note: we don't check size, stride because
     # they'll be merged with unbacked symints if they differ.
     _meta_to_check = {
@@ -509,6 +561,7 @@ def _merge_output(
         tuple(_meta_to_check),
         msg_prefix="When merging two branches' output in torch.cond, ",
     )
+
     # NYI
     if a.is_quantized or b.is_quantized:
         raise AssertionError("quantized tensors not yet implemented")
@@ -535,6 +588,25 @@ def _merge_output(
             return False
         else:
             return has_free_unbacked_symbols(s.node.expr)
+
+    same_size = tuple(SymIntEqByExpr(s) for s in a.size()) == tuple(
+        SymIntEqByExpr(s) for s in b.size()
+    )
+    same_stride = tuple(SymIntEqByExpr(s) for s in a.stride()) == tuple(
+        SymIntEqByExpr(s) for s in b.stride()
+    )
+    has_unbacked_metadata = any(
+        _has_unbacked_symbols(s)
+        for s in (*a.size(), *b.size(), *a.stride(), *b.stride())
+    )
+    if same_size and same_stride and not has_unbacked_metadata:
+        return _empty_strided_matching_offset(
+            a.size(),
+            a.stride(),
+            a.storage_offset(),
+            dtype=a.dtype,
+            device=a.device,
+        )
 
     for s0, s1 in zip(a.size(), b.size()):
         # If there are unbacked symbols leaked out of true_branch or false_branch
@@ -701,10 +773,13 @@ def _merge_output(
         a.size(), b.size(), a.stride(), b.stride(), merged_size
     )
 
-    with mode:
-        return torch.empty_strided(
-            merged_size, merged_stride, dtype=a.dtype, device=a.device
-        )
+    return _empty_strided_matching_offset(
+        merged_size,
+        merged_stride,
+        a.storage_offset(),
+        dtype=a.dtype,
+        device=a.device,
+    )
 
 
 @cond_op.py_functionalize_impl

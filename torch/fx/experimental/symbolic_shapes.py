@@ -17,6 +17,7 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 import abc
 import atexit
 import collections
+import copy
 import dis
 import functools
 import glob
@@ -3972,6 +3973,7 @@ class ShapeEnv:
         self.guards: list[ShapeGuard] = []
         self._evaluate_guards_source_location: SLoc | None = None
         self.axioms: dict[sympy.Expr, sympy.Expr] = {}
+        self._branch_shape_env_snapshots: list[dict[str, Any]] = []
 
         # A set of ids that have already been allocated. This is used
         # for when we allocate symbol ids using the hash of the source
@@ -4310,6 +4312,7 @@ class ShapeEnv:
             # Cached state for optimization_hint unbacked canonicalization
             "_equality_graph",
             "_unbacked_replacements",
+            "_branch_shape_env_snapshots",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -4652,6 +4655,200 @@ class ShapeEnv:
     def suppress_guards(self) -> _GeneratorContextManager[None]:
         """Context manager to ignore all guards generated inside."""
         return _suppress_guards(self)
+
+    def _snapshot_deferred_runtime_asserts(self) -> dict[sympy.Symbol | None, int]:
+        return {
+            symbol: len(asserts)
+            for symbol, asserts in self.deferred_runtime_asserts.items()
+        }
+
+    def _insert_branch_runtime_asserts(
+        self,
+        gm: torch.fx.GraphModule,
+        name: str,
+        guard_start: int,
+        deferred_runtime_asserts_start: dict[sympy.Symbol | None, int],
+        var_to_range_start: dict[sympy.Symbol, ValueRanges[sympy.Expr]],
+        *,
+        export: bool = False,
+    ) -> None:
+        from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+
+        branch_runtime_asserts = {
+            symbol: asserts[deferred_runtime_asserts_start.get(symbol, 0) :]
+            for symbol, asserts in self.deferred_runtime_asserts.items()
+            if len(asserts) > deferred_runtime_asserts_start.get(symbol, 0)
+        }
+        branch_runtime_asserts = {
+            symbol: list(asserts)
+            for symbol, asserts in branch_runtime_asserts.items()
+            if asserts
+        }
+        for guard in self.guards[guard_start:]:
+            branch_runtime_asserts.setdefault(None, []).append(
+                RuntimeAssert(
+                    guard.expr,
+                    f"{name}: {guard.expr}",
+                    CapturedTraceback.extract(skip=1),
+                )
+            )
+
+        def has_singleton_equality_assert(
+            symbol: sympy.Symbol, singleton: sympy.Expr
+        ) -> bool:
+            for asserts in branch_runtime_asserts.values():
+                for runtime_assert in asserts:
+                    expr = runtime_assert.expr
+                    if not isinstance(expr, sympy.Equality):
+                        continue
+                    lhs, rhs = expr.args
+                    if (lhs, rhs) in ((symbol, singleton), (singleton, symbol)):
+                        return True
+            return False
+
+        for symbol, branch_range in self.var_to_range.items():
+            parent_range = var_to_range_start.get(symbol)
+            if parent_range is None:
+                continue
+            if branch_range.is_singleton() and has_singleton_equality_assert(
+                symbol, branch_range.lower
+            ):
+                continue
+            for expr, changed in (
+                (
+                    sympy.Ge(symbol, branch_range.lower),
+                    branch_range.lower != parent_range.lower
+                    and branch_range.lower not in (-sympy.oo, -int_oo),
+                ),
+                (
+                    sympy.Le(symbol, branch_range.upper),
+                    branch_range.upper != parent_range.upper
+                    and branch_range.upper not in (sympy.oo, int_oo),
+                ),
+            ):
+                if changed:
+                    branch_runtime_asserts.setdefault(None, []).append(
+                        RuntimeAssert(
+                            expr,
+                            f"{name}: {expr}",
+                            CapturedTraceback.extract(skip=1),
+                        )
+                    )
+
+        if not branch_runtime_asserts:
+            return
+
+        saved_deferred_runtime_asserts = self.deferred_runtime_asserts
+        saved_num_deferred_runtime_asserts = self.num_deferred_runtime_asserts
+        try:
+            self.deferred_runtime_asserts = branch_runtime_asserts
+            self.num_deferred_runtime_asserts = sum(
+                len(asserts) for asserts in branch_runtime_asserts.values()
+            )
+            insert_deferred_runtime_asserts(gm, self, name, export=export)
+        finally:
+            self.deferred_runtime_asserts = saved_deferred_runtime_asserts
+            self.num_deferred_runtime_asserts = saved_num_deferred_runtime_asserts
+
+    def _clear_branch_isolation_caches(self) -> None:
+        # These plain lru_cache methods either depend on restored ShapeEnv
+        # state or perform side effects that must be replayed after restoration.
+        self.get_axioms.cache_clear()
+        self.size_hint.cache_clear()
+        self.guarding_hint_or_throw.cache_clear()
+        self.has_guarding_hint.cache_clear()
+        self._inner_evaluate_expr.cache_clear()
+        self._maybe_guard_rel.cache_clear()
+        self.guard_or_defer_runtime_assert.cache_clear()
+        self.constrain_symbol_range.cache_clear()
+
+        # ShapeEnv-aware caches should be invalidated by the version bump above,
+        # but clear the ones touched by branch isolation eagerly as well.
+        self._maybe_evaluate_static.cache_clear()
+        self._find.cache_clear()
+        self.replace.cache_clear()
+        self._update_divisible.cache_clear()
+        self.simplify.cache_clear()
+        self._simplify_floor_div.cache_clear()
+
+    @record_shapeenv_event()
+    def _isolate_branch_shape_env_enter(self) -> None:
+        existing_symbols = set(self.var_to_range)
+        snapshot = {
+            "existing_symbols": existing_symbols,
+            "guards": list(self.guards),
+            "axioms": dict(self.axioms),
+            "var_to_range": dict(self.var_to_range),
+            "var_to_range_sloc": copy.deepcopy(self.var_to_range_sloc),
+            "replacements": dict(self.replacements),
+            "replacements_slocs": dict(self.replacements_slocs),
+            "divisible": set(self.divisible),
+            "deferred_runtime_asserts": {
+                k: list(v) for k, v in self.deferred_runtime_asserts.items()
+            },
+            "num_deferred_runtime_asserts": self.num_deferred_runtime_asserts,
+            "symbol_guard_counter": copy.copy(self.symbol_guard_counter),
+            "size_like": set(self.size_like),
+            "translation_validation_enabled": self._translation_validation_enabled,
+        }
+        self._branch_shape_env_snapshots.append(snapshot)
+        self._translation_validation_enabled = False
+
+    @record_shapeenv_event()
+    def _isolate_branch_shape_env_exit(self) -> None:
+        snapshot = self._branch_shape_env_snapshots.pop()
+        existing_symbols = snapshot["existing_symbols"]
+        saved_var_to_range = snapshot["var_to_range"]
+        saved_var_to_range_sloc = snapshot["var_to_range_sloc"]
+
+        new_symbols = set(self.var_to_range) - existing_symbols
+        new_var_to_range = {symbol: self.var_to_range[symbol] for symbol in new_symbols}
+        new_var_to_range_sloc = {
+            symbol: self.var_to_range_sloc[symbol]
+            for symbol in new_symbols
+            if symbol in self.var_to_range_sloc
+        }
+        new_size_like = self.size_like - existing_symbols
+
+        self.guards = snapshot["guards"]
+        self.axioms = snapshot["axioms"]
+        self.var_to_range = saved_var_to_range
+        self.var_to_range.update(new_var_to_range)
+        self.var_to_range_sloc = saved_var_to_range_sloc
+        self.var_to_range_sloc.update(new_var_to_range_sloc)
+        self.replacements = snapshot["replacements"]
+        self.replacements_slocs = snapshot["replacements_slocs"]
+        self.divisible = snapshot["divisible"]
+        self.deferred_runtime_asserts = snapshot["deferred_runtime_asserts"]
+        self.num_deferred_runtime_asserts = snapshot["num_deferred_runtime_asserts"]
+        self.symbol_guard_counter = snapshot["symbol_guard_counter"]
+        self.size_like = snapshot["size_like"] | new_size_like
+        self._translation_validation_enabled = snapshot[
+            "translation_validation_enabled"
+        ]
+        for symbol in new_symbols:
+            self._add_z3var(symbol, int)
+        self.fake_tensor_cache.clear()
+        self._replacements_version_counter += 1
+        self._update_version_counter()
+        self._clear_branch_isolation_caches()
+
+    @contextmanager
+    def isolate_branch_shape_env(self) -> Generator[None, None, None]:
+        """
+        Isolate guards and range refinements learned while tracing one branch
+        of a higher order op.
+
+        Branch tracing still allocates fresh symbols, and those symbols may be
+        needed to merge branch outputs later.  Preserve fresh symbol metadata
+        while restoring guard-like state for symbols that already belonged to
+        the parent graph.
+        """
+        self._isolate_branch_shape_env_enter()
+        try:
+            yield
+        finally:
+            self._isolate_branch_shape_env_exit()
 
     @contextmanager
     def error_on_new_guards(self) -> Generator[None, None, None]:
