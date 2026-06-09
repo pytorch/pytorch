@@ -653,7 +653,7 @@ class DeferredTritonCallWrapper:
     def generate_launch_kernel(self, prefix, wrapper, kernel_var_name, params):
         """
         Generate the GPU kernel launching code.
-        This is where all the call args being sorted out and generated.
+        This is where all the call args are sorted out and generated.
         If enable_kernel_profile is enabled, all args related information would be packed in this function.
         """
         triton_meta = params["triton_meta"]
@@ -1378,7 +1378,11 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 # pyrefly: ignore [bad-argument-type]
                 casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
-            self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
+            # AOT: dispatch through AOTInductorModelKernels member.
+            # JIT: call the extern "C" symbol directly (resolved at link time
+            # via extra_flags pointing at the compiled .so).
+            kernel_prefix = "kernels." if V.graph.aot_mode else ""
+            self.writeline(f"{kernel_prefix}{kernel_name}({call_args_str}, {stream});")
 
     def prepare_triton_wrapper_args(
         self, call_args: list[Any], arg_types: list[Any]
