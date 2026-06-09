@@ -5995,6 +5995,20 @@ class CppTemplateBuffer(TemplateBuffer):
             return super().get_layout()
 
 
+class QuackSplitKTemplateBuffer(TemplateBuffer):
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: Sequence[IRNode],
+        k_split: int,
+    ) -> None:
+        super().__init__(layout, inputs, make_kernel_render=None)
+        self.k_split = k_split
+
+    def should_allocate(self) -> bool:
+        return False
+
+
 class QuackGemmEpilogueTemplateBuffer(TemplateBuffer):
     def __init__(
         self,

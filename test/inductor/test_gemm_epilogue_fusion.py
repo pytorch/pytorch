@@ -286,16 +286,19 @@ class GemmEpilogueFusionTests(TestCase):
                     "offs="
                 ).check_not("extern_kernels._grouped_mm").run(code)
 
-    @requires_cuda_and_triton
-    @inductor_config.patch("triton.num_decompose_k_splits", 2)
-    @inductor_config.patch("triton.decompose_k_threshold", 0)
-    def test_cuda_inductor_triton_epilogue_split_k_allows_decompose_k(self):
+    def _run_split_k_epilogue_test(self, backend, expected_kernel):
+        if backend == "QUACK":
+            try:
+                import quack  # noqa: F401
+            except ImportError:
+                self.skipTest("QuACK is not available")
+
         def fn(a, b):
             return gemm_epilogue_fusion(
                 torch.ops.aten.mm.default,
                 (a, b),
                 lambda acc: acc.relu(),
-                kernel_options={"backend": "TRITON", "SPLIT_K": True},
+                kernel_options={"backend": backend, "SPLIT_K": True},
             )
 
         a = torch.randn(8, 8192, device="cuda", dtype=torch.float16)
@@ -306,7 +309,19 @@ class GemmEpilogueFusionTests(TestCase):
         )
 
         torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
-        FileCheck().check("decompose_k_fp32_mm").run("\n".join(codes))
+        FileCheck().check(expected_kernel).run("\n".join(codes))
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("triton.num_decompose_k_splits", 2)
+    @inductor_config.patch("triton.decompose_k_threshold", 0)
+    def test_cuda_inductor_triton_epilogue_split_k_allows_decompose_k(self):
+        self._run_split_k_epilogue_test("TRITON", "decompose_k_fp32_mm")
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("triton.num_decompose_k_splits", 2)
+    @inductor_config.patch("triton.decompose_k_threshold", 0)
+    def test_cuda_inductor_quack_epilogue_split_k_uses_quack_bmm(self):
+        self._run_split_k_epilogue_test("QUACK", "quack_gemm")
 
     @requires_cuda_and_triton
     @inductor_config.patch(max_autotune_gemm=False)
