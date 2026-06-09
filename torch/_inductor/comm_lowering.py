@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 # within these allocations.
 #
 # To support all different mechanisms with optimal results, we aim to satisfy
-# the strictest requirement for this family of optimizations - we ensures that
+# the strictest requirement for this family of optimizations - we ensure that
 # every collective op invocation is guaranteed to operate on the same
 # allocation, at the same offset, in every iteration.
 #
