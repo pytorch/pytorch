@@ -449,6 +449,28 @@ class TestNativeDeclDllExportMacro(unittest.TestCase):
             "TORCH_API",
         )
 
+    def test_index_put_impl_quantized_cuda_kernel_uses_torch_api(self) -> None:
+        native_function, backend_indices = _build_backend_indices_from_yaml(
+            [
+                {
+                    "func": "_index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)",
+                    "dispatch": {
+                        "CPU": "_index_put_impl_",
+                        "CUDA": "_index_put_impl_",
+                        "QuantizedCUDA": "_index_put_impl_quantized_cuda_",
+                    },
+                    "tags": ["cpu_dll_quantized_cuda_kernel"],
+                }
+            ]
+        )
+        func = native_function[0]
+        decl = dest.compute_native_function_declaration(
+            func, backend_indices[DispatchKey.QuantizedCUDA]
+        )
+        self.assertEqual(len(decl), 1)
+        self.assertTrue(decl[0].startswith("TORCH_API "))
+        self.assertIn("_index_put_impl_quantized_cuda_(", decl[0])
+
 
 class TestGenNativeFunctionDeclaration(unittest.TestCase):
     def setUp(self) -> None:
