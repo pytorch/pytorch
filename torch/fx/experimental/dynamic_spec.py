@@ -1,27 +1,36 @@
 """Spec types for controlling what is dynamic in compiled/exported code.
 Currently only supports unbacked dynamic shapes.
 
-Pure data classes — no dependency on dynamo, compile, or export, so this
-module can be safely consumed by any layer.
 """
 
 from __future__ import annotations
 
 import itertools
-from typing import Any, TYPE_CHECKING, TypeAlias
+import threading
+from typing import Any, cast, TYPE_CHECKING, TypeAlias
+
+import sympy
+
+from torch import SymBool, SymInt
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
 
 __all__ = [
     "ShapeVar",
     "IntVar",
+    "STATIC",
     "TensorSpec",
+    "ObjectSpec",
+    "DictSpec",
     "ParamsSpec",
     "ShapesSpec",
     "LeafSpec",
+    "LeafIntSpec",
     "IntermediateSpec",
 ]
 
@@ -30,11 +39,112 @@ __all__ = [
 _INDENT = "  "
 
 
-class IntVar:
+# Sentinel meaning "this dim / scalar arg is static" (taken from the
+# actual input at runtime, with recompiles on different values).
+# Alias for ``None`` so users can write either ``TensorSpec([A, STATIC])``
+# (more readable) or ``TensorSpec([A, None])``.
+STATIC = None
+
+
+# ---------------------------------------------------------------------------
+# Spec ShapeEnv
+#
+# IntVar/ShapeVar wrap a SymNode, which requires a ShapeEnv. We use a singleton
+# global env for shape specs. This shape env is special and only used for
+# expression construction and will fail on any other calls.
+# ---------------------------------------------------------------------------
+
+
+_SPEC_SHAPE_ENV: ShapeEnv | None = None
+# Lock guarding the lazy init of _SPEC_SHAPE_ENV so concurrent IntVar()
+# calls observe the same singleton. We cannot construct eagerly at module
+# import time because ShapeEnv.__init__ pulls in modules that
+# transitively import this one.
+_SPEC_SHAPE_ENV_LOCK = threading.Lock()
+
+
+def _get_spec_shape_env() -> ShapeEnv:
+    """Lazily build the singleton spec ShapeEnv (thread-safe)."""
+    global _SPEC_SHAPE_ENV
+    if _SPEC_SHAPE_ENV is not None:
+        return _SPEC_SHAPE_ENV
+    with _SPEC_SHAPE_ENV_LOCK:
+        if _SPEC_SHAPE_ENV is not None:
+            return _SPEC_SHAPE_ENV
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class _SpecShapeEnv(ShapeEnv):
+            """Special ShapeEnv used only at spec-definition time.
+
+            Attribute access is blocked by default via ``__getattribute__``;
+            only private (``_``-prefix) names and the explicit allowlist in
+            ``_ALLOWED_PUBLIC`` pass through. SymInt arithmetic paths read
+            a handful of public fields transparently (via the
+            ``@record_shapeenv_event`` decorator and FX-cache machinery),
+            so those are allowlisted. Everything else — evaluation, guard
+            recording, deferred asserts, etc. — is blocked.
+
+            During ``ShapeEnv.__init__`` itself, access is unrestricted
+            because the base class touches its own public fields while
+            bootstrapping.
+            """
+
+            # Public fields read by internal ShapeEnv infra during arithmetic.
+            # Grow as new accesses are discovered by tests.
+            _ALLOWED_PUBLIC: frozenset[str] = frozenset(
+                {
+                    "should_record_events",
+                    "is_recording",
+                    "fx_node_cache",
+                    # bound_sympy is read-only (no guards/asserts/mutation).
+                    # Needed for `%` (mod) which inspects symbol ranges to
+                    # pick between Mod and PythonMod. var_to_range is the
+                    # field bound_sympy reads to compute ranges.
+                    "bound_sympy",
+                    "var_to_range",
+                }
+            )
+
+            def __init__(self) -> None:
+                # Allow everything during super().__init__.
+                object.__setattr__(self, "_init_done", False)
+                super().__init__()
+                object.__setattr__(self, "_init_done", True)
+
+            def __getattribute__(self, name: str) -> Any:
+                if name.startswith("_"):
+                    return super().__getattribute__(name)
+                if not super().__getattribute__("_init_done"):
+                    return super().__getattribute__(name)
+                if name in type(self)._ALLOWED_PUBLIC:
+                    return super().__getattribute__(name)
+                raise TypeError(
+                    f"_SpecShapeEnv: '{name}' is not allowed at "
+                    f"spec-definition time. Use IntVar / ShapeVar only "
+                    f"inside TensorSpec / ShapesSpec."
+                )
+
+        _SPEC_SHAPE_ENV = _SpecShapeEnv()
+        return _SPEC_SHAPE_ENV
+
+
+class IntVar(SymInt):
     """Indicates that a scalar integer argument is dynamic (no implicit range).
 
     Unbacked dynamic shapes will represent the underlying value in the
     compiled graph.
+
+    IntVar is a ``SymInt`` subclass backed by ``_SpecShapeEnv``,
+    so arithmetic and comparisons compose naturally::
+
+        A = IntVar("a")
+        B = IntVar("b")
+        A + 1  # SymInt expr=a#0 + 1
+        A * B + 1  # SymInt expr=a#0*b#1 + 1
+        A > 0  # SymBool
+
+    Such derived ``SymInt`` values may be used directly as leaf specs in
+    ``TensorSpec`` / ``ParamsSpec``
 
     Repr always includes a per-instance uid so two IntVars with the same name
     (or two anonymous ones) are distinguishable in logs::
@@ -59,11 +169,30 @@ class IntVar:
         max: int | None = None,
         optimization_hint: int | None = None,
     ) -> None:
+        from torch.fx.experimental.sym_node import _NO_HINT, SymNode
+        from torch.utils._sympy.numbers import int_oo
+        from torch.utils._sympy.value_ranges import ValueRanges
+
         self.name = name if name is not None else "anon"
         self._uid = next(IntVar._uid_counter)
         self.min = min
         self.max = max
         self.optimization_hint = optimization_hint
+        self.sympy_sym = sympy.Symbol(f"{self.name}#{self._uid}")
+        env = _get_spec_shape_env()
+        node = SymNode(
+            self.sympy_sym,
+            shape_env=env,
+            pytype=int,
+            hint=_NO_HINT,
+        )
+        super().__init__(node)
+        # Register the user-supplied (or unbounded) range so
+        # range-dependent ops like `%` get correct ValueRanges info.
+        env.var_to_range[self.sympy_sym] = ValueRanges(
+            min if min is not None else -int_oo,
+            max if max is not None else int_oo,
+        )
 
     def __repr__(self) -> str:
         # Always include uid so two same-named (or anonymous) instances
@@ -77,6 +206,11 @@ class IntVar:
             parts.append(f"optimization_hint={self.optimization_hint}")
         return f"{type(self).__name__}({', '.join(parts)})"
 
+    # Hashable by identity — IntVars are unique per construction, and inheriting
+    # SymInt.__hash__ would route through node hashing which we don't need here.
+    def __hash__(self) -> int:  # type: ignore[override]
+        return id(self)
+
     def to_jsonable(self) -> dict[str, Any]:
         return {
             "type": type(self).__name__,
@@ -85,6 +219,23 @@ class IntVar:
             "max": self.max,
             "optimization_hint": self.optimization_hint,
         }
+
+
+def _validate_spec_sym(v: Any, *, where: str) -> None:
+    """If ``v`` is a SymInt or SymBool, validate it originates from the
+    spec ShapeEnv.
+    """
+    if isinstance(v, SymInt):
+        kind = "SymInt"
+    elif isinstance(v, SymBool):
+        kind = "SymBool"
+    else:
+        return
+    if v.node.shape_env is not _get_spec_shape_env():
+        raise TypeError(
+            f"{where}: {kind} spec values must originate from spec IntVar / "
+            f"ShapeVar; got {v!r} backed by a different ShapeEnv."
+        )
 
 
 class ShapeVar(IntVar):
@@ -107,42 +258,45 @@ class ShapeVar(IntVar):
         max: int | None = None,
         optimization_hint: int | None = None,
     ) -> None:
+        if min < 0:
+            raise ValueError(
+                f"ShapeVar requires min >= 0 (a shape dim is non-negative); "
+                f"got min={min}. Use IntVar(...) for unrestricted scalars."
+            )
         super().__init__(name, min=min, max=max, optimization_hint=optimization_hint)
 
 
 class TensorSpec:
     """Per-dimension shape specification for a tensor.
 
-    A list-like container of ``ShapeVar | int | None`` with length equal to the
-    tensor's dim.
-
-    Per-entry semantics:
-    - ``ShapeVar``: unbacked dynamic dimension.
-    - ``int``: static dimension pinned to that concrete value.
-    - ``None``: unspecified; treated as static. Value is inferred from the
-      example input if the consuming API supports it (e.g. ``torch.compile``),
-      otherwise an error will be thrown (e.g. ``torch.export`` requires an
-      explicit value).
+    A list-like container of ``LeafIntSpec`` with length
+    equal to the tensor's dim.
 
     Example::
 
         B = ShapeVar("batch")
         TensorSpec([B, None])  # rank 2, dim 0 dynamic
         TensorSpec([B, 10])  # rank 2, dim 0 dynamic, dim 1 static=10
+        TensorSpec([B * 2 + 1, None])  # rank 2, dim 0 derived from B
     """
 
-    _DimSpec = ShapeVar | int | None
+    def __init__(self, dims: Sequence[LeafIntSpec]) -> None:
+        for i, d in enumerate(dims):
+            if d is not None and not isinstance(d, (int, SymInt)):
+                raise TypeError(
+                    f"TensorSpec dim {i}: expected LeafIntSpec, got "
+                    f"{type(d).__name__}: {d!r}"
+                )
+            _validate_spec_sym(d, where=f"TensorSpec dim {i}")
+        self._specs: list[LeafIntSpec] = list(dims)
 
-    def __init__(self, dims: Sequence[TensorSpec._DimSpec]) -> None:
-        self._specs: list[TensorSpec._DimSpec] = list(dims)
-
-    def __getitem__(self, index: int) -> TensorSpec._DimSpec:
+    def __getitem__(self, index: int) -> LeafIntSpec:
         return self._specs[index]
 
     def __len__(self) -> int:
         return len(self._specs)
 
-    def __iter__(self) -> Iterator[TensorSpec._DimSpec]:
+    def __iter__(self) -> Iterator[LeafIntSpec]:
         return iter(self._specs)
 
     def __repr__(self) -> str:
@@ -161,61 +315,253 @@ class TensorSpec:
         }
 
 
-# Type alias for leaf specs (individual argument specifications)
-LeafSpec: TypeAlias = TensorSpec | IntVar | int | None
-# This will include ListSpec, DictSpec and ObjectSpec
-IntermediateSpec: TypeAlias = LeafSpec
+class ObjectSpec:
+    """Spec for any Python object's attributes.
+
+    Constructor::
+
+        ObjectSpec({name: IntermediateSpec, ...})
+
+    Values may be leaves (``TensorSpec`` / ``IntVar`` / ``int`` /
+    ``None``) or another ``ObjectSpec`` for recursion.
+
+    Example::
+
+        ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})
+        ObjectSpec({"inner": ObjectSpec({"weight": TensorSpec([ShapeVar("h")])})})
+    """
+
+    def __init__(self, fields: dict[str, IntermediateSpec] | None = None) -> None:
+        self._fields: dict[str, IntermediateSpec] = dict(fields) if fields else {}
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._fields
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._fields)
+
+    def __len__(self) -> int:
+        return len(self._fields)
+
+    def items(self) -> Any:
+        return self._fields.items()
+
+    def __repr__(self) -> str:
+        lines = ["object_spec:"]
+        for name, spec in self._fields.items():
+            spec_repr = repr(spec)
+            if "\n" in spec_repr:
+                lines.append(f"{_INDENT}.{name}:")
+                for line in spec_repr.splitlines():
+                    lines.append(_INDENT * 2 + line)
+            else:
+                lines.append(f"{_INDENT}.{name}: {spec_repr}")
+        return "\n".join(lines)
+
+    def to_jsonable(self) -> dict[str, Any]:
+        return {
+            "type": "ObjectSpec",
+            "fields": {
+                name: spec.to_jsonable() if hasattr(spec, "to_jsonable") else spec
+                for name, spec in self._fields.items()
+            },
+        }
+
+
+class DictSpec:
+    """Spec for a Python ``dict``-typed value.
+
+    Constructor::
+
+        DictSpec({key: IntermediateSpec, ...})
+
+    Keys may be ``str`` or ``int``.
+
+    Example::
+
+        DictSpec({"x": TensorSpec([ShapeVar("h"), None])})
+        DictSpec({"config": DictSpec({"batch": IntVar()})})
+        DictSpec({0: TensorSpec([ShapeVar("h"), None])})
+    """
+
+    def __init__(
+        self, entries: dict[str | int, IntermediateSpec] | None = None
+    ) -> None:
+        self._entries: dict[str | int, IntermediateSpec] = (
+            dict(entries) if entries else {}
+        )
+        for k in self._entries:
+            if not isinstance(k, (str, int)):
+                raise TypeError(
+                    f"DictSpec entries must have str or int keys, got {type(k).__name__}: {k!r}"
+                )
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._entries
+
+    def __iter__(self) -> Iterator[str | int]:
+        return iter(self._entries)
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def items(self) -> Any:
+        return self._entries.items()
+
+    def __repr__(self) -> str:
+        lines = ["dict_spec:"]
+        for key, spec in self._entries.items():
+            spec_repr = repr(spec)
+            if "\n" in spec_repr:
+                lines.append(f"{_INDENT}[{key!r}]:")
+                for line in spec_repr.splitlines():
+                    lines.append(_INDENT * 2 + line)
+            else:
+                lines.append(f"{_INDENT}[{key!r}]: {spec_repr}")
+        return "\n".join(lines)
+
+    def to_jsonable(self) -> dict[str, Any]:
+        return {
+            "type": "DictSpec",
+            "entries": {
+                str(key): spec.to_jsonable() if hasattr(spec, "to_jsonable") else spec
+                for key, spec in self._entries.items()
+            },
+        }
+
+
+# Per-int-leaf spec type: union of valid values that can appear at a slot
+# where the runtime value is an int (tensor dim, scalar arg).
+#
+# Per-entry semantics:
+# - IntVar (or its ShapeVar subclass): unbacked dynamic dimension.
+# - SymInt (derived from spec IntVars via arithmetic, e.g. A * 2 + 1):
+#   the dim must equal this expression at runtime.
+# - int: static dimension pinned to that concrete value.
+# - None: unspecified; treated as static. Value is inferred from the
+#   example input if the consuming API supports it (e.g. torch.compile),
+#   otherwise an error will be thrown.
+LeafIntSpec: TypeAlias = IntVar | SymInt | int | None
+# Leaf specs (individual argument specifications) — ints plus TensorSpec.
+LeafSpec: TypeAlias = LeafIntSpec | TensorSpec
+# Includes containers (``ObjectSpec`` / ``DictSpec``; future ``ListSpec``)
+# for nested specs reachable via dynamo source-chain walks.
+IntermediateSpec: TypeAlias = LeafSpec | ObjectSpec | DictSpec
+
+# Value type for the dict passed to ``ParamsSpec``/``ShapesSpec``:
+#   - named entries hold a single spec,
+#   - ``"*args"`` holds a list of specs,
+#   - ``"**kwargs"`` holds a dict of specs.
+ParamsSpecValue: TypeAlias = (
+    IntermediateSpec | list[IntermediateSpec] | dict[str, IntermediateSpec]
+)
 
 
 class ParamsSpec:
     """Specification for the arguments of a compiled function.
 
-    Describes the dynamic shape behavior for named arguments, *args, and
-    **kwargs of a ``torch.compile``-wrapped function::
+    Describes the dynamic shape behavior for named arguments, ``*args``,
+    and ``**kwargs`` of a ``torch.compile``-wrapped function. Takes a
+    single dict keyed by parameter name, with two reserved sentinel keys
+    for the variadic slots::
 
-        def f(x, y, *args, **kwargs):
-        #    ^^^^  named_args
-        #           ^^^^^  varargs
-        #                   ^^^^^^  varkw
+        def func(x, n, *args, **kwargs): ...
 
-    Example::
 
-        ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
+        ParamsSpec(
+            {
+                "x": TensorSpec([ShapeVar("batch"), None]),
+                "n": IntVar("seq"),
+                "*args": [TensorSpec([ShapeVar("a")]), None],
+                "**kwargs": {
+                    "foo": TensorSpec([ShapeVar("b"), None]),
+                    "bar": TensorSpec([ShapeVar("c"), None]),
+                },
+            }
+        )
+
+    Anything not expressed in ``ParamsSpec`` is STATIC.**
     """
+
+    _VARARGS_KEY = "*args"
+    _VARKW_KEY = "**kwargs"
 
     def __init__(
         self,
-        named_args: dict[str, IntermediateSpec] | None = None,
-        *,
-        varargs: list[IntermediateSpec] | None = None,
-        varkw: dict[str, IntermediateSpec] | None = None,
+        params: dict[str, ParamsSpecValue] | None = None,
     ) -> None:
-        self._named_args: dict[str, LeafSpec] = dict(named_args) if named_args else {}
-        if varargs is not None:
-            raise NotImplementedError("varargs is not supported yet")
-        if varkw is not None:
-            raise NotImplementedError("varkw is not supported yet")
+        self._named_args: dict[str, IntermediateSpec] = {}
         self._varargs: list[IntermediateSpec] | None = None
         self._varkw: dict[str, IntermediateSpec] | None = None
+        if params is None:
+            return
+        for key, value in params.items():
+            if key == self._VARARGS_KEY:
+                if not isinstance(value, list):
+                    raise ValueError(
+                        f"ParamsSpec {self._VARARGS_KEY!r} value must be a list "
+                        f"of leaf specs, got {type(value).__name__}"
+                    )
+                for i, v in enumerate(value):
+                    _validate_spec_sym(v, where=f"ParamsSpec '{key}'[{i}]")
+                self._varargs = list(value)
+            elif key == self._VARKW_KEY:
+                if not isinstance(value, dict):
+                    raise ValueError(
+                        f"ParamsSpec {self._VARKW_KEY!r} value must be a dict "
+                        f"of leaf specs, got {type(value).__name__}"
+                    )
+                for k, v in value.items():
+                    _validate_spec_sym(v, where=f"ParamsSpec '{key}'[{k!r}]")
+                self._varkw = dict(value)
+            elif key.startswith("*"):
+                raise ValueError(
+                    f"Unknown sentinel key {key!r} in ParamsSpec; only "
+                    f"{self._VARARGS_KEY!r} and {self._VARKW_KEY!r} are reserved"
+                )
+            else:
+                _validate_spec_sym(value, where=f"ParamsSpec[{key!r}]")
+                self._named_args[key] = cast(IntermediateSpec, value)
 
     def __repr__(self) -> str:
-        lines = []
-        for k, v in self._named_args.items():
-            v_repr = repr(v)
+        def _indent_lines(text: str, prefix: str = _INDENT) -> str:
+            return "\n".join(prefix + line for line in text.splitlines())
+
+        def _entry_repr(key: str, value: Any) -> str:
+            v_repr = repr(value)
             if "\n" in v_repr:
-                indented = "\n".join(_INDENT + line for line in v_repr.splitlines())
-                lines.append(f"{k}:\n{indented}")
-            else:
-                lines.append(f"{k}: {v_repr}")
+                return f"{key}:\n{_indent_lines(v_repr)}"
+            return f"{key}: {v_repr}"
+
+        lines = [_entry_repr(k, v) for k, v in self._named_args.items()]
+        if self._varargs is not None:
+            inner = "\n".join(
+                _entry_repr(str(i), v) for i, v in enumerate(self._varargs)
+            )
+            lines.append(f"{self._VARARGS_KEY}:\n{_indent_lines(inner)}")
+        if self._varkw is not None:
+            inner = "\n".join(_entry_repr(k, v) for k, v in self._varkw.items())
+            lines.append(f"{self._VARKW_KEY}:\n{_indent_lines(inner)}")
         return "\n".join(lines)
 
     def to_jsonable(self) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            name: value.to_jsonable() if hasattr(value, "to_jsonable") else value
+            for name, value in self._named_args.items()
+        }
+        if self._varargs is not None:
+            params[self._VARARGS_KEY] = [
+                v.to_jsonable() if hasattr(v, "to_jsonable") else v
+                for v in self._varargs
+            ]
+        if self._varkw is not None:
+            params[self._VARKW_KEY] = {
+                name: value.to_jsonable() if hasattr(value, "to_jsonable") else value
+                for name, value in self._varkw.items()
+            }
         return {
             "type": "ParamsSpec",
-            "named_args": {
-                name: value.to_jsonable() if hasattr(value, "to_jsonable") else value
-                for name, value in self._named_args.items()
-            },
+            "params": params,
         }
 
 
@@ -226,26 +572,61 @@ class ShapesSpec:
     function this is the function's parameters, for an ``nn.Module`` this
     is the parameters of ``forward`` (excluding ``self``).
 
-    Currently only ``params`` is supported::
+    ``assumptions`` is an optional list of ``SymBool`` expressions built
+    from spec ``IntVar`` / ``ShapeVar`` values. Each assumption is wired
+    into the shape env at compile time and asserted at runtime via the
+    deferred-runtime-assert mechanism::
 
-        ShapesSpec(params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])}))
+        A = ShapeVar("a")
+        B = ShapeVar("b")
+        ShapesSpec(
+            params={"x": TensorSpec([A, None]), "y": TensorSpec([B, None])},
+            assumptions=[A + B > 10, A * 2 == B],
+        )
 
-    ``globals`` and ``assumptions`` are reserved for future use and will
-    raise ``NotImplementedError`` if set.
+    ``globals`` is reserved for future use and will raise
+    ``NotImplementedError`` if set.
     """
 
     def __init__(
         self,
-        params: ParamsSpec | None = None,
+        params: ParamsSpec | dict[str, ParamsSpecValue] | None = None,
         *,
         globals: Any = None,
-        assumptions: Any = None,
+        assumptions: Sequence[SymBool] | None = None,
     ) -> None:
+        # Normalize attributes up front so partially-constructed instances
+        # (e.g. when a later check raises) still have a stable shape.
+        self._params: ParamsSpec | None = None
+        self._assumptions: list[SymBool] = []
+
         if globals is not None:
             raise NotImplementedError("ShapesSpec.globals is not supported yet")
-        if assumptions is not None:
-            raise NotImplementedError("ShapesSpec.assumptions is not supported yet")
+        # Auto-wrap a bare dict so callers can write
+        # ``ShapesSpec({"x": ...})`` instead of
+        # ``ShapesSpec(params=ParamsSpec({"x": ...}))``.
+        if isinstance(params, dict):
+            params = ParamsSpec(params)
+        elif params is not None and not isinstance(params, ParamsSpec):
+            raise TypeError(
+                f"shapes_spec must be ParamsSpec, dict, or None, "
+                f"got {type(params).__name__}"
+            )
         self._params = params
+
+        if assumptions is not None:
+            for i, a in enumerate(assumptions):
+                if not isinstance(a, SymBool):
+                    raise TypeError(
+                        f"ShapesSpec.assumptions[{i}]: expected SymBool, "
+                        f"got {type(a).__name__}: {a!r}"
+                    )
+                _validate_spec_sym(a, where=f"ShapesSpec.assumptions[{i}]")
+                self._assumptions.append(a)
+
+    @property
+    def assumptions(self) -> list[SymBool]:
+        return list(self._assumptions)
 
     def __repr__(self) -> str:
         lines = ["shapes_spec:"]
@@ -254,10 +635,15 @@ class ShapesSpec:
             param_repr = repr(self._params)
             for line in param_repr.splitlines():
                 lines.append(_INDENT * 2 + line)
+        if self._assumptions:
+            lines.append(f"{_INDENT}assumptions:")
+            for a in self._assumptions:
+                lines.append(_INDENT * 2 + repr(a))
         return "\n".join(lines)
 
     def to_jsonable(self) -> dict[str, Any]:
         return {
             "type": "ShapesSpec",
             "params": None if self._params is None else self._params.to_jsonable(),
+            "assumptions": [repr(a) for a in self._assumptions],
         }

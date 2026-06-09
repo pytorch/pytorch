@@ -412,6 +412,8 @@ class ShardingPropagator:
             aten._upsample_nearest_exact2d_backward.default: 2,
             aten._upsample_nearest_exact3d_backward.default: 2,
             aten._upsample_bilinear2d_aa_backward.default: 2,
+            aten._upsample_bicubic2d_aa_backward.default: 2,
+            aten._upsample_lanczos2d_aa_backward.default: 2,
             aten.upsample_bicubic2d_backward.default: 2,
             aten.upsample_bilinear2d_backward.default: 2,
             aten.upsample_linear1d_backward.default: 2,
@@ -531,9 +533,18 @@ class ShardingPropagator:
         # NOTE: Use _fake_mode_lock to serialize access when running in
         # multi-threaded tests (lock must be set to threading.Lock()).
         # This is a nullcontext by default.
+        # NOTE: disable_proxy_modes_tracing() prevents make_fx from tracing
+        # into shard propagation. This op runs purely to derive output
+        # metadata (global shape/stride/dtype); it is not part of the real
+        # (local) computation. Without disabling the proxy tracer, the
+        # gen_fake_args() factory calls and op_schema.op(...) get recorded
+        # into the enclosing graph as dead code -- global-shape "shadow" nodes
+        # on empty_strided placeholders that no real output consumes.
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+
         with ShardingPropagator._fake_mode_lock:
             fake_mode = detect_fake_mode() or FakeTensorMode()
-            with fake_mode:
+            with fake_mode, disable_proxy_modes_tracing():
                 fake_args = op_schema.gen_fake_args()
                 fake_kwargs = op_schema.gen_fake_kwargs()
                 fake_out = op_schema.op(*fake_args, **fake_kwargs)
