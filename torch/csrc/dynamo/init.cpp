@@ -214,6 +214,7 @@ enum class PyNumberSlotBit : int64_t {
   NB_INDEX = 31,
   NB_MATRIX_MULTIPLY = 32,
   NB_INPLACE_MATRIX_MULTIPLY = 33,
+  NB_DIVMOD = 34,
 };
 
 enum class PyTypeSlotBit : int64_t {
@@ -333,6 +334,8 @@ int64_t get_pynumber_slots(PyTypeObject* type) {
   if (PyType_GetSlot(type, Py_nb_inplace_matrix_multiply) != nullptr)
     slots |=
         (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_MATRIX_MULTIPLY));
+  if (PyType_GetSlot(type, Py_nb_divmod) != nullptr)
+    slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_DIVMOD));
   return slots;
 }
 
@@ -583,7 +586,8 @@ void initDynamoBindings(PyObject* torch) {
       .value("NB_MATRIX_MULTIPLY", PyNumberSlotBit::NB_MATRIX_MULTIPLY)
       .value(
           "NB_INPLACE_MATRIX_MULTIPLY",
-          PyNumberSlotBit::NB_INPLACE_MATRIX_MULTIPLY);
+          PyNumberSlotBit::NB_INPLACE_MATRIX_MULTIPLY)
+      .value("NB_DIVMOD", PyNumberSlotBit::NB_DIVMOD);
 
   py::enum_<PyTypeSlotBit>(dynamo_module, "PyTypeSlots")
       .value("TP_HASH", PyTypeSlotBit::TP_HASH)
