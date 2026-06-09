@@ -77,7 +77,7 @@ class LocalTest(TestCase):
 
         pad_sizes = []
         old_pad_tensor = placement_types.pad_tensor
-        old_all_gather = placement_types.funcol.all_gather_tensor
+        old_all_gather = placement_types.funcol.all_gather_single
 
         def fake_pad_tensor(tensor, pad_dim, pad_size):
             pad_sizes.append(pad_size)
@@ -97,7 +97,7 @@ class LocalTest(TestCase):
             torch._dynamo.override_optimization_hint(batch, 4)
             local_tensor = torch.empty(512 * batch, 8)
             placement_types.pad_tensor = fake_pad_tensor
-            placement_types.funcol.all_gather_tensor = fake_all_gather
+            placement_types.funcol.all_gather_single = fake_all_gather
             try:
                 replicate_tensor = _StridedShard(
                     0, split_factor=2
@@ -109,7 +109,7 @@ class LocalTest(TestCase):
                 )
             finally:
                 placement_types.pad_tensor = old_pad_tensor
-                placement_types.funcol.all_gather_tensor = old_all_gather
+                placement_types.funcol.all_gather_single = old_all_gather
 
         self.assertEqual(len(pad_sizes), 1)
         self.assertTrue(statically_known_true(pad_sizes[0] == 0))
