@@ -260,7 +260,7 @@ def _set_accelerator_rng_states(rng_states: dict[int, torch.Tensor]) -> None:
     if torch.accelerator.is_available():
         for device_idx, device_rng_state in rng_states.items():
             with torch.accelerator.device_index(device_idx):
-                torch.accelerator.set_rng_state(device_rng_state, device_idx)
+                torch.accelerator.set_rng_state(device_rng_state)
 
 
 def _get_rng_state() -> tuple[torch.Tensor, dict[int, torch.Tensor]]:

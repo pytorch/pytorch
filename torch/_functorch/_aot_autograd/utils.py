@@ -764,8 +764,7 @@ def get_device_rng_state(device: torch.device) -> torch.Tensor:
     """Get the RNG state tensor for a device."""
     if device.type == "cpu":
         return torch.get_rng_state()
-    idx = device.index if device.index is not None else 0
-    return torch.accelerator.get_rng_state(idx)
+    return torch.accelerator.get_rng_state(device)
 
 
 def top_saved_tensors_hooks() -> Any:
