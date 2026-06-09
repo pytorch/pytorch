@@ -586,6 +586,15 @@ def max_memory_reserved(device: "Device" = None) -> int:
     .. note::
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
+
+    .. note::
+        Under ``PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync``, the peak is
+        computed by summing the high-water marks of the default mempool and the
+        device graph-memory pool (CUDA graph captures reserve backing in the
+        latter). Because those two high-water marks need not occur at the same
+        instant, the reported peak is a conservative *upper bound* on the true
+        simultaneous peak (clamped to total device memory). The current value
+        (:func:`~torch.cuda.memory_reserved`) is exact.
     """
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 

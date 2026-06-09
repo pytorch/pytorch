@@ -3660,6 +3660,74 @@ exit(2)
             torch.cuda.empty_cache()
 
     @unittest.skipIf(
+        (not TEST_CUDA_GRAPH) or (not TEST_CUDAMALLOCASYNC),
+        "graph-mem-pool stat undercount is specific to the cudaMallocAsync backend",
+    )
+    def test_graph_mem_counted_in_reserved_async(self):
+        # cudaMallocAsync graph captures reserve backing in the per-device graph-mem
+        # pool, not the default mempool; memory_reserved() must include it. That pool
+        # is shared by all graphs, so a second graph must grow reserved again.
+        device = torch.cuda.current_device()
+
+        CHUNK = 256 * 1024 * 1024  # 256 MiB
+        NCHUNK = 4  # 1 GiB per graph
+        expected = CHUNK * NCHUNK
+
+        def capture_and_replay():
+            g = torch.cuda.CUDAGraph()
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):  # warm up workspace allocs outside capture
+                _ = torch.empty(CHUNK, dtype=torch.uint8, device=device)
+            torch.cuda.current_stream().wait_stream(s)
+            del _
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+
+            buffers = []
+            with torch.cuda.graph(g):
+                for _ in range(NCHUNK):
+                    buffers.append(
+                        torch.empty(CHUNK, dtype=torch.uint8, device=device)
+                    )
+            g.replay()  # graph-mem commits at first replay, not at capture
+            torch.cuda.synchronize()
+            return g, buffers
+
+        def assert_grew(before, after):
+            # The NCHUNK live tensors can't be reused within the graph and reserved
+            # only rounds up, so growth is exactly `expected`.
+            self.assertGreaterEqual(
+                after - before,
+                expected,
+                f"memory_reserved() undercounts the graph-mem pool: grew "
+                f"{after - before}, expected >= {expected}",
+            )
+
+        gc.collect()
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+
+        r0 = torch.cuda.memory_reserved(device)
+        g1, b1 = capture_and_replay()
+        r1 = torch.cuda.memory_reserved(device)
+        assert_grew(r0, r1)
+
+        g2, b2 = capture_and_replay()
+        r2 = torch.cuda.memory_reserved(device)
+        assert_grew(r1, r2)
+
+        # Reset the graphs before freeing the tensors that alias their alloc nodes,
+        # then clear stats so this test's ~2 GiB doesn't bleed into siblings.
+        g1.reset()
+        g2.reset()
+        del b1, b2, g1, g2
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+
+    @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_graph_record_stream(self):

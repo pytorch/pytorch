@@ -732,6 +732,44 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
       C10_CUDA_CHECK(cudaMemPoolGetAttribute(
           mempool, cudaMemPoolAttrUsedMemHigh, &used_mem_peak));
+
+      // Allocations captured into a CUDA graph live in the device's graph-memory
+      // pool, not the default mempool, so add that pool's stats here -- otherwise
+      // memory_reserved() undercounts any graph-capturing workload. Tolerate
+      // cudaErrorNotSupported on drivers without graph-mem attributes (treat as 0).
+      auto get_graph_attr = [device](cudaGraphMemAttributeType attr) -> uint64_t {
+        uint64_t value = 0;
+        cudaError_t err = cudaDeviceGetGraphMemAttribute(device, attr, &value);
+        if (err == cudaErrorNotSupported) {
+          (void)cudaGetLastError(); // clear the sticky error
+          return 0;
+        }
+        C10_CUDA_CHECK(err);
+        return value;
+      };
+      uint64_t graph_reserved_current =
+          get_graph_attr(cudaGraphMemAttrReservedMemCurrent);
+      uint64_t graph_reserved_peak =
+          get_graph_attr(cudaGraphMemAttrReservedMemHigh);
+      uint64_t graph_used_current =
+          get_graph_attr(cudaGraphMemAttrUsedMemCurrent);
+      uint64_t graph_used_peak = get_graph_attr(cudaGraphMemAttrUsedMemHigh);
+
+      // Current counters are instantaneous, so they sum exactly.
+      reserved_mem_current += graph_reserved_current;
+      used_mem_current += graph_used_current;
+
+      // The two high-water marks need not peak at the same instant, so their sum
+      // is an upper bound on the true simultaneous peak; clamp to total device
+      // memory so the reported peak never exceeds physical capacity.
+      reserved_mem_peak += graph_reserved_peak;
+      used_mem_peak += graph_used_peak;
+
+      size_t device_free = 0;
+      size_t device_total = 0;
+      C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+      reserved_mem_peak = std::min(reserved_mem_peak, uint64_t{device_total});
+      used_mem_peak = std::min(used_mem_peak, uint64_t{device_total});
     }
 
     // Many stat types are specific to the native allocator. We leave these
@@ -788,6 +826,22 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         mempool, cudaMemPoolAttrReservedMemHigh, &zero));
     C10_CUDA_CHECK(
         cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrUsedMemHigh, &zero));
+
+    // Also reset the graph-mem pool high-water marks, to match the term
+    // getDeviceStats adds for graph-captured allocations. Setting High to 0
+    // resets it to Current (same as the default-pool attributes above).
+    uint64_t graph_zero = 0;
+    auto reset_graph_high = [device, &graph_zero](cudaGraphMemAttributeType attr) {
+      cudaError_t err =
+          cudaDeviceSetGraphMemAttribute(device, attr, &graph_zero);
+      if (err == cudaErrorNotSupported) {
+        (void)cudaGetLastError(); // clear the sticky error
+        return;
+      }
+      C10_CUDA_CHECK(err);
+    };
+    reset_graph_high(cudaGraphMemAttrReservedMemHigh);
+    reset_graph_high(cudaGraphMemAttrUsedMemHigh);
   }
 
   SnapshotInfo snapshot(MempoolId_t mempool_id, bool include_traces) override {
