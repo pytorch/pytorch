@@ -150,6 +150,29 @@ def rebuild_meta_tensor(
     return t
 
 
+def rebuild_xpu_tensor(
+    tensor_cls,
+    storage,
+    metadata,
+):
+    """
+    Rebuild a tensor that was originally on XPU from CPU storage.
+
+    XPU lacks IPC support (no cudaIpcMemHandle equivalent), so XPU tensors
+    are copied to CPU before serialization and copied back to XPU here.
+    """
+    storage_offset, size, stride, requires_grad, device = metadata
+    t = torch._utils._rebuild_tensor(storage, storage_offset, size, stride)
+    t = t.to(device)
+    if tensor_cls == torch.nn.parameter.Parameter:
+        # It is crucial for integer tensors to receive
+        # the requires_grad=False as an argument in the constructor
+        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
+    else:
+        t.requires_grad = requires_grad
+    return t
+
+
 def rebuild_cuda_tensor(
     tensor_cls,
     tensor_size,
@@ -386,6 +409,20 @@ def reduce_tensor(tensor):
                 tensor.requires_grad,
             ),
         )
+    elif storage._untyped_storage.device.type == "xpu":
+        # XPU lacks IPC support (no shareIpcHandle equivalent).
+        # Copy the tensor to CPU for serialization; the receiving end
+        # will copy it back to XPU in rebuild_xpu_tensor.
+        cpu_tensor = tensor.cpu()
+        cpu_storage = cpu_tensor._typed_storage()
+        metadata = (
+            cpu_tensor.storage_offset(),
+            cpu_tensor.size(),
+            cpu_tensor.stride(),
+            tensor.requires_grad,
+            tensor.device,
+        )
+        return (rebuild_xpu_tensor, (type(tensor), cpu_storage, metadata))
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
     metadata = (
