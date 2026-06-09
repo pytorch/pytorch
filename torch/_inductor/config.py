@@ -560,6 +560,41 @@ max_autotune_prune_choices_based_on_shared_mem = (
     == "1"
 )
 
+# ── AMD ROCm Triton heuristics ────────────────────────────────────────────────
+#
+# Master on/off switches for AMD ROCm pointwise and reduction heuristics.
+# When disabled the autotuner falls back to standard inductor default configs.
+# These mirror the TORCHINDUCTOR_POINTWISE_HEURISTICS and
+# TORCHINDUCTOR_REDUCTION_HEURISTICS env vars read in triton_heuristics.py.
+# Programmatic control is possible without env-var mutation (useful in tests).
+#
+# Default: True (env var defaults to enabled). The heuristic scoring in
+# triton_heuristics.py is additionally gated on torch.version.hip, so these
+# flags are a no-op on CUDA even when True.
+# Environment Variables: TORCHINDUCTOR_POINTWISE_HEURISTICS,
+#                        TORCHINDUCTOR_REDUCTION_HEURISTICS
+pointwise_heuristics: bool = (
+    os.environ.get("TORCHINDUCTOR_POINTWISE_HEURISTICS", "1") != "0"
+)
+reduction_heuristics: bool = (
+    os.environ.get("TORCHINDUCTOR_REDUCTION_HEURISTICS", "1") != "0"
+)
+
+# Number of top-scoring heuristic configs to compile and benchmark.
+# Lower N → faster compilation; higher N → more robustness against mis-rankings.
+# Environment Variable: TORCHINDUCTOR_HEURISTICS_TOP_N  (default: 5)
+heuristics_top_n_configs: int = int(
+    os.environ.get("TORCHINDUCTOR_HEURISTICS_TOP_N", "5")
+)
+
+# Extra configs ranked N+1…N+BUFFER compiled as a register-spill safety net.
+# If all top-N configs spill at runtime, the autotuner falls back to these.
+# Cost: BUFFER extra Triton JIT compilations on first run (cached after that).
+# Environment Variable: TORCHINDUCTOR_HEURISTICS_SPILL_BUFFER  (default: 0)
+heuristics_spill_fallback_buffer: int = int(
+    os.environ.get("TORCHINDUCTOR_HEURISTICS_SPILL_BUFFER", "0")
+)
+
 # Disable triton from trying to initialize and detect devices on the host
 triton_disable_device_detection = (
     os.environ.get("TORCHINDUCTOR_TRITON_DISABLE_DEVICE_DETECTION", "0") == "1"

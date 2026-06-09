@@ -145,6 +145,46 @@ log = logging.getLogger(__name__)
 
 triton_name_sub = re.compile(r"^def [^(]+\(")
 
+# AMD ROCm heuristic helpers
+_IS_ROCM = torch.version.hip is not None
+
+
+def _is_pointwise_heuristics_enabled() -> bool:
+    """Return True if AMD ROCm pointwise heuristics are enabled.
+
+    Reads ``torch._inductor.config.pointwise_heuristics`` (which itself
+    defaults from the TORCHINDUCTOR_POINTWISE_HEURISTICS env var).
+    Call sites are already gated on ``_IS_ROCM``, so this is a no-op on CUDA.
+    """
+    from torch._inductor import config as inductor_config
+    return bool(inductor_config.pointwise_heuristics)
+
+
+def _is_reduction_heuristics_enabled() -> bool:
+    """Return True if AMD ROCm reduction heuristics are enabled.
+
+    Reads ``torch._inductor.config.reduction_heuristics`` (which itself
+    defaults from the TORCHINDUCTOR_REDUCTION_HEURISTICS env var).
+    Call sites are already gated on ``_IS_ROCM``.
+    """
+    from torch._inductor import config as inductor_config
+    return bool(inductor_config.reduction_heuristics)
+
+
+try:
+    from torch._inductor.template_heuristics.rocm.pointwise import PointwiseHeuristics
+    POINTWISE_HEURISTICS_AVAILABLE = True
+except ImportError:
+    PointwiseHeuristics = None  # type: ignore[assignment,misc]
+    POINTWISE_HEURISTICS_AVAILABLE = False
+
+try:
+    from torch._inductor.template_heuristics.rocm.reduction import ReductionHeuristics
+    REDUCTION_HEURISTICS_AVAILABLE = True
+except ImportError:
+    ReductionHeuristics = None  # type: ignore[assignment,misc]
+    REDUCTION_HEURISTICS_AVAILABLE = False
+
 
 def generate_lookup_hash_from_source_code(size_hints_str: str, source_code: str) -> str:
     # Name agnostic + strip white space
@@ -473,6 +513,52 @@ class CachingAutotuner(KernelInterface):
         cached_config = lookup_autotune_config(size_hints, fn)
         self.configs = [cached_config] if cached_config else configs
 
+        # ── AMD ROCm heuristic scoring ─────────────────────────────────────
+        # Set size_hints early so the scoring methods can reconstruct
+        # problem_metadata from it when _heuristics_pending is absent (i.e.
+        # when the kernel module is reused from a cache layer without
+        # re-executing the config-generation path).
+        self.size_hints = size_hints
+
+        _autotune_cache_hit = (
+            (autotune_cache_info or {}).get("autotune_cache_state") == "hit"
+        )
+
+        # Pointwise scoring — ROCm only, skipped on cache hits
+        _should_score_pointwise = (
+            not cached_config
+            and not _autotune_cache_hit
+            and _IS_ROCM
+            and POINTWISE_HEURISTICS_AVAILABLE
+            and _is_pointwise_heuristics_enabled()
+            and heuristic_type == HeuristicType.POINTWISE
+            and size_hints is not None
+        )
+        if _should_score_pointwise:
+            self._score_and_prune_heuristic_configs()
+
+        # Reduction scoring — ROCm only, skipped when max_autotune handles it
+        from torch._inductor import config as inductor_config
+        _should_score_reduction = (
+            _IS_ROCM
+            and REDUCTION_HEURISTICS_AVAILABLE
+            and _is_reduction_heuristics_enabled()
+            and not (
+                (inductor_meta or {}).get("max_autotune")
+                or (inductor_meta or {}).get("max_autotune_pointwise")
+            )
+            and heuristic_type in (
+                HeuristicType.REDUCTION,
+                HeuristicType.PERSISTENT_REDUCTION,
+            )
+            and size_hints is not None
+            and not cached_config
+            and not _autotune_cache_hit
+        )
+        if _should_score_reduction:
+            self._score_and_prune_reduction_configs()
+        # ── end AMD ROCm heuristic scoring ────────────────────────────────
+
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
         self.cuda_kernel_saved = False
@@ -497,7 +583,6 @@ class CachingAutotuner(KernelInterface):
             )
         log.debug("Triton cache dir: %s", os.environ["TRITON_CACHE_DIR"])
 
-        self.size_hints = size_hints
         self.is_mix_order_reduction = self.inductor_meta.get("RSPLIT_SIZE") is not None
         self.coordesc_tuner = CoordescTuner(
             is_mm=False,
@@ -588,6 +673,165 @@ class CachingAutotuner(KernelInterface):
         self.benchmark_failure_reasons.clear()
         self._cached_launcher = None
         self._debug_call = None
+
+    # ── AMD ROCm heuristic scoring methods ────────────────────────────────
+
+    def _score_and_prune_heuristic_configs(self) -> None:
+        """Score pointwise configs using kernel source and prune self.configs to top-N.
+
+        Called from ``__init__`` immediately after ``self.fn`` is set so we have
+        access to ``self.fn.src`` and ``self.fn.arg_names``.  ``self.configs`` is
+        pruned in-place.  N is controlled by ``heuristics_top_n_configs`` (default 5).
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from torch._inductor import config as inductor_config
+
+        if not POINTWISE_HEURISTICS_AVAILABLE or self.size_hints is None:
+            return
+
+        try:
+            problem_metadata = _convert_to_pointwise_heuristics_metadata(
+                self.size_hints, self.inductor_meta, self.triton_meta
+            )
+        except Exception as e:
+            log.debug("[HEURISTICS] Could not build problem_metadata: %s", e)
+            return
+
+        kernel_code = None
+        try:
+            if self.fn is not None and hasattr(self.fn, 'src') and self.fn.src is not None:
+                kernel_code = str(self.fn.src)
+                log.debug(
+                    "[HEURISTICS] Extracted kernel source from fn.src (%d chars)",
+                    len(kernel_code),
+                )
+        except Exception as e:
+            log.debug(
+                "[HEURISTICS] Failed to read fn.src: %s – scoring without kernel metadata", e
+            )
+
+        try:
+            if self.fn is not None and hasattr(self.fn, 'arg_names'):
+                ptr_args = [a for a in self.fn.arg_names if a.endswith('_ptr')]
+                if ptr_args:
+                    num_outputs = max(1, kernel_code.count('tl.store') if kernel_code else 1)
+                    num_inputs = max(0, len(ptr_args) - num_outputs)
+                    problem_metadata = {
+                        **problem_metadata,
+                        'num_tensors': len(ptr_args),
+                        'num_inputs': num_inputs,
+                        'num_outputs': num_outputs,
+                    }
+        except Exception as e:
+            log.debug("[HEURISTICS] Failed to refine tensor counts from arg_names: %s", e)
+
+        def _score_one(triton_cfg):
+            try:
+                effective = {
+                    k: triton_cfg.kwargs[k]
+                    for k in ('XBLOCK', 'YBLOCK', 'ZBLOCK')
+                    if k in triton_cfg.kwargs
+                }
+                effective['num_warps'] = triton_cfg.num_warps
+                sc = PointwiseHeuristics.score_config(effective, problem_metadata, kernel_code)
+                return (sc, triton_cfg, effective)
+            except Exception as e:
+                log.debug("[HEURISTICS] Config scoring failed: %s", e)
+                return None
+
+        _max_workers = min(8, max(1, len(self.configs)))
+        _scored_raw = []
+        with ThreadPoolExecutor(max_workers=_max_workers) as _pool:
+            _futs = {_pool.submit(_score_one, cfg): cfg for cfg in self.configs}
+            for _fut in as_completed(_futs):
+                _res = _fut.result()
+                if _res is not None:
+                    _scored_raw.append(_res)
+
+        if not _scored_raw:
+            log.debug("[HEURISTICS] No configs could be scored – keeping all configs")
+            return
+
+        _scored_raw.sort(
+            key=lambda x: (round(x[0], 4), x[1].kwargs.get('XBLOCK', 0)),
+            reverse=True,
+        )
+        _top_n = max(1, min(inductor_config.heuristics_top_n_configs, len(_scored_raw)))
+        _spill_buf = max(0, inductor_config.heuristics_spill_fallback_buffer)
+        _compile_n = min(_top_n + _spill_buf, len(_scored_raw))
+        self.configs = [tcfg for _, tcfg, _ in _scored_raw[:_compile_n]]
+        log.debug(
+            "[HEURISTICS/POINTWISE] Top-%d configs for %d elements (spill_buf=%d)",
+            _top_n,
+            problem_metadata.get('total_elements', 0),
+            _spill_buf,
+        )
+
+    def _score_and_prune_reduction_configs(self) -> None:
+        """Score reduction configs and prune self.configs to top-N.
+
+        Called from ``__init__`` for REDUCTION / PERSISTENT_REDUCTION kernels
+        when TORCHINDUCTOR_REDUCTION_HEURISTICS is enabled (default) and not max_autotune.
+        """
+        if self.size_hints is None or not self.configs:
+            return
+
+        try:
+            from torch._inductor.template_heuristics.rocm.reduction import (
+                ReductionHeuristics as _RH,
+            )
+        except ImportError:
+            return
+
+        from torch._inductor import config as inductor_config
+
+        _red_kernel_code = None
+        try:
+            if self.fn is not None and hasattr(self.fn, 'src') and self.fn.src:
+                _red_kernel_code = str(self.fn.src)
+        except AttributeError as e:
+            log.debug("[HEURISTICS] Could not read fn.src for reduction kernel: %s", e)
+
+        _red_inductor_meta = self.inductor_meta
+        if _red_kernel_code and not self.inductor_meta.get('slow_ops'):
+            try:
+                from torch._inductor.template_heuristics.rocm.analysis import (
+                    extract_kernel_metadata as _ekm,
+                )
+                _km = _ekm(_red_kernel_code)
+                if _km.get('slow_ops', 0) > 0 or _km.get('ops_per_element', 0) > 0:
+                    _red_inductor_meta = {
+                        **self.inductor_meta,
+                        **{k: _km[k] for k in ('slow_ops', 'ops_per_element') if k in _km},
+                    }
+            except (ImportError, Exception) as e:
+                log.debug("[HEURISTICS] Kernel metadata enrichment skipped: %s", e)
+
+        problem_metadata = _RH.problem_metadata_from_size_hints(
+            self.size_hints, _red_inductor_meta
+        )
+
+        _top_n = max(1, min(inductor_config.heuristics_top_n_configs, len(self.configs)))
+        _spill_buf = max(0, inductor_config.heuristics_spill_fallback_buffer)
+        _compile_n = min(_top_n + _spill_buf, len(self.configs))
+        top_n_configs, all_scored = _RH.prune_configs(
+            self.configs, problem_metadata, top_n=_compile_n
+        )
+
+        if not top_n_configs:
+            return
+
+        self.configs = top_n_configs[:_compile_n]
+        if all_scored:
+            log.debug(
+                "[HEURISTICS/REDUCTION] Top-%d configs for x=%s r=%s (spill_buf=%d)",
+                _top_n,
+                problem_metadata.get("xnumel", "?"),
+                problem_metadata.get("rnumel", "?"),
+                _spill_buf,
+            )
+
+    # ── end AMD ROCm heuristic scoring ────────────────────────────────────
 
     def is_statically_launchable(self):
         """
@@ -3872,6 +4116,62 @@ def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Conf
         )
         return new_configs
     return configs
+
+
+def _convert_to_pointwise_heuristics_metadata(size_hints, inductor_meta, triton_meta):
+    """Convert Triton heuristics metadata to format expected by PointwiseHeuristics."""
+    x_dim = size_hints.get('x', 1)
+    y_dim = size_hints.get('y', None)
+    z_dim = size_hints.get('z', None)
+    if z_dim is not None and y_dim is not None:
+        dimensions = (x_dim, y_dim, z_dim)
+    elif y_dim is not None:
+        dimensions = (x_dim, y_dim)
+    else:
+        dimensions = (x_dim,)
+    total_elements = functools.reduce(operator.mul, dimensions, 1)
+
+    num_inputs = inductor_meta.get("num_inputs", 2)
+    num_outputs = inductor_meta.get("num_outputs", 1)
+    fusion_depth = inductor_meta.get("fusion_depth", 1)
+
+    element_size = 4
+    if "dtype" in triton_meta:
+        dtype_str = str(triton_meta["dtype"])
+        if "float16" in dtype_str or "half" in dtype_str or "bfloat16" in dtype_str:
+            element_size = 2
+        elif "float64" in dtype_str or "double" in dtype_str:
+            element_size = 8
+
+    vector_width = inductor_meta.get("vector_width", 1)
+    has_mask = inductor_meta.get("has_mask", False)
+    has_broadcast = inductor_meta.get("has_broadcast", False)
+    broadcast_tensor_bytes = inductor_meta.get("broadcast_tensor_bytes", 0)
+
+    device_props = triton_meta.get("device")
+    warp_size = (
+        device_props.warp_size if device_props and device_props.warp_size else 64
+    )
+    max_threads_per_block = (
+        device_props.max_threads_per_block
+        if device_props and device_props.max_threads_per_block
+        else 1024
+    )
+
+    return {
+        'dimensions': dimensions,
+        'total_elements': total_elements,
+        'num_inputs': num_inputs,
+        'num_outputs': num_outputs,
+        'fusion_depth': fusion_depth,
+        'element_size': element_size,
+        'vector_width': vector_width,
+        'has_mask': has_mask,
+        'has_broadcast': has_broadcast,
+        'broadcast_tensor_bytes': broadcast_tensor_bytes,
+        'warp_size': warp_size,
+        'max_threads_per_block': max_threads_per_block,
+    }
 
 
 def pointwise(
