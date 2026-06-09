@@ -20,9 +20,22 @@ name: !{{ build_environment }}
     invalidation handles the per-Python ABI bits). Everything else still runs
     on the per-Python matrix below. Add more arch types here as their inline
     build job is wired up. -#}
-{%- set unified_arch_types = ['cpu', 'cpu-aarch64'] %}
+{%- set unified_arch_types = ['cpu', 'cpu-aarch64', 'cuda', 'cuda-aarch64'] %}
 {%- set unified_build_configs = build_configs | selectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
 {%- set matrix_build_configs = build_configs | rejectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
+
+{#- Group unified configs by (gpu_arch_type, desired_cuda). Containers differ
+    per CUDA version, so each (arch, cuda) needs its own job; within a group
+    only the Python version varies. -#}
+{%- set ns = namespace(groups=[]) %}
+{%- for cfg in unified_build_configs %}
+  {%- set existing = ns.groups | selectattr('arch_type', 'equalto', cfg['gpu_arch_type']) | selectattr('desired_cuda', 'equalto', cfg['desired_cuda']) | list %}
+  {%- if existing %}
+    {%- set _ = existing[0]['configs'].append(cfg) %}
+  {%- else %}
+    {%- set _ = ns.groups.append({'arch_type': cfg['gpu_arch_type'], 'desired_cuda': cfg['desired_cuda'], 'configs': [cfg]}) %}
+  {%- endif %}
+{%- endfor %}
 
 {#- Per-OS values that shape the build/test runner labels.
     s390x runners are self-hosted, register only with the bare `linux.s390x`
@@ -102,16 +115,28 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-{#- One inline build job per unified gpu_arch_type group (e.g. one for cpu,
-    one for cpu-aarch64). Each loops over all CPython versions in the group on
-    a single runner, reusing build/ across iterations. libtorch_cpu is
-    Python-ABI-free; only libtorch_python + _C are recompiled per interpreter
-    via the cmake.py cache invalidation. -#}
+{#- One inline build job per (gpu_arch_type, desired_cuda) group. Each loops
+    over all CPython versions in the group on a single runner, reusing build/
+    across iterations. libtorch_cpu/libtorch_cuda are Python-ABI-free; only
+    libtorch_python + _C are recompiled per interpreter via the cmake.py cache
+    invalidation. -#}
 {%- set unified_job_names = [] %}
-{%- for arch_type, group in unified_build_configs | groupby('gpu_arch_type') %}
-  {%- set group = group | list %}
+{%- for g in ns.groups %}
+  {%- set group = g['configs'] %}
+  {%- set arch_type = g['arch_type'] %}
+  {%- set desired_cuda = g['desired_cuda'] %}
   {%- set first = group[0] %}
-  {%- set job_name = "manywheel-" ~ arch_type ~ "-build" %}
+  {#- Job name: keep cpu/cpu-aarch64 names stable; for cuda, include the
+      desired_cuda variant so cu126/cu130/cu132 each get a distinct job. -#}
+  {%- if desired_cuda == 'cpu' %}
+    {%- set job_name = "manywheel-" ~ arch_type ~ "-build" %}
+  {%- else %}
+    {%- set job_name = "manywheel-" ~ arch_type ~ "-" ~ desired_cuda ~ "-build" %}
+  {%- endif %}
+  {#- BUILD_NAME_SUFFIX = the part of build_name after "manywheel-py{X_Y}".
+      E.g. "manywheel-py3_10-cuda-aarch64-12_6" -> "-cuda-aarch64-12_6". -#}
+  {%- set py_dotless = first['python_version'] | replace('.', '_') %}
+  {%- set build_name_suffix = first['build_name'] | replace('manywheel-py' ~ py_dotless, '') %}
   {%- set _ = unified_job_names.append(job_name) %}
 
   !{{ job_name }}:
@@ -125,13 +150,17 @@ jobs:
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: !{{ first['package_type'] }}
-      DESIRED_CUDA: !{{ first['desired_cuda'] }}
+      DESIRED_CUDA: !{{ desired_cuda }}
+      GPU_ARCH_VERSION: "!{{ first['gpu_arch_version'] | default('') }}"
       GPU_ARCH_TYPE: !{{ arch_type }}
       DOCKER_IMAGE: pytorch/!{{ first['container_image'] }}:!{{ first['container_image_tag_prefix'] }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "!{{ group | map(attribute='python_version') | join(' ') }}"
       BUILD_NAME_PREFIX: "manywheel-py"
-      BUILD_NAME_SUFFIX: "-!{{ arch_type }}"
+      BUILD_NAME_SUFFIX: "!{{ build_name_suffix }}"
+      {%- if first.pytorch_extra_install_requirements is defined and first.pytorch_extra_install_requirements|d('')|length > 0 %}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "!{{ first['pytorch_extra_install_requirements'] }}"
+      {%- endif %}
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"

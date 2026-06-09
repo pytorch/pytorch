@@ -194,6 +194,8 @@ def replace_random(
 ):
     if generator is not None:
         return
+    if pin_memory:
+        return
 
     def replacement(size):
         result = inductor_prims.random(
@@ -251,6 +253,9 @@ def replace_randint(
     layout=None,
     pin_memory=None,
 ):
+    if pin_memory:
+        return
+
     def replacement(low, high, size):
         result = inductor_prims.randint(low, high, size, inductor_prims.seed(device))
         return result.to(dtype)
