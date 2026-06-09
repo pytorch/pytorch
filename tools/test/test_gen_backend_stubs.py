@@ -793,7 +793,8 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
         self.assertNotIn("void meta(", decl)
 
     # A multi-output structured op (sort -> values, indices) must build a tuple in the generated
-    # Meta wrapper; returning a single Tensor into the tuple slot would not compile.
+    # Meta wrapper; returning a single Tensor into the tuple slot would not compile. sort is also
+    # MetaBase (not TensorIterator), which guards the set_output names signature below.
     def test_define_meta_multi_output_returns_tuple(self) -> None:
         out = self.define_meta_registrations(
             "- sort.values_stable:\n    structured: true\n    define_meta: true"
@@ -804,6 +805,10 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
             "std::move(op.outputs_[1]));",
             out,
         )
+        # Both MetaBase and TensorIteratorBase declare set_output_* with a trailing
+        # at::DimnameList names; emitting only 4 args (dropping names) for a MetaBase op fails
+        # to override the virtual and does not compile, so it must always be present.
+        self.assertIn("at::TensorOptions options, at::DimnameList names", out)
 
 
 if __name__ == "__main__":
