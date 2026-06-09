@@ -19,13 +19,13 @@ import threading
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.profiler.cupti.cupti_python import ActivityKind, OVERHEAD_KIND_NAMES
-from torch.profiler.cupti.monitor_trace import merge_trace_window_into_chrome_trace
-from torch.profiler.cupti.observers.base import (
+from torch.profiler._cupti.cupti_python import ActivityKind, OVERHEAD_KIND_NAMES
+from torch.profiler._cupti.monitor_trace import merge_trace_window_into_chrome_trace
+from torch.profiler._cupti.observers.base import (
     CuptiMonitorObserver,
     ObserverAnnotationSettings,
 )
-from torch.profiler.cupti.records import (
+from torch.profiler._cupti.records import (
     Api,
     ExternalCorrelation,
     Field,
@@ -39,7 +39,7 @@ from torch.profiler.cupti.records import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from torch.profiler.cupti.observers.base import AnnotationResolver
+    from torch.profiler._cupti.observers.base import AnnotationResolver
 
 
 def _current_thread_resource_tuple() -> tuple[int, int, int]:

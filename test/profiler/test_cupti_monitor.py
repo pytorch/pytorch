@@ -28,7 +28,7 @@ def _cupti_version() -> int:
     if not TEST_CUPTI_PYTHON:
         return 0
     try:
-        from torch.profiler.cupti.cupti_python import pylibcupti
+        from torch.profiler._cupti.cupti_python import pylibcupti
 
         return pylibcupti().get_version()
     except Exception:
@@ -50,8 +50,8 @@ class TestCuptiRecords(TestCase):
         # A Field carries (id, string); int(field) is its id. The per-kind catalogs
         # define the supported field ids; FIELD_REGISTRY and STRING_FIELDS derive
         # from them. No byte sizes -- those come from CUPTI's captured layout.
-        from torch.profiler.cupti.cupti_python import ActivityKind
-        from torch.profiler.cupti.records import FIELD_REGISTRY, Kernel, STRING_FIELDS
+        from torch.profiler._cupti.cupti_python import ActivityKind
+        from torch.profiler._cupti.records import FIELD_REGISTRY, Kernel, STRING_FIELDS
 
         self.assertEqual(int(Kernel.START), 7)
         self.assertEqual(Kernel.NAME.id, 24)
@@ -73,8 +73,8 @@ class TestCuptiRecords(TestCase):
         # dereferenced in place. Synthetic layouts + buffers, no CUDA.
         import numpy as np
 
-        from torch.profiler.cupti.cupti_python import ActivityKind
-        from torch.profiler.cupti.monitor import CuptiMonitorBuffer
+        from torch.profiler._cupti.cupti_python import ActivityKind
+        from torch.profiler._cupti.monitor import CuptiMonitorBuffer
 
         kernel = int(ActivityKind.CONCURRENT_KERNEL)
         memcpy = int(ActivityKind.MEMCPY)
@@ -172,9 +172,9 @@ class TestCuptiRecords(TestCase):
         # A registration request resolves to (kinds, per-kind field selection): a
         # bare kind iterable means "all fields"; a field map selects fields, with
         # "all"/None expanding; *_FIELD_KIND (0) is always included.
-        from torch.profiler.cupti.cupti_python import ActivityKind
-        from torch.profiler.cupti.monitor import CuptiMonitor
-        from torch.profiler.cupti.records import FIELD_REGISTRY, Kernel
+        from torch.profiler._cupti.cupti_python import ActivityKind
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import FIELD_REGISTRY, Kernel
 
         m = CuptiMonitor()
         kernel = ActivityKind.CONCURRENT_KERNEL
@@ -194,7 +194,7 @@ class TestCuptiRecords(TestCase):
     def test_monitor_external_correlation_not_started(self):
         # External-correlation push/pop are no-ops until the monitor is started (no
         # subscriber yet), returning None rather than touching CUPTI's global stack.
-        from torch.profiler.cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.monitor import CuptiMonitor
 
         m = CuptiMonitor()
         self.assertFalse(m._started)
@@ -210,9 +210,9 @@ class TestCuptiMonitorCUDA(TestCase):
     def test_fence_enables_sync_transiently(self):
         # flush(sync=True) fences at a SYNCHRONIZATION sync point, enabled only for
         # the fence (even when no observer requested it) and disabled again after.
-        from torch.profiler.cupti.cupti_python import ActivityKind
-        from torch.profiler.cupti.monitor import CuptiMonitor
-        from torch.profiler.cupti.records import Kernel
+        from torch.profiler._cupti.cupti_python import ActivityKind
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
 
         sync = int(ActivityKind.SYNCHRONIZATION)
         monitor = CuptiMonitor()
@@ -234,9 +234,9 @@ class TestCuptiMonitorCUDA(TestCase):
         # End-to-end columnar collection: the monitor turns on a per-activity field
         # selection, decodes each buffer against CUPTI's captured layout, and hands
         # the observer the columns for its selection.
-        from torch.profiler.cupti.cupti_python import ActivityKind, CuptiError
-        from torch.profiler.cupti.monitor import CuptiMonitor
-        from torch.profiler.cupti.records import Kernel
+        from torch.profiler._cupti.cupti_python import ActivityKind, CuptiError
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
 
         kind = ActivityKind.CONCURRENT_KERNEL
         want = {kind: {Kernel.START, Kernel.END, Kernel.CORRELATION_ID, Kernel.NAME}}
@@ -285,9 +285,9 @@ class TestCuptiMonitorCUDA(TestCase):
         # subscriber, then hands each observer only the columns it selected. Two
         # observers on the same kind with disjoint selections each see only their own
         # slice (plus KIND id 0) and the same set of records.
-        from torch.profiler.cupti.cupti_python import ActivityKind, CuptiError
-        from torch.profiler.cupti.monitor import CuptiMonitor
-        from torch.profiler.cupti.records import Kernel
+        from torch.profiler._cupti.cupti_python import ActivityKind, CuptiError
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
 
         kernel = ActivityKind.CONCURRENT_KERNEL
         lock = threading.Lock()
@@ -347,7 +347,7 @@ class TestCuptiMonitorCUDA(TestCase):
         # (graph_node_id, start, end) numpy columns. Eager kernels share node 0.
         import numpy as np
 
-        from torch.profiler.cupti.observers.node_timer import NodeTimerObserver
+        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
 
         obs = NodeTimerObserver()
         if not obs.available:
@@ -381,8 +381,8 @@ class TestCuptiMonitorCUDA(TestCase):
         # With eager=True, eager kernels bracketed by annotate(name) resolve to that
         # region via the correlation_id -> external_id -> name join, and
         # drain_annotated() returns {name: [(start, end), ...]}.
-        from torch.profiler.cupti.observers.base import ObserverAnnotationSettings
-        from torch.profiler.cupti.observers.node_timer import NodeTimerObserver
+        from torch.profiler._cupti.observers.base import ObserverAnnotationSettings
+        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
 
         obs = NodeTimerObserver(annotations=ObserverAnnotationSettings(eager=True))
         if not obs.available:
@@ -409,7 +409,7 @@ class TestCuptiMonitorCUDA(TestCase):
     def test_node_timer_drain_annotated_unnamed_bucket(self):
         # With no annotations configured, drain_annotated() doesn't drop or raise --
         # every span lands in the "" bucket.
-        from torch.profiler.cupti.observers.node_timer import NodeTimerObserver
+        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
 
         obs = NodeTimerObserver()
         if not obs.available:

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from torch.profiler.cupti.cupti_python import ActivityKind
+from torch.profiler._cupti.cupti_python import ActivityKind
 
 
 @dataclass(frozen=True)
