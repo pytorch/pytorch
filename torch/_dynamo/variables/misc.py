@@ -2486,6 +2486,10 @@ class RandomVariable(VariableTracker):
             # shuffle's permutation depends only on the sequence length and the
             # RNG state, not on the elements, so shuffle a list of indices to
             # both advance the symbolic RNG and obtain the permutation to apply.
+            if not hasattr(seq, "items"):
+                raise AssertionError(
+                    "shuffle only supports ListVariable and TupleVariable"
+                )
             perm = list(range(len(seq.items)))
             self.random.shuffle(perm)
             tx.output.side_effects.mutation(seq)
