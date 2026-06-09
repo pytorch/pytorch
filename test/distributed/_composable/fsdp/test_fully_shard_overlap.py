@@ -305,6 +305,10 @@ class TestFullyShardOverlap(FSDPTest):
         self.assertEqual(len(rs_pgs), 1)  # one communicator for the single rank set
         for pg in param_groups:
             self.assertIsNotNone(pg.mesh_info.reduce_scatter_process_group)
+            self.assertIs(
+                pg._reduce_scatter_process_group,
+                pg.mesh_info.reduce_scatter_process_group,
+            )
             self.assertIsNot(
                 pg._reduce_scatter_process_group, pg.mesh_info.shard_process_group
             )
