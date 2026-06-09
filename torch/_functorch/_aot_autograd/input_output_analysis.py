@@ -479,21 +479,21 @@ def create_graph_signature(
 
         gradients_to_parameters = {}
         gradients_to_user_inputs = {}
-        num_params_buffers = len(params_and_buffers_flat)
         num_params = len(param_names)
+        num_params_and_buffers = len(params_and_buffers_flat)
         for backward_output_name, input_index in zip(
             backward_output_names, traced_gradient_input_indices
         ):
             if input_index < num_params:
                 gradients_to_parameters[backward_output_name] = param_names[input_index]
-            elif input_index < num_params_buffers:
+            elif input_index < num_params_and_buffers:
                 raise AssertionError(
                     f"Unexpected gradient output for buffer input at index {input_index}"
                 )
             else:
-                user_input_index = input_index - num_params_buffers
+                user_input_index = input_index - num_params_and_buffers
                 gradients_to_user_inputs[backward_output_name] = graph_input_names[
-                    num_tokens + num_params_buffers + user_input_index
+                    num_tokens + num_params_and_buffers + user_input_index
                 ]
 
         # Check that we have fully accounted for all graph outputs
@@ -502,7 +502,9 @@ def create_graph_signature(
         backward_signature = BackwardSignature(
             gradients_to_parameters,
             gradients_to_user_inputs,
-            graph_output_names[loss_index],
+            graph_output_names[
+                num_tokens + fw_metadata.num_mutated_inp_runtime_indices + loss_index
+            ],
         )
     else:
         backward_signature = None

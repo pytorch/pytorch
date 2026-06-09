@@ -640,6 +640,18 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 1, requires_grad=False)]
         self.verify_aot_autograd(f, inp, dynamic=True)
 
+    def test_to_dense_strided_tensor(self):
+        def f(a):
+            return (
+                a.to_dense(),
+                a.to_dense(masked_grad=True),
+                a.to_dense(dtype=torch.float32),
+                a.to_dense(dtype=torch.float64),
+            )
+
+        inp = [torch.randn(3, 4)]
+        self.verify_aot_autograd(f, inp, dynamic=True)
+
     def test_complex_linear(self):
         # https://github.com/pytorch/pytorch/issues/93424
         inp = [torch.randn(1, 10, 10, dtype=torch.complex64)]
@@ -5733,7 +5745,7 @@ class <lambda>(torch.nn.Module):
             str(signature.backward_signature.gradients_to_user_inputs), """{}"""
         )
         self.assertExpectedInline(
-            str(signature.backward_signature.loss_output), """getitem_3"""
+            str(signature.backward_signature.loss_output), """sum_1"""
         )
 
         # Also check the inference graph
@@ -5799,6 +5811,9 @@ class <lambda>(torch.nn.Module):
         output_node = next(n for n in fx_g.graph.nodes if n.op == "output")
         self.assertEqual(len(output_node.args[0]), 2)
         self.assertEqual(signature.parameters, ["p1", "p2"])
+        self.assertEqual(
+            signature.backward_signature.loss_output, output_node.args[0][0].name
+        )
         self.assertEqual(signature.backward_signature.gradients_to_user_inputs, {})
         self.assertEqual(
             set(signature.backward_signature.gradients_to_parameters.values()), {"p2"}
@@ -11523,10 +11538,6 @@ if not TEST_MKL:
     )
 
 symbolic_aot_autograd_failures = {
-    xfail("combinations", ""),  # aten.masked_select.default
-    xfail(
-        "index_fill", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "linalg.lstsq", ""
     ),  # aten.linalg_lstsq.default - couldn't find symbolic meta function/decomposition

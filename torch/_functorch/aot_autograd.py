@@ -1703,7 +1703,6 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             # (3) AOTAutograd creates a grad_input for every input in the forward,
             #     including None's for inputs that are not grad-requiring tensors.
             #     we don't want these in our export graph.
-            #     and there are therefore no tangents that are needed to run the joint graph.
             # This function "fixes" both of the above by removing any tangent inputs,
             # and removing pytrees from the original FX graph.
             fake_tangents = [
