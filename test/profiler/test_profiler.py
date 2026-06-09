@@ -2407,14 +2407,22 @@ class TestProfiler(TestCase):
                         )
 
         for gc_flag in [True, False]:
-            with profile(
-                activities=activities,
-                experimental_config=torch._C._profiler._ExperimentalConfig(
-                    record_python_gc_info=gc_flag
-                ),
-                with_stack=True,
-            ) as prof:
-                payload()
+            # Automatic cyclic GC can fire at any point during profiling
+            # Disable it so only explicit gc.collect() in payload() is captured
+            gc_was_enabled = gc.isenabled()
+            gc.disable()
+            try:
+                with profile(
+                    activities=activities,
+                    experimental_config=torch._C._profiler._ExperimentalConfig(
+                        record_python_gc_info=gc_flag
+                    ),
+                    with_stack=True,
+                ) as prof:
+                    payload()
+            finally:
+                if gc_was_enabled:
+                    gc.enable()
             validate_json(prof, gc_flag)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
