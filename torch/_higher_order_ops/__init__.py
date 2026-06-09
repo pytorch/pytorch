@@ -19,7 +19,14 @@ from torch._higher_order_ops.flex_attention import (
     flex_attention_backward,
 )
 from torch._higher_order_ops.foreach_map import _foreach_map, foreach_map
-from torch._higher_order_ops.gemm_epilogue import gemm_epilogue_fusion
+from torch._higher_order_ops.gemm_epilogue import (
+    addmm_epilogue,
+    baddbmm_epilogue,
+    bmm_epilogue,
+    gemm_epilogue_fusion,
+    matmul_epilogue,
+    mm_epilogue,
+)
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
@@ -60,6 +67,11 @@ __all__ = [
     "foreach_map",
     "_foreach_map",
     "gemm_epilogue_fusion",
+    "mm_epilogue",
+    "addmm_epilogue",
+    "bmm_epilogue",
+    "baddbmm_epilogue",
+    "matmul_epilogue",
     "with_effects",
     "tag_activation_checkpoint",
     "auto_functionalized",

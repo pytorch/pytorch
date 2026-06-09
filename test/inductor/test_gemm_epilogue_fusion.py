@@ -3,7 +3,14 @@
 import torch
 import torch._inductor.config as inductor_config
 from torch._C import FileCheck
-from torch._higher_order_ops import gemm_epilogue_fusion
+from torch._higher_order_ops import (
+    addmm_epilogue,
+    baddbmm_epilogue,
+    bmm_epilogue,
+    gemm_epilogue_fusion,
+    matmul_epilogue,
+    mm_epilogue,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM
@@ -62,6 +69,50 @@ class GemmEpilogueFusionTests(TestCase):
         )
 
         torch.testing.assert_close(actual, torch.baddbmm(bias, a, b).relu())
+
+    def test_convenience_wrappers_eager_match_reference(self):
+        bias = torch.randn(2, 4)
+        a = torch.randn(2, 3)
+        b = torch.randn(3, 4)
+        batch_bias = torch.randn(5, 2, 4)
+        batch_a = torch.randn(5, 2, 3)
+        batch_b = torch.randn(5, 3, 4)
+
+        torch.testing.assert_close(mm_epilogue(a, b, lambda acc: acc.relu()), (a @ b).relu())
+        torch.testing.assert_close(
+            addmm_epilogue(
+                bias, a, b, lambda acc: acc.relu(), alpha=0.5, beta=0.25
+            ),
+            torch.addmm(bias, a, b, alpha=0.5, beta=0.25).relu(),
+        )
+        torch.testing.assert_close(
+            bmm_epilogue(batch_a, batch_b, lambda acc: acc.relu()),
+            torch.bmm(batch_a, batch_b).relu(),
+        )
+        torch.testing.assert_close(
+            baddbmm_epilogue(
+                batch_bias,
+                batch_a,
+                batch_b,
+                lambda acc: acc.relu(),
+                alpha=0.5,
+                beta=0.25,
+            ),
+            torch.baddbmm(
+                batch_bias, batch_a, batch_b, alpha=0.5, beta=0.25
+            ).relu(),
+        )
+        torch.testing.assert_close(
+            matmul_epilogue(a, b, lambda acc: acc.relu()), torch.matmul(a, b).relu()
+        )
+        torch.testing.assert_close(
+            matmul_epilogue(batch_a, batch_b, lambda acc: acc.relu()),
+            torch.matmul(batch_a, batch_b).relu(),
+        )
+
+    def test_matmul_epilogue_rejects_non_gemm_shapes(self):
+        with self.assertRaisesRegex(NotImplementedError, "2D mm and 3D bmm"):
+            matmul_epilogue(torch.randn(3), torch.randn(3), lambda acc: acc.relu())
 
     def test_cutlass_backend_is_accepted(self):
         a = torch.randn(2, 3)
