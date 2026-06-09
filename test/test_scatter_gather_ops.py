@@ -28,6 +28,7 @@ if torch.get_default_dtype() is not torch.float32:
 # This test file tests scatter and gather operations,
 #   like torch.scatter and torch.gather.
 
+@torch._dynamo.config.patch(nested_graph_breaks=False)
 class TestScatterGather(TestCase):
     # Fills an index tensor with valid indices
     def _fill_indices(self, idx, dim, dim_size, elems_per_row, m, n, o, unique_indices=True):
