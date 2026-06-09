@@ -530,6 +530,7 @@ class CudagraphCachedInfo:
 
     placeholders: Sequence[PlaceholderInfo]
     stack_traces: list[str | None]
+    stack_trace_required: list[bool]
     cudagraph_fail_reasons: list[str]
 
 
@@ -543,9 +544,21 @@ class CudagraphMetadata:
     static_input_idxs: OrderedSet[int]
     mutated_input_idxs: OrderedSet[int]
     stack_traces: list[str | None]
+    stack_trace_required: list[bool]
     constants: dict[str, torch.Tensor]
     cloned_output_idxs: OrderedSet[int]
     copy_input_idxs: OrderedSet[int]
+
+
+def should_assert_cudagraph_output_stack_trace(node: object) -> bool:
+    return (
+        isinstance(node, torch.fx.Node)
+        and node.op != "placeholder"
+        and (
+            bool(node.meta.get("source_fn_stack"))
+            or bool(node.meta.get("nn_module_stack"))
+        )
+    )
 
 
 def get_partition_cudagraph_metadata(
@@ -587,14 +600,27 @@ def get_partition_cudagraph_metadata(
         partition_placeholders.append(placeholder)
 
     partition_stack_traces = []
+    partition_stack_trace_required = []
     partition_cloned_idxs: OrderedSet[int] = OrderedSet()
     for i, graph_output_idx in enumerate(partition_map.output_index_mapping):
         if graph_output_idx is not None:
             partition_stack_traces.append(metadata.stack_traces[graph_output_idx])
+            partition_stack_trace_required.append(
+                metadata.stack_trace_required[graph_output_idx]
+            )
             if graph_output_idx in metadata.cloned_output_idxs:
                 partition_cloned_idxs.add(i)
+        elif partition_map.stack_traces and i < len(partition_map.stack_traces):
+            # For partition-internal outputs, use stack traces from IR nodes
+            partition_stack_traces.append(partition_map.stack_traces[i])
+            partition_stack_trace_required.append(
+                bool(partition_map.stack_trace_required[i])
+                if i < len(partition_map.stack_trace_required)
+                else False
+            )
         else:
             partition_stack_traces.append(None)
+            partition_stack_trace_required.append(False)
 
     partition_constants = {
         name: metadata.constants[name] for name in partition_map.constant_names
@@ -605,6 +631,7 @@ def get_partition_cudagraph_metadata(
         partition_static_input_idxs,
         partition_mutated_input_idxs,
         partition_stack_traces,
+        partition_stack_trace_required,
         partition_constants,
         partition_cloned_idxs,
         partition_copy_input_idxs,
