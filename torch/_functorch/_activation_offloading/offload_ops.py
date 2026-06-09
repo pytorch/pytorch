@@ -46,6 +46,7 @@ def _get_or_create_transfer_stream(device: torch.device) -> torch.Stream:
 # buffer is never in-flight when reused.
 _pinned_pool: dict[tuple[int, torch.dtype], list[torch.Tensor]] = {}
 _pool_enabled: bool = False
+_pool_managed_ptrs: set[int] = set()
 
 
 def _maybe_pool_alloc(numel: int, dtype: torch.dtype) -> torch.Tensor:
@@ -54,13 +55,19 @@ def _maybe_pool_alloc(numel: int, dtype: torch.dtype) -> torch.Tensor:
         key = (numel, dtype)
         bucket = _pinned_pool.get(key)
         if bucket:
-            return bucket.pop()
+            buf = bucket.pop()
+            _pool_managed_ptrs.add(buf.data_ptr())
+            return buf
+        buf = torch.empty(numel, dtype=dtype, device="cpu", pin_memory=True)
+        _pool_managed_ptrs.add(buf.data_ptr())
+        return buf
     return torch.empty(numel, dtype=dtype, device="cpu", pin_memory=True)
 
 
 def _pool_free(buf: torch.Tensor) -> None:
     """Return a pinned buffer to the pool, or free its storage if pool disabled."""
-    if _pool_enabled:
+    ptr = buf.data_ptr()
+    if ptr in _pool_managed_ptrs:
         key = (buf.nelement(), buf.dtype)
         _pinned_pool.setdefault(key, []).append(buf)
     else:
@@ -72,32 +79,38 @@ def _pool_free(buf: torch.Tensor) -> None:
 def _pool_clear() -> None:
     """Free all cached pinned buffers."""
     _pinned_pool.clear()
+    _pool_managed_ptrs.clear()
 
 
 import contextlib
 
 
 @contextlib.contextmanager
-def pinned_memory_pool():
-    """Context manager that enables pinned memory pooling for offload ops.
+def pinned_memory_pool(enabled: bool = True):
+    """Context manager that controls pinned memory pooling for offload ops.
 
     Without this context manager, ``ao.offload`` allocates a fresh pinned
     buffer every call and ``ao.wait_tensor`` does not cache freed buffers.
-    Inside the context, buffers are reused across calls, avoiding the
-    ~3 ms per-tensor ``cudaHostAlloc`` overhead::
+    Inside the context with ``enabled=True``, buffers are reused across
+    calls, avoiding the ~3 ms per-tensor ``cudaHostAlloc`` overhead::
 
         with pinned_memory_pool():
             for step in range(num_steps):
                 train_step()  # ao.offload/reload reuse pooled buffers
         # pinned buffers freed here
+
+    Nestable: inner contexts save and restore the outer state.
+    Pass ``enabled=False`` to temporarily disable pooling.
     """
     global _pool_enabled
-    _pool_enabled = True
+    saved = _pool_enabled
+    _pool_enabled = enabled
     try:
         yield
     finally:
-        _pool_clear()
-        _pool_enabled = False
+        if not saved:
+            _pool_clear()
+        _pool_enabled = saved
 
 
 # --- Wait registry: maps data_ptr() -> (completion_event, device) ---
