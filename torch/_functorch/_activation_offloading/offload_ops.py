@@ -178,8 +178,8 @@ def _(tensor: torch.Tensor) -> torch.Tensor:
 def reload(
     tensor: torch.Tensor,
     device: torch.device,
-    original_size: list[int],
-    original_stride: list[int],
+    original_size: list[int] | None = None,
+    original_stride: list[int] | None = None,
 ) -> torch.Tensor:
     """Async reload a CPU tensor to GPU on the dedicated transfer stream.
 
@@ -189,13 +189,14 @@ def reload(
 
     ``original_size`` and ``original_stride`` restore the GPU tensor's
     original layout (which may be non-contiguous, e.g. from transpose).
+    When None, the tensor's own size/stride are used.
     """
+    size = original_size if original_size is not None else list(tensor.shape)
+    stride = original_stride if original_stride is not None else list(tensor.stride())
     transfer_stream = _get_or_create_transfer_stream(device)
     current_stream = torch.accelerator.current_stream(device)
 
-    result = torch.empty_strided(
-        original_size, original_stride, dtype=tensor.dtype, device=device
-    )
+    result = torch.empty_strided(size, stride, dtype=tensor.dtype, device=device)
     completion_event = _register_wait(result, device)
 
     transfer_stream.wait_stream(current_stream)
@@ -212,12 +213,12 @@ def reload(
 def _(
     tensor: torch.Tensor,
     device: torch.device,
-    original_size: list[int],
-    original_stride: list[int],
+    original_size: list[int] | None = None,
+    original_stride: list[int] | None = None,
 ) -> torch.Tensor:
-    return torch.empty_strided(
-        original_size, original_stride, dtype=tensor.dtype, device=device
-    )
+    size = original_size if original_size is not None else list(tensor.shape)
+    stride = original_stride if original_stride is not None else list(tensor.stride())
+    return torch.empty_strided(size, stride, dtype=tensor.dtype, device=device)
 
 
 # ao::wait_tensor is defined via torch.library with an aliasing schema so the

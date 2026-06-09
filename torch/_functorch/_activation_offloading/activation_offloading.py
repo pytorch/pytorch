@@ -411,9 +411,6 @@ def choose_offload_sets(
             node, fwd_outputs, model_outputs, static_lifetime_input_nodes
         ):
             node.meta["saved_for_offloading"] = True
-            node.meta["original_device"] = node.meta["val"].device
-            node.meta["original_size"] = tuple(node.meta["val"].size())
-            node.meta["original_stride"] = tuple(node.meta["val"].stride())
             should_perform_offloading = True
 
     return should_perform_offloading
