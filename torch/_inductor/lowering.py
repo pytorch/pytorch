@@ -50,7 +50,6 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_unbacked_symbols,
     resolve_unbacked_bindings,
-    SymTypes,
 )
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
@@ -2958,7 +2957,7 @@ make_fallback(torch.ops.streams.synchronize_device.default)
 def rand(*args, **kwargs):
     if kwargs.get("generator") is not None:
         return fallback_rand_generator(*args, **kwargs)
-    elif config.fallback_random:
+    elif config.fallback_random or kwargs.get("pin_memory"):
         kwargs.pop("generator", None)
         return fallback_rand_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
@@ -2968,7 +2967,7 @@ def rand(*args, **kwargs):
 def randn(*args, **kwargs):
     if kwargs.get("generator") is not None:
         return fallback_randn_generator(*args, **kwargs)
-    elif config.fallback_random:
+    elif config.fallback_random or kwargs.get("pin_memory"):
         kwargs.pop("generator", None)
         return fallback_randn_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
@@ -3590,7 +3589,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
 # WIP
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
-make_fallback(aten.adaptive_max_pool3d)  # @isuruf
+make_fallback(aten.adaptive_max_pool3d, override_decomp=True)
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 
 
@@ -3831,8 +3830,14 @@ def copy(self, src, non_blocking=False):
 
     if self.get_size() != src.get_size():
         out = expand(x, self.get_size())
-        return clone(out)
-    return clone(x)
+        result = clone(out)
+    else:
+        result = clone(x)
+
+    self_layout = self.maybe_get_layout()
+    if self_layout is not None and self_layout.is_pinned:
+        _realize_as_pinned(result)
+    return result
 
 
 @register_lowering(aten.clone)
@@ -3846,6 +3851,11 @@ def clone(x, *, memory_format=None):
         inner_fn=x.make_loader(),
         ranges=list(x.get_size()),
     )
+
+
+def _realize_as_pinned(result):
+    result.realize()
+    result.data.data.get_layout().is_pinned = True
 
 
 def clone_preserve_reinterpret_view(x):
@@ -3869,8 +3879,18 @@ def clone_preserve_reinterpret_view(x):
     return x
 
 
+def lift_fresh_copy(x):
+    result = clone(x)
+    input_layout = x.maybe_get_layout()
+    if input_layout is not None and input_layout.is_pinned:
+        # torch.tensor(..., pin_memory=True) constants reach Inductor as a
+        # pinned constant followed by lift_fresh_copy.
+        _realize_as_pinned(result)
+    return result
+
+
 if hasattr(aten, "lift_fresh_copy"):
-    register_lowering(aten.lift_fresh_copy)(clone)
+    register_lowering(aten.lift_fresh_copy)(lift_fresh_copy)
 
 
 @register_lowering(prims.iota)
@@ -4037,7 +4057,6 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     if layout == torch.jagged:
         layout = torch.strided
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
-    assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
     else:
@@ -4081,15 +4100,20 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 
     else:
         return V.graph.add_tensor_constant(
-            torch.tensor(data, dtype=dtype, device=device)
+            torch.tensor(
+                data, dtype=dtype, device=device, pin_memory=pin_memory or False
+            )
         )
 
-    return Pointwise.create(
+    result = Pointwise.create(
         device=decode_device(device),
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=ranges,
     )
+    if pin_memory:
+        _realize_as_pinned(result)
+    return result
 
 
 @register_lowering(torch.as_tensor)
@@ -4232,9 +4256,7 @@ def tensor_constructor(fill_value):
         full_pointwise = _full(fill_value, decode_device(device), dtype, size)
 
         if pin_memory:
-            # Realize the buffer
-            full_pointwise.realize()
-            full_pointwise.data.data.get_layout().is_pinned = True
+            _realize_as_pinned(full_pointwise)
 
         return full_pointwise
 
@@ -8577,31 +8599,8 @@ def sym_numel(a):
     return a.get_numel()
 
 
-def _unwrap_symbolic_magic_arg(x):
-    if isinstance(x, SymTypes):
-        return x.node.expr
-    if isinstance(x, (int, float, bool)):
-        return sympy.sympify(x)
-    return x
-
-
 for method, func in magic_methods.items():
-
-    @register_lowering(method_to_operator(method))
-    def wrapped(*args, _func=func, **kwargs):
-        node = V.graph.current_node
-        meta_val = node.meta.get("val") if node is not None else None
-        if isinstance(meta_val, SymTypes):
-            return meta_val.node.expr
-        if any(
-            isinstance(x, (SymTypes, sympy.Basic))
-            for x in itertools.chain(args, kwargs.values())
-        ):
-            return _func(
-                *(_unwrap_symbolic_magic_arg(x) for x in args),
-                **{k: _unwrap_symbolic_magic_arg(v) for k, v in kwargs.items()},
-            )
-        return _func(*args, **kwargs)
+    register_lowering(method_to_operator(method))(func)  # type: ignore[arg-type]
 
 
 @register_lowering(torch.sym_sum)
@@ -8925,6 +8924,47 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
             if op_name is None:
                 raise AssertionError("expected: op_name is not None")
             V.graph.additional_buffer_deps[op_name].add(dep_name)
+
+    # For void ops (e.g. wait_stream) that don't produce tensor outputs,
+    # passthrough args returned by control_deps are the same IR nodes as
+    # their inputs. This means downstream consumers have no scheduling
+    # dependency on the void op. Create MutationOutput entries to force
+    # the scheduler to order subsequent readers after the void op.
+    # Only apply this for wait_stream, which needs forward ordering on the
+    # waiting stream. Other sync ops (synchronize_stream, record_event) are
+    # full barriers or have event-based cross-sync tracking.
+    void_ops = [
+        op
+        for op in new_ops
+        if isinstance(op, ir.Buffer)
+        and op.name is not None
+        and isinstance(op.layout, ir.NoneLayout)
+        and not isinstance(op, ir.MutationOutput)
+    ]
+    if void_ops and args:
+        # Check if the subgraph contains a wait_stream call
+        has_wait_stream = any(
+            n.op == "call_function"
+            and n.target is torch.ops.streams.wait_stream.default
+            for n in subgraph_fn.graph_module.graph.nodes
+        )
+        if has_wait_stream:
+            for void_op in void_ops:
+                if not isinstance(void_op, ir.ExternKernel):
+                    raise AssertionError(
+                        f"expected void_op to be ir.ExternKernel, got {type(void_op)}"
+                    )
+                for arg in args:
+                    for arg_leaf in pytree.tree_leaves(arg):
+                        if not isinstance(arg_leaf, IRNode):
+                            continue
+                        device = arg_leaf.get_device()
+                        if device is None:
+                            continue
+                        mut_out = ir.MutationOutput(
+                            ir.NoneLayout(device=device), arg_leaf, void_op
+                        )
+                        void_op.mutation_outputs.append(mut_out)
 
     return output
 

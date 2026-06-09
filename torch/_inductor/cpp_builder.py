@@ -141,8 +141,8 @@ def check_compiler_exist_windows(compiler: str) -> None:
     """
     try:
         subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
-    except FileNotFoundError as exc:
-        raise RuntimeError(f"Compiler: {compiler} is not found.") from exc
+    except FileNotFoundError as e:
+        raise exc.InvalidCxxCompiler(compiler) from e
     except subprocess.SubprocessError:
         # Expected that some compiler(clang, clang++) is exist, but they not support `/help` args.
         pass
@@ -915,7 +915,7 @@ def _get_ffast_math_flags() -> list[str]:
     if _IS_WINDOWS:
         flags = []
     else:
-        # ffast-math is equivalent to these flags as in
+        # This starts from the flags implied by -ffast-math, as in
         # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
         # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
         # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
@@ -926,12 +926,15 @@ def _get_ffast_math_flags() -> list[str]:
             "funsafe-math-optimizations",
             "ffinite-math-only",
             "fno-signed-zeros",
-            "fno-math-errno",
         ]
 
         flags.append("fno-finite-math-only")
         if not config.cpp.enable_unsafe_math_opt_flag:
             flags.append("fno-unsafe-math-optimizations")
+        # Keep errno-preserving libm semantics.  With -fno-math-errno, GCC can
+        # inline/transform libm call pairs like sin(atan(x)) in ways that do not
+        # preserve NaN values (see https://github.com/pytorch/pytorch/issues/143978).
+        flags.append("fmath-errno")
         flags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
 
         if is_gcc():
@@ -2420,7 +2423,9 @@ class CppBuilder:
             else:
                 self._libraries_args += f"-l{lib} "
 
-        for passthrough_arg in BuildOption.get_passthrough_args():
+        for passthrough_arg in self._stage_passthrough_paths(
+            BuildOption.get_passthrough_args()
+        ):
             self._passthrough_parameters_args += f"{passthrough_arg} "
 
     def get_command_line(self) -> str:
@@ -2471,6 +2476,28 @@ class CppBuilder:
 
     def get_target_file_path(self) -> str:
         return normalize_path_separator(self._target_file)
+
+    def _stage_passthrough_paths(self, args: list[str]) -> list[str]:
+        """For fbcode remote builds, treat any absolute file path that appears
+        as a passthrough arg (e.g. precompiled .so kernels passed in via
+        ``extra_flags``) the same way as a source: stage the file into the
+        remote build sandbox and rewrite the command to reference it by
+        basename. Without this the linker is handed a path that only exists on
+        the submitting host and the remote build fails to find the file."""
+        if not (config.is_fbcode() and self._use_relative_path):
+            return args
+        rewritten = []
+        for arg in args:
+            tokens = shlex.split(arg)
+            new_tokens = []
+            for tok in tokens:
+                if os.path.isabs(tok) and os.path.isfile(tok):
+                    self._orig_source_paths.append(tok)
+                    new_tokens.append(os.path.basename(tok))
+                else:
+                    new_tokens.append(tok)
+            rewritten.append(" ".join(shlex.quote(t) for t in new_tokens))
+        return rewritten
 
     def build_fbcode_re(
         self,
