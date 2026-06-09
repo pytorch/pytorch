@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from typing import Any, TYPE_CHECKING, TypeVar
 
@@ -16,7 +16,7 @@ from .utils import is_using_cudagraph_partition
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence, Set as AbstractSet
+    from collections.abc import Set as AbstractSet
 
     from torch._inductor.output_code import OutputCode
 
@@ -171,6 +171,8 @@ class WrappedFunction:
     constants: tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
+    cloned_output_idxs: Sequence[int]
+    copy_input_idxs: Sequence[int] = ()
 
 
 def get_mutating_use_stack_trace_from_node(
@@ -541,6 +543,8 @@ class CudagraphMetadata:
     mutated_input_idxs: OrderedSet[int]
     stack_traces: list[str | None]
     constants: dict[str, torch.Tensor]
+    cloned_output_idxs: OrderedSet[int]
+    copy_input_idxs: OrderedSet[int]
 
 
 def get_partition_cudagraph_metadata(
@@ -556,6 +560,7 @@ def get_partition_cudagraph_metadata(
     partition_placeholders = []
     partition_static_input_idxs: OrderedSet[int] = OrderedSet()
     partition_mutated_input_idxs: OrderedSet[int] = OrderedSet()
+    partition_copy_input_idxs: OrderedSet[int] = OrderedSet()
     for partition_input_idx, graph_input_idx in enumerate(
         partition_map.input_index_mapping
     ):
@@ -564,6 +569,9 @@ def get_partition_cudagraph_metadata(
 
         if graph_input_idx in metadata.mutated_input_idxs:
             partition_mutated_input_idxs.add(partition_input_idx)
+
+        if graph_input_idx in metadata.copy_input_idxs:
+            partition_copy_input_idxs.add(partition_input_idx)
 
         if graph_input_idx is not None:
             placeholder = metadata.placeholders[graph_input_idx]
@@ -578,9 +586,12 @@ def get_partition_cudagraph_metadata(
         partition_placeholders.append(placeholder)
 
     partition_stack_traces = []
-    for graph_output_idx in partition_map.output_index_mapping:
+    partition_cloned_idxs: OrderedSet[int] = OrderedSet()
+    for i, graph_output_idx in enumerate(partition_map.output_index_mapping):
         if graph_output_idx is not None:
             partition_stack_traces.append(metadata.stack_traces[graph_output_idx])
+            if graph_output_idx in metadata.cloned_output_idxs:
+                partition_cloned_idxs.add(i)
         else:
             partition_stack_traces.append(None)
 
@@ -594,7 +605,86 @@ def get_partition_cudagraph_metadata(
         partition_mutated_input_idxs,
         partition_stack_traces,
         partition_constants,
+        partition_cloned_idxs,
+        partition_copy_input_idxs,
     )
+
+
+def expand_cloned_output_idxs(
+    outputs: Sequence[object],
+    cloned_output_idxs: Iterable[int],
+) -> OrderedSet[int]:
+    """
+    Promote cloned outputs to whole returned-storage alias groups.
+
+    If one returned view is cloned out of cudagraph memory, all returned tensors
+    sharing that storage must be cloned from the same storage copy to preserve
+    output-output aliasing.
+    """
+    cloned_storages = OrderedSet[int]()
+    for idx in cloned_output_idxs:
+        if idx >= len(outputs):
+            continue
+        output = outputs[idx]
+        if isinstance(output, torch.Tensor) and torch._C._has_storage(output):
+            cloned_storages.add(output.untyped_storage()._cdata)
+
+    expanded = OrderedSet[int]()
+    if not cloned_storages:
+        return expanded
+
+    for idx, output in enumerate(outputs):
+        if (
+            isinstance(output, torch.Tensor)
+            and torch._C._has_storage(output)
+            and output.untyped_storage()._cdata in cloned_storages
+        ):
+            expanded.add(idx)
+    return expanded
+
+
+def _tensor_metadata_for_cudagraph_alias_clone(x: torch.Tensor) -> dict[str, object]:
+    return {
+        "nbytes": x.untyped_storage().nbytes(),
+        "data_ptr": x.untyped_storage().data_ptr(),
+        "size": x.shape,
+        "stride": x.stride(),
+        "dtype": x.dtype,
+        "device": x.device,
+        "storage_offset": x.storage_offset(),
+    }
+
+
+def clone_outputs_preserving_aliases(
+    outputs: Sequence[object],
+    cloned_output_idxs: Iterable[int],
+) -> Sequence[object]:
+    expanded_idxs = expand_cloned_output_idxs(outputs, cloned_output_idxs)
+    if not expanded_idxs:
+        return outputs
+
+    result = list(outputs)
+    cloned_storages: dict[int, torch.UntypedStorage] = {}
+    for idx in expanded_idxs:
+        output = outputs[idx]
+        assert isinstance(output, torch.Tensor)
+        storage = output.untyped_storage()
+        storage_cdata = storage._cdata
+        if storage_cdata not in cloned_storages:
+            nbytes = storage.nbytes()
+            storage_copy = torch.empty(
+                (nbytes,), dtype=torch.uint8, device=output.device
+            ).untyped_storage()
+            if nbytes:
+                storage_copy[:nbytes].copy_(storage[:nbytes])
+            cloned_storages[storage_cdata] = storage_copy
+
+        result[idx] = torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata(
+            _tensor_metadata_for_cudagraph_alias_clone(output),
+            cloned_storages[storage_cdata],  # type: ignore[arg-type]
+        )
+
+    return tuple(result) if isinstance(outputs, tuple) else result
 
 
 def collect_cuda_data_ptrs(obj: object) -> OrderedSet[int]:

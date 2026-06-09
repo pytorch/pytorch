@@ -67,9 +67,11 @@ from torch.fx.node import (
     Argument,
     Target,
 )
+from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn import Module
 from torch.overrides import TorchFunctionMode
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     _disable_infra_mode,
     _push_mode,
@@ -1660,6 +1662,100 @@ def _make_temp_remove_mode_context_manager(
     return context_manager_fn
 
 
+def _get_cudagraph_op(name: str) -> Any | None:
+    return getattr(
+        getattr(torch.ops, "aten_cudagraphs", None),
+        name,
+        None,
+    )
+
+
+def _normalize_cudagraph_marker_kwargs(op: torch.fx.Node) -> dict[str, Any]:
+    target = typing.cast(Callable[..., Any], op.target)
+    normalized = normalize_function(
+        target, args=op.args, kwargs=op.kwargs, normalize_to_only_use_kwargs=True
+    )
+    if normalized is None:
+        raise RuntimeError(f"Unable to normalize cudagraph marker {op.target}")
+    _, new_kwargs = normalized
+    return new_kwargs
+
+
+def mark_cudagraph_meta(graph: torch.fx.Graph) -> None:
+    exclude_op = _get_cudagraph_op("exclude_from_cudagraphs")
+    copy_op = _get_cudagraph_op("copy_to_cudagraphs")
+
+    output_clone_markers = (
+        []
+        if exclude_op is None
+        else graph.find_nodes(
+            op="call_function",
+            target=exclude_op.default,
+        )
+    )
+    input_copy_markers = (
+        []
+        if copy_op is None
+        else graph.find_nodes(
+            op="call_function",
+            target=copy_op.default,
+        )
+    )
+    cudagraph_markers = output_clone_markers + input_copy_markers
+    if not cudagraph_markers:
+        return
+
+    from torch._inductor.fx_utils import get_node_storage
+
+    cloned_metas = OrderedSet()
+    copy_input_storages = OrderedSet()
+
+    for op in output_clone_markers:
+        new_kwargs = _normalize_cudagraph_marker_kwargs(op)
+        storage = get_node_storage(new_kwargs["inp"])
+        if storage is None:
+            continue
+
+        if new_kwargs["clone"]:
+            cloned_metas.add(storage)
+
+    for op in input_copy_markers:
+        new_kwargs = _normalize_cudagraph_marker_kwargs(op)
+        storage = get_node_storage(new_kwargs["inp"])
+        if storage is not None:
+            copy_input_storages.add(storage)
+
+    output_nodes = graph.find_nodes(op="output")
+    torch._check(len(output_nodes) == 1)
+
+    output_args = output_nodes[0].args[0]
+    if not isinstance(output_args, (tuple, list)):
+        output_args = (output_args,)
+
+    cloned_idxs: OrderedSet[int] = OrderedSet()
+    copy_input_idxs: OrderedSet[int] = OrderedSet()
+
+    for i, inp in enumerate(output_args):
+        if not isinstance(inp, torch.fx.Node):
+            continue
+        stor = get_node_storage(inp)
+        if stor in cloned_metas:
+            cloned_idxs.add(i)
+
+    for i, placeholder in enumerate(graph.find_nodes(op="placeholder")):
+        storage = get_node_storage(placeholder)
+        if storage in copy_input_storages:
+            copy_input_idxs.add(i)
+
+    if cloned_idxs:
+        output_nodes[0].meta["cloned_idxs"] = cloned_idxs
+    if copy_input_idxs:
+        output_nodes[0].meta["cudagraph_copy_input_idxs"] = copy_input_idxs
+
+    for n in cudagraph_markers:
+        n.graph.erase_node(n)
+
+
 @torch._disable_dynamo
 def dispatch_trace(
     root: Module | Callable[..., Any],
@@ -1697,6 +1793,7 @@ def dispatch_trace(
         # No idea, just assume it's not OK
         return True
 
+    mark_cudagraph_meta(graph)
     graph.eliminate_dead_code(impure_pred)
     from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
 
