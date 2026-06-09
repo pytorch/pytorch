@@ -486,6 +486,7 @@ def exception_handler(
 FRAME_COUNTER = 0
 FRAME_COMPILE_COUNTER: typing.Counter[int | FrameStateSizeEntry] = collections.Counter()
 _cprofile_tls = threading.local()
+_cprofile_lock = threading.RLock()
 
 
 def _is_python_profiler_active() -> bool:
@@ -517,32 +518,44 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
                 f"{func.__name__}_{str(trace_id).replace('/', '_')}.profile",
             )
         )
-        active_profiler = getattr(_cprofile_tls, "profiler", None)
-        if active_profiler is None and _is_python_profiler_active():
+        if not _cprofile_lock.acquire(blocking=False):
             log.warning(
-                "Skipping cProfile for %s trace id [%s] because another Python "
-                "profiling tool is already active",
+                "Skipping cProfile for %s trace id [%s] because another Dynamo "
+                "cProfile wrapper is already active",
                 func.__name__,
                 trace_id,
             )
             return func(*args, **kwargs)
 
-        if active_profiler is not None:
-            active_profiler.disable()
-
-        prof = cProfile.Profile()
         try:
-            start_ts = time.time()
-            _cprofile_tls.profiler = prof
-            # pyrefly: ignore [bad-argument-type]
-            retval = prof.runcall(func, *args, **kwargs)
-            profile_latency = time.time() - start_ts
-        finally:
+            active_profiler = getattr(_cprofile_tls, "profiler", None)
+            if active_profiler is None and _is_python_profiler_active():
+                log.warning(
+                    "Skipping cProfile for %s trace id [%s] because another Python "
+                    "profiling tool is already active",
+                    func.__name__,
+                    trace_id,
+                )
+                return func(*args, **kwargs)
+
             if active_profiler is not None:
-                _cprofile_tls.profiler = active_profiler
-                active_profiler.enable()
-            else:
-                del _cprofile_tls.profiler
+                active_profiler.disable()
+
+            prof = cProfile.Profile()
+            try:
+                start_ts = time.time()
+                _cprofile_tls.profiler = prof
+                # pyrefly: ignore [bad-argument-type]
+                retval = prof.runcall(func, *args, **kwargs)
+                profile_latency = time.time() - start_ts
+            finally:
+                if active_profiler is not None:
+                    _cprofile_tls.profiler = active_profiler
+                    active_profiler.enable()
+                else:
+                    del _cprofile_tls.profiler
+        finally:
+            _cprofile_lock.release()
         log.warning(
             "### Cprofile for %s trace id [%s] took %.3f seconds ###",
             func.__name__,

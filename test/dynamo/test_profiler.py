@@ -88,6 +88,85 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             self.assertGreater(inner_stats.total_calls, 0)
             self.assertGreater(outer_stats.total_calls, 0)
 
+    def test_compile_cprofile_serializes_concurrent_wrappers(self):
+        second_finished = threading.Event()
+
+        class FakeProfile:
+            active = False
+            active_lock = threading.Lock()
+            entered = threading.Event()
+
+            def runcall(self, func, /, *args, **kwargs):
+                with FakeProfile.active_lock:
+                    if FakeProfile.active:
+                        raise ValueError("Another profiling tool is already active")
+                    FakeProfile.active = True
+                    FakeProfile.entered.set()
+
+                try:
+                    if not second_finished.wait(timeout=5):
+                        raise AssertionError("Timed out waiting for contending wrapper")
+                    return func(*args, **kwargs)
+                finally:
+                    with FakeProfile.active_lock:
+                        FakeProfile.active = False
+
+            def dump_stats(self, filename):
+                pass
+
+        class FakeStats:
+            total_calls = 1
+
+            def __init__(self, prof):
+                pass
+
+            def sort_stats(self, sort_key):
+                return self
+
+            def print_stats(self, count):
+                pass
+
+        def fn():
+            if threading.current_thread().name == "second":
+                second_finished.set()
+            return threading.current_thread().name
+
+        wrapped = convert_frame.cprofile_wrapper(fn)
+        results = []
+        errors = []
+
+        def run(frame_id):
+            try:
+                with compile_context(
+                    CompileContext(CompileId(frame_id=frame_id, frame_compile_id=0))
+                ):
+                    results.append(wrapped())
+            except Exception as exc:
+                errors.append(exc)
+
+        with (
+            patch.object(convert_frame.cProfile, "Profile", FakeProfile),
+            patch.object(convert_frame.pstats, "Stats", FakeStats),
+            patch.object(
+                convert_frame.subprocess, "Popen", side_effect=FileNotFoundError
+            ),
+            patch.object(
+                convert_frame, "maybe_upload_prof_stats_to_manifold", return_value=None
+            ),
+        ):
+            first = threading.Thread(target=run, args=(0,), name="first")
+            second = threading.Thread(target=run, args=(1,), name="second")
+            first.start()
+            self.assertTrue(FakeProfile.entered.wait(timeout=5))
+            second.start()
+            first.join(timeout=5)
+            second.join(timeout=5)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(errors, [])
+        self.assertCountEqual(results, ["first", "second"])
+
     def test_dynamo_timed_profiling_isolated(self):
         # dynamo_timed functions should appear in profile traces.
         def inner_fn(x):
