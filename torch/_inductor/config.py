@@ -1318,6 +1318,10 @@ class aten_distributed_optimizations:
     # With the empirical profiles this should be 1.0; kept for manual tuning.
     pre_bucketing_fsdp_collectives_saturation_calibration_multiplier: float = 1.0
 
+    # Decompose collective patterns when mathematically equivalent local
+    # computation exists. See torch/_inductor/fx_passes/decomp_comms.py.
+    allow_comms_decompositions: bool = False
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
@@ -1405,6 +1409,16 @@ strict_static_cuda_launcher: bool = (
 # Alias of strict_static_cuda_launcher, used by both CUDA/XPU.
 strict_static_triton_launcher: bool = Config(
     alias="torch._inductor.config.strict_static_cuda_launcher"
+)
+
+# Retain raw cubin bytes on statically-launchable Triton kernels when caching
+# them, instead of dropping them and relying on the per-kernel cubin files left
+# in the local Triton cache dir. Makes a cached CachingAutotuner portable across
+# machines (e.g. a remote cache restored on a cold container), where
+# reload_cubin_path can rehydrate from the retained bytes instead of forcing a
+# recompile. Trades cache size for portability.
+keep_static_cubin_raw: bool = (
+    os.environ.get("TORCHINDUCTOR_KEEP_STATIC_CUBIN_RAW", "0") == "1"
 )
 
 # Use _FastCudaLauncher (vectorcall C extension) instead of
@@ -2626,7 +2640,7 @@ class rocm:
     # reducing autotuning cost while keeping runtime within ~5% of full
     # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
     # toggling at runtime via config.patch has no effect because the rocm-origami
-    # module import is cached at template_heuristics/triton.py load time.
+    # module import is cached at heuristics/template/triton.py load time.
     #
     # Active only when all of these hold:
     #   - IS_ROCM (torch.version.hip is not None)
