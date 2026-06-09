@@ -681,19 +681,21 @@ def meta_select(
         # we assign a new data-dependent symbol for the storage offset.
         new_storage_offset = fake_mode.shape_env.create_unbacked_symint()
         # The data-dependent index is consumed into the opaque offset above and
-        # never appears in the output, so its unbacked symbol has no binding site.
-        # This is the same situation the tensor_split decomposition and dynamo's
-        # ops_consuming_unbacked_scalars handle by wrapping the producing .item()
-        # in ignore_fresh_unbacked_symbols(). Here the index is created upstream
-        # (item() is fused into tensor indexing), so rather than suppressing at the
-        # creation site we discharge the already-pending symbol, as device_mesh's
-        # _select_split_tensor does. We can't torch._check its sign: select accepts
-        # negative indices.
+        # never appears in the output. When the index symbol was created with no
+        # binding site of its own -- e.g. dynamo collapses ``x[:, t]`` into a
+        # single getitem node, so the item() fused into C++ indexing never gets
+        # its own _local_scalar_dense node -- it is left as an unbound pending
+        # symbol. Discharge only such pending symbols; an index whose symbol is
+        # bound elsewhere (an explicit .item() node, as make_fx emits) is not
+        # pending here and is left untouched. We can't torch._check its sign:
+        # select accepts negative indices.
         if isinstance(index, torch.SymInt):
             from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
+            pending = fake_mode.shape_env.pending_fresh_unbacked_symbols
             for s in free_unbacked_symbols(index):
-                fake_mode.shape_env.ignorable_fresh_unbacked_symbols.append(s)
+                if s in pending:
+                    fake_mode.shape_env.ignorable_fresh_unbacked_symbols.append(s)
 
     del new_size[dim]
     del new_stride[dim]
@@ -732,15 +734,16 @@ def meta_select_copy(
             f"{list(self.size())} at dimension {dim}",
         )
 
-    # Unlike select, select_copy returns a contiguous copy, so it has no
-    # data-dependent storage offset to reason about. The index is still consumed
-    # without appearing in the output, so discharge its unbacked symbol the same
-    # way meta_select does.
+    # select_copy returns a contiguous copy, so the index never appears in the
+    # output. Discharge an unbound (pending) index symbol the same way and for
+    # the same reason as meta_select.
     if isinstance(index, torch.SymInt) and fake_mode.shape_env is not None:
         from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
+        pending = fake_mode.shape_env.pending_fresh_unbacked_symbols
         for s in free_unbacked_symbols(index):
-            fake_mode.shape_env.ignorable_fresh_unbacked_symbols.append(s)
+            if s in pending:
+                fake_mode.shape_env.ignorable_fresh_unbacked_symbols.append(s)
 
     new_size = list(self.size())
     del new_size[dim]
