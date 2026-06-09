@@ -8550,7 +8550,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                     "QUACK grouped_mm epilogue currently supports only 2D/3D "
                     "and m-major/contiguous 2D/2D grouped_mm with offsets and no bias"
                 )
-        epilogue_key, epilogue_source, epilogue_arg_placeholders, local_reduce = (
+        epilogue_key, epilogue_source, epilogue_arg_placeholders, local_reduce, aux_output = (
             materialize_quack_epilogue(subgraph.graph_module)
         )
         gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
@@ -8594,6 +8594,19 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 raise NotImplementedError(
                     "QUACK local-reduce tuple epilogues do not support captured tensor reads yet"
                 )
+        if aux_output is not None:
+            if gemm_op != torch.ops.aten.mm.default or len(size) != 2:
+                raise NotImplementedError(
+                    "QUACK generic aux tuple epilogues currently support only 2D aten.mm"
+                )
+            if epilogue_arg_indices:
+                raise NotImplementedError(
+                    "QUACK generic aux tuple epilogues do not support captured tensor reads yet"
+                )
+            if local_reduce is not None:
+                raise NotImplementedError(
+                    "QUACK generic aux tuple epilogues cannot be combined with local reduce"
+                )
         if epilogue_arg_indices:
             if gemm_op != torch.ops.aten.mm.default or len(epilogue_arg_indices) != 1:
                 raise NotImplementedError(
@@ -8608,6 +8621,8 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 )
         local_reduce_out = None
         local_reduce_out_index = None
+        aux_out = None
+        aux_out_index = None
         mutated_inputs = []
         if local_reduce is not None and not local_reduce.feeds_main:
             m, n = size
@@ -8630,6 +8645,18 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 dtype=local_reduce_dtype,
                 device=mat1.get_device_or_error(),
             )
+        if aux_output is not None:
+            aux_val = aux_output.output_value.meta.get("val")
+            if aux_val is None:
+                raise NotImplementedError(
+                    "QUACK generic aux tuple epilogues require fake tensor metadata"
+                )
+            aux_out = empty_strided(
+                list(aux_val.shape),
+                list(aux_val.stride()),
+                dtype=aux_val.dtype,
+                device=mat1.get_device_or_error(),
+            )
 
         input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
         if local_reduce_out is not None:
@@ -8637,6 +8664,11 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             local_reduce_out_index = len(input_nodes)
             input_nodes.append(local_reduce_node)
             mutated_inputs.append(local_reduce_node)
+        if aux_out is not None:
+            aux_node = ir.TemplateBuffer.realize_template_input(aux_out)
+            aux_out_index = len(input_nodes)
+            input_nodes.append(aux_node)
+            mutated_inputs.append(aux_node)
         choices: list[Any] = []
         quack_gemm_epilogue_template.maybe_append_choice(
             choices,
@@ -8650,6 +8682,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             out_dtype=gemm_kwargs.get("out_dtype"),
             epilogue_arg_indices=epilogue_arg_indices,
             local_reduce_out_index=local_reduce_out_index,
+            aux_out_index=aux_out_index,
             local_reduce_group=local_reduce.group_size if local_reduce is not None else None,
             local_reduce_dim=local_reduce.dim if local_reduce is not None else None,
             local_reduce_feeds_main=local_reduce.feeds_main if local_reduce is not None else False,
@@ -8660,6 +8693,8 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         )
         if local_reduce_out is not None:
             return (node, local_reduce_out)
+        if aux_out is not None:
+            return (node, aux_out)
         return (node,)
 
     fusible_template_backends = OrderedSet(["TRITON", "CUTLASS"])

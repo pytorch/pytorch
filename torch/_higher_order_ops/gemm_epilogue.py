@@ -166,11 +166,17 @@ class QuackSumMatch:
 
 
 @dataclass(frozen=True)
+class QuackAuxOutputInfo:
+    output_value: torch.fx.Node
+
+
+@dataclass(frozen=True)
 class QuackOutputPlan:
     output_value: Any
     skip_nodes: frozenset[torch.fx.Node]
     local_reduce: QuackLocalReduceInfo | None
     local_norm: QuackLocalNormInfo | None
+    aux_output: QuackAuxOutputInfo | None
 
 
 @dataclass(frozen=True)
@@ -610,6 +616,7 @@ def _match_quack_local_m_norm(
 
 def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOutputPlan:
     local_reduce = None
+    aux_output = None
     local_norm = _match_quack_local_n_norm(output_value, mm_node) or _match_quack_local_m_norm(
         output_value, mm_node
     )
@@ -636,19 +643,33 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
         if len(output_value) == 1:
             output_value = output_value[0]
         elif len(output_value) == 2:
+            aux_value = output_value[1]
             local_reduce = _match_quack_local_n_reduce(
-                output_value[1], mm_node
-            ) or _match_quack_local_m_reduce(output_value[1], mm_node)
-            if local_reduce is None or local_reduce.keepdim:
+                aux_value, mm_node
+            ) or _match_quack_local_m_reduce(aux_value, mm_node)
+            if local_reduce is not None and not local_reduce.keepdim:
+                skip_nodes.update((local_reduce.view_node, local_reduce.reduce_node))
+                if local_reduce.source_node is not mm_node:
+                    skip_nodes.add(local_reduce.source_node)
+            elif isinstance(aux_value, torch.fx.Node):
+                aux_meta = aux_value.meta.get("val")
+                mm_meta = mm_node.meta.get("val")
+                if aux_meta is None or mm_meta is None:
+                    raise NotImplementedError(
+                        "QUACK generic aux tuple epilogues require fake tensor metadata"
+                    )
+                if tuple(aux_meta.shape) != tuple(mm_meta.shape):
+                    raise NotImplementedError(
+                        "QUACK generic aux tuple epilogues currently require the aux output "
+                        "shape to match the GEMM output shape"
+                    )
+                aux_output = QuackAuxOutputInfo(output_value=aux_value)
+            else:
                 raise NotImplementedError(
-                    "QUACK tuple epilogue currently supports only "
-                    "(main, acc[.float()].view(M, -1, group).sum(-1)) or "
-                    "(main, acc[.float()].view(-1, group, N).sum(1))"
+                    "QUACK tuple epilogue currently supports only a supported local-reduce "
+                    "aux output or one same-shape generic aux expression"
                 )
             output_value = output_value[0]
-            skip_nodes.update((local_reduce.view_node, local_reduce.reduce_node))
-            if local_reduce.source_node is not mm_node:
-                skip_nodes.add(local_reduce.source_node)
         else:
             raise NotImplementedError(
                 "QUACK GEMM epilogue backend expects one output or one supported "
@@ -659,6 +680,7 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
         skip_nodes=frozenset(skip_nodes),
         local_reduce=local_reduce,
         local_norm=local_norm,
+        aux_output=aux_output,
     )
 
 
@@ -895,7 +917,13 @@ def _compile_quack_pointwise_nodes(
 
 def _quack_cute_epilogue_code(
     graph_module: torch.fx.GraphModule,
-) -> tuple[list[str], str, list[torch.fx.Node], QuackLocalReduceInfo | None]:
+) -> tuple[
+    list[str],
+    str,
+    list[torch.fx.Node],
+    QuackLocalReduceInfo | None,
+    QuackAuxOutputInfo | None,
+]:
     from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
         ModificationWrapperCuteDSL,
     )
@@ -930,6 +958,7 @@ def _quack_cute_epilogue_code(
     output_value = output_plan.output_value
     local_reduce = output_plan.local_reduce
     local_norm = output_plan.local_norm
+    aux_output = output_plan.aux_output
 
     _compile_quack_pointwise_nodes(
         graph_module, mm_node, output_plan.skip_nodes, env, kernel, handler
@@ -938,11 +967,20 @@ def _quack_cute_epilogue_code(
     if local_norm is not None and local_norm.dim == 0:
         output_value = local_norm.source_node
 
+    result = str(
+        _quack_cute_arg(output_value, env)
+        if isinstance(output_value, torch.fx.Node)
+        else output_value
+    )
+    if aux_output is not None:
+        result = f"({result}, {_quack_cute_arg(aux_output.output_value, env)})"
+
     return (
         kernel.body.lines,
-        str(_quack_cute_arg(output_value, env) if isinstance(output_value, torch.fx.Node) else output_value),
+        result,
         aux_placeholder_nodes,
         local_reduce,
+        aux_output,
     )
 
 
@@ -967,8 +1005,16 @@ def _render_quack_gemm_epilogue(
 
 def materialize_quack_epilogue(
     graph_module: torch.fx.GraphModule,
-) -> tuple[str, str, list[torch.fx.Node], QuackLocalReduceInfo | None]:
-    lines, result, aux_placeholder_nodes, local_reduce = _quack_cute_epilogue_code(graph_module)
+) -> tuple[
+    str,
+    str,
+    list[torch.fx.Node],
+    QuackLocalReduceInfo | None,
+    QuackAuxOutputInfo | None,
+]:
+    lines, result, aux_placeholder_nodes, local_reduce, aux_output = (
+        _quack_cute_epilogue_code(graph_module)
+    )
     key = (
         "flex_gemm_quack_epilogue_"
         + hashlib.sha256(graph_module.code.encode()).hexdigest()[:16]
@@ -980,6 +1026,7 @@ def materialize_quack_epilogue(
         ),
         aux_placeholder_nodes,
         local_reduce,
+        aux_output,
     )
 
 
