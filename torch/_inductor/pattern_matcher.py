@@ -594,7 +594,7 @@ class _TargetExpr(PatternExpr):
         fns = [fns] if callable(fns) or isinstance(fns, str) else list(fns)
         for fn in fns:
             if isinstance(fn, torch._ops.OpOverloadPacket):
-                fns.extend(getattr(fn, overload) for overload in fn.overloads())  # noqa: B909
+                fns.extend(fn.op_overloads())  # noqa: B909
 
         self.fns = fns
         self.fns_set = OrderedSet(fns)
@@ -2055,8 +2055,6 @@ def register_lowering_pattern(
     *,
     pass_dict: _PassDictsType,
     prepend: bool = False,
-    output_metadata_ignores_input_storage: bool = False,
-    output_metadata_is_input: int | str | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Register an aten to inductor IR replacement pattern.  The decorated
@@ -2070,12 +2068,6 @@ def register_lowering_pattern(
             pattern=pattern, extra_check=extra_check, handler=handler
         ).register(pass_dict, prepend=prepend)
         handler._inductor_lowering_function = True  # type: ignore[attr-defined]
-        handler._inductor_lowering_output_metadata_ignores_input_storage = (  # type: ignore[attr-defined]
-            output_metadata_ignores_input_storage
-        )
-        handler._inductor_lowering_output_metadata_is_input = (  # type: ignore[attr-defined]
-            output_metadata_is_input
-        )
         return handler
 
     return decorator
@@ -2771,7 +2763,7 @@ def get_arg_value(
 def filter_nodes(nodes: Iterable[torch.fx.Node], fn: Any) -> list[torch.fx.Node]:
     fns = [fn]
     if isinstance(fn, torch._ops.OpOverloadPacket):
-        fns.extend([getattr(fn, overload) for overload in fn.overloads()])
+        fns.extend(fn.op_overloads())
 
     return [node for node in nodes if node.target in fns]
 

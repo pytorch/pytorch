@@ -607,10 +607,17 @@ class ExceptionVariable(VariableTracker):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
 
+    def get_internal_traceback(self) -> VariableTracker:
+        return self.__traceback__
+
+    def set_internal_traceback(self, traceback_vt: VariableTracker) -> None:
+        self.__traceback__ = traceback_vt
+
     def set_context(self, context: VariableTracker) -> None:
         self.__context__ = context
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        self.check_safe_to_inspect()
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
         )
@@ -723,12 +730,16 @@ class ExceptionVariable(VariableTracker):
         if name == "__class__":
             return VariableTracker.build(tx, self.exc_type)
         elif name == "__context__":
+            self.check_safe_to_inspect()
             return self.__context__
         elif name == "__cause__":
+            self.check_safe_to_inspect()
             return self.__cause__
         elif name == "__suppress_context__":
+            self.check_safe_to_inspect()
             return self.__suppress_context__
         elif name == "__traceback__":
+            self.check_safe_to_inspect()
             return self.__traceback__
         elif name == "args":
             self.check_safe_to_inspect()

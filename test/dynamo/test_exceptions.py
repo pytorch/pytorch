@@ -707,6 +707,57 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIn("sin", node_targets)
         self.assertNotIn("cos", node_targets)
 
+    def test_fake_tensor_runtime_error_internal_error_not_caught(self):
+        @torch.library.custom_op("test_dynamo::metadata_mismatch", mutates_args=())
+        def metadata_mismatch(t: torch.Tensor) -> torch.Tensor:
+            return t.cos()
+
+        @metadata_mismatch.register_fake
+        def _(t):
+            raise torch._subclasses.fake_tensor.MetadataMismatchError(
+                "fake-only metadata mismatch"
+            )
+
+        def fn(t):
+            try:
+                metadata_mismatch(t)
+            except RuntimeError:
+                return t.sin()
+            return t.cos()
+
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), t.cos())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            TorchRuntimeError, "RuntimeError when making fake tensor call"
+        ):
+            opt_fn(t)
+
+    def test_fake_tensor_runtime_error_propagate_real_internal_error_not_caught(self):
+        @torch.library.custom_op(
+            "test_dynamo::propagate_real_tensors_error", mutates_args=()
+        )
+        def propagate_real_tensors_error(t: torch.Tensor) -> int:
+            return t.dim()
+
+        def fn(t):
+            try:
+                propagate_real_tensors_error(t)
+            except RuntimeError:
+                return t.sin()
+            return t.cos()
+
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), t.cos())
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                TorchRuntimeError, "RuntimeError when making fake tensor call"
+            ):
+                opt_fn(t)
+
     def test_fake_tensor_runtime_error_without_try_except(self):
         def fn(t):
             t.expand_as(torch.randn(2))
@@ -750,6 +801,18 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                     return t.sin()
                 return t.cos()
             return t
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
+
+    def test_fake_tensor_runtime_error_sys_exc_info_traceback(self):
+        def fn(t):
+            try:
+                t.expand_as(torch.randn(2))
+            except RuntimeError:
+                return sys.exc_info()[2] is not None
+            return False
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
@@ -834,6 +897,35 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             except RuntimeError as e:
                 return format([e])
             return "ok"
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
+
+    def test_fake_tensor_runtime_error_return_exception(self):
+        def fn(t):
+            try:
+                t.expand_as(torch.randn(2))
+            except RuntimeError as e:
+                return e
+            return None
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):
+            opt_fn(torch.randn(2, 3))
+
+    @parametrize(
+        "attr",
+        ("__cause__", "__context__", "__suppress_context__", "__traceback__"),
+    )
+    def test_fake_tensor_runtime_error_state_attr(self, attr):
+        def fn(t):
+            try:
+                t.expand_as(torch.randn(2))
+            except RuntimeError as e:
+                getattr(e, attr)
+                return t.sin()
+            return t.cos()
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(Unsupported, "Fake RuntimeError inspection"):

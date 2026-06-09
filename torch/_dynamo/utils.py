@@ -3997,6 +3997,28 @@ def _has_active_exception_handler(tx: InstructionTranslatorBase) -> bool:
     return False
 
 
+_INTERNAL_FAKE_TENSOR_RUNTIME_ERRORS: tuple[type[BaseException], ...] = (
+    torch._subclasses.fake_tensor.DataDependentOutputException,
+    torch._subclasses.fake_tensor.DynamicOutputShapeException,
+    torch._subclasses.fake_tensor.FakeTensorDeviceMismatchError,
+    torch._subclasses.fake_tensor.FakeTensorInternalError,
+    torch._subclasses.fake_tensor.MetadataMismatchError,
+    torch._subclasses.fake_tensor.UnsupportedFakeTensorException,
+    torch._subclasses.fake_tensor.UnsupportedMutationAliasingException,
+    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+)
+
+
+def _can_raise_fake_runtime_error_to_user_handler(
+    cause: BaseException, tx: InstructionTranslatorBase
+) -> bool:
+    return (
+        isinstance(cause, RuntimeError)
+        and not isinstance(cause, _INTERNAL_FAKE_TENSOR_RUNTIME_ERRORS)
+        and _has_active_exception_handler(tx)
+    )
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4208,12 +4230,13 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
             )
-        elif isinstance(cause, RuntimeError) and _has_active_exception_handler(tx):
+        elif _can_raise_fake_runtime_error_to_user_handler(cause, tx):
             from .exc import raise_observed_exception
 
+            runtime_error = cast(RuntimeError, cause)
             tx.output.remove_node(node)
             raise_observed_exception(
-                type(cause),
+                type(runtime_error),
                 tx,
                 unsafe_to_inspect=True,
             )
