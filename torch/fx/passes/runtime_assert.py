@@ -207,6 +207,14 @@ def insert_deferred_runtime_asserts(
 
     Analysis = PythonReferenceAnalysis if export else OptimizedPythonReferenceAnalysis
 
+    def is_self_equality(node: fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and node.target is operator.eq
+            and len(node.args) == 2
+            and node.args[0] is node.args[1]
+        )
+
     def _sympy_interp(
         expr_to_proxy: dict[sympy.Expr, fx.Proxy], expr: sympy.Expr
     ) -> fx.Proxy:
@@ -283,6 +291,11 @@ def insert_deferred_runtime_asserts(
                     ),
                 ):
                     res = _sympy_interp(expr_to_proxy, ra.expr).node
+
+                    if is_self_equality(res):
+                        graph.erase_node(res)
+                        added_asserts.add(ra.expr)
+                        continue
 
                     graph.call_function(
                         torch.ops.aten._assert_scalar.default,
@@ -376,6 +389,7 @@ def insert_deferred_runtime_asserts(
                 cond = node.args[0] if node.args else node.kwargs.get("cond")
                 if (
                     cond == True  # noqa: E712
+                    or (isinstance(cond, fx.Node) and is_self_equality(cond))
                     or (assert_expr := _get_sym_val(cond)) in expr_to_proxy
                     and assert_expr in added_asserts
                 ):

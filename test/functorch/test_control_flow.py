@@ -950,8 +950,6 @@ def forward(self, pred_1, a_1, b_1, c_1):
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-    eq = arg5_1 == arg5_1;  arg5_1 = None
-    _assert_scalar = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s19, s89) on node 'eq'");  eq = _assert_scalar = None
     return (add,)""",
         )
         # Backward
@@ -960,8 +958,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = add = None
-    eq = arg5_1 == arg5_1;  arg5_1 = None
-    _assert_scalar = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s19, s89) on node 'eq'");  eq = _assert_scalar = None
     zeros_like = torch.ops.aten.zeros_like.default(arg4_1, pin_memory = False);  arg4_1 = None
     clone = torch.ops.aten.clone.default(arg6_1)
     clone_1 = torch.ops.aten.clone.default(arg6_1);  arg6_1 = None
@@ -2998,14 +2994,18 @@ class GraphModule(torch.nn.Module):
             # xs tests
             autograds.append([True, False, True, True, True, True, True, True])
             autograds.append([False, False, True, True, True, True, True, True])
+            autograds.append([True, False, False, False, False, False, False, False])
         elif partial_grad == "init":
             # init tests
             autograds.append([True, True, False, True, True, True, True, True])
             autograds.append([True, True, False, False, True, True, True, True])
+            autograds.append([False, False, False, True, False, False, False, False])
         elif partial_grad == "additional_inputs":
             # additional input tests
             autograds.append([True, True, True, True, False, True, False, True])
-            autograds.append([True, True, True, True, False, False, False, False])
+            autograds.append([True, True, True, True, False, False, True, False])
+            autograds.append([False, False, False, False, False, True, False, True])
+            autograds.append([False, False, False, False, False, False, True, False])
         elif partial_grad == "complex":
             # complex cases
             autograds.append([True, False, False, False, False, False, False, True])
@@ -3034,7 +3034,7 @@ class GraphModule(torch.nn.Module):
             ]
 
             def RNN(x: torch.Tensor, y: torch.Tensor):
-                c_new_0 = x[0] + 1
+                c_new_0 = x[0] + b_hh
                 c_new_1 = x[1] + 1
                 h_new = (
                     torch.tanh(c_new_1 + x[0] @ W_hh + b_hh)
@@ -3059,6 +3059,44 @@ class GraphModule(torch.nn.Module):
                     [r for r, m in zip(result_exp_flat, exp_grad_mask) if m],
                     params,
                 )
+
+    def test_scan_break_bw_input_output_aliasing(self):
+        # Focused test for ScanAutogradImpl._break_bw_input_output_aliasing.
+        # The partitioner naturally produces direct placeholder outputs (covered
+        # by test_scan_closure_combine_fn_with_no_grad_additional_inputs_partial),
+        # but transitive aliases (a view of a placeholder) don't arise from real
+        # fixtures, so we hand-craft a bw_gm that returns both kinds and a
+        # non-aliasing computed output, then check the pass clones the right ones.
+        from torch._higher_order_ops.scan import ScanAutogradImpl
+
+        graph = torch.fx.Graph()
+        ph_tangent = graph.placeholder("tangent")
+        ph_tangent.meta["val"] = torch.empty(2, 3)
+        ph_zeros = graph.placeholder("zeros_like")
+        ph_zeros.meta["val"] = torch.empty(6)
+        # Non-aliasing computed gradient.
+        computed = graph.call_function(
+            torch.ops.aten.mul.Tensor, args=(ph_tangent, 2.0)
+        )
+        computed.meta["val"] = ph_tangent.meta["val"] * 2.0
+        # Transitive alias: view of a placeholder.
+        view = graph.call_function(torch.ops.aten.view.default, args=(ph_zeros, [2, 3]))
+        view.meta["val"] = ph_zeros.meta["val"].view(2, 3)
+        graph.output((computed, ph_zeros, view))
+        bw_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        # Stub instance: only hop_partitioned_graph.bw_gm is read by the pass.
+        impl = ScanAutogradImpl.__new__(ScanAutogradImpl)
+        impl.hop_partitioned_graph = type("_S", (), {"bw_gm": bw_gm})()
+
+        impl._break_bw_input_output_aliasing()
+
+        outs = next(iter(bw_gm.graph.find_nodes(op="output"))).args[0]
+        self.assertIs(outs[0], computed)  # not an alias of any input
+        self.assertEqual(outs[1].target, torch.ops.aten.clone.default)  # direct
+        self.assertEqual(outs[1].args, (ph_zeros,))
+        self.assertEqual(outs[2].target, torch.ops.aten.clone.default)  # transitive
+        self.assertEqual(outs[2].args, (view,))
 
     @requires_cuda
     @skipIfTorchDynamo("not a dynamo test")
@@ -6213,9 +6251,6 @@ def forward(self, a_1, b_1):
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-    eq = arg3_1 == arg3_1;  arg3_1 = None
-    _assert_scalar = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s12, s30) on node 'eq'");  _assert_scalar = None
-    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s85, s57) on node 'eq_1'");  eq = _assert_scalar_1 = None
     return (add,)""",
         )
         self.assertExpectedInline(
@@ -6223,9 +6258,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-    eq = arg3_1 == arg3_1;  arg3_1 = None
-    _assert_scalar = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s12, s30) on node 'eq'");  _assert_scalar = None
-    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s85, s57) on node 'eq_1'");  eq = _assert_scalar_1 = None
     return (mul,)""",
         )
 
@@ -9479,12 +9511,8 @@ class GraphModule(torch.nn.Module):
             sym_size_int_2: "Sym(s68)" = torch.ops.aten.sym_size.int(x, 0)
 
             mul: "f32[s68, 3]" = torch.ops.aten.mul.Tensor(z, sym_size_int_5);  z = None
-            eq_1: "Sym(True)" = sym_size_int_2 == sym_size_int_5;  sym_size_int_2 = None
+            eq_1: "Sym(True)" = sym_size_int_2 == sym_size_int_5;  sym_size_int_2 = sym_size_int_5 = None
             _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq_1, "Runtime assertion failed for expression Eq(s77, s68) on node 'eq_1'");  eq_1 = _assert_scalar_default = None
-
-            eq: "Sym(True)" = sym_size_int_5 == sym_size_int_5;  sym_size_int_5 = None
-
-            _assert_scalar = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s85, s27) on node 'eq'");  eq = _assert_scalar = None
 
             add: "f32[s68, 3]" = torch.ops.aten.add.Tensor(x, mul);  x = mul = None
             return (add,)
@@ -9574,6 +9602,17 @@ class GraphModule(torch.nn.Module):
 
         for case in valid_test_cases:
             _inner(case)
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode:
+            t1_base = torch.empty(20)
+            t2_base = torch.empty(20)
+            t1 = t1_base.as_strided((2, 4), (4, 1), storage_offset=4)
+            t2 = t2_base.as_strided((2, 4), (4, 1), storage_offset=4)
+        out = _merge_output(t1, t2, fake_mode)
+        self.assertEqual(tuple(out.size()), (2, 4))
+        self.assertEqual(tuple(out.stride()), (4, 1))
+        self.assertEqual(out.storage_offset(), 4)
 
         # The shapes and strides are from raondomly generated pairs of tensors then swapaxes
         invalid_test_cases = [

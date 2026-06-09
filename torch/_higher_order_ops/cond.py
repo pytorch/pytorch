@@ -531,6 +531,18 @@ def _merge_output(
             f"expected both a and b to be FakeTensor, got a={type(a)}, b={type(b)}"
         )
 
+    def _empty_strided_matching_offset(size, stride, storage_offset, *, dtype, device):
+        with mode:
+            if isinstance(storage_offset, int) and storage_offset == 0:
+                return torch.empty_strided(size, stride, dtype=dtype, device=device)
+
+            from torch._prims_common import compute_required_storage_length
+
+            storage_size = compute_required_storage_length(size, stride, storage_offset)
+            return torch.empty((storage_size,), dtype=dtype, device=device).as_strided(
+                size, stride, storage_offset
+            )
+
     # Note: we don't check size, stride because
     # they'll be merged with unbacked symints if they differ.
     _meta_to_check = {
@@ -588,10 +600,13 @@ def _merge_output(
         for s in (*a.size(), *b.size(), *a.stride(), *b.stride())
     )
     if same_size and same_stride and not has_unbacked_metadata:
-        with mode:
-            return torch.empty_strided(
-                a.size(), a.stride(), dtype=a.dtype, device=a.device
-            )
+        return _empty_strided_matching_offset(
+            a.size(),
+            a.stride(),
+            a.storage_offset(),
+            dtype=a.dtype,
+            device=a.device,
+        )
 
     for s0, s1 in zip(a.size(), b.size()):
         # If there are unbacked symbols leaked out of true_branch or false_branch
@@ -758,10 +773,13 @@ def _merge_output(
         a.size(), b.size(), a.stride(), b.stride(), merged_size
     )
 
-    with mode:
-        return torch.empty_strided(
-            merged_size, merged_stride, dtype=a.dtype, device=a.device
-        )
+    return _empty_strided_matching_offset(
+        merged_size,
+        merged_stride,
+        a.storage_offset(),
+        dtype=a.dtype,
+        device=a.device,
+    )
 
 
 @cond_op.py_functionalize_impl

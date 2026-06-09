@@ -722,7 +722,7 @@ def rebind_unbacked(
 
             if not isinstance(raw_u1, sympy.Symbol):
                 if raw_u1.free_symbols:
-                    raise AssertionError(f"should have been constant, but got {raw_u1}")
+                    shape_env._eliminate_unbacked(raw_u0, raw_u1)
                 continue
 
             # The old and new could be the same if you improperly hit the memo
@@ -2979,12 +2979,19 @@ class _ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
 @dataclass(frozen=True, slots=True)
 class _ShapeGuardsHelper:
     exprs: list[str]
+    source_locations: list[SLoc | None]
 
 
 # A dataclass for storing C++ expressions and helper variables
 @dataclass(frozen=True, slots=True)
 class _CppShapeGuardsHelper(_ShapeGuardsHelper):
     source_to_symbol: dict[Source, sympy.Symbol]
+
+
+@dataclass(frozen=True, slots=True)
+class _ShapeGuardExpression:
+    expr: str
+    sloc: SLoc | None
 
 
 class LoggingShapeGuardPrinter(ShapeGuardPythonPrinter):
@@ -3768,6 +3775,32 @@ class DimConstraints:
 TLS = threading.local()
 
 
+def _ignore_fresh_unbacked_symbols_tls() -> bool:
+    return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
+
+
+def _ignore_fresh_unbacked_symbols_set(b: bool) -> bool:
+    prev = _ignore_fresh_unbacked_symbols_tls()
+    TLS.ignore_fresh_unbacked_symbols = b
+    return prev
+
+
+@contextmanager
+def _ignore_fresh_unbacked_symbols_tls_context() -> Generator[None, None, None]:
+    """
+    Indicates that newly allocated unbacked SymInts are intentionally discarded.
+
+    This is used by tracing-only metadata paths that do not own a ShapeEnv, but
+    still create temporary fake tensors whose fresh symbols should not be bound
+    into the surrounding graph.
+    """
+    prev = _ignore_fresh_unbacked_symbols_set(True)
+    try:
+        yield
+    finally:
+        _ignore_fresh_unbacked_symbols_set(prev)
+
+
 @dataclass(frozen=True, slots=True)
 class ShapeEnvSettings:
     """
@@ -3938,6 +3971,7 @@ class ShapeEnv:
         )
 
         self.guards: list[ShapeGuard] = []
+        self._evaluate_guards_source_location: SLoc | None = None
         self.axioms: dict[sympy.Expr, sympy.Expr] = {}
         self._branch_shape_env_snapshots: list[dict[str, Any]] = []
 
@@ -4274,6 +4308,7 @@ class ShapeEnv:
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
+            "_evaluate_guards_source_location",
             # Cached state for optimization_hint unbacked canonicalization
             "_equality_graph",
             "_unbacked_replacements",
@@ -4463,13 +4498,11 @@ class ShapeEnv:
                 self.replacements[b.node.expr] = new_var
 
     def _ignore_fresh_unbacked_symbols_tls(self) -> bool:
-        return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
+        return _ignore_fresh_unbacked_symbols_tls()
 
     @record_shapeenv_event()
     def _ignore_fresh_unbacked_symbols_set(self, b: bool) -> bool:
-        prev = self._ignore_fresh_unbacked_symbols_tls()
-        TLS.ignore_fresh_unbacked_symbols = b
-        return prev
+        return _ignore_fresh_unbacked_symbols_set(b)
 
     @contextmanager
     def ignore_fresh_unbacked_symbols(self) -> Generator[None, None, None]:
@@ -4477,11 +4510,8 @@ class ShapeEnv:
         Indicates that the newly allocated unbacked SymInts are being
         discarded
         """
-        prev = self._ignore_fresh_unbacked_symbols_set(True)
-        try:
+        with _ignore_fresh_unbacked_symbols_tls_context():
             yield
-        finally:
-            self._ignore_fresh_unbacked_symbols_set(prev)
 
     @record_shapeenv_event()
     def freeze(self) -> None:
@@ -4732,7 +4762,7 @@ class ShapeEnv:
         self.guard_or_defer_runtime_assert.cache_clear()
         self.constrain_symbol_range.cache_clear()
 
-        # ShapeEnv-aware caches should be invalidated by the version bump below,
+        # ShapeEnv-aware caches should be invalidated by the version bump above,
         # but clear the ones touched by branch isolation eagerly as well.
         self._maybe_evaluate_static.cache_clear()
         self._find.cache_clear()
@@ -6528,6 +6558,7 @@ class ShapeEnv:
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         all_exprs: list[list[str]] = [[] for _ in langs]
+        all_source_locations: list[list[SLoc | None]] = [[] for _ in langs]
 
         self.dim_constraints = DimConstraints(
             symbol_to_source,
@@ -6567,7 +6598,9 @@ class ShapeEnv:
                 if is_dim(source):
                     self.dim_constraints.add_equality(source, expr)
 
-                for exprs, printer, lang in zip(all_exprs, printers, langs):
+                for exprs, source_locations, printer, lang in zip(
+                    all_exprs, all_source_locations, printers, langs
+                ):
                     res = f"{printer.print_source(source)} == {printer.doprint(expr)}"
 
                     if lang == "verbose_python":
@@ -6585,6 +6618,7 @@ class ShapeEnv:
                         else:
                             res = f"{res}  # (unknown source {srcname}, please file a bug)"
                     exprs.append(res)
+                    source_locations.append(None)
 
                 if (
                     isinstance(source, TensorPropertySource)
@@ -6658,11 +6692,14 @@ class ShapeEnv:
                         raise AssertionError("dim_constraints must not be None")
                     is_trivial = self.dim_constraints.add(expr)
 
-                for exprs, printer, lang in zip(all_exprs, printers, langs):
+                for exprs, source_locations, printer, lang in zip(
+                    all_exprs, all_source_locations, printers, langs
+                ):
                     guard_expr = printer.doprint(expr)
                     if lang == "verbose_python":
                         guard_expr = f"{guard_expr}  # {guard.sloc}"
                     exprs.append(guard_expr)
+                    source_locations.append(guard.sloc)
 
                 self._add_target_expr(expr)
                 # A non-relational constraint on a single sizevar can violate
@@ -6753,12 +6790,20 @@ class ShapeEnv:
                     verbose_expr = f"{rf} <= {r.upper}  # {vr_sloc.upper}"
             if bounds:
                 bound = sympy.And(*bounds, evaluate=False)
+                bound_sloc = (
+                    vr_sloc.lower
+                    if r.lower not in (-sympy.oo, -int_oo)
+                    else vr_sloc.upper
+                )
 
-                for exprs, printer, lang in zip(all_exprs, printers, langs):
+                for exprs, source_locations, printer, lang in zip(
+                    all_exprs, all_source_locations, printers, langs
+                ):
                     if lang == "verbose_python":
                         exprs.append(verbose_expr)
                     else:
                         exprs.append(printer.doprint(bound))
+                    source_locations.append(bound_sloc)
                 # NB: verbose_exprs are done above
 
                 # Check constraints
@@ -6789,7 +6834,9 @@ class ShapeEnv:
             # merry hell with the reasoning.
             if symbol_is_type(symbol, SymT.FLOAT):
                 res = f"not math.isnan({py_printer.print_source(sources[0])})"
-                for exprs, printer, lang in zip(all_exprs, printers, langs):
+                for exprs, source_locations, printer, lang in zip(
+                    all_exprs, all_source_locations, printers, langs
+                ):
                     if lang == "verbose_python":
                         exprs.append(
                             f"{res}  # implicit guard for float input due to NaN specialization in the framework"
@@ -6800,6 +6847,7 @@ class ShapeEnv:
                         exprs.append(f"~std::isnan({printer.print_source(sources[0])})")
                     else:
                         raise NotImplementedError(f"Unimplemented for lang: {lang}")
+                    source_locations.append(None)
 
         # Exclusion guard for stable graph selection with automatic dynamic.
         #
@@ -6880,13 +6928,16 @@ class ShapeEnv:
                     excl_expr = sympy.Or(
                         *[sympy.Ne(sym, val, evaluate=False) for sym, val in all_pairs]
                     )
-                for exprs, printer, lang in zip(all_exprs, printers, langs):
+                for exprs, source_locations, printer, lang in zip(
+                    all_exprs, all_source_locations, printers, langs
+                ):
                     guard_expr = printer.doprint(excl_expr)
                     if lang == "verbose_python":
                         guard_expr = (
                             f"{guard_expr}  # exclusion guard for automatic dynamic"
                         )
                     exprs.append(guard_expr)
+                    source_locations.append(None)
 
         if constraint_violations:
             warn_msgs: list[str] = []
@@ -6957,15 +7008,21 @@ class ShapeEnv:
             self._check_translation_validate()
 
         helpers: list[_ShapeGuardsHelper] = []
-        for exprs, printer, lang in zip(all_exprs, printers, langs):
+        for exprs, source_locations, printer, lang in zip(
+            all_exprs, all_source_locations, printers, langs
+        ):
             if lang == "cpp":
                 if not isinstance(printer, _ShapeGuardCppPrinter):
                     raise AssertionError(
                         f"Expected _ShapeGuardCppPrinter, got {type(printer)}"
                     )
-                helpers.append(_CppShapeGuardsHelper(exprs, printer.source_to_symbol))
+                helpers.append(
+                    _CppShapeGuardsHelper(
+                        exprs, source_locations, printer.source_to_symbol
+                    )
+                )
             else:
-                helpers.append(_ShapeGuardsHelper(exprs))
+                helpers.append(_ShapeGuardsHelper(exprs, source_locations))
         return helpers
 
     def produce_guards_expression(
@@ -6980,18 +7037,45 @@ class ShapeEnv:
         for the given placeholders and returns a string expression to be evaluated
         by evaluate_guards_expression given concrete values for the placeholders.
         """
+        guards_expr, _ = self.produce_guards_expression_with_source_info(
+            placeholders, guards=guards, ignore_static=ignore_static
+        )
+        return guards_expr
+
+    def produce_guards_expression_with_source_info(
+        self,
+        placeholders: Sequence[SymInt | FakeTensor],
+        *,
+        guards: list[ShapeGuard] | None = None,
+        ignore_static: bool = True,
+    ) -> tuple[str | None, list[_ShapeGuardExpression] | None]:
+        """
+        Like produce_guards_expression(), but also returns each individual
+        guard expression paired with the ShapeGuard source location that
+        produced it, when one is available.
+        """
         from torch._dynamo.source import LocalSource
 
         arg_names = [f"t{i}" for i in range(len(placeholders))]
-        produced_guards = self.produce_guards(
-            placeholders,
+        produced_guards = self.produce_guards_verbose(
+            placeholders,  # pyrefly: ignore [bad-argument-type]
             [LocalSource(a) for a in arg_names],
             guards=guards,
             ignore_static=ignore_static,
-        )
-        if produced_guards:
-            return " and ".join(produced_guards)
-        return None
+            langs=("python",),
+        )[0]
+        if produced_guards.exprs:
+            if len(produced_guards.source_locations) != len(produced_guards.exprs):
+                raise AssertionError(
+                    "guard expressions and source locations must stay in sync"
+                )
+            source_locations = produced_guards.source_locations
+            guards_with_source = [
+                _ShapeGuardExpression(expr, sloc)
+                for expr, sloc in zip(produced_guards.exprs, source_locations)
+            ]
+            return " and ".join(produced_guards.exprs), guards_with_source
+        return None, None
 
     def evaluate_symexpr(self, code: str) -> int | float | bool:
         """
@@ -7017,6 +7101,27 @@ class ShapeEnv:
         """
         arg_names = [f"t{i}" for i in range(len(args))]
         return eval(code, SYMPY_INTERP, {"L": dict(zip(arg_names, args))})
+
+    def evaluate_guards_expression_with_source_info(
+        self, guards: Sequence[_ShapeGuardExpression], args: Sequence[object]
+    ) -> bool:
+        """
+        Evaluate a sequence produced by
+        produce_guards_expression_with_source_info(), using each stored source
+        location when replaying symbolic guards into this ShapeEnv.
+        """
+        arg_names = [f"t{i}" for i in range(len(args))]
+        locals_ = {"L": dict(zip(arg_names, args))}
+        old_sloc = self._evaluate_guards_source_location
+        try:
+            for guard in guards:
+                self._evaluate_guards_source_location = guard.sloc
+                result = eval(guard.expr, SYMPY_INTERP, locals_)
+                if not bool(result):
+                    return False
+        finally:
+            self._evaluate_guards_source_location = old_sloc
+        return True
 
     def evaluate_guards_for_args(
         self,
@@ -8690,9 +8795,10 @@ class ShapeEnv:
                     # at this point, we've evaluated the concrete expr value, and have
                     # flipped/negated the guard if necessary. Now we know what to guard
                     # or defer to runtime assert on.
-                    guard = ShapeGuard(
-                        g, self._get_sloc(), size_oblivious=size_oblivious
-                    )
+                    guard_sloc = self._evaluate_guards_source_location
+                    if guard_sloc is None:
+                        guard_sloc = self._get_sloc()
+                    guard = ShapeGuard(g, guard_sloc, size_oblivious=size_oblivious)
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
             else:
