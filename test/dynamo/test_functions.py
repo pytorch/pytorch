@@ -4592,7 +4592,9 @@ class GraphModule(torch.nn.Module):
 
         f5()
         new_device = (
-            "cpu" if torch._C._get_accelerator() == torch.device("cuda") else "cuda"
+            "cpu"
+            if torch._C._get_accelerator() == torch.device(device_type)
+            else device_type
         )
 
         old_get_device_module = torch.get_device_module
@@ -5703,8 +5705,12 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             fn_opt(torch.zeros(2))
 
         fn_fullgraph = torch.compile(backend="eager", fullgraph=True)(fn)
-        with self.assertRaisesRegex(TypeError, "unsupported operand type"):
-            fn_fullgraph(torch.zeros(2))
+        if torch._dynamo.config.debug_force_nested_calls:
+            with self.assertRaisesRegex(Unsupported, "Observed exception"):
+                fn_fullgraph(torch.zeros(2))
+        else:
+            with self.assertRaisesRegex(TypeError, "unsupported operand type"):
+                fn_fullgraph(torch.zeros(2))
 
     def test_numpy_operator_reverse_dunder_not_implemented_type_error(self):
         class RorNotImpl:
@@ -5726,8 +5732,12 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             fn_opt(torch.zeros(2))
 
         fn_fullgraph = torch.compile(backend="eager", fullgraph=True)(fn)
-        with self.assertRaisesRegex(TypeError, "unsupported operand type"):
-            fn_fullgraph(torch.zeros(2))
+        if torch._dynamo.config.debug_force_nested_calls:
+            with self.assertRaisesRegex(Unsupported, "Observed exception"):
+                fn_fullgraph(torch.zeros(2))
+        else:
+            with self.assertRaisesRegex(TypeError, "unsupported operand type"):
+                fn_fullgraph(torch.zeros(2))
 
     def test_is_numpy_bool_operator_singletons(self):
         def fn(x):
