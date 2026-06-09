@@ -648,20 +648,26 @@ class CuptiMonitor:
         correlation_id to this id. Returns the id, or None if not started. What
         the id *means* (e.g. a region name) is the caller's per-observer metadata,
         not the monitor's concern."""
-        if not self._started:
+        if not self._started or self._subscriber is None:
             return None
         with self._lock:
             external_id = self._next_external_id
             self._next_external_id += 1
-        pushed = self._cupti.activity_push_external_correlation_id(external_id)
+        # Pass the subscriber: the plain push returns NOT_COMPATIBLE under the UDR
+        # subscriber, so the wrapper uses the subscriber-aware _v2 variant.
+        pushed = self._cupti.activity_push_external_correlation_id(
+            external_id, sub_handle=self._subscriber
+        )
         return external_id if pushed else None
 
     def pop_external_correlation_id(self) -> int | None:
         """Pop the most recent external-correlation id off CUPTI's global stack.
         Returns the popped id, or None if not started/failed."""
-        if not self._started:
+        if not self._started or self._subscriber is None:
             return None
-        return self._cupti.activity_pop_external_correlation_id()
+        return self._cupti.activity_pop_external_correlation_id(
+            sub_handle=self._subscriber
+        )
 
     def session_info(self) -> dict[str, Any]:
         """Monitor/session metadata for consumers that need to describe the
