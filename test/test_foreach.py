@@ -5,6 +5,7 @@ import os
 import random
 import re
 import unittest
+import unittest.mock
 import weakref
 from contextlib import nullcontext
 from numbers import Number
@@ -1939,6 +1940,8 @@ _FOREACH_MM_SHAPES = [
     ("mixed_small", [(128, 64, 256), (256, 128, 512), (64, 32, 128)]),
     ("mixed_muon", [(1024, 1024, 1024), (1024, 1024, 2752), (1024, 2752, 1024)]),
     ("nonsquare", [(32, 64, 128), (64, 128, 32)]),
+    # uniform K,N + variable M: exercises the _grouped_mm offs path (MoE pattern)
+    ("uniform_kn_var_m", [(128, 64, 64), (256, 64, 64), (64, 64, 64)]),
 ]
 
 
@@ -1989,6 +1992,143 @@ class TestForeachMM(TestCase):
             return torch._foreach_mm(list(tensors[:G]), list(tensors[G:]))
 
         gradcheck(fn, (*A, *B))
+
+    @parametrize(
+        "label,a_dtype,b_dtype,K,expected",
+        [
+            ("mixed_bf16_fp32", torch.bfloat16, torch.float32, 16, False),
+            ("mixed_fp32_bf16", torch.float32, torch.bfloat16, 16, False),
+            ("fp32", torch.float32, torch.float32, 16, False),
+            # bf16 eligible iff N,K are 16-byte aligned (K a multiple of 8)
+            ("bf16_aligned", torch.bfloat16, torch.bfloat16, 16, True),
+            ("bf16_unaligned", torch.bfloat16, torch.bfloat16, 4, False),
+        ],
+        name_fn=lambda label, *_: label,
+    )
+    def test_foreach_mm_can_use_nvmath_cublaslt_grouped_mm(
+        self, label, a_dtype, b_dtype, K, expected
+    ):
+        from torch._native.ops.foreach_mm.impl import (
+            _can_use_nvmath_cublaslt_grouped_mm,
+        )
+
+        A = [torch.randn(16, K, dtype=a_dtype) for _ in range(2)]
+        B = [torch.randn(K, K, dtype=b_dtype) for _ in range(2)]
+        self.assertEqual(_can_use_nvmath_cublaslt_grouped_mm(A, B), expected)
+
+    # One case per _foreach_mm_route branch; reads only metadata, does not require GPU.
+    @parametrize(
+        "label,dtype,shapes,available,expected",
+        [
+            # bf16 aligned + nvmath available -> nvmath_cublaslt_grouped_mm
+            (
+                "nvmath_cublaslt",
+                torch.bfloat16,
+                [(16, 16, 16)] * 2,
+                True,
+                "nvmath_cublaslt_grouped_mm",
+            ),
+            # fp32 uniform aligned -> cutlass_grouped_mm (fp32 is never nvmath-eligible)
+            (
+                "cutlass_fp32",
+                torch.float32,
+                [(16, 16, 16)] * 2,
+                False,
+                "cutlass_grouped_mm",
+            ),
+            # bf16 uniform aligned, nvmath unavailable -> cutlass_grouped_mm
+            (
+                "cutlass_bf16",
+                torch.bfloat16,
+                [(16, 16, 16)] * 2,
+                False,
+                "cutlass_grouped_mm",
+            ),
+            # non-uniform K -> mm_loop
+            (
+                "mm_loop_nonuniform",
+                torch.float32,
+                [(16, 16, 16), (16, 16, 8)],
+                False,
+                "mm_loop",
+            ),
+            # uniform but >= 1024 groups -> mm_loop (group-count guard)
+            (
+                "mm_loop_group_limit",
+                torch.float32,
+                [(8, 8, 8)] * 1024,
+                False,
+                "mm_loop",
+            ),
+        ],
+        name_fn=lambda label, *_: label,
+    )
+    def test_foreach_mm_route(self, label, dtype, shapes, available, expected):
+        from torch._native.ops.foreach_mm import impl
+
+        A = [torch.randn(M, K, dtype=dtype) for (M, N, K) in shapes]
+        B = [torch.randn(K, N, dtype=dtype) for (M, N, K) in shapes]
+        # the only mock is the nvmath availability probe
+        with unittest.mock.patch.object(
+            impl, "_check_nvmath_cublaslt", return_value=available
+        ):
+            self.assertEqual(impl._foreach_mm_route(A, B), expected)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+    )
+    @parametrize(
+        "label,a_shape,b_shape,a_dtype,b_dtype",
+        [
+            # mixed A/B dtype, unsupported dtype, and zero-sized K/N each fall back
+            # to fallback_loop_mm rather than a grouped kernel.
+            ("mixed_bf16_fp32", (16, 16), (16, 16), torch.bfloat16, torch.float32),
+            ("mixed_fp32_bf16", (16, 16), (16, 16), torch.float32, torch.bfloat16),
+            ("unsupported_fp16", (16, 16), (16, 16), torch.float16, torch.float16),
+            ("zero_K", (16, 0), (0, 16), torch.bfloat16, torch.bfloat16),
+            ("zero_N", (16, 16), (16, 0), torch.bfloat16, torch.bfloat16),
+        ],
+        name_fn=lambda label, *_: label,
+    )
+    def test_foreach_mm_cond_rejects(self, label, a_shape, b_shape, a_dtype, b_dtype):
+        from torch._native.ops.foreach_mm.impl import _foreach_mm_cond
+
+        A = [torch.randn(*a_shape, dtype=a_dtype, device="cuda") for _ in range(2)]
+        B = [torch.randn(*b_shape, dtype=b_dtype, device="cuda") for _ in range(2)]
+        self.assertFalse(_foreach_mm_cond(A, B))
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+    )
+    @parametrize(
+        "label,shapes",
+        [
+            # Cases no grouped kernel takes: zero-sized K/N (cond -> fallback_loop_mm)
+            # and >= 1024 groups (cutlass cap -> mm_loop).
+            ("zero_K", [(16, 16, 0)] * 2),
+            ("zero_N", [(16, 0, 16)] * 2),
+            ("group_limit", [(8, 8, 8)] * 1024),
+        ],
+        name_fn=lambda label, shapes: label,
+    )
+    def test_foreach_mm_fallback_correctness(self, label, shapes):
+        from torch._native.ops.foreach_mm import impl
+
+        A = [
+            torch.randn(M, K, dtype=torch.bfloat16, device="cuda")
+            for (M, N, K) in shapes
+        ]
+        B = [
+            torch.randn(K, N, dtype=torch.bfloat16, device="cuda")
+            for (M, N, K) in shapes
+        ]
+        ref = [torch.mm(a, b) for a, b in zip(A, B)]
+        with unittest.mock.patch.object(
+            impl, "_check_nvmath_cublaslt", return_value=False
+        ):
+            out = torch._foreach_mm(A, B)
+        for o, r in zip(out, ref):
+            self.assertEqual(o, r)
 
     @skipIfNoNvmath
     @unittest.skipUnless(
