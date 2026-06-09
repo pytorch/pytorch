@@ -2055,6 +2055,8 @@ def register_lowering_pattern(
     *,
     pass_dict: _PassDictsType,
     prepend: bool = False,
+    output_metadata_ignores_input_storage: bool = False,
+    output_metadata_is_input: int | str | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Register an aten to inductor IR replacement pattern.  The decorated
@@ -2068,6 +2070,12 @@ def register_lowering_pattern(
             pattern=pattern, extra_check=extra_check, handler=handler
         ).register(pass_dict, prepend=prepend)
         handler._inductor_lowering_function = True  # type: ignore[attr-defined]
+        handler._inductor_lowering_output_metadata_ignores_input_storage = (  # type: ignore[attr-defined]
+            output_metadata_ignores_input_storage
+        )
+        handler._inductor_lowering_output_metadata_is_input = (  # type: ignore[attr-defined]
+            output_metadata_is_input
+        )
         return handler
 
     return decorator
@@ -2111,10 +2119,7 @@ def fixme_incorrect_inductor_schema_op(op: torch._ops.OpOverload) -> bool:
 
     # TODO - fix schema
     # Don't add any more!
-    return op in (
-        torch.ops.inductor.accumulate_grad_.default,
-        torch.ops.inductor.resize_storage_bytes_.default,
-    )
+    return op in (torch.ops.inductor.resize_storage_bytes_.default,)
 
 
 def is_mutation_op(node: torch.fx.Node) -> bool:
