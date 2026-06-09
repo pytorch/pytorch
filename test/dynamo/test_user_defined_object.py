@@ -262,7 +262,7 @@ class TestUserDefinedObjectConstruction(TestCase):
             opt_fn()
 
     def test_explicit_exception_init_requires_descriptor_owner(self):
-        class MyError(Exception):
+        class MyError(OSError):
             pass
 
         def fn():

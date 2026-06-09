@@ -349,9 +349,7 @@ def _make_prim(
     if tags:
         _prim._tags = tags
     elif aten_packet := getattr(torch.ops.aten, name, None):
-        overload_tags = [
-            getattr(aten_packet, overload).tags for overload in aten_packet.overloads()
-        ]
+        overload_tags = [overload.tags for overload in aten_packet.op_overloads()]
         tags_intersection = set(overload_tags[0])
         tags_intersection.intersection_update(*overload_tags[1:])
 

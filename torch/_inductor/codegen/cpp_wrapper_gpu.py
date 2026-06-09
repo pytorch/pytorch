@@ -653,7 +653,7 @@ class DeferredTritonCallWrapper:
     def generate_launch_kernel(self, prefix, wrapper, kernel_var_name, params):
         """
         Generate the GPU kernel launching code.
-        This is where all the call args being sorted out and generated.
+        This is where all the call args are sorted out and generated.
         If enable_kernel_profile is enabled, all args related information would be packed in this function.
         """
         triton_meta = params["triton_meta"]
@@ -873,19 +873,6 @@ class CppWrapperGpu(CppWrapperCpu):
         self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
         self._lazy_kernel_names: list[str] = []
 
-    def generate_debug_sync(self, buffer):
-        if self.device == "cuda":
-            buffer.writeline(
-                maybe_hipify_code_wrapper(
-                    "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
-                )
-            )
-            return
-
-        raise NotImplementedError(
-            f"triton debug sync is not supported with {self.device} cpp_wrapper"
-        )
-
     @staticmethod
     def create(
         is_subgraph: bool,
@@ -993,7 +980,6 @@ class CppWrapperGpu(CppWrapperCpu):
             return super().generate(is_inference)
 
     def _codegen_entry_impl_prologue(self):
-        super()._codegen_entry_impl_prologue()
         self.prefix.writeline(
             _LazyTritonCompileKickoffLine(
                 self._lazy_kernel_names, "ensure_triton_kernel_compiles_started();"
@@ -1378,7 +1364,11 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 # pyrefly: ignore [bad-argument-type]
                 casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
-            self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
+            # AOT: dispatch through AOTInductorModelKernels member.
+            # JIT: call the extern "C" symbol directly (resolved at link time
+            # via extra_flags pointing at the compiled .so).
+            kernel_prefix = "kernels." if V.graph.aot_mode else ""
+            self.writeline(f"{kernel_prefix}{kernel_name}({call_args_str}, {stream});")
 
     def prepare_triton_wrapper_args(
         self, call_args: list[Any], arg_types: list[Any]
