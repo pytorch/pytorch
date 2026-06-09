@@ -1309,6 +1309,111 @@ class TestCuteDSLSubprocessCompile(TestCase):
             if os.path.exists(sentinel_path):
                 os.unlink(sentinel_path)
 
+    def test_nv_universal_gemm_subprocess_precompile_skips_bad_fork(self):
+        """NV Universal GEMM precompile skips compile in bad-fork workers."""
+        import json
+        import uuid
+
+        from torch._inductor.codegen.common import jinja2_env
+        from torch._inductor.kernel.mm_common import load_kernel_template
+
+        sentinel_name = f"nvgemm_bad_fork_precompile_{uuid.uuid4().hex[:8]}"
+        precompile_sentinel_path = os.path.join(tempfile.gettempdir(), sentinel_name)
+        compile_sentinel_path = f"{precompile_sentinel_path}_compile"
+
+        template = jinja2_env().from_string(load_kernel_template("nv_universal_gemm"))
+        source = template.render(
+            kernel_name="test_kernel",
+            kernel_name_str="test_kernel_manifest",
+            is_grouped=False,
+            is_scaled=False,
+            acc_dtype="cutlass.Float32",
+            params_str="in_ptr0, in_ptr1, out_ptr0, stream=None",
+            workspace_arg="None",
+            input_ptrs=["in_ptr0", "in_ptr1"],
+        )
+        source += textwrap.dedent(f"""\
+
+            import json
+
+            _PRECOMPILE_SENTINEL_PATH = {precompile_sentinel_path!r}
+            _COMPILE_SENTINEL_PATH = {compile_sentinel_path!r}
+
+            class _TestKernel:
+                def compile(self, args):
+                    with open(_COMPILE_SENTINEL_PATH, "w") as f:
+                        json.dump({{"called": True}}, f)
+                    raise AssertionError(
+                        "bad-fork NVGEMM precompile should not call kernel.compile"
+                    )
+
+            def get_kernel_by_name(name):
+                with open(_PRECOMPILE_SENTINEL_PATH, "w") as f:
+                    json.dump({{
+                        "name": name,
+                        "in_bad_fork": torch.cuda._is_in_bad_fork(),
+                    }}, f)
+                return _TestKernel()
+        """)
+
+        dev_idx = torch.cuda.current_device()
+        dev_cap = torch.cuda.get_device_capability(dev_idx)
+        metadata = {
+            "precompile_shapes": {
+                "in_ptr0": [4, 4],
+                "in_ptr1": [4, 4],
+                "output": [4, 4],
+            },
+            "precompile_strides": {
+                "in_ptr0": [4, 1],
+                "in_ptr1": [4, 1],
+                "output": [4, 1],
+            },
+            "precompile_dtypes": {
+                "in_ptr0": "float32",
+                "in_ptr1": "float32",
+                "output": "float32",
+            },
+            "device_index": dev_idx,
+            "device_capability": dev_cap,
+        }
+
+        try:
+            shutdown_compile_workers()
+            with config.patch(worker_start_method="subprocess", compile_threads=4):
+                AsyncCompile.wait_pool_ready()
+                self.assertTrue(AsyncCompile.use_process_pool())
+
+                with fresh_cache():
+                    async_compile = AsyncCompile()
+                    wrapper = async_compile.nv_universal_gemm(
+                        "test_kernel", source, precompile_metadata=metadata
+                    )
+                    wrapper.result()
+
+            self.assertTrue(
+                os.path.exists(precompile_sentinel_path),
+                "NVGEMM subprocess precompile was not invoked.",
+            )
+            self.assertFalse(
+                os.path.exists(compile_sentinel_path),
+                "bad-fork NVGEMM precompile should skip kernel.compile(args).",
+            )
+
+            with open(precompile_sentinel_path) as f:
+                sentinel_data = json.load(f)
+            self.assertEqual(sentinel_data["name"], "test_kernel_manifest")
+            self.assertTrue(
+                sentinel_data["in_bad_fork"],
+                "Precompile did not run in a forked-after-CUDA-init subprocess. "
+                "This test only validates the guard when the worker inherits CUDA state.",
+            )
+        finally:
+            if os.path.exists(precompile_sentinel_path):
+                os.unlink(precompile_sentinel_path)
+            if os.path.exists(compile_sentinel_path):
+                os.unlink(compile_sentinel_path)
+
     def test_concurrent_disk_cache_set_atomic(self):
         """Verify concurrent disk_cache_set calls to the same key don't corrupt the .o file.
 
