@@ -2204,6 +2204,9 @@ print(json.dumps({
     "support_check_ns": stats["guard_last_success_support_check_ns"],
     "token_cap_count_sum": stats["guard_last_success_token_cap_count_sum"],
     "token_cap_count_max": stats["guard_last_success_token_cap_count_max"],
+    "compare_mismatch": stats["guard_last_success_compare_mismatch"],
+    "mismatch_reasons": stats["guard_last_success_mismatch_reasons"],
+    "mismatch_token_kinds": stats["guard_last_success_mismatch_token_kinds"],
     "disabled_reasons": stats["guard_last_success_disabled_reasons"],
 }))
 """
@@ -2223,6 +2226,9 @@ print(json.dumps({
         self.assertGreaterEqual(stats["support_check_ns"], 0)
         self.assertGreaterEqual(stats["token_cap_count_sum"], 0)
         self.assertGreaterEqual(stats["token_cap_count_max"], 0)
+        self.assertGreaterEqual(stats["compare_mismatch"], 0)
+        self.assertIsInstance(stats["mismatch_reasons"], dict)
+        self.assertIsInstance(stats["mismatch_token_kinds"], dict)
 
     def test_guard_last_success_supports_default_device_token(self):
         script = r"""

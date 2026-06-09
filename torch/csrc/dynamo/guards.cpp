@@ -149,6 +149,26 @@ enum class GuardFastPlanTensorTokenMissReason : uint8_t {
   Stride,
 };
 
+enum class GuardLastSuccessCompareMismatchReason : uint8_t {
+  EntryKey,
+  RootKey,
+  EmptyPrevious,
+  Size,
+  Kind,
+  Object,
+  Type,
+  TensorMeta,
+  DefaultDevice,
+  GlobalState,
+  TorchFunctionModeStack,
+  NoTensorAliasing,
+  ObjectAliasing,
+  Version,
+  DictSize,
+  ListItems,
+  Unknown,
+};
+
 struct GuardSubtreeProbeStats {
   std::atomic<uint64_t> attempt{0};
   std::atomic<uint64_t> entry_match{0};
@@ -228,6 +248,9 @@ struct GuardLastSuccessStats {
   std::atomic<uint64_t> support_check_ns{0};
   std::atomic<uint64_t> receipt_update_ns{0};
   std::atomic<uint64_t> receipt_compare_ns{0};
+  std::atomic<uint64_t> compare_mismatch{0};
+  std::atomic<uint64_t> compare_mismatch_index_sum{0};
+  std::atomic<uint64_t> compare_mismatch_index_max{0};
 };
 
 struct GuardFastPlanDisabledPathStats {
@@ -413,6 +436,23 @@ guard_last_success_disabled_path_stats() {
   return stats;
 }
 
+std::mutex& guard_last_success_mismatch_stats_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::unordered_map<std::string, uint64_t>&
+guard_last_success_mismatch_reason_stats() {
+  static std::unordered_map<std::string, uint64_t> stats;
+  return stats;
+}
+
+std::unordered_map<std::string, uint64_t>&
+guard_last_success_mismatch_kind_stats() {
+  static std::unordered_map<std::string, uint64_t> stats;
+  return stats;
+}
+
 } // namespace
 
 bool guard_lookup_stats_enabled() {
@@ -580,6 +620,9 @@ void reset_guard_lookup_stats() {
   store_zero(last_success_stats.support_check_ns);
   store_zero(last_success_stats.receipt_update_ns);
   store_zero(last_success_stats.receipt_compare_ns);
+  store_zero(last_success_stats.compare_mismatch);
+  store_zero(last_success_stats.compare_mismatch_index_sum);
+  store_zero(last_success_stats.compare_mismatch_index_max);
   {
     std::lock_guard<std::mutex> lock(guard_accessor_type_stats_mutex());
     guard_accessor_type_stats().clear();
@@ -602,6 +645,12 @@ void reset_guard_lookup_stats() {
         guard_last_success_disabled_stats_mutex());
     guard_last_success_disabled_reason_stats().clear();
     guard_last_success_disabled_path_stats().clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(
+        guard_last_success_mismatch_stats_mutex());
+    guard_last_success_mismatch_reason_stats().clear();
+    guard_last_success_mismatch_kind_stats().clear();
   }
   guard_lookup_stats_force_enabled().store(true, std::memory_order_relaxed);
 }
@@ -814,6 +863,12 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(last_success_stats.receipt_update_ns);
   result["guard_last_success_receipt_compare_ns"] =
       load_relaxed(last_success_stats.receipt_compare_ns);
+  result["guard_last_success_compare_mismatch"] =
+      load_relaxed(last_success_stats.compare_mismatch);
+  result["guard_last_success_compare_mismatch_index_sum"] =
+      load_relaxed(last_success_stats.compare_mismatch_index_sum);
+  result["guard_last_success_compare_mismatch_index_max"] =
+      load_relaxed(last_success_stats.compare_mismatch_index_max);
   py::dict last_success_disabled_reasons;
   py::dict last_success_disabled_top_paths;
   {
@@ -850,6 +905,22 @@ py::dict get_guard_lookup_stats() {
       last_success_disabled_reasons;
   result["guard_last_success_disabled_top_paths"] =
       last_success_disabled_top_paths;
+  py::dict last_success_mismatch_reasons;
+  py::dict last_success_mismatch_token_kinds;
+  {
+    std::lock_guard<std::mutex> lock(
+        guard_last_success_mismatch_stats_mutex());
+    for (const auto& item : guard_last_success_mismatch_reason_stats()) {
+      last_success_mismatch_reasons[py::str(item.first)] = item.second;
+    }
+    for (const auto& item : guard_last_success_mismatch_kind_stats()) {
+      last_success_mismatch_token_kinds[py::str(item.first)] = item.second;
+    }
+  }
+  result["guard_last_success_mismatch_reasons"] =
+      last_success_mismatch_reasons;
+  result["guard_last_success_mismatch_token_kinds"] =
+      last_success_mismatch_token_kinds;
   if (guard_subtree_probe_detail_enabled()) {
     py::dict path_stats;
     std::vector<std::pair<std::string, GuardSubtreeProbePathStats>> items;
@@ -982,6 +1053,74 @@ void record_unsafe_mock_guard_bypass_stats(uint64_t cache_entry_hit_index) {
   add_relaxed(stats.unsafe_mock_guard_bypass_count, 1);
   add_relaxed(
       stats.unsafe_mock_guard_bypass_hit_index_sum, cache_entry_hit_index);
+}
+
+static const char* guard_subtree_token_kind_name(
+    GuardSubtreeProbeTokenKind token_kind) {
+  switch (token_kind) {
+    case GuardSubtreeProbeTokenKind::ObjectOnly:
+      return "ObjectOnly";
+    case GuardSubtreeProbeTokenKind::ExactDict:
+      return "ExactDict";
+    case GuardSubtreeProbeTokenKind::ExactList:
+      return "ExactList";
+    case GuardSubtreeProbeTokenKind::ExactTuple:
+      return "ExactTuple";
+    case GuardSubtreeProbeTokenKind::TensorMatch:
+      return "TensorMatch";
+    case GuardSubtreeProbeTokenKind::DefaultDevice:
+      return "DefaultDevice";
+    case GuardSubtreeProbeTokenKind::GlobalState:
+      return "GlobalState";
+    case GuardSubtreeProbeTokenKind::TorchFunctionModeStack:
+      return "TorchFunctionModeStack";
+    case GuardSubtreeProbeTokenKind::NoTensorAliasing:
+      return "NoTensorAliasing";
+    case GuardSubtreeProbeTokenKind::ObjectAliasing:
+      return "ObjectAliasing";
+  }
+  return "Unknown";
+}
+
+static const char* guard_last_success_mismatch_reason_name(
+    GuardLastSuccessCompareMismatchReason reason) {
+  switch (reason) {
+    case GuardLastSuccessCompareMismatchReason::EntryKey:
+      return "entry_key";
+    case GuardLastSuccessCompareMismatchReason::RootKey:
+      return "root_key";
+    case GuardLastSuccessCompareMismatchReason::EmptyPrevious:
+      return "empty_previous";
+    case GuardLastSuccessCompareMismatchReason::Size:
+      return "size";
+    case GuardLastSuccessCompareMismatchReason::Kind:
+      return "kind";
+    case GuardLastSuccessCompareMismatchReason::Object:
+      return "object";
+    case GuardLastSuccessCompareMismatchReason::Type:
+      return "type";
+    case GuardLastSuccessCompareMismatchReason::TensorMeta:
+      return "tensor_meta";
+    case GuardLastSuccessCompareMismatchReason::DefaultDevice:
+      return "default_device";
+    case GuardLastSuccessCompareMismatchReason::GlobalState:
+      return "global_state";
+    case GuardLastSuccessCompareMismatchReason::TorchFunctionModeStack:
+      return "torch_function_mode_stack";
+    case GuardLastSuccessCompareMismatchReason::NoTensorAliasing:
+      return "no_tensor_aliasing";
+    case GuardLastSuccessCompareMismatchReason::ObjectAliasing:
+      return "object_aliasing";
+    case GuardLastSuccessCompareMismatchReason::Version:
+      return "version";
+    case GuardLastSuccessCompareMismatchReason::DictSize:
+      return "dict_size";
+    case GuardLastSuccessCompareMismatchReason::ListItems:
+      return "list_items";
+    case GuardLastSuccessCompareMismatchReason::Unknown:
+      return "unknown";
+  }
+  return "unknown";
 }
 
 void record_guard_accessor_type_stats(
@@ -1316,6 +1455,25 @@ static void record_guard_last_success_shadow_reset() {
     return;
   }
   add_relaxed(guard_last_success_stats().shadow_reset, 1);
+}
+
+static void record_guard_last_success_compare_mismatch(
+    GuardLastSuccessCompareMismatchReason reason,
+    GuardSubtreeProbeTokenKind token_kind,
+    size_t index) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_last_success_stats();
+  add_relaxed(stats.compare_mismatch, 1);
+  add_relaxed(stats.compare_mismatch_index_sum, index);
+  max_relaxed(stats.compare_mismatch_index_max, index);
+  std::lock_guard<std::mutex> lock(
+      guard_last_success_mismatch_stats_mutex());
+  guard_last_success_mismatch_reason_stats()
+      [guard_last_success_mismatch_reason_name(reason)] += 1;
+  guard_last_success_mismatch_kind_stats()
+      [guard_subtree_token_kind_name(token_kind)] += 1;
 }
 
 static void record_guard_last_success_support_check(uint64_t check_ns) {
@@ -2516,6 +2674,73 @@ struct GuardSubtreeEntryToken {
   }
 };
 
+static GuardLastSuccessCompareMismatchReason
+guard_subtree_token_mismatch_reason(
+    const GuardSubtreeEntryToken& lhs,
+    const GuardSubtreeEntryToken& rhs) {
+  if (lhs.kind != rhs.kind) {
+    return GuardLastSuccessCompareMismatchReason::Kind;
+  }
+  if (lhs.object != rhs.object) {
+    return GuardLastSuccessCompareMismatchReason::Object;
+  }
+  if (lhs.type != rhs.type) {
+    return GuardLastSuccessCompareMismatchReason::Type;
+  }
+  if (lhs.kind == GuardSubtreeProbeTokenKind::TensorMatch) {
+    if (lhs.tensor_dispatch_key != rhs.tensor_dispatch_key ||
+        lhs.tensor_dtype != rhs.tensor_dtype ||
+        lhs.tensor_device_index != rhs.tensor_device_index ||
+        lhs.tensor_requires_grad != rhs.tensor_requires_grad ||
+        lhs.tensor_dim != rhs.tensor_dim ||
+        lhs.tensor_size_indices != rhs.tensor_size_indices ||
+        lhs.tensor_size_values != rhs.tensor_size_values ||
+        lhs.tensor_stride_indices != rhs.tensor_stride_indices ||
+        lhs.tensor_stride_values != rhs.tensor_stride_values) {
+      return GuardLastSuccessCompareMismatchReason::TensorMeta;
+    }
+    return GuardLastSuccessCompareMismatchReason::Unknown;
+  }
+  if (lhs.kind == GuardSubtreeProbeTokenKind::DefaultDevice) {
+    if (lhs.default_device_dict != rhs.default_device_dict ||
+        lhs.default_device != rhs.default_device) {
+      return GuardLastSuccessCompareMismatchReason::DefaultDevice;
+    }
+    return GuardLastSuccessCompareMismatchReason::Unknown;
+  }
+  if (lhs.kind == GuardSubtreeProbeTokenKind::GlobalState) {
+    return lhs.global_state_guard == rhs.global_state_guard
+        ? GuardLastSuccessCompareMismatchReason::Unknown
+        : GuardLastSuccessCompareMismatchReason::GlobalState;
+  }
+  if (lhs.kind == GuardSubtreeProbeTokenKind::TorchFunctionModeStack) {
+    return lhs.torch_function_mode_stack_guard ==
+            rhs.torch_function_mode_stack_guard
+        ? GuardLastSuccessCompareMismatchReason::Unknown
+        : GuardLastSuccessCompareMismatchReason::TorchFunctionModeStack;
+  }
+  if (lhs.kind == GuardSubtreeProbeTokenKind::NoTensorAliasing) {
+    return lhs.no_tensor_aliasing_guard == rhs.no_tensor_aliasing_guard
+        ? GuardLastSuccessCompareMismatchReason::Unknown
+        : GuardLastSuccessCompareMismatchReason::NoTensorAliasing;
+  }
+  if (lhs.kind == GuardSubtreeProbeTokenKind::ObjectAliasing) {
+    return lhs.object_aliasing_guard == rhs.object_aliasing_guard
+        ? GuardLastSuccessCompareMismatchReason::Unknown
+        : GuardLastSuccessCompareMismatchReason::ObjectAliasing;
+  }
+  if (lhs.version != rhs.version) {
+    return GuardLastSuccessCompareMismatchReason::Version;
+  }
+  if (lhs.size != rhs.size) {
+    return GuardLastSuccessCompareMismatchReason::DictSize;
+  }
+  if (lhs.list_items != rhs.list_items) {
+    return GuardLastSuccessCompareMismatchReason::ListItems;
+  }
+  return GuardLastSuccessCompareMismatchReason::Unknown;
+}
+
 static bool guard_subtree_token_vectors_match(
     const std::vector<GuardSubtreeEntryToken>& lhs,
     const std::vector<GuardSubtreeEntryToken>& rhs) {
@@ -2524,6 +2749,32 @@ static bool guard_subtree_token_vectors_match(
   }
   for (size_t i = 0; i < lhs.size(); ++i) {
     if (!lhs[i].matches(rhs[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool guard_subtree_token_vectors_match(
+    const std::vector<GuardSubtreeEntryToken>& lhs,
+    const std::vector<GuardSubtreeEntryToken>& rhs,
+    GuardLastSuccessCompareMismatchReason& reason,
+    GuardSubtreeProbeTokenKind& token_kind,
+    size_t& index) {
+  reason = GuardLastSuccessCompareMismatchReason::Unknown;
+  token_kind = GuardSubtreeProbeTokenKind::ObjectOnly;
+  index = 0;
+  if (lhs.size() != rhs.size()) {
+    reason = GuardLastSuccessCompareMismatchReason::Size;
+    index = std::min(lhs.size(), rhs.size());
+    return false;
+  }
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    if (!lhs[i].matches(rhs[i])) {
+      reason = guard_subtree_token_mismatch_reason(lhs[i], rhs[i]);
+      token_kind = lhs[i].kind == rhs[i].kind ? lhs[i].kind
+                                              : GuardSubtreeProbeTokenKind::ObjectOnly;
+      index = i;
       return false;
     }
   }
@@ -2546,10 +2797,30 @@ struct GuardLastSuccessReceipt {
       bool& reset_state,
       uint64_t& compare_ns) {
     const uint64_t compare_start_ns = guard_lookup_time_ns();
-    stable = entry_key == new_entry_key && root_key == new_root_key &&
-        !tokens.empty() && guard_subtree_token_vectors_match(tokens, new_tokens);
+    GuardLastSuccessCompareMismatchReason mismatch_reason =
+        GuardLastSuccessCompareMismatchReason::Unknown;
+    GuardSubtreeProbeTokenKind mismatch_kind =
+        GuardSubtreeProbeTokenKind::ObjectOnly;
+    size_t mismatch_index = 0;
+    if (entry_key != new_entry_key) {
+      stable = false;
+      mismatch_reason = GuardLastSuccessCompareMismatchReason::EntryKey;
+    } else if (root_key != new_root_key) {
+      stable = false;
+      mismatch_reason = GuardLastSuccessCompareMismatchReason::RootKey;
+    } else if (tokens.empty()) {
+      stable = false;
+      mismatch_reason = GuardLastSuccessCompareMismatchReason::EmptyPrevious;
+    } else {
+      stable = guard_subtree_token_vectors_match(
+          tokens, new_tokens, mismatch_reason, mismatch_kind, mismatch_index);
+    }
     compare_ns = guard_lookup_time_ns() - compare_start_ns;
     reset_state = !stable && !tokens.empty();
+    if (!stable) {
+      record_guard_last_success_compare_mismatch(
+          mismatch_reason, mismatch_kind, mismatch_index);
+    }
 
     if (stable) {
       shadow_passes += 1;
