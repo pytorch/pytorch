@@ -24,10 +24,7 @@ static const size_t kMinLargeAlloc = MB(10); // allocations between 1 and 10 MiB
 static const size_t kRoundLarge = MB(2); // round up large allocations to 2 MiB
 static const size_t kSmallHeap = MB(8); // "small" allocations are packed in 8 MiB heaps
 static const size_t kLargeHeap = MB(32); // "large" allocations may be packed in 32 MiB heaps
-static const size_t kXLargeHeapD =
-    MB(128); // "extra large" allocations on Discrete devices may be packed in 128 MiB heaps
-static const size_t kXLargeHeapU =
-    MB(1024); // "extra large" allocations on Unified devices may be packed in 1 GiB heaps
+static const size_t kXLargeHeap = MB(1024); // "extra large" allocations may be packed in 1 GiB heaps
 static const size_t kMaxScalarAlloc = (sizeof(int64_t)); // largest "scalar" allocation
 
 // buffer pools could be customized with a combination of usage flags
@@ -100,8 +97,6 @@ struct AllocParams {
   // true if we exceed the low watermark limit. In this case
   // we apply strategies to relieve the pressure before allocation.
   bool has_memory_pressure = false;
-  // true if we're allocating on a unified memory device
-  bool has_unified_memory = true;
 };
 
 struct HeapBlock {
@@ -147,7 +142,6 @@ struct HeapBlock {
     const size_t size = params.size();
     MTLHeapDescriptor* d = [MTLHeapDescriptor new];
     if (d) {
-      const size_t kXLargeHeap = params.has_unified_memory ? kXLargeHeapU : kXLargeHeapD;
       if (size <= kMaxSmallAlloc) {
         d.size = kSmallHeap;
       } else if (size < kMinLargeAlloc) {
@@ -361,8 +355,7 @@ class MPSHeapAllocatorImpl {
   constexpr static double default_high_watermark_upper_bound = 2.0;
   // (see m_low_watermark_ratio for description)
   // on unified memory, we could allocate beyond the recommendedMaxWorkingSetSize
-  constexpr static double default_low_watermark_ratio_unified = 1.4;
-  constexpr static double default_low_watermark_ratio_discrete = 1.0;
+  constexpr static double default_low_watermark_ratio = 1.4;
 
   const id<MTLDevice> m_device;
   std::recursive_mutex m_mutex;
