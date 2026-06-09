@@ -1034,7 +1034,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
-        return fallback_handler(aten.view.dtype)(x, dtype)
+        x_cont = ir.ExternKernel.require_contiguous_strides(x)
+        return fallback_handler(aten.view.dtype)(x_cont, dtype)
     else:
         return TensorBox(DtypeView.create(x, dtype))
 
@@ -2903,7 +2904,7 @@ make_fallback(torch.ops.streams.synchronize_device.default)
 def rand(*args, **kwargs):
     if kwargs.get("generator") is not None:
         return fallback_rand_generator(*args, **kwargs)
-    elif config.fallback_random:
+    elif config.fallback_random or kwargs.get("pin_memory"):
         kwargs.pop("generator", None)
         return fallback_rand_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
@@ -2913,7 +2914,7 @@ def rand(*args, **kwargs):
 def randn(*args, **kwargs):
     if kwargs.get("generator") is not None:
         return fallback_randn_generator(*args, **kwargs)
-    elif config.fallback_random:
+    elif config.fallback_random or kwargs.get("pin_memory"):
         kwargs.pop("generator", None)
         return fallback_randn_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
@@ -3047,8 +3048,8 @@ def inductor_randint(
         return ops.randint64(
             seed_loader([]),
             ops.index_expr(random_pos(index), torch.int32),
-            ops.index_expr(low, torch.int64),
-            ops.index_expr(high, torch.int64),
+            ops.value_expr(low, torch.int64),
+            ops.value_expr(high, torch.int64),
         )
 
     return Pointwise.create(
@@ -3529,7 +3530,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
 # WIP
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
-make_fallback(aten.adaptive_max_pool3d)  # @isuruf
+make_fallback(aten.adaptive_max_pool3d, override_decomp=True)
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 
 
@@ -3688,9 +3689,6 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
 
-# Needs dimname support
-make_fallback(aten.zeros.names)
-
 # 6) Pattern-matched
 make_fallback(
     aten._scaled_dot_product_efficient_attention.default,
@@ -3773,19 +3771,32 @@ def copy(self, src, non_blocking=False):
 
     if self.get_size() != src.get_size():
         out = expand(x, self.get_size())
-        return clone(out)
-    return clone(x)
+        result = clone(out)
+    else:
+        result = clone(x)
+
+    self_layout = self.maybe_get_layout()
+    if self_layout is not None and self_layout.is_pinned:
+        _realize_as_pinned(result)
+    return result
 
 
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=None):
-    # TODO(jansel): memory format
+    # Don't materialize the layout here based on memory_format,
+    # as we want to give the scheduler opportunity to perform layout optimization.
+    # Let the downstream op handle the input stride as needed.
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=x.make_loader(),
         ranges=list(x.get_size()),
     )
+
+
+def _realize_as_pinned(result):
+    result.realize()
+    result.data.data.get_layout().is_pinned = True
 
 
 def clone_preserve_reinterpret_view(x):
@@ -3809,8 +3820,18 @@ def clone_preserve_reinterpret_view(x):
     return x
 
 
+def lift_fresh_copy(x):
+    result = clone(x)
+    input_layout = x.maybe_get_layout()
+    if input_layout is not None and input_layout.is_pinned:
+        # torch.tensor(..., pin_memory=True) constants reach Inductor as a
+        # pinned constant followed by lift_fresh_copy.
+        _realize_as_pinned(result)
+    return result
+
+
 if hasattr(aten, "lift_fresh_copy"):
-    register_lowering(aten.lift_fresh_copy)(clone)
+    register_lowering(aten.lift_fresh_copy)(lift_fresh_copy)
 
 
 @register_lowering(prims.iota)
@@ -3975,7 +3996,6 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     if layout == torch.jagged:
         layout = torch.strided
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
-    assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
     else:
@@ -4018,15 +4038,20 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 
     else:
         return V.graph.add_tensor_constant(
-            torch.tensor(data, dtype=dtype, device=device)
+            torch.tensor(
+                data, dtype=dtype, device=device, pin_memory=pin_memory or False
+            )
         )
 
-    return Pointwise.create(
+    result = Pointwise.create(
         device=decode_device(device),
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=ranges,
     )
+    if pin_memory:
+        _realize_as_pinned(result)
+    return result
 
 
 @register_lowering(torch.as_tensor)
@@ -4145,14 +4170,12 @@ def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
     def inner(
         *size,
-        names=None,
         dtype=None,
         device=None,
         layout=None,
         pin_memory=False,
         memory_format=None,
     ):
-        assert_nyi(names is None, "named tensors")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         assert_nyi(not memory_format, "memory_format")
         device = decode_device(device)
@@ -4167,9 +4190,7 @@ def tensor_constructor(fill_value):
         full_pointwise = _full(fill_value, decode_device(device), dtype, size)
 
         if pin_memory:
-            # Realize the buffer
-            full_pointwise.realize()
-            full_pointwise.data.data.get_layout().is_pinned = True
+            _realize_as_pinned(full_pointwise)
 
         return full_pointwise
 
@@ -4179,14 +4200,12 @@ def tensor_constructor(fill_value):
 @register_lowering([torch.empty, aten.empty])
 def empty(
     *size,
-    names=None,
     dtype=None,
     layout=None,
     device=None,
     pin_memory=None,
     memory_format=None,
 ):
-    assert_nyi(names is None, "named tensors")
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
@@ -7055,9 +7074,13 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     return x_var, x_mean
 
 
-def use_two_step_variance(x, axis, keepdim):
-    # two-step algorithm can get better performance in small reductions size
-    # while it can accumulate more numerical error than Welford algorithm.
+def use_two_step_variance(x, axis, keepdim, input_dtype):
+    # The two-step algorithm can be faster for non-split reductions because
+    # Welford does more work per element. Preserve the old tiny-reduction
+    # two-step path, keep Welford for the rest of the small reductions where
+    # the speedup is limited and training gradients are more sensitive to the
+    # different accumulation order, and keep Welford for larger or split
+    # reductions where avoiding another full pass over the data is profitable.
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
@@ -7066,17 +7089,39 @@ def use_two_step_variance(x, axis, keepdim):
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
     device = x.get_device()
-    if not (device and device.type == "cpu"):
-        threshold = config.unroll_reductions_threshold
-    else:
+    check_for_split = False
+    min_numel = 0
+    is_cuda_two_step_dtype = input_dtype in (torch.bfloat16, torch.float16)
+    if device and device.type == "cpu":
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
         threshold = config.cpp.use_two_step_variance_threshold
-    return (
-        isinstance(reduction_numel, sympy.Integer)
-        and int(reduction_numel) <= threshold
-        and sympy_product(ranges) != 1
+    elif device and device.type == "cuda" and is_triton(x) and is_cuda_two_step_dtype:
+        min_numel = config.triton.use_two_step_variance_min_numel
+        threshold = config.triton.use_two_step_variance_threshold
+        check_for_split = True
+    else:
+        threshold = config.unroll_reductions_threshold
+
+    if not isinstance(reduction_numel, sympy.Integer):
+        return False
+
+    reduction_numel = int(reduction_numel)
+    if reduction_numel > threshold or sympy_product(ranges) == 1:
+        return False
+
+    if min_numel and config.unroll_reductions_threshold < reduction_numel < min_numel:
+        return False
+
+    if not check_for_split:
+        return True
+
+    _, split = ir.Reduction.num_splits(
+        reduction_numel=reduction_numel,
+        reduction_type="sum",
+        **kwargs,
     )
+    return V.graph.sizevars.statically_known_leq(split, 1)
 
 
 def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
@@ -7137,7 +7182,9 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
         var_mean_sum_(**kwargs)
         if (
             config.mtia.disable_welford_reduction
-            or use_two_step_variance(x, axis=axis, keepdim=keepdim)
+            or use_two_step_variance(
+                x, axis=axis, keepdim=keepdim, input_dtype=out_dtype
+            )
         )
         else var_mean_welford_(**kwargs)
     )
@@ -8137,7 +8184,21 @@ reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
 sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
-register_pointwise(aten.signbit, override_return_dtype=torch.bool)
+
+
+@register_lowering(aten.signbit)
+def signbit(x):
+    if x.get_dtype() in (
+        torch.bool,
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+    ):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("signbit")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
 
 register_lowering(aten._neg_view)(neg)
 
@@ -8676,6 +8737,44 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
             op_name = op.operation_name
             assert op_name is not None
             V.graph.additional_buffer_deps[op_name].add(dep_name)
+
+    # For void ops (e.g. wait_stream) that don't produce tensor outputs,
+    # passthrough args returned by control_deps are the same IR nodes as
+    # their inputs. This means downstream consumers have no scheduling
+    # dependency on the void op. Create MutationOutput entries to force
+    # the scheduler to order subsequent readers after the void op.
+    # Only apply this for wait_stream, which needs forward ordering on the
+    # waiting stream. Other sync ops (synchronize_stream, record_event) are
+    # full barriers or have event-based cross-sync tracking.
+    void_ops = [
+        op
+        for op in new_ops
+        if isinstance(op, ir.Buffer)
+        and op.name is not None
+        and isinstance(op.layout, ir.NoneLayout)
+        and not isinstance(op, ir.MutationOutput)
+    ]
+    if void_ops and args:
+        # Check if the subgraph contains a wait_stream call
+        has_wait_stream = any(
+            n.op == "call_function"
+            and n.target is torch.ops.streams.wait_stream.default
+            for n in subgraph_fn.graph_module.graph.nodes
+        )
+        if has_wait_stream:
+            for void_op in void_ops:
+                assert isinstance(void_op, ir.ExternKernel)
+                for arg in args:
+                    for arg_leaf in pytree.tree_leaves(arg):
+                        if not isinstance(arg_leaf, IRNode):
+                            continue
+                        device = arg_leaf.get_device()
+                        if device is None:
+                            continue
+                        mut_out = ir.MutationOutput(
+                            ir.NoneLayout(device=device), arg_leaf, void_op
+                        )
+                        void_op.mutation_outputs.append(mut_out)
 
     return output
 
