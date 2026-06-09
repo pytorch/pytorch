@@ -217,11 +217,12 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")(MyObj())
         self.assertEqual(result, 42)
 
-    # --- Dunder semantic gaps (known TODOs) ---
-
     def test_dunder_getattribute_skips_getattr(self):
-        """obj.__getattribute__("nonexistent") should raise AttributeError
-        even when __getattr__ is defined, matching CPython semantics.
+        """obj.__getattribute__("nonexistent") raises AttributeError even
+        when __getattr__ is defined.  This matches CPython: the bytecode
+        path (LOAD_ATTR + CALL) resolves __getattribute__ as a bound
+        WrapperDescriptor that calls object.__getattribute__ directly,
+        which does not invoke __getattr__.
         """
 
         class MyObj:
