@@ -328,10 +328,10 @@ class _KinetoProfile:
                 self._monitor_tempdir = tempfile.TemporaryDirectory(
                     prefix="torch_cupti_profiler_"
                 )
-                _mon.start_collection(self._monitor_tempdir.name)
+                _mon.start_collection(self._monitor_tempdir.name)  # pyrefly: ignore[missing-attribute]
                 self._monitor_started_here = True
             self._monitor_trace_window = None
-            _mon.prepare_trace_window()
+            _mon.prepare_trace_window()  # pyrefly: ignore[missing-attribute]
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
@@ -343,7 +343,7 @@ class _KinetoProfile:
         if self._use_cupti_monitor:
             from torch.profiler._cupti import monitor as _mon
 
-            _mon.start_trace_window()
+            _mon.start_trace_window()  # pyrefly: ignore[missing-attribute]
 
         if self.profile_memory:
             self.add_metadata_json("profile_memory", "1")
@@ -395,12 +395,12 @@ class _KinetoProfile:
 
             if self.use_device:
                 torch.accelerator.synchronize()
-            self._monitor_trace_window = _mon.end_trace_window()
+            self._monitor_trace_window = _mon.end_trace_window()  # pyrefly: ignore[missing-attribute]
         self.profiler.__exit__(None, None, None)
         if self._use_cupti_monitor and self._monitor_started_here:
             from torch.profiler._cupti import monitor as _mon
 
-            _mon.stop_collection()
+            _mon.stop_collection()  # pyrefly: ignore[missing-attribute]
             self._monitor_started_here = False
             if self._monitor_tempdir is not None:
                 self._monitor_tempdir.cleanup()
