@@ -1,4 +1,4 @@
-#include <torch/csrc/profiler/cupti_monitor_native.h>
+#include <torch/csrc/profiler/cupti/monitor_native.h>
 
 #include <cstdlib>
 
@@ -31,6 +31,36 @@ struct AbiBufferCompleteInfo {
 };
 
 } // namespace
+
+std::vector<CuptiRecordLayout> cuptiMonitorParseRecordLayouts(
+    void* complete_info) {
+  std::vector<CuptiRecordLayout> out;
+  if (complete_info == nullptr) {
+    return out;
+  }
+  const auto* info = static_cast<const AbiBufferCompleteInfo*>(complete_info);
+  if (info->ppRecordLayouts == nullptr) {
+    return out;
+  }
+  // ppRecordLayouts is indexed by activity kind; entries are null for kinds
+  // without a user-defined layout.
+  for (size_t kind = 0; kind < info->numRecordLayouts; ++kind) {
+    const AbiRecordLayout* layout = info->ppRecordLayouts[kind];
+    if (layout == nullptr) {
+      continue;
+    }
+    CuptiRecordLayout parsed;
+    parsed.kind = static_cast<uint32_t>(kind);
+    parsed.record_size = layout->recordSize;
+    parsed.fields.reserve(layout->numFields);
+    for (size_t f = 0; f < layout->numFields; ++f) {
+      const AbiFieldLayoutEntry& e = layout->pEntries[f];
+      parsed.fields.push_back({e.fieldId, e.offset, e.size});
+    }
+    out.push_back(std::move(parsed));
+  }
+  return out;
+}
 
 CuptiMonitorBuffers& CuptiMonitorBuffers::get() {
   static CuptiMonitorBuffers instance;
@@ -73,38 +103,21 @@ void CuptiMonitorBuffers::on_request(
 }
 
 void CuptiMonitorBuffers::on_complete(
-    uint64_t ctx,
-    uint32_t stream,
-    uint8_t* buffer,
-    size_t /*size*/,
-    size_t valid_size) {
-  {
-    std::lock_guard<std::mutex> guard(mutex_);
-    completed_.push_back({buffer, valid_size, ctx, stream, current_epoch_});
-  }
-  cv_.notify_one();
-}
-
-void CuptiMonitorBuffers::on_complete_v2(
     void* complete_info,
     uint8_t* buffer,
     size_t /*size*/,
     size_t valid_size) {
+  // Parse the layout outside the lock (it only reads the CUPTI-owned struct),
+  // then enqueue the buffer with its layout attached. The completion callback
+  // delivers neither CUcontext nor streamId (they are selectable record
+  // fields), so ctx/stream are 0.
+  std::vector<CuptiRecordLayout> layouts =
+      cuptiMonitorParseRecordLayouts(complete_info);
   {
     std::lock_guard<std::mutex> guard(mutex_);
-    // Capture + tag under one lock so the buffer's epoch and its layout stay
-    // consistent even if next_layout_epoch() races a completion. v2 delivers
-    // neither CUcontext nor streamId (they are selectable record fields), so
-    // ctx/stream are 0.
-    capture_layouts_locked(complete_info);
-    completed_.push_back({buffer, valid_size, 0, 0, current_epoch_});
+    completed_.push_back({buffer, valid_size, 0, 0, std::move(layouts)});
   }
   cv_.notify_one();
-}
-
-uint64_t CuptiMonitorBuffers::next_layout_epoch() {
-  std::lock_guard<std::mutex> guard(mutex_);
-  return ++current_epoch_;
 }
 
 std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed() {
@@ -113,7 +126,7 @@ std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed() {
   if (completed_.empty()) {
     return std::nullopt; // shutdown
   }
-  CompletedCuptiBuffer buf = completed_.front();
+  CompletedCuptiBuffer buf = std::move(completed_.front());
   completed_.pop_front();
   return buf;
 }
@@ -152,67 +165,9 @@ void CuptiMonitorBuffers::reset() {
   all_.clear();
   allocated_ = 0;
   shutdown_ = false;
-  current_epoch_ = 0;
-  layouts_.clear();
-}
-
-void CuptiMonitorBuffers::capture_layouts_locked(void* complete_info) {
-  if (complete_info == nullptr || layouts_.contains(current_epoch_)) {
-    return;
-  }
-  std::vector<CuptiRecordLayout> snapshot;
-  const auto* info = static_cast<const AbiBufferCompleteInfo*>(complete_info);
-  if (info->ppRecordLayouts != nullptr) {
-    // ppRecordLayouts is indexed by activity kind; entries are null for kinds
-    // without a user-defined layout.
-    for (size_t kind = 0; kind < info->numRecordLayouts; ++kind) {
-      const AbiRecordLayout* layout = info->ppRecordLayouts[kind];
-      if (layout == nullptr) {
-        continue;
-      }
-      CuptiRecordLayout out;
-      out.kind = static_cast<uint32_t>(kind);
-      out.record_size = layout->recordSize;
-      out.fields.reserve(layout->numFields);
-      for (size_t f = 0; f < layout->numFields; ++f) {
-        const AbiFieldLayoutEntry& e = layout->pEntries[f];
-        out.fields.push_back({e.fieldId, e.offset, e.size});
-      }
-      snapshot.push_back(std::move(out));
-    }
-  }
-  // Insert even when empty so this epoch is not re-parsed on every buffer.
-  layouts_.emplace(current_epoch_, std::move(snapshot));
-}
-
-std::vector<CuptiRecordLayout> CuptiMonitorBuffers::record_layouts(
-    uint64_t epoch) {
-  std::lock_guard<std::mutex> guard(mutex_);
-  auto it = layouts_.find(epoch);
-  if (it == layouts_.end()) {
-    return {};
-  }
-  return it->second;
 }
 
 void cuptiMonitorBufferRequested(
-    uint8_t** buffer,
-    size_t* size,
-    size_t* max_num_records) {
-  CuptiMonitorBuffers::get().on_request(buffer, size, max_num_records);
-}
-
-void cuptiMonitorBufferCompleted(
-    void* context,
-    uint32_t stream_id,
-    uint8_t* buffer,
-    size_t size,
-    size_t valid_size) {
-  CuptiMonitorBuffers::get().on_complete(
-      reinterpret_cast<uint64_t>(context), stream_id, buffer, size, valid_size);
-}
-
-void cuptiMonitorBufferRequestedV2(
     uint8_t** buffer,
     size_t* size,
     size_t* max_num_records,
@@ -220,14 +175,14 @@ void cuptiMonitorBufferRequestedV2(
   CuptiMonitorBuffers::get().on_request(buffer, size, max_num_records);
 }
 
-void cuptiMonitorBufferCompletedV2(
+void cuptiMonitorBufferCompleted(
     uint8_t* buffer,
     size_t size,
     size_t valid_size,
     void* complete_info) {
-  // The record layout in complete_info is valid only for this call;
-  // on_complete_v2 snapshots it into the current epoch before queuing.
-  CuptiMonitorBuffers::get().on_complete_v2(
+  // The record layout in complete_info is valid only for this call; on_complete
+  // parses it and attaches it to the queued buffer.
+  CuptiMonitorBuffers::get().on_complete(
       complete_info, buffer, size, valid_size);
 }
 
