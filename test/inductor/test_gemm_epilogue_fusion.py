@@ -1014,6 +1014,65 @@ class GemmEpilogueFusionTests(TestCase):
         ).check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_group2_reduce_feeding_main(self):
+        M = 32
+        N = 64
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(M, -1, 2)
+                denom = x.sum(-1, keepdim=True)
+                return (x / denom).view(M, N)
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(M, 64, device="cuda", dtype=torch.float16)
+        b = torch.rand(64, N, device="cuda", dtype=torch.float16)
+
+        with self.assertRaisesRegex(
+            Exception,
+            "reductions feeding the main output currently support only same-fragment group size 32",
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_tuple_epilogue_small_group_fuses(self):
+        M = 32
+
+        for group in (2, 4, 8):
+            with self.subTest(group=group):
+
+                def fn(a, b):
+                    return gemm_epilogue_fusion(
+                        torch.ops.aten.mm.default,
+                        (a, b),
+                        lambda acc: (
+                            acc.relu(),
+                            acc.float().view(M, -1, group).sum(-1),
+                        ),
+                        kernel_options={"backend": "QUACK"},
+                    )
+
+                a = torch.rand(M, 64, device="cuda", dtype=torch.float16)
+                b = torch.rand(64, 64, device="cuda", dtype=torch.float16)
+
+                actual, (code,) = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                )
+                expected = fn(a, b)
+
+                torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
+                torch.testing.assert_close(actual[1], expected[1], atol=1e-1, rtol=1e-2)
+                FileCheck().check(f"local_reduce_group={group}").check(
+                    "local_reduce_out="
+                ).check_not("extern_kernels.mm").run(code)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_group16_fuses(self):
         M = 128
 
