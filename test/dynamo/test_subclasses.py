@@ -36,6 +36,12 @@ from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
+skipIfCppFakeTensor = unittest.skipIf(
+    torch._dynamo.config.use_cpp_fake_tensor,
+    "NestedTensor unsupported with C++ FakeTensor (TORCHDYNAMO_CPP_FAKE_TENSOR=1)",
+)
+
+
 def nontraceable_subclass(c):
     return torch._dynamo.config.patch("nontraceable_tensor_subclasses", {c})
 
@@ -3383,6 +3389,7 @@ class GraphModule(torch.nn.Module):
         out = f(x, y)
         self.assertEqual(out, (x.sin().sum(), y.sin().sum()))
 
+    @skipIfCppFakeTensor
     def test_njt_subclass_simple(self):
         def f(nt):
             y = nt.clone()
@@ -3457,6 +3464,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @skipIfCppFakeTensor
     def test_njt_subclass_from_cat(self):
         # create from an existing NJT
         def f(nt):
@@ -3536,6 +3544,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @skipIfCppFakeTensor
     def test_njt_subclass_from_buffer(self):
         # create the NJT from a buffer(?)
         def f(nt):
@@ -3650,6 +3659,7 @@ class <lambda>(torch.nn.Module):
 instantiate_parametrized_tests(SubclassTests)
 
 
+@skipIfCppFakeTensor
 class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
     def _get_jagged_tensor(self, nested_size, offsets, requires_grad=True):
         return get_jagged_tensor(nested_size, offsets, requires_grad)
