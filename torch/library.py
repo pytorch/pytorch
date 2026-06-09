@@ -300,9 +300,11 @@ class Library:
             tags = (tags,)
 
         name = schema.split("(")[0]
-        packet_name = name.split(".")[0] if "." in name else name
-        has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(
-            getattr(torch.ops, self.ns), packet_name
+        name_without_namespace = name.rsplit("::", 1)[-1]
+        packet_name = name_without_namespace.split(".")[0]
+        cached_namespace = torch.ops.__dict__.get(self.ns)
+        has_preexisting_packet = (
+            cached_namespace is not None and packet_name in cached_namespace.__dict__
         )
 
         if torch.Tag.out in tags:
@@ -311,8 +313,8 @@ class Library:
             _validate_inplace_schema(schema)
 
         result = self.m.define(schema, alias_analysis, tuple(tags))
-        name = schema.split("(")[0]
-        qualname = self.ns + "::" + name
+        result_ns = result.split("::", 1)[0] if "::" in result else self.ns
+        qualname = result_ns + "::" + name_without_namespace
 
         # If the OpOverloadPacket exists already, then this means we're adding a
         # new OpOverload for it. Refresh the packet to include the new OpOverload.
@@ -619,13 +621,17 @@ def _clear_torch_ops_cache(op_defs):
     # and another library owns an alive overload.
     # That's OK - the next time torch.ops.ns.foo gets called, it'll be
     # recomputed to point at the right collection of overloads.
+    cleared_packets = set()
     for qualname in op_defs:
         ns, name_with_overload = qualname.split("::")
         name = name_with_overload.split(".")[0]
-        if not hasattr(torch.ops, ns):
+        if (ns, name) in cleared_packets:
             continue
-        namespace = getattr(torch.ops, ns)
-        if not hasattr(namespace, name):
+        cleared_packets.add((ns, name))
+        namespace = torch.ops.__dict__.get(ns)
+        if namespace is None:
+            continue
+        if name not in namespace.__dict__:
             continue
         delattr(namespace, name)
         if name in namespace._dir:

@@ -68,7 +68,7 @@ class ErrorHandler:
 
     def record_exception(self, e: BaseException) -> None:
         """
-        Write a structured information about the exception into an error file in JSON format.
+        Write structured information about the exception into an error file in JSON format.
 
         If the error file cannot be determined, then logs the content
         that would have been written to the error file.

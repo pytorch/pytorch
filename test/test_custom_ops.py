@@ -331,15 +331,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             @staticmethod
             def forward(ctx, x):
                 # Emulate AutoDispatchBelowADInplaceOrView, which is not bound into python
-                guard = torch._C._AutoDispatchBelowAutograd()
-                guard2 = torch._C.ExcludeDispatchKeyGuard(
-                    torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
-                )
-                try:
+                with (
+                    torch._C._AutoDispatchBelowAutograd(),
+                    torch._C._ExcludeDispatchKeyGuard(
+                        torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
+                    ),
+                ):
                     return op(x)
-                finally:
-                    del guard
-                    del guard2
 
             @staticmethod
             def backward(ctx, gx):
@@ -2248,6 +2246,26 @@ Dynamic shape operator
         y = self.ns().foo(x)
         if not torch.allclose(y, x.sin()):
             raise AssertionError("expected y to equal x.sin()")
+
+    def test_legacy_define_qualified_schema_tracks_normalized_name(self):
+        lib = self.lib()
+        result = lib.define(f"{self.test_ns}::foo(Tensor x) -> Tensor")
+
+        self.assertEqual(result, f"{self.test_ns}::foo")
+        self.assertEqual(lib._op_defs, {f"{self.test_ns}::foo"})
+
+    def test_legacy_define_qualified_schema_refreshes_cached_packet(self):
+        lib = self.lib()
+        lib.define(f"{self.test_ns}::foo(Tensor x) -> Tensor")
+        packet = self.ns().foo
+        self.assertEqual(packet.overloads(), ["default"])
+
+        lib.define(f"{self.test_ns}::foo.bar(Tensor x) -> Tensor")
+
+        self.assertEqual(packet.overloads(), ["default", "bar"])
+        self.assertEqual(
+            lib._op_defs, {f"{self.test_ns}::foo", f"{self.test_ns}::foo.bar"}
+        )
 
     def test_impl_function(self):
         lib = self.lib()
