@@ -88,6 +88,8 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
             )
             if qtb.local_reduce_out_index is not None:
                 local_reduce_kwargs += f", local_reduce_out={input_args[qtb.local_reduce_out_index]}"
+            if qtb.local_reduce_op is not None:
+                local_reduce_kwargs += f", local_reduce_op={qtb.local_reduce_op!r}"
             if qtb.local_reduce_feeds_main:
                 local_reduce_kwargs += ", local_reduce_feeds_main=True"
         if qtb.gemm_op in ("mm", "bmm"):
