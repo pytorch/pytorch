@@ -4196,6 +4196,29 @@ class TestDistributions(DistributionsTestCase):
                         ]
                     ),
                 )
+                
+    def test_cauchy_gumbel_icdf_boundary(self):
+        # Boundary quantiles map to the (unbounded) support endpoints.
+        # https://github.com/pytorch/pytorch/issues/186824
+        inf = float("inf")
+        for dtype in (torch.float32, torch.float64):
+            loc = torch.tensor(0.0, dtype=dtype)
+            scale = torch.tensor(1.0, dtype=dtype)
+            for ctor in (Cauchy, Gumbel):
+                d = ctor(loc, scale)
+                self.assertEqual(
+                    d.icdf(torch.tensor(0.0, dtype=dtype)),
+                    torch.tensor(-inf, dtype=dtype),
+                )
+                self.assertEqual(
+                    d.icdf(torch.tensor(1.0, dtype=dtype)),
+                    torch.tensor(inf, dtype=dtype),
+                )
+                # per-element boundaries within a batch stay independent
+                self.assertEqual(
+                    d.icdf(torch.tensor([0.0, 1.0], dtype=dtype)),
+                    torch.tensor([-inf, inf], dtype=dtype),
+                )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma_log_prob_at_boundary(self):
