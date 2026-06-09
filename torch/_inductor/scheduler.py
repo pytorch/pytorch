@@ -3719,7 +3719,7 @@ def _occupancy_before_and_after_fusion(
         return 1, 1  # Can't calculate, allow fusion
 
     assert num_warps
-    threads_per_block = num_warps * (device_props.warp_size or 32)
+    threads_per_block = num_warps * device_props.warp_size_or_default
 
     regs_per_block_unfused = unfused_n_regs * threads_per_block
     regs_per_block_fused = fused_n_regs * threads_per_block

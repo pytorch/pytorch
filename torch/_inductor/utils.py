@@ -3175,9 +3175,11 @@ def get_gpu_shared_memory() -> int:
 
 def get_max_numwarps() -> int:
     if torch.cuda.is_available():
-        warp_size = torch.cuda.get_device_properties().warp_size
-        # pyrefly: ignore [missing-attribute]
-        max_threads_per_block = torch.cuda.get_device_properties().max_threads_per_block
+        device = torch.device("cuda", torch.cuda.current_device())
+        props = DeviceProperties.create(device)
+        warp_size = props.warp_size_or_default
+        max_threads_per_block = props.max_threads_per_block
+        assert max_threads_per_block is not None
     else:
         # Defaults
         warp_size = 32
