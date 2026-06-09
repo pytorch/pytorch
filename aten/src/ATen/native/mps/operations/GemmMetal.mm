@@ -361,6 +361,57 @@ std::string gemv_bt_name(const std::string& dt, const GemvBtSpec& s, at_gemm::Ge
   return fmt::format("gemv_bt_{}_{}_{}_{}", dt, s.mrows, s.vec, en);
 }
 
+// {BM, BN, NSG, G} for split-K: G threadgroups each accumulate a K/G chunk into an
+// fp32 plane, reduced after. Tiny-output deep-K shapes starve matmul2d for tiles.
+struct SplitKSpec {
+  int BM, BN, NSG, G;
+  bool valid;
+};
+
+// Tiny square output (both <= 256) + deep K: matmul2d has too few tiles to fill the
+// cores, so split-K wins. Packed + low-precision only (planes accumulate in fp32).
+bool is_splitk_regime(int64_t M, int64_t N, int64_t K, c10::ScalarType dt) {
+  return dt != kFloat && M <= 256 && N <= 256 && std::min(M, N) >= 128 && K >= 2048;
+}
+
+// Fixed M5 winner {32,64,2} (1.3-2.3x). G=4 needs K/4 a multiple of 16 (K % 64 == 0),
+// else G=2 (K % 32 == 0), else no aligned split -> invalid, caller uses matmul2d.
+SplitKSpec pick_splitk(int64_t K) {
+  if (K % 64 == 0) {
+    return {32, 64, 2, 4, true};
+  }
+  if (K % 32 == 0) {
+    return {32, 64, 2, 2, true};
+  }
+  return {0, 0, 0, 0, false};
+}
+
+// {BMW, BNO, NSG} for conv1x1 (1x1-conv-shaped GEMM): tall M, very narrow N. The kernel
+// name bakes in N (=BNO) and K, so both are gated to instantiated values.
+struct ConvSpec {
+  int BMW, BNO, NSG;
+  bool valid;
+};
+
+// conv1x1 is instantiated only for these K (K is a template constant in the kernel).
+bool conv_k_supported(int64_t K) {
+  return K == 512 || K == 1024 || K == 2048 || K == 4096;
+}
+
+// Tall (M >= 512), very narrow N (32 or 64). N=64 needs M > 4096 (else the matmul tile
+// already fills). Packed + low precision; K must be an instantiated value.
+bool is_conv_regime(int64_t M, int64_t N, int64_t K, c10::ScalarType dt) {
+  return dt != kFloat && N <= 64 && (N < 64 || M > 4096) && N % 32 == 0 && M >= 512 && conv_k_supported(K);
+}
+
+// M5 winner: BMW=64, NSG=4 (BNO = N). Needs M % 64 == 0 for the row tiling, else invalid.
+ConvSpec pick_conv(int64_t M, int64_t N) {
+  if (M % 64 != 0) {
+    return {0, 0, 0, false};
+  }
+  return {64, static_cast<int>(N), 4, true};
+}
+
 // (BM, BN, BK, TX, TY) for the register-tiled int_gemm kernel.
 struct IntTile {
   int BM, BN, BK, TX, TY;
@@ -598,6 +649,75 @@ void launch_gemv_bt(const std::string& dt_str,
   });
 }
 
+// Split-K GEMM: G threadgroups each accumulate a K/G chunk into an fp32 plane, then a
+// reduction pass sums the planes into out. Packed inputs only, no epilogue (out = A@B),
+// so the dispatcher gates it on the None epilogue.
+void launch_splitk(const std::string& dt_str,
+                   const Tensor& A,
+                   const Tensor& B,
+                   const Tensor& out,
+                   int64_t M,
+                   int64_t N,
+                   int64_t K,
+                   const SplitKSpec& s) {
+  const int kchunk = static_cast<int>(K / s.G);
+  Tensor Cp = at::empty({s.G, M, N}, out.options().dtype(kFloat));
+  auto stream = getCurrentMPSStream();
+  auto pso_g = lib.getPipelineStateForFunc(fmt::format("splitk_gemm_{}_{}_{}_{}", dt_str, s.BM, s.BN, s.NSG));
+  auto pso_r = lib.getPipelineStateForFunc("splitk_reduce_" + dt_str);
+  const int64_t tiles_m = (M + s.BM - 1) / s.BM;
+  const int64_t tiles_n = (N + s.BN - 1) / s.BN;
+  const std::array<int32_t, 4> sk = {static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), kchunk};
+  const std::array<int32_t, 2> rd = {static_cast<int32_t>(M * N), s.G};
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso_g, "splitk_gemm", {A, B});
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso_g];
+      mtl_setArgs(enc, A, B, Cp, sk);
+      [enc dispatchThreadgroups:MTLSizeMake(tiles_n, tiles_m, s.G) threadsPerThreadgroup:MTLSizeMake(s.NSG * 32, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso_g);
+    }
+  });
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso_r, "splitk_reduce", {Cp});
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso_r];
+      mtl_setArgs(enc, Cp, out, rd);
+      mtl_dispatch1DJob(enc, pso_r, static_cast<uint32_t>(M * N));
+      getMPSProfiler().endProfileKernel(pso_r);
+    }
+  });
+}
+
+// conv1x1 GEMM: 1x1-conv-shaped kernel for tall, narrow-N projections. Packed inputs,
+// no epilogue (out = A@B), gated on the None epilogue like split-K.
+void launch_conv(const std::string& dt_str,
+                 const Tensor& A,
+                 const Tensor& B,
+                 const Tensor& out,
+                 int64_t M,
+                 int64_t N,
+                 int64_t K,
+                 const ConvSpec& s) {
+  auto stream = getCurrentMPSStream();
+  auto pso = lib.getPipelineStateForFunc(fmt::format("conv1x1_gemm_{}_{}_{}_{}_{}", dt_str, s.BMW, s.BNO, s.NSG, K));
+  const int64_t tiles_o = (N + s.BNO - 1) / s.BNO;
+  const int64_t tiles_w = (M + s.BMW - 1) / s.BMW;
+  const std::array<int32_t, 3> cd = {static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K)};
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "conv1x1_gemm", {A, B});
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, A, B, out, cd);
+      [enc dispatchThreadgroups:MTLSizeMake(tiles_o, tiles_w, 1) threadsPerThreadgroup:MTLSizeMake(s.NSG * 32, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+}
+
 } // namespace
 
 bool gemm_supported_dtype(c10::ScalarType dt) {
@@ -682,7 +802,7 @@ const GemmTuning& gemm_tuning(GpuGen gen) {
 
 // One GEMM's complete dispatch decision. Only the field(s) for `path` are meaningful.
 struct GemmPlan {
-  enum class Path : uint8_t { Gemv, GemvBt, Int, Mpp, Simd };
+  enum class Path : uint8_t { Gemv, GemvBt, Int, Mpp, Simd, SplitK, Conv };
   Path path = Path::Mpp;
   bool contiguify_a = false; // pack a column-major A to row-major before launch
   bool contiguify_b = false;
@@ -693,6 +813,8 @@ struct GemmPlan {
   IntTile int_tile{}; // Int
   TensorTile mpp_tile{}; // Mpp
   SimdTile simd_tile{}; // Simd
+  SplitKSpec splitk{}; // SplitK
+  ConvSpec conv{}; // Conv
 };
 
 // THE dispatch heuristic: shapes/strides/dtype/gen -> plan. Routing order is rank-1
@@ -710,7 +832,8 @@ GemmPlan gemm_plan(GpuGen gen,
                    int64_t c,
                    bool batched,
                    c10::ScalarType dt,
-                   bool force_precise_fp32) {
+                   bool force_precise_fp32,
+                   at_gemm::GemmEpilogue epi) {
   GemmPlan p;
   const bool relaxed_fp32 =
       !force_precise_fp32 && at::globalContext().float32MatmulPrecision() != at::Float32MatmulPrecision::HIGHEST;
@@ -785,7 +908,28 @@ GemmPlan gemm_plan(GpuGen gen,
     }
   }
 
-  // 4c. matmul2d tile (bmm prefers a bigger tile; 2-D uses the stride/shape pick).
+  // 4c. Split-K: tiny output + deep K starves matmul2d for tiles. 2-D, packed, no
+  // epilogue (the reduce writes out = A@B; addmm stays on matmul2d).
+  if (!batched && packed_untrans && epi == at_gemm::GemmEpilogue::None && is_splitk_regime(M, N, K, dt)) {
+    const SplitKSpec sk = pick_splitk(K);
+    if (sk.valid) {
+      p.splitk = sk;
+      p.path = GemmPlan::Path::SplitK;
+      return p;
+    }
+  }
+
+  // 4d. conv1x1: tall, very narrow-N projections. 2-D, packed, None epilogue.
+  if (!batched && packed_untrans && epi == at_gemm::GemmEpilogue::None && is_conv_regime(M, N, K, dt)) {
+    const ConvSpec cv = pick_conv(M, N);
+    if (cv.valid) {
+      p.conv = cv;
+      p.path = GemmPlan::Path::Conv;
+      return p;
+    }
+  }
+
+  // 4e. matmul2d tile (bmm prefers a bigger tile; 2-D uses the stride/shape pick).
   p.mpp_tile = batched ? tune.pick_bmm(M, N, K, dt)
       : packed_untrans ? tune.pick_mpp_packed(M, N, K, dt)
                        : tune.pick_mpp(M, N, K, dt);
@@ -824,7 +968,8 @@ void mps_gemm(const Tensor& A,
 
   // All routing/tile/contiguify heuristics live in gemm_plan; the rest of this
   // function only executes the plan it returns.
-  const GemmPlan plan = gemm_plan(gemm_gpu_gen(), A, B, target, ra, rb, M, N, K, r, c, batched, dt, force_precise_fp32);
+  const GemmPlan plan =
+      gemm_plan(gemm_gpu_gen(), A, B, target, ra, rb, M, N, K, r, c, batched, dt, force_precise_fp32, epi);
 
   // Pack an operand the plan flagged (a thin column-major operand feeding a large
   // output). The copy must outlive the launch, so it is held here.
@@ -992,6 +1137,16 @@ void mps_gemm(const Tensor& A,
           getMPSProfiler().endProfileKernel(pso);
         }
       });
+      break;
+    }
+    case GemmPlan::Path::SplitK: {
+      // Tiny-output deep-K: split K across G threadgroups (out = A@B, None epilogue).
+      launch_splitk(dt_str, ra.view, rb.view, target, M, N, K, plan.splitk);
+      break;
+    }
+    case GemmPlan::Path::Conv: {
+      // Tall, narrow-N projection via the 1x1-conv kernel (out = A@B, None epilogue).
+      launch_conv(dt_str, ra.view, rb.view, target, M, N, K, plan.conv);
       break;
     }
     case GemmPlan::Path::Simd: {
