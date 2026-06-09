@@ -1161,11 +1161,20 @@ def _view_meta(
         return typing_cast(
             FakeTensor, _view_unbacked_meta(a, shape, allow_copy=allow_copy)
         )
-    else:
-        return typing_cast(
-            FakeTensor,
-            torch._refs._reshape_view_helper(a, *shape, allow_copy=allow_copy),
-        )
+
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
+    shape = utils.infer_size(shape, a.numel())
+    if not any(isinstance(dim, torch.SymInt) for dim in shape):
+        # Match eager view stride calculation, including size-1 dimensions whose
+        # strides can be recomputed by at::detail::computeStride.
+        new_strides = _compute_stride(a.size(), a.stride(), shape)
+        if new_strides is not None:
+            return typing_cast(FakeTensor, a.as_strided(shape, new_strides))
+
+    return typing_cast(
+        FakeTensor,
+        torch._refs._reshape_view_helper(a, shape, allow_copy=allow_copy),
+    )
 
 
 @register_op_impl(aten.view_copy.default)

@@ -3790,6 +3790,45 @@ instantiate_parametrized_tests(FakeTensorMetaDevicePropagation)
 
 
 class FakeTensorViewCopy(TestCase):
+    @skipIfTorchDynamo("FakeTensor symbolic shape setup is incompatible with Dynamo")
+    def test_view_backed_symbolic_input_concrete_shape_matches_eager(self):
+        def pre_view(x):
+            y = x.flatten(2).transpose(1, 2) @ torch.ones(2, 2)
+            return y.transpose(1, 2)
+
+        x = torch.randn(1, 2, 2, 2)
+        eager_pre_view = pre_view(x)
+        eager_view = eager_pre_view.view(1, 2, 2, 2)
+        eager_view_copy = torch.ops.aten.view_copy.default(eager_pre_view, [1, 2, 2, 2])
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        fake_x = fake_mode.from_tensor(
+            x,
+            source=LocalSource("x"),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[
+                    DimDynamic.STATIC,
+                    DimDynamic.STATIC,
+                    DimDynamic.DYNAMIC,
+                    DimDynamic.STATIC,
+                ],
+                constraint_sizes=[None, None, None, None],
+            ),
+        )
+        self.assertTrue(any(isinstance(dim, torch.SymInt) for dim in fake_x.size()))
+
+        with fake_mode:
+            fake_pre_view = pre_view(fake_x)
+            fake_view = fake_pre_view.view(1, 2, 2, 2)
+            fake_view_copy = torch.ops.aten.view_copy.default(
+                fake_pre_view, [1, 2, 2, 2]
+            )
+
+        self.assertEqual(fake_view.stride(), eager_view.stride())
+        self.assertEqual(fake_view_copy.stride(), eager_view_copy.stride())
+        self.assertIsNone(fake_view_copy._base)
+
     def test_expand_then_view_copy_matches_eager_mode(self):
         x = torch.arange(7)
         y = x.expand(12, 7)
