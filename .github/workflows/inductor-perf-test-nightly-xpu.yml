@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: pt2", "module: xpu"]
+# Owner(s): ["module: xpu"]
 name: inductor-perf-nightly-xpu
 
 on:

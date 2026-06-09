@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: pt2", "module: rocm"]
+# Owner(s): ["module: rocm"]
 name: inductor-rocm-mi200
 
 on:

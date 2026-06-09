@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: pt2", "module: macos"]
+# Owner(s): ["module: macos"]
 name: inductor-perf-nightly-macos
 
 on:
