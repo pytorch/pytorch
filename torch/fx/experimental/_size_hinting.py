@@ -20,6 +20,7 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.singleton_int import SingletonInt
 
 
 log = logging.getLogger(__name__)
@@ -94,6 +95,8 @@ def _maybe_realize_expr(
         if expr in (-int_oo, -sympy.oo):
             return -sys.maxsize
         if nan_fallback is not None and (expr is sympy.nan or expr.has(sympy.nan)):
+            return nan_fallback
+        if nan_fallback is not None and expr.has(SingletonInt):
             return nan_fallback
 
     return None

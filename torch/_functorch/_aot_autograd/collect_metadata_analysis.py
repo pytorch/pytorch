@@ -58,7 +58,7 @@ from .schemas import (
     OutputType,
     ViewAndMutationMeta,
 )
-from .subclass_utils import create_subclass_meta
+from .subclass_utils import collect_nested_int_ids, create_subclass_meta
 from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
 
 
@@ -858,8 +858,13 @@ from a multi-output view call"
                 grad_enabled_mutation,
             )
 
+        allowed_nested_int_ids = collect_nested_int_ids(flat_args)
         subclass_inp_meta = create_subclass_meta(flat_args)
-        subclass_fw_graph_out_meta = create_subclass_meta(fw_graph_outs)
+        subclass_fw_graph_out_meta = create_subclass_meta(
+            fw_graph_outs,
+            include_nested_ints=True,
+            allowed_nested_int_ids=allowed_nested_int_ids,
+        )
         subclass_tangent_meta = create_subclass_meta(
             traced_tangents, count_symints=False, with_memory_format=True
         )

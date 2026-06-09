@@ -4817,6 +4817,7 @@ def forward(self, tangents_1):
         meta.flat_tensor_start_idx = 0
         meta.arg_count = 2
         meta.included_subclass_symints = True
+        meta.included_subclass_nested_ints = False
         meta.attrs = {
             "a": PlainTensorMeta(unwrapped_idx=0),
             "b": PlainTensorMeta(unwrapped_idx=1),
@@ -8907,6 +8908,27 @@ def forward(self, primals_1, tangents_1):
         fn = _codegen_backward_epilogue(fw_metadata, subclass_meta, fast_wrap)
         fn([1, 2, 3])
         self.assertEqual(call_log, ["fast"])
+
+    def test_backward_epilogue_drops_metadata_only_symbolic_grads(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _codegen_backward_epilogue,
+        )
+        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+
+        fw_metadata = SimpleNamespace(
+            num_backward_tokens=0,
+            is_rng_op_functionalized=False,
+        )
+        subclass_meta = SimpleNamespace(grad_input_metas=[PlainTensorMeta(0)])
+        call_log = []
+
+        def fast_wrap(out):
+            call_log.append(out)
+            return out
+
+        fn = _codegen_backward_epilogue(fw_metadata, subclass_meta, fast_wrap)
+        fn([1, 2, None])
+        self.assertEqual(call_log, [(None,)])
 
     def test_backward_epilogue_make_subclass_override_slow_path(self):
         from torch._functorch._aot_autograd.runtime_wrappers import (
