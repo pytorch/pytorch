@@ -693,3 +693,24 @@ class ShapesSpec:
             "params": None if self._params is None else self._params.to_jsonable(),
             "assumptions": [repr(a) for a in self._assumptions],
         }
+
+
+def _coerce_to_shapes_spec(
+    x: ShapesSpec | ParamsSpec | dict[str, Any] | None,
+) -> ShapesSpec | None:
+    """Normalize a user-supplied dynamic-spec value to ``ShapesSpec | None``.
+
+    Accepts ``None``, an existing ``ShapesSpec``, a ``ParamsSpec``, or a plain
+    ``dict`` (the same shape ``ParamsSpec`` accepts). The dict and
+    ``ParamsSpec`` forms are auto-wrapped by ``ShapesSpec.__init__``.
+    """
+    if x is None:
+        return None
+    if isinstance(x, ShapesSpec):
+        return x
+    if isinstance(x, (dict, ParamsSpec)):
+        return ShapesSpec(x)
+    raise TypeError(
+        f"dynamic spec expects a dict, ShapesSpec, or ParamsSpec, "
+        f"got {type(x).__name__}"
+    )

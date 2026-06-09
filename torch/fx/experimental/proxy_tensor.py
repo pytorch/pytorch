@@ -13,13 +13,13 @@ import logging
 import operator
 import threading
 import typing
-import typing_extensions
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import (
     Any,
+    cast,
     Concatenate,
     Literal,
     overload,
@@ -29,7 +29,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import ParamSpec, Self, TypeVarTuple, Unpack
 from weakref import WeakKeyDictionary
 
 import torch
@@ -37,6 +36,7 @@ import torch._ops
 import torch.fx as fx
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+import typing_extensions
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
@@ -61,6 +61,18 @@ from torch._subclasses.fake_tensor import (
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import GraphModule, Proxy, Tracer
+from torch.fx.experimental.dynamic_spec import (
+    _coerce_to_shapes_spec,
+    IntVar,
+    ShapesSpec,
+)
+from torch.fx.experimental.symbolic_shapes import (
+    _finalize_spec_wiring,
+    _symbolic_context_from_shapes_spec,
+    _wire_spec_assumptions,
+    _wire_spec_slot,
+    _wire_tensor_spec_dims,
+)
 from torch.fx.graph_module import _assign_attr
 from torch.fx.node import (
     _side_effectful_need_to_be_preserved_pre_dispatch,
@@ -81,6 +93,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._stats import count
 from torch.utils._thunk import Thunk
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary, WeakTensorKeyDictionary
+from typing_extensions import ParamSpec, Self, TypeVarTuple, Unpack
 
 from ._backward_state import BackwardState
 from .sym_node import SymNode
@@ -91,8 +104,14 @@ if TYPE_CHECKING:
     from collections.abc import MutableMapping
 
     import sympy
-
+    from torch._guards import Source
     from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
+    from torch.fx.experimental.dynamic_spec import (
+        IntermediateSpec,
+        ParamsSpec,
+        ShapesSpec,
+    )
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
 __all__ = [
@@ -532,7 +551,6 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     (e.g. ``sympy.Mul`` -> ``operator.mul``, ``sympy.Add`` -> ``torch.sym_sum``).
     """
     import sympy
-
     import torch.utils._sympy.interp
 
     handlers = {}
@@ -2628,6 +2646,7 @@ class _MakefxTracer:
         parent_tracer: _MakefxTracer | None = None,
         proxy_module_inputs: bool = False,
         _disable_torch_fn_metadata_mode: bool = False,
+        _dynamic_spec: ShapesSpec | None = None,
     ) -> None:
         # Configurations that are used to initialize the context managers and their states.
         # Should not modify them during tracing.
@@ -2662,6 +2681,29 @@ class _MakefxTracer:
         self.parent_tracer: _MakefxTracer | None = parent_tracer
         self.proxy_module_inputs = proxy_module_inputs
         self._disable_torch_fn_metadata_mode = _disable_torch_fn_metadata_mode
+        # Declares which inputs are dynamic. See
+        # ``torch.fx.experimental.dynamic_spec`` for the spec API.
+        #
+        # Only set on the top-level tracer; sub-tracers default to None.
+        # Higher-order ops (``cond``, ``while_loop``, ``scan``, ...) spawn
+        # sub-tracers via ``_make_sub_tracer`` to produce a separate
+        # subgraph for each branch/body.
+
+        # ``_dynamic_spec`` is pre-normalized by ``make_fx()``; assign as-is.
+        self._dynamic_spec: ShapesSpec | None = _dynamic_spec
+        # ``_dynamic_spec`` requires ``tracing_mode="fake"`` so the spec
+        # is the *sole* source of dynamism:
+        #   - ``"real"``: no fakification → spec would be silently
+        #     ignored (footgun).
+        #   - ``"symbolic"``: every dim becomes a backed symbol by
+        #     default.
+        if self._dynamic_spec is not None and self.tracing_mode != "fake":
+            raise ValueError(
+                f"make_fx(_dynamic_spec=...) requires tracing_mode='fake' "
+                f"(got tracing_mode={self.tracing_mode!r}). 'real' would "
+                f"silently ignore the spec; 'symbolic' conflicts with the "
+                f"spec's unbacked-by-default semantics."
+            )
 
     def _checkpoint_modes(self) -> list[Any]:
         return [
@@ -2807,55 +2849,109 @@ class _MakefxTracer:
         finally:
             self._restore_modes(*prev_modes)
 
-    def _convert_args_to_fake(self, args: T) -> T:
+    def _convert_args_to_fake(self, f: Callable[..., Any], args: T) -> T:
+        """Fakify ``args``. If ``self._dynamic_spec`` is set, create
+        tensors with dynamic dims accordingly.
+        """
         if self.tracing_mode == "real":
             return args
 
-        arg_count = 0
+        from torch._dynamo.functional_export import _bind_spec_to_args
+        from torch._dynamo.source import ConstantSource
 
-        def inner_wrap_fake(x: object) -> object:
-            nonlocal arg_count
-            # TODO: it would be nice to line these up with the names
-            # FX will choose for the placeholders, but we don't
-            # actually know what the names will be at this point yet
-            # NB: the Source here is actually meaningless
-            from torch._dynamo.source import ConstantSource
+        # Spec set-up. Pass an empty ShapesSpec when no user spec was
+        # supplied so the binding path is uniform (yields all-None
+        # leaf_specs aligned to the flat layout).
+        shape_env = (
+            self.fake_tensor_mode.shape_env if self.fake_tensor_mode else None
+        )
+        user_spec = self._dynamic_spec
+        if user_spec is not None:
+            shape_env = cast(ShapeEnv, shape_env)
+            # Wire assumptions BEFORE processing any inputs so derived /
+            # assumption checks can drain as inputs bind.
+            if user_spec._assumptions:
+                _wire_spec_assumptions(shape_env, user_spec)
 
-            if self.fake_tensor_mode is None:
-                raise AssertionError("fake_tensor_mode should not be None")
-            source = ConstantSource(f"input{arg_count}")
-            if isinstance(x, Tensor):
-                arg_count += 1
+        leaf_specs, flat_args, args_pytree_spec = _bind_spec_to_args(
+            f, args, {}, user_spec or ShapesSpec()
+        )
+
+        with shape_env.ignore_fresh_unbacked_symbols():
+            fake_leaves: list[object] = [
+                self._fakify_leaf(
+                    x,
+                    ConstantSource(f"input{i}"),
+                    leaf_specs[i],
+                )
+                for i, x in enumerate(flat_args)
+            ]
+
+        # Verify every spec assumption / derived check that survived
+        # input processing has been emitted (mirrors output_graph.py).
+        if user_spec is not None and user_spec._assumptions:
+            _finalize_spec_wiring(shape_env)
+
+        # args_pytree_spec wraps (args, {}); unflatten and take the args.
+        return pytree.tree_unflatten(fake_leaves, args_pytree_spec)[0]  # type: ignore[return-value]
+
+    def _fakify_leaf(
+        self,
+        x: object,
+        source: Source,
+        leaf_spec: IntermediateSpec | None,
+    ) -> object:
+        """Fakify a single flat input leaf.
+        """
+        if self.fake_tensor_mode is None:
+            raise AssertionError("fake_tensor_mode should not be None")
+
+        if isinstance(x, Tensor):
+            if leaf_spec is None:
                 return self.fake_tensor_mode.from_tensor(x, source=source)
-            # NB: don't match on bools
-            elif type(x) is int and self.tracing_mode == "symbolic":
-                if self.fake_tensor_mode.shape_env is None:
-                    raise AssertionError(
-                        "shape_env should be set if tracing with 'symbolic'"
-                    )
-                return self.fake_tensor_mode.shape_env.create_symintnode(
-                    self.fake_tensor_mode.shape_env.create_symbol(
-                        x, source, positive=None
-                    ),
-                    hint=x,
-                    source=source,
-                )
-            elif isinstance(x, torch.ScriptObject) or is_opaque_value(x):
-                if is_opaque_value_type(
-                    type(x)  # pyrefly: ignore[bad-argument-type]
-                ):
-                    return x
-                return torch._library.fake_class_registry.maybe_to_fake_obj(
-                    self.fake_tensor_mode, x
-                )
+            # leaf_spec is guaranteed to be a TensorSpec by _walk_spec.
+            shape_env = self.fake_tensor_mode.shape_env
+            ctx = _symbolic_context_from_shapes_spec(
+                x, source, leaf_spec, None, {}
+            )
+            fake_x = self.fake_tensor_mode.from_tensor(
+                x,
+                static_shapes=False,
+                source=source,
+                symbolic_context=ctx,
+            )
+            _wire_tensor_spec_dims(leaf_spec, fake_x)
+            return fake_x
 
-            if isinstance(x, FakeScriptObject):
-                raise AssertionError(
-                    f"ScriptObject {x} has been fakified. Cannot wrap_fake it again."
-                )
-            return x
+        # NB: don't match on bools.
+        if type(x) is int and (
+            self._dynamic_spec is not None or self.tracing_mode == "symbolic"
+        ):
+            shape_env = self.fake_tensor_mode.shape_env
+            sym_node = shape_env.create_symintnode(
+                shape_env.create_symbol(x, source, positive=None),
+                hint=x,
+                source=source,
+            )
+            if isinstance(leaf_spec, (IntVar, SymInt)):
+                _wire_spec_slot(leaf_spec, sym_node)
+            # Otherwise leaf_spec is int or None (validated by _walk_spec).
+            return sym_node
 
-        return pytree.tree_map(inner_wrap_fake, args)
+        if isinstance(x, torch.ScriptObject) or is_opaque_value(x):
+            if is_opaque_value_type(
+                type(x)  # pyrefly: ignore[bad-argument-type]
+            ):
+                return x
+            return torch._library.fake_class_registry.maybe_to_fake_obj(
+                self.fake_tensor_mode, x
+            )
+
+        if isinstance(x, FakeScriptObject):
+            raise AssertionError(
+                f"ScriptObject {x} has been fakified. Cannot wrap_fake it again."
+            )
+        return x
 
     def _trace_inner(self, f: Callable[..., Any], *args: object) -> GraphModule:
         # TODO: We need to explicitly import torch._dynamo before calling dispatch_trace,
@@ -2867,7 +2963,7 @@ class _MakefxTracer:
 
         phs = pytree.tree_map(lambda _: torch.fx._symbolic_trace.PH, args)
 
-        args = self._convert_args_to_fake(args)
+        args = self._convert_args_to_fake(f, args)
 
         # FX doesn't support varargs, so we gotta fake up a wrapper
         # TODO: Would be nice to fix this at the source...
@@ -3004,6 +3100,7 @@ def make_fx(
     record_stack_traces: bool = False,
     proxy_module_inputs: bool = False,
     _disable_torch_fn_metadata_mode: bool = False,
+    _dynamic_spec: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
 ) -> Callable[..., GraphModule]:
     """
     Given a function f, return a new function which when executed with valid
@@ -3011,6 +3108,20 @@ def make_fx(
     were executed during the course of execution.
 
     If record_stack_traces is True, the stack trace will be preserved on node.meta["stack_trace"]
+
+    ``tracing_mode``:
+        - ``"real"``: no fakification, traces with real tensors.
+        - ``"fake"``: tensors become FakeTensors. By default all dims are
+          static (concrete); if ``_dynamic_spec`` is set, the spec
+          controls which dims become unbacked symbolic sizes — everything
+          not declared by the spec stays static.
+        - ``"symbolic"``: tensors become FakeTensors and **every dim becomes a
+          backed symbolic size** (``s0``, ``s1``, ...) via the auto-dynamic
+          path. NOTE: using backed symbols this way is generally **not
+          recommended and not sound** — backed symbols come with assumptions
+          (e.g. ``size >= 2`` 0/1 specialization) that may be violated. Kept
+          for backward compatibility. Prefer ``"fake"`` + ``_dynamic_spec``
+          to declare dynamism explicitly with unbacked symbols.
     """
 
     if tracing_mode not in ["real", "fake", "symbolic"]:
@@ -3032,6 +3143,7 @@ def make_fx(
         or config.trace.provenance_tracking_level == 1,
         proxy_module_inputs=proxy_module_inputs,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
+        _dynamic_spec=_coerce_to_shapes_spec(_dynamic_spec),
     )
 
     @functools.wraps(f)
