@@ -500,7 +500,12 @@ class BatchLinearLHSFusion(BatchFusion):
         ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
             bias = get_arg_value(node, 2, "bias")
-            bias_dim = None if bias is None else bias.meta["val"].ndim  # type: ignore[union-attr]
+            bias_tensor = (
+                None
+                if bias is None
+                else bias.meta.get("val") or bias.meta.get("example_value")
+            )
+            bias_dim = None if bias_tensor is None else bias_tensor.ndim  # type: ignore[union-attr]
             group_key = ("batch_linear_lhs", bias_dim, input)
         else:
             group_key = None
