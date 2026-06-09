@@ -2999,7 +2999,6 @@ class TMACompatibilityChecker:
         # and in that case we should fall back to the generic analysis below.
         if (
             self.kernel.persistent_reduction
-            and not self.for_store
             and innermost_block_symt in TritonSymbols.reduction_types
         ):
             # For a discontiguous tensor, a 1D block will be split across several
@@ -3034,7 +3033,7 @@ class TMACompatibilityChecker:
                 innermost_block_bytes, sympy.Integer(16)
             ):
                 log.debug(
-                    "%s persistent reduction innermost block shape cannot load 16 bytes. Block shape: %s, persistent RBLOCK: %d",
+                    "%s persistent reduction innermost block shape cannot transfer 16 bytes. Block shape: %s, persistent RBLOCK: %d",
                     self.failed_debug_prefix,
                     block_params.block_shape,
                     persistent_rblock,
