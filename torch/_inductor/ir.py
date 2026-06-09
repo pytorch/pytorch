@@ -10317,7 +10317,7 @@ class Conditional(ExternKernel):
             shape_env: ShapeEnv, branch: bool
         ) -> AbstractContextManager[None]:
             if not isinstance(fake_pred, torch.SymBool):
-                return contextlib.nullcontext()
+                return shape_env.branch_local_shape_refinement(allow_eager_checks=False)
 
             @contextlib.contextmanager
             def ctx() -> Generator[None, None, None]:

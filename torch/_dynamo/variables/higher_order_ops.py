@@ -2476,6 +2476,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         def speculate_branch(
             branch: bool,
         ) -> tuple[VariableTracker, OutputSpec, torch.fx.Graph, dict[Proxy, Proxy]]:
+            # Keep this local so importing higher_order_ops does not eagerly import sympy.
             import sympy
 
             # NB: 0 is predicate
@@ -2483,7 +2484,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if self._HOP_NAME is None:
                 raise AssertionError("_HOP_NAME must be set")
             # TODO: Support kwargs
-            with tx.output.shape_env.branch_local_shape_refinement():
+            with tx.output.shape_env.branch_local_shape_refinement(
+                allow_eager_checks=isinstance(pred, SymNodeVariable)
+            ):
                 if isinstance(pred, SymNodeVariable):
                     pred_expr = pred.sym_num
                     if not isinstance(pred_expr, torch.SymBool):

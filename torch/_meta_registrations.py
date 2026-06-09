@@ -1027,7 +1027,6 @@ def assert_scalar_meta(val, assert_msg):
 
     if isinstance(val, SymBool):
         if val.node.shape_env._has_branch_local_shape_refinement():
-            val.node.shape_env._assume_branch_local_shape_expr(val.node.expr)
             return
 
         from torch.fx.experimental.symbolic_shapes import expect_true
@@ -4743,7 +4742,7 @@ def meta_lshifts(self, other):
 
 @register_meta(aten.zero.default)
 def meta_zero(self):
-    return self.new_empty(self.shape)
+    return torch.empty_like(self)
 
 
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])

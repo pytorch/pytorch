@@ -4117,14 +4117,63 @@ def _local_scalar_dense(data):
 
 @register_lowering(aten._assert_scalar)
 def _assert_scalar(data, msg):
-    if V.graph.sizevars.shape_env._has_branch_local_shape_refinement():
-        arg = V.graph.current_node.args[0]
+    def _sympy_value_from_fx_arg(arg):
         if isinstance(arg, torch.fx.Node):
-            val = arg.meta.get("val")
-            if isinstance(val, torch.SymBool):
-                data = val.node.expr
-            elif isinstance(val, (torch.SymInt, torch.SymFloat)):
-                data = sympy.Ne(val.node.expr, 0)
+            val = arg.meta.get("val", arg.meta.get("example_value"))
+            if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                return val.node.expr
+            if isinstance(val, sympy.Expr):
+                return val
+        elif isinstance(arg, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            return arg.node.expr
+        elif isinstance(arg, (int, float, bool, sympy.Expr)):
+            return sympy.sympify(arg)
+        return None
+
+    def _comparison_expr_from_fx_node(node: torch.fx.Node):
+        if len(node.args) != 2:
+            return None
+        lhs = _sympy_value_from_fx_arg(node.args[0])
+        rhs = _sympy_value_from_fx_arg(node.args[1])
+        if lhs is None or rhs is None:
+            return None
+        target_name = getattr(node.target, "__name__", None)
+        if node.target is operator.eq or target_name == "eq":
+            return sympy.Eq(lhs, rhs, evaluate=False)
+        if node.target is operator.ne or target_name == "ne":
+            return sympy.Ne(lhs, rhs, evaluate=False)
+        if node.target is operator.lt or target_name == "lt":
+            return lhs < rhs
+        if node.target is operator.le or target_name == "le":
+            return lhs <= rhs
+        if node.target is operator.gt or target_name == "gt":
+            return lhs > rhs
+        if node.target is operator.ge or target_name == "ge":
+            return lhs >= rhs
+        return None
+
+    if V.graph.sizevars.shape_env._has_branch_local_shape_refinement():
+        branch_local_assert_expr = V.graph.current_node.meta.get(
+            "branch_local_assert_expr"
+        )
+        if branch_local_assert_expr is not None:
+            data = branch_local_assert_expr
+        else:
+            arg = V.graph.current_node.args[0]
+            if isinstance(arg, torch.fx.Node):
+                arg_assert_expr = arg.meta.get("branch_local_assert_expr")
+                if arg_assert_expr is not None:
+                    data = arg_assert_expr
+                else:
+                    comparison_expr = _comparison_expr_from_fx_node(arg)
+                    if comparison_expr is not None:
+                        data = comparison_expr
+                    else:
+                        val = arg.meta.get("val", arg.meta.get("example_value"))
+                        if isinstance(val, torch.SymBool):
+                            data = val.node.expr
+                        elif isinstance(val, (torch.SymInt, torch.SymFloat)):
+                            data = sympy.Ne(val.node.expr, 0)
 
     if isinstance(data, torch.SymBool):
         data = data.node.expr
@@ -8760,6 +8809,44 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
             op_name = op.operation_name
             assert op_name is not None
             V.graph.additional_buffer_deps[op_name].add(dep_name)
+
+    # For void ops (e.g. wait_stream) that don't produce tensor outputs,
+    # passthrough args returned by control_deps are the same IR nodes as
+    # their inputs. This means downstream consumers have no scheduling
+    # dependency on the void op. Create MutationOutput entries to force
+    # the scheduler to order subsequent readers after the void op.
+    # Only apply this for wait_stream, which needs forward ordering on the
+    # waiting stream. Other sync ops (synchronize_stream, record_event) are
+    # full barriers or have event-based cross-sync tracking.
+    void_ops = [
+        op
+        for op in new_ops
+        if isinstance(op, ir.Buffer)
+        and op.name is not None
+        and isinstance(op.layout, ir.NoneLayout)
+        and not isinstance(op, ir.MutationOutput)
+    ]
+    if void_ops and args:
+        # Check if the subgraph contains a wait_stream call
+        has_wait_stream = any(
+            n.op == "call_function"
+            and n.target is torch.ops.streams.wait_stream.default
+            for n in subgraph_fn.graph_module.graph.nodes
+        )
+        if has_wait_stream:
+            for void_op in void_ops:
+                assert isinstance(void_op, ir.ExternKernel)
+                for arg in args:
+                    for arg_leaf in pytree.tree_leaves(arg):
+                        if not isinstance(arg_leaf, IRNode):
+                            continue
+                        device = arg_leaf.get_device()
+                        if device is None:
+                            continue
+                        mut_out = ir.MutationOutput(
+                            ir.NoneLayout(device=device), arg_leaf, void_op
+                        )
+                        void_op.mutation_outputs.append(mut_out)
 
     return output
 

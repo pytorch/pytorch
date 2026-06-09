@@ -2514,7 +2514,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         "Expected cond to be True, but got False. "
                         f"Runtime assertion failed for expression {sym_expr}"
                     )
-                    tx.output.create_proxy(
+                    assert_proxy = tx.output.create_proxy(
                         "call_function",
                         torch.ops.aten._assert_scalar.default,
                         *proxy_args_kwargs(
@@ -2526,6 +2526,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         ),
                     )
                     if isinstance(sym_expr, torch.SymBool):
+                        assert_proxy.node.meta["branch_local_assert_expr"] = (
+                            sym_expr.node.expr
+                        )
+                        assert_arg = assert_proxy.node.args[0]
+                        if isinstance(assert_arg, torch.fx.Node):
+                            assert_arg.meta["branch_local_assert_expr"] = (
+                                sym_expr.node.expr
+                            )
                         tx.output.shape_env._assume_branch_local_shape_expr(
                             sym_expr.node.expr
                         )

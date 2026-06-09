@@ -721,7 +721,7 @@ def rebind_unbacked(
 
             if not isinstance(raw_u1, sympy.Symbol):
                 if raw_u1.free_symbols:
-                    raise AssertionError(f"should have been constant, but got {raw_u1}")
+                    shape_env._eliminate_unbacked(raw_u0, raw_u1)
                 continue
 
             # The old and new could be the same if you improperly hit the memo
@@ -3767,6 +3767,32 @@ class DimConstraints:
 TLS = threading.local()
 
 
+def _ignore_fresh_unbacked_symbols_tls() -> bool:
+    return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
+
+
+def _ignore_fresh_unbacked_symbols_set(b: bool) -> bool:
+    prev = _ignore_fresh_unbacked_symbols_tls()
+    TLS.ignore_fresh_unbacked_symbols = b
+    return prev
+
+
+@contextmanager
+def _ignore_fresh_unbacked_symbols_tls_context() -> Generator[None, None, None]:
+    """
+    Indicates that newly allocated unbacked SymInts are intentionally discarded.
+
+    This is used by tracing-only metadata paths that do not own a ShapeEnv, but
+    still create temporary fake tensors whose fresh symbols should not be bound
+    into the surrounding graph.
+    """
+    prev = _ignore_fresh_unbacked_symbols_set(True)
+    try:
+        yield
+    finally:
+        _ignore_fresh_unbacked_symbols_set(prev)
+
+
 @dataclass(frozen=True, slots=True)
 class ShapeEnvSettings:
     """
@@ -4122,7 +4148,8 @@ class ShapeEnv:
 
         self.trace_asserts = trace_asserts
         self._branch_local_shape_refinement_stack: list[
-            tuple[
+            None
+            | tuple[
                 dict[sympy.Expr, sympy.Expr],
                 dict[sympy.Symbol, sympy.Expr],
                 dict[sympy.Symbol, ValueRanges[sympy.Expr]],
@@ -4133,6 +4160,7 @@ class ShapeEnv:
                 Counter[sympy.Symbol],
             ]
         ] = []
+        self._branch_local_shape_refinement_allow_eager_checks_stack: list[bool] = []
 
         self.specializations: OrderedSet[Specialization] = OrderedSet()
 
@@ -4255,25 +4283,37 @@ class ShapeEnv:
             self.frozen = False
 
     @record_shapeenv_event()
-    def _branch_local_shape_refinement_enter(self) -> None:
-        self._branch_local_shape_refinement_stack.append(
-            (
-                self.axioms.copy(),
-                self.replacements.copy(),
-                self.var_to_range.copy(),
-                {
-                    k: ValueRangesSLoc(v.lower, v.upper)
-                    for k, v in self.var_to_range_sloc.items()
-                },
-                len(self.guards),
-                {k: len(v) for k, v in self.deferred_runtime_asserts.items()},
-                self.num_deferred_runtime_asserts,
-                self.symbol_guard_counter.copy(),
-            )
+    def _branch_local_shape_refinement_enter(
+        self, allow_eager_checks: bool = True
+    ) -> None:
+        self._branch_local_shape_refinement_stack.append(None)
+        self._branch_local_shape_refinement_allow_eager_checks_stack.append(
+            allow_eager_checks
+        )
+
+    def _ensure_branch_local_shape_refinement_snapshot(self) -> None:
+        if self._branch_local_shape_refinement_stack[-1] is not None:
+            return
+        self._branch_local_shape_refinement_stack[-1] = (
+            self.axioms.copy(),
+            self.replacements.copy(),
+            self.var_to_range.copy(),
+            {
+                k: ValueRangesSLoc(v.lower, v.upper)
+                for k, v in self.var_to_range_sloc.items()
+            },
+            len(self.guards),
+            {k: len(v) for k, v in self.deferred_runtime_asserts.items()},
+            self.num_deferred_runtime_asserts,
+            self.symbol_guard_counter.copy(),
         )
 
     @record_shapeenv_event()
     def _branch_local_shape_refinement_exit(self) -> None:
+        frame = self._branch_local_shape_refinement_stack.pop()
+        self._branch_local_shape_refinement_allow_eager_checks_stack.pop()
+        if frame is None:
+            return
         (
             old_axioms,
             old_replacements,
@@ -4283,7 +4323,7 @@ class ShapeEnv:
             old_deferred_runtime_assert_lens,
             old_num_deferred_runtime_asserts,
             old_symbol_guard_counter,
-        ) = self._branch_local_shape_refinement_stack.pop()
+        ) = frame
 
         old_range_symbols = set(old_var_to_range)
         new_var_to_range = {
@@ -4342,9 +4382,11 @@ class ShapeEnv:
             self._maybe_evaluate_static.cache_clear()
 
     @contextmanager
-    def branch_local_shape_refinement(self) -> Generator[None, None, None]:
+    def branch_local_shape_refinement(
+        self, allow_eager_checks: bool = True
+    ) -> Generator[None, None, None]:
         """Temporarily add counterfactual shape facts while tracing a HOP branch."""
-        self._branch_local_shape_refinement_enter()
+        self._branch_local_shape_refinement_enter(allow_eager_checks)
         try:
             yield
         finally:
@@ -4353,10 +4395,19 @@ class ShapeEnv:
     def _has_branch_local_shape_refinement(self) -> bool:
         return bool(self._branch_local_shape_refinement_stack)
 
+    def _has_branch_local_shape_refinement_for_eager_checks(self) -> bool:
+        return any(self._branch_local_shape_refinement_allow_eager_checks_stack)
+
+    def _has_branch_local_shape_refinement_snapshot(self) -> bool:
+        return any(
+            frame is not None for frame in self._branch_local_shape_refinement_stack
+        )
+
     def _assume_branch_local_shape_expr(self, expr: SympyBoolean) -> bool:
         if not self._branch_local_shape_refinement_stack:
             return False
 
+        self._ensure_branch_local_shape_refinement_snapshot()
         expr = self.simplify(expr)
         if expr is sympy.false:
             return False
@@ -4424,6 +4475,7 @@ class ShapeEnv:
             "_equality_graph",
             "_unbacked_replacements",
             "_branch_local_shape_refinement_stack",
+            "_branch_local_shape_refinement_allow_eager_checks_stack",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -4609,13 +4661,11 @@ class ShapeEnv:
                 self.replacements[b.node.expr] = new_var
 
     def _ignore_fresh_unbacked_symbols_tls(self) -> bool:
-        return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
+        return _ignore_fresh_unbacked_symbols_tls()
 
     @record_shapeenv_event()
     def _ignore_fresh_unbacked_symbols_set(self, b: bool) -> bool:
-        prev = self._ignore_fresh_unbacked_symbols_tls()
-        TLS.ignore_fresh_unbacked_symbols = b
-        return prev
+        return _ignore_fresh_unbacked_symbols_set(b)
 
     @contextmanager
     def ignore_fresh_unbacked_symbols(self) -> Generator[None, None, None]:
@@ -4623,11 +4673,8 @@ class ShapeEnv:
         Indicates that the newly allocated unbacked SymInts are being
         discarded
         """
-        prev = self._ignore_fresh_unbacked_symbols_set(True)
-        try:
+        with _ignore_fresh_unbacked_symbols_tls_context():
             yield
-        finally:
-            self._ignore_fresh_unbacked_symbols_set(prev)
 
     @record_shapeenv_event()
     def freeze(self) -> None:
@@ -7842,7 +7889,7 @@ class ShapeEnv:
         cur_replace = {s: self._find(s) for s in res.free_symbols}
         replaced, changed = self.replacements[a]._xreplace(cur_replace)
         if changed:
-            if self._branch_local_shape_refinement_stack:
+            if self._has_branch_local_shape_refinement_snapshot():
                 # Do not path-compress through counterfactual branch facts.
                 return replaced
             self._set_replacement(a, replaced, "find")
