@@ -2,6 +2,7 @@
 
 
 import torch
+import torch._dynamo.config
 import torch.nn.utils.parametrize as parametrize
 from torch import nn
 from torch.testing._internal.common_utils import raise_on_run_directly
@@ -38,6 +39,7 @@ class TestParametrization(JitTestCase):
             with parametrize.cached():
                 traced_model = torch.jit.trace_module(model, {"forward": x})
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_scriptable(self):
         # TODO: Need to fix the scripting in parametrizations
         #       Currently, all the tests below will throw torch.jit.Error

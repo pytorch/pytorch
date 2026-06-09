@@ -2195,6 +2195,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # check that u refers to the same dimension
         self.assertEqual(m.weight_u.shape, m.weight_orig[0, :, 0, 0].shape)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_spectral_norm_forward(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)

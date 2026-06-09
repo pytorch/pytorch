@@ -63,6 +63,7 @@ class TestComplexTensor(TestCase):
 
     @onlyCPU
     @dtypes(*complex_types())
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_eq(self, device, dtype):
         "Test eq on complex types"
         nan = float("nan")
