@@ -1573,16 +1573,16 @@ class _LocalRandom:
             and isinstance(seed, torch.SymInt)
             and isinstance(seed.node, LocalIntNode)
         ):
-            from torch.random import _manual_seed_impl
+            from torch.random import manual_seed
 
             for rank in sorted(lm.ranks):
                 rank_seed = seed.node._local_ints[rank]
-                _manual_seed_impl(rank_seed)
+                manual_seed(rank_seed)
                 lm._per_rank_rng_states[rank] = _get_rng_state()
             return torch.random.default_generator
-        from torch.random import _manual_seed_impl
+        from torch.random import manual_seed
 
-        result = _manual_seed_impl(seed)
+        result = manual_seed(seed)
 
         if lm is not None and len(lm._per_rank_rng_states) > 0:
             cpu_state, cuda_states = _get_rng_state()

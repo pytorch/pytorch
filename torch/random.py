@@ -3,6 +3,7 @@ import contextlib
 import warnings
 from collections.abc import Generator
 from typing import TYPE_CHECKING
+from typing_extensions import deprecated
 
 import torch
 
@@ -46,7 +47,7 @@ def get_rng_state() -> torch.Tensor:
     return default_generator.get_state()
 
 
-def manual_seed(seed) -> torch._C.Generator:
+def manual_seed(seed: int) -> torch._C.Generator:
     r"""Sets the seed for generating random numbers on all devices. Returns a
     `torch.Generator` object.
 
@@ -56,34 +57,18 @@ def manual_seed(seed) -> torch._C.Generator:
             is raised. Negative inputs are remapped to positive values with the formula
             `0xffff_ffff_ffff_ffff + seed`.
     """
-    return _manual_seed_impl(seed)
+    if not torch._C._accelerator_isInBadFork():
+        import torch.accelerator
 
-
-def _manual_seed_impl(seed) -> torch._C.Generator:
-    seed = int(seed)
-    import torch.cuda
-
-    if not torch.cuda._is_in_bad_fork():
-        torch.cuda.manual_seed_all(seed)
-
-    import torch.mps
-
-    if not torch.mps._is_in_bad_fork():
-        torch.mps.manual_seed(seed)
-
-    import torch.xpu
-
-    if not torch.xpu._is_in_bad_fork():
-        torch.xpu.manual_seed_all(seed)
-
-    import torch.mtia
-
-    if not torch.mtia._is_in_bad_fork():
-        torch.mtia.manual_seed_all(seed)
-
-    _seed_custom_device(seed)
+        torch.accelerator.manual_seed_all(seed)
 
     return default_generator.manual_seed(seed)
+
+
+_manual_seed_impl = deprecated(
+    "Use `set_device_index` instead.",
+    category=FutureWarning,
+)(manual_seed)
 
 
 def seed() -> int:
@@ -91,54 +76,13 @@ def seed() -> int:
     random number on all devices. Returns a 64 bit number used to seed the RNG.
     """
     seed = default_generator.seed()
-    import torch.cuda
 
-    if not torch.cuda._is_in_bad_fork():
-        torch.cuda.manual_seed_all(seed)
+    if not torch._C._accelerator_isInBadFork():
+        import torch.accelerator
 
-    import torch.mps
-
-    if not torch.mps._is_in_bad_fork():
-        torch.mps.manual_seed(seed)
-
-    import torch.xpu
-
-    if not torch.xpu._is_in_bad_fork():
-        torch.xpu.manual_seed_all(seed)
-
-    import torch.mtia
-
-    if not torch.mtia._is_in_bad_fork():
-        torch.mtia.manual_seed_all(seed)
-
-    _seed_custom_device(seed)
+        torch.accelerator.manual_seed_all(seed)
 
     return seed
-
-
-def _seed_custom_device(seed) -> None:
-    r"""Sets the seed to generate random numbers for custom device.
-
-    Args:
-        seed (int): The desired seed.
-
-    See [Note: support the custom device with privateuse1]
-    """
-    seed = int(seed)
-    custom_backend_name = torch._C._get_privateuse1_backend_name()
-    if hasattr(torch, custom_backend_name):
-        custom_device_mod = getattr(torch, custom_backend_name)
-        _bad_fork_name = "_is_in_bad_fork"
-        _seed_all_name = "manual_seed_all"
-        if hasattr(custom_device_mod, _bad_fork_name) and hasattr(
-            custom_device_mod, _seed_all_name
-        ):
-            if not getattr(custom_device_mod, _bad_fork_name)():
-                getattr(custom_device_mod, _seed_all_name)(seed)
-        else:
-            message = f"Set seed for `{custom_backend_name}` device does not take effect, please add API's "
-            message += f"`{_bad_fork_name}` and `{_seed_all_name}` to `{custom_backend_name}` device module."
-            warnings.warn(message, UserWarning, stacklevel=3)
 
 
 def initial_seed() -> int:
