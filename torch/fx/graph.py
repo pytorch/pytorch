@@ -1547,14 +1547,12 @@ class Graph:
         if op in ("call_function", "call_method", "call_module") and (args or kwargs):
             for val in pytree.tree_iter((args, kwargs)):
                 if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-                    warnings.warn(
+                    raise RuntimeError(
                         f"Raw {type(val).__name__} value ({val}) passed as argument to "
                         f"Graph.create_node(op='{op}', target={target}). "
                         f"Use create_*_node() helpers for tensor metadata queries "
-                        f"or materialize_symints() for general symbolic expressions.",
-                        stacklevel=2,
+                        f"or materialize_symints() for general symbolic expressions."
                     )
-                    break
 
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
