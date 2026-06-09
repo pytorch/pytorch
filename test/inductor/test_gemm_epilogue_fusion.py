@@ -26,6 +26,33 @@ from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 class GemmEpilogueFusionTests(TestCase):
+    def _grouped_mm_inputs(self, op, device):
+        dtype = torch.bfloat16
+        match op:
+            case "2d/2d":
+                m, n, k, groups = 64, 128, 64, 2
+                a = torch.randn(m, k * groups, device=device, dtype=dtype)
+                b = torch.randn(n, k * groups, device=device, dtype=dtype).t()
+                offs = torch.arange(k, k * groups + 1, k, device=device, dtype=torch.int32)
+            case "2d/3d":
+                groups, m, n, k = 2, 64, 128, 64
+                a = torch.randn(m * groups, k, device=device, dtype=dtype)
+                b = torch.randn(groups, n, k, device=device, dtype=dtype).transpose(-2, -1)
+                offs = torch.arange(m, m * groups + 1, m, device=device, dtype=torch.int32)
+            case "3d/2d":
+                groups, m, n, k = 2, 64, 128, 64
+                a = torch.randn(groups, m, k, device=device, dtype=dtype)
+                b = torch.randn(n * groups, k, device=device, dtype=dtype).t()
+                offs = torch.arange(n, n * groups + 1, n, device=device, dtype=torch.int32)
+            case "3d/3d":
+                groups, m, n, k = 2, 64, 128, 64
+                a = torch.randn(groups, m, k, device=device, dtype=dtype)
+                b = torch.randn(groups, n, k, device=device, dtype=dtype).transpose(-2, -1)
+                offs = None
+            case _:
+                raise AssertionError(f"invalid grouped_mm op shape: {op}")
+        return a, b, offs
+
     def test_eager_matches_reference(self):
         a = torch.randn(2, 3)
         b = torch.randn(3, 4)
@@ -123,14 +150,13 @@ class GemmEpilogueFusionTests(TestCase):
             matmul_epilogue(torch.randn(3), torch.randn(3), lambda acc: acc.relu())
 
     def test_grouped_mm_epilogue_eager_matches_reference(self):
-        m_sizes = torch.tensor([16, 32], dtype=torch.int32)
-        offs = torch.cumsum(m_sizes, dim=0).to(torch.int32)
-        a = torch.randn(int(offs[-1]), 8, dtype=torch.bfloat16)
-        b = torch.randn(2, 8, 16, dtype=torch.bfloat16)
+        for op in ("2d/2d", "2d/3d", "3d/2d", "3d/3d"):
+            with self.subTest(op=op):
+                a, b, offs = self._grouped_mm_inputs(op, "cpu")
 
-        actual = grouped_mm_epilogue(a, b, lambda acc: acc.relu(), offs=offs)
+                actual = grouped_mm_epilogue(a, b, lambda acc: acc.relu(), offs=offs)
 
-        torch.testing.assert_close(actual, F.grouped_mm(a, b, offs=offs).relu())
+                torch.testing.assert_close(actual, F.grouped_mm(a, b, offs=offs).relu())
 
     def test_cutlass_backend_is_accepted(self):
         a = torch.randn(2, 3)
@@ -188,19 +214,18 @@ class GemmEpilogueFusionTests(TestCase):
         def fn(a, b, offs):
             return grouped_mm_epilogue(a, b, lambda acc: acc.relu(), offs=offs)
 
-        m_sizes = torch.tensor([64, 96], device="cuda", dtype=torch.int32)
-        offs = torch.cumsum(m_sizes, dim=0).to(torch.int32)
-        a = torch.randn(int(offs[-1]), 64, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+        for op in ("2d/2d", "2d/3d", "3d/2d", "3d/3d"):
+            with self.subTest(op=op):
+                a, b, offs = self._grouped_mm_inputs(op, "cuda")
 
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b, offs
-        )
+                actual, (code,) = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True), a, b, offs
+                )
 
-        torch.testing.assert_close(actual, fn(a, b, offs), atol=1e-2, rtol=1e-2)
-        FileCheck().check("triton_").check("grouped_mm").check_not(
-            "extern_kernels._grouped_mm"
-        ).run(code)
+                torch.testing.assert_close(actual, fn(a, b, offs), atol=1e-2, rtol=1e-2)
+                FileCheck().check("triton_").check("grouped_mm").check_not(
+                    "extern_kernels._grouped_mm"
+                ).run(code)
 
     @requires_cuda_and_triton
     @inductor_config.patch(max_autotune_gemm=False)
