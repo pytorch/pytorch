@@ -2,7 +2,7 @@
 """Captured aux tensor vectorization analysis for flex attention."""
 
 import dataclasses
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from enum import auto, Enum
 
 import sympy
@@ -114,6 +114,8 @@ def make_fx_index_symbols(
     q_idx_node: torch.fx.Node,
     kv_idx_node: torch.fx.Node,
     non_lane_index_nodes: Sequence[torch.fx.Node] = (),
+    *,
+    kv_expr: sympy.Expr | None = None,
 ) -> tuple[sympy.Symbol, sympy.Symbol, dict[torch.fx.Node, sympy.Expr]]:
     """Build symbolic replacements for lane and non-lane FX index nodes."""
     q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
@@ -123,7 +125,7 @@ def make_fx_index_symbols(
         for node in non_lane_index_nodes
     }
     index_symbols[q_idx_node] = q_idx
-    index_symbols[kv_idx_node] = kv_idx
+    index_symbols[kv_idx_node] = kv_idx if kv_expr is None else kv_expr
     return q_idx, kv_idx, index_symbols
 
 
@@ -339,6 +341,7 @@ def direct_aux_load_vec_size_and_kind(
 def fx_aux_index_to_sympy(
     index: object,
     index_symbols: Mapping[torch.fx.Node, sympy.Expr],
+    node_to_sympy: Callable[[torch.fx.Node], sympy.Expr | None] | None = None,
 ) -> sympy.Expr | None:
     """Translate the supported FX integer index operations to sympy."""
     if isinstance(index, int | sympy.Integer):
@@ -347,6 +350,10 @@ def fx_aux_index_to_sympy(
         return None
     if index in index_symbols:
         return index_symbols[index]
+    if node_to_sympy is not None:
+        expr = node_to_sympy(index)
+        if expr is not None:
+            return expr
     if index.op != "call_function":
         return None
 
@@ -354,8 +361,8 @@ def fx_aux_index_to_sympy(
     target = index.target
     if len(args) < 2:
         return None
-    lhs = fx_aux_index_to_sympy(args[0], index_symbols)
-    rhs = fx_aux_index_to_sympy(args[1], index_symbols)
+    lhs = fx_aux_index_to_sympy(args[0], index_symbols, node_to_sympy)
+    rhs = fx_aux_index_to_sympy(args[1], index_symbols, node_to_sympy)
     if lhs is None or rhs is None:
         return None
     match target:
