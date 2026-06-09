@@ -8736,7 +8736,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     )
     input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
     choices: list[Any] = []
-    flex_gemm_epilogue_template.maybe_append_choice(
+    error = flex_gemm_epilogue_template.maybe_append_choice(
         choices,
         input_nodes=input_nodes,
         layout=layout,
@@ -8749,6 +8749,8 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             out_dtype=output_meta.dtype,
         ),
     )
+    if error is not None:
+        raise error
     result, _ = autotune_select_algorithm(
         "flex_gemm_epilogue", choices, input_nodes, layout
     )

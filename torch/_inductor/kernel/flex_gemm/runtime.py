@@ -119,6 +119,7 @@ def gemm_epilogue(
     alpha: float = 1.0,
     beta: float = 1.0,
     out_dtype: torch.dtype | None = None,
+    out: torch.Tensor | None = None,
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
     epilogue_source: str | None = None,
@@ -135,6 +136,7 @@ def gemm_epilogue(
         alpha: Scale applied to the GEMM accumulator.
         beta: Scale applied to ``C`` when ``C`` is present.
         out_dtype: Optional output dtype. Defaults to ``a.dtype``.
+        out: Optional preallocated output tensor with shape ``[M, N]``.
         epilogue_args: Optional tensor args captured by the epilogue.
         epilogue_arg_kinds: Explicit ``tile``, ``row``, or ``col`` kind per arg.
         epilogue_source: Optional source string included in the epilogue cache key.
@@ -151,13 +153,24 @@ def gemm_epilogue(
         raise RuntimeError(
             f"mat1 and mat2 shapes cannot be multiplied ({a.shape} and {b.shape})"
         )
+    expected_shape = (a.shape[0], b.shape[1])
+    expected_dtype = a.dtype if out_dtype is None else out_dtype
     if C is not None:
         _check_matrix("C", C)
         _check_matrix_major_layout("C", C)
-        if tuple(C.shape) != (a.shape[0], b.shape[1]):
+        if tuple(C.shape) != expected_shape:
             raise RuntimeError(
-                f"C shape must be {(a.shape[0], b.shape[1])}, got {tuple(C.shape)}"
+                f"C shape must be {expected_shape}, got {tuple(C.shape)}"
             )
+    if out is not None:
+        _check_matrix("out", out)
+        _check_matrix_major_layout("out", out)
+        if tuple(out.shape) != expected_shape:
+            raise RuntimeError(
+                f"out shape must be {expected_shape}, got {tuple(out.shape)}"
+            )
+        if out.dtype != expected_dtype:
+            raise RuntimeError(f"out dtype must be {expected_dtype}, got {out.dtype}")
     if epilogue_args and C is not None:
         # TODO: Route this through the flex frontend so validated A/B/C metadata
         # can be reused here.
@@ -171,7 +184,7 @@ def gemm_epilogue(
             "FlexGEMM tuned=True requires the QuACK autotune wrapper follow-up"
         )
 
-    tensors = (C, *epilogue_args) if C is not None else epilogue_args
+    tensors = (C, out, *epilogue_args)
     _check_same_device(a, b, *(tensor for tensor in tensors if tensor is not None))
     inferred_arg_kinds = _epilogue_arg_kinds(a, b, epilogue_args, epilogue_arg_kinds)
     for index, arg in enumerate(epilogue_args):
@@ -187,17 +200,17 @@ def gemm_epilogue(
 
     from torch._vendor.quack.gemm_act import gemm_act as gemm_act_dispatch
 
-    out = torch.empty(
-        (1, a.shape[0], b.shape[1]),
-        device=a.device,
-        dtype=a.dtype if out_dtype is None else out_dtype,
+    out = (
+        torch.empty(expected_shape, device=a.device, dtype=expected_dtype)
+        if out is None
+        else out
     )
     gemm_act_dispatch(
         a.unsqueeze(0),
         b.mT.unsqueeze(0),
         None,
         None if C is None else C.unsqueeze(0),
-        out,
+        out.unsqueeze(0),
         None,
         None,
         _QUACK_DEFAULT_TILE_M,
@@ -217,4 +230,4 @@ def gemm_epilogue(
         alpha=alpha,
         beta=beta,
     )
-    return out.squeeze(0)
+    return out
