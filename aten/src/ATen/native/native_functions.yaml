@@ -4117,14 +4117,6 @@
     CUDA: _int_mm_out_cuda
     XPU: _int_mm_out_xpu
 
-- func: _int_mm.dtype(Tensor self, Tensor mat2, *, ScalarType out_dtype) -> Tensor
-  dispatch:
-    CPU: _int_mm_dtype_cpu
-
-- func: _int_mm.dtype_out(Tensor self, Tensor mat2, *, ScalarType out_dtype, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: _int_mm_dtype_out_cpu
-
 - func: _convert_weight_to_int4pack(Tensor self, int innerKTiles) -> Tensor
   dispatch:
     CUDA: _convert_weight_to_int4pack_cuda
@@ -9412,14 +9404,12 @@
 - func: multinomial.out(Tensor self, SymInt num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
-    CPU, CUDA: multinomial_out
-    MPS: multinomial_out_mps
+    CPU, CUDA, MPS: multinomial_out
 
 - func: multinomial(Tensor self, SymInt num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   variants: method, function
   dispatch:
-    CPU, CUDA: multinomial
-    MPS: multinomial_mps
+    CPU, CUDA, MPS: multinomial
   tags: nondeterministic_seeded
 
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
