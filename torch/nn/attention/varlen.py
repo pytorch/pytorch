@@ -168,6 +168,15 @@ def _varlen_attn_fake(
         (num_heads, total_q), dtype=torch.float, device=query.device
     )
 
+    if torch.version.hip:
+        preferred = torch._C._get_rocm_fa_preferred_backend()
+        if preferred == torch._C._ROCmFABackend.AOTriton:
+            # AOTriton ROCm path uses batched 3D
+            batch_size = cu_seq_q.size(0) - 1
+            logsumexp = torch.empty(
+                (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
+            )
+
     rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
 
     return output, logsumexp, rng_state
@@ -304,6 +313,26 @@ def varlen_attn(
             f"but got Hq={num_heads_q} and Hkv={num_heads_k}."
         )
 
+    # Validate tensor lengths match cu_seqlens (fixes #176793)
+    # When query/key tensors are longer than cu_seqlens, backward produces NaN
+    # because the extra tokens are outside the attention computation but still
+    # have gradients flowing through them.
+    total_q = cu_seq_q[-1].item()
+    if query.size(0) > total_q:
+        raise ValueError(
+            f"query has {query.size(0)} tokens but cu_seq_q[-1] = {total_q}. "
+            f"query length must not exceed cu_seq_q[-1] to avoid NaN gradients in backward. "
+            f"See https://github.com/pytorch/pytorch/issues/176793."
+        )
+    if cu_seq_k is not None:
+        total_k = cu_seq_k[-1].item()
+        if key.size(0) > total_k:
+            raise ValueError(
+                f"key has {key.size(0)} tokens but cu_seq_k[-1] = {total_k}. "
+                f"key length must not exceed cu_seq_k[-1] to avoid NaN gradients in backward. "
+                f"See https://github.com/pytorch/pytorch/issues/176793."
+            )
+
     is_causal = window_size == (-1, 0)
     out, lse, _ = torch.ops.torch_attn._varlen_attn(
         query,
@@ -406,6 +435,14 @@ def _varlen_attn_out_fake(
     logsumexp = torch.empty(
         (num_heads, total_q), dtype=torch.float, device=query.device
     )
+
+    if torch.version.hip:
+        preferred = torch._C._get_rocm_fa_preferred_backend()
+        if preferred == torch._C._ROCmFABackend.AOTriton:
+            batch_size = cu_seq_q.size(0) - 1
+            logsumexp = torch.empty(
+                (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
+            )
 
     return logsumexp
 
