@@ -455,6 +455,46 @@ class TestPythonRegistration(TestCase):
 
         _collect_all_valid_cia_ops_for_namespace(namespace)
 
+    def test_finalizer_no_getattr_into_cpp(self):
+        # Regression test: _clear_torch_ops_cache must not call __getattr__ on
+        # _OpNamespace (which invokes _jit_get_operation in C++). During
+        # interpreter shutdown the C++ runtime may be torn down, causing
+        # UnicodeDecodeError or segfaults when the finalizer fires.
+        lib = Library(self.test_ns, "DEF")  # noqa: SCOPED_LIBRARY
+        lib.define("uncached_op() -> None")
+
+        @impl(lib, "uncached_op", "")
+        def uncached_op():
+            pass
+
+        # Do NOT call torch.ops._test_python_registration.uncached_op() here,
+        # so the OpOverloadPacket is never cached on the namespace object.
+        # This simulates what happens when a library (e.g. vLLM) registers ops
+        # but some are never looked up before shutdown.
+        namespace = torch.ops._test_python_registration
+
+        # Patch __getattr__ to detect if it gets called during cache clearing.
+        original_getattr = type(namespace).__getattr__
+        getattr_called_with = []
+
+        def tracking_getattr(self, name):
+            getattr_called_with.append(name)
+            return original_getattr(self, name)
+
+        type(namespace).__getattr__ = tracking_getattr
+        try:
+            del lib
+            gc.collect()
+        finally:
+            type(namespace).__getattr__ = original_getattr
+
+        self.assertNotIn(
+            "uncached_op",
+            getattr_called_with,
+            "_clear_torch_ops_cache must not trigger __getattr__ (which calls "
+            "into C++) for ops that were never cached on the namespace",
+        )
+
     def test_register_check_mem_op_survives_gc(self):
         # Regression guard for the autorevert of #181785: inductor's
         # `register_check_mem_op` is an lru_cache-decorated registration whose
