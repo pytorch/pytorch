@@ -1559,6 +1559,7 @@ def gen_pyi(
                         "dispatch_strides: _bool = False",
                         "dispatch_device: _bool = False",
                         "device_for_backend_keys: _device | None = None",
+                        "_extra_dispatch_keys: DispatchKeySet | None = None",
                     ],
                     "S",
                 )
