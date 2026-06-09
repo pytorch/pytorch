@@ -4429,6 +4429,71 @@ class TestMPS(TestCaseMPS):
 
         [helper(dtype) for dtype in [torch.float32, torch.int16, torch.int32, torch.uint8]]
 
+    def _check_cumulative_op(self, op_name, shape, dim, dtype, noncontig_out=False):
+        torch.manual_seed(0)
+        op = getattr(torch, op_name)
+        is_int = dtype in (torch.int32, torch.int64)
+        if is_int:
+            cpu_x = (torch.randint(-2, 3, shape, dtype=dtype) if op_name == "cumsum"
+                     else torch.randint(0, 2, shape, dtype=dtype) * 2 - 1)  # {-1, 1}
+        elif op_name == "cumsum":
+            cpu_x = (torch.rand(shape) * 0.002 - 0.001).to(dtype)
+        else:  # cumprod: values ~1 keep the long-axis product bounded
+            cpu_x = (1 + 0.0002 * torch.randn(shape)).to(dtype)
+        mps_x = cpu_x.to("mps")
+
+        if noncontig_out:
+            nc_shape = shape[:-2] + (shape[-1], shape[-2])
+            out = torch.empty(nc_shape, device="mps", dtype=dtype).transpose(-1, -2)
+            self.assertFalse(out.is_contiguous())
+            op(mps_x, dim, out=out)
+            res = out.cpu()
+        else:
+            res = op(mps_x, dim).cpu()
+
+        if is_int:
+            self.assertEqual(res, op(cpu_x, dim))
+        else:
+            tol = {torch.float32: 2e-3, torch.float16: 5e-2, torch.bfloat16: 1e-1}[dtype]
+            self.assertEqual(res.float(), op(cpu_x.float(), dim), atol=tol, rtol=tol)
+
+    # Each (shape, dim) routes to a distinct scan kernel; see the dispatch in
+    # aten/src/ATen/native/mps/operations/ScanKernel.mm.
+    #   (4, 70000)    dim 1: contiguous decoupled look-back (float) / 3-pass multiblock (int)
+    #   (8, 70000, 2) dim 1: strided decoupled look-back VEC=2 (float, macOS15+) / 2-pass vec multi-block (int)
+    #   (8, 70000, 4) dim 1: strided decoupled look-back VEC=4 (float, macOS15+) / 2-pass vec multi-block (int)
+    #   (8, 70000, 16) dim 1: strided decoupled look-back VEC=16 (float, macOS15+) / 3-pass strided multi-block (int)
+    #   (8, 70000, 5) dim 1: small-stride 2-pass vectorized multi-block (float) / 3-pass strided multi-block (int)
+    #   (8, 70000, 6) dim 1: vec width 6 (float, narrow-vec) / 3-pass strided multi-block (int)
+    #   (8, 70000, 12) dim 1: tight strided tile BN=12 (float) / BN=16 (int)
+    #   (8, 70000, 1) dim 1: trailing dims size 1, n_irows==1 -> reshaped contiguous scan
+    #   (8192, 16)    dim 1: tiny-innermost segmented scan
+    #   (32, 100)     dim 1: fallback scan_innermost_dim
+    #   (100, 64)     dim 0: fallback scan_outer_dim
+    @parametrize("op_name", ["cumsum", "cumprod"])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16, torch.int32, torch.int64])
+    @parametrize("shape,dim", [((4, 70000), 1), ((8, 70000, 2), 1), ((8, 70000, 4), 1),
+                               ((8, 70000, 16), 1), ((8, 70000, 5), 1),
+                               ((8, 70000, 6), 1), ((8, 70000, 12), 1),
+                               ((8, 70000, 1), 1), ((8192, 16), 1), ((32, 100), 1), ((100, 64), 0)])
+    def test_cumulative_scan_kernels(self, op_name, dtype, shape, dim):
+        self._check_cumulative_op(op_name, shape, dim, dtype)
+
+    @parametrize("op_name", ["cumsum", "cumprod"])
+    @parametrize("dtype", [torch.float32, torch.int64])
+    def test_cumulative_scan_noncontiguous_output(self, op_name, dtype):
+        # The dispatch stages into a temporary when the output is not contiguous.
+        self._check_cumulative_op(op_name, (8, 70000, 2), 1, dtype, noncontig_out=True)
+
+    @parametrize("op_name", ["cumsum", "cumprod"])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16, torch.int32, torch.int64])
+    @parametrize("dim", [0, 1, 2, 3, 4])
+    def test_cumulative_ops_5d(self, op_name, dtype, dim):
+        # Regression for scans on >4D tensors: MPSGraph's MPSNDArrayScan asserts
+        # for scan axes outside the rightmost 4 dims (issue #184844 and #154881); the Metal
+        # scan kernels handle any dim.
+        self._check_cumulative_op(op_name, (2, 3, 4, 5, 6), dim, dtype)
+
     def test_median_int16(self):
         def helper(shape, dtype):
             cpu_x = torch.randint(-9999, 9999, shape, device='cpu', dtype=dtype)
