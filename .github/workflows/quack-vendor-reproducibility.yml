@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 # Reproducibility guard for the vendored quack subset (torch/_vendor/quack).
 #
 # Runs tools/vendoring/quack/vendor.sh --check against the SHA pinned in
