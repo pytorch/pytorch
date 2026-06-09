@@ -4,13 +4,13 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
-from ...ir import get_free_symbols
-from ...kernel.mm import (
+from ..ir import get_free_symbols
+from ..kernel.mm import (
     addmm_contiguous_subgraph_template,
     mm_contiguous_subgraph_template,
 )
-from ...kernel_inputs import KernelInputs, MMKernelInputs
-from ...utils import use_contiguous
+from ..kernel_inputs import KernelInputs, MMKernelInputs
+from ..utils import use_contiguous
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
