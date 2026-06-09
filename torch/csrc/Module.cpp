@@ -3122,6 +3122,34 @@ Call this whenever a new thread is created in order to propagate values from
           mode->shape_env_->ptr(getPyInterpreter()));
     }
 
+    void mk_fake_tensor(const at::Tensor& real, const at::Tensor& meta)
+        const {
+      meta.unsafeGetTensorImpl()->set_and_normalize_fake_device(real.device());
+      meta.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+
+      // return early for plain tensors
+      if (!meta.key_set().has(c10::DispatchKey::Python)) {
+        return;
+      }
+
+      py::object py_meta = py::cast(meta);
+      if (!py::hasattr(py_meta, "__tensor_flatten__")) {
+        return;
+      }
+      py::object py_real = py::cast(real);
+      py::tuple flat = py_meta.attr("__tensor_flatten__")();
+      for (auto name : flat[0]) {
+        py::object meta_inner = py_meta.attr(name);
+        py::object real_inner = py_real.attr(name);
+        if (THPVariable_Check(meta_inner.ptr()) &&
+            THPVariable_Check(real_inner.ptr())) {
+          mk_fake_tensor(
+              py::cast<at::Tensor>(real_inner),
+              py::cast<at::Tensor>(meta_inner));
+        }
+      }
+    }
+
     at::Tensor from_tensor(
         const at::Tensor& real,
         py::object source,
@@ -3144,9 +3172,7 @@ Call this whenever a new thread is created in order to propagate values from
         meta_tensor = py::cast<at::Tensor>(meta_obj);
       }
 
-      meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(
-          real.device());
-      meta_tensor.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+      mk_fake_tensor(real, meta_tensor);
       return meta_tensor;
     }
   };
