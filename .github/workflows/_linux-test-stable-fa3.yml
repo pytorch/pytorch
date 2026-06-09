@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 # The point of this workflow is to test that a FA3 wheel that was built based off the
 # stable ABI targeting 2.9 can still run on the newer torch.
 #

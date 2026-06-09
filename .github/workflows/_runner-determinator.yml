@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: Check whether the workflow owner can use ARC runners
 
 on:
