@@ -376,13 +376,12 @@ Tensor& random_meta_(Tensor& self, std::optional<Generator> gen) {
 }
 
 Tensor& random_meta_(Tensor& self, int64_t from, std::optional<int64_t> to, std::optional<Generator> gen) {
-  // No error checking yay
+  at::native::templates::random_from_to_range_calc(self, from, to);
   return self;
 }
 
 Tensor& random_meta_(Tensor& self, int64_t to, std::optional<Generator> gen) {
-  // No error checking yay
-  return self;
+  return random_meta_(self, 0, to, std::move(gen));
 }
 
 // ====================================================================================================================
