@@ -849,14 +849,14 @@ def _maybe_cupti_annotations():
     if not _cupti_annotations_checked:
         _cupti_annotations_checked = True
         try:
-            from torch.profiler.cupti.observers import profiler as _cupti_annotations
+            from torch.profiler._cupti.observers import profiler as _cupti_annotations
 
             _cupti_annotations_module = _cupti_annotations
         except ModuleNotFoundError:
             pass
         except Exception:
             log.warning(
-                "Unexpected error importing torch.profiler.cupti.observers.profiler",
+                "Unexpected error importing torch.profiler._cupti.observers.profiler",
                 exc_info=True,
             )
     return _cupti_annotations_module

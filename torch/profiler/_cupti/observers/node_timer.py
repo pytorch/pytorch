@@ -43,12 +43,12 @@ from __future__ import annotations
 import threading
 from typing import Any, TYPE_CHECKING
 
-from torch.profiler.cupti.cupti_python import ActivityKind
-from torch.profiler.cupti.observers.base import (
+from torch.profiler._cupti.cupti_python import ActivityKind
+from torch.profiler._cupti.observers.base import (
     CuptiMonitorObserver,
     ObserverAnnotationSettings,
 )
-from torch.profiler.cupti.records import (
+from torch.profiler._cupti.records import (
     CORRELATION_FIELD,
     ExternalCorrelation,
     Kernel,
