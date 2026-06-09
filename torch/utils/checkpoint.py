@@ -834,6 +834,8 @@ class _CheckpointFrame:
         _cls = type(obj)
         if isinstance(obj, Mapping):
             mapped = {k: self._tree_map(fn, target_type, v) for k, v in obj.items()}
+            if isinstance(obj, defaultdict):
+                mapped.default_factory = obj.default_factory
             return _cls(mapped)
         
         if dataclasses.is_dataclass(obj):
