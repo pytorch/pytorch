@@ -1179,8 +1179,13 @@ def scatter_upon_const_tensor(
         # Create a mask for where to scatter
         mask = selector_expanded == indices_view
 
-        # Use torch.where to implement the scatter pointwise operation
-        return torch.where(mask, val, background_val)
+        # Use torch.where to implement the scatter pointwise operation.
+        # When val and background_val are Python scalars, torch.where promotes
+        # the result to the default floating dtype (float32), which loses the
+        # const tensor's dtype. Cast back to dtype so the rewrite preserves
+        # aten.scatter.value semantics (the result has self's dtype, with the
+        # scalar value cast to it).
+        return torch.where(mask, val, background_val).to(dtype)
 
     # replace the scatter operation with pointwise equivalent
     # pyrefly: ignore [bad-argument-type]

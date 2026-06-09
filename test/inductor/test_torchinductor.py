@@ -10142,7 +10142,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 (a, b, c),
             )
 
-    @xfail_if_mps  # dtypes mismatch
     def test_nll_loss_backward_1d_input(self):
         # 1D input with 1D target used to crash the decomposition because
         # target.unsqueeze(0) produced a 2D index for a 1D scatter.
