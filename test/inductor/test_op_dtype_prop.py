@@ -80,17 +80,7 @@ class TestCase(InductorTestCase):
             kwargs = sample_input.kwargs
             out = run(op.get_op(), args, kwargs)
 
-            # test_configs.runtime_triton_dtype_assert does not work well with dynamic shape so far.
-            # Consider the following cases for torch.add:
-            #   both lhs/rhs are int32 tensor, there is also a integer alpha argument.
-            #   In dynamic shape case, alpha is passed in as an ks0 argument. To be safe,
-            #   we use tl.int64 for ks0's dtype.
-            #   But the dtype for alpha is also decided as tl.int32 during lowering when
-            #   we promote alpha to a ir.Constant.
-            #   Ideally to resolve this problem, we should track assignment like
-            #     alpha = ks0
-            #   so that we know alpha is actually tl.int64 rather than tl.int32.
-            out_c = torch.compile(run, dynamic=False)(op.get_op(), args, kwargs)
+            out_c = torch.compile(run, dynamic=True)(op.get_op(), args, kwargs)
             self.assertEqual(out, out_c)
 
     @requires_gpu()
@@ -225,6 +215,16 @@ class TestCase(InductorTestCase):
         with config.patch("triton.codegen_upcast_to_fp32", load_upcast_to_fp32):
             compiled = torch.compile(op, backend="inductor")
             code = run_and_get_triton_code(compiled, *inps)
+
+            if op_name == "atan" and GPU_TYPE == "cuda" and not torch.version.hip:
+                self.assertIn("rcp.approx.ftz.f32", code)
+                separate_upcast = (
+                    re.search(r"tmp\d+ = tmp\d+\.to\(tl\.float32\)", code) is not None
+                )
+                self.assertNotEqual(separate_upcast, load_upcast_to_fp32)
+                if convert_output:
+                    self.assertIn(f".to({tl_dtype_str})", code)
+                return
 
             # Search the code with a regex.
             # Example code: libdevice.floor(tmp3.to(tl.float32)).to(tl.float16)
@@ -366,6 +366,71 @@ class TestCase(InductorTestCase):
         # and cast down to fp32 for use with the fp32 tensor
         self.assertIn("'ks0': 'fp64'", code)
         self.assertIn(".to(tl.float32)", code)
+
+    @requires_gpu()
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
+    def test_index_expr_ks_arg_dtype_int(self):
+        """
+        ks* kernel args are always int64 in the Triton signature (per
+        _decide_tl_dtype), even when the kernel's index_dtype is int32.
+        Verify that index_expr emits an explicit final cast to index_dtype.
+        """
+
+        def fn(a, b, alpha):
+            return torch.add(a, b, alpha=alpha)
+
+        a = torch.randint(0, 10, (5, 5), device=GPU_TYPE, dtype=torch.int32)
+        b = torch.randint(0, 10, (5, 5), device=GPU_TYPE, dtype=torch.int32)
+
+        compiled = torch.compile(fn, dynamic=True)
+        result, codes = run_and_get_code(compiled, a, b, 2)
+        code = "\n".join(codes)
+        self.assertEqual(result, torch.add(a, b, alpha=2))
+        self.assertIn("'ks0': 'i64'", code)
+        self.assertIn(".to(tl.int32)", code)
+
+    @requires_gpu()
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
+    def test_index_expr_ks_arg_dtype_float(self):
+        """
+        When a symbolic scalar is used in a float context (e.g. math.sqrt of
+        a tensor size), index_expr emits an explicit final cast to the
+        requested float dtype.
+        """
+        import math
+
+        @torch.compile(dynamic=True)
+        def fn(a, b):
+            r = 1 / math.sqrt(a.size(1))
+            return torch.bmm(a, b) / r
+
+        a = torch.randn(2, 4, 4, device=GPU_TYPE)
+        b = torch.randn(2, 4, 4, device=GPU_TYPE)
+        result, codes = run_and_get_code(fn, a, b)
+        code = "\n".join(codes)
+        expected = torch.bmm(a, b) / (1 / math.sqrt(a.size(1)))
+        self.assertTrue(torch.allclose(result, expected))
+        self.assertIn(".to(tl.float32)", code)
+
+    @requires_gpu()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
+    def test_randint_symbolic_bounds_use_value_expr(self):
+        @torch.compile(fullgraph=True)
+        def fn(high):
+            return torch.randint(2**32, high.item(), (5, 5), device=GPU_TYPE)
+
+        high = torch.tensor(2**40, device=GPU_TYPE, dtype=torch.int64)
+        result, codes = run_and_get_code(fn, high)
+        code = "\n".join(codes)
+        self.assertEqual(result.dtype, torch.int64)
+        self.assertGreaterEqual(result.min().item(), 2**32)
+        self.assertLess(result.max().item(), 2**40)
+        self.assertIn("triton_helpers.randint64", code)
+        self.assertIn(".to(tl.int64)", code)
 
 
 instantiate_device_type_tests(

@@ -11,7 +11,6 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
-    expectedFailureMPS,
     instantiate_device_type_tests,
     onlyCPU,
     onlyNativeDeviceTypes,
@@ -46,14 +45,9 @@ def _generate_input(shape, dtype, device, with_extremal):
         x = torch.tensor((), dtype=dtype, device=device)
     else:
         if dtype.is_floating_point or dtype.is_complex:
-            # work around torch.randn not being implemented for bfloat16
-            if dtype == torch.bfloat16:
-                x = torch.randn(*shape, device=device) * random.randint(30, 100)
-                x = x.to(torch.bfloat16)
-            else:
-                x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(
-                    30, 100
-                )
+            x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(
+                30, 100
+            )
             x[torch.randn(*shape) > 0.5] = 0
             if with_extremal and dtype.is_floating_point:
                 # Use extremal values
@@ -73,7 +67,6 @@ def _generate_input(shape, dtype, device, with_extremal):
     return x
 
 
-# TODO: replace this with make_tensor() in common_utils.py
 def _rand_shape(dim, min_size, max_size):
     shape = []
     for _ in range(dim):
@@ -81,38 +74,21 @@ def _rand_shape(dim, min_size, max_size):
     return tuple(shape)
 
 
-# TODO: refactor tests to avoid this function
-# Converts half/bfloat16 dtype to float when device is cpu
-def _convert_t(dtype, device):
-    if device == "cpu" and dtype in {torch.half, torch.bfloat16}:
-        return torch.float
-    return dtype
-
-
 # TODO: replace this with make_tensor() in common_utils.py
-# Returns a tensor of the requested shape, dtype, and device
-# Requesting a half CPU tensor returns a float CPU tensor with
-# values representable by a half.
+# Returns a tensor of the requested shape, dtype, and device.
 # Initialization uses randint for non-float types and randn for float types.
 def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
     # Returns a tensor filled with ones
     if fill_ones:
-        return torch.ones(*shape, dtype=_convert_t(dtype, device), device=device)
+        return torch.ones(*shape, dtype=dtype, device=device)
 
     # Returns a tensor with random integer values
     if not (dtype.is_floating_point or dtype.is_complex):
         t = torch.randint(0, 10, shape, device=device)
         if dtype != torch.uint8:
             t = t - 5  # generate negative values also
-        return t.to(_convert_t(dtype, device))
+        return t.to(dtype)
 
-    # Populates the CPU tensor with floats representable as half/bfloat16
-    if dtype == torch.half and device == "cpu":
-        return torch.randn(*shape, dtype=torch.float, device=device).half().float()
-    if dtype == torch.bfloat16 and device == "cpu":
-        return torch.randn(*shape, dtype=torch.float, device=device).bfloat16().float()
-
-    # Default: returns a tensor with random float values
     return torch.randn(shape, dtype=dtype, device=device).to(dtype=dtype)
 
 
@@ -527,8 +503,8 @@ class TestViewOps(TestCase):
         self.assertEqual(a[5:].imag, a.imag[5:])
 
     @onlyNativeDeviceTypes
-    @expectedFailureMPS
     @dtypes(*complex_types())
+    @dtypesIfMPS(torch.cfloat)
     def test_conj_imag_view(self, device, dtype) -> None:
         t = _make_tensor((4, 5), dtype, device)
         t_numpy_conj = torch.from_numpy(t.cpu().numpy().conj()).to(device=device)

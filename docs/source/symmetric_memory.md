@@ -283,7 +283,7 @@ To use CE collectives, you need to:
 3. Allocate tensors using symmetric memory
 4. Register the tensors with symmetric memory via rendezvous
 
-Once set up, standard collective functions like {func}`all_gather_into_tensor` and
+Once set up, standard collective functions like {func}`all_gather_single` and
 {func}`all_to_all_single` will automatically use the copy engines when operating
 on symmetric memory tensors.
 
@@ -315,7 +315,7 @@ symm_mem.rendezvous(out, group=group_name)
 
 # Perform collective operation using copy engines
 # This now runs on DMA engines instead of SMs
-work = dist.all_gather_into_tensor(out, inp, async_op=True)
+work = dist.all_gather_single(out, inp, async_op=True)
 work.wait()
 ```
 
@@ -453,11 +453,31 @@ communicator for the process group if it doesn't already exist.
 .. autofunction:: get_mem_pool
 ```
 
+```{eval-rst}
+.. autofunction:: is_symm_mem_tensor
+```
+
+```{eval-rst}
+.. autofunction:: set_signal_pad_size
+```
+
+```{eval-rst}
+.. autofunction:: get_signal_pad_size
+```
+
 ## Op Reference
 :::{note}
 The following ops are hosted in the `torch.ops.symm_mem` namespace. You can call
 them directly via `torch.ops.symm_mem.<op_name>`.
 :::
+
+```{eval-rst}
+.. currentmodule:: torch.distributed._symmetric_memory
+```
+
+```{eval-rst}
+.. autofunction:: reduce_scatter_offset
+```
 
 ```{eval-rst}
 .. currentmodule:: torch.ops.symm_mem

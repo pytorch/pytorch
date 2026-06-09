@@ -15,29 +15,34 @@ Instructions to update:
 
 ## `quack`
 
-This is a subset of the full quack library, currently vendoring the following operators:
+This is a subset of the full quack library, currently vendoring the following implementation paths:
 
 - RMSNorm
+- Lower-level GEMM epilogue implementation dependencies used by PyTorch-owned adapters
 
 Note: There are a couple of patchsets applied to make the library vendorable - at a high level:
 - Change exports from absolute `quack.module` to relative `.module`
-- Remove `@custom_op` and `@register_fake` decorators as we don't want to register custom ops here.
+- Rename cache directories / worker module paths so this copy is independent of any external `quack` package
+- Remove custom-op registration from RMSNorm; PyTorch owns the public operator adapters
 
 Source: https://github.com/Dao-AILab/quack
 
-Vendored version: `0.4.0`
-Vendored SHA: `6bceaad2dba3b979b898824b146b1bb2816fc483`
+The pinned upstream commit is the `PINNED_SHA` constant in
+`tools/vendoring/quack/vendor.sh` (`__version__` in the generated vendored
+package records the upstream version). That constant is the single source of
+truth; do not duplicate the pin here.
 
 Instructions to update:
 
-Run the following script:
+Edit `PINNED_SHA` in `tools/vendoring/quack/vendor.sh` to the new commit, then
+re-render (no SHA is passed):
 
 ```
-tools/vendoring/quack/vendor.sh <NEW_SHA>
+tools/vendoring/quack/vendor.sh
 
-# Or if you have an existing local clone:
+# Or, to reuse an existing local clone instead of fetching:
 
-tools/vendoring/quack/vendor.sh <NEW_SHA> /path/to/local/quack
+tools/vendoring/quack/vendor.sh --src /path/to/local/quack
 ```
 
 Instructions to update the subset of quack being vendored:

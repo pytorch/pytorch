@@ -23,15 +23,21 @@ ShapeArg = ShapeVar | torch.types.Number | str | OpsValue | torch.dtype
 # So first decompose CSEVars -> tuple before calling this
 
 
-@functools.lru_cache(None)
 def get_broadcasted_shape(a: BlockShapeType, b: BlockShapeType) -> BlockShapeType:
     assert isinstance(a, Sequence)
     assert isinstance(b, Sequence)
+    return _get_broadcasted_shape(tuple(a), tuple(b))
+
+
+@functools.lru_cache(None)
+def _get_broadcasted_shape(
+    a: tuple[int | str, ...], b: tuple[int | str, ...]
+) -> BlockShapeType:
     if len(a) > len(b):
-        return get_broadcasted_shape(a, (*[1] * (len(a) - len(b)), *b))
+        return _get_broadcasted_shape(a, (*[1] * (len(a) - len(b)), *b))
     elif len(a) < len(b):
         b, a = a, b
-        return get_broadcasted_shape(a, (*[1] * (len(a) - len(b)), *b))
+        return _get_broadcasted_shape(a, (*[1] * (len(a) - len(b)), *b))
     else:
 
         def _get_broadcasted_dim(d1: int | str, d2: int | str) -> int | str:
@@ -124,6 +130,11 @@ class ShapePropagationOpsHandler:
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> BlockShapeType:
+        # shape is implicitly embedded in expr.
+        return None
+
+    @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> BlockShapeType:
         # shape is implicitly embedded in expr.
         return None
 
