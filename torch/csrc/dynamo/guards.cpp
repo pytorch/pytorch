@@ -3769,6 +3769,10 @@ class OBJECT_ALIASING : public RelationalGuard {
     _is_first_call = true;
   }
 
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:OBJECT_ALIASING";
+  }
+
  private:
   bool _is_first_call{true};
   PyObject* _first_tensor{nullptr};
@@ -3811,6 +3815,10 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     _unique_tensors.clear();
   }
 
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:NO_TENSOR_ALIASING";
+  }
+
  private:
   py::list _tensor_names;
   ska::flat_hash_map<PyObject*, std::nullptr_t> _unique_tensors;
@@ -3844,6 +3852,10 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
 
   void reset_state() final {
     _checker->reset(_overlapping);
+  }
+
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:STORAGE_OVERLAPPING";
   }
 
  private:
@@ -3958,6 +3970,10 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
 
   void reset_state() final {
     _args_seen = 0;
+  }
+
+  const char* subtree_memo_unsupported_reason() const override {
+    return "unsupported_leaf:SYMBOLIC_SHAPE_GUARD";
   }
 
  private:
