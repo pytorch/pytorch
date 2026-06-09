@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/TensorTopK.h>
 
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
@@ -23,9 +24,10 @@ void topk_out_with_sort(
   const Tensor& self,
   int64_t k, int64_t dim, bool largest,
   const Tensor& values,
-  const Tensor& indices
+  const Tensor& indices,
+  bool stable
 ) {
-  auto [sorted_values, sorted_indices] = at::cuda::sort(self, /* stable= */false, dim, largest);
+  auto [sorted_values, sorted_indices] = at::cuda::sort(self, stable, dim, largest);
   values.copy_(sorted_values.narrow(dim, 0, k));
   indices.copy_(sorted_indices.narrow(dim, 0, k));
 }
@@ -83,9 +85,20 @@ TORCH_IMPL_FUNC(topk_out_cuda)
   checkAllSameGPU(__func__, {topK_arg, indices_arg, input_arg});
 
   dim = at::maybe_wrap_dim(dim, self);
+  // See Note [Enabling Deterministic Operations]
+  const bool deterministic = at::globalContext().deterministicAlgorithms();
+
+#if defined(USE_ROCM)
+  if (deterministic) {
+    // The ROCm top-k gather path can reserve tie slots through atomics.
+    // Use stable full sort in deterministic mode to guarantee index tie-breaking.
+    topk_out_with_sort(self, k, dim, largest, values, indices, /*stable=*/true);
+    return;
+  }
+#endif
 
   if (should_use_sort(self, dim)) {
-    topk_out_with_sort(self, k, dim, largest, values, indices);
+    topk_out_with_sort(self, k, dim, largest, values, indices, deterministic);
     return;
   }
 
@@ -103,7 +116,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
 
-      sortKeyValueInplace(values, indices, dim, largest);
+      sortKeyValueInplace(values, indices, dim, largest, deterministic);
     } else {
       // Depend upon the backup sort that returns indices, which we
       // can use in conjunction with gather to produce the original
@@ -116,7 +129,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
 
       Tensor sortedIndices = at::empty_like(indices);
       Tensor sortedValues = at::empty_like(values);
-      at::cuda::sort_outf(values, /* stable= */ false, dim, largest, sortedValues, sortedIndices);
+      at::cuda::sort_outf(values, deterministic, dim, largest, sortedValues, sortedIndices);
       indices.copy_(indices.gather(dim, sortedIndices));
       values.copy_(sortedValues);
     }
