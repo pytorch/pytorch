@@ -20284,6 +20284,26 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        @config.patch(
+            {
+                "triton.use_tensor_descriptor": True,
+                "assume_aligned_inputs": True,
+            }
+        )
+        def test_tma_descriptor_no_x_dim_split_scan(self):
+            # Regression test: split_scan kernels have no_x_dim=True (XBLOCK
+            # hardcoded to 1). TMA descriptors require >= 16 bytes in the
+            # innermost dimension, so TMA must be rejected when the innermost
+            # block is XBLOCK and XBLOCK is fixed at 1.
+            def fn(x, b):
+                return torch.cumsum(x + b, dim=1)
+
+            x = torch.randn(1, 129, 64, device=GPU_TYPE)
+            b = torch.randn(64, device=GPU_TYPE)
+            actual = torch.compile(fn)(x, b)
+            expected = fn(x, b)
+            torch.testing.assert_close(actual, expected)
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 

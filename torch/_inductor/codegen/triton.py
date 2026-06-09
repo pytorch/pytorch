@@ -3036,6 +3036,21 @@ class TMACompatibilityChecker:
                     )
                     return False
 
+                # When no_x_dim is True, XBLOCK is fixed at 1. TMA cannot
+                # be used if the innermost block is XBLOCK and the minimum
+                # required size exceeds 1.
+                if (
+                    self.kernel.no_x_dim
+                    and innermost_block_symt == SymT.XBLOCK
+                    and min_block_size > 1
+                ):
+                    log.debug(
+                        "%s no_x_dim kernel has XBLOCK fixed at 1 but TMA requires min block size %d",
+                        self.failed_debug_prefix,
+                        min_block_size,
+                    )
+                    return False
+
                 block_type_str = self.kernel.index_to_str(innermost_block_type)
                 # Check block sizes if the user has provided a fixed triton config
                 if self.kernel.fixed_config:
