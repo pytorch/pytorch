@@ -409,3 +409,6 @@ CLAUDE.local.md
 /debug_*.py
 CLAUDE_CONTEXT/
 /.claude/settings.local.json
+
+# TODO remove before land
+FLEX_GEMM_EPILOGUE_PROGRESS.md
