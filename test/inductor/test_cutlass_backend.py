@@ -2370,15 +2370,16 @@ class TestCutlassBackend(TestCase):
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     def test_evt_scalar_constant(self):
-        # Python scalar literals in the epilogue (e.g. * 0.5, + 1.0) are lowered
+        # Python scalar literals in the epilogue (e.g. * 0.5, - 1.0) are lowered
         # by the CUTLASS EVT frontend into immediate-constant ("imm_*") nodes.
         # These are not input buffers, so EVT arg rendering must recover the
         # constant value and emit it as a scalar (see get_constant_value /
         # constant handling in evt_extensions.py); without it the renderer
-        # raises KeyError on the imm_ name.
+        # raises KeyError on the imm_ name. The negative literal additionally
+        # exercises the name-parsing fallback for signed immediates.
         class TestModel(torch.nn.Module):
             def forward(self, a, b):
-                return (a @ b) * 0.5 + 1.0
+                return (a @ b) * 0.5 - 1.0
 
         M = 1024
         N = 512

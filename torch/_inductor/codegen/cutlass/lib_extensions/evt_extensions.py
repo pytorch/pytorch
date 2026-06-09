@@ -245,10 +245,22 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
                 t: CutlassArgType,
                 constant_value: float | int | None = None,
             ) -> None:
-                # Nodes that are neither input buffers nor immediate constants
-                # (e.g. autogen_identity_*/compute_* placeholders) render as an
-                # empty struct, matching CUTLASS reference EVT kernels.
                 if constant_value is None and name not in name_to_buffer:
+                    # An imm_* node is an immediate constant whose value we
+                    # failed to recover (dag_ir meta missing AND name parsing
+                    # failed, e.g. an unsupported encoding). Emitting an empty
+                    # struct here would silently drop the constant and produce a
+                    # numerically wrong kernel, so fail loudly instead.
+                    if name.startswith("imm_"):
+                        raise RuntimeError(
+                            f"Could not recover the value of immediate constant "
+                            f"node {name!r} for the CUTLASS EVT epilogue. "
+                            f"Refusing to emit an empty argument that would "
+                            f"silently drop the constant."
+                        )
+                    # Other non-buffer nodes (e.g. autogen_identity_*/compute_*
+                    # placeholders) legitimately render as an empty struct,
+                    # matching CUTLASS reference EVT kernels.
                     buffer.writeline(f"{{}}, /* {name} */")
                     return
                 if issubclass(t, ctypes.c_byte):
