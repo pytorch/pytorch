@@ -1,7 +1,8 @@
 #pragma once
 // Shared definitions for the MPS GEMM kernels (gemm_*.h). The enums and POD dim
-// structs are valid in both Metal and host C++ so the dispatcher and shaders agree
-// on the constant-buffer layout; Metal-only helpers are guarded by __METAL__.
+// structs are valid in both Metal and host C++ so the dispatcher and shaders
+// agree on the constant-buffer layout; Metal-only helpers are guarded by
+// __METAL__.
 
 #include <c10/metal/common.h>
 
@@ -17,7 +18,8 @@ enum class GemmEpilogue : int {
 
 // Dims/strides for the strided kernels (simd_gemm, mpp_gemm, int_gemm).
 // One constant buffer (one setBytes). All strides are ELEMENT strides; each
-// device pointer is pre-offset to its tensor's first element by the host binding.
+// device pointer is pre-offset to its tensor's first element by the host
+// binding.
 struct GemmDimsStrided {
   int M, N, K;
   int lda, ldb, ldc;
@@ -26,16 +28,18 @@ struct GemmDimsStrided {
   int batch_a, batch_b, batch_c, batch_self; // per-batch element strides
 };
 
-// Dims for the GEMV kernels (gemv_t / gemv_nt). `n` is the output length (cols for
-// gemv_t, rows for gemv_nt); `ld` the matrix row stride; `xs` the vector stride;
-// self_r/self_c the addend strides (one is the broadcast step at the output, other 0).
+// Dims for the GEMV kernels (gemv_t / gemv_nt). `n` is the output length (cols
+// for gemv_t, rows for gemv_nt); `ld` the matrix row stride; `xs` the vector
+// stride; self_r/self_c the addend strides (one is the broadcast step at the
+// output, other 0).
 struct GemvDims {
   int n, K, ld, xs;
   int self_r, self_c;
 };
 
-// Dims for the thin-M batched GEMV (gemv_bt / gemv_bt_t). M is the true row count
-// (the kernel's MROWS is padded); batch_* are 0 when 2-D (grid-z offset is a no-op).
+// Dims for the thin-M batched GEMV (gemv_bt / gemv_bt_t). M is the true row
+// count (the kernel's MROWS is padded); batch_* are 0 when 2-D (grid-z offset
+// is a no-op).
 struct GemvBtDims {
   int M, N, K, ldb, ldx, ldy;
   int self_r, self_c;
@@ -43,13 +47,15 @@ struct GemvBtDims {
 };
 
 // Dims for the split-K GEMM (deep-K, few-output-tile shapes). Inputs are packed
-// (lda == K, ldb == N, ldc == N); `kchunk` is the per-chunk K length, applied as
-// a runtime extent (the AOT build cannot template on the data-dependent K / G).
+// (lda == K, ldb == N, ldc == N); `kchunk` is the per-chunk K length, applied
+// as a runtime extent (the AOT build cannot template on the data-dependent K /
+// G).
 struct SplitKDims {
   int M, N, K, kchunk;
 };
 
-// Dims for the split-K reduction pass: `n` output elements, `planes` fp32 partials.
+// Dims for the split-K reduction pass: `n` output elements, `planes` fp32
+// partials.
 struct SplitKReduceDims {
   int n, planes;
 };
