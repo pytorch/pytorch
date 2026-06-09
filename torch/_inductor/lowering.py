@@ -24,6 +24,11 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
+from torch._higher_order_ops.gemm_epilogue import (
+    _gemm_epilogue_fusion,
+    materialize_quack_epilogue,
+)
+from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
@@ -8394,6 +8399,76 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
 
     if output is _MISSING:
         raise RuntimeError("No output node found in graph")
+
+    return output
+
+
+@register_lowering(hints_wrapper, type_promotion_kind=None)
+def hints_wrapper_lowering(subgraph, args, kwargs, hints):
+    return process_subgraph_nodes(subgraph.graph_module, list(args))
+
+
+@register_lowering(_gemm_epilogue_fusion, type_promotion_kind=None)
+def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
+    backend = kernel_options.get("backend", "TRITON")
+    if backend == "QUACK":
+        if gemm_op != torch.ops.aten.mm.default or gemm_kwargs:
+            raise NotImplementedError(
+                "QUACK GEMM epilogue backend currently supports only aten.mm.default"
+            )
+        from torch._inductor.kernel.quack_gemm_epilogue import (
+            quack_gemm_epilogue_template,
+        )
+        from torch._inductor.select_algorithm import autotune_select_algorithm
+
+        epilogue_key, epilogue_source = materialize_quack_epilogue(
+            subgraph.graph_module
+        )
+        m, n = args[0].get_size()[0], args[1].get_size()[1]
+        layout = ir.FixedLayout(
+            args[0].get_device_or_error(),
+            args[0].get_dtype(),
+            [m, n],
+            [n, 1],
+        )
+        input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
+        choices: list[Any] = []
+        quack_gemm_epilogue_template.maybe_append_choice(
+            choices,
+            input_nodes=input_nodes,
+            layout=layout,
+            epilogue_name=epilogue_key,
+            epilogue_source=epilogue_source,
+        )
+        node, _ = autotune_select_algorithm(
+            "quack_gemm_epilogue", choices, input_nodes, layout
+        )
+        return (node,)
+
+    fusible_template_backends = {"TRITON", "CUTLASS"}
+    if backend not in fusible_template_backends:
+        raise NotImplementedError(
+            f"GEMM epilogue backend {backend} does not support Inductor template "
+            "epilogue fusion yet"
+        )
+
+    operation_len = len(V.graph.operations)
+    patches = [
+        patch.object(config, "max_autotune_gemm", True),
+        patch.object(config, "max_autotune_gemm_backends", backend),
+    ]
+    if backend == "CUTLASS":
+        patches.append(
+            patch.object(config.cutlass, "cutlass_epilogue_fusion_enabled", True)
+        )
+
+    with contextlib.ExitStack() as stack:
+        for config_patch in patches:
+            stack.enter_context(config_patch)
+        output = process_subgraph_nodes(subgraph.graph_module, list(args))
+
+    for op in V.graph.operations[operation_len:]:
+        op._gemm_epilogue_must_fuse = True
 
     return output
 
