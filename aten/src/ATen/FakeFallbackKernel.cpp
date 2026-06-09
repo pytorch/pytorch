@@ -398,7 +398,7 @@ void maybe_run_unsafe_fallback(
 
 void fakeFallback(
     const c10::OperatorHandle& op,
-    c10::DispatchKeySet dispatchKeySet,
+    c10::DispatchKeySet /*dispatchKeySet*/,
     torch::jit::Stack* stack) {
   auto t_start = std::chrono::steady_clock::now();
   const auto& schema = op.schema();
@@ -657,16 +657,13 @@ void fakeFallback(
       }
     }
 
-    // try CIA decomposition. remove Fake from the redispatch keyset so this op
-    // doesn't re-enter fakeFallback (which would infinite-loop)
+    // Run the CIA decomposition by calling its kernel directly
+    // same as python in torch/_ops.py
     if (!op.hasKernelForDispatchKey(c10::DispatchKey::Meta) &&
         op.hasKernelForDispatchKey(
             c10::DispatchKey::CompositeImplicitAutograd)) {
-      auto ks = dispatchKeySet;
-      ks = ks.remove(c10::DispatchKey::Fake);
-      ks = ks.remove(c10::DispatchKey::Python);
-      ks = ks.remove(c10::DispatchKey::PythonTLSSnapshot);
-      op.redispatchBoxed(ks, stack);
+      op.callBoxedForDispatchKey(
+          c10::DispatchKey::CompositeImplicitAutograd, *stack);
       wrap_meta_outputs_with_default_device_logic();
       return;
     }
