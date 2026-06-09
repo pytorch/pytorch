@@ -120,6 +120,7 @@ enum class GuardSubtreeProbeTokenKind : uint8_t {
   ExactList,
   ExactTuple,
   TensorMatch,
+  DefaultDevice,
 };
 
 enum class GuardFastPlanCandidateKind : uint8_t {
@@ -158,6 +159,7 @@ struct GuardSubtreeProbeStats {
   std::atomic<uint64_t> token_exact_list{0};
   std::atomic<uint64_t> token_exact_tuple{0};
   std::atomic<uint64_t> token_tensor_match{0};
+  std::atomic<uint64_t> token_default_device{0};
 };
 
 struct GuardFastPlanStats {
@@ -251,6 +253,7 @@ struct GuardSubtreeProbePathStats {
   uint64_t token_exact_list{0};
   uint64_t token_exact_tuple{0};
   uint64_t token_tensor_match{0};
+  uint64_t token_default_device{0};
 };
 
 constexpr size_t kGuardAccessorDetailStatsTopK = 64;
@@ -494,6 +497,7 @@ void reset_guard_lookup_stats() {
   store_zero(subtree_stats.token_exact_list);
   store_zero(subtree_stats.token_exact_tuple);
   store_zero(subtree_stats.token_tensor_match);
+  store_zero(subtree_stats.token_default_device);
   store_zero(fastplan_stats.candidate);
   store_zero(fastplan_stats.candidate_top);
   store_zero(fastplan_stats.candidate_nested);
@@ -627,6 +631,8 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(subtree_stats.token_exact_tuple);
   subtree_token_kind_counts["TensorMatch"] =
       load_relaxed(subtree_stats.token_tensor_match);
+  subtree_token_kind_counts["DefaultDevice"] =
+      load_relaxed(subtree_stats.token_default_device);
   result["guard_subtree_probe_token_kind_counts"] =
       subtree_token_kind_counts;
   auto& fastplan_stats = guard_fastplan_stats();
@@ -988,6 +994,9 @@ static void add_guard_subtree_probe_token_kind(
     case GuardSubtreeProbeTokenKind::TensorMatch:
       add_relaxed(stats.token_tensor_match, 1);
       break;
+    case GuardSubtreeProbeTokenKind::DefaultDevice:
+      add_relaxed(stats.token_default_device, 1);
+      break;
     case GuardSubtreeProbeTokenKind::ObjectOnly:
       add_relaxed(stats.token_object_only, 1);
       break;
@@ -1009,6 +1018,9 @@ static void add_guard_subtree_probe_token_kind(
       break;
     case GuardSubtreeProbeTokenKind::TensorMatch:
       stats.token_tensor_match += 1;
+      break;
+    case GuardSubtreeProbeTokenKind::DefaultDevice:
+      stats.token_default_device += 1;
       break;
     case GuardSubtreeProbeTokenKind::ObjectOnly:
       stats.token_object_only += 1;
@@ -2110,6 +2122,38 @@ static bool tensor_strides_match_guard_check(
   return true;
 }
 
+static PyObject* current_device_key() {
+  static PyObject* key = PyUnicode_InternFromString("CURRENT_DEVICE");
+  return key;
+}
+
+static bool default_device_matches(
+    PyObject* utils_device_dict,
+    PyObject* expected) {
+  if (utils_device_dict == nullptr || expected == nullptr) {
+    return false;
+  }
+  PyObject* key = current_device_key();
+  if (key == nullptr) {
+    PyErr_Clear();
+    return false;
+  }
+  PyObject* device = PyDict_GetItem(utils_device_dict, key);
+  if (device == nullptr) {
+    PyErr_Clear();
+    return false;
+  }
+  if (device == expected) {
+    return true;
+  }
+  const int result = PyObject_RichCompareBool(device, expected, Py_EQ);
+  if (result == -1) {
+    PyErr_Clear();
+    return false;
+  }
+  return result == 1;
+}
+
 struct GuardSubtreeEntryToken {
   PyObject* object{nullptr};
   PyTypeObject* type{nullptr};
@@ -2126,6 +2170,8 @@ struct GuardSubtreeEntryToken {
   std::vector<c10::SymInt> tensor_size_values;
   std::vector<int64_t> tensor_stride_indices;
   std::vector<c10::SymInt> tensor_stride_values;
+  PyObject* default_device_dict{nullptr};
+  PyObject* default_device{nullptr};
 
   static GuardSubtreeEntryToken make(PyObject* obj) {
     GuardSubtreeEntryToken token;
@@ -2199,6 +2245,18 @@ struct GuardSubtreeEntryToken {
     return true;
   }
 
+  static GuardSubtreeEntryToken make_default_device(
+      PyObject* utils_device_dict,
+      PyObject* device) {
+    GuardSubtreeEntryToken token;
+    token.object = utils_device_dict;
+    token.type = Py_TYPE(utils_device_dict);
+    token.kind = GuardSubtreeProbeTokenKind::DefaultDevice;
+    token.default_device_dict = utils_device_dict;
+    token.default_device = device;
+    return token;
+  }
+
   bool matches_tensor_current(
       const LocalState* state,
       GuardFastPlanTensorTokenMissReason& reason) const {
@@ -2260,6 +2318,10 @@ struct GuardSubtreeEntryToken {
     return true;
   }
 
+  bool matches_default_device_current() const {
+    return default_device_matches(default_device_dict, default_device);
+  }
+
   bool matches(const GuardSubtreeEntryToken& other) const {
     if (kind != other.kind || object != other.object || type != other.type) {
       return false;
@@ -2274,6 +2336,10 @@ struct GuardSubtreeEntryToken {
           tensor_size_values == other.tensor_size_values &&
           tensor_stride_indices == other.tensor_stride_indices &&
           tensor_stride_values == other.tensor_stride_values;
+    }
+    if (kind == GuardSubtreeProbeTokenKind::DefaultDevice) {
+      return default_device_dict == other.default_device_dict &&
+          default_device == other.default_device;
     }
     return version == other.version && size == other.size &&
         list_items == other.list_items;
@@ -2356,6 +2422,12 @@ static bool guard_subtree_memo_tokens_match(
         }
       }
       if (!matches) {
+        return false;
+      }
+      continue;
+    }
+    if (token.kind == GuardSubtreeProbeTokenKind::DefaultDevice) {
+      if (!token.matches_default_device_current()) {
         return false;
       }
       continue;
@@ -3067,8 +3139,16 @@ class LeafGuard {
   virtual bool emits_subtree_memo_token() const {
     return false;
   }
+  virtual bool emits_subtree_memo_token_for_frame_locals() const {
+    return false;
+  }
   virtual bool append_subtree_memo_token(
       PyObject* value,
+      std::vector<GuardSubtreeEntryToken>* /*tokens*/) {
+    return check_nopybind(value);
+  }
+  virtual bool append_subtree_memo_token(
+      FrameLocalsMapping* value,
       std::vector<GuardSubtreeEntryToken>* /*tokens*/) {
     return check_nopybind(value);
   }
@@ -3369,23 +3449,7 @@ class DEFAULT_DEVICE : public LeafGuard {
 
   template <typename T>
   bool check_nopybind_template(T* value) { // borrowed ref
-    // Create a static interned string. Interned string is faster than creating
-    // a new string every time. Even though its a new reference, we don't dec
-    // ref it. Interned strings are used for things like variable names and are
-    // leaked by design.
-    static PyObject* current_device_str =
-        PyUnicode_InternFromString("CURRENT_DEVICE");
-    PyObject* device = PyDict_GetItem(
-        _utils_device_dict.ptr(), current_device_str); // borrowed ref
-    if (device != _device.ptr()) {
-      int result = PyObject_RichCompareBool(device, _device.ptr(), Py_EQ);
-      if (result == -1) {
-        PyErr_Clear();
-        return false;
-      }
-      return result;
-    }
-    return true;
+    return default_device_matches(_utils_device_dict.ptr(), _device.ptr());
   }
 
   bool check_nopybind(PyObject* value) override {
@@ -3397,13 +3461,41 @@ class DEFAULT_DEVICE : public LeafGuard {
   }
 
   bool supports_subtree_memo() const override {
-    return false;
+    return true;
   }
   const char* subtree_memo_unsupported_reason() const override {
     return "unsupported_leaf:DEFAULT_DEVICE";
   }
+  bool emits_subtree_memo_token() const override {
+    return true;
+  }
+  bool emits_subtree_memo_token_for_frame_locals() const override {
+    return true;
+  }
+  bool append_subtree_memo_token(
+      PyObject* value,
+      std::vector<GuardSubtreeEntryToken>* tokens) override {
+    return append_subtree_memo_token_template(value, tokens);
+  }
+  bool append_subtree_memo_token(
+      FrameLocalsMapping* value,
+      std::vector<GuardSubtreeEntryToken>* tokens) override {
+    return append_subtree_memo_token_template(value, tokens);
+  }
 
  private:
+  template <typename T>
+  bool append_subtree_memo_token_template(
+      T* value,
+      std::vector<GuardSubtreeEntryToken>* tokens) {
+    if (!check_nopybind_template(value)) {
+      return false;
+    }
+    tokens->emplace_back(GuardSubtreeEntryToken::make_default_device(
+        _utils_device_dict.ptr(), _device.ptr()));
+    return true;
+  }
+
   // Save the current device and the module dict during the guard construction.
   py::object _utils_device_dict;
   py::object _device;
@@ -4534,15 +4626,14 @@ class GuardManager {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       bool result = false;
-      if constexpr (std::is_same_v<T, PyObject>) {
-        if (C10_UNLIKELY(
-                active_guard_subtree_memo_recorder != nullptr &&
-                guard->emits_subtree_memo_token())) {
-          result = guard->append_subtree_memo_token(
-              value, active_guard_subtree_memo_recorder);
-        } else {
-          result = guard->check_nopybind(value);
-        }
+      const bool emit_subtree_memo_token =
+          std::is_same_v<T, PyObject>
+          ? guard->emits_subtree_memo_token()
+          : guard->emits_subtree_memo_token_for_frame_locals();
+      if (C10_UNLIKELY(active_guard_subtree_memo_recorder != nullptr &&
+                       emit_subtree_memo_token)) {
+        result = guard->append_subtree_memo_token(
+            value, active_guard_subtree_memo_recorder);
       } else {
         result = guard->check_nopybind(value);
       }
