@@ -80,7 +80,10 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
             epilogue_kwargs = f", epilogue_args=({', '.join(epilogue_args)},)"
         local_reduce_kwargs = ""
         if qtb.local_reduce_group is not None:
-            local_reduce_kwargs = f", local_reduce_group={qtb.local_reduce_group!r}"
+            local_reduce_kwargs = (
+                f", local_reduce_group={qtb.local_reduce_group!r}, "
+                f"local_reduce_dim={qtb.local_reduce_dim!r}"
+            )
             if qtb.local_reduce_out_index is not None:
                 local_reduce_kwargs += f", local_reduce_out={input_args[qtb.local_reduce_out_index]}"
             if qtb.local_reduce_feeds_main:
