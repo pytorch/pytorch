@@ -4549,13 +4549,17 @@ class GraphModule(torch.nn.Module):
         clone: "f64[s64, s55]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
 
         mul: "f64[s64, s55]" = torch.ops.aten.mul.Tensor(clone, primals_1);  clone = None
+
+        mul_2: "Sym(s55*s71)" = primals_2 * primals_10
         return (
             mul,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_values')
             primals_5,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_offsets')
             primals_6,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_min_seqlen_tensor')
             primals_7,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_max_seqlen_tensor')
             primals_8,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
+            primals_2,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
             primals_10,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=2)
+            mul_2,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
             primals_10,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
             primals_1,  # SavedForBackwardsAOTOutput(idx=0)
             primals_8,  # SavedForBackwardsAOTOutput(idx=1)
@@ -4625,13 +4629,17 @@ class GraphModule(torch.nn.Module):
 
         cat: "f64[s64, 2*s55]" = torch.ops.aten.cat.default([clone, clone], 1);  clone = None
         add_2: "Sym(2*s55)" = primals_10 + primals_10
+
+        mul: "Sym(2*s55*s71)" = primals_2 * add_2
         return (
             cat,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_values')
             primals_5,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_offsets')
             primals_6,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_min_seqlen_tensor')
             primals_7,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_max_seqlen_tensor')
             primals_8,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
+            primals_2,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
             add_2,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=2)
+            mul,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
             add_2,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
             primals_8,  # SavedForBackwardsAOTOutput(idx=0)
             primals_10,  # SavedForBackwardsAOTOutput(idx=1)

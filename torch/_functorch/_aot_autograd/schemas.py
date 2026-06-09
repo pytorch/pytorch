@@ -262,6 +262,9 @@ class SubclassCreationMeta:
     # Mark where or not symints were included. This flag is only used in one assertion
     # in "wrap_tensor_subclasses"
     included_subclass_symints: bool
+    # Nested ints are normally reconstructed from tensor metadata. Subclass graph
+    # outputs that allocate fresh metadata tensors need to carry them explicitly.
+    included_subclass_nested_ints: bool
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
@@ -375,9 +378,11 @@ class SubclassCreationMeta:
         def _make_size_runtime_safe(x: None | int | torch.SymInt) -> int | None:
             dummy = -1
             if isinstance(x, torch.SymInt):
-                # Replace nested ints by a dummy value (-1) as NJT ignores
-                # the outer_size/outer_stride at runtime.
-                return dummy if x.node.is_nested_int() else None
+                if x.node.is_nested_int() and not self.included_subclass_nested_ints:
+                    # Replace nested ints by a dummy value (-1) when they were
+                    # not emitted as graph arguments.
+                    return dummy
+                return None
             return x
 
         if self.original_subclass is None:
@@ -388,9 +393,10 @@ class SubclassCreationMeta:
         self.original_subclass = None
 
         # Note: NJT outer_size in AOTDispatcher
-        # `_make_size_runtime_safe` replaces any nested int with a dummy value (-1)
-        # to prevent serializing a SymInt at runtime. Internally, nested tensor __tensor_unflatten__
-        # is designed to safely ignore this dummy value.
+        # `_make_size_runtime_safe` replaces nested ints that are not explicitly
+        # emitted as graph arguments with a dummy value (-1) to prevent
+        # serializing a SymInt at runtime. Internally, nested tensor
+        # __tensor_unflatten__ is designed to safely ignore this dummy value.
         # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299
         self.outer_size = tuple(map(_make_size_runtime_safe, self.outer_size))
         self.outer_stride = tuple(map(_make_size_runtime_safe, self.outer_stride))

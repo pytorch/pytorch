@@ -3136,6 +3136,21 @@ def _codegen_backward_epilogue(
         code_globals["_grad_input_metas_"] = (
             maybe_subclass_meta.grad_input_metas
         )  # pyrefly: ignore [missing-attribute]
+        code_globals["torch"] = torch
+        expected_grad_input_count = sum(
+            meta.arg_count if isinstance(meta, SubclassCreationMeta) else 1
+            for meta in maybe_subclass_meta.grad_input_metas
+        )
+        lines.append(f"    expected_grad_input_count = {expected_grad_input_count}")
+        lines.append("    if len(out) > expected_grad_input_count:")
+        lines.append("        dropped = out[:len(out) - expected_grad_input_count]")
+        lines.append("        if any(isinstance(x, torch.Tensor) for x in dropped):")
+        lines.append("            raise AssertionError(")
+        lines.append(
+            "                'unexpected tensor outputs before subclass grad inputs'"
+        )
+        lines.append("            )")
+        lines.append("        out = out[len(out) - expected_grad_input_count:]")
         if codegen_wrap_fn is not None:
             code_globals["_wrap_"] = codegen_wrap_fn
             lines.append("    if make_subclass_override is None:")

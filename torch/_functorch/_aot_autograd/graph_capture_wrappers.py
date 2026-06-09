@@ -86,6 +86,7 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import (
+    collect_nested_int_ids,
     create_subclass_meta,
     remap_unwrapped_subclass_arg_indices,
     requires_subclass_dispatch,
@@ -1339,6 +1340,8 @@ def aot_dispatch_subclass(
         all_args = wrap_tensor_subclasses_maybe_joint(
             args, is_joint_structure=use_trace_joint, meta=meta
         )
+        nested_int_source_args = all_args[0] if use_trace_joint else all_args
+        allowed_nested_int_ids = collect_nested_int_ids(nested_int_source_args)
 
         # Step 2: call the inner function, with our (maybe subclass) inputs
         wrapped_outs, wrapped_outs_descs = call_and_expect_output_descs(fn, all_args)  # type: ignore[arg-type]
@@ -1356,13 +1359,13 @@ def aot_dispatch_subclass(
             subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
 
             # Add extra symints as outputs to the forward/backward graphs
-            # ignore nested ints here
             forward_outs, forward_outs_descs = unwrap_tensor_subclasses(
                 wrapped_outs[0],
                 wrapped_outs_descs[0],
                 append_symints=True,
+                include_nested_ints=True,
+                allowed_nested_int_ids=allowed_nested_int_ids,
             )
-            # ignore nested ints here
             backward_outs, backward_outs_descs = unwrap_tensor_subclasses(
                 wrapped_outs[1],
                 wrapped_outs_descs[1],
@@ -1375,7 +1378,11 @@ def aot_dispatch_subclass(
 
         # Step 3: Unwrap any subclass outputs back into dense tensors
         return unwrap_tensor_subclasses(
-            wrapped_outs, wrapped_outs_descs, append_symints=True
+            wrapped_outs,
+            wrapped_outs_descs,
+            append_symints=True,
+            include_nested_ints=True,
+            allowed_nested_int_ids=allowed_nested_int_ids,
         )
 
     def joint_fn(
