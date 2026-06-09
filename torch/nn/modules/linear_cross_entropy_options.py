@@ -51,19 +51,25 @@ class LinearCrossEntropyOptions:
     """
 
     allow_retain_graph: bool = False
-    """Allow ``retain_graph=True`` on backward.
+    """Allow ``retain_graph=True`` on backward. Applies only to the scalar
+    reductions (``"mean"`` / ``"sum"``).
 
-    When ``False`` (default), backward consumes pre-computed gradient
+    When ``False`` (default), their backward consumes pre-computed gradient
     buffers in place; a second ``.backward()`` raises ``RuntimeError``.
 
     When ``True``, the buffers are preserved at the cost of one extra
     gradient-sized allocation per call.
 
+    ``reduction="none"`` ignores this field: its backward recomputes the
+    chunked gradients from the saved inputs, so ``retain_graph=True`` works
+    unconditionally with no extra allocation.
+
     Higher-order autograd (gradgrad, forward-mode AD) is unsupported.
 
-    Under :func:`torch.compile` this field is auto-promoted to ``True``
-    because the default-mode second-backward guard relies on a ctx
-    mutation Dynamo doesn't preserve; the wrapper warns on the promotion.
+    Under :func:`torch.compile` this field is auto-promoted to ``True`` for
+    the scalar reductions because the default-mode second-backward guard
+    relies on a ctx mutation Dynamo doesn't preserve; the wrapper warns on
+    the promotion.
     """
 
     batch_chunk_size: int | None = None
