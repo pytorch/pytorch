@@ -1396,10 +1396,19 @@ static GuardFastPlanCandidateKind compute_guard_fastplan_candidate_kind(
   return GuardFastPlanCandidateKind::NestedModules;
 }
 
+static bool source_ends_with(
+    const std::string& source,
+    const char* suffix) {
+  const size_t suffix_len = std::strlen(suffix);
+  return source.size() >= suffix_len &&
+      source.compare(source.size() - suffix_len, suffix_len, suffix) == 0;
+}
+
 static bool tensor_match_source_supports_subtree_memo(
     const std::string& source) {
   return source.find("._parameters[") != std::string::npos ||
-      source.find("._buffers[") != std::string::npos;
+      source.find("._buffers[") != std::string::npos ||
+      source_ends_with(source, "._cached_tensor");
 }
 
 std::string guard_accessor_stats_key(PyObject* key) {
