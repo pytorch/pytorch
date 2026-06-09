@@ -136,14 +136,10 @@ dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
   if (t.scalar_type() == at::ScalarType::Float4_e2m1fn_x2) {
     TORCH_CHECK(t.dim() == 2, "fp4x2 tensor must be 2D, got ", t.dim(), "D");
     TORCH_CHECK(
-        t.is_contiguous(),
-        "fp4x2 tensor must be contiguous for get_onednn_md");
+        t.is_contiguous(), "fp4x2 tensor must be contiguous for get_onednn_md");
     int64_t M = t.size(0);
     int64_t K_logical = t.size(1) * 2;
-    return {
-        {M, K_logical},
-        dnnl::memory::data_type::f4_e2m1,
-        {K_logical, 1}};
+    return {{M, K_logical}, dnnl::memory::data_type::f4_e2m1, {K_logical, 1}};
   }
   return {
       get_onednn_dims(t),

@@ -4893,10 +4893,11 @@ def _infer_scale_swizzle_impl(
         # 2D unpadded scales XPU: shape [outer, ceil_div(K*2, block)]
         if len(scale_size) == 2:
             if (
-                (eq_fn(scale_size[0], mat_size[0]) and
-                 eq_fn(scale_size[1], ceildiv(K_multiplier * mat_size[1], 16))) or
-                (eq_fn(scale_size[0], mat_size[1]) and
-                 eq_fn(scale_size[1], ceildiv(K_multiplier * mat_size[0], 16)))
+                eq_fn(scale_size[0], mat_size[0])
+                and eq_fn(scale_size[1], ceildiv(K_multiplier * mat_size[1], 16))
+            ) or (
+                eq_fn(scale_size[0], mat_size[1])
+                and eq_fn(scale_size[1], ceildiv(K_multiplier * mat_size[0], 16))
             ):
                 return ScalingType.BlockWise1x16, SwizzleType.NO_SWIZZLE
         # 1D padded scales (CUDA/cuBLAS after to_blocked): numel with round_up

@@ -117,8 +117,8 @@ bool is_blockwise_128x128_scaling(
 bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
   return (
       t.scalar_type() == at::ScalarType::Float4_e2m1fn_x2 &&
-      scale.scalar_type() == at::kFloat8_e4m3fn &&
-      scale.dim() == 2 && scale.size(0) == t.size(0) &&
+      scale.scalar_type() == at::kFloat8_e4m3fn && scale.dim() == 2 &&
+      scale.size(0) == t.size(0) &&
       scale.size(1) == ceil_div<int64_t>(t.size(1) * 2, 16) &&
       (scale.is_contiguous() || scale.t().is_contiguous()));
 }
@@ -327,7 +327,8 @@ Tensor& _scaled_mm_out_xpu(
               ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
           std::make_pair(
               ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
-          std::make_pair(ScalingType::BlockWise1x16, ScalingType::BlockWise1x16),
+          std::make_pair(
+              ScalingType::BlockWise1x16, ScalingType::BlockWise1x16),
       },
       mat1,
       mat2,
@@ -865,8 +866,7 @@ Tensor& _scaled_nvfp4_nvfp4(
       "scale_b must be Float8_e4m3fn, got: ",
       scale_b.scalar_type());
   TORCH_CHECK_VALUE(
-      scale_a.dim() == 2 && scale_a.size(0) == M &&
-          scale_a.size(1) == scale_k,
+      scale_a.dim() == 2 && scale_a.size(0) == M && scale_a.size(1) == scale_k,
       "scale_a must have shape [",
       M,
       ", ",
@@ -874,8 +874,7 @@ Tensor& _scaled_nvfp4_nvfp4(
       "], got ",
       scale_a.sizes());
   TORCH_CHECK_VALUE(
-      scale_b.dim() == 2 && scale_b.size(0) == N &&
-          scale_b.size(1) == scale_k,
+      scale_b.dim() == 2 && scale_b.size(0) == N && scale_b.size(1) == scale_k,
       "scale_b must have shape [",
       N,
       ", ",
@@ -1194,13 +1193,7 @@ Tensor& _scaled_mm_xpu_v2_out(
         scale_b[1]);
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE) {
     return _scaled_nvfp4_nvfp4(
-        mat_a,
-        mat_b,
-        scale_a[0],
-        scale_b[0],
-        bias,
-        out_dtype_,
-        out);
+        mat_a, mat_b, scale_a[0], scale_b[0], bias, out_dtype_, out);
   } else {
     TORCH_CHECK_VALUE(
         false, "Invalid state - found an implementation, but not really");

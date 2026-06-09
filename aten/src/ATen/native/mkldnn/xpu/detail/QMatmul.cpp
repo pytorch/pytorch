@@ -504,8 +504,7 @@ sycl::event scaled_matmul(
   //   mat2: [K_packed, N] (transposed view of original [N, K_packed])
   // oneDNN matmul expects A[M,K] @ B[K,N], so we create memory descriptors
   // with logical dims and transposed strides for B.
-  const bool is_fp4 =
-      mat1.scalar_type() == at::ScalarType::Float4_e2m1fn_x2;
+  const bool is_fp4 = mat1.scalar_type() == at::ScalarType::Float4_e2m1fn_x2;
 
   const int64_t M = mat1.size(0);
   // For fp4x2, K is the logical (unpacked) dimension
@@ -518,10 +517,10 @@ sycl::event scaled_matmul(
   dnnl::memory::desc weights_md;
   if (is_fp4) {
     // B arrives as [K_packed, N] (transposed view of original [N, K_packed])
-    // oneDNN needs [K, N] with f4_e2m1 dtype. The physical data is [N, K_packed]
-    // contiguous, so strides in fp4 element units: {1, K} maps [k, n] -> n*K + k
-    weights_md = {
-        {K, N}, dnnl::memory::data_type::f4_e2m1, {1, K}};
+    // oneDNN needs [K, N] with f4_e2m1 dtype. The physical data is [N,
+    // K_packed] contiguous, so strides in fp4 element units: {1, K} maps [k, n]
+    // -> n*K + k
+    weights_md = {{K, N}, dnnl::memory::data_type::f4_e2m1, {1, K}};
   } else {
     weights_md = get_onednn_md(mat2);
   }
