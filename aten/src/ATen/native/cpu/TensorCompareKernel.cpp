@@ -346,7 +346,7 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
         if (min != min || max != max) {
             return std::numeric_limits<scalar_t>::quiet_NaN();
         } else {
-            return std::clamp(a, min, max);
+            return std::min(std::max(a, min), max);
         }
       },
       [](Vectorized<scalar_t> a, Vectorized<scalar_t> min, Vectorized<scalar_t> max) {
@@ -363,7 +363,7 @@ void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, cons
     const Vectorized<scalar_t> max_vec(max);
       cpu_kernel_vec(iter,
         [=](scalar_t a) -> scalar_t {
-          return std::clamp(a, min, max);
+          return std::min(std::max(a, min), max);
         },
         [=](Vectorized<scalar_t> a) {
           return vec::clamp(a, min_vec, max_vec);

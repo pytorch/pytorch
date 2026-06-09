@@ -28,7 +28,7 @@ void hardswish_kernel(TensorIterator& iter) {
     const opmath_t six(6.0f);
     gpu_kernel(iter, [zero, one_sixth, three, six]GPU_LAMBDA(scalar_t self_val) -> scalar_t {
       opmath_t x = static_cast<opmath_t>(self_val);
-      return x * std::clamp(x + three, zero, six) * one_sixth;
+      return x * std::min(std::max(x + three, zero), six) * one_sixth;
     });
   });
 }

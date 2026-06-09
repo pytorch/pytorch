@@ -938,7 +938,7 @@ Vectorized<T> inline clamp(
     const Vectorized<T>& max_vec) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = std::clamp(a[i], min_vec[i], max_vec[i]);
+    c[i] = std::min(std::max(a[i], min_vec[i]), max_vec[i]);
   }
   return c;
 }
