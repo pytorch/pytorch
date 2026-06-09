@@ -56,9 +56,15 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
             wrapper.quack_gemm_epilogue_defs.add(qtb.epilogue_name)
 
         input_args = [input.codegen_reference() for input in qtb.inputs]
+        if qtb.gemm_op in ("mm", "bmm"):
+            call_args = [input_args[0], input_args[1]]
+            call_kwargs = ""
+        else:
+            call_args = [input_args[1], input_args[2]]
+            call_kwargs = f", C={input_args[0]}, alpha={qtb.alpha!r}, beta={qtb.beta!r}"
         wrapper.writeline(
             f"{qtb.get_name()} = gemm_epilogue("
-            f"{input_args[0]}, {input_args[1]}, "
-            f"{qtb.epilogue_name}, {qtb.epilogue_name!r})"
+            f"{call_args[0]}, {call_args[1]}, "
+            f"{qtb.epilogue_name}, {qtb.epilogue_name!r}{call_kwargs})"
         )
         self.free_buffers_in_scheduler()
