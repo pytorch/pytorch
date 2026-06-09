@@ -3154,14 +3154,11 @@ class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
         self._prev = torch._dynamo.config.enable_trace_contextlib
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_contextlib = True
-        torch._dynamo.config.enable_trace_unittest = True
 
     def tearDown(self):
         super().tearDown()
         torch._dynamo.config.enable_trace_contextlib = self._prev
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
 
     def test_ctx_basic0(self):
         @contextlib.contextmanager

@@ -169,15 +169,6 @@ _INPLACE_COMBOS = {
 
 
 class TestNbOr(torch._dynamo.test_case.TestCase):
-    def setUp(self):
-        super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
-
     # --- Logical or ---
 
     @make_dynamo_test
@@ -869,15 +860,6 @@ class _RSubReturnsMarker:
 
 
 class TestNbSub(torch._dynamo.test_case.TestCase):
-    def setUp(self):
-        super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
-
     # --- Arithmetic sub ---
 
     @make_dynamo_test
@@ -1348,15 +1330,6 @@ class _InheritedSubAdd(_BaseWithAdd):
 
 
 class TestNbAdd(torch._dynamo.test_case.TestCase):
-    def setUp(self):
-        super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
-
     # --- Arithmetic add ---
 
     @make_dynamo_test

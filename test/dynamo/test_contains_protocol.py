@@ -222,15 +222,6 @@ class _ContainsBase:
     has_iter = True  # Override in subclass if type doesn't implement __iter__
     has_getitem = True  # Override in subclass if type doesn't implement __getitem__
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     def init(self, thetype, data):
         return thetype(data)
 
@@ -461,15 +452,6 @@ class RangeContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
 class ContainsNonBoolReturnTest(torch._dynamo.test_case.TestCase):
     """Test __contains__ that returns non-bool truthy/falsy values."""
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_contains_truthy(self):
         seq = ContainsReturnsTruthy()
@@ -490,15 +472,6 @@ class ContainsNonBoolReturnTest(torch._dynamo.test_case.TestCase):
 class NoIterNoContainsTest(torch._dynamo.test_case.TestCase):
     """Tests for objects with neither __iter__ nor __contains__"""
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_no_iter_no_contains_raises_typeerror(self):
         # Should raise TypeError when neither __iter__ nor __contains__ exists
@@ -516,15 +489,6 @@ class NoIterNoContainsTest(torch._dynamo.test_case.TestCase):
 
 class RaisesDuringIterTest(torch._dynamo.test_case.TestCase):
     """Tests for iterators that raise exceptions during iteration"""
-
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
 
     @make_dynamo_test
     def test_raises_during_iter_found_before_error(self):
@@ -545,15 +509,6 @@ class RaisesDuringIterTest(torch._dynamo.test_case.TestCase):
 class ContainsRaisesTypeErrorTest(torch._dynamo.test_case.TestCase):
     """Tests for __contains__ that raises TypeError"""
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_contains_raises_typeerror(self):
         # __contains__ raises TypeError
@@ -573,15 +528,6 @@ class ContainsRaisesTypeErrorTest(torch._dynamo.test_case.TestCase):
 
 class RangeContainsMiscTest(torch._dynamo.test_case.TestCase):
     """Specific tests for range __contains__ protocol"""
-
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
 
     @make_dynamo_test
     def test_range_basic(self):
@@ -659,15 +605,6 @@ class SetInSetTest(torch._dynamo.test_case.TestCase):
     retries, so `{1, 2} in {frozenset({1, 2})}` returns True even though set is
     not hashable.  Ref: Objects/setobject.c::set_contains.
     """
-
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
 
     @make_dynamo_test
     def test_set_in_frozenset_set_found(self):

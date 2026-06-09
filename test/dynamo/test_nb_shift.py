@@ -5,7 +5,6 @@ import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
-@torch._dynamo.config.patch(enable_trace_unittest=True)
 @torch._dynamo.config.patch(enable_trace_load_build_class=True)
 class TestNbLshift(torch._dynamo.test_case.TestCase):
     # --- Integer lshift ---
@@ -237,7 +236,6 @@ class TestNbLshift(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), fn(x))
 
 
-@torch._dynamo.config.patch(enable_trace_unittest=True)
 @torch._dynamo.config.patch(enable_trace_load_build_class=True)
 class TestNbRshift(torch._dynamo.test_case.TestCase):
     # --- Integer rshift ---
