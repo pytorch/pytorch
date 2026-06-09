@@ -173,6 +173,7 @@ class WrappedFunction:
     mutated_input_idxs: Sequence[int]
     cloned_output_idxs: Sequence[int]
     copy_input_idxs: Sequence[int] = ()
+    auto_copy_input_idxs: Sequence[int] = ()
 
 
 def get_mutating_use_stack_trace_from_node(

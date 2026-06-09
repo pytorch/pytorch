@@ -1277,6 +1277,62 @@ if HAS_CUDA_AND_TRITON:
             (actual,) = foo_cg([base, base])
             self.assertEqual(actual, expected)
 
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        @torch._inductor.config.patch(
+            "triton.cudagraph_static_input_auto_copy_threshold", 1
+        )
+        def test_auto_copy_static_input_after_address_churn(self):
+            def fn(x, y):
+                return (x + y,)
+
+            def new_inputs():
+                return [
+                    torch.rand([5, 5], device="cuda"),
+                    torch.rand([5, 5], device="cuda"),
+                ]
+
+            inps = new_inputs()
+            mod = make_fx(fn)(*inps)
+            compiled_f = compile_fx_inner(
+                mod, inps, static_input_idxs=[0], cudagraphs=True
+            )
+
+            for _ in range(3):
+                inps = new_inputs()
+                expected = fn(*inps)
+                actual = compiled_f(list(inps))
+                self.assertEqual(actual, expected)
+                del actual, expected
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        @torch._inductor.config.patch(
+            "triton.cudagraph_static_input_auto_copy_threshold", 1
+        )
+        def test_auto_copy_aliased_input_falls_back(self):
+            def fn(x, y):
+                return (x + y,)
+
+            def new_inputs():
+                return [
+                    torch.rand([5, 5], device="cuda"),
+                    torch.rand([5, 5], device="cuda"),
+                ]
+
+            inps = new_inputs()
+            mod = make_fx(fn)(*inps)
+            compiled_f = compile_fx_inner(
+                mod, inps, static_input_idxs=[0], cudagraphs=True
+            )
+
+            inps = new_inputs()
+            self.assertEqual(compiled_f(list(inps)), fn(*inps))
+
+            base = torch.rand([5, 5], device="cuda")
+            self.assertEqual(compiled_f([base, base]), fn(base, base))
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_graph_partition_custom_rule(self):
