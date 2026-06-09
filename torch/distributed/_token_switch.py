@@ -25,7 +25,7 @@ def _set_nccl_ep_jit_paths() -> None:
         os.environ["NCCL_EP_JIT_BUILD_INCLUDE_DIR"] = inc
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Routing:
     handle: object
     topk_idx: torch.Tensor
@@ -61,7 +61,7 @@ class _DispatchAutograd(torch.autograd.Function):
         grad_out_tokens: torch.Tensor,
         grad_out_topk_weights: torch.Tensor,
         grad_out_topk_idx: torch.Tensor,
-    ) -> tuple:
+    ) -> tuple[None, None, torch.Tensor, None, None]:
         grad_tokens = grad_out_tokens.new_zeros(ctx.tokens_shape)
         ctx.ts._combine(ctx.routing, grad_out_tokens.contiguous(), grad_tokens)
         return None, None, grad_tokens, None, None
@@ -88,7 +88,9 @@ class _CombineAutograd(torch.autograd.Function):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def backward(ctx: Any, grad_out_tokens: torch.Tensor) -> tuple:
+    def backward(
+        ctx: Any, grad_out_tokens: torch.Tensor
+    ) -> tuple[None, None, torch.Tensor]:
         M, H = ctx.expert_shape
         N = grad_out_tokens.shape[0]
         K = ctx.top_k
