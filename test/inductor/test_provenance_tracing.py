@@ -22,6 +22,8 @@ from torch._inductor.debug import (
     create_mapping_pre_post_grad_nodes,
     create_node_mapping_kernel_to_post_grad,
     reset_inductor_kernel_provenance_debug_handle,
+    reset_provenance_globals,
+    set_kernel_post_grad_provenance_tracing,
 )
 from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
@@ -708,6 +710,7 @@ class TestProvenanceTracingStackTraces(TestCase):
                 self.assertIsInstance(data[field], list)
                 for item in data[field]:
                     self.assertIsInstance(item, str)
+            self.assertIn(type(data["extern_semantic_key"]), (str, type(None)))
 
     @requires_gpu_and_triton
     @torch._inductor.config.patch("trace.provenance_tracking_level", 1)
@@ -815,6 +818,22 @@ class TestProvenanceTracingStackTraces(TestCase):
                     f"Mismatch for key: {key}",
                 )
 
+            # extern_semantic_key + shape metadata for extern kernels
+            triton_poi_0 = kernel_info["triton_poi_fused_addmm_relu_sigmoid_0:2"]
+            self.assertIsNone(triton_poi_0["extern_semantic_key"])
+
+            mm_out_1 = kernel_info[f"aoti_torch_{GPU_TYPE}_mm_out:1"]
+            # Single pre_grad_node "linear" → extern_semantic_key fallback
+            self.assertEqual(mm_out_1["extern_semantic_key"], "linear")
+            # Extern kernels should have shape metadata
+            self.assertIn("input_shapes", mm_out_1)
+            self.assertIn("input_dtypes", mm_out_1)
+            self.assertIn("output_shape", mm_out_1)
+            self.assertIn("output_dtype", mm_out_1)
+
+            mm_out_4 = kernel_info[f"aoti_torch_{GPU_TYPE}_mm_out:4"]
+            self.assertEqual(mm_out_4["extern_semantic_key"], "addmm")
+
     @torch._inductor.config.patch("trace.provenance_tracking_level", 0)
     def test_no_kernel_information_without_provenance_tracking(self):
         """Test that kernel_information.json is not generated without provenance tracking."""
@@ -876,6 +895,162 @@ class TestProvenanceTracingStackTraces(TestCase):
 
             keys = [k.split(":")[0] for k in data]
             self.assertTrue("aoti_torch_cpu_convolution" in keys)
+
+    def test_create_kernel_information_json_with_synthetic_data(self):
+        """Test create_kernel_information_json with synthetic globals."""
+        import torch._inductor.debug as debug_mod
+
+        with config.patch("trace.provenance_tracking_level", 1), reset_provenance_globals():
+            # Populate globals with known data
+            debug_mod._inductor_triton_kernel_to_post_grad_node_info = {
+                "triton_poi_fused_add_mul_0:1": ["add", "mul"],
+                "aoti_torch_cuda_mm_out:2": ["mm_default"],
+                "extern_kernels.addmm:3": ["addmm_default"],
+                "custom_backend.mm:4": ["custom_mm_default"],
+                "aoti_torch_cuda_add_out:5": ["add_default"],
+            }
+            debug_mod._inductor_kernel_stack_trace = {
+                "triton_poi_fused_add_mul_0:1": ["File test.py, line 10"],
+                "aoti_torch_cuda_mm_out:2": ["File test.py, line 20"],
+                "extern_kernels.addmm:3": ["File test.py, line 30"],
+                "custom_backend.mm:4": ["File test.py, line 40"],
+                "aoti_torch_cuda_add_out:5": ["File test.py, line 50"],
+            }
+            debug_mod._inductor_post_to_pre_grad_nodes = {
+                "postToPre": {
+                    "add": ["add_1"],
+                    "mul": ["mul_1"],
+                    "mm_default": ["linear"],
+                    "addmm_default": ["addmm"],
+                    "custom_mm_default": ["custom_linear"],
+                    "add_default": ["prefix_only_add"],
+                }
+            }
+            debug_mod._inductor_extern_kernel_keys = {
+                "aoti_torch_cuda_mm_out:2",
+                "extern_kernels.addmm:3",
+                "custom_backend.mm:4",
+            }
+            # Explicit extern_semantic_key (simulates FP8 bridge)
+            debug_mod._inductor_kernel_extern_semantic_key = {
+                "aoti_torch_cuda_mm_out:2": "linear_42",
+            }
+            # Shape metadata for extern
+            debug_mod._inductor_kernel_shapes = {
+                "aoti_torch_cuda_mm_out:2": {
+                    "input_shapes": [[8, 10], [10, 16]],
+                    "input_dtypes": ["torch.float32", "torch.float32"],
+                    "output_shape": [8, 16],
+                    "output_dtype": "torch.float32",
+                },
+            }
+
+            result = create_kernel_information_json()
+
+            # Triton pointwise kernel: no extern_semantic_key, no shape metadata.
+            k1 = result["triton_poi_fused_add_mul_0:1"]
+            self.assertIsNone(k1["extern_semantic_key"])
+            self.assertNotIn("input_shapes", k1)
+
+            # Extern kernel with explicit semantic key (FP8 bridge precedence)
+            # and merged shape metadata.
+            k2 = result["aoti_torch_cuda_mm_out:2"]
+            self.assertEqual(k2["extern_semantic_key"], "linear_42")
+            self.assertEqual(k2["input_shapes"], [[8, 10], [10, 16]])
+            self.assertEqual(k2["output_shape"], [8, 16])
+            self.assertEqual(k2["output_dtype"], "torch.float32")
+
+            # Extern kernel with single pre_grad_node fallback semantic key.
+            k3 = result["extern_kernels.addmm:3"]
+            self.assertEqual(k3["extern_semantic_key"], "addmm")
+            self.assertNotIn("input_shapes", k3)
+
+            # Extern fallback comes from explicit tracking, not kernel-name prefixes.
+            k4 = result["custom_backend.mm:4"]
+            self.assertEqual(k4["extern_semantic_key"], "custom_linear")
+
+            k5 = result["aoti_torch_cuda_add_out:5"]
+            self.assertIsNone(k5["extern_semantic_key"])
+
+    def test_extern_kernel_metadata_accepts_tensor_like_ir_inputs(self):
+        import torch._inductor.ir as ir_mod
+
+        class FakeTensorIRNode(ir_mod.IRNode):
+            def __init__(self, size, dtype) -> None:
+                self._size = size
+                self._dtype = dtype
+
+            def has_tensor_output(self):
+                return True
+
+            def maybe_get_size(self):
+                return self._size
+
+            def maybe_get_dtype(self):
+                return self._dtype
+
+        class FakeNonTensorIRNode(ir_mod.IRNode):
+            def has_tensor_output(self):
+                return False
+
+        class FakeExternKernel(ir_mod.ExternKernel):
+            def __init__(self, inputs, output_size=None, output_dtype=None) -> None:
+                self.inputs = inputs
+                self.origin_node = None
+                self.origins = []
+                self._output_size = output_size
+                self._output_dtype = output_dtype
+
+            def has_tensor_output(self):
+                return self._output_size is not None
+
+            def maybe_get_size(self):
+                return self._output_size
+
+            def maybe_get_dtype(self):
+                return self._output_dtype
+
+            def get_stack_traces(self):
+                return ["File fake.py, line 1"]
+
+        with config.patch("trace.provenance_tracking_level", 1), reset_provenance_globals():
+            extern = FakeExternKernel(
+                [
+                    FakeTensorIRNode([2, 4], torch.float32),
+                    [FakeTensorIRNode([3, "s0"], torch.bfloat16)],
+                    FakeNonTensorIRNode(),
+                ],
+                output_size=[2, "s0"],
+                output_dtype=torch.float16,
+            )
+            handle = set_kernel_post_grad_provenance_tracing(
+                extern, "custom_backend.mm", is_extern=True
+            )
+            self.assertEqual(handle, 1)
+
+            non_tensor_output = FakeExternKernel(
+                [FakeTensorIRNode([7], torch.int64)],
+            )
+            handle = set_kernel_post_grad_provenance_tracing(
+                non_tensor_output, "custom_backend.multi", is_extern=True
+            )
+            self.assertEqual(handle, 2)
+
+            result = create_kernel_information_json()
+
+            metadata = result["custom_backend.mm:1"]
+            self.assertEqual(metadata["input_shapes"], [[2, 4], [3, "s0"]])
+            self.assertEqual(
+                metadata["input_dtypes"], ["torch.float32", "torch.bfloat16"]
+            )
+            self.assertEqual(metadata["output_shape"], [2, "s0"])
+            self.assertEqual(metadata["output_dtype"], "torch.float16")
+
+            non_tensor_output_metadata = result["custom_backend.multi:2"]
+            self.assertEqual(non_tensor_output_metadata["input_shapes"], [[7]])
+            self.assertEqual(non_tensor_output_metadata["input_dtypes"], ["torch.int64"])
+            self.assertNotIn("output_shape", non_tensor_output_metadata)
+            self.assertNotIn("output_dtype", non_tensor_output_metadata)
 
 
 class ProvenanceTracingKernelContextTemplate:

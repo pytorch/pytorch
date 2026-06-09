@@ -33,7 +33,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_leaves, tree_map
 
 from . import config, ir
 from .ir import ExternKernel
@@ -353,6 +353,9 @@ _pre_grad_graph_id: int | None = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 _inductor_kernel_stack_trace: dict[str, list[str]] = {}
 _inductor_kernel_provenance_debug_handle: int = 0
+_inductor_extern_kernel_keys: set[str] = set()
+_inductor_kernel_extern_semantic_key: dict[str, str] = {}
+_inductor_kernel_shapes: dict[str, dict[str, Any]] = {}
 
 
 def reset_inductor_kernel_provenance_debug_handle() -> None:
@@ -370,6 +373,9 @@ def reset_provenance_globals() -> Iterator[None]:
     global _inductor_pre_grad_node_stack_trace
     global _inductor_kernel_stack_trace
     global _inductor_kernel_provenance_debug_handle
+    global _inductor_extern_kernel_keys
+    global _inductor_kernel_extern_semantic_key
+    global _inductor_kernel_shapes
 
     # Store original values
     original_pre_grad_graph_id = _pre_grad_graph_id
@@ -384,6 +390,11 @@ def reset_provenance_globals() -> Iterator[None]:
     original_inductor_kernel_provenance_debug_handle = (
         _inductor_kernel_provenance_debug_handle
     )
+    original_inductor_extern_kernel_keys = _inductor_extern_kernel_keys.copy()
+    original_inductor_kernel_extern_semantic_key = (
+        _inductor_kernel_extern_semantic_key.copy()
+    )
+    original_inductor_kernel_shapes = _inductor_kernel_shapes.copy()
 
     # Reset to default values
     _pre_grad_graph_id = -1
@@ -392,6 +403,9 @@ def reset_provenance_globals() -> Iterator[None]:
     _inductor_pre_grad_node_stack_trace = {}
     _inductor_kernel_stack_trace = {}
     _inductor_kernel_provenance_debug_handle = 0
+    _inductor_extern_kernel_keys = set()
+    _inductor_kernel_extern_semantic_key = {}
+    _inductor_kernel_shapes = {}
 
     try:
         yield
@@ -409,6 +423,11 @@ def reset_provenance_globals() -> Iterator[None]:
         _inductor_kernel_provenance_debug_handle = (
             original_inductor_kernel_provenance_debug_handle
         )
+        _inductor_extern_kernel_keys = original_inductor_extern_kernel_keys
+        _inductor_kernel_extern_semantic_key = (
+            original_inductor_kernel_extern_semantic_key
+        )
+        _inductor_kernel_shapes = original_inductor_kernel_shapes
 
 
 class DebugContext:
@@ -1097,12 +1116,35 @@ def dump_inductor_provenance_info() -> dict[str, Any]:
         return {}
 
 
-def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
-    """Create kernel information JSON"""
+def _serialize_provenance_shape(size: Sequence[Any]) -> list[int | str]:
+    shape: list[int | str] = []
+    for dim in size:
+        try:
+            shape.append(int(dim))
+        except (TypeError, ValueError):
+            shape.append(str(dim))
+    return shape
+
+
+def _get_tensor_metadata(node: ir.IRNode) -> tuple[list[int | str], str] | None:
+    if not node.has_tensor_output():
+        return None
+
+    size = node.maybe_get_size()
+    dtype = node.maybe_get_dtype()
+    if size is None or dtype is None:
+        return None
+
+    return _serialize_provenance_shape(size), str(dtype)
+
+
+def create_kernel_information_json() -> dict[str, dict[str, Any]]:
+    """Create kernel information JSON with extended metadata for cross-hardware comparison."""
     try:
         global _inductor_post_to_pre_grad_nodes
         global _inductor_kernel_stack_trace
         global _inductor_triton_kernel_to_post_grad_node_info
+        global _inductor_extern_kernel_keys
 
         post_to_pre = _inductor_post_to_pre_grad_nodes.get("postToPre", {})
         all_kernels = OrderedSet(_inductor_kernel_stack_trace.keys()) | OrderedSet(
@@ -1110,20 +1152,50 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
         )
 
         result = {}
-        for kernel_name in all_kernels:
+        for kernel_key in all_kernels:
             post_grad_nodes = _inductor_triton_kernel_to_post_grad_node_info.get(
-                kernel_name, []
+                kernel_key, []
             )
 
             pre_grad_nodes: OrderedSet[str] = OrderedSet()
             for post_node in post_grad_nodes:
                 pre_grad_nodes.update(post_to_pre.get(post_node, []))
 
-            result[kernel_name] = {
-                "stack_traces": _inductor_kernel_stack_trace.get(kernel_name, []),
+            stack_traces = _inductor_kernel_stack_trace.get(kernel_key, [])
+            pre_grad_list = list(pre_grad_nodes)
+
+            # extern_semantic_key precedence:
+            # 1. Explicit annotation (e.g., FP8 bridge) — highest priority
+            # 2. Single-element pre_grad_nodes for externs — derived identity
+            # 3. None
+            explicit_key = _inductor_kernel_extern_semantic_key.get(kernel_key)
+            if explicit_key:
+                extern_semantic_key = explicit_key
+            elif kernel_key in _inductor_extern_kernel_keys and len(pre_grad_list) == 1:
+                extern_semantic_key = pre_grad_list[0]
+            else:
+                extern_semantic_key = None
+
+            result[kernel_key] = {
+                "stack_traces": stack_traces,
                 "post_grad_nodes": post_grad_nodes,
-                "pre_grad_nodes": list(pre_grad_nodes),
+                "pre_grad_nodes": pre_grad_list,
+                "extern_semantic_key": extern_semantic_key,
             }
+
+            # Merge shape metadata if available (extern ops only)
+            shapes = _inductor_kernel_shapes.get(kernel_key)
+            if shapes:
+                result[kernel_key].update(shapes)
+
+        if not result:
+            log.warning(
+                "create_kernel_information_json: empty result. "
+                "stack_trace keys=%d, post_grad_node_info keys=%d, post_to_pre keys=%d",
+                len(_inductor_kernel_stack_trace),
+                len(_inductor_triton_kernel_to_post_grad_node_info),
+                len(post_to_pre),
+            )
 
         return result
     except Exception as e:
@@ -1136,6 +1208,7 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
                 "stack_trace": traceback.format_exc(),
             },
         )
+        log.warning("create_kernel_information_json: exception: %s", e)
         return {}
 
 
@@ -1159,12 +1232,16 @@ def set_kernel_post_grad_provenance_tracing(
         global _inductor_triton_kernel_to_post_grad_node_info
         global _inductor_kernel_stack_trace
         global _inductor_kernel_provenance_debug_handle
+        global _inductor_extern_kernel_keys
+        global _inductor_kernel_extern_semantic_key
+        global _inductor_kernel_shapes
 
         _inductor_kernel_provenance_debug_handle += 1
         stack_traces: list[str] = []
         kernel_name = f"{kernel_name}:{_inductor_kernel_provenance_debug_handle}"
         if is_extern:
             assert isinstance(node_schedule, ExternKernel)
+            _inductor_extern_kernel_keys.add(kernel_name)
             curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
                 kernel_name, []
             )
@@ -1181,6 +1258,49 @@ def set_kernel_post_grad_provenance_tracing(
                     for origin in node_schedule.origins
                     if origin.name not in curr_node_info
                 )
+            # Extract extern_semantic_key if stamped by a transform pass (e.g., FP8)
+            if node_schedule.origin_node and "extern_semantic_key" in getattr(
+                node_schedule.origin_node, "meta", {}
+            ):
+                _inductor_kernel_extern_semantic_key[kernel_name] = (
+                    node_schedule.origin_node.meta["extern_semantic_key"]
+                )
+            else:
+                for origin in node_schedule.origins:
+                    if "extern_semantic_key" in getattr(origin, "meta", {}):
+                        _inductor_kernel_extern_semantic_key[kernel_name] = origin.meta[
+                            "extern_semantic_key"
+                        ]
+                        break
+            # Extract input/output shapes and dtypes for extern ops
+            try:
+                input_shapes: list[list[int | str]] = []
+                input_dtypes: list[str] = []
+                for inp in tree_leaves(node_schedule.inputs):
+                    if isinstance(inp, ir.IRNode):
+                        metadata = _get_tensor_metadata(inp)
+                        if metadata is None:
+                            continue
+                        shape, dtype = metadata
+                        input_shapes.append(shape)
+                        input_dtypes.append(dtype)
+
+                shape_metadata: dict[str, Any] = {
+                    "input_shapes": input_shapes,
+                    "input_dtypes": input_dtypes,
+                }
+                output_metadata = _get_tensor_metadata(node_schedule)
+                if output_metadata is not None:
+                    output_shape, output_dtype = output_metadata
+                    shape_metadata.update(
+                        {
+                            "output_shape": output_shape,
+                            "output_dtype": output_dtype,
+                        }
+                    )
+                _inductor_kernel_shapes[kernel_name] = shape_metadata
+            except Exception as e:
+                log.debug("Shape extraction failed for %s: %s", kernel_name, e)
             stack_traces = list(node_schedule.get_stack_traces())
         else:
             assert isinstance(node_schedule, list)
