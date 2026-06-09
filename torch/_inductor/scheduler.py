@@ -8560,6 +8560,9 @@ class Scheduler:
 
         assert node.node is not None
 
+        if self._has_cudagraph_unsafe_origin(node):
+            return "user disabled cudagraph capture"
+
         if not node.is_gpu():
             return f"{node.get_device()} ops"
 
@@ -8584,6 +8587,21 @@ class Scheduler:
                 return "dynamic shape ops"
 
         return None
+
+    @staticmethod
+    def _has_cudagraph_unsafe_origin(node: BaseSchedulerNode) -> bool:
+        if node.node is None:
+            return False
+
+        origin_node = node.node.get_origin_node()
+        if origin_node is not None and origin_node.meta.get("cudagraph_unsafe", False):
+            return True
+
+        return any(
+            isinstance(origin, torch.fx.Node)
+            and origin.meta.get("cudagraph_unsafe", False)
+            for origin in node.node.get_origins()
+        )
 
     @cache_on_self
     def _get_cudagraph_unsafe_unbacked_symints(self) -> OrderedSet[sympy.Symbol]:

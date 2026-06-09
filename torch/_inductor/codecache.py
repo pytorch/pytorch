@@ -1192,6 +1192,35 @@ class FxGraphHashDetails:
     # just a debug label).
     EXCLUDED_KWARGS = ["graph_id", "compile_region_name"]
 
+    @staticmethod
+    def _cudagraph_metadata_for_cache_key(
+        gm: torch.fx.GraphModule,
+    ) -> tuple[
+        tuple[str, tuple[tuple[int, ...], tuple[int, ...]], tuple[str, ...]], ...
+    ]:
+        metadata: list[
+            tuple[str, tuple[tuple[int, ...], tuple[int, ...]], tuple[str, ...]]
+        ] = []
+        for module_name, module in gm.named_modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+
+            output_metadata: tuple[tuple[int, ...], tuple[int, ...]] = ((), ())
+            unsafe_nodes: list[str] = []
+            for node in module.graph.nodes:
+                if node.op == "output":
+                    output_metadata = (
+                        tuple(node.meta.get("cloned_idxs", ())),
+                        tuple(node.meta.get("cudagraph_copy_input_idxs", ())),
+                    )
+                elif node.meta.get("cudagraph_unsafe", False):
+                    unsafe_nodes.append(node.name)
+
+            if output_metadata != ((), ()) or unsafe_nodes:
+                metadata.append((module_name, output_metadata, tuple(unsafe_nodes)))
+
+        return tuple(metadata)
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -1317,6 +1346,10 @@ class FxGraphHashDetails:
         # normalize to a simple boolean (equivalent to flipping the config).
         # When fwd and bwd differ, include the full annotation.
         if gm is not None:
+            cudagraph_metadata = self._cudagraph_metadata_for_cache_key(gm)
+            if cudagraph_metadata:
+                self.cudagraph_metadata = cudagraph_metadata
+
             annotation = gm.meta.get("cudagraph_annotation")
             if annotation is not None:
                 default = config.triton.cudagraphs

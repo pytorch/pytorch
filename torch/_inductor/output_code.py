@@ -152,6 +152,25 @@ def copy_strided_storage_(dst: torch.Tensor, src: torch.Tensor) -> None:
     )
 
 
+def _has_aliased_cudagraph_copy_input(
+    copy_input_idxs: OrderedSet[int],
+    example_inputs: Sequence[InputType],
+) -> bool:
+    if not copy_input_idxs:
+        return False
+
+    storage_to_idxs: dict[int, list[int]] = {}
+    for idx, inp in enumerate(example_inputs):
+        if isinstance(inp, torch.Tensor) and torch._C._has_storage(inp):
+            storage_to_idxs.setdefault(inp.untyped_storage()._cdata, []).append(idx)
+
+    return any(
+        len(storage_to_idxs.get(inp.untyped_storage()._cdata, ())) > 1
+        for idx, inp in enumerate(example_inputs)
+        if idx in copy_input_idxs and isinstance(inp, torch.Tensor)
+    )
+
+
 def maybe_handle_backward_generation(
     compiled_graph: CompiledFxGraph,
     boxed_forward_device_index: BoxedDeviceIndex | None,
@@ -227,7 +246,12 @@ def cudagraph_post_compile(
 
     if not cudagraph_fail_reasons:
         fx_kwargs = compiled_graph.fx_kwargs
-        static_input_idxs = fx_kwargs["static_input_idxs"]
+        static_input_idxs = OrderedSet(fx_kwargs["static_input_idxs"] or ())
+        static_input_idxs = OrderedSet(
+            i
+            for i in static_input_idxs
+            if i not in compiled_graph.cudagraph_copy_input_idxs
+        )
 
         placeholders = cached_info.placeholders
         stack_traces = cached_info.stack_traces
@@ -255,6 +279,8 @@ def cudagraph_post_compile(
             constants=tuple(tensor_constants.values()),
             placeholders=placeholders,
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
+            cloned_output_idxs=tuple(compiled_graph.cudagraph_cloned_idxs),
+            copy_input_idxs=tuple(compiled_graph.cudagraph_copy_input_idxs),
         )
 
         policy = config.cudagraph_policy
@@ -262,7 +288,7 @@ def cudagraph_post_compile(
             compiled_graph.current_callable = policy.cudagraphify(
                 current_callable,
                 example_inputs,
-                static_input_idxs or (),
+                tuple(static_input_idxs),
                 **cudagraphify_kwargs,
             )
         else:
@@ -270,7 +296,7 @@ def cudagraph_post_compile(
 
             compiled_graph.current_callable = cudagraphify(
                 current_callable,
-                static_input_idxs=static_input_idxs or (),
+                static_input_idxs=tuple(static_input_idxs),
                 **cudagraphify_kwargs,
             )
 
@@ -348,6 +374,8 @@ def cudagraph_partition_post_compile(
         mutated_input_idxs,
         compiled_graph.cudagraph_info.stack_traces,
         tensor_constants,
+        compiled_graph.cudagraph_cloned_idxs,
+        compiled_graph.cudagraph_copy_input_idxs,
     )
 
     prepare_cudagraph_post_compile(
@@ -366,9 +394,14 @@ def cudagraph_partition_post_compile(
             graph_metadata,
         )
 
+        partition_static_input_idxs = OrderedSet(
+            i
+            for i in partition_metadata.static_input_idxs
+            if i not in partition_metadata.copy_input_idxs
+        )
         cudagraphify_fn = partial(
             cudagraphify,
-            static_input_idxs=tuple(partition_metadata.static_input_idxs),
+            static_input_idxs=tuple(partition_static_input_idxs),
             device_index=device_index,
             stack_traces=partition_metadata.stack_traces,
             is_backward=is_backward,
@@ -376,6 +409,8 @@ def cudagraph_partition_post_compile(
             constants=tuple(partition_metadata.constants.values()),
             placeholders=partition_metadata.placeholders,
             mutated_input_idxs=tuple(partition_metadata.mutated_input_idxs),
+            cloned_output_idxs=tuple(partition_metadata.cloned_output_idxs),
+            copy_input_idxs=tuple(partition_metadata.copy_input_idxs),
         )
         cudagraphify_fns.append(cudagraphify_fn)
 
@@ -561,6 +596,16 @@ class CompiledFxGraph(OutputCode):
         self.device_idxs = OrderedSet(graph.device_idxs)
         self.mutated_inputs = OrderedSet(graph.mutated_inputs)
         self.mutated_input_idxs = OrderedSet(graph.mutated_input_idxs)
+        cloned_bufs = getattr(graph, "cudagraph_cloned_bufs", OrderedSet())
+        self.cudagraph_cloned_idxs: OrderedSet[int] = OrderedSet()
+        if cloned_bufs:
+            output_names = graph.get_output_names()
+            for i, name in enumerate(output_names):
+                if name in cloned_bufs:
+                    self.cudagraph_cloned_idxs.add(i)
+        self.cudagraph_copy_input_idxs: OrderedSet[int] = OrderedSet(
+            getattr(graph, "cudagraph_copy_input_idxs", OrderedSet())
+        )
 
         # We store the constant attributes in the cache entry and re-attach them
         # to the module created in PyCodeCache.load_by_key_path. In the case that
@@ -636,9 +681,19 @@ class CompiledFxGraph(OutputCode):
                 if storage_mutation_reason is not None:
                     self.disabled_cudagraphs_reason = storage_mutation_reason
 
+                copy_input_mutation = any(
+                    idx in self.mutated_input_idxs
+                    for idx in self.cudagraph_copy_input_idxs
+                )
+                copy_input_alias = _has_aliased_cudagraph_copy_input(
+                    self.cudagraph_copy_input_idxs, example_inputs
+                )
+
                 cudagraph_tests = [
                     (storage_mutation_reason is None, "input storage mutation"),
                     (not has_mutation, "mutated inputs"),
+                    (not copy_input_mutation, "explicit copy of mutated input"),
+                    (not copy_input_alias, "explicit copy of aliased input"),
                     (
                         not config.force_disable_cudagraph_TESTING_ONLY,
                         "force_disable_cudagraph_TESTING_ONLY",

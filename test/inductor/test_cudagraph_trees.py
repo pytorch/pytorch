@@ -1229,6 +1229,110 @@ if HAS_CUDA_AND_TRITON:
         def test_unaligned_static_input_no_cudagraphs(self):
             self._test_unaligned_static_input_impl(expected_clones=0)
 
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_explicit_copy_static_input_no_rerecord(self):
+            def fn(x, y):
+                torch.compiler.cudagraph_mark_input_copy(x)
+                return (x + y,)
+
+            def new_inputs():
+                return [
+                    torch.rand([5, 5], device="cuda"),
+                    torch.rand([5, 5], device="cuda"),
+                ]
+
+            inps = new_inputs()
+            mod = make_fx(fn)(*inps)
+            compiled_f = compile_fx_inner(
+                mod, inps, static_input_idxs=[0], cudagraphs=True
+            )
+
+            for _ in range(3):
+                inps = new_inputs()
+                expected = fn(*inps)
+                self.assertEqual(compiled_f(list(inps)), expected)
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_explicit_copy_aliased_input_falls_back(self):
+            def foo(args):
+                x, y = args
+                y.add_(1)
+                args.clear()
+                return (x + y,)
+
+            x = torch.rand([5, 5], device="cuda")
+            y = torch.rand([5, 5], device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [x, y], (0,), copy_input_idxs=(0,))
+            foo_cg(
+                [
+                    torch.rand([5, 5], device="cuda"),
+                    torch.rand([5, 5], device="cuda"),
+                ]
+            )
+
+            base = torch.rand([5, 5], device="cuda")
+            expected = 2 * (base + 1)
+            (actual,) = foo_cg([base, base])
+            self.assertEqual(actual, expected)
+
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        @torch._inductor.config.patch(
+            "triton.cudagraph_static_input_auto_copy_threshold", 1
+        )
+        def test_auto_copy_static_input_after_address_churn(self):
+            def fn(x, y):
+                return (x + y,)
+
+            def new_inputs():
+                return [
+                    torch.rand([5, 5], device="cuda"),
+                    torch.rand([5, 5], device="cuda"),
+                ]
+
+            inps = new_inputs()
+            mod = make_fx(fn)(*inps)
+            compiled_f = compile_fx_inner(
+                mod, inps, static_input_idxs=[0], cudagraphs=True
+            )
+
+            for _ in range(3):
+                inps = new_inputs()
+                expected = fn(*inps)
+                actual = compiled_f(list(inps))
+                self.assertEqual(actual, expected)
+                del actual, expected
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        @torch._inductor.config.patch(
+            "triton.cudagraph_static_input_auto_copy_threshold", 1
+        )
+        def test_auto_copy_aliased_input_falls_back(self):
+            def fn(x, y):
+                return (x + y,)
+
+            def new_inputs():
+                return [
+                    torch.rand([5, 5], device="cuda"),
+                    torch.rand([5, 5], device="cuda"),
+                ]
+
+            inps = new_inputs()
+            mod = make_fx(fn)(*inps)
+            compiled_f = compile_fx_inner(
+                mod, inps, static_input_idxs=[0], cudagraphs=True
+            )
+
+            inps = new_inputs()
+            self.assertEqual(compiled_f(list(inps)), fn(*inps))
+
+            base = torch.rand([5, 5], device="cuda")
+            self.assertEqual(compiled_f([base, base]), fn(base, base))
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_graph_partition_custom_rule(self):
@@ -5334,6 +5438,193 @@ if HAS_CUDA_AND_TRITON:
             result2 = foo_cg([sf, inp])
             self.assertEqual(result2[0], inp * 3.0)
 
+        def test_cloned_output_basic(self):
+            """Cloned outputs get fresh storage on every replay."""
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return x * 2, x + 1
+
+            inp = torch.randn(4, device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [inp], (0,), cloned_output_idxs=(0,))
+
+            foo_cg([inp])
+            out1_a, out1_b = foo_cg([inp])
+            out2_a, out2_b = foo_cg([inp])
+            self.assertNotEqual(out1_a.data_ptr(), out2_a.data_ptr())
+            self.assertEqual(out2_a, inp * 2)
+            self.assertEqual(out2_b, inp + 1)
+
+        def test_cloned_output_survives_replay(self):
+            """Cloned outputs remain valid after subsequent replays."""
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return (x * 3,)
+
+            inp = torch.randn(4, device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [inp], (0,), cloned_output_idxs=(0,))
+
+            foo_cg([inp])
+            (first,) = foo_cg([inp])
+            expected = first.clone()
+            foo_cg([inp])
+            self.assertEqual(first, expected)
+
+        def test_cloned_output_multiple_idxs(self):
+            """Multiple outputs can be cloned."""
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return x + 1, x + 2, x + 3
+
+            inp = torch.randn(4, device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [inp], (0,), cloned_output_idxs=(0, 2))
+
+            foo_cg([inp])
+            a1, b1, c1 = foo_cg([inp])
+            a2, b2, c2 = foo_cg([inp])
+            self.assertNotEqual(a1.data_ptr(), a2.data_ptr())
+            self.assertNotEqual(c1.data_ptr(), c2.data_ptr())
+            self.assertEqual(a2, inp + 1)
+            self.assertEqual(b2, inp + 2)
+            self.assertEqual(c2, inp + 3)
+
+        def test_cloned_output_preserves_output_aliasing(self):
+            """Cloning one returned view clones its returned alias group once."""
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return x[:3], x[1:4]
+
+            inp = torch.randn(8, device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [inp], (0,), cloned_output_idxs=(0,))
+
+            foo_cg([inp])
+            first_a, first_b = foo_cg([inp])
+            second_a, second_b = foo_cg([inp])
+
+            self.assertEqual(first_a, inp[:3])
+            self.assertEqual(first_b, inp[1:4])
+            self.assertEqual(second_a, inp[:3])
+            self.assertEqual(second_b, inp[1:4])
+            self.assertEqual(
+                first_a.untyped_storage()._cdata, first_b.untyped_storage()._cdata
+            )
+            self.assertEqual(
+                second_a.untyped_storage()._cdata, second_b.untyped_storage()._cdata
+            )
+            self.assertNotEqual(
+                first_a.untyped_storage()._cdata, second_a.untyped_storage()._cdata
+            )
+
+        def test_cloned_output_compile(self):
+            """End-to-end test with torch.compile."""
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                y = x * 2
+                z = x + 1
+                torch.compiler.cudagraph_mark_output_clone(y)
+                return y, z
+
+            inp = torch.randn(4, device="cuda")
+            for _ in range(3):
+                foo(inp)
+
+            out1_y, _ = foo(inp)
+            out2_y, _ = foo(inp)
+            self.assertNotEqual(out1_y.data_ptr(), out2_y.data_ptr())
+            self.assertEqual(out2_y, inp * 2)
+
+            expected_y = out1_y.clone()
+            foo(inp)
+            self.assertEqual(out1_y, expected_y)
+
+        def test_cloned_output_shutdown(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                y = x * 2
+                torch.compiler.cudagraph_mark_output_clone(y)
+                return y
+
+            inp = torch.randn(4, device="cuda")
+            for _ in range(3):
+                foo(inp)
+
+            self.assertIsNotNone(self.get_manager())
+            torch._inductor.cudagraph_trees.reset_cudagraph_trees()
+            self.assertIsNone(self.get_manager())
+
+        def test_cloned_output_checkpoint_tracks_original_output(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                y = x * 2
+                torch.compiler.cudagraph_mark_output_clone(y)
+                return y
+
+            @torch.compile(mode="reduce-overhead")
+            def bar(x):
+                return x + 1
+
+            inp = torch.randn(4, device="cuda")
+            for _ in range(3):
+                out = foo(inp)
+
+            del out
+            gc.collect()
+            torch.cuda.empty_cache()
+
+            for _ in range(3):
+                self.assertEqual(bar(inp), inp + 1)
+
+        def test_cloned_output_with_cpu_partition(self):
+            """Cloned output works when graph has CPU ops causing partitions."""
+
+            def foo(x):
+                y = x * 2
+                torch.compiler.cudagraph_mark_output_clone(y)
+                cpu_val = x.sum().cpu()
+                z = x + cpu_val.to("cuda")
+                return y, z
+
+            inp = torch.randn(4, device="cuda")
+            f_compiled = torch.compile(foo, mode="reduce-overhead")
+
+            for _ in range(3):
+                f_compiled(inp)
+
+            out1_y, out1_z = f_compiled(inp)
+            out2_y, out2_z = f_compiled(inp)
+            self.assertNotEqual(out1_y.data_ptr(), out2_y.data_ptr())
+            self.assertEqual(out2_y, inp * 2)
+            self.assertEqual(out2_z, inp + inp.sum())
+
+            expected = out1_y.clone()
+            f_compiled(inp)
+            self.assertEqual(out1_y, expected)
+
+        @torch._inductor.config.patch("graph_partition", False)
+        def test_cudagraph_disable_region_skips_capture(self):
+            def foo(x):
+                y = x + 1
+                with torch.compiler.cudagraph_disable():
+                    z = y.sin()
+                    w = z.cos()
+                return w + 1
+
+            inp = torch.randn(4, device="cuda")
+            f_compiled = torch.compile(foo, mode="reduce-overhead")
+
+            for _ in range(3):
+                self.assertEqual(f_compiled(inp), foo(inp))
+
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
     class TestCUDAGraphPolicy(TestCase):
         def setUp(self):
             super().setUp()
@@ -6001,6 +6292,126 @@ if HAS_CUDA_AND_TRITON:
         instantiate_device_type_tests(
             TestCudagraphIndexingOps, globals(), only_for=("cuda",)
         )
+
+
+if torch.cuda.is_available():
+
+    class TestMarkOutputsMeta(InductorTestCase):
+        """Tests for cudagraph metadata tracing (no triton needed)."""
+
+        def test_no_annotation(self):
+            """make_fx works normally when no cudagraph annotations exist."""
+            gm = make_fx(lambda x: x * 2, tracing_mode="fake")(
+                torch.randn(4, device="cuda")
+            )
+            out = next(reversed(gm.graph.find_nodes(op="output")))
+            self.assertNotIn("cloned_idxs", out.meta)
+
+        def test_clone_annotation(self):
+            """exclude_from_cudagraphs with clone=True sets cloned_idxs."""
+
+            def f(x):
+                y = x * 2
+                torch.compiler.cudagraph_mark_output_clone(y)
+                return y, x + 1
+
+            gm = make_fx(f, tracing_mode="fake")(torch.randn(4, device="cuda"))
+            out = next(reversed(gm.graph.find_nodes(op="output")))
+            self.assertEqual(list(out.meta["cloned_idxs"]), [0])
+
+            # custom op must be erased
+            for node in gm.graph.nodes:
+                self.assertNotIn("exclude", str(node.target))
+
+        def test_clone_annotation_view_alias_group(self):
+            """Annotating one returned view marks the returned alias group."""
+
+            def f(x):
+                y = x * 2
+                a = y[:2]
+                b = y[1:3]
+                torch.compiler.cudagraph_mark_output_clone(a)
+                return a, b
+
+            gm = make_fx(f, tracing_mode="fake")(torch.randn(4, device="cuda"))
+            out = next(reversed(gm.graph.find_nodes(op="output")))
+            self.assertEqual(list(out.meta["cloned_idxs"]), [0, 1])
+
+        def test_single_output(self):
+            """Cudagraph output metadata handles single outputs."""
+
+            def f(x):
+                y = x * 2
+                torch.compiler.cudagraph_mark_output_clone(y)
+                return y
+
+            gm = make_fx(f, tracing_mode="fake")(torch.randn(4, device="cuda"))
+            out = next(reversed(gm.graph.find_nodes(op="output")))
+            self.assertEqual(list(out.meta["cloned_idxs"]), [0])
+
+        def test_input_copy_annotation(self):
+            """copy_to_cudagraphs marks the matching placeholder index."""
+
+            def f(x, y):
+                torch.compiler.cudagraph_mark_input_copy(x)
+                return x + y
+
+            gm = make_fx(f, tracing_mode="fake")(
+                torch.randn(4, device="cuda"), torch.randn(4, device="cuda")
+            )
+            out = next(reversed(gm.graph.find_nodes(op="output")))
+            self.assertEqual(list(out.meta["cudagraph_copy_input_idxs"]), [0])
+
+            for node in gm.graph.nodes:
+                self.assertNotIn("copy_to_cudagraphs", str(node.target))
+
+        def test_cudagraph_disable_region_annotation(self):
+            """cudagraph_disable marks traced nodes inside the region."""
+
+            def f(x):
+                a = x + 1
+                with torch.compiler.cudagraph_disable():
+                    b = a.sin()
+                    c = b.cos()
+                return c + 1
+
+            gm = make_fx(f, tracing_mode="fake")(torch.randn(4, device="cuda"))
+            unsafe_targets = [
+                node.target
+                for node in gm.graph.nodes
+                if node.meta.get("cudagraph_unsafe", False)
+            ]
+            self.assertEqual(
+                unsafe_targets,
+                [torch.ops.aten.sin.default, torch.ops.aten.cos.default],
+            )
+
+            for node in gm.graph.nodes:
+                self.assertNotIn("disable_cudagraphs", str(node.target))
+
+        def test_cudagraph_disable_region_nested_view(self):
+            """Region annotations cover all traced nodes without view chasing."""
+
+            def f(x):
+                a = x + 1
+                with torch.compiler.cudagraph_disable():
+                    b = a.view(-1)
+                    c = b[1:]
+                    d = c.sin()
+                return d + 1
+
+            gm = make_fx(f, tracing_mode="fake")(torch.randn(4, device="cuda"))
+            unsafe_targets = [
+                node.target
+                for node in gm.graph.nodes
+                if node.meta.get("cudagraph_unsafe", False)
+            ]
+            self.assertIn(torch.ops.aten.view.default, unsafe_targets)
+            self.assertIn(torch.ops.aten.slice.Tensor, unsafe_targets)
+            self.assertIn(torch.ops.aten.sin.default, unsafe_targets)
+
+            for node in gm.graph.nodes:
+                self.assertNotIn("disable_cudagraphs", str(node.target))
 
 
 if __name__ == "__main__":

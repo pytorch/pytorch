@@ -25,6 +25,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      set_stance
      set_enable_guard_collectives
      cudagraph_mark_step_begin
+     cudagraph_mark_output_clone
+     cudagraph_mark_input_copy
+     cudagraph_disable
      is_compiling
      is_dynamo_compiling
      is_exporting

@@ -4293,6 +4293,9 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
     """
     target = fx_node.target
 
+    if fx_node.meta.get("cudagraph_unsafe", False):
+        return True
+
     # Check against the forbidden ops set
     if str(target) in FORBIDDEN_CUDAGRAPH_OPS:
         return True
