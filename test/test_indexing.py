@@ -1743,9 +1743,10 @@ class TestIndexing(TestCase):
         indices = torch.argsort(t, dim=dim)
 
         # MPS backend uses a different error message
+        device_obj = torch.device(device) if isinstance(device, str) else device
         expected_error = (
             "Passed CPU tensor to MPS op"
-            if device.type == "mps"
+            if device_obj.type == "mps"
             else "Expected all tensors to be on the same device"
         )
 
