@@ -2,11 +2,27 @@
 from __future__ import annotations
 
 import abc
+import os
 from dataclasses import dataclass
 from typing import Any
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup  # noqa: TC001
+
+
+def _set_nccl_ep_jit_paths() -> None:
+    # nccl-ep JIT-compiles its CUDA kernels at runtime and needs its source
+    # headers on disk. A USE_NCCL_EP build bundles them under
+    # torch/include/nccl_ep_jit (NCCL is statically linked, so the NCCL wheel is
+    # absent at runtime and ships neither the device headers nor a
+    # version-matched copy). Point the JIT at the bundled tree, unless the user
+    # already pinned the location via NCCL_EP_JIT_SOURCE_DIR or NCCL_HOME.
+    if "NCCL_EP_JIT_SOURCE_DIR" in os.environ or "NCCL_HOME" in os.environ:
+        return
+    inc = os.path.join(os.path.dirname(torch.__file__), "include", "nccl_ep_jit")
+    if os.path.isdir(inc):
+        os.environ["NCCL_EP_JIT_SOURCE_DIR"] = os.path.join(inc, "nccl_ep")
+        os.environ["NCCL_EP_JIT_BUILD_INCLUDE_DIR"] = inc
 
 
 @dataclass(frozen=True)
@@ -200,6 +216,7 @@ class TokenSwitchNCCL(TokenSwitch):
             raise RuntimeError(
                 "TokenSwitchNCCL requires a build with NCCL EP (USE_NCCL_EP)."
             )
+        _set_nccl_ep_jit_paths()
         self._max_recv_tokens_per_rank = max_recv_tokens_per_rank
         self._group = c10d._NcclEpGroup.create(
             process_group,
