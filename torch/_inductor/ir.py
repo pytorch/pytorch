@@ -6026,6 +6026,7 @@ class QuackGemmEpilogueTemplateBuffer(TemplateBuffer):
         local_reduce_group: int | None = None,
         local_reduce_dim: int | None = None,
         local_reduce_op: str | None = None,
+        local_reduce_scale: float = 1.0,
         local_reduce_feeds_main: bool = False,
         mutated_inputs: Iterable[IRNode] | None = None,
     ) -> None:
@@ -6042,6 +6043,7 @@ class QuackGemmEpilogueTemplateBuffer(TemplateBuffer):
         self.local_reduce_group = local_reduce_group
         self.local_reduce_dim = local_reduce_dim
         self.local_reduce_op = local_reduce_op
+        self.local_reduce_scale = local_reduce_scale
         self.local_reduce_feeds_main = local_reduce_feeds_main
 
     def should_allocate(self) -> bool:
