@@ -495,7 +495,7 @@ class BatchLinearLHSFusion(BatchFusion):
     """
 
     def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
-        if CallFunctionVarArgs(torch.nn.functional.linear).match(
+        if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
@@ -612,7 +612,7 @@ def is_linear_node_can_be_fused(node: torch.fx.Node):
 class PreGradBatchLinearFusion(BatchFusion):
     """
     Batch linear fusion in pre grad pass.
-    Fuse linear with same size with torch.baddmm
+    Fuse linear with same size with torch.baddbmm
     """
 
     def _getitem_args(self, getitem_node: torch.fx.Node):
@@ -717,7 +717,7 @@ class PreGradBatchLinearFusion(BatchFusion):
                     bmm_meta = bmm.meta["example_value"]
                 except Exception as e:
                     log.debug(
-                        f" exception when update bmm meta data with stack error tracekey {e}"  # noqa: G004
+                        f" exception when update bmm meta data with stack error traceback {e}"  # noqa: G004
                     )
                     bmm_meta = None
 

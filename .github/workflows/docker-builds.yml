@@ -16,7 +16,7 @@ on:
     - cron: 1 3 * * 3
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 env:
@@ -75,16 +75,18 @@ jobs:
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13
             buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
+            runner_label: mt-rel-l-arm64g4-16-62
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
             buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
             timeout-minutes: 600
+            runner_label: mt-rel-l-arm64g4-16-62
     # Use the release runner pool: its nodes carry osdc.io/runner-class=release,
     # which exempts them from the cache-enforcer DaemonSet's iptables block on
     # outbound ghcr.io traffic so the "Mirror image to GHCR" step can succeed.
     # The regular mt-l-* pool blocks ghcr.io egress at the host iptables layer.
     runs-on:
       group: release-runners
-      labels: mt-rel-l-x86iavx512-8-64
+      labels: ${{ matrix.runner_label || 'mt-rel-l-x86iavx512-8-64' }}
     container:
       image: ghcr.io/actions/actions-runner:latest
     steps:

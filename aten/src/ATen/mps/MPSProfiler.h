@@ -93,7 +93,7 @@ struct OperationInfo : BaseInfo {
     for (const Tensor& tensor : tensors) {
       kernelStr << ':' << BaseInfo::buildTensorString(tensor, includeBufferId);
     }
-    return kernelStr.str();
+    return std::move(kernelStr).str();
   }
 };
 
