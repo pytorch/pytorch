@@ -65,6 +65,7 @@ from torch._functorch.aot_autograd import (
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
+    clone_outputs_preserving_aliases,
     cudagraphs_log,
     format_default_skip_message,
     log_cudagraph_skip_and_bump_counter,
@@ -1893,6 +1894,8 @@ def cudagraphify(
     constants: tuple[torch.Tensor, ...] = (),
     placeholders: Sequence[PlaceholderInfo] = (),
     mutated_input_idxs: tuple[int, ...] = (),
+    cloned_output_idxs: tuple[int, ...] = (),
+    copy_input_idxs: tuple[int, ...] = (),
 ) -> Callable[..., Any]:
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -1910,9 +1913,15 @@ def cudagraphify(
             placeholders=placeholders,
             mutated_input_idxs=mutated_input_idxs,
             compile_id=torch._guards.CompileContext.current_compile_id(),
+            cloned_output_idxs=cloned_output_idxs,
+            copy_input_idxs=copy_input_idxs,
         )
     else:
-        cudagraphify_fn = cudagraphify_impl
+        cudagraphify_fn = functools.partial(
+            cudagraphify_impl,
+            cloned_output_idxs=cloned_output_idxs,
+            copy_input_idxs=copy_input_idxs,
+        )
 
     thread_local = threading.local()
 
@@ -1955,6 +1964,9 @@ def cudagraphify_impl(
     model: Callable[..., Any],
     inputs: list[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
+    *,
+    cloned_output_idxs: tuple[int, ...] = (),
+    copy_input_idxs: tuple[int, ...] = (),
 ) -> Callable[[list[InputType]], Any]:
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
@@ -2008,9 +2020,28 @@ def cudagraphify_impl(
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
 
+    def copy_input_aliases_any(new_inputs: list[InputType]) -> bool:
+        for idx in copy_input_idxs:
+            inp = new_inputs[idx]
+            if not isinstance(inp, torch.Tensor) or not torch._C._has_storage(inp):
+                continue
+            storage_cdata = inp.untyped_storage()._cdata
+            for other_idx, other in enumerate(new_inputs):
+                if other_idx == idx:
+                    continue
+                if (
+                    isinstance(other, torch.Tensor)
+                    and torch._C._has_storage(other)
+                    and other.untyped_storage()._cdata == storage_cdata
+                ):
+                    return True
+        return False
+
     if config.size_asserts:
 
         def run(new_inputs: list[InputType]) -> Callable[[list[InputType]], Any]:
+            if copy_input_aliases_any(new_inputs):
+                return model(new_inputs)
             assert len(static_inputs) == len(new_inputs)
             for idx, (dst, src, expanded_dims) in enumerate(
                 zip(static_inputs, new_inputs, inps_expanded_dims)
@@ -2028,7 +2059,7 @@ def cudagraphify_impl(
             new_inputs.clear()
             graph.replay()
             # pyrefly: ignore [bad-return]
-            return static_outputs
+            return clone_outputs_preserving_aliases(static_outputs, cloned_output_idxs)
 
     else:
         copy_indices = [
@@ -2036,6 +2067,8 @@ def cudagraphify_impl(
         ]
 
         def run(new_inputs: list[InputType]) -> Callable[[list[InputType]], Any]:
+            if copy_input_aliases_any(new_inputs):
+                return model(new_inputs)
             for idx in copy_indices:
                 expanded_dims = inps_expanded_dims[idx]
                 src = new_inputs[idx]
@@ -2044,7 +2077,7 @@ def cudagraphify_impl(
             new_inputs.clear()
             graph.replay()
             # pyrefly: ignore [bad-return]
-            return static_outputs
+            return clone_outputs_preserving_aliases(static_outputs, cloned_output_idxs)
 
     return align_inputs_from_check_idxs(run, check_input_idxs, OrderedSet())
 
