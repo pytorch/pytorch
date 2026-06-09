@@ -15,7 +15,7 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict, Unpack
 from weakref import ReferenceType
 
 import torch
@@ -87,6 +87,32 @@ aten = torch._ops.ops.aten
 CONSTANT_NUMEL_LIMIT = 8
 
 RECURSION_COUNT = 0
+
+
+class _FakeTensorConstructorIgnoredState(TypedDict, total=False):
+    # Recompute memo descriptor state when reconstructing from
+    # FakeTensor.__dict__.
+    _nonzero_memo: object
+    _nonzero_memo_vc: object
+    _nonzero_memo_epoch: object
+    _item_memo: object
+    _item_memo_vc: object
+    _item_memo_epoch: object
+    _unique_memo: object
+    _unique_memo_vc: object
+    _unique_memo_epoch: object
+    _unique_consecutive_memo: object
+    _unique_consecutive_memo_vc: object
+    _unique_consecutive_memo_epoch: object
+    _nested_int_memo: object
+    _nested_int_memo_vc: object
+    _nested_int_memo_epoch: object
+    _debug_trace: object
+
+
+_FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS = frozenset(
+    _FakeTensorConstructorIgnoredState.__annotations__
+)
 
 
 # Check if device type supports device index
@@ -832,18 +858,86 @@ class FakeTensor(Tensor):
     @staticmethod
     def __new__(
         cls,
-        fake_mode: FakeTensorMode,
-        elem: Tensor,
-        device: torch.device,
+        fake_mode_or_elem: FakeTensorMode | Tensor | None = None,
+        elem: Tensor | None = None,
+        device: torch.device | str | None = None,
         constant: Tensor | None = None,
         real_tensor: Tensor | None = None,
         pytype: type[Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
+        *,
+        fake_mode: FakeTensorMode | None = None,
+        fake_device: torch.device | str | None = None,
+        _fake_device: torch.device | str | None = None,
+        requires_grad: bool | None = None,
+        _is_param: bool = False,
+        **state: Unpack[_FakeTensorConstructorIgnoredState],
     ) -> Self:
+        state_dict = cast(dict[str, object], state)
+        for attr_name in _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS:
+            state_dict.pop(attr_name, None)
+        if state_dict:
+            unexpected = next(iter(state_dict))
+            raise TypeError(
+                "FakeTensor.__new__() got an unexpected keyword argument "
+                f"{unexpected!r}"
+            )
+
+        if isinstance(fake_mode_or_elem, FakeTensorMode):
+            if fake_mode is not None and fake_mode is not fake_mode_or_elem:
+                raise TypeError("FakeTensor.__new__() got conflicting fake_mode values")
+            fake_mode = fake_mode_or_elem
+        else:
+            # Support bounded state-based reconstruction from known FakeTensor
+            # attrs, e.g. type(fake_tensor)(new_elem, **fake_tensor.__dict__).
+            if fake_mode_or_elem is not None:
+                if not isinstance(fake_mode_or_elem, Tensor):
+                    raise TypeError(
+                        "FakeTensor.__new__() expected a FakeTensorMode or Tensor "
+                        f"as the first argument, got {type(fake_mode_or_elem)}"
+                    )
+                if elem is not None:
+                    raise TypeError(
+                        "FakeTensor.__new__() expected either "
+                        "(fake_mode, elem, ...) or (elem, fake_mode=..., ...)"
+                    )
+                elem = fake_mode_or_elem
+            if fake_mode is None:
+                raise TypeError(
+                    "FakeTensor.__new__() missing required argument: 'fake_mode'"
+                )
+
+        if elem is None:
+            raise TypeError("FakeTensor.__new__() missing required argument: 'elem'")
+
+        specified_devices = [
+            (name, FakeTensor._normalize_fake_device(torch.device(value)))
+            for name, value in (
+                ("device", device),
+                ("fake_device", fake_device),
+                ("_fake_device", _fake_device),
+            )
+            if value is not None
+        ]
+        if specified_devices:
+            first_name, resolved_device = specified_devices[0]
+            for name, candidate_device in specified_devices[1:]:
+                if resolved_device != candidate_device:
+                    raise ValueError(
+                        "FakeTensor.__new__() got conflicting device values: "
+                        f"{first_name}={resolved_device}, {name}={candidate_device}"
+                    )
+            device = resolved_device
+        else:
+            raise TypeError(
+                "FakeTensor.__new__() missing required argument: "
+                "'device' (or 'fake_device')"
+            )
+
         self = Tensor._make_subclass(
             cls,
             elem,
-            elem.requires_grad,
+            elem.requires_grad if requires_grad is None else requires_grad,
             dispatch_device=True,
             device_for_backend_keys=device,
         )
@@ -856,7 +950,6 @@ class FakeTensor(Tensor):
             raise AssertionError(
                 f"elem.device.type must be 'meta', got {elem.device.type}"
             )
-        device = device if isinstance(device, torch.device) else torch.device(device)
         # NB: it is fine, if a little confusing, for device to be meta
         # (we are faking a meta tensor in that case).  However, it often
         # indicates some sort of confusion (e.g., you accidentally passed
@@ -882,6 +975,9 @@ class FakeTensor(Tensor):
         self.unique_memo = None
         self.unique_consecutive_memo = None
         self.nested_int_memo = None
+
+        if _is_param:
+            self._is_param = _is_param
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
@@ -2618,6 +2714,8 @@ class FakeTensorMode(TorchDispatchMode):
             and (
                 torch.Tag.inplace_view not in func.tags or func is aten.detach_.default
             )
+            # DeviceMesh coordinates depend on the current rank, so folding them
+            # would bake one rank's value into graphs compiled for every rank.
             and not func.name().startswith(
                 "device_mesh::_runtime_compute_coordinate_on_dim"
             )
