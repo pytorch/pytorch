@@ -2917,6 +2917,7 @@ if TYPE_CHECKING:
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
     # imported in user code.
     from torch import (
+        cfg as cfg,
         _dynamo as _dynamo,
         _inductor as _inductor,
         _subclasses as _subclasses,
@@ -2928,6 +2929,7 @@ else:
         "_dynamo",
         "_inductor",
         "_export",
+        "cfg",
         # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
         "onnx",
     }
