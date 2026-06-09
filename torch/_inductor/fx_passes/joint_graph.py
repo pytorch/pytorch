@@ -983,6 +983,7 @@ def _preserve_scaled_softmax_nonfinite_semantics(scaled, stable, dim, keepdim):
     finite_scaled = torch.all(torch.isfinite(scaled), dim=dim, keepdim=True)
     return torch.where(finite_scaled, stable, original)
 
+
 def _is_static_safe_softmax_divisor(other) -> bool:
     """
     For scaled softmax of the form inp / other, the effective scale is 1 / other.
@@ -996,6 +997,8 @@ def _is_static_safe_softmax_divisor(other) -> bool:
 
     other = float(other)
     return math.isfinite(other) and abs(other) >= 1.0
+
+
 def _is_static_safe_softmax_scale(scale) -> bool:
     """
     Return True when the scale is a compile-time positive constant <= 1.
@@ -1008,6 +1011,8 @@ def _is_static_safe_softmax_scale(scale) -> bool:
         return math.isfinite(scale) and 0.0 < scale <= 1.0
 
     return False
+
+
 def _other_is_broadcasted_in_dim(match):
     # Check that the scaling factor is constant across the reduction dim,
     # so scaling doesn't change which index corresponds to the maximum value

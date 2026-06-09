@@ -2165,6 +2165,30 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(actual[1, 0].item(), float("-inf"))
         self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
 
+    @inductor_config.patch(fx_graph_cache=False)
+    def test_scaled_softmax_static_safe_scale_and_divisor_skips_nonfinite_guard(self):
+        def check(fn, args):
+            torch._dynamo.reset()
+            counters.clear()
+            expected = fn(*args)
+            actual, code = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(actual, expected)
+            self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+            code = "\n".join(code)
+            self.assertNotIn("isfinite", code)
+            self.assertNotIn("where", code)
+
+        def mul_softmax(x):
+            return F.softmax(x * 0.125, dim=0)
+
+        def div_softmax(x):
+            return F.softmax(x / 8.0, dim=0)
+
+        torch.manual_seed(100)
+        check(mul_softmax, (torch.randn((4, 16)),))
+        check(div_softmax, (torch.randn((4, 16)),))
+
     def test_mutation_op_matching(self):
         def check(type, func_name, args, kwargs, expect=True):
             if type not in ["call_function", "call_method"]:
