@@ -2843,8 +2843,6 @@ class trace:
             "INDUCTOR_PROVENANCE", os.environ.get("TORCH_COMPILE_DEBUG", "0")
         )
     )
-    if provenance_tracking_to_timeline:
-        provenance_tracking_level = max(provenance_tracking_level, 1)
 
 
 def effective_provenance_tracking_level() -> int:

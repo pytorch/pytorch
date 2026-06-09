@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import ast
 import copy
 import json
 import logging
@@ -640,7 +641,7 @@ class profile:
         return src2dst, dst2src
 
     def _maybe_triton_call(self, kernel_name):
-        return "triton_" in kernel_name
+        return kernel_name.startswith("triton_")
 
     def _has_kernel_info(self, compile_info, graph_key, kernel_name):
         graph_info = compile_info.get(graph_key, {})
@@ -698,6 +699,8 @@ class profile:
                 extern_events.append(event)
 
         compiled_events = sorted(compiled_events, key=lambda x: _EventItem(x).start)
+        compiled_event_items = [_EventItem(event) for event in compiled_events]
+        compiled_event_starts = [item.start for item in compiled_event_items]
         ops_in_compile_region = _find_events_covered_in(real_events, compiled_events)
         ops_in_extern_region = _find_events_covered_in(real_events, extern_events)
         src2dst, dst2src = self._build_flow_mapping(trace, flow_events)
@@ -712,14 +715,30 @@ class profile:
         def _related_compile_region(compile_event):
             src_event = uid_2_events[dst2src[compile_event["uid"]]]
             src_item = _EventItem(src_event)
-            for event in reversed(compiled_events):
-                region_item = _EventItem(event)
+            idx = bisect_left(compiled_event_starts, src_item.start) - 1
+            while idx >= 0:
+                region_item = compiled_event_items[idx]
                 if (
                     src_item.start > region_item.start
                     and src_item.end < region_item.end
                 ):
-                    return event
+                    return region_item.e
+                idx -= 1
             raise ValueError(f"Cannot find compile region for {compile_event}")
+
+        def _parse_compile_region_key(key):
+            try:
+                parsed_key = ast.literal_eval(key)
+            except (SyntaxError, ValueError):
+                return None
+            if (
+                not isinstance(parsed_key, tuple)
+                or len(parsed_key) != 2
+                or not isinstance(parsed_key[0], str)
+                or not isinstance(parsed_key[1], bool)
+            ):
+                return None
+            return parsed_key
 
         def _backward_graph_keys(compile_info, compile_name):
             bw_graph_key = str((compile_name, True))
@@ -729,10 +748,13 @@ class profile:
 
             prefix = compile_name + "_"
             for key, info in compile_info.items():
-                if not key.endswith(", True)") or not info:
+                if not info:
                     continue
-                graph_name = key.split("', True)", 1)[0].removeprefix("('")
-                if graph_name.startswith(prefix):
+                parsed_key = _parse_compile_region_key(key)
+                if parsed_key is None:
+                    continue
+                graph_name, is_backward = parsed_key
+                if is_backward and graph_name.startswith(prefix):
                     keys.append(key)
             return keys
 
@@ -750,16 +772,14 @@ class profile:
             return kernel_info
 
         def _assign_stack(event, compile_info, fwd_key, bw_keys, kernel_name):
-            event.setdefault("args", {})
-            event["args"]["stack"] = None
             for bw_key in bw_keys:
                 stack = _stack_for_kernel(compile_info, bw_key, kernel_name)
                 if stack is not None:
-                    event["args"]["stack"] = stack
+                    event.setdefault("args", {})["stack"] = stack
                     return
-            event["args"]["stack"] = _stack_for_kernel(
-                compile_info, fwd_key, kernel_name
-            )
+            stack = _stack_for_kernel(compile_info, fwd_key, kernel_name)
+            if stack is not None:
+                event.setdefault("args", {})["stack"] = stack
 
         def _kernel_events_for_op(op_id):
             if op_id in src2dst:
@@ -852,6 +872,9 @@ class profile:
         import torch._inductor.config as inductor_config
 
         if inductor_config.trace.provenance_tracking_to_timeline:
+            # Kineto owns the initial serialization path.  Re-read the exported
+            # trace here so timeline provenance stays decoupled from Kineto's
+            # JSON writer and remains a Python-only post-processing step.
             with open(path) as f:
                 trace = json.load(f)
 

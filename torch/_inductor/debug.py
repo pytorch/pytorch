@@ -389,6 +389,7 @@ def reset_provenance_globals() -> Iterator[None]:
     global _inductor_triton_kernel_to_post_grad_node_info
     global _inductor_pre_grad_node_stack_trace
     global _inductor_kernel_stack_trace
+    global _kernel_information_jsons
     global _inductor_kernel_provenance_debug_handle
 
     # Store original values
@@ -401,6 +402,7 @@ def reset_provenance_globals() -> Iterator[None]:
         _inductor_pre_grad_node_stack_trace.copy()
     )
     original_inductor_kernel_stack_trace = _inductor_kernel_stack_trace.copy()
+    original_kernel_information_jsons = _kernel_information_jsons.copy()
     original_inductor_kernel_provenance_debug_handle = (
         _inductor_kernel_provenance_debug_handle
     )
@@ -411,6 +413,7 @@ def reset_provenance_globals() -> Iterator[None]:
     _inductor_triton_kernel_to_post_grad_node_info = {}
     _inductor_pre_grad_node_stack_trace = {}
     _inductor_kernel_stack_trace = {}
+    _kernel_information_jsons = {}
     _inductor_kernel_provenance_debug_handle = 0
 
     try:
@@ -423,6 +426,7 @@ def reset_provenance_globals() -> Iterator[None]:
             original_triton_kernel_to_post_grad_node_info
         )
         _inductor_kernel_stack_trace = original_inductor_kernel_stack_trace
+        _kernel_information_jsons = original_kernel_information_jsons
         _inductor_pre_grad_node_stack_trace = (
             original_inductor_pre_grad_node_stack_trace
         )
