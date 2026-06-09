@@ -268,7 +268,7 @@ def _quack_cute_call_function(
 
 def _quack_cute_epilogue_code(
     graph_module: torch.fx.GraphModule,
-) -> tuple[list[str], str]:
+) -> tuple[list[str], str, list[torch.fx.Node]]:
     from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
         ModificationWrapperCuteDSL,
     )
@@ -279,11 +279,24 @@ def _quack_cute_epilogue_code(
     mm_node = _find_single_quack_gemm_node(graph_module)
     kernel = _QuackCuteDSLKernel()
     handler = ModificationWrapperCuteDSL(kernel, 0, {}, None)
+    placeholder_nodes = [
+        node for node in graph_module.graph.nodes if node.op == "placeholder"
+    ]
+    gemm_placeholder_nodes = {
+        arg for arg in mm_node.args if isinstance(arg, torch.fx.Node)
+    }
+    aux_placeholder_nodes = [
+        node for node in placeholder_nodes if node not in gemm_placeholder_nodes
+    ]
     env: dict[torch.fx.Node, Any] = {
         mm_node: CuteDSLCSEVariable(
             "acc", ValueRanges.unknown(), dtype=torch.float32, shape=(1,)
         )
     }
+    for i, node in enumerate(aux_placeholder_nodes):
+        env[node] = CuteDSLCSEVariable(
+            f"aux{i}", ValueRanges.unknown(), dtype=torch.float32, shape=(1,)
+        )
     with V.set_kernel_handler(kernel), V.set_ops_handler(handler):
         for node in graph_module.graph.nodes:
             if node.op in ("placeholder", "output") or node is mm_node:
@@ -319,11 +332,15 @@ def _quack_cute_epilogue_code(
     output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
     if len(output_nodes) != 1:
         raise NotImplementedError("QUACK GEMM epilogue backend expects one output")
-    return kernel.body.lines, str(_quack_cute_arg(_unwrap_output(output_nodes[0]), env))
+    return (
+        kernel.body.lines,
+        str(_quack_cute_arg(_unwrap_output(output_nodes[0]), env)),
+        aux_placeholder_nodes,
+    )
 
 
 def _render_quack_gemm_epilogue(
-    epilogue_name: str, body_lines: list[str], result: str
+    epilogue_name: str, body_lines: list[str], result: str, aux_args: list[str]
 ) -> str:
     from torch._inductor.codegen.common import KernelTemplate
     from torch._inductor.kernel.mm_common import load_kernel_template
@@ -334,17 +351,28 @@ def _render_quack_gemm_epilogue(
     if template is None:
         raise ImportError("jinja2 is required to render QuACK GEMM epilogue templates")
     return template.render(
-        epilogue_name=epilogue_name, body_lines=body_lines, result=result
+        epilogue_name=epilogue_name,
+        body_lines=body_lines,
+        result=result,
+        aux_args=aux_args,
     )
 
 
-def materialize_quack_epilogue(graph_module: torch.fx.GraphModule) -> tuple[str, str]:
-    lines, result = _quack_cute_epilogue_code(graph_module)
+def materialize_quack_epilogue(
+    graph_module: torch.fx.GraphModule,
+) -> tuple[str, str, list[torch.fx.Node]]:
+    lines, result, aux_placeholder_nodes = _quack_cute_epilogue_code(graph_module)
     key = (
         "flex_gemm_quack_epilogue_"
         + hashlib.sha256(graph_module.code.encode()).hexdigest()[:16]
     )
-    return key, _render_quack_gemm_epilogue(key, lines, result)
+    return (
+        key,
+        _render_quack_gemm_epilogue(
+            key, lines, result, [f"aux{i}" for i in range(len(aux_placeholder_nodes))]
+        ),
+        aux_placeholder_nodes,
+    )
 
 
 def _unwrap_output(node: torch.fx.Node) -> Any:

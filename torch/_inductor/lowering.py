@@ -8544,8 +8544,8 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                     "QUACK grouped_mm epilogue currently supports only 2D/3D "
                     "and m-major/contiguous 2D/2D grouped_mm with offsets and no bias"
                 )
-        epilogue_key, epilogue_source = materialize_quack_epilogue(
-            subgraph.graph_module
+        epilogue_key, epilogue_source, epilogue_arg_placeholders = (
+            materialize_quack_epilogue(subgraph.graph_module)
         )
         gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
         mat1, mat2 = args[gemm_op_info.mat1_index], args[gemm_op_info.mat2_index]
@@ -8571,6 +8571,25 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             size,
             stride,
         )
+        placeholders = [
+            node
+            for node in subgraph.graph_module.graph.nodes
+            if node.op == "placeholder"
+        ]
+        epilogue_arg_indices = tuple(
+            placeholders.index(node) for node in epilogue_arg_placeholders
+        )
+        if epilogue_arg_indices:
+            if gemm_op != torch.ops.aten.mm.default or len(epilogue_arg_indices) != 1:
+                raise NotImplementedError(
+                    "QUACK epilogues with captured tensor reads currently support only one full-tile mm aux tensor"
+                )
+            epilogue_arg = args[epilogue_arg_indices[0]]
+            if epilogue_arg.get_size() != size:
+                raise NotImplementedError(
+                    "QUACK captured tensor epilogue args currently must match the GEMM output shape"
+                )
+        epilogue_arg_kinds = tuple("tile" for _ in epilogue_arg_indices)
         input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
         choices: list[Any] = []
         quack_gemm_epilogue_template.maybe_append_choice(
@@ -8583,6 +8602,8 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             alpha=alpha,
             beta=beta,
             out_dtype=gemm_kwargs.get("out_dtype"),
+            epilogue_arg_indices=epilogue_arg_indices,
+            epilogue_arg_kinds=epilogue_arg_kinds,
         )
         node, _ = autotune_select_algorithm(
             "quack_gemm_epilogue", choices, input_nodes, layout
