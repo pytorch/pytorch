@@ -673,9 +673,24 @@ def is_impure(
             torch.ops.higher_order.auto_functionalized_v2,
         ):
             # Check if the auto-functionalized operator (the first argument) is
-            # side-effectful
+            # side-effectful. First the hardcoded allowlist (for ops that are
+            # side-effectful for reasons unrelated to schema-declared mutation),
+            # then fall through to the same schema.is_mutable check the
+            # OpOverload branch above uses -- without this fallback, an op
+            # registered via torch.library.custom_op(..., mutates_args=[...])
+            # is correctly flagged as impure when seen as a raw OpOverload but
+            # incorrectly flagged as pure when wrapped here in an
+            # auto_functionalized HOP (the typical post-functionalization
+            # form).
             if args and len(args) > 0:
-                return args[0] in _side_effectful_functions
+                wrapped = args[0]
+                if wrapped in _side_effectful_functions:
+                    return True
+                if isinstance(wrapped, torch._ops.OpOverload):
+                    wrapped_schema = getattr(wrapped, "_schema", None)
+                    if wrapped_schema is not None and wrapped_schema.is_mutable:
+                        return True
+                return False
 
         if _get_effect(op) is not None:
             return True
