@@ -1912,6 +1912,46 @@ print(json.dumps({
             0,
         )
 
+    def test_guard_last_success_supports_global_state_token(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+def fn(x):
+    return x + 1
+
+compiled = torch.compile(fn, backend="eager")
+x = torch.ones(4)
+guards.reset_guard_lookup_stats()
+for _ in range(5):
+    out = compiled(x)
+    assert torch.equal(out, x + 1)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "attempt": stats["guard_last_success_shadow_attempt"],
+    "success": stats["guard_last_success_shadow_success"],
+    "disabled_reasons": stats["guard_last_success_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["attempt"], 0)
+        self.assertGreaterEqual(stats["success"], 0)
+        self.assertEqual(
+            stats["disabled_reasons"].get("unsupported_leaf:GLOBAL_STATE", 0),
+            0,
+        )
+
     def test_guard_fast_plan_subtree_memo_miss_disables_and_falls_back(self):
         script = r"""
 import json
