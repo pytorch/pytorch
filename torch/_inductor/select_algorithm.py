@@ -1139,14 +1139,29 @@ class TritonTemplateKernel(TritonKernel):
             dim_order = list(range(ndim))
 
         if self.meta.get("HOST_SIDE_TMA", False):
-            arg_name = self.args.input_buffers.get(node.get_name(), input_name)
-            self.host_tma_descriptor_args[arg_name] = {
-                "block_shape": [int(b) for b in block_shape],
-                "dim_order": dim_order,
-            }
-            return f"{desc_name} = {input_name}"
+            buf_name = node.get_name()
+            if input_name is not None:
+                arg_name = self.args.input_buffers.get(buf_name, input_name)
+                self.host_tma_descriptor_args[arg_name] = {
+                    "block_shape": [int(b) for b in block_shape],
+                    "dim_order": dim_order,
+                }
+                return f"{desc_name} = {input_name}"
+            elif self.tma_store:
+                # Output descriptor: only register when TMA store is enabled,
+                # otherwise store_output uses pointer-based tl.store
+                arg_name = self.args.output_buffers.get(buf_name, "out_ptr0")
+                self.host_tma_descriptor_args[arg_name] = {
+                    "block_shape": [int(b) for b in block_shape],
+                    "dim_order": dim_order,
+                }
+            return ""
 
-        base_name = input_name if input_name is not None else "output"
+        if input_name is None:
+            # Device-side output: store_output handles its own descriptor
+            return ""
+
+        base_name = input_name
         stride_exprs = ", ".join(self.stride(input_name, d) for d in dim_order)
         size_exprs = ", ".join(self.size(input_name, d) for d in dim_order)
         block_str = ", ".join(str(b) for b in block_shape)
