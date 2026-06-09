@@ -403,6 +403,30 @@ class AOTInductorTestsTemplate:
         with config.patch({"always_keep_tensor_constants": True}):
             self.check_model(Model().to(self.device), example_inputs)
 
+    @unittest.skipIf(
+        not HAS_GPU or GPU_TYPE != "cuda" or TEST_WITH_ROCM,
+        "Pinned async constant copy is CUDA-only",
+    )
+    @patch.dict(
+        os.environ,
+        {
+            "AOTI_COPY_USE_PINNED_ASYNC": "1",
+            "AOTI_COPY_STAGE_BUFFER_BYTES": "1024",
+        },
+    )
+    def test_small_constant_pinned_async_copy(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"always_keep_tensor_constants": True}):
+            self.check_model(Model().to(self.device), example_inputs)
+
     def test_output_path_1(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
