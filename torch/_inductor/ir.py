@@ -7956,62 +7956,6 @@ class UserDefinedTritonKernel(ExternKernel):
 
         return kernel, configs, restore_value_args, reset_to_zero_args
 
-    def can_fuse_epilogue(self) -> bool:
-        """
-        For kernels like
-
-        @triton.jit
-        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-            pid = tl.program_id(0)
-            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-            mask = offs < n_elements
-            x = tl.load(in_ptr0 + offs, mask=mask)
-            y = tl.load(in_ptr1 + offs, mask=mask)
-            tl.store(out_ptr + offs, x + y, mask=mask)
-
-        @torch.compile
-        def fn(a, b):
-            out = torch.empty_like(a)
-            grid = (triton.cdiv(a.numel(), 1024),)
-            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
-            return out.relu()
-
-        We can potentially fuse the relu epilogue into the add_kernel.
-        We do this by pruning the `out` tensor allocation and directly writing the relu-output.
-        """
-
-        if not config.epilogue_fusion_user_defined_triton_kernel:
-            return False
-
-        if not self.arg_accesses.can_fuse_epilogue:
-            return False
-
-        # We achieve fusion by parsing the original src into a python AST,
-        # then identify the expr containing the original value written via tl.store().
-        # We generate an expr for the value after the epilogue and replace that into the tl.store.
-        # So far we only support the simple case where there is a single tl.store in the kernel.
-        if len(self.kernel_stores.stores) != 1:
-            return False
-
-        # Only fuse if the mutated arg is originally an "empty" tensor.
-        # This is because we don't know exactly which element of that tensor is being written to.
-        # If the kernel only writes to a subset of the tensor, then we only apply the epilogue to that subset.
-        # In these edge cases, our fusion is only correct if the original tensor is empty,
-        # where the semantics is that content values are UB, and we can rely on the fact that `epilogue(UB) == UB`.
-        assert len(self.mutable_args) == 1
-        if not isinstance(self.mutable_args[0], TensorBox):
-            return False
-        if not isinstance(self.mutable_args[0].data, StorageBox):
-            return False
-        if not isinstance(self.mutable_args[0].data.data, ComputedBuffer):
-            return False
-        if not isinstance(self.mutable_args[0].data.data.data, Pointwise):
-            return False
-        if not all(r == 0 for r in self.mutable_args[0].data.data.data.ranges):
-            return False
-
-        return True
-
     @override
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         return self._codegen(wrapper, epilogue_fusion=None)
@@ -8061,8 +8005,8 @@ class UserDefinedTritonKernel(ExternKernel):
         }
 
         if epilogue_fusion:
-            assert len(self.arg_accesses.read_writes.writes) == 1
-            mutable_arg_name = next(iter(self.arg_accesses.read_writes.writes)).name
+            assert len(self.formal_accesses.read_writes.writes) == 1
+            mutable_arg_name = next(iter(self.formal_accesses.read_writes.writes)).name
             assert mutable_arg_name in named_args
             epilogue_computed_buffer, _ = epilogue_fusion
             named_args[mutable_arg_name] = epilogue_computed_buffer
@@ -8185,22 +8129,15 @@ class UserDefinedTritonKernel(ExternKernel):
             arg for arg in kernel.arg_names if arg in kernel_args
         ]
 
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            identify_accessed_tensors,
-            identify_triton_stores,
-        )
+        from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
 
         autotuned_kwargs = configs[0].kwargs if len(configs) > 0 else {}
 
-        import ast
-
         # pyrefly: ignore [missing-attribute]
         self.kernel_src = kernel.src
-        self.kernel_ast = ast.parse(self.kernel_src)
-        self.kernel_stores = identify_triton_stores(self.kernel_src)
         self.kernel_args = kernel_args
-        # names in `arg_accesses.read_writes` are names of formal arguments in the kernel's prototype
-        self.arg_accesses = identify_accessed_tensors(
+        # names in `formal_accesses.read_writes` are names of formal arguments in the kernel's prototype
+        self.formal_accesses = identify_accessed_tensors(
             kernel,
             {**kernel_args, **autotuned_kwargs},
             tma_descriptor_metadata,
@@ -8210,7 +8147,7 @@ class UserDefinedTritonKernel(ExternKernel):
         # includes scalars, so writes may reference non-tensor args like SymInts.
         self.mutable_args = [
             kernel_args[key.name]
-            for key in self.arg_accesses.read_writes.writes
+            for key in self.formal_accesses.read_writes.writes
             if isinstance(kernel_args.get(key.name), TensorBox)
         ]
 
@@ -8219,6 +8156,44 @@ class UserDefinedTritonKernel(ExternKernel):
             for buf in self.mutable_args
         ]
         V.graph.register_operation(self)
+
+    @override
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        # Limit override to `epilogue_fusion_user_defined_triton_kernel` to
+        # avoid potential regression to existing models.
+        if not config.epilogue_fusion_user_defined_triton_kernel:
+            return super().get_read_writes()
+
+        # Map formal kernel arg names to inductor buffer names.
+        write_renames = {
+            dep.name: mut_output.get_name()
+            for dep, mut_output in zip(
+                (
+                    d
+                    for d in self.formal_accesses.read_writes.writes
+                    if isinstance(self.kernel_args.get(d.name), TensorBox)
+                ),
+                self.mutation_outputs,
+            )
+        }
+
+        # All tensor args need to be included in reads, to avoid false dead-node-elimination
+        # see: https://github.com/pytorch/pytorch/issues/181864
+        reads = OrderedSet(
+            dependencies.UserTritonDep(arg.get_name())
+            for arg in self.kernel_args.values()
+            if isinstance(arg, TensorBox)
+        )
+
+        return dependencies.ReadWrites(
+            reads=reads,
+            writes=OrderedSet(
+                dep.rename(write_renames)
+                for dep in self.formal_accesses.read_writes.writes
+                if dep.name in write_renames
+            ),
+            index_exprs=OrderedSet(),
+        )
 
     def get_outputs(self) -> list[Buffer]:
         return list(self.mutation_outputs)

@@ -1,4 +1,3 @@
-import ast
 import collections
 import copy
 import dataclasses
@@ -905,7 +904,7 @@ def get_tma_stores(
 @dataclasses.dataclass
 class TensorAccesses:
     read_writes: "ReadWrites"
-    can_fuse_epilogue: bool
+    only_tt_stores: bool
 
 
 @MemoizeWithCycleCheck
@@ -927,7 +926,7 @@ def analyze_kernel_access(
 
     Returns ReadWrites with StarDep objects for each accessed tensor.
     """
-    from torch._inductor.dependencies import Dep, ReadWrites, StarDep
+    from torch._inductor.dependencies import Dep, ReadWrites, UserTritonDep
 
     # Name of mutation op to mutated parameter indices
     # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
@@ -948,6 +947,7 @@ def analyze_kernel_access(
     }
     UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
 
+    only_tt_stores = True
     write_stack: list[Param | Intermediate] = []
     read_stack: list[Param | Intermediate] = []
 
@@ -1008,9 +1008,12 @@ def analyze_kernel_access(
                         write_stack.append(arg)
                     if name in read_set:
                         read_stack.append(arg)
-            else:
-                write_stack.extend(op.args[idx] for idx in WRITE_OPS.get(op.name, []))
-                read_stack.extend(op.args[idx] for idx in READ_OPS.get(op.name, []))
+            elif op.name in WRITE_OPS:
+                if op.name != "tt.store":
+                    only_tt_stores = False
+                write_stack.extend(op.args[idx] for idx in WRITE_OPS[op.name])
+            elif op.name in READ_OPS:
+                read_stack.extend(op.args[idx] for idx in READ_OPS[op.name])
 
     # For these ops, only the first argument (base pointer) refers to actual
     # memory. The remaining arguments are shape/stride/offset metadata and
@@ -1056,10 +1059,12 @@ def analyze_kernel_access(
     read_count = _find_arg_access_count(read_stack, skip_loads=False)
 
     writes: OrderedSet[Dep] = OrderedSet(
-        StarDep(tensor_names[i]) for i in sorted(write_count.keys())
+        UserTritonDep(tensor_names[i], access_count=write_count[i])
+        for i in sorted(write_count.keys())
     )
     reads: OrderedSet[Dep] = OrderedSet(
-        StarDep(tensor_names[i]) for i in sorted(read_count.keys())
+        UserTritonDep(tensor_names[i], access_count=read_count[i])
+        for i in sorted(read_count.keys())
     )
 
     read_writes = ReadWrites(
@@ -1068,26 +1073,7 @@ def analyze_kernel_access(
         index_exprs=OrderedSet(),
     )
 
-    def _decide_can_fuse_epilogue():
-        # only do epilogue fusion if the kernel has a single output tensor
-        if len(write_count) != 1:
-            return False
-
-        written_arg_index = next(iter(write_count))
-        # only do epilogue fusion if the written tensor is written exactly once
-        if write_count[written_arg_index] != 1:
-            return False
-
-        written_arg_name = next(iter(writes)).name
-        #  cannot fuse if the kernel also reads from the output buffer
-        if any(read_dep.name == written_arg_name for read_dep in reads):
-            return False
-
-        return True
-
-    can_fuse_epilogue = _decide_can_fuse_epilogue()
-
-    return TensorAccesses(read_writes=read_writes, can_fuse_epilogue=can_fuse_epilogue)
+    return TensorAccesses(read_writes=read_writes, only_tt_stores=only_tt_stores)
 
 
 def identify_accessed_tensors(
@@ -1102,7 +1088,7 @@ def identify_accessed_tensors(
     3) Analyzes the graph to detect which input tensors are read and/or written
     """
 
-    from torch._inductor.dependencies import Dep, ReadWrites, StarDep
+    from torch._inductor.dependencies import Dep, ReadWrites, UserTritonDep
     from torch._inductor.ir import TensorBox
 
     ttir_module = None
@@ -1166,7 +1152,7 @@ def identify_accessed_tensors(
             for key, value in kwargs.items()
             if isinstance(value, (Tensor, TensorBox))
         ]
-        all_deps = OrderedSet(StarDep(name) for name in all_tensor_names)
+        all_deps = OrderedSet(UserTritonDep(name) for name in all_tensor_names)
         all_deps = typing.cast(OrderedSet[Dep], all_deps)
         return TensorAccesses(
             ReadWrites(
@@ -1174,71 +1160,8 @@ def identify_accessed_tensors(
                 writes=all_deps,
                 index_exprs=OrderedSet(),
             ),
-            can_fuse_epilogue=False,
+            only_tt_stores=False,  # Conservative false
         )
-
-
-@dataclasses.dataclass
-class TritonStore:
-    store_node: ast.Call
-    store_pointer_node: ast.Expr
-    store_value_node: ast.Expr
-
-
-@dataclasses.dataclass
-class TritonStores:
-    stores: list[TritonStore]
-
-
-@functools.cache
-def identify_triton_stores(source_code: str) -> TritonStores:
-    """
-    Parse Python source code of triton kernel and find all tl.store calls.
-    Returns a TritonStores object containing information about pointer, value, and mask.
-
-    tl.store signature: store(pointer, value, mask=None, boundary_check=(), ...)
-    """
-    return identify_triton_stores_from_ast(ast.parse(source_code))
-
-
-def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
-    stores = []
-
-    def _extract_arg(node, arg_name, positional_index):
-        """
-        Extract an argument from a Call node, checking both positional and keyword args.
-        Returns the AST node for the argument, or None if not found.
-        """
-        # Check positional args first
-        if len(node.args) > positional_index:
-            return node.args[positional_index]
-
-        # Check keyword args
-        for keyword in node.keywords:
-            if keyword.arg == arg_name:
-                return keyword.value
-
-        return None
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            # Check if this is a tl.store call
-            if (
-                isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "tl"
-                and node.func.attr == "store"
-            ):
-                # Extract required arguments
-                pointer_node = _extract_arg(node, "pointer", 0)
-                value_node = _extract_arg(node, "value", 1)
-
-                if pointer_node is None or value_node is None:
-                    continue
-
-                stores.append(TritonStore(node, pointer_node, value_node))
-
-    return TritonStores(stores=stores)
 
 
 ###############################################################################
