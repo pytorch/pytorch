@@ -2,6 +2,7 @@
 
 import itertools
 import unittest
+import uuid
 
 import torch
 import torch._dynamo.testing
@@ -725,18 +726,24 @@ class CondTests(TestCase):
         counters = {"pre_grad": 0, "post_grad": 0}
 
         class PreGradPassCounter(CustomGraphPass):
+            def __init__(self):
+                self._uuid = str(uuid.uuid4())
+
             def __call__(self, graph):
                 counters["pre_grad"] += 1
 
             def uuid(self):
-                return "PreGradPassCounter"
+                return self._uuid
 
         class PostGradPassCounter(CustomGraphPass):
+            def __init__(self):
+                self._uuid = str(uuid.uuid4())
+
             def __call__(self, graph):
                 counters["post_grad"] += 1
 
             def uuid(self):
-                return "PostGradPassCounter"
+                return self._uuid
 
         with torch._inductor.config.patch(
             {
@@ -2144,6 +2151,12 @@ class ScanTests(TestCase):
     def test_scan_in_cond(
         self, device, dynamic, reverse, dim, pred, scan_length, autograd
     ):
+        # TODO: remove when https://github.com/pytorch/pytorch/issues/182381 is resolved.
+        if autograd:
+            raise unittest.SkipTest(
+                "Fails due to issues with backward pass when compiled."
+            )
+
         init = torch.randn(4, 4, 4, dtype=torch.float64)
         xs = torch.randn(scan_length, 4, 4, 4, dtype=torch.float64)
         xs = xs.movedim(0, dim)
