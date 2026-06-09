@@ -264,6 +264,15 @@ struct GuardLastSuccessStats {
   std::atomic<uint64_t> actual_disabled{0};
   std::atomic<uint64_t> actual_token_check_ns{0};
   std::atomic<uint64_t> actual_train_ns{0};
+  std::atomic<uint64_t> actual_partial_attempt{0};
+  std::atomic<uint64_t> actual_partial_hit{0};
+  std::atomic<uint64_t> actual_partial_miss{0};
+  std::atomic<uint64_t> actual_partial_enable{0};
+  std::atomic<uint64_t> actual_partial_disabled{0};
+  std::atomic<uint64_t> actual_partial_residual_fail{0};
+  std::atomic<uint64_t> actual_partial_token_check_ns{0};
+  std::atomic<uint64_t> actual_partial_residual_ns{0};
+  std::atomic<uint64_t> actual_partial_train_ns{0};
 };
 
 struct GuardFastPlanDisabledPathStats {
@@ -666,6 +675,15 @@ void reset_guard_lookup_stats() {
   store_zero(last_success_stats.actual_disabled);
   store_zero(last_success_stats.actual_token_check_ns);
   store_zero(last_success_stats.actual_train_ns);
+  store_zero(last_success_stats.actual_partial_attempt);
+  store_zero(last_success_stats.actual_partial_hit);
+  store_zero(last_success_stats.actual_partial_miss);
+  store_zero(last_success_stats.actual_partial_enable);
+  store_zero(last_success_stats.actual_partial_disabled);
+  store_zero(last_success_stats.actual_partial_residual_fail);
+  store_zero(last_success_stats.actual_partial_token_check_ns);
+  store_zero(last_success_stats.actual_partial_residual_ns);
+  store_zero(last_success_stats.actual_partial_train_ns);
   {
     std::lock_guard<std::mutex> lock(guard_accessor_type_stats_mutex());
     guard_accessor_type_stats().clear();
@@ -931,6 +949,24 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(last_success_stats.actual_token_check_ns);
   result["guard_last_success_actual_train_ns"] =
       load_relaxed(last_success_stats.actual_train_ns);
+  result["guard_last_success_actual_partial_attempt"] =
+      load_relaxed(last_success_stats.actual_partial_attempt);
+  result["guard_last_success_actual_partial_hit"] =
+      load_relaxed(last_success_stats.actual_partial_hit);
+  result["guard_last_success_actual_partial_miss"] =
+      load_relaxed(last_success_stats.actual_partial_miss);
+  result["guard_last_success_actual_partial_enable"] =
+      load_relaxed(last_success_stats.actual_partial_enable);
+  result["guard_last_success_actual_partial_disabled"] =
+      load_relaxed(last_success_stats.actual_partial_disabled);
+  result["guard_last_success_actual_partial_residual_fail"] =
+      load_relaxed(last_success_stats.actual_partial_residual_fail);
+  result["guard_last_success_actual_partial_token_check_ns"] =
+      load_relaxed(last_success_stats.actual_partial_token_check_ns);
+  result["guard_last_success_actual_partial_residual_ns"] =
+      load_relaxed(last_success_stats.actual_partial_residual_ns);
+  result["guard_last_success_actual_partial_train_ns"] =
+      load_relaxed(last_success_stats.actual_partial_train_ns);
   py::dict last_success_disabled_reasons;
   py::dict last_success_disabled_top_paths;
   {
@@ -1660,6 +1696,68 @@ static void record_guard_last_success_actual_train(uint64_t train_ns) {
     return;
   }
   add_relaxed(guard_last_success_stats().actual_train_ns, train_ns);
+}
+
+static void record_guard_last_success_actual_partial_attempt() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_last_success_stats().actual_partial_attempt, 1);
+}
+
+static void record_guard_last_success_actual_partial_hit(
+    uint64_t token_check_ns,
+    uint64_t residual_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_last_success_stats();
+  add_relaxed(stats.actual_partial_hit, 1);
+  add_relaxed(stats.actual_partial_token_check_ns, token_check_ns);
+  add_relaxed(stats.actual_partial_residual_ns, residual_ns);
+}
+
+static void record_guard_last_success_actual_partial_miss(
+    uint64_t token_check_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_last_success_stats();
+  add_relaxed(stats.actual_partial_miss, 1);
+  add_relaxed(stats.actual_partial_token_check_ns, token_check_ns);
+}
+
+static void record_guard_last_success_actual_partial_enable() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_last_success_stats().actual_partial_enable, 1);
+}
+
+static void record_guard_last_success_actual_partial_disabled() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_last_success_stats().actual_partial_disabled, 1);
+}
+
+static void record_guard_last_success_actual_partial_residual_fail(
+    uint64_t token_check_ns,
+    uint64_t residual_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_last_success_stats();
+  add_relaxed(stats.actual_partial_residual_fail, 1);
+  add_relaxed(stats.actual_partial_token_check_ns, token_check_ns);
+  add_relaxed(stats.actual_partial_residual_ns, residual_ns);
+}
+
+static void record_guard_last_success_actual_partial_train(uint64_t train_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_last_success_stats().actual_partial_train_ns, train_ns);
 }
 
 static void record_guard_last_success_disabled_item_locked(
@@ -3071,6 +3169,7 @@ struct GuardLastSuccessReceipt {
     tokens.clear();
     debug_paths.clear();
     reset_actual();
+    reset_actual_partial();
   }
 
   void reset_actual() {
@@ -3083,6 +3182,17 @@ struct GuardLastSuccessReceipt {
     actual_self_object = nullptr;
     actual_self_type = nullptr;
     actual_tokens.clear();
+  }
+
+  void reset_actual_partial() {
+    actual_partial_entry_key = nullptr;
+    actual_partial_root_key = nullptr;
+    actual_partial_shadow_passes = 0;
+    actual_partial_enabled = false;
+    actual_partial_disabled = false;
+    actual_partial_self_object = nullptr;
+    actual_partial_self_type = nullptr;
+    actual_partial_tokens.clear();
   }
 
   uint64_t update(
@@ -3164,6 +3274,15 @@ struct GuardLastSuccessReceipt {
   PyObject* actual_self_object{nullptr};
   PyTypeObject* actual_self_type{nullptr};
   std::vector<GuardSubtreeEntryToken> actual_tokens;
+
+  void* actual_partial_entry_key{nullptr};
+  void* actual_partial_root_key{nullptr};
+  uint64_t actual_partial_shadow_passes{0};
+  bool actual_partial_enabled{false};
+  bool actual_partial_disabled{false};
+  PyObject* actual_partial_self_object{nullptr};
+  PyTypeObject* actual_partial_self_type{nullptr};
+  std::vector<GuardSubtreeEntryToken> actual_partial_tokens;
 };
 
 extern thread_local const LocalState* active_guard_local_state;
@@ -3401,6 +3520,124 @@ static bool guard_last_success_actual_tokens_match(
   const bool result =
       guard_subtree_memo_tokens_match(receipt->actual_tokens, root_value);
   return result;
+}
+
+static bool guard_last_success_extract_self_partial_tokens(
+    const std::vector<GuardSubtreeEntryToken>& tokens,
+    const std::vector<std::string>& debug_paths,
+    std::vector<GuardSubtreeEntryToken>& partial_tokens,
+    std::string& disabled_reason,
+    std::string& disabled_path) {
+  partial_tokens.clear();
+  if (tokens.empty()) {
+    disabled_reason = "actual_partial_empty_receipt";
+    return false;
+  }
+  if (tokens.size() != debug_paths.size()) {
+    disabled_reason = "actual_partial_missing_debug_paths";
+    return false;
+  }
+
+  size_t start = tokens.size();
+  for (size_t i = 0; i < debug_paths.size(); ++i) {
+    if (debug_paths[i] == "L['self']") {
+      start = i;
+      break;
+    }
+  }
+  if (start == tokens.size()) {
+    disabled_reason = "actual_partial_missing_self";
+    disabled_path = "L['self']";
+    return false;
+  }
+
+  size_t end = tokens.size();
+  for (size_t i = start + 1; i < debug_paths.size(); ++i) {
+    const auto& path = debug_paths[i];
+    if (is_global_source_path(path) ||
+        (is_local_source_path(path) && !is_self_local_source_path(path))) {
+      end = i;
+      break;
+    }
+  }
+  if (end <= start) {
+    disabled_reason = "actual_partial_empty_self";
+    disabled_path = "L['self']";
+    return false;
+  }
+
+  partial_tokens.assign(tokens.begin() + start, tokens.begin() + end);
+  return true;
+}
+
+static bool guard_last_success_prepare_actual_partial(
+    GuardLastSuccessReceipt* receipt,
+    FrameLocalsMapping* f_locals,
+    const std::vector<GuardSubtreeEntryToken>& tokens,
+    const std::vector<std::string>& debug_paths,
+    std::vector<GuardSubtreeEntryToken>& partial_tokens,
+    std::string& disabled_reason,
+    std::string& disabled_path) {
+  if (!guard_last_success_extract_self_partial_tokens(
+          tokens, debug_paths, partial_tokens, disabled_reason, disabled_path)) {
+    return false;
+  }
+  if (partial_tokens.size() > kGuardLastSuccessActualMaxTokens) {
+    disabled_reason = "actual_partial_token_cap_exceeded";
+    disabled_path = "L['self']";
+    return false;
+  }
+  if (partial_tokens.empty() ||
+      partial_tokens[0].kind == GuardSubtreeProbeTokenKind::FrameGlobals) {
+    disabled_reason = "actual_partial_invalid_self_token";
+    disabled_path = "L['self']";
+    return false;
+  }
+
+  PyObject* key = guard_last_success_self_key();
+  if (key == nullptr) {
+    PyErr_Clear();
+    disabled_reason = "actual_partial_missing_self_key";
+    return false;
+  }
+  PyObject* current_self = PyDict_GetItem((PyObject*)f_locals->to_dict(), key);
+  if (current_self == nullptr) {
+    disabled_reason = "actual_partial_missing_self";
+    disabled_path = "L['self']";
+    return false;
+  }
+  if (partial_tokens[0].object != current_self) {
+    disabled_reason = "actual_partial_self_object_mismatch";
+    disabled_path = "L['self']";
+    return false;
+  }
+  receipt->actual_partial_self_object = current_self;
+  receipt->actual_partial_self_type = Py_TYPE(current_self);
+  return true;
+}
+
+static bool guard_last_success_actual_partial_tokens_match(
+    GuardLastSuccessReceipt* receipt,
+    FrameLocalsMapping* f_locals) {
+  if (receipt->actual_partial_tokens.empty()) {
+    return false;
+  }
+  PyObject* key = guard_last_success_self_key();
+  if (key == nullptr) {
+    PyErr_Clear();
+    return false;
+  }
+  PyObject* current_self = PyDict_GetItem((PyObject*)f_locals->to_dict(), key);
+  if (current_self == nullptr ||
+      current_self != receipt->actual_partial_self_object ||
+      Py_TYPE(current_self) != receipt->actual_partial_self_type) {
+    return false;
+  }
+  LocalState state;
+  GuardLocalStateScope local_state_scope(&state);
+  return guard_subtree_memo_tokens_match(
+      receipt->actual_partial_tokens,
+      receipt->actual_partial_tokens[0].object);
 }
 
 struct GuardSubtreeMemoState {
@@ -5031,11 +5268,15 @@ class GuardAccessor {
     return _guard_manager;
   }
 
+  const std::unique_ptr<GuardManager>& get_guard_manager() const {
+    return _guard_manager;
+  }
+
   bool matches_key(const py::handle& key) const {
     return _accessor_key.equal(key);
   }
 
-  std::string get_source() {
+  const std::string& get_source() const {
     return _source;
   }
 
@@ -5373,6 +5614,36 @@ class GuardManager {
       }
     }
     return supported;
+  }
+
+  bool supports_accessor_subtree_memo_recursive(
+      const std::string& source,
+      GuardSubtreeMemoSupportAnalysis* analysis = nullptr) const {
+    for (const auto& accessor : _accessors) {
+      if (accessor->get_source() != source) {
+        continue;
+      }
+      if (!accessor->supports_subtree_memo()) {
+        if (analysis != nullptr) {
+          analysis->set_if_empty(
+              accessor->subtree_memo_unsupported_reason(),
+              accessor->get_source());
+        }
+        return false;
+      }
+      if (!accessor->get_guard_manager()->supports_subtree_memo_recursive(
+              analysis)) {
+        if (analysis != nullptr && analysis->path.empty()) {
+          analysis->path = accessor->get_source();
+        }
+        return false;
+      }
+      return true;
+    }
+    if (analysis != nullptr) {
+      analysis->set_if_empty("partial_missing_accessor", source);
+    }
+    return false;
   }
 
   bool prepare_partial_subtree_memo(
@@ -5803,6 +6074,63 @@ class GuardManager {
     return result;
   }
 
+  template <typename T>
+  bool check_accessors_nopybind_skipping_source(
+      T* value,
+      const std::string& skip_source) {
+    bool matches_dict_tag = false;
+    uint64_t new_tag = 0;
+    if constexpr (std::is_same_v<T, PyObject>) {
+      if (_is_dict) {
+        new_tag = get_dict_version_unchecked(value);
+        matches_dict_tag = (new_tag == _dict_tag);
+      }
+    }
+
+    const bool collect_stats = guard_lookup_stats_enabled();
+    bool result = true;
+    bool failed_on_first = true;
+    for (const auto& accessor : _accessors) {
+      if (accessor->get_source() == skip_source) {
+        failed_on_first = false;
+        continue;
+      }
+      const uint64_t accessor_start_ns =
+          collect_stats ? guard_lookup_time_ns() : 0;
+      const bool accessor_result =
+          accessor->check_nopybind(value, matches_dict_tag);
+      if (collect_stats) {
+        record_guard_accessor_type_stats(
+            accessor->stats_name(),
+            guard_lookup_time_ns() - accessor_start_ns,
+            !accessor_result);
+      }
+      if (!accessor_result) {
+        _fail_count += 1;
+        result = false;
+        break;
+      }
+      failed_on_first = false;
+    }
+
+    if (!result && !failed_on_first) {
+      std::sort(
+          _accessors.begin(),
+          _accessors.end(),
+          [](const std::unique_ptr<GuardAccessor>& a,
+             const std::unique_ptr<GuardAccessor>& b) {
+            return a->get_guard_manager()->fail_count() >
+                b->get_guard_manager()->fail_count();
+          });
+    }
+
+    if (_is_dict && result) {
+      _dict_tag = new_tag;
+    }
+
+    return result;
+  }
+
   // This function has some code duplication with function check. This is
   // deliberate to keep check function simple and fast.
   virtual GuardDebugInfo check_verbose_nopybind(
@@ -6025,7 +6353,9 @@ class RootGuardManager : public GuardManager {
 
   // Fast check function.
   template <typename T>
-  bool check_nopybind_template(T* value) { // borrowed ref
+  bool check_nopybind_template(
+      T* value,
+      const std::string* skip_accessor_source = nullptr) { // borrowed ref
     const bool collect_stats = guard_lookup_stats_enabled();
     const uint64_t total_start_ns =
         collect_stats ? guard_lookup_time_ns() : 0;
@@ -6102,7 +6432,11 @@ class RootGuardManager : public GuardManager {
 
     const uint64_t accessor_start_ns =
         collect_stats ? guard_lookup_time_ns() : 0;
-    if (!GuardManager::check_accessors_nopybind(value)) {
+    const bool accessor_result = skip_accessor_source == nullptr
+        ? GuardManager::check_accessors_nopybind(value)
+        : GuardManager::check_accessors_nopybind_skipping_source(
+              value, *skip_accessor_source);
+    if (!accessor_result) {
       if (collect_stats) {
         accessor_ns += guard_lookup_time_ns() - accessor_start_ns;
       }
@@ -6157,6 +6491,12 @@ class RootGuardManager : public GuardManager {
 
   bool check_nopybind(FrameLocalsMapping* value) override {
     return check_nopybind_template(value);
+  }
+
+  bool check_nopybind_skipping_source(
+      FrameLocalsMapping* value,
+      const std::string& skip_accessor_source) {
+    return check_nopybind_template(value, &skip_accessor_source);
   }
 
   bool supports_subtree_memo_recursive(
@@ -9034,6 +9374,9 @@ bool run_root_guard_manager_with_last_success_receipt(
     return run_root_guard_manager(root, f_locals);
   }
 
+  RootGuardManager* root_mgr = static_cast<RootGuardManager*>(root);
+  static const std::string self_source = "L['self']";
+
   if (state->actual_enabled && state->actual_entry_key == entry_key &&
       state->actual_root_key == root) {
     const bool collect_stats = guard_lookup_stats_enabled();
@@ -9051,11 +9394,42 @@ bool run_root_guard_manager_with_last_success_receipt(
     state->reset_actual();
   }
 
-  if (state->actual_disabled && !guard_last_success_shadow_enabled()) {
+  record_guard_last_success_actual_partial_attempt();
+  if (state->actual_partial_enabled &&
+      state->actual_partial_entry_key == entry_key &&
+      state->actual_partial_root_key == root) {
+    const bool collect_stats = guard_lookup_stats_enabled();
+    const uint64_t token_start_ns =
+        collect_stats ? guard_lookup_time_ns() : 0;
+    const bool partial_match =
+        guard_last_success_actual_partial_tokens_match(state, f_locals);
+    const uint64_t token_check_ns =
+        collect_stats ? guard_lookup_time_ns() - token_start_ns : 0;
+    if (partial_match) {
+      const uint64_t residual_start_ns =
+          collect_stats ? guard_lookup_time_ns() : 0;
+      const bool residual_result =
+          root_mgr->check_nopybind_skipping_source(f_locals, self_source);
+      const uint64_t residual_ns =
+          collect_stats ? guard_lookup_time_ns() - residual_start_ns : 0;
+      if (residual_result) {
+        record_guard_last_success_actual_partial_hit(
+            token_check_ns, residual_ns);
+      } else {
+        record_guard_last_success_actual_partial_residual_fail(
+            token_check_ns, residual_ns);
+      }
+      return residual_result;
+    }
+    record_guard_last_success_actual_partial_miss(token_check_ns);
+    state->reset_actual_partial();
+  }
+
+  if (state->actual_disabled && state->actual_partial_disabled &&
+      !guard_last_success_shadow_enabled()) {
     return run_root_guard_manager(root, f_locals);
   }
 
-  RootGuardManager* root_mgr = static_cast<RootGuardManager*>(root);
   GuardSubtreeMemoSupportAnalysis analysis;
   analysis.collect_all = guard_lookup_stats_enabled();
   const bool should_train_actual = !state->actual_disabled;
@@ -9075,9 +9449,31 @@ bool run_root_guard_manager_with_last_success_receipt(
       state->actual_disabled = true;
       record_guard_last_success_actual_disabled();
     }
-    if (!guard_last_success_shadow_enabled()) {
-      return run_root_guard_manager(root, f_locals);
+  }
+
+  GuardSubtreeMemoSupportAnalysis partial_analysis;
+  partial_analysis.collect_all = guard_lookup_stats_enabled();
+  const bool should_train_partial = !state->actual_partial_disabled;
+  const bool partial_supported = should_train_partial &&
+      root_mgr->supports_accessor_subtree_memo_recursive(
+          self_source, &partial_analysis);
+  if (!partial_supported && should_train_partial) {
+    state->reset_actual_partial();
+    state->actual_partial_disabled = true;
+    record_guard_last_success_actual_partial_disabled();
+    if (guard_lookup_stats_enabled()) {
+      std::lock_guard<std::mutex> lock(
+          guard_last_success_disabled_stats_mutex());
+      record_guard_last_success_disabled_item_locked(
+          partial_analysis.reason.empty()
+              ? "actual_partial_unsupported"
+              : partial_analysis.reason.c_str(),
+          partial_analysis.path.empty() ? self_source : partial_analysis.path);
     }
+  }
+
+  if (!supported && !partial_supported && !guard_last_success_shadow_enabled()) {
+    return run_root_guard_manager(root, f_locals);
   }
 
   std::vector<GuardSubtreeEntryToken> tokens;
@@ -9150,6 +9546,53 @@ bool run_root_guard_manager_with_last_success_receipt(
       guard_lookup_stats_enabled() ? guard_lookup_time_ns() - actual_train_start_ns
                                    : 0);
 
+  const uint64_t partial_train_start_ns =
+      guard_lookup_stats_enabled() ? guard_lookup_time_ns() : 0;
+  std::vector<GuardSubtreeEntryToken> partial_tokens;
+  std::string partial_disabled_reason;
+  std::string partial_disabled_path;
+  bool partial_disabled_now = false;
+  const bool actual_partial_supported = should_train_partial &&
+      partial_supported &&
+      guard_last_success_prepare_actual_partial(
+          state,
+          f_locals,
+          tokens,
+          debug_paths,
+          partial_tokens,
+          partial_disabled_reason,
+          partial_disabled_path);
+  if (actual_partial_supported) {
+    if (state->actual_partial_entry_key == entry_key &&
+        state->actual_partial_root_key == root &&
+        !state->actual_partial_tokens.empty() &&
+        guard_subtree_token_vectors_match(
+            partial_tokens, state->actual_partial_tokens)) {
+      state->actual_partial_shadow_passes += 1;
+    } else {
+      state->actual_partial_entry_key = entry_key;
+      state->actual_partial_root_key = root;
+      state->actual_partial_tokens = std::move(partial_tokens);
+      state->actual_partial_shadow_passes = 1;
+      state->actual_partial_enabled = false;
+    }
+    if (!state->actual_partial_enabled &&
+        state->actual_partial_shadow_passes >=
+            kGuardLastSuccessActualStablePasses) {
+      state->actual_partial_enabled = true;
+      record_guard_last_success_actual_partial_enable();
+    }
+  } else if (should_train_partial && partial_supported) {
+    state->reset_actual_partial();
+    state->actual_partial_disabled = true;
+    partial_disabled_now = true;
+    record_guard_last_success_actual_partial_disabled();
+  }
+  record_guard_last_success_actual_partial_train(
+      guard_lookup_stats_enabled()
+          ? guard_lookup_time_ns() - partial_train_start_ns
+          : 0);
+
   std::vector<GuardSubtreeEntryToken> diagnostic_tokens =
       guard_last_success_make_diagnostic_tokens(tokens, debug_paths);
   const uint64_t update_start_ns = guard_lookup_time_ns();
@@ -9180,6 +9623,14 @@ bool run_root_guard_manager_with_last_success_receipt(
         actual_disabled_reason.empty() ? "actual_unsupported"
                                        : actual_disabled_reason.c_str(),
         actual_disabled_path);
+  }
+  if (partial_disabled_now && guard_lookup_stats_enabled()) {
+    std::lock_guard<std::mutex> lock(
+        guard_last_success_disabled_stats_mutex());
+    record_guard_last_success_disabled_item_locked(
+        partial_disabled_reason.empty() ? "actual_partial_unsupported"
+                                        : partial_disabled_reason.c_str(),
+        partial_disabled_path);
   }
   return true;
 }

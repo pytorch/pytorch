@@ -2297,6 +2297,64 @@ print(json.dumps({
         self.assertEqual(stats["actual_miss"], 0)
         self.assertEqual(stats["actual_disabled"], 0, stats["disabled_reasons"])
 
+    def test_guard_last_success_partial_self_hits_with_unstable_global(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+GLOBAL_DICT = {"used": 1, "noise": [0]}
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("bias", torch.ones(4))
+
+    def forward(self):
+        return self.bias + GLOBAL_DICT["used"]
+
+m = Mod()
+compiled = torch.compile(m, backend="eager")
+expected = m.bias + 1
+assert torch.equal(compiled(), expected)
+
+guards.reset_guard_lookup_stats()
+for _ in range(8):
+    GLOBAL_DICT["noise"] = [1]
+    out = compiled()
+    assert torch.equal(out, expected)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "partial_attempt": stats["guard_last_success_actual_partial_attempt"],
+    "partial_enable": stats["guard_last_success_actual_partial_enable"],
+    "partial_hit": stats["guard_last_success_actual_partial_hit"],
+    "partial_miss": stats["guard_last_success_actual_partial_miss"],
+    "partial_disabled": stats["guard_last_success_actual_partial_disabled"],
+    "partial_residual_fail": stats[
+        "guard_last_success_actual_partial_residual_fail"
+    ],
+    "mismatch_top_paths": stats["guard_last_success_mismatch_top_paths"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["partial_attempt"], 0)
+        self.assertGreater(stats["partial_enable"], 0)
+        self.assertGreater(stats["partial_hit"], 0)
+        self.assertEqual(stats["partial_miss"], 0)
+        self.assertEqual(stats["partial_disabled"], 0)
+        self.assertEqual(stats["partial_residual_fail"], 0)
+
     def test_guard_last_success_global_dict_ignores_unrelated_version(self):
         script = r"""
 import json
