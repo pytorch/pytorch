@@ -62,9 +62,9 @@ def manual_seed(seed: int) -> torch._C.Generator:
         For CPU only, use ``torch.default_generator.manual_seed(seed)``.
         For the accelerator only, use :func:`torch.accelerator.manual_seed_all`.
     """
-    if not torch._C._accelerator_isInBadFork():
-        import torch.accelerator
+    import torch.accelerator
 
+    if not torch._C._accelerator_isInBadFork():
         torch.accelerator.manual_seed_all(seed)
 
     return default_generator.manual_seed(seed)
@@ -86,9 +86,9 @@ def seed() -> int:
     """
     seed = default_generator.seed()
 
-    if not torch._C._accelerator_isInBadFork():
-        import torch.accelerator
+    import torch.accelerator
 
+    if not torch._C._accelerator_isInBadFork():
         torch.accelerator.manual_seed_all(seed)
 
     return seed
@@ -168,7 +168,9 @@ def fork_rng(
 
     if devices is None:
         if num_devices > 1 and not _fork_rng_warned_already:
-            acc_type = current_accelerator.type.upper()  # pyrefly: ignore [missing-attribute]
+            acc_type = (
+                current_accelerator.type.upper()
+            )  # pyrefly: ignore [missing-attribute]
             message = (
                 f"{acc_type} reports that you have {num_devices} available devices, and "
                 f"you have used {_caller} without explicitly specifying which devices are being used. "
