@@ -28,6 +28,7 @@ import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     get_report_path,
+    HardwareRequirementChoices,
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
@@ -556,6 +557,10 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
+
+    if options.hardware_requirement:
+        # forward hardware requirement filter to test subprocess
+        unittest_args += ["--hardware-requirement"] + options.hardware_requirement
 
     if options.showlocals:
         if options.pytest:
@@ -1487,6 +1492,14 @@ def parse_args():
         metavar="TESTS",
         help="select a set of tests to include (defaults to ALL tests)."
         " tests must be a part of the TESTS list defined in run_test.py",
+    )
+    parser.add_argument(
+        "--hardware-requirement",
+        nargs="+",
+        choices=HardwareRequirementChoices(),
+        default=None,
+        metavar="REQ",
+        help="filter tests by hardware requirement categories (e.g., GENERIC DEVICE_GENERIC)",
     )
     parser.add_argument(
         "-x",

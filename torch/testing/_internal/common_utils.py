@@ -122,6 +122,21 @@ class TestHardwareRequirement(Enum):
     MULTI_DEVICE_GENERIC = "multi_device_generic"
     MULTI_DEVICE_SPECIFIC = "multi_device_specific"
 
+
+class HardwareRequirementChoices(list):
+    """Custom choices list for --hardware-requirement argument.
+
+    Accepts case-insensitive enum names (e.g., 'GENERIC', 'device_specific').
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__([e.name for e in TestHardwareRequirement])
+
+    def __contains__(self, item):
+        if isinstance(item, str):
+            item = item.upper()
+        return list.__contains__(self, item)
+
+
 # Set by parse_cmd_line_args() if called
 DISABLED_TESTS_FILE = ""
 GRAPH_EXECUTOR : ProfilingMode | None = None
@@ -138,7 +153,7 @@ TEST_IN_SUBPROCESS = False
 TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
-HARDWARE_REQUIREMENT : list[TestHardwareRequirement] | None = None
+HARDWARE_REQUIREMENT : set[TestHardwareRequirement] | None = None
 
 
 def _iter_test_cases_recursively(
@@ -1080,7 +1095,7 @@ def parse_cmd_line_args():
     parser.add_argument('--rerun-disabled-tests', action='store_true')
     parser.add_argument('--pytest-single-test', type=str, nargs=1)
     parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument('--hardware-requirement', action='append', type=TestHardwareRequirement, choices=list(TestHardwareRequirement), default=None)
+    parser.add_argument('--hardware-requirement', nargs='+', choices=HardwareRequirementChoices(), default=None, metavar='REQ')
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
     def run_unittest_help(argv):
@@ -1117,7 +1132,7 @@ def parse_cmd_line_args():
     REPEAT_COUNT = args.repeat
     SHOWLOCALS = args.showlocals
     HARDWARE_REQUIREMENT = (
-        set(args.hardware_requirement)
+        {TestHardwareRequirement[name.upper()] for name in args.hardware_requirement}
         if args.hardware_requirement is not None
         else None
     )
@@ -1328,11 +1343,35 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
 
 
 class HardwareRequirementTestLoader(unittest.TestLoader):
+    """Unittest TestLoader that filters loaded tests by hardware_requirement."""
     def loadTestsFromModule(self, module, *args, pattern=None, **kwargs):
         suite = super().loadTestsFromModule(
             module, *args, pattern=pattern, **kwargs
         )
         return _filter_suite_by_hardware_requirement(suite)
+
+
+class HardwareRequirementPytestPlugin:
+    """Pytest plugin to filter collected tests by hardware_requirement."""
+    def __init__(self, requirement: set[TestHardwareRequirement] | None) -> None:
+        self.requirement = requirement
+
+    def pytest_collection_modifyitems(self, items):
+        if self.requirement is None:
+            return
+        filtered = []
+        for item in items:
+            # hardware_requirement is a class-level attribute. Function-based tests
+            # do not have item.cls and are therefore not filtered.
+            cls = getattr(item, "cls", None)
+            if cls is not None:
+                req = _get_hardware_requirement(cls)
+                if req is not None and req in self.requirement:
+                    filtered.append(item)
+            else:
+                filtered.append(item)
+        items[:] = filtered
+
 
 
 def run_tests(argv=None):
@@ -1375,6 +1414,10 @@ def run_tests(argv=None):
             *argv[1:],
         ]
 
+    testLoader = unittest.loader.defaultTestLoader
+    if HARDWARE_REQUIREMENT is not None:
+        testLoader = HardwareRequirementTestLoader()
+
     if TEST_IN_SUBPROCESS:
         other_args = []
         if DISABLED_TESTS_FILE:
@@ -1387,6 +1430,8 @@ def run_tests(argv=None):
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
             other_args += ['--save-xml', TEST_SAVE_XML]
+        if HARDWARE_REQUIREMENT is not None:
+            other_args += ['--hardware-requirement'] + [req.name for req in HARDWARE_REQUIREMENT]
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1432,6 +1477,8 @@ def run_tests(argv=None):
         processes = []
         for i in range(RUN_PARALLEL):
             command = [sys.executable] + argv + [f'--log-suffix=-shard-{i + 1}'] + test_batches[i]
+            if HARDWARE_REQUIREMENT is not None:
+                command += ['--hardware-requirement'] + [req.name for req in HARDWARE_REQUIREMENT]
             processes.append(subprocess.Popen(command, universal_newlines=True))
         failed = False
         for p in processes:
@@ -1450,7 +1497,10 @@ def run_tests(argv=None):
 
         import pytest
         os.environ["NO_COLOR"] = "1"
-        exit_code = pytest.main(args=pytest_args)
+        plugins = None
+        if HARDWARE_REQUIREMENT is not None:
+            plugins = [HardwareRequirementPytestPlugin(HARDWARE_REQUIREMENT)]
+        exit_code = pytest.main(args=pytest_args, plugins=plugins)
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
 
@@ -1491,16 +1541,13 @@ def run_tests(argv=None):
         unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
             output=test_report_path,
             verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose))
+            resultclass=XMLTestResultVerbose), testLoader=testLoader)
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
-            if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
+            if not unittest.main(exit=False, argv=argv, testLoader=testLoader).result.wasSuccessful():
                 sys.exit(-1)
     else:
-        if HARDWARE_REQUIREMENT is not None:
-            unittest.main(argv=argv, testLoader=HardwareRequirementTestLoader())
-        else:
-            unittest.main(argv=argv)
+        unittest.main(argv=argv, testLoader=testLoader)
 
 IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"

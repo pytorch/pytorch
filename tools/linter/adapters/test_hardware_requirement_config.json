@@ -1,0 +1,10 @@
+{
+    "_description": "Coverage is intentionally incremental and should be expanded as existing tests are updated to declare hardware requirements.",
+    "include_patterns": [
+        "test/profiler/test*.py",
+        "test/profiler/*_test.py"
+    ],
+    "exclude_patterns": [
+        "test/profiler/test_profiler.py"
+    ]
+}

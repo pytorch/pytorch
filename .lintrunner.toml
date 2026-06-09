@@ -1801,9 +1801,7 @@ exclude_patterns = [
     'test/cpython/**',
 ]
 
-# Initial rollout of hardware requirement enforcement. Start with a small
-# set of test files and expand coverage incrementally as existing tests are
-# migrated.
+# Check that test classes explicitly declare hardware_requirement.
 [[linter]]
 code = 'TEST_HARDWARE_REQUIREMENT'
 command = [
@@ -1813,11 +1811,8 @@ command = [
     '@{{PATHSFILE}}',
 ]
 include_patterns = [
-    'test/profiler/test*.py',
-    'test/profiler/*_test.py',
-]
-exclude_patterns = [
-    'test/profiler/test_profiler.py',
+    'test/**/test_*.py',
+    'test/**/*_test.py',
 ]
 is_formatter = false
 

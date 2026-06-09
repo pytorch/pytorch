@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import fnmatch
 import json
 import multiprocessing as mp
 from enum import Enum
@@ -14,6 +15,39 @@ from typing import NamedTuple
 LINTER_CODE = "TEST_HARDWARE_REQUIREMENT"
 
 HARDWARE_REQUIREMENT_ATTR = "hardware_requirement"
+
+_CONFIG_PATH = Path(__file__).resolve().parent / "test_hardware_requirement_config.json"
+
+
+def _load_config() -> dict:
+    if not _CONFIG_PATH.exists():
+        return {"include_patterns": [], "exclude_patterns": []}
+    with open(_CONFIG_PATH) as f:
+        return json.load(f)
+
+
+_CONFIG = _load_config()
+
+
+def _is_path_included(filepath: Path) -> bool:
+    """Check if filepath matches the rollout config's include/exclude patterns."""
+    s = str(filepath)
+    include = _CONFIG.get("include_patterns", [])
+    exclude = _CONFIG.get("exclude_patterns", [])
+
+    matched = False
+    for pattern in include:
+        if fnmatch.fnmatch(s, pattern):
+            matched = True
+            break
+    if not matched:
+        return False
+
+    for pattern in exclude:
+        if fnmatch.fnmatch(s, pattern):
+            return False
+
+    return True
 
 
 class LintSeverity(str, Enum):
@@ -80,7 +114,7 @@ def has_hardware_requirement(node: ast.ClassDef) -> bool:
 
 def check_file(filename: str) -> list[LintMessage]:
     path = Path(filename)
-    if not is_test_file(path):
+    if not is_test_file(path) or not _is_path_included(path):
         return []
 
     with open(path) as f:
