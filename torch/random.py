@@ -28,21 +28,22 @@ from torch._C import default_generator
 def set_rng_state(new_state: torch.Tensor) -> None:
     r"""Sets the random number generator state.
 
-    .. note:: This function only works for CPU. For CUDA, please use
-        :func:`torch.manual_seed`, which works for both CPU and CUDA.
-
     Args:
-        new_state (torch.ByteTensor): The desired state
+        new_state (torch.Tensor): The desired state, a tensor of dtype `torch.uint8`
+
+    .. note:: This function only works for CPU. For :ref:`accelerator<accelerators>`, please use
+        :func:`torch.accelerator.set_rng_state`.
     """
     default_generator.set_state(new_state)
 
 
 def get_rng_state() -> torch.Tensor:
-    r"""Returns the random number generator state as a `torch.ByteTensor`.
-
-    .. note:: The returned state is for the default generator on CPU only.
+    r"""Returns the random number generator state as a `torch.Tensor` of dtype `torch.uint8`.
 
     See also: :func:`torch.random.fork_rng`.
+
+    .. note:: This function only works for CPU.
+        For :ref:`accelerator<accelerators>`, please use :func:`torch.accelerator.get_rng_state`.
     """
     return default_generator.get_state()
 
@@ -56,6 +57,10 @@ def manual_seed(seed: int) -> torch._C.Generator:
             `[-0x8000_0000_0000_0000, 0xffff_ffff_ffff_ffff]`. Otherwise, a RuntimeError
             is raised. Negative inputs are remapped to positive values with the formula
             `0xffff_ffff_ffff_ffff + seed`.
+
+    .. note:: This function seeds both the CPU and the current :ref:`accelerator<accelerators>`.
+        For CPU only, use ``torch.default_generator.manual_seed(seed)``.
+        For the accelerator only, use :func:`torch.accelerator.manual_seed_all`.
     """
     if not torch._C._accelerator_isInBadFork():
         import torch.accelerator
@@ -73,7 +78,11 @@ _manual_seed_impl = deprecated(
 
 def seed() -> int:
     r"""Sets the seed for generating random numbers to a non-deterministic
-    random number on all devices. Returns a 64 bit number used to seed the RNG.
+    random number on all devices. Returns a 64-bit number used to seed the RNG.
+
+    .. note:: This function generates a non-deterministic seed on CPU, then uses
+        it to seed all :ref:`accelerators<accelerators>`.
+        For the accelerator only, use :func:`torch.accelerator.manual_seed_all`.
     """
     seed = default_generator.seed()
 
@@ -86,10 +95,10 @@ def seed() -> int:
 
 
 def initial_seed() -> int:
-    r"""Returns the initial seed for generating random numbers as a
-    Python `long`.
+    r"""Returns the initial seed for generating random numbers as a Python `int`.
 
     .. note:: The returned seed is for the default generator on CPU only.
+        For :ref:`accelerator<accelerators>`, please use :func:`torch.accelerator.initial_seed`.
     """
     return default_generator.initial_seed()
 
@@ -103,7 +112,7 @@ def fork_rng(
     enabled=True,
     _caller="fork_rng",
     _devices_kw="devices",
-    device_type="cuda",
+    device_type: str | None = None,
 ) -> Generator:
     """
     Forks the RNG, so that when you return, the RNG is reset
@@ -118,21 +127,29 @@ def fork_rng(
         enabled (bool): if ``False``, the RNG is not forked.  This is a convenience
             argument for easily disabling the context manager without having
             to delete it and unindent your Python code under it.
-        device_type (str): device type str, default is `cuda`. As for supported device,
-            see details in :ref:`accelerator<accelerators>`
+        device_type (str | None): device type string, default is ``None``.
+            If ``None`` and an accelerator is available, the current
+            :ref:`accelerator<accelerators>` is used; otherwise only the CPU
+            RNG state is forked.
+            If ``"meta"``, the context manager is a no-op.
+            If ``"cpu"``, only the CPU RNG state is forked.
+            Otherwise, the value must match the current accelerator or a
+            ValueError is raised.
+            See :ref:`accelerator<accelerators>` for supported device types.
     """
 
     if device_type == "meta":
         yield
         return
 
-    device_type = torch.device(device_type).type
-    device_mod = getattr(torch, device_type, None)
-    if device_mod is None:
-        raise RuntimeError(
-            f"torch has no module of `{device_type}`, you should register "
-            + "a module by `torch._register_device_module`."
-        )
+    current_accelerator = torch.accelerator.current_accelerator()
+    if device_type is not None and current_accelerator is not None:
+        if device_type != "cpu" and device_type != current_accelerator.type:
+            raise ValueError(
+                f"Device type '{device_type}' doesn't match the current "
+                f"accelerator '{current_accelerator.type}'."
+            )
+
     global _fork_rng_warned_already
 
     # Internal arguments:
@@ -143,21 +160,27 @@ def fork_rng(
         yield
         return
 
+    # Determine the effective accelerator type for device enumeration
+    if device_type == "cpu" or current_accelerator is None:
+        num_devices = 0
+    else:
+        num_devices = torch.accelerator.device_count()
+
     if devices is None:
-        num_devices = device_mod.device_count()
         if num_devices > 1 and not _fork_rng_warned_already:
+            acc_type = current_accelerator.type.upper()  # pyrefly: ignore [missing-attribute]
             message = (
-                f"{device_type.upper()} reports that you have {num_devices} available devices, and "
+                f"{acc_type} reports that you have {num_devices} available devices, and "
                 f"you have used {_caller} without explicitly specifying which devices are being used. "
-                f"For safety, we initialize *every* {device_type.upper()} device by default, which can "
-                f"be quite slow if you have a lot of {device_type.upper()}s. If you know that you are only"
-                f" making use of a few {device_type.upper()} devices, set the environment variable "
-                f"{device_type.upper()}_VISIBLE_DEVICES or the '{_devices_kw}' keyword argument of {_caller} "
+                f"For safety, we initialize *every* {acc_type} device by default, which can "
+                f"be quite slow if you have a lot of {acc_type}s. If you know that you are only"
+                f" making use of a few {acc_type} devices, set the environment variable "
+                f"{acc_type}_VISIBLE_DEVICES or the '{_devices_kw}' keyword argument of {_caller} "
                 "with the set of devices you are actually using. For example, if you are using CPU only, "
-                "set device.upper()_VISIBLE_DEVICES= or devices=[]; if you are using device 0 only, "
-                f"set {device_type.upper()}_VISIBLE_DEVICES=0 or devices=[0].  To initialize all devices "
+                f"set {acc_type}_VISIBLE_DEVICES= or devices=[]; if you are using device 0 only, "
+                f"set {acc_type}_VISIBLE_DEVICES=0 or devices=[0].  To initialize all devices "
                 f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
-                f"`range(torch.{device_type}.device_count())`."
+                f"`range(torch.accelerator.device_count())`."
             )
             warnings.warn(message, stacklevel=2)
             _fork_rng_warned_already = True
@@ -168,14 +191,14 @@ def fork_rng(
         devices = list(devices)
 
     cpu_rng_state = torch.get_rng_state()
-    device_rng_states = [device_mod.get_rng_state(device) for device in devices]
+    device_rng_states = [torch.accelerator.get_rng_state(device) for device in devices]
 
     try:
         yield
     finally:
         torch.set_rng_state(cpu_rng_state)
         for device, device_rng_state in zip(devices, device_rng_states):
-            device_mod.set_rng_state(device_rng_state, device)
+            torch.accelerator.set_rng_state(device_rng_state, device)
 
 
 def thread_safe_generator() -> torch.Generator | None:
