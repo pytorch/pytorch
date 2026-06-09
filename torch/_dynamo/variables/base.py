@@ -30,7 +30,7 @@ from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, Source
+from ..source import AttrSource, Source, SyntheticLocalSource
 from ..utils import format_source_range, istype, raise_args_mismatch
 
 
@@ -1298,6 +1298,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Returns None for sourceless VTs — callers use FakeIdVariable in
         that case (see generic_id in object_protocol.py).
         """
+        source = self.source
+        while source is not None:
+            if isinstance(source, SyntheticLocalSource):
+                return None
+            source = getattr(source, "base", None)
         if self.source:
             return id(tx.output.resolve_source_value(self.source))
         return None
