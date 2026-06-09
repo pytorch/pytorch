@@ -2051,6 +2051,22 @@ class GemmEpilogueFusionTests(TestCase):
                 torch.float32,
                 "local_reduce_op='amax_abs'",
             ),
+            (
+                "mx_e8m0_scale",
+                lambda x: mx_e8m0_scale(x.abs().amax(-1, keepdim=True)).view(
+                    B, M, -1
+                ),
+                torch.float8_e8m0fnu,
+                "local_reduce_op='mx_e8m0_scale'",
+            ),
+            (
+                "nvfp4_e4m3_scale",
+                lambda x: nvfp4_e4m3_scale(x.abs().amax(-1, keepdim=True)).view(
+                    B, M, -1
+                ),
+                torch.float8_e4m3fn,
+                "local_reduce_op='nvfp4_e4m3_scale'",
+            ),
         )
         for name, aux_fn, aux_dtype, check_op in cases:
             with self.subTest(name=name):
