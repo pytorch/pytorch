@@ -223,17 +223,12 @@ def autotune_hints_to_configs(
 
 def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
     call_args = []
-    call_kwargs = {}
+    call_kwargs = dict(kwargs)
     for arg in args:
         if isinstance(arg, (int, bool)):
             call_args.append(str(arg))
         else:
             call_args.append("T")
-    for k, v in kwargs.items():
-        if isinstance(arg, (int, bool)):
-            call_kwargs[k] = v
-        else:
-            call_kwargs[k] = v
     call_kwargs.update(launcher.config.kwargs)
     call_kwargs["num_warps"] = launcher.config.num_warps
     call_kwargs["num_stages"] = launcher.config.num_stages
@@ -563,6 +558,37 @@ class CachingAutotuner(KernelInterface):
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
 
+    @staticmethod
+    def _close_compiled_kernel(kernel: Any) -> None:
+        if kernel is None:
+            return
+        close = getattr(kernel, "close", None)
+        if close is not None:
+            close()
+            return
+        module = getattr(kernel, "module", None)
+        if module is not None:
+            # Transitional fallback for Triton versions before CompiledKernel.close().
+            # Their __del__ unloads the module and clears kernel.module, so repeated
+            # calls from our idempotent benchmark cleanup paths are harmless.
+            delete = getattr(kernel, "__del__", None)
+            if delete is not None:
+                delete()
+
+    def release_benchmark_artifacts(self) -> None:
+        for launcher in self.launchers:
+            kernel = getattr(launcher, "__self__", None)
+            self._close_compiled_kernel(kernel)
+
+        for result in self.compile_results:
+            self._close_compiled_kernel(getattr(result, "kernel", None))
+
+        self.launchers = []
+        self.compile_results = []
+        self.benchmark_failure_reasons.clear()
+        self._cached_launcher = None
+        self._debug_call = None
+
     def is_statically_launchable(self):
         """
         Checks if every compiled kernel is statically launchable, which
@@ -861,6 +887,26 @@ class CachingAutotuner(KernelInterface):
                 )
         self.launchers = launchers
 
+    def _prune_compile_results_to_launcher(self, launcher: LauncherType) -> None:
+        if not self.compile_results:
+            return
+
+        launcher_config = launcher.config  # type: ignore[attr-defined]
+        for result in self.compile_results:
+            if result.config is launcher_config:
+                self.compile_results = [result]
+                return
+
+        launcher_config_hash = triton_config_to_hashable(launcher_config)
+        for result in self.compile_results:
+            if triton_config_to_hashable(result.config) == launcher_config_hash:
+                self.compile_results = [result]
+                return
+
+        raise AssertionError(
+            f"Autotuned launcher config does not match any compile result: {launcher_config}"
+        )
+
     def _ensure_kernel_loaded(self) -> None:
         """Reload the kernel in the parent process if needed.
 
@@ -921,8 +967,15 @@ class CachingAutotuner(KernelInterface):
     def prepare_for_caching(self) -> None:
         """
         Statically Launched CUDA Kernels have a raw cubin on them
-        that we don't need to store in the cache(since TritonBundler handles the collection for us)
+        that we don't need to store in the cache(since TritonBundler handles the collection for us),
+        this behavior is gated by keep_static_cubin_raw config.
         """
+        # Only cubin_raw must be retained: __getstate__ already nulls cubin_path
+        # on every serialize, so a cold-container load rehydrates the cubin from
+        # cubin_raw (reload_cubin_path calls reload_cubin_from_raw) instead of
+        # pointing at a missing file.
+        if torch._inductor.config.keep_static_cubin_raw:
+            return
         for result in self.compile_results:
             if isinstance(result, StaticTritonCompileResult):
                 # Don't save this in the inductor cache, as it is very large
@@ -1388,6 +1441,41 @@ class CachingAutotuner(KernelInterface):
     def clone_args(self, *args, **kwargs) -> tuple[list[Any], dict[str, Any]]:
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
+    @staticmethod
+    def _close_static_launcher(launcher: LauncherType) -> None:
+        if not getattr(launcher, "_is_static", False):
+            return
+        runner = getattr(launcher, "__globals__", {}).get("runner")
+        kernel = getattr(runner, "__self__", None)
+        close = getattr(kernel, "close", None)
+        if close is not None:
+            close()
+
+    def _release_static_launchers_except(self, keep_launcher: LauncherType) -> None:
+        for launcher in self.launchers:
+            if launcher is not keep_launcher:
+                self._close_static_launcher(launcher)
+        if not getattr(keep_launcher, "_is_static", False):
+            return
+        keep_hash = getattr(keep_launcher, "cache_hash", None)
+        if keep_hash is None:
+            return
+        keep_results = [
+            result
+            for result in self.compile_results
+            if isinstance(result, StaticTritonCompileResult)
+            and triton_hash_to_path_key(result.kernel.hash) == keep_hash
+        ]
+        if len(keep_results) == 1:
+            for result in self.compile_results:
+                if result is not keep_results[0] and isinstance(
+                    result, StaticTritonCompileResult
+                ):
+                    close = getattr(result.kernel, "close", None)
+                    if close is not None:
+                        close()
+            self.compile_results = keep_results
+
     def benchmark_all_configs(self, *args, **kwargs):
         with (
             dynamo_timed(
@@ -1406,10 +1494,21 @@ class CachingAutotuner(KernelInterface):
             #     str(self.compile_id),
             # ),
         ):
-            timings = {
-                launcher: self.bench(launcher, *args, **kwargs)
-                for launcher in self.launchers
-            }
+            timings = {}
+            best_launcher = None
+            best_timing = float("inf")
+            for launcher in self.launchers:
+                timing = self.bench(launcher, *args, **kwargs)
+                timings[launcher] = timing
+                # Close losing static launchers eagerly so exhaustive autotuning
+                # keeps only the current winner and candidate modules loaded.
+                if best_launcher is None or timing < best_timing:
+                    if best_launcher is not None:
+                        self._close_static_launcher(best_launcher)
+                    best_launcher = launcher
+                    best_timing = timing
+                else:
+                    self._close_static_launcher(launcher)
 
             for k, v in timings.items():
                 self.coordesc_tuner.cache_benchmark_result(k.config, v)
@@ -1486,7 +1585,10 @@ class CachingAutotuner(KernelInterface):
                     best_time,
                 )
 
-        self.launchers = [builtins.min(timings, key=timings.get)]
+        best_launcher = builtins.min(timings, key=timings.get)
+        self._release_static_launchers_except(best_launcher)
+        self.launchers = [best_launcher]
+        self._prune_compile_results_to_launcher(best_launcher)
         self.autotune_time_taken_ns = (
             self.precompile_time_taken_ns + benchmark_time_taken_ns
         )
@@ -2128,6 +2230,11 @@ class CachingAutotuner(KernelInterface):
             "use_fast_triton_launcher",
             torch._inductor.config.use_fast_triton_launcher,
         ):
+            return None
+
+        # _FastCudaLauncher binds CUDA/HIP function pointers; XPU static
+        # launchers use SYCL kernels stored in PyCapsules.
+        if self.device_props.type not in ("cuda", "hip"):
             return None
 
         try:
@@ -3522,6 +3629,20 @@ def _handle_combo_kernel_per_subkernel_blocks(
     combo_meta = inductor_meta.get("combo_grid_meta")
     if combo_meta is None or "heuristic_0" not in combo_meta:
         return None
+
+    # CAP no-bench: combo_grid_meta carries a stitched config; skip the
+    # combo_tuning_groups computation and return a single stitched config.
+    # default_config holds BLOCK keys for the grid lambda; backend kwargs
+    # (HIP options like waves_per_eu) come from stitched_backend_kwargs.
+    stitched_warps = combo_meta.get("stitched_num_warps")
+    if stitched_warps is not None:
+        return [
+            triton.Config(
+                combo_meta["stitched_backend_kwargs"],
+                num_warps=stitched_warps,
+                num_stages=combo_meta["stitched_num_stages"],
+            )
+        ]
 
     num_kernels = combo_meta["num_kernels"]
     inductor_meta_clean = {
