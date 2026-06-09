@@ -28,6 +28,7 @@ class TestQuackVendor(TestCase):
             mxfp8_varlen_m_scaled_mm_epilogue,
         )
         from torch._vendor.quack.gemm_config import GemmConfig
+        from torch._vendor.quack.trace import TraceContext
 
         vendor_root = Path(quack.__file__).resolve().parent
         self.assertIn("torch/_vendor/quack", vendor_root.as_posix())
@@ -43,6 +44,10 @@ class TestQuackVendor(TestCase):
                 )
             )
         )
+        trace_context = TraceContext.create(None)
+        trace_context.b("noop")
+        trace_context.e("noop")
+        trace_context.flush()
 
 
 @unittest.skipIf(
