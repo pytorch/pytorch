@@ -48,5 +48,5 @@ def freeze_rng_state():
         # NB: Mode disable is to avoid running cross-ref tests on this seeding
         with torch.utils._mode_utils.no_dispatch(), torch._C._DisableFuncTorch():
             if torch.accelerator.is_available():
-                torch.accelerator.set_rng_state(accelerator_rng_state)
+                torch.accelerator.set_rng_state(accelerator_rng_state)  # type: ignore[possibly-undefined]
             torch.set_rng_state(rng_state)

@@ -205,7 +205,6 @@ def set_device_states(devices, states, *, device_type=None) -> None:
         device_type = DefaultDeviceType.get_device_type()
     if device_type == "meta":
         return
-    device_module = _get_device_module(device_type)
     for device, state in zip(devices, states, strict=False):
         with torch.accelerator.device_index(device):
             torch.accelerator.set_rng_state(state)
