@@ -1829,20 +1829,71 @@ class GemmEpilogueFusionTests(TestCase):
         expected = _bfloat16_to_float4_e2m1fn_x2(x.to(torch.bfloat16))
         self.assertEqual(actual.dtype, torch.float4_e2m1fn_x2)
         self.assertEqual(actual.shape, (4, 8))
+        self.assertEqual(actual.stride(), (8, 1))
         self.assertEqual(actual.view(torch.uint8), expected.view(torch.uint8))
 
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            fake_actual = nvfp4_e2m1_pack(torch.empty(4, 16))
+            self.assertEqual(fake_actual.stride(), actual.stride())
+
     @requires_cuda_and_triton
-    def test_cuda_inductor_quack_backend_swiglu_shape_changing_main_fuses(self):
-        M = 64
-        K = 64
+    def test_cuda_inductor_quack_backend_grouped_contract_shape_changing_main_fuses(self):
+        cases = (
+            (64, 64, 64, torch.float16, "silu", True),
+            (96, 96, 64, torch.bfloat16, "relu", False),
+            (64, 128, 96, torch.float16, "sub", False),
+        )
+        for M, K, N, dtype, expr, cast_acc in cases:
+            with self.subTest(shape=(M, K, N), dtype=dtype, expr=expr):
+
+                def fn(a, b):
+                    def epilogue(acc):
+                        pair = (acc.float() if cast_acc else acc).view(M, -1, 2)
+                        gate = pair[..., 0]
+                        up = pair[..., 1]
+                        if expr == "silu":
+                            out = torch.nn.functional.silu(gate) * up
+                        elif expr == "relu":
+                            out = torch.relu(gate) * up
+                        else:
+                            out = gate - up
+                        return out.to(acc.dtype) if cast_acc else out
+
+                    return gemm_epilogue_fusion(
+                        torch.ops.aten.mm.default,
+                        (a, b),
+                        epilogue,
+                        kernel_options={"backend": "QUACK"},
+                    )
+
+                a = torch.randn(M, K, device="cuda", dtype=dtype)
+                gate_w = torch.randn(K, N, device="cuda", dtype=dtype)
+                up_w = torch.randn(K, N, device="cuda", dtype=dtype)
+                b = torch.stack((gate_w, up_w), dim=-1).reshape(K, 2 * N).contiguous()
+
+                actual, (code,) = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                )
+                expected = fn(a, b)
+
+                self.assertEqual(actual.shape, (M, N))
+                torch.testing.assert_close(actual, expected, atol=1e-1, rtol=1e-1)
+                FileCheck().check("main_output_transform='grouped_n_contract'").check(
+                    "main_output_transform_group=2"
+                ).check_not("activation='").check_not("extern_kernels.mm").run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_malformed_local_n_reduce_aux(self):
+        M = 32
         N = 64
+        group = 16
 
         def fn(a, b):
             def epilogue(acc):
-                pair = acc.float().view(M, -1, 2)
-                gate = pair[..., 0]
-                up = pair[..., 1]
-                return (torch.nn.functional.silu(gate) * up).to(acc.dtype)
+                bad_aux = acc.float().view(1, -1, group).sum(-1)
+                return acc.relu(), bad_aux
 
             return gemm_epilogue_fusion(
                 torch.ops.aten.mm.default,
@@ -1851,55 +1902,11 @@ class GemmEpilogueFusionTests(TestCase):
                 kernel_options={"backend": "QUACK"},
             )
 
-        a = torch.randn(M, K, device="cuda", dtype=torch.float16)
-        gate_w = torch.randn(K, N, device="cuda", dtype=torch.float16)
-        up_w = torch.randn(K, N, device="cuda", dtype=torch.float16)
-        b = torch.stack((gate_w, up_w), dim=-1).reshape(K, 2 * N).contiguous()
+        a = torch.randn(M, 64, device="cuda", dtype=torch.float16)
+        b = torch.randn(64, N, device="cuda", dtype=torch.float16)
 
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        expected = fn(a, b)
-
-        self.assertEqual(actual.shape, (M, N))
-        torch.testing.assert_close(actual, expected, atol=1e-1, rtol=1e-1)
-        FileCheck().check("main_output_transform='grouped_n_contract'").check(
-            "main_output_transform_group=2"
-        ).check_not("main_output_expression").check_not("extern_kernels.mm").run(code)
-
-    @requires_cuda_and_triton
-    def test_cuda_inductor_quack_backend_reglu_shape_changing_main_fuses(self):
-        M = 96
-        K = 96
-        N = 64
-
-        def fn(a, b):
-            def epilogue(acc):
-                pair = acc.view(M, -1, 2)
-                return torch.relu(pair[..., 0]) * pair[..., 1]
-
-            return gemm_epilogue_fusion(
-                torch.ops.aten.mm.default,
-                (a, b),
-                epilogue,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
-        gate_w = torch.randn(K, N, device="cuda", dtype=torch.bfloat16)
-        up_w = torch.randn(K, N, device="cuda", dtype=torch.bfloat16)
-        b = torch.stack((gate_w, up_w), dim=-1).reshape(K, 2 * N).contiguous()
-
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        expected = fn(a, b)
-
-        self.assertEqual(actual.shape, (M, N))
-        torch.testing.assert_close(actual, expected, atol=1e-1, rtol=1e-1)
-        FileCheck().check("main_output_transform='grouped_n_contract'").check(
-            "main_output_transform_group=2"
-        ).check_not("activation='reglu'").check_not("extern_kernels.mm").run(code)
+        with self.assertRaisesRegex(Exception, "generic aux tuple epilogues"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_nvfp4_scale_aux_fuses(self):
