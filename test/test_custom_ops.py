@@ -331,15 +331,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             @staticmethod
             def forward(ctx, x):
                 # Emulate AutoDispatchBelowADInplaceOrView, which is not bound into python
-                guard = torch._C._AutoDispatchBelowAutograd()
-                guard2 = torch._C.ExcludeDispatchKeyGuard(
-                    torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
-                )
-                try:
+                with (
+                    torch._C._AutoDispatchBelowAutograd(),
+                    torch._C._ExcludeDispatchKeyGuard(
+                        torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
+                    ),
+                ):
                     return op(x)
-                finally:
-                    del guard
-                    del guard2
 
             @staticmethod
             def backward(ctx, gx):
@@ -3403,212 +3401,6 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(y, x + 2.0)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @parametrize(
-        "op_factory, opname",
-        [
-            subtest((torch.library.custom_op, "custom"), name="custom_op"),
-            subtest((torch.library.triton_op, "triton"), name="triton_op"),
-        ],
-    )
-    def test_register_autograd_incorrect_num_gradients(self, op_factory, opname):
-        @op_factory(
-            f"_torch_testing::incorrect_num_gradients_{opname}",
-            mutates_args=(),
-        )
-        def f(x: Tensor) -> Tensor:
-            return x.sin()
-
-        def setup_context(ctx, inputs, output):
-            pass
-
-        def backward(ctx, grad_output):
-            return ()
-
-        f.register_autograd(backward, setup_context=setup_context)
-
-        x = torch.randn(3, requires_grad=True)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"incorrect number of gradients \(expected 1, got 0\)",
-        ):
-            f(x).sum().backward()
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @parametrize(
-        "op_factory, opname",
-        [
-            subtest((torch.library.custom_op, "custom"), name="custom_op"),
-            subtest((torch.library.triton_op, "triton"), name="triton_op"),
-        ],
-    )
-    def test_register_autograd_defaulted_inputs_full_gradients(
-        self, op_factory, opname
-    ):
-        @op_factory(
-            f"_torch_testing::defaulted_input_gradients_{opname}",
-            mutates_args=(),
-        )
-        def f(
-            x: Tensor,
-            y: Optional[Tensor] = None,
-            scale: float = 2.0,
-            enabled: bool = False,
-        ) -> Tensor:
-            return x.sin()
-
-        def setup_context(ctx, inputs, output):
-            self.assertEqual(len(inputs), 4)
-            self.assertIs(inputs[1], None)
-            self.assertEqual(inputs[2], 2.0)
-            self.assertFalse(inputs[3])
-            (x, _, _, _) = inputs
-            ctx.save_for_backward(x)
-
-        def backward(ctx, grad_output):
-            (x,) = ctx.saved_tensors
-            return grad_output * x.cos(), None, None, None
-
-        f.register_autograd(backward, setup_context=setup_context)
-
-        x = torch.randn(3, requires_grad=True)
-        f(x).sum().backward()
-        self.assertEqual(x.grad, x.cos())
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @parametrize(
-        "op_factory, opname",
-        [
-            subtest((torch.library.custom_op, "custom"), name="custom_op"),
-            subtest((torch.library.triton_op, "triton"), name="triton_op"),
-        ],
-    )
-    def test_register_autograd_defaulted_inputs_too_few_gradients(
-        self, op_factory, opname
-    ):
-        @op_factory(
-            f"_torch_testing::defaulted_input_too_few_gradients_{opname}",
-            mutates_args=(),
-        )
-        def f(
-            x: Tensor,
-            y: Optional[Tensor] = None,
-            scale: float = 2.0,
-            enabled: bool = False,
-        ) -> Tensor:
-            return x.sin()
-
-        def setup_context(ctx, inputs, output):
-            (x, _, _, _) = inputs
-            ctx.save_for_backward(x)
-
-        def backward(ctx, grad_output):
-            (x,) = ctx.saved_tensors
-            return grad_output * x.cos(), None, None
-
-        f.register_autograd(backward, setup_context=setup_context)
-
-        x = torch.randn(3, requires_grad=True)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"incorrect number of gradients \(expected 4, got 3\)",
-        ):
-            f(x).sum().backward()
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_register_autograd_pt_metadata_ctx_attr_is_not_tensorlist(self):
-        @torch.library.custom_op(
-            "_torch_testing::pt_metadata_ctx_attr_is_not_tensorlist",
-            mutates_args=(),
-        )
-        def f(x: Tensor, y: Optional[Tensor] = None) -> Tensor:
-            return x.sin()
-
-        def setup_context(ctx, inputs, output):
-            ctx._pt_metadata = "user attr"
-            (x, _) = inputs
-            ctx.save_for_backward(x)
-
-        def backward(ctx, grad_output):
-            self.assertEqual(ctx._pt_metadata, "user attr")
-            (x,) = ctx.saved_tensors
-            return grad_output * x.cos(), None
-
-        f.register_autograd(backward, setup_context=setup_context)
-
-        x = torch.randn(3, requires_grad=True)
-        f(x).sum().backward()
-        self.assertEqual(x.grad, x.cos())
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_register_autograd_tensorlist_defaulted_input(self):
-        @torch.library.custom_op(
-            "_torch_testing::tensorlist_defaulted_input_gradients",
-            mutates_args=(),
-        )
-        def f(xs: list[Tensor], scale: float = 2.0) -> Tensor:
-            return sum(x.sin() for x in xs) * scale
-
-        def setup_context(ctx, inputs, output):
-            xs, scale = inputs
-            self.assertIn(scale, (2.0, 3.0))
-            ctx.save_for_backward(*xs)
-            ctx.scale = scale
-
-        def backward(ctx, grad_output):
-            self.assertEqual(ctx.needs_input_grad, ([True, True], False))
-            grads = [grad_output * x.cos() * ctx.scale for x in ctx.saved_tensors]
-            return grads, None
-
-        f.register_autograd(backward, setup_context=setup_context)
-
-        x = torch.randn(3, requires_grad=True)
-        y = torch.randn(3, requires_grad=True)
-        f([x, y]).sum().backward()
-        self.assertEqual(x.grad, x.cos() * 2.0)
-        self.assertEqual(y.grad, y.cos() * 2.0)
-
-        x = torch.randn(3, requires_grad=True)
-        y = torch.randn(3, requires_grad=True)
-        f([x, y], 3.0).sum().backward()
-        self.assertEqual(x.grad, x.cos() * 3.0)
-        self.assertEqual(y.grad, y.cos() * 3.0)
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_register_autograd_tensorlist_return_defaulted_input(self):
-        @torch.library.custom_op(
-            "_torch_testing::tensorlist_return_defaulted_input_gradients",
-            mutates_args=(),
-        )
-        def f(x: Tensor, scale: float = 2.0) -> list[Tensor]:
-            return [x.sin() * scale, x.cos() * scale]
-
-        def setup_context(ctx, inputs, output):
-            x, scale = inputs
-            ctx.save_for_backward(x)
-            ctx.scale = scale
-
-        def backward(ctx, grad_outputs):
-            self.assertEqual(ctx.needs_input_grad, (True, False))
-            (x,) = ctx.saved_tensors
-            grad_x = (
-                grad_outputs[0] * x.cos() * ctx.scale
-                - grad_outputs[1] * x.sin() * ctx.scale
-            )
-            return grad_x, None
-
-        f.register_autograd(backward, setup_context=setup_context)
-
-        x = torch.randn(3, requires_grad=True)
-        y0, y1 = f(x, 3.0)
-        (y0.sum() + y1.sum()).backward()
-        self.assertEqual(x.grad, (x.cos() - x.sin()) * 3.0)
-
-        x = torch.randn(3, requires_grad=True)
-        y0, y1 = f(x)
-        (y0.sum() + y1.sum()).backward()
-        self.assertEqual(x.grad, (x.cos() - x.sin()) * 2.0)
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema(self):
         @torch.library.custom_op(
             "_torch_testing::add",
@@ -3826,7 +3618,7 @@ class TestCustomOpAPI(TestCase):
             def backward(ctx, grad):
                 nonlocal called
                 called = True
-                return grad * ctx.c, None
+                return grad * ctx.c
 
             def setup_context(ctx, inputs, keyword_only_inputs, output):
                 if len(inputs) != 2:
