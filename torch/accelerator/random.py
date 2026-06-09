@@ -23,7 +23,7 @@ def initial_seed() -> int:
 
 def get_rng_state(device: _device_t = None, /) -> Tensor:
     r"""Return the RNG state of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
-    as a `torch.Tensor` of dtype `torch.uint8` on the specified accelerator device.
+    as a `torch.Tensor` of dtype `torch.uint8` for the specified accelerator device.
 
     Args:
         device (:class:`torch.device`, str, int, optional): The device to return the RNG state of.
