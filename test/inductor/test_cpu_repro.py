@@ -2389,7 +2389,7 @@ class CPUReproTests(TestCase):
                 return None
 
         x2 = torch.randint(0, 10, size=(3, 4))
-        y2 = torch.tensor(0, dtype=torch.int32)
+        y2 = torch.zeros((3,4), dtype=torch.int32)
         ret = run_division(x2, y2, rounding_mode="trunc")
         self.assertTrue(ret is None)
         ret = run_division(x2, y2, rounding_mode="floor")
