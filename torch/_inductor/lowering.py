@@ -8618,8 +8618,12 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 local_reduce_size = list(local_reduce_val.shape)
                 local_reduce_stride = list(local_reduce_val.stride())
             else:
-                local_reduce_size = [m, FloorDiv(n, group_size)]
-                local_reduce_stride = [FloorDiv(n, group_size), 1]
+                if local_reduce.dim == 0:
+                    local_reduce_size = [FloorDiv(m, group_size), n]
+                    local_reduce_stride = [n, 1]
+                else:
+                    local_reduce_size = [m, FloorDiv(n, group_size)]
+                    local_reduce_stride = [FloorDiv(n, group_size), 1]
             local_reduce_out = empty_strided(
                 local_reduce_size,
                 local_reduce_stride,

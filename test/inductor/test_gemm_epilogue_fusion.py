@@ -1071,6 +1071,28 @@ class GemmEpilogueFusionTests(TestCase):
         ).check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_mis_shaped_row_reduce(self):
+        M = 128
+        N = 64
+
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: (
+                    acc.relu(),
+                    acc.float().view(-1, 2, N // 2).sum(1),
+                ),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(M, 64, device="cuda", dtype=torch.float16)
+        b = torch.rand(64, N, device="cuda", dtype=torch.float16)
+
+        with self.assertRaisesRegex(Exception, "view\\(-1, group, N\\).sum\\(1\\)"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_row_group2_tail_m(self):
         M = 64
         N = 64
@@ -1121,8 +1143,8 @@ class GemmEpilogueFusionTests(TestCase):
                 torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
                 torch.testing.assert_close(actual[1], expected[1], atol=1e-1, rtol=1e-2)
                 FileCheck().check(f"local_reduce_group={group}").check(
-                    "local_reduce_out="
-                ).check_not("extern_kernels.mm").run(code)
+                    "local_reduce_dim=1"
+                ).check("local_reduce_out=").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_group16_fuses(self):
@@ -1146,9 +1168,9 @@ class GemmEpilogueFusionTests(TestCase):
 
         torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
         torch.testing.assert_close(actual[1], expected[1], atol=1e-1, rtol=1e-2)
-        FileCheck().check("local_reduce_group=16").check("local_reduce_out=").check_not(
-            "extern_kernels.mm"
-        ).run(code)
+        FileCheck().check("local_reduce_group=16").check("local_reduce_dim=1").check(
+            "local_reduce_out="
+        ).check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_local_reduce_feeds_main(self):
@@ -1203,9 +1225,9 @@ class GemmEpilogueFusionTests(TestCase):
 
         torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
         torch.testing.assert_close(actual[1], expected[1], atol=1e-1, rtol=1e-2)
-        FileCheck().check("local_reduce_group=32").check("local_reduce_out=").check_not(
-            "extern_kernels.mm"
-        ).run(code)
+        FileCheck().check("local_reduce_group=32").check("local_reduce_dim=1").check(
+            "local_reduce_out="
+        ).check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_honors_epilogue_add_alpha(self):
