@@ -4,6 +4,7 @@ import inspect
 import math
 import operator
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import torch
@@ -19,34 +20,37 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
-_SUPPORTED_GEMM_OPS = {
-    torch.ops.aten.mm.default,
-    torch.ops.aten.addmm.default,
-    torch.ops.aten.bmm.default,
-    torch.ops.aten.baddbmm.default,
-    torch.ops.aten._scaled_mm.default,
+@dataclass(frozen=True)
+class GemmEpilogueOpInfo:
+    quack_name: str
+    mat1_index: int
+    mat2_index: int
+    is_batched: bool = False
+
+
+GEMM_EPILOGUE_OPS = {
+    torch.ops.aten.mm.default: GemmEpilogueOpInfo("mm", 0, 1),
+    torch.ops.aten.addmm.default: GemmEpilogueOpInfo("addmm", 1, 2),
+    torch.ops.aten.bmm.default: GemmEpilogueOpInfo("bmm", 0, 1, is_batched=True),
+    torch.ops.aten.baddbmm.default: GemmEpilogueOpInfo(
+        "baddbmm", 1, 2, is_batched=True
+    ),
+    torch.ops.aten._scaled_mm.default: GemmEpilogueOpInfo("scaled_mm", 0, 1),
 }
 _SUPPORTED_BACKENDS = {"TRITON", "CUTLASS", "CUTEDSL", "QUACK"}
-
-
-_QUACK_SUPPORTED_GEMM_OPS = {
-    torch.ops.aten.mm.default,
-    torch.ops.aten.addmm.default,
-    torch.ops.aten.bmm.default,
-    torch.ops.aten.baddbmm.default,
-    torch.ops.aten._scaled_mm.default,
-}
+_SUPPORTED_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm"
 
 
 def _find_single_quack_gemm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
     gemm_nodes = [
         node
         for node in graph_module.graph.nodes
-        if node.op == "call_function" and node.target in _QUACK_SUPPORTED_GEMM_OPS
+        if node.op == "call_function" and node.target in GEMM_EPILOGUE_OPS
     ]
     if len(gemm_nodes) != 1:
         raise NotImplementedError(
-            "QUACK GEMM epilogue backend currently supports one mm/addmm/bmm/baddbmm/_scaled_mm body"
+            "QUACK GEMM epilogue backend currently supports one "
+            f"{_SUPPORTED_GEMM_OP_NAMES} body"
         )
     return gemm_nodes[0]
 
@@ -145,6 +149,18 @@ def _quack_cute_call_function(
         torch.minimum: ops.minimum,
     }
     if target in binary_ops:
+        if target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar):
+            alpha = kwargs.get("alpha", 1)
+            rhs = args[1] if alpha == 1 else ops.mul(args[1], alpha).value
+            return ops.add(args[0], rhs).value
+        if target in (torch.ops.aten.sub.Tensor, torch.ops.aten.sub.Scalar):
+            alpha = kwargs.get("alpha", 1)
+            rhs = args[1] if alpha == 1 else ops.mul(args[1], alpha).value
+            return ops.sub(args[0], rhs).value
+        if kwargs:
+            raise NotImplementedError(
+                f"unsupported kwargs for QUACK epilogue op {target}: {kwargs}"
+            )
         return binary_ops[target](*args[:2]).value
 
     unary_ops = {
@@ -200,10 +216,24 @@ def _quack_cute_call_function(
     if target == torch.ops.aten.clamp_max.default:
         return ops.minimum(args[0], args[1]).value
     if target == torch.nn.functional.leaky_relu:
-        return ops.where(ops.gt(args[0], 0.0), args[0], ops.mul(args[0], args[1])).value
+        negative_slope = kwargs.get(
+            "negative_slope", args[1] if len(args) > 1 else 0.01
+        )
+        return ops.where(
+            ops.gt(args[0], 0.0), args[0], ops.mul(args[0], negative_slope)
+        ).value
     if target == torch.nn.functional.silu:
+        if kwargs:
+            raise NotImplementedError(
+                f"unsupported kwargs for QUACK epilogue op {target}: {kwargs}"
+            )
         return ops.mul(args[0], ops.sigmoid(args[0])).value
     if target == torch._C._nn.gelu:
+        approximate = kwargs.get("approximate", args[1] if len(args) > 1 else "none")
+        if approximate != "none":
+            raise NotImplementedError(
+                f"unsupported gelu approximate mode for QUACK epilogue: {approximate}"
+            )
         return ops.mul(
             ops.mul(args[0], 0.5),
             ops.add(
@@ -342,7 +372,7 @@ class GemmEpilogueFusion(HigherOrderOperator):
         gemm_kwargs: dict[str, Any],
         kernel_options: dict[str, Any],
     ):
-        if gemm_op not in _SUPPORTED_GEMM_OPS:
+        if gemm_op not in GEMM_EPILOGUE_OPS:
             raise RuntimeError(f"unsupported GEMM op for epilogue fusion: {gemm_op}")
 
         if not isinstance(gemm_args, tuple):
@@ -407,6 +437,7 @@ def gemm_epilogue_fusion(
     def body_fn(*args, **body_kwargs):
         return epilogue_fn(gemm_op(*args, **body_kwargs))
 
+    body_fn._gemm_epilogue_accepts_kwargs = True
     return _gemm_epilogue_fusion(
         gemm_op, body_fn, gemm_args, gemm_kwargs, kernel_options
     )
@@ -487,6 +518,12 @@ def matmul_epilogue(
     *,
     kernel_options: dict[str, Any] | None = None,
 ):
+    """Apply an epilogue to GEMM-shaped matmul cases only.
+
+    This helper intentionally does not implement vector inputs or broadcasted
+    matmul. Use the lower-level helpers for explicit control over supported
+    `mm` and `bmm` cases.
+    """
     if input.dim() == 2 and other.dim() == 2:
         return mm_epilogue(input, other, epilogue_fn, kernel_options=kernel_options)
     if input.dim() == 3 and other.dim() == 3:
@@ -497,13 +534,12 @@ def matmul_epilogue(
 
 
 def _body_accepts_kwargs(body_fn, kwargs) -> bool:
-    if not kwargs:
+    if not kwargs or isinstance(body_fn, torch.fx.GraphModule):
         return False
+    if getattr(body_fn, "_gemm_epilogue_accepts_kwargs", False):
+        return True
     signature = inspect.signature(body_fn)
-    return any(
-        parameter.kind == inspect.Parameter.VAR_KEYWORD
-        for parameter in signature.parameters.values()
-    ) or all(key in signature.parameters for key in kwargs)
+    return all(key in signature.parameters for key in kwargs)
 
 
 def _call_gemm_epilogue_body(body_fn, args, kwargs):
@@ -528,7 +564,7 @@ def gemm_epilogue_fusion_fake_tensor_mode(
 ):
     flat_args = pytree.tree_leaves(args)
     with mode:
-        return body_fn(*flat_args)
+        return _call_gemm_epilogue_body(body_fn, flat_args, kwargs)
 
 
 @_gemm_epilogue_fusion.py_functionalize_impl
@@ -563,7 +599,11 @@ def gemm_epilogue_fusion_proxy_torch_dispatch_mode(
 ):
     if proxy_mode.enable_tracing:
         flat_args = tuple(pytree.tree_leaves(args))
-        body_graph = reenter_make_fx(body_fn)(*flat_args)
+
+        def tracing_body_fn(*flat_body_args):
+            return _call_gemm_epilogue_body(body_fn, flat_body_args, kwargs)
+
+        body_graph = reenter_make_fx(tracing_body_fn)(*flat_args)
         _, body_graph_name = unique_graph_id(
             proxy_mode, prefix="gemm_epilogue_fusion_body_graph"
         )
@@ -579,7 +619,7 @@ def gemm_epilogue_fusion_proxy_torch_dispatch_mode(
             {},
             name="gemm_epilogue_fusion",
         )
-        out = body_fn(*flat_args)
+        out = _call_gemm_epilogue_body(body_fn, flat_args, kwargs)
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )

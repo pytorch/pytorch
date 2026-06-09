@@ -25,6 +25,8 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.gemm_epilogue import (
+    GEMM_EPILOGUE_OPS,
+    _SUPPORTED_GEMM_OP_NAMES,
     _gemm_epilogue_fusion,
     materialize_quack_epilogue,
 )
@@ -8412,17 +8414,10 @@ def hints_wrapper_lowering(subgraph, args, kwargs, hints):
 def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     backend = kernel_options.get("backend", "TRITON")
     if backend == "QUACK":
-        quack_gemm_ops = {
-            torch.ops.aten.mm.default: ("mm", 0, 1),
-            torch.ops.aten.addmm.default: ("addmm", 1, 2),
-            torch.ops.aten.bmm.default: ("bmm", 0, 1),
-            torch.ops.aten.baddbmm.default: ("baddbmm", 1, 2),
-            torch.ops.aten._scaled_mm.default: ("scaled_mm", 0, 1),
-        }
-        if gemm_op not in quack_gemm_ops:
+        if gemm_op not in GEMM_EPILOGUE_OPS:
             raise NotImplementedError(
                 "QUACK GEMM epilogue backend currently supports only "
-                "aten.mm/addmm/bmm/baddbmm/_scaled_mm"
+                f"aten.{_SUPPORTED_GEMM_OP_NAMES}"
             )
         from torch._inductor.kernel.quack_gemm_epilogue import (
             quack_gemm_epilogue_template,
@@ -8445,16 +8440,16 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         epilogue_key, epilogue_source = materialize_quack_epilogue(
             subgraph.graph_module
         )
-        gemm_op_name, mat1_idx, mat2_idx = quack_gemm_ops[gemm_op]
-        mat1, mat2 = args[mat1_idx], args[mat2_idx]
-        if gemm_op_name in ("mm", "addmm", "scaled_mm"):
-            m, n = mat1.get_size()[0], mat2.get_size()[1]
-            size = [m, n]
-            stride = [n, 1]
-        else:
+        gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
+        mat1, mat2 = args[gemm_op_info.mat1_index], args[gemm_op_info.mat2_index]
+        if gemm_op_info.is_batched:
             b, m, n = mat1.get_size()[0], mat1.get_size()[1], mat2.get_size()[2]
             size = [b, m, n]
             stride = [m * n, n, 1]
+        else:
+            m, n = mat1.get_size()[0], mat2.get_size()[1]
+            size = [m, n]
+            stride = [n, 1]
         layout = ir.FixedLayout(
             mat1.get_device_or_error(),
             gemm_kwargs.get("out_dtype", mat1.get_dtype()),
@@ -8469,7 +8464,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             layout=layout,
             epilogue_name=epilogue_key,
             epilogue_source=epilogue_source,
-            gemm_op=gemm_op_name,
+            gemm_op=gemm_op_info.quack_name,
             alpha=alpha,
             beta=beta,
             out_dtype=gemm_kwargs.get("out_dtype"),
