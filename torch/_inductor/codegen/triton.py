@@ -7029,7 +7029,8 @@ def identify_triton_stores_from_ast(tree: ast.Module) -> UserTritonMeta:
         return None
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef):
+        # Store kernel function definition
+        if isinstance(node, ast.FunctionDef) and not func_def:
             func_def = node
         if isinstance(node, ast.Call):
             # Check if this is a tl.store call
