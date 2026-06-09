@@ -135,7 +135,7 @@ class TestOnlineSoftmax(TestCase):
             "test_configs.force_filter_reduction_configs": False,
         }
     )
-    def test_checkpointed_softmax_filters_reduction_configs(self):
+    def test_checkpointed_softmax_uses_ac_stable_reduction_policy(self):
         from torch.utils.checkpoint import (
             checkpoint,
             create_selective_checkpoint_contexts,
@@ -154,14 +154,18 @@ class TestOnlineSoftmax(TestCase):
         for code in codes:
             self.assertIn("softmax", code)
             self.assertIn("'optimize_mem': False", code)
+            self.assertIn("'ac_stable_reduction': True", code)
             self.assertIn("'force_filter_reduction_configs': True", code)
             self.assertIn("'dynamic_scale_rblock': False", code)
+            self.assertIn("'disable_reduction_coordesc': True", code)
 
         _, codes = run_and_get_code(lambda: torch.compile(block, fullgraph=True)(x))
         self.assertEqual(len(codes), 1)
         self.assertIn("softmax", codes[0])
+        self.assertNotIn("'ac_stable_reduction': True", codes[0])
         self.assertNotIn("'force_filter_reduction_configs': True", codes[0])
         self.assertNotIn("'dynamic_scale_rblock': False", codes[0])
+        self.assertNotIn("'disable_reduction_coordesc': True", codes[0])
 
         def save_fn(x):
             return checkpoint(
@@ -180,6 +184,7 @@ class TestOnlineSoftmax(TestCase):
 
         self.assertGreater(len(codes), 0)
         for code in codes:
+            self.assertNotIn("'ac_stable_reduction': True", code)
             self.assertNotIn("'force_filter_reduction_configs': True", code)
 
     @inductor_config.patch("triton.persistent_reductions", False)

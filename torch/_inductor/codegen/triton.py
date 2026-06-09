@@ -3171,7 +3171,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return (
             config.deterministic
             or config.test_configs.force_filter_reduction_configs
-            or (self.inside_reduction and self._has_activation_checkpoint_origins())
+            or (self.inside_reduction and self._has_ac_recompute_origins())
         )
 
     @staticmethod
@@ -6237,16 +6237,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.has_load_with_contiguous_rdim
                 or self.has_store_with_contiguous_rdim
             )
-        if self._needs_activation_checkpoint_reduction_config_filtering():
-            # Combo kernels pass per-sub-kernel metadata through this helper.
-            # Keep checkpointed reductions on the same filtered config path
-            # there as well as in the standalone codegen_kernel() path.
-            out["force_filter_reduction_configs"] = True
-            out["dynamic_scale_rblock"] = False
-            out["has_loadstore_with_contiguous_rdim"] = (
-                self.has_load_with_contiguous_rdim
-                or self.has_store_with_contiguous_rdim
-            )
+        self._apply_ac_stable_reduction_policy(out)
         if self.tma_min_block_sizes:
             out["tma_min_block_sizes"] = self.tma_min_block_sizes
         if self.tiling_scores:
@@ -6276,7 +6267,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return out
 
     @cache_on_self
-    def _has_activation_checkpoint_origins(self) -> bool:
+    def _has_ac_recompute_origins(self) -> bool:
         from torch.utils.checkpoint import CheckpointPolicy
 
         for scheduler_node in self.features.scheduler_nodes():
@@ -6292,8 +6283,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     return True
         return False
 
-    def _needs_activation_checkpoint_reduction_config_filtering(self) -> bool:
-        return self.num_reduction > 0 and self._has_activation_checkpoint_origins()
+    def _needs_ac_stable_reduction_policy(self) -> bool:
+        return self.num_reduction > 0 and self._has_ac_recompute_origins()
+
+    def _apply_ac_stable_reduction_policy(self, out: dict[str, Any]) -> None:
+        if not self._needs_ac_stable_reduction_policy():
+            return
+
+        out["ac_stable_reduction"] = True
+        out["force_filter_reduction_configs"] = True
+        out["dynamic_scale_rblock"] = False
+        out["disable_reduction_coordesc"] = True
+        out["has_loadstore_with_contiguous_rdim"] = (
+            self.has_load_with_contiguous_rdim or self.has_store_with_contiguous_rdim
+        )
 
     @functools.cached_property
     def add_persistent_rblock(self) -> bool:
@@ -6481,14 +6484,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # every new node will increase the peak memory and our greedy approach would
         # introduce a lot of unnecessary cpu copies.
         optimize_mem = V.graph.is_inference or V.graph.is_backward
-        if self._needs_activation_checkpoint_reduction_config_filtering():
-            # Checkpointed forward reductions are compiled once in the training
-            # forward graph and again as recompute inside the backward graph.
-            # Treating the recompute copy like an arbitrary backward kernel can
-            # make it autotune under different mutation-preservation rules than
-            # the original forward. Keep these kernels on the forward-compatible
-            # autotune path so discrete downstream decisions, such as MoE routing,
-            # see the same low bits.
+        if self._needs_ac_stable_reduction_policy():
+            # AC forward and recompute reductions compile independently today.
+            # Keep their autotune input-preservation policy aligned so they do
+            # not choose different numerics-affecting reduction strategies.
             optimize_mem = False
 
         inductor_meta = {
@@ -6499,21 +6498,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             **self.inductor_meta_per_kernel(),
             **self.inductor_meta_common(),
         }
-
-        if self._needs_activation_checkpoint_reduction_config_filtering():
-            # AC forward and recompute graphs are compiled independently. Keep
-            # reductions in checkpointed regions on the canonical filtered config
-            # path so downstream discrete decisions see the same low bits.
-            inductor_meta["force_filter_reduction_configs"] = True
-            # Dynamic R-block scaling depends on compiled register pressure. A
-            # recompute graph can legitimately materialize extra backward-needed
-            # outputs, so letting register pressure choose the reduction tree can
-            # make recompute numerics differ from the original forward.
-            inductor_meta["dynamic_scale_rblock"] = False
-            inductor_meta["has_loadstore_with_contiguous_rdim"] = (
-                self.has_load_with_contiguous_rdim
-                or self.has_store_with_contiguous_rdim
-            )
+        self._apply_ac_stable_reduction_policy(inductor_meta)
 
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault

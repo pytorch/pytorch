@@ -766,15 +766,14 @@ class ComboKernel(Kernel):
                 default=0,
             )
 
-        # Compute per-sub-kernel metadata before the outer combo metadata so
-        # checkpointed reductions can opt out of backward autotune memory
-        # optimization in the combined launch path as well.
+        # Compute per-sub-kernel metadata before the outer combo metadata so AC
+        # reductions can apply the same stable strategy in the combined launch.
         sub_metas = [sub.inductor_meta_per_kernel() for sub in self.sub_kernels]
         optimize_mem = V.graph.is_inference or V.graph.is_backward
-        has_ac_filtered_reduction = any(
-            m.get("force_filter_reduction_configs", False) for m in sub_metas
+        has_ac_stable_reduction = any(
+            m.get("ac_stable_reduction", False) for m in sub_metas
         )
-        if has_ac_filtered_reduction:
+        if has_ac_stable_reduction:
             optimize_mem = False
 
         inductor_meta = {
@@ -788,8 +787,11 @@ class ComboKernel(Kernel):
             "optimize_mem": optimize_mem,
             **self.triton_kernel_cls.inductor_meta_common(),
         }
-        if has_ac_filtered_reduction:
+        if has_ac_stable_reduction:
+            inductor_meta["ac_stable_reduction"] = True
             inductor_meta["dynamic_scale_rblock"] = False
+            inductor_meta["disable_reduction_coordesc"] = True
+            inductor_meta["disable_combo_kernel_autotune"] = True
         if max_persistent_rblock > 0:
             inductor_meta["max_persistent_rblock"] = max_persistent_rblock
 
