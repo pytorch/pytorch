@@ -593,7 +593,7 @@ def max_memory_reserved(device: "Device" = None) -> int:
         device graph-memory pool (CUDA graph captures reserve backing in the
         latter). Because those two high-water marks need not occur at the same
         instant, the reported peak is a conservative *upper bound* on the true
-        simultaneous peak (clamped to total device memory). The current value
+        simultaneous peak. The current value
         (:func:`~torch.cuda.memory_reserved`) is exact.
     """
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)

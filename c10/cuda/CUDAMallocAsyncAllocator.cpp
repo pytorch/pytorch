@@ -760,16 +760,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       used_mem_current += graph_used_current;
 
       // The two high-water marks need not peak at the same instant, so their sum
-      // is an upper bound on the true simultaneous peak; clamp to total device
-      // memory so the reported peak never exceeds physical capacity.
+      // is a conservative upper bound on the true simultaneous peak.
       reserved_mem_peak += graph_reserved_peak;
       used_mem_peak += graph_used_peak;
-
-      size_t device_free = 0;
-      size_t device_total = 0;
-      C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
-      reserved_mem_peak = std::min(reserved_mem_peak, uint64_t{device_total});
-      used_mem_peak = std::min(used_mem_peak, uint64_t{device_total});
     }
 
     // Many stat types are specific to the native allocator. We leave these
