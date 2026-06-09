@@ -41,6 +41,17 @@ bool cpp_meta_supports_symint(const c10::OperatorHandle& op) {
   return op.hasTag(at::Tag::view_copy);
 }
 
+// copied from fake_tensor.py _unbacked_special_fake_handling_ops.
+const std::unordered_set<c10::OperatorHandle>&
+_unbacked_special_fake_handling_ops() {
+  static const std::unordered_set<c10::OperatorHandle> ops = {
+      c10::Dispatcher::singleton().findSchemaOrThrow("aten::view", ""),
+      c10::Dispatcher::singleton().findSchemaOrThrow("aten::_unsafe_view", ""),
+      c10::Dispatcher::singleton().findSchemaOrThrow("aten::slice", "Tensor"),
+  };
+  return ops;
+}
+
 template <typename Fn>
 void for_each_tensor(
     torch::jit::Stack* stack,
@@ -648,8 +659,9 @@ void fakeFallback(
     return *op_key_cache;
   };
 
-  // for ops with symbolic sizes, try decompositions before the meta kernel
-  if (has_symints && !cpp_meta_supports_symint(op) && mode) {
+  // for ops with symbolic sizes, try decompositions before the meta kernel.
+  if (has_symints && !cpp_meta_supports_symint(op) &&
+      !_unbacked_special_fake_handling_ops().contains(op) && mode) {
     if (interp && mode->decomp_ops_.count(fake_op_key())) {
       if ((*interp)->fake_try_decomp(op, stack)) {
         wrap_meta_outputs_with_default_device_logic();
