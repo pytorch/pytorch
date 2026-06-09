@@ -78,6 +78,8 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
         epilogue_kwargs = ""
         if epilogue_args:
             epilogue_kwargs = f", epilogue_args=({', '.join(epilogue_args)},)"
+        if qtb.main_output_transform is not None:
+            epilogue_kwargs += f", main_output_transform={qtb.main_output_transform!r}"
         local_reduce_kwargs = ""
         if qtb.aux_out_index is not None:
             local_reduce_kwargs += f", aux_out={input_args[qtb.aux_out_index]}"

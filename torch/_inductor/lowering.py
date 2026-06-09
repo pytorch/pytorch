@@ -8550,9 +8550,14 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                     "QUACK grouped_mm epilogue currently supports only 2D/3D "
                     "and m-major/contiguous 2D/2D grouped_mm with offsets and no bias"
                 )
-        epilogue_key, epilogue_source, epilogue_arg_placeholders, local_reduce, aux_output = (
-            materialize_quack_epilogue(subgraph.graph_module)
-        )
+        (
+            epilogue_key,
+            epilogue_source,
+            epilogue_arg_placeholders,
+            local_reduce,
+            aux_output,
+            main_output_transform,
+        ) = materialize_quack_epilogue(subgraph.graph_module)
         gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
         mat1, mat2 = args[gemm_op_info.mat1_index], args[gemm_op_info.mat2_index]
         if gemm_op == torch.ops.aten._grouped_mm.default and len(mat2.get_size()) == 3:
@@ -8587,6 +8592,9 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 else None
             )
             main_output_dtype = getattr(output_meta, "dtype", main_output_dtype)
+            if output_meta is not None:
+                size = list(output_meta.shape)
+                stride = list(output_meta.stride())
         layout = ir.FixedLayout(
             mat1.get_device_or_error(),
             main_output_dtype,
@@ -8717,6 +8725,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             local_reduce_scale=local_reduce.scale if local_reduce is not None else 1.0,
             local_reduce_max_power=local_reduce.max_power if local_reduce is not None else 8,
             local_reduce_feeds_main=local_reduce.feeds_main if local_reduce is not None else False,
+            main_output_transform=main_output_transform,
             mutated_inputs=mutated_inputs or None,
         )
         node, _ = autotune_select_algorithm(
