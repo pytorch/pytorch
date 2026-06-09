@@ -114,14 +114,14 @@ class TestExperiment(TestCase):
             """\
 def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     view = torch.ops.aten.view.default(x, [1, 3]);  x = None
-    transpose = torch.ops.aten.transpose.int(p_linear_weight, 0, 1);  p_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(p_linear_bias, view, transpose);  p_linear_bias = transpose = None
+    permute = torch.ops.aten.permute.default(p_linear_weight, [1, 0]);  p_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(p_linear_bias, view, permute);  p_linear_bias = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [3]);  addmm = None
     _softmax = torch.ops.aten._softmax.default(view_1, 0, False);  view_1 = None
-    alias = torch.ops.aten.alias.default(_softmax)
+    detach_1 = torch.ops.aten.detach.default(_softmax)
     clone = torch.ops.aten.clone.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
     _log_softmax = torch.ops.aten._log_softmax.default(_softmax, 0, False);  _softmax = None
-    alias_1 = torch.ops.aten.alias.default(_log_softmax)
+    detach_3 = torch.ops.aten.detach.default(_log_softmax)
     mul = torch.ops.aten.mul.Tensor(_log_softmax, clone);  _log_softmax = None
     sum_1 = torch.ops.aten.sum.dim_IntList(mul, []);  mul = None
     neg = torch.ops.aten.neg.default(sum_1);  sum_1 = None
@@ -131,24 +131,22 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     neg_1 = torch.ops.aten.neg.default(div_1);  div_1 = None
     expand = torch.ops.aten.expand.default(neg_1, [3]);  neg_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(expand, clone);  expand = clone = None
-    alias_2 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
-    exp = torch.ops.aten.exp.default(alias_2);  alias_2 = None
+    exp = torch.ops.aten.exp.default(detach_3);  detach_3 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(mul_1, [0], True)
     mul_2 = torch.ops.aten.mul.Tensor(exp, sum_2);  exp = sum_2 = None
     sub = torch.ops.aten.sub.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-    alias_3 = torch.ops.aten.alias.default(alias);  alias = None
-    mul_3 = torch.ops.aten.mul.Tensor(sub, alias_3);  sub = None
+    mul_3 = torch.ops.aten.mul.Tensor(sub, detach_1);  sub = None
     sum_3 = torch.ops.aten.sum.dim_IntList(mul_3, [0], True)
-    mul_4 = torch.ops.aten.mul.Tensor(alias_3, sum_3);  alias_3 = sum_3 = None
+    mul_4 = torch.ops.aten.mul.Tensor(detach_1, sum_3);  detach_1 = sum_3 = None
     sub_1 = torch.ops.aten.sub.Tensor(mul_3, mul_4);  mul_3 = mul_4 = None
     view_2 = torch.ops.aten.view.default(sub_1, [1, 3]);  sub_1 = None
-    transpose_1 = torch.ops.aten.transpose.int(view_2, 0, 1)
-    mm = torch.ops.aten.mm.default(transpose_1, view);  transpose_1 = view = None
-    transpose_2 = torch.ops.aten.transpose.int(mm, 0, 1);  mm = None
+    permute_1 = torch.ops.aten.permute.default(view_2, [1, 0])
+    mm = torch.ops.aten.mm.default(permute_1, view);  permute_1 = view = None
+    permute_2 = torch.ops.aten.permute.default(mm, [1, 0]);  mm = None
     sum_4 = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
     view_3 = torch.ops.aten.view.default(sum_4, [3]);  sum_4 = None
-    transpose_3 = torch.ops.aten.transpose.int(transpose_2, 0, 1);  transpose_2 = None
-    return (div, transpose_3, view_3)""",
+    permute_3 = torch.ops.aten.permute.default(permute_2, [1, 0]);  permute_2 = None
+    return (div, permute_3, view_3)""",
         )
         ep = joint_ep.run_decompositions()
         self.assertExpectedInline(
@@ -160,10 +158,10 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     addmm = torch.ops.aten.addmm.default(p_linear_bias, view, permute);  p_linear_bias = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [3]);  addmm = None
     _softmax = torch.ops.aten._softmax.default(view_1, 0, False);  view_1 = None
-    alias = torch.ops.aten.alias.default(_softmax)
+    detach = torch.ops.aten.detach.default(_softmax)
     clone = torch.ops.aten.clone.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
     _log_softmax = torch.ops.aten._log_softmax.default(_softmax, 0, False);  _softmax = None
-    alias_1 = torch.ops.aten.alias.default(_log_softmax)
+    detach_1 = torch.ops.aten.detach.default(_log_softmax)
     mul = torch.ops.aten.mul.Tensor(_log_softmax, clone);  _log_softmax = None
     sum_1 = torch.ops.aten.sum.dim_IntList(mul, []);  mul = None
     neg = torch.ops.aten.neg.default(sum_1);  sum_1 = None
@@ -173,15 +171,13 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     neg_1 = torch.ops.aten.neg.default(div_1);  div_1 = None
     expand = torch.ops.aten.expand.default(neg_1, [3]);  neg_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(expand, clone);  expand = clone = None
-    alias_2 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
-    exp = torch.ops.aten.exp.default(alias_2);  alias_2 = None
+    exp = torch.ops.aten.exp.default(detach_1);  detach_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(mul_1, [0], True)
     mul_2 = torch.ops.aten.mul.Tensor(exp, sum_2);  exp = sum_2 = None
     sub = torch.ops.aten.sub.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-    alias_3 = torch.ops.aten.alias.default(alias);  alias = None
-    mul_3 = torch.ops.aten.mul.Tensor(sub, alias_3);  sub = None
+    mul_3 = torch.ops.aten.mul.Tensor(sub, detach);  sub = None
     sum_3 = torch.ops.aten.sum.dim_IntList(mul_3, [0], True)
-    mul_4 = torch.ops.aten.mul.Tensor(alias_3, sum_3);  alias_3 = sum_3 = None
+    mul_4 = torch.ops.aten.mul.Tensor(detach, sum_3);  detach = sum_3 = None
     sub_1 = torch.ops.aten.sub.Tensor(mul_3, mul_4);  mul_3 = mul_4 = None
     view_2 = torch.ops.aten.view.default(sub_1, [1, 3]);  sub_1 = None
     permute_1 = torch.ops.aten.permute.default(view_2, [1, 0])

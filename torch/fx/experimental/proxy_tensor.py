@@ -1183,10 +1183,18 @@ def proxy_call(
         )
         return NotImplemented
 
-    skip_nested_alias_decomp = proxy_mode.functional_decomp_layers > 0 and any(
-        arg.alias_info for arg in func._schema.arguments
-    )
-    if not skip_nested_alias_decomp:
+    decomp_fn = proxy_mode.decomposition_table.get(func)
+    if decomp_fn is None:
+        skip_default_alias_decomp = False
+    else:
+        from torch._decomp import decomposition_table
+
+        skip_default_alias_decomp = (
+            func not in (torch.ops.aten.t.default, torch.ops.aten.transpose.int)
+            and any(arg.alias_info for arg in func._schema.arguments)
+            and decomposition_table.get(func) is decomp_fn
+        )
+    if not skip_default_alias_decomp:
         r = maybe_handle_decomp(
             proxy_mode, func, args, kwargs, record_pointwise_barrier=True
         )

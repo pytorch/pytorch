@@ -640,6 +640,18 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 1, requires_grad=False)]
         self.verify_aot_autograd(f, inp, dynamic=True)
 
+    def test_to_dense_strided_tensor(self):
+        def f(a):
+            return (
+                a.to_dense(),
+                a.to_dense(masked_grad=True),
+                a.to_dense(dtype=torch.float32),
+                a.to_dense(dtype=torch.float64),
+            )
+
+        inp = [torch.randn(3, 4)]
+        self.verify_aot_autograd(f, inp, dynamic=True)
+
     def test_complex_linear(self):
         # https://github.com/pytorch/pytorch/issues/93424
         inp = [torch.randn(1, 10, 10, dtype=torch.complex64)]
@@ -9706,6 +9718,34 @@ class TestAOTDispatch(AOTTestCase):
         }
         self.assertNotIn(torch.ops.aten.add_.Tensor, ops)
 
+    def test_default_aliasing_op_decomposition_uses_functionalization(self):
+        fw_graphs = []
+
+        def fw_compiler(gm, _):
+            fw_graphs.append(gm)
+            return gm.forward
+
+        def f(x):
+            return x.unsqueeze(0)
+
+        inp = torch.randn(2, 3)
+        compiled_f = aot_function(
+            f,
+            fw_compiler=fw_compiler,
+            decompositions=decomposition_table,
+        )
+
+        self.assertEqual(compiled_f(inp), f(inp))
+        self.assertEqual(len(fw_graphs), 1)
+
+        ops = {
+            node.target
+            for node in fw_graphs[0].graph.nodes
+            if node.op == "call_function"
+        }
+        self.assertIn(torch.ops.aten.unsqueeze.default, ops)
+        self.assertNotIn(torch.ops.prims.broadcast_in_dim.default, ops)
+
     def test_nested_aliasing_op_decomposition_does_not_escape_functionalization(self):
         fw_graphs = []
 
@@ -11641,10 +11681,6 @@ if not TEST_MKL:
     )
 
 symbolic_aot_autograd_failures = {
-    xfail("combinations", ""),  # aten.masked_select.default
-    xfail(
-        "index_fill", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "linalg.lstsq", ""
     ),  # aten.linalg_lstsq.default - couldn't find symbolic meta function/decomposition
