@@ -324,12 +324,16 @@ class MPSHeapAllocatorImpl {
   }
   // (see m_total_allocated_memory for description)
   size_t getTotalAllocatedMemory() const {
-    return m_total_allocated_memory;
+    return m_total_allocated_memory.current;
   }
   // (see m_current_allocated_memory for description)
   size_t getCurrentAllocatedMemory() const {
-    return m_current_allocated_memory;
+    return m_current_allocated_memory.current;
   }
+  // snapshot of memory stats for the generic torch.accelerator memory APIs
+  c10::CachingDeviceAllocator::DeviceStats getDeviceStats();
+  void resetAccumulatedStats();
+  void resetPeakStats();
   // total GPU memory allocated in the process by Metal driver; including
   // implicit allocations from MPS/MPSGraph frameworks and MPSHeapAllocatorImpl.
   size_t getDriverAllocatedMemory() const {
@@ -366,10 +370,12 @@ class MPSHeapAllocatorImpl {
   ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers;
   // using a container for pools to simplify iterating them
   ska::flat_hash_map<BufferPool::Kind, std::unique_ptr<BufferPool>> m_pools;
-  // total memory allocated by HeapAllocator (including blocks in pools)
-  size_t m_total_allocated_memory = 0;
-  // currently active memory allocations in use (i.e., blocks not in pools)
-  size_t m_current_allocated_memory = 0;
+  // total memory allocated by HeapAllocator (including blocks in pools);
+  // tracked as a Stat to expose current/peak/accumulated reserved bytes
+  c10::CachingAllocator::Stat m_total_allocated_memory;
+  // currently active memory allocations in use (i.e., blocks not in pools);
+  // tracked as a Stat to expose current/peak/accumulated allocated bytes
+  c10::CachingAllocator::Stat m_current_allocated_memory;
   // max buffer size allowed by Metal
   size_t m_max_buffer_size = 0;
   // maximum total size allowed to be allocated
