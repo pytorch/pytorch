@@ -54,6 +54,7 @@ from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
     DeviceProperties,
+    get_warp_size,
     native_matmul_persistent_rblock,
     ReductionHint,
     TRITON_MAX_BLOCK,
@@ -2124,7 +2125,22 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def rand(seed, offset):
         offset = f"({offset}).to(tl.uint32)"
+        if TritonOverrides._can_use_4x_random():
+            (block,) = V.kernel.dense_size_list()
+            return f"triton_helpers.rand4x({seed}, {offset}, {block})"
         return f"tl.rand({seed}, {offset})"
+
+    @staticmethod
+    def _can_use_4x_random():
+        return (
+            isinstance(V.kernel, TritonKernel)
+            and not isinstance(
+                V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel
+            )
+            and V.graph.get_current_device_or_throw().type == "cuda"
+            and V.kernel.triton_tensor_ndim() == 1
+            and not config.align_random_eager
+        )
 
     @staticmethod
     def rand_eager(seed, base_offset, threads_per_round, tid, vec):
@@ -2139,6 +2155,9 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def randn(seed, offset):
         offset = f"({offset}).to(tl.uint32)"
+        if TritonOverrides._can_use_4x_random():
+            (block,) = V.kernel.dense_size_list()
+            return f"triton_helpers.randn4x({seed}, {offset}, {block})"
         return f"tl.randn({seed}, {offset})"
 
     @staticmethod
@@ -6954,7 +6973,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # faults on AMD hardware.  Keep the dynamic mask so that all
             # hardware stays correct.
             device = V.graph.get_current_device_or_throw()
-            warp_size = DeviceProperties.create(device).warp_size or 32
+            warp_size = get_warp_size(device)
             if isinstance(max_block, int) and max_block < warp_size:
                 return False
         elif tree.prefix == "x" and self.no_x_dim:
@@ -7199,7 +7218,16 @@ class FusedUserDefinedTritonKernel(TritonKernel):
         if name == self.scheduler_node.fused_epilogue.node.get_name():
             # when the fused epilogue nodes tries to store to its destination buffer
             # we remember this expr and then later replace it into the `tl.store` call of the original kernel
-            self.new_store_cse_var = value
+            layout = self.scheduler_node.fused_epilogue.node.layout
+            if not isinstance(layout, ir.Layout):
+                raise AssertionError(f"expected ir.Layout, got {type(layout)}")
+            store_dtype = layout.dtype
+            self.new_store_cse_var = self.cse.generate(
+                self.compute,
+                f"{value}.to({triton_store_type(store_dtype)})",
+                dtype=store_dtype,
+                shape=value.shape,
+            )
         else:
             super().store(name, index, value, mode)
 
