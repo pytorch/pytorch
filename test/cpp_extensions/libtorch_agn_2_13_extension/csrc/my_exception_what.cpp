@@ -3,11 +3,10 @@
 
 #include <string>
 
-// Direct calls to the 2.13 exception getter shims. Unlike
+// Direct calls to the 2.13 exception getter shims. Also tested in
 // our_subtract_stable_error_check (in the 2.10 extension, which reaches these
 // shims dynamically via TORCH_DYNAMIC_VERSION_CALL when built at an older
-// target), these call the shims directly and so can only live in the 2.13
-// extension.
+// target).
 std::string my_exception_what() {
   return std::string(torch_exception_get_what());
 }

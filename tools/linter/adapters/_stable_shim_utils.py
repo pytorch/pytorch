@@ -164,11 +164,11 @@ def dynamic_call_parser(buffer: str, current_version: tuple[int, int, int] | Non
         )
     major, minor, patch = res[0][0:3]
     dynamic_version = (int(major), int(minor), int(patch))
-    fallback_identifier = res[0][3]
-    dynamic_lookup_identifier = res[0][4]
+    dynamic_lookup_identifier = res[0][3]
+    fallback_identifier = res[0][4]
     return [
-        IdentifierUse(fallback_identifier, version=current_version),
         IdentifierUse(dynamic_lookup_identifier, version=dynamic_version),
+        IdentifierUse(fallback_identifier, version=current_version),
     ]
 
 

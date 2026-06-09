@@ -250,24 +250,24 @@ class TestStableShimUtils(unittest.TestCase):
 
         sample = """
         const auto& error_msg = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
-            torch_shim_bc_const_char_ptr, torch_exception_get_what);
+            torch_exception_get_what, torch_shim_bc_const_char_ptr);
 
         const auto& error_msg = TORCH_DYNAMIC_VERSION_CALL_2_10_0(
-            super_old_fallback, something_from_2_10);
+            something_from_2_10, super_old_fallback);
         """
 
         expected = {
             3: [
                 IdentifierUse(
-                    identifier="torch_shim_bc_const_char_ptr", version=(2, 13, 7)
+                    identifier="torch_exception_get_what", version=(2, 13, 0)
                 ),
                 IdentifierUse(
-                    identifier="torch_exception_get_what", version=(2, 13, 0)
+                    identifier="torch_shim_bc_const_char_ptr", version=(2, 13, 7)
                 ),
             ],
             6: [
-                IdentifierUse(identifier="super_old_fallback", version=(2, 13, 7)),
                 IdentifierUse(identifier="something_from_2_10", version=(2, 10, 0)),
+                IdentifierUse(identifier="super_old_fallback", version=(2, 13, 7)),
             ],
         }
         result = {}
@@ -282,28 +282,28 @@ class TestStableShimUtils(unittest.TestCase):
     def test_dynamic_version_call_with_trailing_args(self):
         """
         The dynamic version call macro is variadic: it forwards trailing args to
-        the shim/fallback. The parser must still pick out only the fallback and
-        shim identifiers, even when those trailing args contain commas or nested
-        parens.
+        the shim/fallback. The parser must still pick out only the shim and
+        fallback identifiers, even when those trailing args contain commas or
+        nested parens.
         """
         matcher = MatcherAccumulator([DYNAMIC_VERSION_CALL_IDENTIFIER_MATCHER])
         matcher.set_scope_version((2, 13, 0))
 
         sample = """
         auto a = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
-            bc_with_args, shim_with_args, self.get(), other.get(), alpha);
+            shim_with_args, bc_with_args, self.get(), other.get(), alpha);
 
-        auto b = TORCH_DYNAMIC_VERSION_CALL_2_10_0(no_args_fallback, no_args_shim);
+        auto b = TORCH_DYNAMIC_VERSION_CALL_2_10_0(no_args_shim, no_args_fallback);
         """
 
         expected = {
             3: [
-                IdentifierUse(identifier="bc_with_args", version=(2, 13, 0)),
                 IdentifierUse(identifier="shim_with_args", version=(2, 13, 0)),
+                IdentifierUse(identifier="bc_with_args", version=(2, 13, 0)),
             ],
             5: [
-                IdentifierUse(identifier="no_args_fallback", version=(2, 13, 0)),
                 IdentifierUse(identifier="no_args_shim", version=(2, 10, 0)),
+                IdentifierUse(identifier="no_args_fallback", version=(2, 13, 0)),
             ],
         }
         result = {}

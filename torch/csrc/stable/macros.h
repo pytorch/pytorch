@@ -94,7 +94,7 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
 // FALLBACK_FUNCTION, which must therefore share SHIM_FUNCTION's exact signature
 // (including arguments).
 #define TORCH_DYNAMIC_VERSION_CALL(                                    \
-    VERSION_SHIM_PRESENT, FALLBACK_FUNCTION, SHIM_FUNCTION, ...)       \
+    VERSION_SHIM_PRESENT, SHIM_FUNCTION, FALLBACK_FUNCTION, ...)       \
   ([&]() {                                                             \
     if (aoti_torch_abi_version() >= (VERSION_SHIM_PRESENT)) {          \
       void* fn_ptr =                                                   \
@@ -114,14 +114,14 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
 #if TORCH_TARGET_VERSION >= TORCH_VERSION_2_13_0
 // Target version already includes the shim, call it directly.
 #define TORCH_DYNAMIC_VERSION_CALL_2_13_0( \
-    FALLBACK_FUNCTION, SHIM_FUNCTION, ...) \
+    SHIM_FUNCTION, FALLBACK_FUNCTION, ...) \
   ([&]() { return SHIM_FUNCTION(__VA_ARGS__); })()
 #else
 // Target version predates the shim, try a dynamic lookup.
 #define TORCH_DYNAMIC_VERSION_CALL_2_13_0( \
-    FALLBACK_FUNCTION, SHIM_FUNCTION, ...) \
+    SHIM_FUNCTION, FALLBACK_FUNCTION, ...) \
   TORCH_DYNAMIC_VERSION_CALL(              \
-      TORCH_VERSION_2_13_0, FALLBACK_FUNCTION, SHIM_FUNCTION, __VA_ARGS__)
+      TORCH_VERSION_2_13_0, SHIM_FUNCTION, FALLBACK_FUNCTION, __VA_ARGS__)
 #endif
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
@@ -131,7 +131,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
     int64_t line) {
   std::stringstream ss;
   const auto& error_msg_without = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
-      torch_shim_bc_const_char_ptr, torch_exception_get_what_without_backtrace);
+      torch_exception_get_what_without_backtrace, torch_shim_bc_const_char_ptr);
   if (error_msg_without) {
     ss << error_msg_without;
     ss << " (originally from " << call << " API call failed at " << file
@@ -141,7 +141,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
   }
 
   const auto& error_msg = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
-      torch_shim_bc_const_char_ptr, torch_exception_get_what);
+      torch_exception_get_what, torch_shim_bc_const_char_ptr);
   if (error_msg) {
     std::time_t t = std::time(nullptr);
     std::tm tm = *std::localtime(&t);
