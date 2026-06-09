@@ -128,9 +128,9 @@ def fork_rng(
             argument for easily disabling the context manager without having
             to delete it and unindent your Python code under it.
         device_type (str | None): device type string, default is ``None``.
-            If ``None`` and an accelerator is available, the current
-            :ref:`accelerator<accelerators>` is used; otherwise only the CPU
-            RNG state is forked.
+            If ``None`` and an accelerator is available, both CPU and
+            accelerator RNG states are forked; if no accelerator is available,
+            only the CPU RNG state is forked.
             If ``"meta"``, the context manager is a no-op.
             If ``"cpu"``, only the CPU RNG state is forked.
             Otherwise, the value must match the current accelerator or a
@@ -155,7 +155,7 @@ def fork_rng(
             torch.set_rng_state(cpu_rng_state)
         return
 
-    if device_type != acc.type:
+    if device_type is not None and device_type != acc.type:
         raise ValueError(
             f"Device type '{device_type}' doesn't match the current "
             f"accelerator '{acc.type}'."
