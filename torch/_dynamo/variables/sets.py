@@ -31,7 +31,7 @@ from ..utils import (
     _item_debug_repr,
     cmp_name_to_op_mapping,
     istype,
-    lazily_unpack_and_apply_fn,
+    lazily_unpack,
     raise_args_mismatch,
     set_methods,
     tracked_repr,
@@ -272,9 +272,7 @@ class SetVariable(VariableTracker):
             yield from other.items.keys()
             return
 
-        yield from lazily_unpack_and_apply_fn(
-            tx, other, lambda item: HashableTracker(item)
-        )
+        yield from (HashableTracker(item) for item in lazily_unpack(tx, other))
 
     def _operand_keys(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
