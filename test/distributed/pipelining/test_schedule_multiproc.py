@@ -4,7 +4,13 @@ import copy
 import logging
 from dataclasses import dataclass
 
-from model_registry import ModelWithKwargs, MultiMLP, MultiMLPKwargs, MultiMLPWithDw
+from model_registry import (
+    ConditionalGradStack,
+    ModelWithKwargs,
+    MultiMLP,
+    MultiMLPKwargs,
+    MultiMLPWithDw,
+)
 from schedule_registry import (
     ScheduleUnbalanced,
     ScheduleVShaped,
@@ -55,6 +61,8 @@ logger = logging.getLogger(__name__)
 
 d_hid = 512
 batch_size = 64
+none_grad_d_hid = 32
+none_grad_microbatches = 8
 torch.manual_seed(0)
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = dist.get_default_backend_for_device(device_type)
@@ -206,6 +214,43 @@ def zero_gradients(stage_modules):
         stage_modules = [stage_modules]
     for stage_module in stage_modules:
         stage_module.zero_grad()
+
+
+def none_grad_loss(output, target):
+    return torch.nn.functional.mse_loss(output[0], target, reduction="sum")
+
+
+def make_none_grad_flags(pattern: str, device: torch.device) -> torch.Tensor:
+    values = [False] + [True] * (none_grad_microbatches - 1)
+    if pattern == "first_true_then_false":
+        values = [True] + [False] * (none_grad_microbatches - 1)
+    chunk = batch_size // none_grad_microbatches
+    return torch.cat(
+        [
+            torch.full((chunk, 1), value, dtype=torch.bool, device=device)
+            for value in values
+        ]
+    )
+
+
+def setup_none_grad_model_and_data(config: PipelineTestConfig, n_layers: int):
+    torch.manual_seed(0)
+    mod = ConditionalGradStack(none_grad_d_hid, n_layers).to(config.device)
+    ref_mod = copy.deepcopy(mod)
+    x = torch.randn(batch_size, none_grad_d_hid, device=config.device)
+    target = torch.randn(batch_size, none_grad_d_hid, device=config.device)
+    return mod, ref_mod, x, target
+
+
+def run_none_grad_reference(ref_mod, x, flag, target) -> None:
+    ref_mod.zero_grad()
+    for x_mb, flag_mb, target_mb in zip(
+        torch.tensor_split(x, none_grad_microbatches),
+        torch.tensor_split(flag, none_grad_microbatches),
+        torch.tensor_split(target, none_grad_microbatches),
+        strict=True,
+    ):
+        none_grad_loss(ref_mod(x_mb, flag_mb), target_mb).backward()
 
 
 class ScheduleTest(MultiProcContinuousTest):
@@ -1057,6 +1102,69 @@ class ScheduleTest(MultiProcContinuousTest):
         check_gradients(
             self.config, stage_modules, ref_mod, submod_names, rtol=3e-5, atol=5e-3
         )
+
+    def _none_grad_stage_indices(self, ScheduleClass):
+        if ScheduleClass is ScheduleGPipe:
+            return self.world_size, [self.rank]
+        n_stages = 2 * self.world_size
+        if ScheduleClass is ScheduleZBVZeroBubble:
+            return n_stages, [self.rank, n_stages - 1 - self.rank]
+        return n_stages, [self.rank, self.rank + self.world_size]
+
+    def _run_none_grad_schedule(self, ScheduleClass, pattern):
+        n_stages, stage_indices = self._none_grad_stage_indices(ScheduleClass)
+        mod, ref_mod, x, target = setup_none_grad_model_and_data(self.config, n_stages)
+        flag = make_none_grad_flags(pattern, self.device)
+        run_none_grad_reference(ref_mod, x, flag, target)
+
+        stages, stage_modules, submod_names = create_multi_stage_pipeline(
+            self.config, mod, len(stage_indices), n_stages, stage_indices
+        )
+        schedule = (
+            ScheduleClass(
+                stages[0],
+                none_grad_microbatches,
+                loss_fn=none_grad_loss,
+                scale_grads=False,
+            )
+            if ScheduleClass is ScheduleGPipe
+            else ScheduleClass(
+                stages,
+                none_grad_microbatches,
+                loss_fn=none_grad_loss,
+                scale_grads=False,
+            )
+        )
+
+        losses = []
+        has_first = any(stage.is_first for stage in stages)
+        has_last = any(stage.is_last for stage in stages)
+        if has_first and has_last:
+            schedule.step(x, flag, target=target, losses=losses)
+        elif has_first:
+            schedule.step(x, flag)
+        elif has_last:
+            schedule.step(target=target, losses=losses)
+        else:
+            schedule.step()
+
+        dist.barrier()
+        check_gradients(
+            self.config, stage_modules, ref_mod, submod_names, rtol=1e-5, atol=1e-5
+        )
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleGPipe, ScheduleInterleaved1F1B, ScheduleZBVZeroBubble],
+    )
+    @parametrize("pattern", ["first_false_then_true", "first_true_then_false"])
+    @skip_if_lt_x_gpu(4)
+    def test_NoneGrad_conditional_input_grad(self, ScheduleClass, pattern):
+        self._run_none_grad_schedule(ScheduleClass, pattern)
 
 
 instantiate_parametrized_tests(ScheduleTest)
