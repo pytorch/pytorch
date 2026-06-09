@@ -3732,7 +3732,7 @@ class SIMDScheduling(BaseScheduling):
                         configs, probe_kernel = self._probe_subkernel_heuristic(
                             node_schedule_map[pn]
                         )
-                        if torch.version.hip:
+                        if torch.version.hip or V.graph.device_type == "xpu":
                             fuse_ok = configs and not probe_kernel.autotune_hints
                         else:
                             fuse_ok = configs and len(configs) <= 2
