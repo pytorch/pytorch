@@ -186,6 +186,7 @@ class DummyContextManager:
         self.input.append(-1)
 
 
+@torch._dynamo.config.patch(nested_graph_breaks=False)
 class TestModuleHooks(TestCase):
     @parametrize_test("named_tuple", (True, False))
     def test_forward_hooks(self, named_tuple):
@@ -1254,6 +1255,7 @@ class TestModuleGlobalHooks(TestCase):
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
 
+@torch._dynamo.config.patch(nested_graph_breaks=False)
 class TestModuleHookNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -1344,7 +1346,6 @@ class TestModuleHookNN(NNTestCase):
         test_fwd.remove()
         test_bwd.remove()
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_hooks(self):
         self._test_hooks("register_backward_hook")
         self._test_hooks("register_full_backward_hook")
