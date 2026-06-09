@@ -191,6 +191,29 @@ sycl::event convolution_backward_weights(
   // create dnnl::memory desc
   auto [src_md, weight_md, dst_md] =
       conv_get_md(src, diff_weight, diff_dst, groups, is_channels_last);
+
+  // Use fp32 intermediate buffer for backward weight computation
+  // when diff_weight is fp16/bf16 to improve numerical determinism
+  // across different batch sizes.
+  // oneDNN's jit:ir convolution_backward_weights generates different
+  // reduction trees for different mb values, causing divergence in
+  // the weight gradient even when the math is identical.
+  // Computing the weight gradient in fp32 and then casting to fp16
+  // reduces the batch-size-dependent differences by ~1000x.
+  at::Tensor diff_weight_buf = diff_weight;
+  dnnl::memory::desc weight_md_buf = weight_md;
+  bool use_fp32_intermediate =
+      (diff_weight.scalar_type() == at::kHalf ||
+       diff_weight.scalar_type() == at::kBFloat16);
+  if (use_fp32_intermediate) {
+    diff_weight_buf = at::empty(
+        diff_weight.sizes(),
+        diff_weight.options().dtype(at::kFloat));
+    auto [_, weight_md_f32, __] =
+        conv_get_md(src, diff_weight_buf, diff_dst, groups, is_channels_last);
+    weight_md_buf = weight_md_f32;
+  }
+
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
   auto bia_md = diff_bia.defined()
       ? dnnl::memory::desc({diff_dst.size(1)}, src_md.get_data_type(), bia_fmt)
@@ -233,7 +256,7 @@ sycl::event convolution_backward_weights(
       engine,
       dnnl::algorithm::convolution_direct,
       src_md,
-      weight_md,
+      weight_md_buf,
       bia_md,
       dst_md,
       _stride,
@@ -249,7 +272,8 @@ sycl::event convolution_backward_weights(
 
   src_m = make_onednn_memory(src_md, engine, src.data_ptr());
   diff_dst_m = make_onednn_memory(dst_md, engine, diff_dst.data_ptr());
-  diff_weight_m = make_onednn_memory(weight_md, engine, diff_weight.data_ptr());
+  diff_weight_m =
+      make_onednn_memory(weight_md_buf, engine, diff_weight_buf.data_ptr());
 
   // insert args
   std::unordered_map<int, dnnl::memory> args;
@@ -275,6 +299,13 @@ sycl::event convolution_backward_weights(
   auto conv_bwd_w = dnnl::convolution_backward_weights(conv_bwd_w_pd);
   sycl::event conv_bwd_w_event =
       dnnl::sycl_interop::execute(conv_bwd_w, stream, args, deps);
+
+  // If we used an fp32 intermediate buffer, wait for the primitive
+  // to finish and then copy back to the fp16 diff_weight tensor.
+  if (use_fp32_intermediate) {
+    conv_bwd_w_event.wait();
+    diff_weight.copy_(diff_weight_buf);
+  }
 
   return conv_bwd_w_event;
 }
