@@ -15174,7 +15174,9 @@ fn
 
         outer = Outer()
 
-        @torch.compile(backend="eager", fullgraph=True)
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
         def fn(t):
             class Wrapper:
                 def __init__(self, t):
@@ -15188,6 +15190,14 @@ fn
 
         t = torch.randn(2)
         self.assertEqual(fn(t), t.sin() * outer.scale)
+        # Same value: the EQUALS_MATCH guard on outer.scale holds, no recompile.
+        self.assertEqual(fn(t), t.sin() * outer.scale)
+        self.assertEqual(cnt.frame_count, 1)
+        # Mutating the closed-over non-constant trips the guard -> recompile with
+        # the new value (proves scale is guarded, not baked in as a constant).
+        outer.scale = 5
+        self.assertEqual(fn(t), t.sin() * outer.scale)
+        self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_build_class_closure_over_nonconstant_method(self):
@@ -15200,7 +15210,9 @@ fn
 
         outer = Outer()
 
-        @torch.compile(backend="eager", fullgraph=True)
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
         def fn(t):
             class Wrapper:
                 def keys(self):
@@ -15210,6 +15222,12 @@ fn
 
         t = torch.randn(2)
         self.assertEqual(fn(t), outer.get_scale() + t.sum())
+        self.assertEqual(fn(t), outer.get_scale() + t.sum())
+        self.assertEqual(cnt.frame_count, 1)
+        # Mutating the closed-over value re-guards and recompiles.
+        outer.scale = 7
+        self.assertEqual(fn(t), outer.get_scale() + t.sum())
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_dunder_weakref(self):
         class Foo:
