@@ -7,7 +7,9 @@
 #include <sstream>
 #include <stdexcept>
 
-#ifndef _WIN32
+#if defined(_WIN32)
+#include <windows.h>
+#else
 #include <dlfcn.h>
 #endif
 
@@ -38,54 +40,84 @@
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
-// Fallback for functions that produce const char* types, returns a nullptr.
-[[maybe_unused]] static const char* torch_shim_bc_const_char_ptr(...) {
+// Look up a symbol already loaded in the current process. Used to reach
+// stable-ABI shims that were added after the extension's TORCH_TARGET_VERSION
+// when the running libtorch is new enough to provide them. Returns nullptr if
+// the symbol is absent or the platform has no in-process dynamic lookup. This
+// is the single place that holds the per-platform lookup; the macros below are
+// platform agnostic.
+[[maybe_unused]] static void* lookup_stable_symbol(const char* name) {
+#if defined(C10_MOBILE)
+  (void)name;
+  return nullptr;
+#elif defined(_WIN32)
+  // Windows has no RTLD_DEFAULT equivalent, so resolve against the modules that
+  // export the stable shims. Today these live in torch_cpu.dll and
+  // torch_cuda.dll, so try each in turn. GetModuleHandleW does not take a
+  // reference on the returned handle.
+  const wchar_t* dlls[] = {L"torch_cpu.dll", L"torch_cuda.dll"};
+  for (const wchar_t* dll : dlls) {
+    HMODULE handle = GetModuleHandleW(dll);
+    if (handle != nullptr) {
+      void* sym = reinterpret_cast<void*>(GetProcAddress(handle, name));
+      if (sym != nullptr) {
+        return sym;
+      }
+    }
+  }
+  return nullptr;
+#else
+  return dlsym(RTLD_DEFAULT, name);
+#endif
+}
+
+// Fallback for the const char* exception getters, returns a nullptr. A fallback
+// MUST share the exact signature (return type and arguments) of the shim it
+// backs: the looked-up pointer is called through decltype(&FALLBACK_FUNCTION).
+[[maybe_unused]] static const char* torch_shim_bc_const_char_ptr() {
   return nullptr;
 }
 HIDDEN_NAMESPACE_END(torch, stable, detail)
 
-// This macro allows for an at-runtime lookup of a symbol, this is relatively
-// expensive and should only be done in exceptional circumstances, it only
-// supports platforms that have dlsym available.
+// IMPORTANT: this macro is intended for RARE, EXCEPTIONAL use only. It performs
+// an at-runtime symbol lookup (dlsym / GetProcAddress), which is relatively
+// expensive and only works on platforms that support dynamic symbol lookup.
+// Reach for it only when an older-target extension genuinely needs a newer shim
+// that would otherwise be unavailable (e.g. richer error messages); prefer
+// normal version-guarded shim calls everywhere else.
 //
-// We structure these macro's as immediately invoked lambda's to be able to
-// 'return' a value from the macro call.
+// Calls SHIM_FUNCTION via the runtime lookup when the running libtorch is at
+// least VERSION_SHIM_PRESENT, otherwise calls FALLBACK_FUNCTION.
 //
-// Return type is inferred from the return value of FALLBACK_FUNCTION.
-#if !defined(C10_MOBILE) && !defined(_WIN32)
+// We structure this macro as an immediately-invoked lambda so it can 'return' a
+// value from the macro call. The called pointer type is derived from
+// FALLBACK_FUNCTION, which must therefore share SHIM_FUNCTION's exact signature
+// (including arguments).
 #define TORCH_DYNAMIC_VERSION_CALL(                                    \
     VERSION_SHIM_PRESENT, FALLBACK_FUNCTION, SHIM_FUNCTION, ...)       \
-  ([]() {                                                              \
-    if (aoti_torch_abi_version() >= VERSION_SHIM_PRESENT) {            \
-      const auto fn_ptr = dlsym(RTLD_DEFAULT, #SHIM_FUNCTION);         \
-      if (fn_ptr) {                                                    \
+  ([&]() {                                                             \
+    if (aoti_torch_abi_version() >= (VERSION_SHIM_PRESENT)) {          \
+      void* fn_ptr =                                                   \
+          torch::stable::detail::lookup_stable_symbol(#SHIM_FUNCTION); \
+      if (fn_ptr != nullptr) {                                         \
         using FunctionType = decltype(&FALLBACK_FUNCTION);             \
-        const auto typed_ptr = reinterpret_cast<FunctionType>(fn_ptr); \
-        return (typed_ptr)(__VA_ARGS__);                               \
+        return reinterpret_cast<FunctionType>(fn_ptr)(__VA_ARGS__);    \
       }                                                                \
     }                                                                  \
     return FALLBACK_FUNCTION(__VA_ARGS__);                             \
   })()
-#else
-// On a platform without dlsym, so immediately call the fallback function.
-#define TORCH_DYNAMIC_VERSION_CALL(                              \
-    VERSION_SHIM_PRESENT, FALLBACK_FUNCTION, SHIM_FUNCTION, ...) \
-  ([]() { return FALLBACK_FUNCTION(__VA_ARGS__); })()
-#endif
 
-// Entry point for dynamic version calls that exist from 2.13.0 and onward.
-// Putting the version expectation in the macro ensures we can bypass the symbol
-// lookup if the target version exceeds the version in which this shim function
-// was added.
+// Entry point for dynamic version calls for shims added in 2.13.0. Putting the
+// version expectation in the macro lets us bypass the symbol lookup entirely
+// when the target version already includes the shim and call it directly;
+// otherwise we fall through to the runtime lookup.
 #if TORCH_TARGET_VERSION >= TORCH_VERSION_2_13_0
-// Target version is greater than version that added the method, we can call the
-// shim.
+// Target version already includes the shim, call it directly.
 #define TORCH_DYNAMIC_VERSION_CALL_2_13_0( \
     FALLBACK_FUNCTION, SHIM_FUNCTION, ...) \
-  ([]() { return SHIM_FUNCTION(__VA_ARGS__); })()
+  ([&]() { return SHIM_FUNCTION(__VA_ARGS__); })()
 #else
-// Target version is less than the version that added the shim, try a dynamic
-// lookup.
+// Target version predates the shim, try a dynamic lookup.
 #define TORCH_DYNAMIC_VERSION_CALL_2_13_0( \
     FALLBACK_FUNCTION, SHIM_FUNCTION, ...) \
   TORCH_DYNAMIC_VERSION_CALL(              \

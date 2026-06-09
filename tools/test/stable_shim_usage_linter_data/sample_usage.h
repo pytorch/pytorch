@@ -149,3 +149,10 @@ const auto& error_msg_without3 = TORCH_DYNAMIC_VERSION_CALL_2_11_0(
 const auto& error_msg_without4 = TORCH_DYNAMIC_VERSION_CALL_2_11_0(
     unversioned_function, function_2_13_2);
 #endif
+
+// Case 20: Incorrect even with trailing args; the target shim exceeds the dynamic
+// version call. Confirms trailing __VA_ARGS__ do not confuse identifier extraction.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_2
+const auto& with_trailing_args = TORCH_DYNAMIC_VERSION_CALL_2_11_0(
+    unversioned_function, function_2_13_2, some_arg, other_arg);
+#endif

@@ -155,7 +155,7 @@ MULTILINE_MATCHERS = [
 
 
 def dynamic_call_parser(buffer: str, current_version: tuple[int, int, int] | None):
-    pattern = r"TORCH_DYNAMIC_VERSION_CALL_(\d+)_(\d+)_(\d+)\(([^,]*),([^\)]*)\)"
+    pattern = r"TORCH_DYNAMIC_VERSION_CALL_(\d+)_(\d+)_(\d+)\(([^,]+),([^,\)]+)"
     buffer_without_space = buffer.replace(" ", "").replace("\n", "")
     res = re.findall(pattern, buffer_without_space)
     if not res:

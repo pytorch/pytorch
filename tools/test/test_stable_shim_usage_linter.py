@@ -157,6 +157,7 @@ class TestStableShimUsageLinter(unittest.TestCase):
         # Line 126: insufficient version (2.10) for NewOpaqueClass (needs 2.11)
         # Line 138: insufficient version (2.11) for fallback (needs 2.11)
         # Line 150: insufficient version (2.12.2) for target (needs 2.13.2)
+        # Line 157: insufficient version (2.11) for target (needs 2.13.2), with trailing args
 
         expected_errors = [
             (15, "unversioned-shim-call", "simple_versioned_func"),
@@ -174,6 +175,7 @@ class TestStableShimUsageLinter(unittest.TestCase):
             (126, "insufficient-version-for-shim-call", "NewOpaqueClass"),
             (138, "insufficient-version-for-shim-call", "function_2_12_1"),
             (150, "insufficient-version-for-shim-call", "function_2_13_2"),
+            (157, "insufficient-version-for-shim-call", "function_2_13_2"),
         ]
 
         self.assertEqual(

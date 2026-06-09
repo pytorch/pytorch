@@ -2108,6 +2108,51 @@ except RuntimeError as e:
             with_backtrace.count("\n") > 10
         )  # Conservative, backtrace is 25 lines.
 
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_dynamic_version_call_error_message(self, device):
+        """Exercise the dynamic version call (dlsym) path.
+
+        our_subtract_stable_error_check lives in the 2.10 extension, which
+        targets 2.10 -- older than the 2.13 torch_exception_get_what* shims that
+        STABLE_TORCH_ERROR_CODE_CHECK relies on. It therefore reaches them via
+        TORCH_DYNAMIC_VERSION_CALL (a runtime symbol lookup). When the running
+        libtorch is >= 2.13 the lookup succeeds and we get the detailed message;
+        against an older runtime it falls back to the simple call-site message.
+        """
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        # Mismatched shapes so the subtract errors.
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(1, 2, device=device)
+        self.assertRaises(RuntimeError, lambda: torch.subtract(a, b))
+
+        # The non-stable check always yields the simple call-site message.
+        simple_re = (
+            "aoti_torch_aten_subtract_Tensor\\(self.get\\(\\), other.get\\(\\), alpha, &ret0\\)"
+            " API call failed at .+?, line \\d+$"
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            simple_re,
+            lambda: libtorch_agnostic.ops.our_subtract_torch_error_check(a, b),
+        )
+
+        def make_exception_stable():
+            libtorch_agnostic.ops.our_subtract_stable_error_check(a, b)
+
+        if _torchVersionLessThan(2, 13):
+            # Runtime predates the shim: dlsym returns null, so we fall back to
+            # the same simple call-site message as the non-stable check.
+            self.assertRaisesRegex(RuntimeError, simple_re, make_exception_stable)
+        else:
+            # Runtime has the shim: the dynamic lookup succeeds and we get the
+            # detailed error retrieved across the C ABI boundary.
+            detailed_re = (
+                "^The size of tensor a \\(\\d\\) must match the size of "
+                "tensor b \\(\\d\\) at non-singleton dimension \\d.*"
+            )
+            self.assertRaisesRegex(RuntimeError, detailed_re, make_exception_stable)
+
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
