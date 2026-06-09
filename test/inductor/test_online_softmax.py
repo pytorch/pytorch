@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import functools
 import math
 import os
 
@@ -9,7 +10,7 @@ import torch.nn.functional as F
 from torch._dynamo.utils import rmse, same
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -20,6 +21,10 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_TRITON
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT") == "1" or DO_PERF_TEST
+
+
+def _must_save_policy(ctx, op, *args, **kwargs):
+    return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
 
 
 def _prepare_softmax(x, dim):
@@ -122,6 +127,65 @@ class TestOnlineSoftmax(TestCase):
         """
         wrapper_code = self.get_softmax_wrapper(1024)
         self.assertEqual(wrapper_code.count("for r0_offset in"), 0)
+
+    @inductor_config.patch(
+        {
+            "batch_invariant": False,
+            "deterministic": False,
+            "test_configs.force_filter_reduction_configs": False,
+        }
+    )
+    def test_checkpointed_softmax_uses_ac_stable_reduction_policy(self):
+        from torch.utils.checkpoint import (
+            checkpoint,
+            create_selective_checkpoint_contexts,
+        )
+
+        def block(x):
+            return torch.softmax(x, dim=-1)
+
+        def fn(x):
+            return checkpoint(block, x, use_reentrant=False)
+
+        x = torch.randn(16, 64, device=GPU_TYPE, requires_grad=True)
+        _, codes = run_fw_bw_and_get_code(lambda: torch.compile(fn, fullgraph=True)(x))
+
+        self.assertEqual(len(codes), 2)
+        for code in codes:
+            self.assertIn("softmax", code)
+            self.assertIn("'optimize_mem': False", code)
+            self.assertIn("'ac_stable_reduction': True", code)
+            self.assertIn("'force_filter_reduction_configs': True", code)
+            self.assertIn("'dynamic_scale_rblock': False", code)
+            self.assertIn("'disable_reduction_coordesc': True", code)
+
+        _, codes = run_and_get_code(lambda: torch.compile(block, fullgraph=True)(x))
+        self.assertEqual(len(codes), 1)
+        self.assertIn("softmax", codes[0])
+        self.assertNotIn("'ac_stable_reduction': True", codes[0])
+        self.assertNotIn("'force_filter_reduction_configs': True", codes[0])
+        self.assertNotIn("'dynamic_scale_rblock': False", codes[0])
+        self.assertNotIn("'disable_reduction_coordesc': True", codes[0])
+
+        def save_fn(x):
+            return checkpoint(
+                block,
+                x,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts, _must_save_policy
+                ),
+            )
+
+        x = torch.randn(16, 64, device=GPU_TYPE, requires_grad=True)
+        _, codes = run_fw_bw_and_get_code(
+            lambda: torch.compile(save_fn, fullgraph=True)(x)
+        )
+
+        self.assertGreater(len(codes), 0)
+        for code in codes:
+            self.assertNotIn("'ac_stable_reduction': True", code)
+            self.assertNotIn("'force_filter_reduction_configs': True", code)
 
     @inductor_config.patch("triton.persistent_reductions", False)
     def test_sdpa(self):

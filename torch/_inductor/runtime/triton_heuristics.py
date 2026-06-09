@@ -1897,12 +1897,17 @@ class CachingAutotuner(KernelInterface):
             HeuristicType.FIXED,
         ):
             return False
-        # Deterministic mode forbids tuning RBLOCK / num_warps for reductions
-        # because those knobs shift numerics.
-        if self.deterministic_mode and self.heuristic_type in (
+        reduction_heuristic = self.heuristic_type in (
             HeuristicType.REDUCTION,
             HeuristicType.PERSISTENT_REDUCTION,
             HeuristicType.SPLIT_SCAN,
+        )
+        # These knobs can shift reduction numerics by changing the tree.
+        if self.deterministic_mode and reduction_heuristic:
+            return False
+        if (
+            self.inductor_meta.get("disable_reduction_coordesc", False)
+            and reduction_heuristic
         ):
             return False
         return True
@@ -2129,8 +2134,10 @@ class CachingAutotuner(KernelInterface):
                 if len(self.launchers) > 1:
                     self.autotune_to_one_config(*args, **kwargs)
 
-        if self.inductor_meta.get("combo_tuning_groups") and not getattr(
-            self.launchers[0].config, "found_by_combo_autotune", False
+        if (
+            self.inductor_meta.get("combo_tuning_groups")
+            and not self.inductor_meta.get("disable_combo_kernel_autotune", False)
+            and not getattr(self.launchers[0].config, "found_by_combo_autotune", False)
         ):
             with dynamo_timed(
                 "CachingAutotuner.combo_sequential_autotune",
@@ -3571,6 +3578,10 @@ def _subkernel_fingerprint(combo_meta: dict[str, Any], i: int) -> tuple[Any, ...
         combo_meta.get(f"reduction_hint_{i}"),
         combo_meta.get(f"tile_hint_{i}"),
         sub_meta.get("add_persistent_rblock", False),
+        sub_meta.get("ac_stable_reduction", False),
+        sub_meta.get("force_filter_reduction_configs", False),
+        sub_meta.get("dynamic_scale_rblock"),
+        sub_meta.get("disable_reduction_coordesc", False),
         sub_meta.get("has_loadstore_with_contiguous_rdim"),
         tuple(sorted(tma.items())),
         tuple(sorted(tiling_scores.items())),

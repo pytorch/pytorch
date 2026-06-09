@@ -766,6 +766,16 @@ class ComboKernel(Kernel):
                 default=0,
             )
 
+        # Compute per-sub-kernel metadata before the outer combo metadata so AC
+        # reductions can apply the same stable strategy in the combined launch.
+        sub_metas = [sub.inductor_meta_per_kernel() for sub in self.sub_kernels]
+        optimize_mem = V.graph.is_inference or V.graph.is_backward
+        has_ac_stable_reduction = any(
+            m.get("ac_stable_reduction", False) for m in sub_metas
+        )
+        if has_ac_stable_reduction:
+            optimize_mem = False
+
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
             "combo_grid_meta": self.combo_grid_meta(size_hints_list),
@@ -774,14 +784,18 @@ class ComboKernel(Kernel):
             # Matches triton.py:codegen_kernel(): inference/backward graphs skip
             # CPU-copy of mutated args during autotune retries; training-forward
             # graphs must keep it to preserve benchmark inputs across retries.
-            "optimize_mem": V.graph.is_inference or V.graph.is_backward,
+            "optimize_mem": optimize_mem,
             **self.triton_kernel_cls.inductor_meta_common(),
         }
+        if has_ac_stable_reduction:
+            inductor_meta["ac_stable_reduction"] = True
+            inductor_meta["dynamic_scale_rblock"] = False
+            inductor_meta["disable_reduction_coordesc"] = True
+            inductor_meta["disable_combo_kernel_autotune"] = True
         if max_persistent_rblock > 0:
             inductor_meta["max_persistent_rblock"] = max_persistent_rblock
 
         # Sum per-sub-kernel bandwidth / FLOP estimates for the combo launch.
-        sub_metas = [sub.inductor_meta_per_kernel() for sub in self.sub_kernels]
         self._kernel_num_gb = sum(m.get("kernel_num_gb") or 0 for m in sub_metas)
         if config.benchmark_kernel or config.profile_bandwidth:
             inductor_meta["kernel_num_gb"] = self._kernel_num_gb
