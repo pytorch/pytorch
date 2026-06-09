@@ -5,7 +5,6 @@
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 
-#include <ATen/Context.h>
 #include <ATen/accelerator/Graph.h>
 #include <ATen/core/Generator.h>
 #include <optional>
@@ -115,12 +114,8 @@ TORCH_API inline std::pair<size_t, size_t> getMemoryInfo(
   return at::getDeviceAllocator(device_type)->getMemoryInfo(device_index);
 }
 
-inline const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) {
-  const auto device_type = getAccelerator(true).value();
-  return at::globalContext()
-      .getAcceleratorHooksInterface(device_type)
-      .getDefaultGenerator(device_index);
-}
+TORCH_API const at::Generator& getDefaultGenerator(
+    c10::DeviceIndex device_index);
 
 } // namespace at::accelerator
 
