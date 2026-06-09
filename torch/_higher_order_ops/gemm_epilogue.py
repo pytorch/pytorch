@@ -684,6 +684,8 @@ def _match_quack_local_n_amax_scale_view(
     if aux_view is None:
         return None
     extra_skip_nodes.add(aux_view.node)
+    if isinstance(aux_view.base, torch.fx.Node):
+        extra_skip_nodes.add(aux_view.base)
     scaled = _split_quack_scalar_scale(aux_view.base)
     if scaled is None:
         return None

@@ -114,9 +114,10 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
             )
         else:
             call_args = [input_args[1], input_args[2]]
+            out_dtype_kwargs = "" if qtb.out_dtype is None else f", out_dtype={qtb.out_dtype!r}"
             call_kwargs = (
                 f", C={input_args[0]}, alpha={qtb.alpha!r}, beta={qtb.beta!r}"
-                f"{epilogue_kwargs}{local_reduce_kwargs}"
+                f"{out_dtype_kwargs}{epilogue_kwargs}{local_reduce_kwargs}"
             )
         wrapper.writeline(
             f"{qtb.get_name()} = gemm_epilogue("
