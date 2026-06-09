@@ -23,7 +23,6 @@ import tempfile
 import textwrap
 import time
 import unittest
-import warnings
 from collections.abc import (
     Callable,
     Collection,
@@ -62,6 +61,7 @@ from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
+from torch.utils._triton import has_triton_package
 
 
 OPTIMUS_EXCLUDE_POST_GRAD = [
@@ -122,6 +122,7 @@ from torch.utils._sympy.functions import (
     CleanDiv,
     FloorDiv,
     Identity,
+    Max,
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -193,7 +194,7 @@ def _align(nbytes: int) -> int:
 
 def _is_aligned(v: sympy.Expr) -> bool:
     """v can be statically proven to be a multiple of ALIGN_BYTES"""
-    if isinstance(v, (sympy.Add, sympy.Max)):
+    if isinstance(v, (sympy.Add, sympy.Max, Max)):
         return all(map(_is_aligned, v.args))
     return isinstance(v, align) or sympy.gcd(v, ALIGN_BYTES) == ALIGN_BYTES
 
@@ -321,9 +322,13 @@ def do_bench_using_profiling(
     # to torch._inductor.runtime.benchmarking and change all the call site.
     # But that's not trivial due to so many call sites in and out of pytorch.
 
-    from torch._inductor.runtime.benchmarking import may_distort_benchmarking_result
+    from torch._inductor.runtime.benchmarking import (
+        gpu_benchmark_lock,
+        may_distort_benchmarking_result,
+    )
 
-    return may_distort_benchmarking_result(_do_bench_using_profiling)(
+    locked_bench = gpu_benchmark_lock(_do_bench_using_profiling)
+    return may_distort_benchmarking_result(locked_bench)(
         fn, warmup, rep, is_vetted_benchmarking
     )
 
@@ -1950,6 +1955,15 @@ def using_b200() -> bool:
     return device_properties.major == 10
 
 
+def is_nvidia_sm100_or_later() -> bool:
+    """Return true for NVIDIA CUDA devices with compute capability SM100+."""
+    return (
+        torch.cuda.is_available()
+        and torch.version.hip is None
+        and torch.cuda.get_device_capability() >= (10, 0)
+    )
+
+
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
@@ -2400,21 +2414,6 @@ def use_blackwell_cutedsl_grouped_mm(
 
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
-
-    # TODO: Enable CUTLASS in non-AOT cpp_wrapper mode. The CUTLASS
-    # codegen (CUDATemplateKernel.call_kernel) already has cpp_wrapper-aware
-    # arg handling, but the other half is missing: the non-triton branch of
-    # CppWrapperGpu._generate_kernel_call_helper unconditionally emits
-    # `kernels.<name>(...)`, and that AOTInductorModelKernels struct only
-    # exists in AOT mode. Fixing this requires adding dlopen/dlsym loading
-    # for the compiled CUTLASS .so, similar to how the triton branch uses
-    # static CUfunction + loadKernel for non-AOT mode.
-    if V.graph.cpp_wrapper and not V.graph.aot_mode:
-        warnings.warn(
-            "CUTLASS backend is not supported with non-AOT cpp_wrapper mode. "
-            "Skipping CUTLASS backend.",
-        )
-        return False
 
     gemm_size = V.graph.sizevars.optimization_hint(m * n * k, fallback=-1)
     if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:
@@ -3176,9 +3175,11 @@ def get_gpu_shared_memory() -> int:
 
 def get_max_numwarps() -> int:
     if torch.cuda.is_available():
-        warp_size = torch.cuda.get_device_properties().warp_size
-        # pyrefly: ignore [missing-attribute]
-        max_threads_per_block = torch.cuda.get_device_properties().max_threads_per_block
+        device = torch.device("cuda", torch.cuda.current_device())
+        props = DeviceProperties.create(device)
+        warp_size = props.warp_size_or_default
+        max_threads_per_block = props.max_threads_per_block
+        assert max_threads_per_block is not None
     else:
         # Defaults
         warp_size = 32
@@ -3193,7 +3194,11 @@ def is_welford_reduction(reduction_type: str) -> bool:
 def reduction_num_outputs(reduction_type: str) -> int:
     if is_welford_reduction(reduction_type):
         return 3
-    elif reduction_type == "online_softmax_reduce":
+    elif reduction_type in (
+        "argmax_with_value",
+        "argmin_with_value",
+        "online_softmax_reduce",
+    ):
         return 2
     else:
         return 1
@@ -3540,6 +3545,81 @@ def is_gpu(device: str | None) -> bool:
 def is_rocm() -> bool:
     """Check if we're running on ROCm/HIP platform."""
     return torch.version.hip is not None
+
+
+@functools.lru_cache(None)
+def _triton_supported_fp8_dtypes(
+    backend_name: str, arch: int | str, warp_size: int
+) -> tuple[str, ...] | None:
+    if not has_triton_package():
+        return None
+
+    try:
+        from triton.backends.compiler import GPUTarget
+        from triton.compiler.compiler import make_backend
+
+        # This is the same option Triton checks when lowering tl.float8* types.
+        target = GPUTarget(backend_name, arch, warp_size)
+        options = make_backend(target).parse_options({})
+    except (AttributeError, ImportError, KeyError, TypeError):
+        return None
+
+    supported_fp8_dtypes = getattr(options, "supported_fp8_dtypes", None)
+    if supported_fp8_dtypes is None:
+        return None
+    return tuple(supported_fp8_dtypes)
+
+
+def is_triton_fp8_dtype_supported(
+    dtype: torch.dtype,
+    device: torch.device | str | None = None,
+    *,
+    triton_backend: str | None = None,
+    triton_arch: int | str | None = None,
+    warp_size: int | None = None,
+) -> bool:
+    if dtype not in (
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2fnuz,
+    ):
+        return True
+
+    triton_dtype = _type_of(dtype).removeprefix("*")
+
+    if triton_backend is None:
+        if device is None:
+            return True
+        device = torch.device(device)
+        if device.type != "cuda":
+            return True
+        if not torch.cuda.is_available():
+            return True
+
+        device_index = device.index
+        if device_index is None:
+            device_index = torch.cuda.current_device()
+        properties = torch.cuda.get_device_properties(device_index)
+        if is_rocm():
+            triton_backend = "hip"
+            triton_arch = properties.gcnArchName.split(":")[0]
+        else:
+            triton_backend = "cuda"
+            triton_arch = properties.major * 10 + properties.minor
+        warp_size = getattr(properties, "warp_size", None)
+
+    if triton_arch is None:
+        raise ValueError("triton_arch must be provided with triton_backend")
+    if warp_size is None:
+        warp_size = 64 if triton_backend == "hip" else 32
+
+    supported_fp8_dtypes = _triton_supported_fp8_dtypes(
+        triton_backend, triton_arch, warp_size
+    )
+    if supported_fp8_dtypes is None:
+        return True
+    return triton_dtype in supported_fp8_dtypes
 
 
 def device_need_guard(device: str) -> bool:
@@ -4605,12 +4685,22 @@ def set_customized_partition_wrappers(wrapper: CUDAGraphWrapperType) -> None:
 
 
 def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, Any]]:
-    args = snode.node.inputs  # type: ignore[union-attr]
-    args = snode.node.fill_non_provided_args(  # type: ignore[union-attr]
-        [*args, *snode.node.constant_args],  # type: ignore[union-attr]
-        snode.node.kwargs,  # type: ignore[union-attr]
-    )
-    kwargs = snode.node.kwargs  # type: ignore[union-attr]
+    node = cast("ExternKernel", snode.node)
+    if isinstance(node, torch._inductor.ir.FallbackKernel):
+        args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
+    else:
+        args = [*node.inputs, *node.constant_args]
+        kwargs = node.kwargs
+
+    args = node.fill_non_provided_args(args, kwargs)
+    kwargs = dict(kwargs)
+    op_overload = getattr(node, "op_overload", None)
+    if isinstance(op_overload, torch._ops.OpOverload):
+        positional_arg_names = [
+            arg.name for arg in op_overload._schema.arguments if not arg.kwarg_only
+        ]
+        for arg_name in positional_arg_names[: len(args)]:
+            kwargs.pop(arg_name, None)
     flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
 
     def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
