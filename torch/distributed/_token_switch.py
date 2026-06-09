@@ -8,7 +8,7 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup  # noqa: TC001
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Routing:
     handle: object
     topk_idx: torch.Tensor
