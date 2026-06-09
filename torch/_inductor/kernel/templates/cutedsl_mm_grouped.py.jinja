@@ -18,10 +18,10 @@ from torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_g
 #      partitionings (`offs`).
 #
 #   2. _gemm_fn_cache — caches the compiled Grouped GEMM executor. Its key
-#      extends the prep key with (max_active_clusters, total_num_clusters)
-#      because different `offs` tensors change per-group problem sizes and
-#      thus total_num_clusters, which alters the grid shape and persistent
-#      scheduler configuration. Kernels compiled for one grid cannot be
+#      extends the prep key with (max_active_clusters, total_num_clusters,
+#      initial_m) because different `offs` tensors change per-group problem
+#      sizes and thus total_num_clusters and descriptor initialization shape.
+#      Kernels compiled for one grid or initial descriptor shape cannot be
 #      safely reused for another.
 #
 # Compile-time constexprs (TILE_M, TILE_N, CLUSTER_M/N, USE_2_CTA, etc.)
@@ -55,8 +55,15 @@ _TORCH_TO_CUTLASS_DTYPE = {
     torch.int64: cutlass.Int64,
 }
 
-def _to_fake_cute_tensor(t, assumed_align=16):
+def _to_fake_cute_tensor(t, assumed_align=16, compact=True):
     dyn_shape = tuple(map(int, t.shape))
+    if not compact:
+        return cute.runtime.make_fake_tensor(
+            _TORCH_TO_CUTLASS_DTYPE[t.dtype],
+            dyn_shape,
+            tuple(map(int, t.stride())),
+            assumed_align=assumed_align,
+        )
     stride_order = tuple(get_stride_order(t.stride()))
     return cute.runtime.make_fake_compact_tensor(
         _TORCH_TO_CUTLASS_DTYPE[t.dtype], dyn_shape,
@@ -87,22 +94,43 @@ def get_prep_cache_key(input_a, input_b, output):
     )
 
 
-def get_gemm_cache_key(prep_cache_key, max_active_clusters, total_num_clusters):
+def get_gemm_cache_key(
+    prep_cache_key, max_active_clusters, total_num_clusters, initial_m
+):
     return (
         prep_cache_key,
         max_active_clusters,
         total_num_clusters,
+        initial_m,
     )
 
 
-def compute_total_num_clusters(problem_sizes_mnkl, cluster_tile_shape_mn):
+def compute_total_num_clusters_and_initial_group(
+    problem_sizes_mnkl, cluster_tile_shape_mn
+):
+    # total_num_clusters is a host-side launch parameter; use the same
+    # host-side problem sizes to pick the descriptor initialization group.
+    problem_sizes_mnkl = (
+        problem_sizes_mnkl.cpu().tolist()
+        if isinstance(problem_sizes_mnkl, torch.Tensor)
+        else problem_sizes_mnkl
+    )
     total_num_clusters = 0
-    for m, n, _, _ in problem_sizes_mnkl:
+    max_group = 0
+    max_m = 0
+    max_m_start = 0
+    m_start = 0
+    for group, (m, n, _, _) in enumerate(problem_sizes_mnkl):
+        if m > max_m:
+            max_group = group
+            max_m = m
+            max_m_start = m_start
         num_clusters_mn = tuple(
             ceildiv(x, y) for x, y in zip((m, n), cluster_tile_shape_mn)
         )
         total_num_clusters += functools.reduce(lambda x, y: x * y, num_clusters_mn)
-    return total_num_clusters
+        m_start += m
+    return total_num_clusters, max_group, max_m, max_m_start
 
 
 def compute_cluster_tile_shape(mma_tiler_mn, cluster_shape_mn, use_2cta_instrs):
@@ -287,12 +315,26 @@ def launch_build_group_ptrs_from_bases(
         (TILE_M, TILE_N), (CLUSTER_M, CLUSTER_N), bool(USE_2_CTA)
     )
 
-    total_num_clusters = int(compute_total_num_clusters(probs_t, cluster_tile_shape_mn))
+    (
+        total_num_clusters,
+        initial_group,
+        initial_m,
+        initial_m_start,
+    ) = compute_total_num_clusters_and_initial_group(probs_t, cluster_tile_shape_mn)
 
     gemm_cache_key = get_gemm_cache_key(
-        prep_cache_key, max_active_clusters, total_num_clusters
+        prep_cache_key, max_active_clusters, total_num_clusters, initial_m
     )
     gemm_executor = disk_cache_get(_gemm_fn_cache, __file__, _KERNEL_CONFIG_KEY, gemm_cache_key, dev_idx)
+
+    # GroupedGemmKernel initializes TMA descriptors from these tensors before
+    # updating them to each group at runtime.  Use a real single-group shape
+    # instead of the full packed A/C tensors to avoid descriptor init/update
+    # shape mismatches in the CuTeDSL grouped GEMM.
+    initial_m_end = initial_m_start + initial_m
+    initial_a = input_a[initial_m_start:initial_m_end].unsqueeze(-1)
+    initial_b = input_b[initial_group].unsqueeze(-1)
+    initial_c = {{get_output()}}[initial_m_start:initial_m_end].unsqueeze(-1)
 
     if gemm_executor is None:
         grouped_gemm = GroupedGemmKernel(
@@ -303,14 +345,11 @@ def launch_build_group_ptrs_from_bases(
             tensormap_update_mode=TENSORMAP_UPDATE_MODE,
         )
 
-        a_unsq = input_a.unsqueeze(-1)
-        b_unsq = input_b[0].unsqueeze(-1)
-        c_unsq = {{get_output()}}.unsqueeze(-1)
         gemm_executor = cute.compile(
             grouped_gemm,
-            _to_fake_cute_tensor(a_unsq),
-            _to_fake_cute_tensor(b_unsq),
-            _to_fake_cute_tensor(c_unsq),
+            _to_fake_cute_tensor(initial_a, compact=False),
+            _to_fake_cute_tensor(initial_b, compact=False),
+            _to_fake_cute_tensor(initial_c, compact=False),
             G,
             _to_fake_cute_tensor(probs_t, assumed_align=4),
             _to_fake_cute_tensor(strides_t, assumed_align=4),
@@ -325,9 +364,9 @@ def launch_build_group_ptrs_from_bases(
         disk_cache_set(_gemm_fn_cache, __file__, _KERNEL_CONFIG_KEY, gemm_cache_key, gemm_executor, dev_idx)
 
     gemm_executor(
-        input_a.unsqueeze(-1),
-        input_b[0].unsqueeze(-1),
-        {{get_output()}}.unsqueeze(-1),
+        initial_a,
+        initial_b,
+        initial_c,
         probs_t,
         strides_t,
         ptrs_t,
@@ -379,14 +418,11 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
     def _cpu_proxy(shape, stride, dtype):
         return torch.empty_strided(shape, stride, dtype=dtype, device="cpu")
 
-    # _main transposes then unsqueezes: a.unsqueeze(-1), b[0].unsqueeze(-1), c.unsqueeze(-1)
-    # Replicate those stride transformations on CPU proxies.
-    proxy_a = _cpu_proxy(shape_a, stride_a, dtype_a).unsqueeze(-1)
+    proxy_a_packed = _cpu_proxy(shape_a, stride_a, dtype_a)
     proxy_b_transposed = _cpu_proxy(
         trans_shape_b, trans_stride_b, dtype_b,
     )
-    proxy_b_unsq = proxy_b_transposed[0].unsqueeze(-1)
-    proxy_out = _cpu_proxy(shape_out, stride_out, dtype_out).unsqueeze(-1)
+    proxy_out_packed = _cpu_proxy(shape_out, stride_out, dtype_out)
 
     proxy_offs = _cpu_proxy(shape_offs, (1,), torch.int32)
     proxy_ptrs = _cpu_proxy((G, 3), (3, 1), torch.int64)
@@ -459,12 +495,17 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
     cluster_tile_shape_mn = compute_cluster_tile_shape(
         (TILE_M, TILE_N), (CLUSTER_M, CLUSTER_N), bool(USE_2_CTA),
     )
-    total_num_clusters = int(compute_total_num_clusters(
+    (
+        total_num_clusters,
+        initial_group,
+        initial_m,
+        initial_m_start,
+    ) = compute_total_num_clusters_and_initial_group(
         problem_sizes, cluster_tile_shape_mn,
-    ))
+    )
 
     gemm_cache_key = get_gemm_cache_key(
-        prep_cache_key, max_active_clusters, total_num_clusters,
+        prep_cache_key, max_active_clusters, total_num_clusters, initial_m,
     )
 
     grouped_gemm = GroupedGemmKernel(
@@ -475,11 +516,16 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
         tensormap_update_mode=TENSORMAP_UPDATE_MODE,
     )
 
+    initial_m_end = initial_m_start + initial_m
+    proxy_a = proxy_a_packed[initial_m_start:initial_m_end].unsqueeze(-1)
+    proxy_b = proxy_b_transposed[initial_group].unsqueeze(-1)
+    proxy_out = proxy_out_packed[initial_m_start:initial_m_end].unsqueeze(-1)
+
     gemm_executor = cute.compile(
         grouped_gemm,
-        _to_fake_cute_tensor(proxy_a),
-        _to_fake_cute_tensor(proxy_b_unsq),
-        _to_fake_cute_tensor(proxy_out),
+        _to_fake_cute_tensor(proxy_a, compact=False),
+        _to_fake_cute_tensor(proxy_b, compact=False),
+        _to_fake_cute_tensor(proxy_out, compact=False),
         G,
         _to_fake_cute_tensor(proxy_probs, assumed_align=4),
         _to_fake_cute_tensor(proxy_strides, assumed_align=4),
