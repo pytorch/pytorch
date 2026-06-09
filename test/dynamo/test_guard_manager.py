@@ -2207,6 +2207,7 @@ print(json.dumps({
     "compare_mismatch": stats["guard_last_success_compare_mismatch"],
     "mismatch_reasons": stats["guard_last_success_mismatch_reasons"],
     "mismatch_token_kinds": stats["guard_last_success_mismatch_token_kinds"],
+    "mismatch_top_paths": stats["guard_last_success_mismatch_top_paths"],
     "disabled_reasons": stats["guard_last_success_disabled_reasons"],
 }))
 """
@@ -2229,6 +2230,7 @@ print(json.dumps({
         self.assertGreaterEqual(stats["compare_mismatch"], 0)
         self.assertIsInstance(stats["mismatch_reasons"], dict)
         self.assertIsInstance(stats["mismatch_token_kinds"], dict)
+        self.assertIsInstance(stats["mismatch_top_paths"], dict)
 
     def test_guard_last_success_supports_default_device_token(self):
         script = r"""

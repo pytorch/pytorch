@@ -453,6 +453,12 @@ guard_last_success_mismatch_kind_stats() {
   return stats;
 }
 
+std::unordered_map<std::string, GuardFastPlanDisabledPathStats>&
+guard_last_success_mismatch_path_stats() {
+  static std::unordered_map<std::string, GuardFastPlanDisabledPathStats> stats;
+  return stats;
+}
+
 } // namespace
 
 bool guard_lookup_stats_enabled() {
@@ -651,6 +657,7 @@ void reset_guard_lookup_stats() {
         guard_last_success_mismatch_stats_mutex());
     guard_last_success_mismatch_reason_stats().clear();
     guard_last_success_mismatch_kind_stats().clear();
+    guard_last_success_mismatch_path_stats().clear();
   }
   guard_lookup_stats_force_enabled().store(true, std::memory_order_relaxed);
 }
@@ -907,6 +914,7 @@ py::dict get_guard_lookup_stats() {
       last_success_disabled_top_paths;
   py::dict last_success_mismatch_reasons;
   py::dict last_success_mismatch_token_kinds;
+  py::dict last_success_mismatch_top_paths;
   {
     std::lock_guard<std::mutex> lock(
         guard_last_success_mismatch_stats_mutex());
@@ -916,11 +924,34 @@ py::dict get_guard_lookup_stats() {
     for (const auto& item : guard_last_success_mismatch_kind_stats()) {
       last_success_mismatch_token_kinds[py::str(item.first)] = item.second;
     }
+    std::vector<std::pair<std::string, GuardFastPlanDisabledPathStats>>
+        path_items;
+    path_items.reserve(guard_last_success_mismatch_path_stats().size());
+    for (const auto& item : guard_last_success_mismatch_path_stats()) {
+      path_items.emplace_back(item.first, item.second);
+    }
+    std::sort(
+        path_items.begin(),
+        path_items.end(),
+        [](const auto& a, const auto& b) {
+          return a.second.count > b.second.count;
+        });
+    const size_t limit =
+        std::min(path_items.size(), kGuardFastPlanDisabledTopK);
+    for (size_t i = 0; i < limit; ++i) {
+      py::dict item_stats;
+      item_stats["count"] = path_items[i].second.count;
+      item_stats["reason"] = path_items[i].second.reason;
+      last_success_mismatch_top_paths[py::str(path_items[i].first)] =
+          item_stats;
+    }
   }
   result["guard_last_success_mismatch_reasons"] =
       last_success_mismatch_reasons;
   result["guard_last_success_mismatch_token_kinds"] =
       last_success_mismatch_token_kinds;
+  result["guard_last_success_mismatch_top_paths"] =
+      last_success_mismatch_top_paths;
   if (guard_subtree_probe_detail_enabled()) {
     py::dict path_stats;
     std::vector<std::pair<std::string, GuardSubtreeProbePathStats>> items;
@@ -1460,7 +1491,8 @@ static void record_guard_last_success_shadow_reset() {
 static void record_guard_last_success_compare_mismatch(
     GuardLastSuccessCompareMismatchReason reason,
     GuardSubtreeProbeTokenKind token_kind,
-    size_t index) {
+    size_t index,
+    const std::string& path) {
   if (!guard_lookup_stats_enabled()) {
     return;
   }
@@ -1474,6 +1506,13 @@ static void record_guard_last_success_compare_mismatch(
       [guard_last_success_mismatch_reason_name(reason)] += 1;
   guard_last_success_mismatch_kind_stats()
       [guard_subtree_token_kind_name(token_kind)] += 1;
+  if (!path.empty()) {
+    auto& path_stats = guard_last_success_mismatch_path_stats()[path];
+    path_stats.count += 1;
+    if (path_stats.reason.empty()) {
+      path_stats.reason = guard_last_success_mismatch_reason_name(reason);
+    }
+  }
 }
 
 static void record_guard_last_success_support_check(uint64_t check_ns) {
@@ -2787,12 +2826,14 @@ struct GuardLastSuccessReceipt {
     root_key = nullptr;
     shadow_passes = 0;
     tokens.clear();
+    debug_paths.clear();
   }
 
   uint64_t update(
       void* new_entry_key,
       void* new_root_key,
       std::vector<GuardSubtreeEntryToken>&& new_tokens,
+      std::vector<std::string>&& new_debug_paths,
       bool& stable,
       bool& reset_state,
       uint64_t& compare_ns) {
@@ -2818,8 +2859,17 @@ struct GuardLastSuccessReceipt {
     compare_ns = guard_lookup_time_ns() - compare_start_ns;
     reset_state = !stable && !tokens.empty();
     if (!stable) {
+      const std::string* mismatch_path = nullptr;
+      if (mismatch_index < new_debug_paths.size()) {
+        mismatch_path = &new_debug_paths[mismatch_index];
+      } else if (mismatch_index < debug_paths.size()) {
+        mismatch_path = &debug_paths[mismatch_index];
+      }
       record_guard_last_success_compare_mismatch(
-          mismatch_reason, mismatch_kind, mismatch_index);
+          mismatch_reason,
+          mismatch_kind,
+          mismatch_index,
+          mismatch_path == nullptr ? std::string() : *mismatch_path);
     }
 
     if (stable) {
@@ -2828,6 +2878,7 @@ struct GuardLastSuccessReceipt {
       entry_key = new_entry_key;
       root_key = new_root_key;
       tokens = std::move(new_tokens);
+      debug_paths = std::move(new_debug_paths);
       shadow_passes = 1;
     }
     return shadow_passes;
@@ -2837,6 +2888,7 @@ struct GuardLastSuccessReceipt {
   void* root_key{nullptr};
   uint64_t shadow_passes{0};
   std::vector<GuardSubtreeEntryToken> tokens;
+  std::vector<std::string> debug_paths;
 };
 
 extern thread_local const LocalState* active_guard_local_state;
@@ -2929,21 +2981,38 @@ struct GuardSubtreeProbeState {
 
 thread_local std::vector<GuardSubtreeEntryToken>*
     active_guard_subtree_memo_recorder = nullptr;
+thread_local std::vector<std::string>*
+    active_guard_subtree_memo_debug_paths = nullptr;
 thread_local const LocalState* active_guard_local_state = nullptr;
 
 struct GuardSubtreeMemoRecorderScope {
   explicit GuardSubtreeMemoRecorderScope(
-      std::vector<GuardSubtreeEntryToken>* tokens)
-      : previous(active_guard_subtree_memo_recorder) {
+      std::vector<GuardSubtreeEntryToken>* tokens,
+      std::vector<std::string>* debug_paths = nullptr)
+      : previous(active_guard_subtree_memo_recorder),
+        previous_debug_paths(active_guard_subtree_memo_debug_paths) {
     active_guard_subtree_memo_recorder = tokens;
+    active_guard_subtree_memo_debug_paths = debug_paths;
   }
 
   ~GuardSubtreeMemoRecorderScope() {
     active_guard_subtree_memo_recorder = previous;
+    active_guard_subtree_memo_debug_paths = previous_debug_paths;
   }
 
   std::vector<GuardSubtreeEntryToken>* previous{nullptr};
+  std::vector<std::string>* previous_debug_paths{nullptr};
 };
+
+static void append_guard_subtree_memo_token(
+    std::vector<GuardSubtreeEntryToken>* tokens,
+    GuardSubtreeEntryToken&& token,
+    const std::string& debug_path) {
+  tokens->emplace_back(std::move(token));
+  if (active_guard_subtree_memo_debug_paths != nullptr) {
+    active_guard_subtree_memo_debug_paths->push_back(debug_path);
+  }
+}
 
 struct GuardLocalStateScope {
   explicit GuardLocalStateScope(const LocalState* state)
@@ -3957,8 +4026,11 @@ class DEFAULT_DEVICE : public LeafGuard {
     if (!check_nopybind_template(value)) {
       return false;
     }
-    tokens->emplace_back(GuardSubtreeEntryToken::make_default_device(
-        _utils_device_dict.ptr(), _device.ptr()));
+    append_guard_subtree_memo_token(
+        tokens,
+        GuardSubtreeEntryToken::make_default_device(
+            _utils_device_dict.ptr(), _device.ptr()),
+        "<DEFAULT_DEVICE>");
     return true;
   }
 
@@ -4024,8 +4096,10 @@ class GLOBAL_STATE : public LeafGuard {
     if (!check_nopybind(value)) {
       return false;
     }
-    tokens->emplace_back(
-        GuardSubtreeEntryToken::make_global_state(_guard.get()));
+    append_guard_subtree_memo_token(
+        tokens,
+        GuardSubtreeEntryToken::make_global_state(_guard.get()),
+        "<GLOBAL_STATE>");
     return true;
   }
 
@@ -4174,8 +4248,11 @@ class OBJECT_ALIASING : public RelationalGuard {
     if (!check_nopybind(value)) {
       return false;
     }
-    tokens->emplace_back(GuardSubtreeEntryToken::make_object_aliasing(
-        value, static_cast<const void*>(this)));
+    append_guard_subtree_memo_token(
+        tokens,
+        GuardSubtreeEntryToken::make_object_aliasing(
+            value, static_cast<const void*>(this)),
+        "<OBJECT_ALIASING>");
     return true;
   }
 
@@ -4236,8 +4313,11 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     if (!check_nopybind(value)) {
       return false;
     }
-    tokens->emplace_back(GuardSubtreeEntryToken::make_no_tensor_aliasing(
-        value, static_cast<const void*>(this)));
+    append_guard_subtree_memo_token(
+        tokens,
+        GuardSubtreeEntryToken::make_no_tensor_aliasing(
+            value, static_cast<const void*>(this)),
+        "<NO_TENSOR_ALIASING>");
     return true;
   }
 
@@ -4789,8 +4869,10 @@ class GuardManager {
   bool check_nopybind_template(T* value) { // borrowed ref
     if constexpr (std::is_same_v<T, PyObject>) {
       if (C10_UNLIKELY(active_guard_subtree_memo_recorder != nullptr)) {
-        active_guard_subtree_memo_recorder->emplace_back(
-            GuardSubtreeEntryToken::make(value));
+        append_guard_subtree_memo_token(
+            active_guard_subtree_memo_recorder,
+            GuardSubtreeEntryToken::make(value),
+            _source);
       }
     }
 
@@ -4961,7 +5043,8 @@ class GuardManager {
       PyObject* value,
       const GuardSubtreeMemoState& memo,
       std::vector<GuardSubtreeEntryToken>* tokens) {
-    tokens->emplace_back(GuardSubtreeEntryToken::make(value));
+    append_guard_subtree_memo_token(
+        tokens, GuardSubtreeEntryToken::make(value), _source);
     if (!this->check_leaf_guards_nopybind(value)) {
       return false;
     }
@@ -6269,9 +6352,11 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
     if (!check_nopybind_template(value)) {
       return false;
     }
-    tokens->emplace_back(
+    append_guard_subtree_memo_token(
+        tokens,
         GuardSubtreeEntryToken::make_torch_function_mode_stack(
-            static_cast<const void*>(this)));
+            static_cast<const void*>(this)),
+        "<TORCH_FUNCTION_MODE_STACK>");
     return true;
   }
 
@@ -6413,7 +6498,8 @@ class TENSOR_MATCH : public LeafGuard {
             value, *_tensor_check, _root_guard_manager->_local_state, &token)) {
       return false;
     }
-    tokens->emplace_back(std::move(token));
+    append_guard_subtree_memo_token(
+        tokens, std::move(token), _tensor_name);
     record_guard_fastplan_tensor_token_shadow();
     return true;
   }
@@ -8496,15 +8582,19 @@ bool run_root_guard_manager_with_last_success_receipt(
   }
 
   std::vector<GuardSubtreeEntryToken> tokens;
+  std::vector<std::string> debug_paths;
   {
     // This receipt is shadow-only diagnostics. The recorder deliberately
     // disables nested manager fastplan so it can observe the full guard tree.
-    GuardSubtreeMemoRecorderScope recorder(&tokens);
+    GuardSubtreeMemoRecorderScope recorder(&tokens, &debug_paths);
     const bool result = run_root_guard_manager(root, f_locals);
     if (!result) {
       state->reset();
       return false;
     }
+  }
+  if (debug_paths.size() != tokens.size()) {
+    debug_paths.clear();
   }
 
   if (tokens.empty()) {
@@ -8524,7 +8614,13 @@ bool run_root_guard_manager_with_last_success_receipt(
   bool reset_state = false;
   uint64_t compare_ns = 0;
   const uint64_t shadow_passes = state->update(
-      entry_key, root, std::move(tokens), stable, reset_state, compare_ns);
+      entry_key,
+      root,
+      std::move(tokens),
+      std::move(debug_paths),
+      stable,
+      reset_state,
+      compare_ns);
   const uint64_t update_ns = guard_lookup_time_ns() - update_start_ns;
   if (stable) {
     record_guard_last_success_shadow_stable();
