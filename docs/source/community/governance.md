@@ -226,9 +226,9 @@ the reasoning behind the decision publicly.
 
 Primary work happens through issues and pull requests on
 GitHub. Maintainers should avoid pushing their changes directly to
-the PyTorch repository, instead relying on pull requests. 
+the PyTorch repository, instead relying on pull requests.
 
-Every pull request needs to be reviewed by either the [CODEOWNERS](https://github.com/pytorch/pytorch/blob/master/CODEOWNERS) or by an appropriate [core reviewer](https://github.com/pytorch/pytorch/blob/main/.github/merge_rules.yaml) who is able to review any changes in the repo. A core reviewer is an individual chosen by the core maintainers who has the authority to approve changes across the repository. 
+Every pull request needs to be reviewed by either the [CODEOWNERS](https://github.com/pytorch/pytorch/blob/master/CODEOWNERS) or by an appropriate [core reviewer](https://github.com/pytorch/pytorch/blob/main/.github/merge_rules.yaml) who is able to review any changes in the repo. A core reviewer is an individual chosen by the core maintainers who has the authority to approve changes across the repository.
 
 ### Controversial Decision Process
 
