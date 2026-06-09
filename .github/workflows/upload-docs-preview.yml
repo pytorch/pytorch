@@ -1,3 +1,4 @@
+# Owner(s): ["module: docs"]
 name: Upload docs preview
 
 # Runs in the base-repo context so it has the AWS credentials needed to write
