@@ -15,7 +15,7 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict, Unpack
 from weakref import ReferenceType
 
 import torch
@@ -87,6 +87,32 @@ CONSTANT_NUMEL_LIMIT = 1
 RECURSION_COUNT = 0
 
 
+class _FakeTensorConstructorIgnoredState(TypedDict, total=False):
+    # Recompute memo descriptor state when reconstructing from
+    # FakeTensor.__dict__.
+    _nonzero_memo: object
+    _nonzero_memo_vc: object
+    _nonzero_memo_epoch: object
+    _item_memo: object
+    _item_memo_vc: object
+    _item_memo_epoch: object
+    _unique_memo: object
+    _unique_memo_vc: object
+    _unique_memo_epoch: object
+    _unique_consecutive_memo: object
+    _unique_consecutive_memo_vc: object
+    _unique_consecutive_memo_epoch: object
+    _nested_int_memo: object
+    _nested_int_memo_vc: object
+    _nested_int_memo_epoch: object
+    _debug_trace: object
+
+
+_FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS = frozenset(
+    _FakeTensorConstructorIgnoredState.__annotations__
+)
+
+
 def _maybe_dispatch_key(name: str) -> torch._C.DispatchKey | None:
     return getattr(torch._C.DispatchKey, name, None)
 
@@ -131,6 +157,21 @@ def _extra_autocast_dispatch_keys(
     if extra_keys.raw_repr() == 0:
         return None
     return extra_keys
+
+
+def _extra_autocast_dispatch_keys_for_tensor(
+    device: torch.device | str,
+    t: Tensor,
+) -> torch.DispatchKeySet | None:
+    if isinstance(t, FakeTensor) and t.dispatch_keys is not None:
+        return _extra_autocast_dispatch_keys(device, t.dispatch_keys)
+
+    # XLA:CUDA tensors have device type XLA but use AutocastCUDA. Avoid probing
+    # ordinary tensors here, since Dynamo guards on direct dispatch-key reads.
+    if torch.device(device).type != "xla":
+        return None
+
+    return _extra_autocast_dispatch_keys(device, torch._C._dispatch_keys(t))
 
 
 # Check if device type supports device index
@@ -510,7 +551,9 @@ class FakeTensorConverter:
         # caller to explicitly specify the device in case outer and inner tensors
         # have different devices.
         source_device = t.device
-        source_dispatch_keys = torch._C._dispatch_keys(t)
+        source_extra_dispatch_keys = _extra_autocast_dispatch_keys_for_tensor(
+            source_device, t
+        )
 
         def mk_fake_tensor(
             make_meta_t: Callable[[], object], device: torch.device | str
@@ -533,10 +576,8 @@ class FakeTensorConverter:
                     # which case using t is wrong!  BUG!
                     constant=constant,
                     dispatch_keys=(
-                        source_dispatch_keys
+                        source_extra_dispatch_keys
                         if torch.device(device) == source_device
-                        and _extra_autocast_dispatch_keys(device, source_dispatch_keys)
-                        is not None
                         else None
                     ),
                 )
@@ -886,23 +927,100 @@ class FakeTensor(Tensor):
     @staticmethod
     def __new__(
         cls,
-        fake_mode: FakeTensorMode,
-        elem: Tensor,
-        device: torch.device,
+        fake_mode_or_elem: FakeTensorMode | Tensor | None = None,
+        elem: Tensor | None = None,
+        device: torch.device | str | None = None,
         constant: Tensor | None = None,
         real_tensor: Tensor | None = None,
         pytype: type[Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
+        *,
+        fake_mode: FakeTensorMode | None = None,
+        fake_device: torch.device | str | None = None,
+        _fake_device: torch.device | str | None = None,
+        requires_grad: bool | None = None,
+        _is_param: bool = False,
+        **state: Unpack[_FakeTensorConstructorIgnoredState],
     ) -> Self:
+        state_dict = cast(dict[str, object], state)
+        for attr_name in _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS:
+            state_dict.pop(attr_name, None)
+        if state_dict:
+            unexpected = next(iter(state_dict))
+            raise TypeError(
+                "FakeTensor.__new__() got an unexpected keyword argument "
+                f"{unexpected!r}"
+            )
+
+        if isinstance(fake_mode_or_elem, FakeTensorMode):
+            if fake_mode is not None and fake_mode is not fake_mode_or_elem:
+                raise TypeError("FakeTensor.__new__() got conflicting fake_mode values")
+            fake_mode = fake_mode_or_elem
+        else:
+            # Support bounded state-based reconstruction from known FakeTensor
+            # attrs, e.g. type(fake_tensor)(new_elem, **fake_tensor.__dict__).
+            if fake_mode_or_elem is not None:
+                if not isinstance(fake_mode_or_elem, Tensor):
+                    raise TypeError(
+                        "FakeTensor.__new__() expected a FakeTensorMode or Tensor "
+                        f"as the first argument, got {type(fake_mode_or_elem)}"
+                    )
+                if elem is not None:
+                    raise TypeError(
+                        "FakeTensor.__new__() expected either "
+                        "(fake_mode, elem, ...) or (elem, fake_mode=..., ...)"
+                    )
+                elem = fake_mode_or_elem
+            if fake_mode is None:
+                raise TypeError(
+                    "FakeTensor.__new__() missing required argument: 'fake_mode'"
+                )
+
+        if elem is None:
+            raise TypeError("FakeTensor.__new__() missing required argument: 'elem'")
+
+        specified_devices = [
+            (name, FakeTensor._normalize_fake_device(torch.device(value)))
+            for name, value in (
+                ("device", device),
+                ("fake_device", fake_device),
+                ("_fake_device", _fake_device),
+            )
+            if value is not None
+        ]
+        if specified_devices:
+            first_name, resolved_device = specified_devices[0]
+            for name, candidate_device in specified_devices[1:]:
+                if resolved_device != candidate_device:
+                    raise ValueError(
+                        "FakeTensor.__new__() got conflicting device values: "
+                        f"{first_name}={resolved_device}, {name}={candidate_device}"
+                    )
+            device = resolved_device
+        else:
+            raise TypeError(
+                "FakeTensor.__new__() missing required argument: "
+                "'device' (or 'fake_device')"
+            )
+
         extra_dispatch_keys = _extra_autocast_dispatch_keys(device, dispatch_keys)
-        self = Tensor._make_subclass(
-            cls,
-            elem,
-            elem.requires_grad,
-            dispatch_device=True,
-            device_for_backend_keys=device,
-            _extra_dispatch_keys=extra_dispatch_keys,
-        )
+        if extra_dispatch_keys is not None:
+            self = Tensor._make_subclass(
+                cls,
+                elem,
+                elem.requires_grad if requires_grad is None else requires_grad,
+                dispatch_device=True,
+                device_for_backend_keys=device,
+                _extra_dispatch_keys=extra_dispatch_keys,
+            )
+        else:
+            self = Tensor._make_subclass(
+                cls,
+                elem,
+                elem.requires_grad if requires_grad is None else requires_grad,
+                dispatch_device=True,
+                device_for_backend_keys=device,
+            )
         if not fake_mode._allow_unsafe_data_ptr_access:
             torch._C._set_throw_on_mutable_data_ptr(self)
         else:
@@ -912,7 +1030,6 @@ class FakeTensor(Tensor):
             raise AssertionError(
                 f"elem.device.type must be 'meta', got {elem.device.type}"
             )
-        device = device if isinstance(device, torch.device) else torch.device(device)
         # NB: it is fine, if a little confusing, for device to be meta
         # (we are faking a meta tensor in that case).  However, it often
         # indicates some sort of confusion (e.g., you accidentally passed
@@ -929,7 +1046,7 @@ class FakeTensor(Tensor):
         self.fake_mode = fake_mode
         self.constant = constant
         self.pytype = pytype
-        self.dispatch_keys = dispatch_keys
+        self.dispatch_keys = extra_dispatch_keys
         if isinstance(real_tensor, FakeTensor):
             raise AssertionError("real_tensor must not be a FakeTensor")
         self.real_tensor = real_tensor
@@ -938,6 +1055,9 @@ class FakeTensor(Tensor):
         self.unique_memo = None
         self.unique_consecutive_memo = None
         self.nested_int_memo = None
+
+        if _is_param:
+            self._is_param = _is_param
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
@@ -1283,8 +1403,8 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         (
             extra_dispatch_keys.raw_repr()
             if (
-                extra_dispatch_keys := _extra_autocast_dispatch_keys(
-                    t.device, torch._C._dispatch_keys(t)
+                extra_dispatch_keys := _extra_autocast_dispatch_keys_for_tensor(
+                    t.device, t
                 )
             )
             is not None
@@ -2074,7 +2194,10 @@ class FakeTensorMode(TorchDispatchMode):
         _BypassDispatchCache if the output tensor has characteristics that
         prevent caching it.
         """
-        from torch._higher_order_ops.utils import registered_hop_fake_fns
+        from torch._higher_order_ops.utils import (
+            hops_that_skip_faketensor_cache,
+            registered_hop_fake_fns,
+        )
         from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
         self._validate_cache_key(func, args, kwargs)
@@ -2084,22 +2207,26 @@ class FakeTensorMode(TorchDispatchMode):
         # caching.
         # NB: Note that the HOPs that sta alive till FakeTensor are functional,
         # once they support mutations, we will have to revisit this logic.
+        # Skipping caching for HOPs that used to be registered with @py.impl(FakeTensorMode)
+        # to preserve original behaviour
         if (
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
         ):
-            if not isinstance(output, tuple) and output is not None:
-                raise AssertionError(
-                    f"Expected tuple output for HOP {func}, got {type(output)}"
-                )
-            if output is not None:
-                non_cacheable = any(
+            outs = output if isinstance(output, tuple) else (output,)
+            non_cacheable = (
+                any(
                     isinstance(o, (torch.Tensor, torch.SymInt))
                     and has_free_unbacked_symbols(o)
-                    for o in output  # pyrefly: ignore[not-iterable]
+                    for o in outs
                 )
-                if non_cacheable:
-                    raise _BypassDispatchCache(f"unbacked symbol in HOP {func} output")
+                or func in hops_that_skip_faketensor_cache
+            )
+            if non_cacheable:
+                raise _BypassDispatchCache(
+                    f"unbacked symbol in HOP {func} output \
+                    or {func} in hops_that_skip_faketensor_cache"
+                )
 
         if isinstance(output, (int, torch.SymInt, type(None))):
             output_info = _DispatchCacheEntryOutputInfo(
@@ -3168,13 +3295,10 @@ class FakeTensorMode(TorchDispatchMode):
             for arg in flat_args:
                 if not isinstance(arg, FakeTensor) or arg.device != output_device:
                     continue
-                arg_dispatch_keys = (
-                    arg.dispatch_keys
-                    if arg.dispatch_keys is not None
-                    else torch._C._dispatch_keys(arg)
-                )
+                if arg.dispatch_keys is None:
+                    continue
                 arg_extra_dispatch_keys = _extra_autocast_dispatch_keys(
-                    output_device, arg_dispatch_keys
+                    output_device, arg.dispatch_keys
                 )
                 if arg_extra_dispatch_keys is None:
                     continue
