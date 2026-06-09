@@ -589,6 +589,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
@@ -1003,6 +1004,9 @@ elseif(USE_CUDA)
   if(USE_NCCL)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
+  endif()
+  if(USE_NCCL_EP)
+    target_compile_definitions(torch_cuda PRIVATE USE_NCCL_EP)
   endif()
 
   # Compile with NVSHMEM
