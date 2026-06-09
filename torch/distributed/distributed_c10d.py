@@ -5834,16 +5834,31 @@ def new_group(
     default group's bound device).
     """
     if _use_torchcomms_enabled():
-        return _new_group_via_split_group(
-            ranks=ranks,
-            timeout=timeout,
-            backend=backend,
-            pg_options=pg_options,
-            use_local_synchronization=use_local_synchronization,
-            group_desc=group_desc,
-            device_id=device_id,
-            sort_ranks=sort_ranks,
+        # split_group can only split the parent's existing communicator, so it
+        # cannot produce a child whose backend differs from the parent's. A
+        # "fake" subgroup of a real parent -- how DeviceMesh creates disabled /
+        # unflattened dims, with use_local_synchronization for hashed names -- is
+        # exactly that case: route it through the normal path, which builds the
+        # FakeProcessGroup directly (see ``_new_group_with_tag``). When the
+        # requested backend matches the parent (including a fake parent), split
+        # delegation is fine.
+        parent_backend, _ = _world.pg_map[_get_default_group()]
+        is_fake_subgroup = (
+            backend is not None
+            and str(backend).lower() == "fake"
+            and str(backend).lower() != str(parent_backend).lower()
         )
+        if not is_fake_subgroup:
+            return _new_group_via_split_group(
+                ranks=ranks,
+                timeout=timeout,
+                backend=backend,
+                pg_options=pg_options,
+                use_local_synchronization=use_local_synchronization,
+                group_desc=group_desc,
+                device_id=device_id,
+                sort_ranks=sort_ranks,
+            )
 
     return _new_group_with_tag(
         ranks,
