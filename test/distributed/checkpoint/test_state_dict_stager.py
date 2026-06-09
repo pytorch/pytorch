@@ -39,6 +39,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = dist.get_default_backend_for_device(device_type)
 
 
 def create_cpu_state_dict(state_dict):
@@ -873,7 +874,6 @@ class TestStateDictStager(TestCase):
 
 class TestDTensorStateDictStager(DTensorTestBase):
     @with_comms
-    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
     def test_dtensor(self):
         """
@@ -954,7 +954,7 @@ class TestReplicationStager(DTensorTestBase):
 
     @property
     def backend(self) -> str:
-        return "cpu:gloo,cuda:nccl"
+        return f"cpu:gloo,{device_type}:{backend}"
 
     def _create_simple_state_dict(self, rank: int) -> dict:
         """
@@ -1251,6 +1251,7 @@ class TestReplicationStager(DTensorTestBase):
             )
 
     @with_comms
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(4)
     def test_replication_basic(self):
         """Test basic replication functionality with world_size=16"""

@@ -148,7 +148,7 @@ class TestDefaultStager(TestCase):
     def test_cuda_tensors_staging(self) -> None:
         """Test staging with CUDA tensors."""
         # Create state dict with CUDA tensors
-        device = torch.accelerator.current_accelerator()
+        device = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
         cuda_state_dict = {
             "cuda_tensor": torch.randn(3, 4).to(device),
             "cpu_tensor": torch.randn(2, 3),

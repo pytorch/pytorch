@@ -40,6 +40,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.nn.parallel import DistributedDataParallel
+from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -512,9 +513,14 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 class TestNoCPU(DTensorTestBase):
     @property
     def backend(self):
-        return "nccl"
+        return (
+            torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
+                device_type
+            )
+        )
 
     @with_comms
+    @requires_accelerator_dist_backend()
     def test_no_cpu(self):
         with self.assertRaisesRegex(
             AssertionError, r"A CPU backend must be enabled for async save;.*?"

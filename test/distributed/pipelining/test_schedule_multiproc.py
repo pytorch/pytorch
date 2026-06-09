@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 d_hid = 512
 batch_size = 64
+
 torch.manual_seed(0)
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = dist.get_default_backend_for_device(device_type)
@@ -426,7 +427,6 @@ class ScheduleTest(MultiProcContinuousTest):
                 schedule.step(target=target, losses=losses)
             else:
                 schedule.step()
-
         dist.barrier(device_ids=[self.rank])
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
