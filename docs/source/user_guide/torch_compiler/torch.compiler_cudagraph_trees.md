@@ -292,6 +292,24 @@ Currently, CUDAGraph partition supports splitting off the following types of ops
 - **CUDAGraph Unsafe Custom Ops**: Custom ops tagged with `torch._C.Tag.cudagraph_unsafe` are split off. See *CUDAGraph Unsafe Custom Ops* section for details.
 - **Unbacked Symints**: Please refer to *Dynamic Shape Support* section for more information.
 
+### CUDAGraph Annotations
+
+CUDA graphs require stable memory addresses and reuse private-pool memory across
+replays. The following annotations can be used inside a compiled function to
+override the default CUDAGraph handling for specific tensors:
+
+- `torch.compiler.cudagraph_mark_output_clone(tensor)` marks a returned tensor
+  to be cloned out of CUDA graph managed memory. If multiple returned tensors
+  alias the same storage as the marked tensor, the returned alias group is
+  cloned together so output aliasing is preserved.
+- `torch.compiler.cudagraph_mark_input_copy(tensor)` marks a graph input to be
+  copied into CUDA graph managed memory instead of requiring its address to
+  remain stable. Mutated inputs and inputs that alias another graph input are
+  not captured with copy semantics because copying would change user-visible
+  behavior.
+These annotations preserve eager behavior and return `None`; they are metadata
+markers consumed by `torch.compile`.
+
 
 ### Limitations
 
