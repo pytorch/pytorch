@@ -206,9 +206,8 @@ sycl::event convolution_backward_weights(
       (diff_weight.scalar_type() == at::kHalf ||
        diff_weight.scalar_type() == at::kBFloat16);
   if (use_fp32_intermediate) {
-    diff_weight_buf = at::empty(
-        diff_weight.sizes(),
-        diff_weight.options().dtype(at::kFloat));
+    diff_weight_buf =
+        at::empty(diff_weight.sizes(), diff_weight.options().dtype(at::kFloat));
     auto [_, weight_md_f32, __] =
         conv_get_md(src, diff_weight_buf, diff_dst, groups, is_channels_last);
     weight_md_buf = weight_md_f32;
