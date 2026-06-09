@@ -272,16 +272,25 @@ constexpr size_t kGuardAccessorDetailStatsTopK = 64;
 constexpr size_t kGuardSubtreeProbeTopK = 64;
 constexpr size_t kGuardFastPlanDisabledTopK = 64;
 constexpr size_t kGuardFastPlanMaxTokens = 1024;
+constexpr size_t kGuardSubtreeMemoSupportAnalysisMaxItems = 1024;
 
 struct GuardSubtreeMemoSupportAnalysis {
   std::string reason;
   std::string path;
+  bool collect_all{false};
+  std::vector<std::pair<std::string, std::string>> unsupported;
 
   void set_if_empty(const char* new_reason, const std::string& new_path) {
+    const std::string resolved_reason =
+        new_reason == nullptr ? "unsupported:unknown" : new_reason;
+    if (collect_all &&
+        unsupported.size() < kGuardSubtreeMemoSupportAnalysisMaxItems) {
+      unsupported.emplace_back(resolved_reason, new_path);
+    }
     if (!reason.empty()) {
       return;
     }
-    reason = new_reason == nullptr ? "unsupported:unknown" : new_reason;
+    reason = resolved_reason;
     path = new_path;
   }
 };
@@ -1307,6 +1316,22 @@ static void record_guard_last_success_support_check(uint64_t check_ns) {
   add_relaxed(guard_last_success_stats().support_check_ns, check_ns);
 }
 
+static void record_guard_last_success_disabled_item_locked(
+    const char* reason,
+    const std::string& path) {
+  if (reason == nullptr) {
+    reason = "unsupported:unknown";
+  }
+  guard_last_success_disabled_reason_stats()[reason] += 1;
+  if (!path.empty()) {
+    auto& path_stats = guard_last_success_disabled_path_stats()[path];
+    path_stats.count += 1;
+    if (path_stats.reason.empty()) {
+      path_stats.reason = reason;
+    }
+  }
+}
+
 static void record_guard_last_success_incomplete(
     const char* reason,
     const std::string& path = "") {
@@ -1323,13 +1348,27 @@ static void record_guard_last_success_incomplete(
   }
   std::lock_guard<std::mutex> lock(
       guard_last_success_disabled_stats_mutex());
-  guard_last_success_disabled_reason_stats()[reason] += 1;
-  if (!path.empty()) {
-    auto& path_stats = guard_last_success_disabled_path_stats()[path];
-    path_stats.count += 1;
-    if (path_stats.reason.empty()) {
-      path_stats.reason = reason;
-    }
+  record_guard_last_success_disabled_item_locked(reason, path);
+}
+
+static void record_guard_last_success_incomplete(
+    const GuardSubtreeMemoSupportAnalysis& analysis) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_last_success_stats();
+  add_relaxed(stats.shadow_incomplete, 1);
+  std::lock_guard<std::mutex> lock(
+      guard_last_success_disabled_stats_mutex());
+  if (analysis.unsupported.empty()) {
+    record_guard_last_success_disabled_item_locked(
+        analysis.reason.empty() ? "unsupported:unknown" : analysis.reason.c_str(),
+        analysis.path);
+    return;
+  }
+  for (const auto& item : analysis.unsupported) {
+    record_guard_last_success_disabled_item_locked(
+        item.first.c_str(), item.second);
   }
 }
 
@@ -4491,13 +4530,18 @@ class GuardManager {
 
   virtual bool supports_subtree_memo_recursive(
       GuardSubtreeMemoSupportAnalysis* analysis = nullptr) const {
+    bool supported = true;
+    const bool collect_all = analysis != nullptr && analysis->collect_all;
     for (const auto& guard : _leaf_guards) {
       if (!guard->supports_subtree_memo()) {
         if (analysis != nullptr) {
           analysis->set_if_empty(
               guard->subtree_memo_unsupported_reason(), _source);
         }
-        return false;
+        supported = false;
+        if (!collect_all) {
+          return false;
+        }
       }
     }
     for (const auto& accessor : _accessors) {
@@ -4507,17 +4551,24 @@ class GuardManager {
               accessor->subtree_memo_unsupported_reason(),
               accessor->get_source());
         }
-        return false;
+        supported = false;
+        if (!collect_all) {
+          return false;
+        }
+        continue;
       }
       if (!accessor->get_guard_manager()->supports_subtree_memo_recursive(
               analysis)) {
         if (analysis != nullptr && analysis->path.empty()) {
           analysis->path = accessor->get_source();
         }
-        return false;
+        supported = false;
+        if (!collect_all) {
+          return false;
+        }
       }
     }
-    return true;
+    return supported;
   }
 
   bool prepare_partial_subtree_memo(
@@ -5675,22 +5726,33 @@ class DictGuardManager : public GuardManager {
 
   bool supports_subtree_memo_recursive(
       GuardSubtreeMemoSupportAnalysis* analysis = nullptr) const override {
+    bool supported = true;
+    const bool collect_all = analysis != nullptr && analysis->collect_all;
     if (!GuardManager::supports_subtree_memo_recursive(analysis)) {
-      return false;
+      supported = false;
+      if (!collect_all) {
+        return false;
+      }
     }
     for (const auto& item : _key_value_managers) {
       const auto& key_manager = item.second.first;
       if (key_manager && !key_manager->supports_subtree_memo_recursive(
                              analysis)) {
-        return false;
+        supported = false;
+        if (!collect_all) {
+          return false;
+        }
       }
       const auto& value_manager = item.second.second;
       if (value_manager && !value_manager->supports_subtree_memo_recursive(
-                               analysis)) {
-        return false;
+                                analysis)) {
+        supported = false;
+        if (!collect_all) {
+          return false;
+        }
       }
     }
-    return true;
+    return supported;
   }
 
  public: // cloning functions
@@ -8137,15 +8199,13 @@ bool run_root_guard_manager_with_last_success_receipt(
 
   RootGuardManager* root_mgr = static_cast<RootGuardManager*>(root);
   GuardSubtreeMemoSupportAnalysis analysis;
+  analysis.collect_all = guard_lookup_stats_enabled();
   const uint64_t support_start_ns = guard_lookup_time_ns();
   const bool supported = root_mgr->supports_subtree_memo_recursive(&analysis);
   record_guard_last_success_support_check(
       guard_lookup_time_ns() - support_start_ns);
   if (!supported) {
-    record_guard_last_success_incomplete(
-        analysis.reason.empty() ? "unsupported:unknown"
-                                : analysis.reason.c_str(),
-        analysis.path);
+    record_guard_last_success_incomplete(analysis);
     state->reset();
     return run_root_guard_manager(root, f_locals);
   }
