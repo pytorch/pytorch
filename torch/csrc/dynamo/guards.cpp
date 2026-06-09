@@ -126,6 +126,7 @@ enum class GuardSubtreeProbeTokenKind : uint8_t {
   NoTensorAliasing,
   ObjectAliasing,
   BoundMethod,
+  FrameGlobals,
 };
 
 enum class GuardFastPlanCandidateKind : uint8_t {
@@ -191,6 +192,7 @@ struct GuardSubtreeProbeStats {
   std::atomic<uint64_t> token_no_tensor_aliasing{0};
   std::atomic<uint64_t> token_object_aliasing{0};
   std::atomic<uint64_t> token_bound_method{0};
+  std::atomic<uint64_t> token_frame_globals{0};
 };
 
 struct GuardFastPlanStats {
@@ -295,6 +297,7 @@ struct GuardSubtreeProbePathStats {
   uint64_t token_no_tensor_aliasing{0};
   uint64_t token_object_aliasing{0};
   uint64_t token_bound_method{0};
+  uint64_t token_frame_globals{0};
 };
 
 constexpr size_t kGuardAccessorDetailStatsTopK = 64;
@@ -577,6 +580,7 @@ void reset_guard_lookup_stats() {
   store_zero(subtree_stats.token_no_tensor_aliasing);
   store_zero(subtree_stats.token_object_aliasing);
   store_zero(subtree_stats.token_bound_method);
+  store_zero(subtree_stats.token_frame_globals);
   store_zero(fastplan_stats.candidate);
   store_zero(fastplan_stats.candidate_top);
   store_zero(fastplan_stats.candidate_nested);
@@ -734,6 +738,8 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(subtree_stats.token_object_aliasing);
   subtree_token_kind_counts["BoundMethod"] =
       load_relaxed(subtree_stats.token_bound_method);
+  subtree_token_kind_counts["FrameGlobals"] =
+      load_relaxed(subtree_stats.token_frame_globals);
   result["guard_subtree_probe_token_kind_counts"] =
       subtree_token_kind_counts;
   auto& fastplan_stats = guard_fastplan_stats();
@@ -1000,6 +1006,7 @@ py::dict get_guard_lookup_stats() {
           items[i].second.token_no_tensor_aliasing;
       token_counts["ObjectAliasing"] = items[i].second.token_object_aliasing;
       token_counts["BoundMethod"] = items[i].second.token_bound_method;
+      token_counts["FrameGlobals"] = items[i].second.token_frame_globals;
       item_stats["token_kind_counts"] = token_counts;
       path_stats[py::str(items[i].first)] = item_stats;
     }
@@ -1126,6 +1133,8 @@ static const char* guard_subtree_token_kind_name(
       return "ObjectAliasing";
     case GuardSubtreeProbeTokenKind::BoundMethod:
       return "BoundMethod";
+    case GuardSubtreeProbeTokenKind::FrameGlobals:
+      return "FrameGlobals";
   }
   return "Unknown";
 }
@@ -1243,6 +1252,9 @@ static void add_guard_subtree_probe_token_kind(
     case GuardSubtreeProbeTokenKind::BoundMethod:
       add_relaxed(stats.token_bound_method, 1);
       break;
+    case GuardSubtreeProbeTokenKind::FrameGlobals:
+      add_relaxed(stats.token_frame_globals, 1);
+      break;
     case GuardSubtreeProbeTokenKind::ObjectOnly:
       add_relaxed(stats.token_object_only, 1);
       break;
@@ -1282,6 +1294,9 @@ static void add_guard_subtree_probe_token_kind(
       break;
     case GuardSubtreeProbeTokenKind::BoundMethod:
       stats.token_bound_method += 1;
+      break;
+    case GuardSubtreeProbeTokenKind::FrameGlobals:
+      stats.token_frame_globals += 1;
       break;
     case GuardSubtreeProbeTokenKind::ObjectOnly:
       stats.token_object_only += 1;
@@ -2550,6 +2565,19 @@ struct GuardSubtreeEntryToken {
     return token;
   }
 
+  static GuardSubtreeEntryToken make_for_source(
+      PyObject* obj,
+      const std::string& source) {
+    if (source == "G" && PyDict_CheckExact(obj)) {
+      GuardSubtreeEntryToken token;
+      token.object = obj;
+      token.type = Py_TYPE(obj);
+      token.kind = GuardSubtreeProbeTokenKind::FrameGlobals;
+      return token;
+    }
+    return make(obj);
+  }
+
   static bool make_tensor_match(
       PyObject* obj,
       TensorCheck& tensor_check,
@@ -2731,6 +2759,9 @@ struct GuardSubtreeEntryToken {
     }
     if (object != other.object) {
       return false;
+    }
+    if (kind == GuardSubtreeProbeTokenKind::FrameGlobals) {
+      return true;
     }
     if (kind == GuardSubtreeProbeTokenKind::TensorMatch) {
       return tensor_dispatch_key == other.tensor_dispatch_key &&
@@ -3017,6 +3048,13 @@ static bool guard_subtree_memo_tokens_match(
          token.kind == GuardSubtreeProbeTokenKind::BoundMethod)) {
       // Parent tokens prove whether this non-root object is still reachable.
       continue;
+    }
+    if (token.kind == GuardSubtreeProbeTokenKind::FrameGlobals) {
+      // FrameGlobals is only safe for full slow-guard receipt comparison,
+      // where every run records a fresh child token vector. Existing hot
+      // memo checks rely on exact parent container tokens to prove non-root
+      // ObjectOnly tokens are still reachable.
+      return false;
     }
     GuardSubtreeEntryToken current =
         GuardSubtreeEntryToken::make(i == 0 ? root_value : token.object);
@@ -4935,7 +4973,9 @@ class GuardManager {
       if (C10_UNLIKELY(active_guard_subtree_memo_recorder != nullptr)) {
         append_guard_subtree_memo_token(
             active_guard_subtree_memo_recorder,
-            GuardSubtreeEntryToken::make(value),
+            active_guard_subtree_memo_debug_paths != nullptr
+                ? GuardSubtreeEntryToken::make_for_source(value, _source)
+                : GuardSubtreeEntryToken::make(value),
             _source);
       }
     }
@@ -5108,7 +5148,9 @@ class GuardManager {
       const GuardSubtreeMemoState& memo,
       std::vector<GuardSubtreeEntryToken>* tokens) {
     append_guard_subtree_memo_token(
-        tokens, GuardSubtreeEntryToken::make(value), _source);
+        tokens,
+        GuardSubtreeEntryToken::make(value),
+        _source);
     if (!this->check_leaf_guards_nopybind(value)) {
       return false;
     }
