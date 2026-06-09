@@ -809,6 +809,12 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
         # at::DimnameList names; emitting only 4 args (dropping names) for a MetaBase op fails
         # to override the virtual and does not compile, so it must always be present.
         self.assertIn("at::TensorOptions options, at::DimnameList names", out)
+        # sort is MetaBase: MetaBase::set_output_raw_strided is TORCH_INTERNAL_ASSERT(false), so the
+        # super-call (emitted for TensorIterator ops like minimum) must NOT appear here, otherwise
+        # meta() would abort at runtime. Mirrors in-tree generate_super=structured_inherits is not None.
+        self.assertNotIn(
+            "at::meta::structured_sort_stable::set_output_raw_strided", out
+        )
 
 
 if __name__ == "__main__":
