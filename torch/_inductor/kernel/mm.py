@@ -207,7 +207,7 @@ def check_supported_striding(mat_a, mat_b) -> None:
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
 
-def decomposeK(a, b, k_splits):
+def decomposeK(a, b, k_splits, preserve_fp32=False):
     m = a.shape[0]
     n = b.shape[1]
     k = a.shape[1]
@@ -218,14 +218,15 @@ def decomposeK(a, b, k_splits):
     b_reshaped = b.reshape(B, k_parts, n)
     result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
     reduced_buf = torch.sum(result, 0)
-    return reduced_buf.to(a.dtype)
+    return reduced_buf if preserve_fp32 else reduced_buf.to(a.dtype)
 
 
 class DecomposeKSugraphTemplate(SubgraphTemplate):
-    def __init__(self):
+    def __init__(self, name="decompose_k", preserve_fp32=False):
         super().__init__(
-            name="decompose_k",
+            name=name,
         )
+        self.preserve_fp32 = preserve_fp32
 
     def generate(  # type: ignore[override]
         self,
@@ -237,13 +238,17 @@ class DecomposeKSugraphTemplate(SubgraphTemplate):
 
         from ..decomposition import select_decomp_table
 
-        name = f"decompose_k_mm_{k_split}_split"
+        name = f"{self.name}_mm_{k_split}_split"
         description = f"{k_split=}"
 
         with enable_python_dispatcher():
             decompositions = select_decomp_table()
             fn = make_fx(
-                functools.partial(decomposeK, k_splits=k_split),
+                functools.partial(
+                    decomposeK,
+                    k_splits=k_split,
+                    preserve_fp32=self.preserve_fp32,
+                ),
                 decompositions,
             )
 
@@ -257,6 +262,9 @@ class DecomposeKSugraphTemplate(SubgraphTemplate):
 
 
 decompose_k_subgraph_template = DecomposeKSugraphTemplate()
+decompose_k_fp32_subgraph_template = DecomposeKSugraphTemplate(
+    name="decompose_k_fp32", preserve_fp32=True
+)
 
 
 class ContiguousTemplate(SubgraphTemplate):
