@@ -21,12 +21,10 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    MI200_ARCH,
     parametrize,
     run_tests,
     serialTest,
-    skipIfRocm,
-    skipIfRocmArch,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -51,6 +49,93 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             lambda x: torch.ops.aten.contiguous(x),
             torch.randn(16, 32),
         )
+
+    @with_comms
+    def test_auto_registered_batch_norm_functional(self):
+        self.assertIn(
+            torch.ops.aten._native_batch_norm_legit_functional.default,
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs,
+        )
+        device_mesh = self.build_device_mesh()
+        input = torch.arange(
+            8 * 4 * 3 * 3, device=self.device_type, dtype=torch.float32
+        ).reshape(8, 4, 3, 3)
+        input = input / input.numel()
+        weight = torch.linspace(0.5, 1.1, 4, device=self.device_type)
+        bias = torch.linspace(-0.2, 0.2, 4, device=self.device_type)
+        running_mean = torch.zeros(4, device=self.device_type)
+        running_var = torch.ones(4, device=self.device_type)
+
+        expected = torch.ops.aten._native_batch_norm_legit_functional(
+            input,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            True,
+            0.1,
+            1e-5,
+        )
+
+        dinput = distribute_tensor(input, device_mesh, [Shard(1)])
+        dweight = distribute_tensor(weight, device_mesh, [Shard(0)])
+        dbias = distribute_tensor(bias, device_mesh, [Shard(0)])
+        drunning_mean = distribute_tensor(running_mean, device_mesh, [Shard(0)])
+        drunning_var = distribute_tensor(running_var, device_mesh, [Shard(0)])
+
+        result = torch.ops.aten._native_batch_norm_legit_functional(
+            dinput,
+            dweight,
+            dbias,
+            drunning_mean,
+            drunning_var,
+            True,
+            0.1,
+            1e-5,
+        )
+
+        self.assertEqual(len(result), 5)
+        expected_placements = (Shard(1), Shard(0), Shard(0), Shard(0), Shard(0))
+        for output, placements in zip(result, expected_placements):
+            self.assertEqual(output.placements, (placements,))
+        for actual, expected_tensor in zip(result, expected):
+            self.assertEqual(actual.full_tensor(), expected_tensor)
+
+    @with_comms
+    def test_auto_registered_explicit_out_variant(self):
+        self.assertNotIn("out", torch.ops.aten.max.dim_max._schema.overload_name)
+        self.assertTrue(
+            any(
+                argument.is_out
+                for argument in torch.ops.aten.max.dim_max._schema.arguments
+            )
+        )
+        self.assertIn(
+            torch.ops.aten.max.dim_max,
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs,
+        )
+        device_mesh = self.build_device_mesh()
+        input = torch.arange(
+            8 * 4, device=self.device_type, dtype=torch.float32
+        ).reshape(8, 4)
+        expected_values, expected_indices = torch.max(input, dim=1)
+
+        dinput = distribute_tensor(input, device_mesh, [Shard(0)])
+        dvalues = distribute_tensor(
+            torch.empty_like(expected_values), device_mesh, [Shard(0)]
+        )
+        dindices = distribute_tensor(
+            torch.empty_like(expected_indices), device_mesh, [Shard(0)]
+        )
+
+        result = torch.max(dinput, dim=1, out=(dvalues, dindices))
+
+        self.assertIs(result[0], dvalues)
+        self.assertIs(result[1], dindices)
+        self.assertEqual(dvalues.placements, (Shard(0),))
+        self.assertEqual(dindices.placements, (Shard(0),))
+        self.assertEqual(dvalues.full_tensor(), expected_values)
+        self.assertEqual(dindices.full_tensor(), expected_indices)
 
     def test_detach(self):
         device_mesh = self.build_device_mesh()
@@ -591,6 +676,53 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
                 self.assertEqual(output_dt.placements, [Replicate()])
                 self.assertEqual(output_dt.to_local(), global_output)
 
+        # case 2 shard on a non-scatter dim: input/index/src and output all
+        # sharded on dim 0, scatter performed along dim 1. This must run as a
+        # purely local op with no communication.
+        shard_dim, scatter_dim = 0, 1
+        rows = self.world_size * 2
+        global_input = torch.zeros(rows, 5, dtype=torch.int64)
+        # deterministic index so every spawned rank builds the same tensor
+        global_index = torch.arange(rows * 3).reshape(rows, 3) % 5
+        srcs = [torch.arange(1, rows * 3 + 1).reshape((rows, 3)), 4]
+        for global_src in srcs:
+            global_output = torch.scatter(
+                global_input, scatter_dim, global_index, global_src
+            )
+            input_dt = distribute_tensor(
+                global_input.clone(), device_mesh, [Shard(shard_dim)]
+            )
+            index_dt = distribute_tensor(global_index, device_mesh, [Shard(shard_dim)])
+            if isinstance(global_src, torch.Tensor):
+                src_dt = distribute_tensor(global_src, device_mesh, [Shard(shard_dim)])
+            else:
+                src_dt = global_src
+            with comm_mode:
+                output_dt = torch.scatter(input_dt, scatter_dim, index_dt, src_dt)
+
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(output_dt.placements, [Shard(shard_dim)])
+            self.assertEqual(output_dt.full_tensor(), global_output)
+
+        # case 3 src larger than index on the shard dim: sharding src to match
+        # index would misalign boundaries, so the sharded strategy must not be
+        # offered and the op falls back to replicate. Result must stay correct.
+        global_input = torch.zeros(rows, 5, dtype=torch.int64)
+        global_index = torch.arange(rows * 3).reshape(rows, 3) % 5
+        global_src = torch.arange(1, (rows + 2) * 3 + 1).reshape((rows + 2, 3))
+        global_output = torch.scatter(
+            global_input, scatter_dim, global_index, global_src
+        )
+        input_dt = distribute_tensor(
+            global_input.clone(), device_mesh, [Shard(shard_dim)]
+        )
+        index_dt = distribute_tensor(global_index, device_mesh, [Shard(shard_dim)])
+        src_dt = distribute_tensor(global_src, device_mesh, [Replicate()])
+        output_dt = torch.scatter(input_dt, scatter_dim, index_dt, src_dt)
+        # the sharded strategy is not offered, so the op falls back to replicate
+        self.assertEqual(output_dt.placements, [Replicate()])
+        self.assertEqual(output_dt.full_tensor(), global_output)
+
     def test_gather(self):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
@@ -639,8 +771,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             self.assertEqual(output_dt.placements, [Shard(gather_dim)])
             self.assertEqual(output_dt.full_tensor(), global_output)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/175064")
-    @skipIfRocmArch(MI200_ARCH)
+    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/175064")
     @serialTest()  # heavy combinatorial _test_op calls, serialize to avoid OOM
     def test_index(self):
         meshes = [
