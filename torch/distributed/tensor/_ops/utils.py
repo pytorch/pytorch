@@ -4,7 +4,7 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
-from typing import cast, TypeAlias, TypeVar
+from typing import Any, cast, TypeAlias, TypeVar
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
@@ -22,6 +22,7 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _is_shard_like,
     _StridedShard,
     Partial,
     Placement,
@@ -192,7 +193,12 @@ def is_tensor_shardable(
         True: assumes shardability; we return True, allowing zero-size shards at runtime when u0 < num_shards.
         False: returns False, and lower-bounding u0, e.g. torch._check(u0 >= num_shards), is needed to enable sharding.
     """
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+    from torch.fx.experimental.symbolic_shapes import (
+        free_unbacked_symbols,
+        guard_or_false,
+        guard_or_true,
+        optimization_hint,
+    )
 
     if allow_unbacked_sharding not in [None, True, False]:
         raise AssertionError
@@ -202,10 +208,28 @@ def is_tensor_shardable(
         False: guard_or_true,
     }[allow_unbacked_sharding]
 
+    def hint_proves_at_least(size, lower_bound: int) -> bool:
+        if guard_or_false(size >= lower_bound):
+            return True
+        if not (
+            isinstance(size, torch.SymInt)
+            and (shape_env := getattr(size.node, "shape_env", None)) is not None
+            and (unbacked_symbols := free_unbacked_symbols(size.node.expr))
+            and unbacked_symbols.issubset(shape_env.var_to_hint_override.keys())
+            and optimization_hint(size, fallback=None) >= lower_bound
+        ):
+            return False
+
+        # Shardability is a correctness property, not just an optimization.
+        # A user-provided unbacked hint can select the shardable branch, but
+        # the runtime extent must still be checked before the strategy is used.
+        torch._check(size >= lower_bound)
+        return True
+
     # number of shards in each tensor dimension
     num_shards = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
-        if isinstance(placement, Shard | _StridedShard):
+        if _is_shard_like(placement):
             shard_dim = placement.dim
             if shard_dim >= len(shape):
                 return False
@@ -213,12 +237,16 @@ def is_tensor_shardable(
             if isinstance(placement, _StridedShard):
                 # make sure tensor dim `shard_dim` is shardable after splitting
                 # with split_factor
-                if guard_fn(
-                    shape[shard_dim] < num_shards[shard_dim] * placement.split_factor
+                lower_bound = cast(Any, num_shards[shard_dim]) * placement.split_factor
+                if not hint_proves_at_least(shape[shard_dim], lower_bound) and guard_fn(
+                    shape[shard_dim] < lower_bound
                 ):
                     return False
             else:
-                if guard_fn(shape[shard_dim] < num_shards[shard_dim]):
+                lower_bound = num_shards[shard_dim]
+                if not hint_proves_at_least(shape[shard_dim], lower_bound) and guard_fn(
+                    shape[shard_dim] < lower_bound
+                ):
                     return False
 
     return True
@@ -229,14 +257,15 @@ def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     # number of shards in each tensor dimension
     num_shards = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
-        if isinstance(placement, Shard | _StridedShard):
+        if _is_shard_like(placement):
             shard_dim = placement.dim
             if shard_dim >= len(shape):
                 return False
             num_shards[shard_dim] *= spec.mesh.size(i)
             if isinstance(placement, _StridedShard):
                 if (
-                    shape[shard_dim] % (placement.split_factor * num_shards[shard_dim])
+                    cast(Any, shape[shard_dim])
+                    % (placement.split_factor * num_shards[shard_dim])
                     != 0
                 ):
                     return False
@@ -254,17 +283,24 @@ def is_tensor_evenly_shardable_on_dim(
 
     num_shards = 1
     for i, placement in enumerate(spec.placements):
-        if placement.is_shard():
-            shard_dim = cast(Shard, placement).dim
-            if shard_dim == dim:
-                num_shards *= spec.mesh.size(i)
+        if _is_shard_like(placement) and placement.dim == dim:
+            num_shards *= spec.mesh.size(i)
+            if isinstance(placement, _StridedShard):
+                # _StridedShard._split_tensor first chunks into split_factor
+                # groups, then into num_shards within each group, so the dim
+                # must be divisible by the product of both.  This is stricter
+                # than the final num_shards check and implies it.  Note:
+                # num_shards already includes spec.mesh.size(i) from this
+                # iteration, so the check covers the full shard count.
+                if cast(Any, shape[dim]) % (placement.split_factor * num_shards) != 0:
+                    return False
 
     return shape[dim] % num_shards == 0
 
 
 def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
     """Return True if tensor dim is sharded."""
-    return any(p.is_shard(dim) for p in spec.placements)
+    return any(_is_shard_like(p) and p.dim == dim for p in spec.placements)
 
 
 def is_tensor_partial(spec: DTensorSpec) -> bool:
@@ -309,7 +345,7 @@ def map_placements_after_broadcast(
         elif isinstance(placement, Replicate):
             new_placements.append(placement)
         else:
-            if not isinstance(placement, Shard | _StridedShard):
+            if not _is_shard_like(placement):
                 raise AssertionError
             shard_dim = normalize_dim(placement.dim, len(shape))
             new_shard_dim = broadcast_dims_map[shard_dim]
@@ -404,6 +440,18 @@ def expand_to_full_mesh_op_strategy(
     args_strategy = op_schema.args_strategy
     kwargs_strategy = op_schema.kwargs_strategy
     input_args_strategy = args_strategy + kwargs_strategy
+
+    # Propagate use_strided_shard_as_shard_order from inputs so that
+    # strategy specs with _StridedShard get the correct flag (and thus
+    # correct shard_order) at construction time, avoiding shard_order
+    # mismatches in redistribute_cost computation.
+    _input_use_strided: bool | None = None
+    for input_strat in input_args_strategy:
+        input_spec = input_strat.strategies[0].output_spec
+        if any(isinstance(p, _StridedShard) for p in input_spec.placements):
+            _input_use_strided = input_spec.use_strided_shard_as_shard_order
+            break
+
     all_strategies = []
     # Track input placements if we skip strategies due to inplace placement mismatch
     blocking_inplace_input_placements: tuple[Placement, ...] | None = None
@@ -442,7 +490,20 @@ def expand_to_full_mesh_op_strategy(
                         input_strategy_counter += 1
 
                 # pyrefly: ignore [bad-argument-type]
-                spec_list.append(DTensorSpec(mesh, specs, tensor_meta=tensor_meta))
+                use_strided = (
+                    _input_use_strided
+                    if _input_use_strided is not None
+                    and any(isinstance(p, _StridedShard) for p in specs)
+                    else None
+                )
+                spec_list.append(
+                    DTensorSpec(
+                        mesh,
+                        specs,
+                        tensor_meta=tensor_meta,
+                        use_strided_shard_as_shard_order=use_strided,
+                    )
+                )
             else:
                 spec_list.append(None)
 
@@ -537,17 +598,27 @@ def expand_to_full_mesh_op_strategy(
                 blocking_inplace_input_placements = self_spec.placements
             continue
 
-        # For out= variant ops, output placement must match the "out" kwarg's placement
-        if (
-            op_schema.is_out_variant_op()
-            and "out" in op_schema.kwargs_schema
-            and isinstance(op_schema.kwargs_schema["out"], OpStrategy)
-        ):
-            out_kwarg_spec = op_schema.kwargs_schema["out"].strategies[0].output_spec
-            # spec_list[0] is the output spec for this strategy combination
-            if spec_list[0] is not None:
-                if spec_list[0].placements != out_kwarg_spec.placements:
+        # For out= variant ops, output placement must match each out kwarg's
+        # placement. Kwargs are intentionally not redistributed in dispatch.
+        if op_schema.is_out_variant_op():
+            out_arg_idx = 0
+            mismatched_out_arg = False
+            for argument in op_schema.op._schema.arguments:
+                if not argument.is_out:
                     continue
+                out_arg = op_schema.kwargs_schema.get(argument.name)
+                if isinstance(out_arg, OpStrategy):
+                    output_spec = spec_list[out_arg_idx]
+                    out_arg_spec = out_arg.strategies[0].output_spec
+                    if (
+                        output_spec is None
+                        or output_spec.placements != out_arg_spec.placements
+                    ):
+                        mismatched_out_arg = True
+                        break
+                out_arg_idx += 1
+            if mismatched_out_arg:
+                continue
 
         output_specs: tuple[DTensorSpec | None, ...] | DTensorSpec | None
         if input_index == 0:
@@ -611,7 +682,11 @@ def shift_shard_dims_after_insert(
 ) -> Sequence[Placement]:
     normalized_placements: list[Placement] = []
     for placement in placements:
-        if isinstance(placement, Shard) and placement.dim >= insert_dim:
+        if isinstance(placement, _StridedShard) and placement.dim >= insert_dim:
+            normalized_placements.append(
+                _StridedShard(placement.dim + 1, split_factor=placement.split_factor)
+            )
+        elif isinstance(placement, Shard) and placement.dim >= insert_dim:
             normalized_placements.append(Shard(placement.dim + 1))
         else:
             normalized_placements.append(placement)
@@ -623,7 +698,11 @@ def shift_shard_dims_after_remove(
 ) -> Sequence[Placement]:
     normalized_placements: list[Placement] = []
     for placement in placements:
-        if isinstance(placement, Shard) and placement.dim > remove_dim:
+        if isinstance(placement, _StridedShard) and placement.dim > remove_dim:
+            normalized_placements.append(
+                _StridedShard(placement.dim - 1, split_factor=placement.split_factor)
+            )
+        elif isinstance(placement, Shard) and placement.dim > remove_dim:
             normalized_placements.append(Shard(placement.dim - 1))
         else:
             normalized_placements.append(placement)

@@ -34,7 +34,7 @@ std::string getNodesModuleHierarchy(const Node& n) {
     if (opt_module_info.has_value()) {
       const auto& module_instance_info = opt_module_info.value();
       if (!module_hierarchy.empty()) {
-        module_hierarchy.append(".");
+        module_hierarchy.push_back('.');
       }
       module_hierarchy.append(utils::get_module_info(module_instance_info));
     } else {
@@ -886,7 +886,7 @@ Value* Value::setDebugName(const std::string& name) {
       ss.imbue(c_locale);
 #endif
       ss << name_base << '.' << suffix++;
-      replacement_name = ss.str();
+      replacement_name = std::move(ss).str();
     } while (names.count(replacement_name) > 0);
 
     names_suffixes[name_base] = suffix;
@@ -929,12 +929,7 @@ void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
     }
   });
 
-  uses_.erase(
-      std::remove_if(
-          uses_.begin(),
-          uses_.end(),
-          [&node](const Use& u) { return u.user->isAfter(node); }),
-      uses_.end());
+  std::erase_if(uses_, [&node](const Use& u) { return u.user->isAfter(node); });
 }
 
 void Value::replaceAllUsesDominatedByNodeWith(
@@ -947,12 +942,8 @@ void Value::replaceAllUsesDominatedByNodeWith(
     }
   });
 
-  uses_.erase(
-      std::remove_if(
-          uses_.begin(),
-          uses_.end(),
-          [&node](const Use& u) { return u.user->isDominatedBy(node); }),
-      uses_.end());
+  std::erase_if(
+      uses_, [&node](const Use& u) { return u.user->isDominatedBy(node); });
 }
 
 static size_t findArgument(
@@ -1218,7 +1209,6 @@ bool Node::hasSideEffects() const {
       return true;
   }
   TORCH_INTERNAL_ASSERT(false, "Unhandled AliasAnalysisKind case");
-  return false; // silence compiler warning
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and

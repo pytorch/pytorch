@@ -15,7 +15,7 @@ from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, maybe_get_fake_mode
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
     FunctionalTensor,
@@ -28,6 +28,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
 @dataclass
@@ -96,10 +97,29 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
+def _hop_compile_and_call(fn, args, kwargs=None):
+    """Compile and call fn with fullgraph=True for HOP eager execution.
+
+    Pre-activates the fullgraph counter so that compile_wrapper treats this as
+    a nested compile.  This avoids erroring when a non-infra dispatch mode
+    causes the frame to be skipped — the function still executes eagerly within
+    compile_wrapper and returns normally.
+    """
+    from torch._dynamo.eval_frame import set_fullgraph_compiled_frame_count
+
+    with setup_compilation_env() as backend:
+        old_count = set_fullgraph_compiled_frame_count(0)
+        try:
+            return torch.compile(fn, backend=backend, fullgraph=True)(
+                *args, **(kwargs or {})
+            )
+        finally:
+            set_fullgraph_compiled_frame_count(old_count)
+
+
 def _maybe_compile_and_run_fn(fn, *args):
     if not torch.compiler.is_dynamo_compiling():
-        with setup_compilation_env() as backend:  # type: ignore[attr-defined]
-            return torch.compile(fn, backend=backend, fullgraph=True)(*args)
+        return _hop_compile_and_call(fn, args)
     else:
         return fn(*args)
 
@@ -291,7 +311,7 @@ def _set_compilation_env():
     # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
     # the top-level frame produces no graph, the default behavior is to fallback to eager.
     # Then when it encounters an inner function, it will try to trace that function again, which is unnecessary.
-    # For while_loop, during inspecting the inner call, we trace into the python dispathcer
+    # For while_loop, during inspecting the inner call, we trace into the python dispatcher
     # logic, which is not tracable as of today. So the proper fix can be either 1. allow dispatch
     # logic to be dynamo tracable or 2. fixing https://github.com/pytorch/pytorch/issues/144360.
     # but it exposes some bugs in existing tests so we have to have a temporary flag to control
@@ -311,13 +331,23 @@ def _set_compilation_env():
 
 
 # The invariant here is that we always trace the branch with fake tensor
-def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
+def _detect_fake_mode_from_inputs(inputs: list[Any]):
     fake_mode_det = None
     for inp in pytree.tree_leaves(inputs):
-        if isinstance(inp, FakeTensor):
-            fake_mode_det = inp.fake_mode
-            break
+        fake_mode = maybe_get_fake_mode(inp)
+        if fake_mode is None:
+            continue
+        if fake_mode_det is None:
+            fake_mode_det = fake_mode
+        elif fake_mode_det is not fake_mode:
+            raise AssertionError(
+                f"Expected all fake inputs to use the same fake mode, got {fake_mode_det} and {fake_mode}"
+            )
+    return fake_mode_det
 
+
+def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
+    fake_mode_det = _detect_fake_mode_from_inputs(inputs)
     fake_mode: AbstractContextManager = nullcontext()
     tracing_mode = "fake"
     if fake_mode_det is not None:
@@ -328,12 +358,20 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
     # as fake tensor.
     with fake_mode, disable_proxy_modes_tracing():
-        gm = make_fx(
-            fn,
-            tracing_mode=tracing_mode,
-            pre_dispatch=pre_dispatch,
-            _error_on_data_dependent_ops=False,
-        )(*inputs)
+        from torch.fx.experimental.symbolic_shapes import (
+            _ignore_fresh_unbacked_symbols_tls_context,
+        )
+
+        # This graph is used only to answer alias/mutation questions. Fresh
+        # unbacked symbols created during the trace are therefore discarded with
+        # the graph and should not require bindings in the surrounding graph.
+        with _ignore_fresh_unbacked_symbols_tls_context():
+            gm = make_fx(
+                fn,
+                tracing_mode=tracing_mode,
+                pre_dispatch=pre_dispatch,
+                _error_on_data_dependent_ops=False,
+            )(*inputs)
         if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:  # type: ignore[attr-defined]
             insert_deferred_runtime_asserts(
                 gm,
@@ -440,6 +478,16 @@ def _collect_fake_inputs(inputs):
                                 f"Expected FakeTensor after unwrapping, got {type(val)}"
                             )
                         inputs_fake.append(val)
+                    elif is_traceable_wrapper_subclass(val):
+                        for attr_name in val.__tensor_flatten__()[0]:
+                            unwrapped_input = getattr(val, attr_name)
+                            if not isinstance(unwrapped_input, torch.Tensor):
+                                continue
+                            if not isinstance(unwrapped_input, FakeTensor):
+                                raise AssertionError(
+                                    f"Expected FakeTensor after unwrapping, got {type(unwrapped_input)}"
+                                )
+                            inputs_fake.append(unwrapped_input)
                     else:
                         # This is the standard case of a TensorVariable
                         if not isinstance(val, FakeTensor):
@@ -466,9 +514,9 @@ def _check_alias_and_mutation(graph_module, inputs_fake, name, pre_dispatch):
         graph_module, inputs_fake, pre_dispatch=pre_dispatch
     )
     if aliases:
-        raise RuntimeError(f"{name} might be aliasing the input or the output!")  # noqa: F541
+        raise RuntimeError(f"{name} might be aliasing the input or the output!")
     if inp_mutation:
-        raise RuntimeError(f"{name} might be modifying the input!")  # noqa: F541
+        raise RuntimeError(f"{name} might be modifying the input!")
 
 
 def unique_graph_id(proxy_mode, prefix):
@@ -1018,6 +1066,21 @@ def _tensor_storage(t) -> StorageWeakRef:
     return StorageWeakRef(t._typed_storage())
 
 
+def _get_example_value(n):
+    if not isinstance(n, torch.fx.Node):
+        return n
+    if "val" in n.meta:
+        return n.meta["val"]
+    if "example_value" in n.meta:
+        return n.meta["example_value"]
+    return None
+
+
+def get_graph_output_example_values(gm: torch.fx.GraphModule) -> list[Any]:
+    output_node = gm.graph.find_nodes(op="output")[0]
+    return [_get_example_value(n) for n in pytree.tree_flatten(output_node.args[0])[0]]
+
+
 def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
 ) -> tuple[
@@ -1027,22 +1090,12 @@ def check_input_alias_and_mutation_return_outputs(
     list[int],
     tuple[Any, ...] | list[Any],
 ]:
-    def _get_example_value(n):
-        if not isinstance(n, torch.fx.Node):
-            return n
-        else:
-            return n.meta["val"] if "val" in n.meta else n.meta["example_value"]
-
     fake_args = [
         _get_example_value(n)
         for n in gm.graph.find_nodes(op="placeholder")
         if isinstance(n, torch.fx.Node) and "val" in n.meta
     ]
-    outputs = [
-        _get_example_value(n)
-        for n in pytree.tree_flatten(gm.graph.find_nodes(op="output")[0].args[0])[0]
-        if not isinstance(n, torch.fx.Node) or "val" in n.meta
-    ]
+    outputs = get_graph_output_example_values(gm)
 
     # We need to analyze the original fake_args to detect
     # inp-inp alias.
@@ -1097,23 +1150,35 @@ def check_input_alias_and_mutation_return_outputs(
 
 registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}
 
+# Set skip_cache=True for HOPs that should not be cached in FakeTensorMode
+# (previously these ops were registered with .py_impl(FakeTensorMode)) and
+# were never cached so we are just preserving original behaviour
+hops_that_skip_faketensor_cache: set[torch._ops.OpOverload] = set()
+
 
 F = TypeVar("F", bound=Callable)
 
 
 @overload
-def register_fake(hop, fn: None = None) -> Callable[[F], F]: ...
+def register_fake(
+    hop, fn: None = None, *, skip_cache: bool = ...
+) -> Callable[[F], F]: ...
 
 
 @overload
-def register_fake(hop, fn: F) -> F: ...
+def register_fake(hop, fn: F, *, skip_cache: bool = ...) -> F: ...
 
 
-def register_fake(hop, fn=None):
+def register_fake(hop, fn=None, *, skip_cache=False):
     """
     Register a fake function for a HOP. This is conceptually equivalent of the
     register_fake utility for the custom ops. The registered function is called
     inside the fake_tensor _dispatch_impl.
+
+    Set skip_cache=True to keep a HOP's fake output out of the FakeTensorMode
+    cache -- either to preserve the historical uncached behavior of
+    py_impl(FakeTensorMode), or because its outputs alias in ways the cache
+    cannot reconstruct (e.g. auto_functionalized).
     """
     if hop in registered_hop_fake_fns:
         raise AssertionError(f"hop {hop} already registered in registered_hop_fake_fns")
@@ -1124,6 +1189,8 @@ def register_fake(hop, fn=None):
         redirect_to_mode(hop, FakeTensorMode)
 
         registered_hop_fake_fns[hop] = func
+        if skip_cache:
+            hops_that_skip_faketensor_cache.add(hop)
         return func
 
     if fn is None:
@@ -1131,29 +1198,36 @@ def register_fake(hop, fn=None):
     return register(fn)
 
 
-class FunctionalizeCtxWrapper:
+class SubgraphCallableWrapper:
     """
-    This is a dummy wrapper to facilitate fake tensor caching.
+    Wraps a callable while preserving the original subgraph identity for
+    fake tensor caching. Without this, passing a plain closure to
+    invoke_subgraph would bypass the dispatch cache entirely.
+    """
 
-    For AOT Dispatcher metadata collection pass, HOPs go from functionalization
-    key to fake tensor key. The functionalization key wraps the subgraphs in a
-    function, which changes from call to call even though the subgraph might
-    still be same.
+    def __init__(self, fn, subgraph):
+        self.fn = fn
+        self.subgraph = subgraph
+        self._boxed_call = getattr(subgraph, "_boxed_call", False)
 
-    To enable fake tensor caching, we just wrap the ctx and subgraph in this
-    class and then use the subgraph as the hash.
+    def __hash__(self):
+        return id(self.subgraph)
+
+    def __call__(self, *args, **kwargs):
+        return self.fn(*args, **kwargs)
+
+
+class FunctionalizeCtxWrapper(SubgraphCallableWrapper):
+    """
+    Wraps a subgraph with functionalization context for the AOT Dispatcher
+    metadata collection pass.
     """
 
     # Prevents PYTORCH_TEST_WITH_DYNAMO=1 test failures
     @torch._disable_dynamo
     def __init__(self, ctx, subgraph):
+        super().__init__(subgraph, subgraph)
         self.ctx = ctx
-        self.subgraph = subgraph
-        # Propagate so callers pass inputs as a list, enabling input deallocation.
-        self._boxed_call = getattr(subgraph, "_boxed_call", False)
-
-    def __hash__(self):
-        return id(self.subgraph)
 
     def __repr__(self):
         return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"

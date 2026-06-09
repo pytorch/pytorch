@@ -624,7 +624,12 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
             # TODO: better to change to a specific field of custom?
             custom = fwd_node.meta.get("custom")
             if custom is not None:
-                node.meta["custom"] = copy.deepcopy(custom)
+                # Merge rather than overwrite so bw-only keys survive
+                # fw keys win on conflict.
+                node.meta["custom"] = {
+                    **node.meta.get("custom", {}),
+                    **copy.deepcopy(custom),
+                }
 
 
 def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
@@ -711,15 +716,57 @@ def contain_metadata_mutation_ops(module: torch.fx.GraphModule) -> bool:
     return False
 
 
-def get_cuda_generator_meta_val(device_idx: int) -> Any:
-    """
-    Get a generator value to use as a meta val
+_GRAPHSAFE_RNG_DEVICE_TYPES: set[str] = {"cuda"}
 
-    newly cloned generator will not contain tensors. it is only Generators that are
-    registered to a CUDAGraph that contain tensors. since this does not contain Tensor
-    it is fine to use in the meta.
+
+def register_graphsafe_rng_device_type(device_type: str) -> None:
+    """Register a device type as supporting graphsafe RNG operations.
+
+    The device backend module (``torch.<device_type>``) must provide:
+    - ``_get_generator(device: torch.device) -> Generator``: return the default
+      generator for the given device. The generator must implement
+      ``graphsafe_get_state()``, ``graphsafe_set_state(state)``, and
+      ``clone_state()``.
+    - ``get_rng_state(device_index: int) -> Tensor``: return the current RNG
+      state tensor.
+
+    Args:
+        device_type: The device type string (e.g. "cuda", "xpu").
     """
-    return torch.cuda.default_generators[device_idx].clone_state()
+    from torch._prims.rng_prims import register_graphsafe_rng_dispatch
+
+    key_name = torch._C._dispatch_key_for_device(device_type)
+    dispatch_key = getattr(torch._C.DispatchKey, key_name)
+    _GRAPHSAFE_RNG_DEVICE_TYPES.add(device_type)
+    register_graphsafe_rng_dispatch(dispatch_key)
+
+
+def supports_graphsafe_rng(device: torch.device) -> bool:
+    """Check whether a device supports graphsafe RNG operations."""
+    return device.type in _GRAPHSAFE_RNG_DEVICE_TYPES
+
+
+def get_default_generator(device: torch.device) -> Any:
+    """Get the default RNG generator for a device.
+
+    Calls ``torch.<device_type>._get_generator(device)``.
+    """
+    device_mod = getattr(torch, device.type, None)
+    if device_mod is None or not hasattr(device_mod, "_get_generator"):
+        raise AssertionError(
+            f"Device type '{device.type}' does not implement _get_generator. "
+            f"Registered graphsafe RNG types: {sorted(_GRAPHSAFE_RNG_DEVICE_TYPES)}."
+        )
+    return device_mod._get_generator(device)
+
+
+def get_device_rng_state(device: torch.device) -> torch.Tensor:
+    """Get the RNG state tensor for a device."""
+    device_mod = getattr(torch, device.type, None)
+    if device_mod is not None and hasattr(device_mod, "get_rng_state"):
+        idx = device.index if device.index is not None else 0
+        return device_mod.get_rng_state(idx)
+    return torch.get_rng_state()
 
 
 def top_saved_tensors_hooks() -> Any:

@@ -246,8 +246,6 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   }
 };
 
-// NB: dummy argument to suppress "ISO C++11 requires at least one argument
-// for the "..." in a variadic macro"
 struct TORCH_API CUDAHooksArgs {};
 
 TORCH_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);

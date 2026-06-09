@@ -8,7 +8,6 @@ import subprocess
 from pathlib import Path
 
 from packaging.version import Version
-from setuptools import distutils  # type: ignore[import,attr-defined]
 
 
 UNKNOWN = "Unknown"
@@ -112,13 +111,18 @@ def get_torch_version(sha: str | None = None) -> str:
 
 
 if __name__ == "__main__":
+    # Imported here so library users that load this file outside the tools
+    # package (e.g. via importlib.util.spec_from_file_location) do not need
+    # the project root on sys.path just to call get_torch_version().
+    from tools.strtobool import strtobool
+
     parser = argparse.ArgumentParser(
         description="Generate torch/version.py from build and environment metadata."
     )
     parser.add_argument(
         "--is-debug",
         "--is_debug",
-        type=distutils.util.strtobool,
+        type=strtobool,
         help="Whether this build is debug mode or not.",
     )
     parser.add_argument("--cuda-version", "--cuda_version", type=str)

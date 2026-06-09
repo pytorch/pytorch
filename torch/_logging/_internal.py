@@ -257,6 +257,7 @@ def set_logs(
     cudagraph_static_inputs: bool = False,
     benchmarking: bool = False,
     autotuning: bool = False,
+    incremental: bool = False,
     graph_region_expansion: bool = False,
     inductor_metrics: bool = False,
     hierarchical_compile: bool = False,
@@ -403,7 +404,7 @@ def set_logs(
             Whether to emit the TorchInductor output code on a per-graph basis. Default: ``False``
 
         kernel_code (:class:`bool`):
-            Whether to emit the TorchInductor output code on a per-kernel bases. Default: ``False``
+            Whether to emit the TorchInductor output code on a per-kernel basis. Default: ``False``
 
         schedule (:class:`bool`):
             Whether to emit the TorchInductor schedule. Default: ``False``
@@ -433,7 +434,7 @@ def set_logs(
             Whether to emit detailed Inductor compute/comm overlap decisions. Default: ``False``
 
         sym_node (:class:`bool`):
-            Whether to emit debug info for various SymNode opterations. Default: ``False``
+            Whether to emit debug info for various SymNode operations. Default: ``False``
 
         export (:class:`Optional[int]`):
             The log level for export. Default: ``logging.WARN``
@@ -456,6 +457,9 @@ def set_logs(
 
         autotuning (:class:`bool`):
             Autotuning choice logs, such as kernel source, perf, and tuning parameters. Default: ``False``
+
+        incremental (:class:`bool`):
+            Incremental autotuning logs. Default: ``False``
 
         graph_region_expansion (:class:`bool`):
             Whether to emit the detailed steps of the duplicate graph region tracker expansion algorithm. Default: ``False``
@@ -585,6 +589,7 @@ def set_logs(
         cudagraph_static_inputs=cudagraph_static_inputs,
         benchmarking=benchmarking,
         autotuning=autotuning,
+        incremental=incremental,
         graph_region_expansion=graph_region_expansion,
         inductor_metrics=inductor_metrics,
         hierarchical_compile=hierarchical_compile,
@@ -1181,6 +1186,10 @@ def _init_logs(log_file_name=None) -> None:
     # are any handlers before deciding to actually call logging on this.  Do
     # not manually call
     trace_log.setLevel(logging.DEBUG)
+    # Override isEnabledFor so that logging.disable() cannot suppress trace
+    # events.  When TORCH_TRACE is set we always want output regardless of
+    # the global disable threshold.
+    trace_log.isEnabledFor = lambda level: level >= trace_log.level
     trace_log_handler = _track_handler(LOG_TRACE_HANDLER)
     trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
     trace_log.addHandler(trace_log_handler)
@@ -1443,6 +1452,7 @@ def trace_structured(
         "timestamp",
         "pathname",
         "thread",
+        "subgraph_name",
     ]
     if name in reserved_names:
         raise AssertionError(f"name {name!r} is reserved and cannot be used")
@@ -1485,6 +1495,12 @@ def trace_structured(
                         record["frame_compile_id"] = cid.frame_compile_id
                 if trace_id:
                     record["attempt"] = trace_id.attempt
+
+            from torch.fx.traceback import _get_regional_inductor_subgraph_name
+
+            subgraph_name = _get_regional_inductor_subgraph_name()
+            if subgraph_name is not None:
+                record["subgraph_name"] = subgraph_name
 
         payload = payload_fn()
         if payload is not None:
@@ -1547,3 +1563,4 @@ def dtrace_structured(
 import torch._guards
 import torch._utils_internal
 import torch.distributed as dist
+import torch.fx.traceback

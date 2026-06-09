@@ -198,7 +198,7 @@ def cond(
     if isinstance(pred, (bool, int, float)):
         # This is the non-strict export case. Strict export and torch.compile are
         # handled above in dynamo.
-        if torch.compiler.is_compiling():
+        if torch.compiler.is_exporting():
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
                 " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
@@ -241,12 +241,9 @@ def cond(
     def _cond_op_wrapper(*args, **kwargs):
         return cond_op(*args, **kwargs)
 
-    from torch._higher_order_ops.utils import setup_compilation_env
+    from torch._higher_order_ops.utils import _hop_compile_and_call
 
-    with setup_compilation_env() as backend:
-        return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
-            pred, true_fn, false_fn, operands
-        )
+    return _hop_compile_and_call(_cond_op_wrapper, (pred, true_fn, false_fn, operands))
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):

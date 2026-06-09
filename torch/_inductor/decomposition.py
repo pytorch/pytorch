@@ -61,6 +61,8 @@ quantized_decomposed = torch.ops.quantized_decomposed
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
+        aten.adaptive_max_pool2d,
+        aten.adaptive_max_pool3d,
         aten.index_select,
         aten.addmv,
         aten.arange,
@@ -319,7 +321,13 @@ def convolution_backward(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if not output_mask[2] or not is_gpu(grad_output.device.type):
         return NotImplemented
-    grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
+    if statically_known_true(input.size(1) == 0) and statically_known_true(
+        bias_sizes[0] != 0
+    ):
+        # deal with the `input_channel=0` case
+        grad_bias = grad_output.new_zeros(bias_sizes)
+    else:
+        grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
     grad_inp, grad_weight, _ = aten.convolution_backward(
         grad_output,
         input,
@@ -351,7 +359,7 @@ def bmm(
 ) -> torch.Tensor:
     # Outer-product specialization: [B, M, 1] x [B, 1, N] -> [B, M, N].
     # This avoids introducing a reduction and maps directly to broadcasted mul.
-    if statically_known_true(self.shape[2] == 1) or statically_known_true(
+    if statically_known_true(self.shape[2] == 1) and statically_known_true(
         batch2.shape[1] == 1
     ):
         return (self * batch2).contiguous()
@@ -776,22 +784,22 @@ def _rand_like(
     return result.permute(permutation).clone()
 
 
-@register_decomposition(aten.rand_like)
+@decomp.register_decomposition([aten.rand_like], extra_random_decomps)
 def rand_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.rand, self, **kwargs)
 
 
-@register_decomposition(aten.randn_like)
+@decomp.register_decomposition([aten.randn_like], extra_random_decomps)
 def randn_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.randn, self, **kwargs)
 
 
-@register_decomposition(aten.randint_like.default)
+@decomp.register_decomposition([aten.randint_like.default], extra_random_decomps)
 def randint_like(self: torch.Tensor, high: int, **kwargs: Any) -> torch.Tensor:
     return _rand_like(functools.partial(aten.randint.low, 0, high), self, **kwargs)
 
 
-@register_decomposition(aten.randint_like.low_dtype)
+@decomp.register_decomposition([aten.randint_like.low_dtype], extra_random_decomps)
 def randint_like_low(
     self: torch.Tensor, low: int, high: int, **kwargs: Any
 ) -> torch.Tensor:
@@ -1065,6 +1073,14 @@ def index_reduce(
     *,
     include_self: bool = True,
 ) -> torch.Tensor:
+    torch._check(
+        self.device == index.device and self.device == src.device,
+        lambda: (
+            f"index_reduce(): self, index and source expected to be in the same device, "
+            f"but got (self) {self.device}, (index) {index.device}, "
+            f"and (source) {src.device}"
+        ),
+    )
     if reduction_type == "mean" and not needs_fallback_due_to_atomic_add_limitations(
         self.dtype
     ):
@@ -1193,24 +1209,6 @@ def max_pool3d_with_indices(
     )
 
 
-@register_decomposition(aten.adaptive_max_pool2d)
-def adaptive_max_pool2d(
-    x: torch.Tensor, output_size: list[int]
-) -> tuple[torch.Tensor, torch.Tensor]:
-    *batch, h_in, w_in = x.shape
-    h_out, w_out = output_size
-
-    if h_out == 0 or w_out == 0:
-        o_size = [*batch, h_out, w_out]
-        return x.new_empty(o_size), x.new_empty(o_size, dtype=torch.int64)
-
-    if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
-        return aten.max_pool2d_with_indices(x, kernel_size)
-
-    return NotImplemented
-
-
 @register_decomposition(aten.searchsorted.Scalar)
 def searchsorted_scalar(
     sorted_sequence: torch.Tensor,
@@ -1247,7 +1245,7 @@ def bucketize_scalar(
     ).squeeze(0)
 
 
-@register_decomposition(aten.rrelu_with_noise_functional)
+@decomp.register_decomposition(aten.rrelu_with_noise_functional, extra_random_decomps)
 def rrelu_with_noise_functional(
     self: torch.Tensor,
     noise: torch.Tensor,

@@ -11,7 +11,11 @@ from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.runtime.benchmarking import benchmarker
-from torch._inductor.sizevars import SizeVarAllocator
+from torch._inductor.sizevars import (
+    simplify_index_in_vec_range,
+    SizeVarAllocator,
+    stride_at_vec_range,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_utils import (
@@ -23,12 +27,14 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
     FloorDiv,
+    Identity,
     Mod,
     ModularIndexing,
     PythonMod,
     RoundDecimal,
     RoundToInt,
 )
+from torch.utils._sympy.numbers import int_oo
 
 
 # int64_t is long long on MacOS, but long on 64-bit Linux
@@ -37,6 +43,97 @@ DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
 class TestIndexingSimplification(InductorTestCase):
+    def test_simplify_index_in_vec_range(self):
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+
+        self.assertEqual(
+            simplify_index_in_vec_range(ModularIndexing(i, 1, 16), i, 8),
+            i + sympy.Symbol("i_mod_c0"),
+        )
+        self.assertEqual(stride_at_vec_range(ModularIndexing(i, 1, 16), i, 8), 1)
+        self.assertEqual(stride_at_vec_range(FloorDiv(i, 8), i, 8), 0)
+        self.assertEqual(
+            simplify_index_in_vec_range(ModularIndexing(i, 1, 10), i, 8),
+            ModularIndexing(i, 1, 10),
+        )
+
+    def test_simplify_index_in_vec_range_with_relational(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/181115
+
+        sympy.simplify crashes with 'StrictLessThan has no attribute diff'
+        when index expressions contain relational sub-expressions. This happens
+        with dynamic=True + torch.func.grad producing Piecewise/Min/Max terms.
+        """
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+        s0 = sympy.Symbol("s0", positive=True, integer=True)
+        index = sympy.Piecewise((i, i < s0), (s0 - 1, True))
+        result = simplify_index_in_vec_range(index, i, 16)
+        self.assertIsNotNone(result)
+        result2 = stride_at_vec_range(index, i, 16)
+        self.assertIsNotNone(result2)
+
+    def test_analyze_lane_contiguity(self):
+        sizevars = SizeVarAllocator()
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+        j = sympy.Symbol("j", integer=True, nonnegative=True)
+
+        result = sizevars.analyze_lane_contiguity(i + 8, i)
+        self.assertEqual(result.contiguous_width, int_oo)
+        self.assertEqual(result.stride, 1)
+        self.assertFalse(result.uniform)
+
+        result = sizevars.analyze_lane_contiguity(2 * i, i)
+        self.assertIsNone(result.contiguous_width)
+        self.assertEqual(result.stride, 2)
+        self.assertFalse(result.uniform)
+
+        result = sizevars.analyze_lane_contiguity(2 * i * j, i)
+        self.assertIsNone(result.contiguous_width)
+        self.assertEqual(result.stride, 2 * j)
+        self.assertFalse(result.uniform)
+
+        result = sizevars.analyze_lane_contiguity(i * i, i)
+        self.assertTrue(result.unknown)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i, 1, 4), i)
+        self.assertEqual(result.contiguous_width, 4)
+        self.assertEqual(result.stride, 1)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 4, 1, 8), i)
+        self.assertEqual(result.contiguous_width, 4)
+        self.assertEqual(result.stride, 1)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 2, 1, 8), i)
+        self.assertEqual(result.contiguous_width, 2)
+        self.assertEqual(result.stride, 1)
+
+        result = sizevars.analyze_lane_contiguity(Mod(i, 4), i)
+        self.assertEqual(result.contiguous_width, 4)
+        self.assertEqual(result.stride, 1)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 1, 1, 8), i)
+        self.assertTrue(result.unknown)
+
+        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 8), i)
+        self.assertTrue(result.uniform)
+        self.assertEqual(result.uniform_width, 8)
+        self.assertEqual(result.stride, 0)
+
+        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 2), i)
+        self.assertTrue(result.uniform)
+        self.assertEqual(result.uniform_width, 2)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i, 8, 4), i)
+        self.assertTrue(result.uniform)
+        self.assertEqual(result.uniform_width, 8)
+
+        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 8) + i, i)
+        self.assertEqual(result.contiguous_width, 8)
+        self.assertFalse(result.uniform)
+
+        result = sizevars.analyze_lane_contiguity(2 * i - ModularIndexing(i, 1, 4), i)
+        self.assertTrue(result.unknown)
+
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
         i0 = sympy.Symbol("i0", integer=True)
@@ -116,10 +213,62 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
         var_ranges = {i2: 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
-        expected = FloorDiv(ModularIndexing(i2, 1, 28), 7)
+        # FloorDiv(ModularIndexing(b, d1, m), d2) simplifies to
+        # ModularIndexing(b, d1*d2, m//d2) when d2 | m
+        expected = ModularIndexing(i2, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+
+    def test_floordiv_modularindexing_simplification(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0", integer=True, nonneg=True)
+
+        # FloorDiv(ModularIndexing(b, d1, m), d2) -> ModularIndexing(b, d1*d2, m//d2)
+        # when d2 divides m
+        self.assertEqual(
+            sizevars.simplify_with_ranges(
+                FloorDiv(ModularIndexing(i0, 1, 8192), 128), {}
+            ),
+            ModularIndexing(i0, 128, 64),
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(ModularIndexing(i0, 2, 120), 6), {}),
+            ModularIndexing(i0, 12, 20),
+        )
+        # Does NOT simplify when d2 does not divide m
+        expr = FloorDiv(ModularIndexing(i0, 1, 28), 5)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {}), expr)
+
+        # FloorDiv(base, divisor) -> 0 when 0 <= base < divisor
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(ModularIndexing(i0, 1, 10), 10), {}),
+            sympy.S.Zero,
+        )
+
+    def test_remove_zero_terms_generalized(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0", integer=True, nonneg=True)
+        i1 = sympy.Symbol("i1", integer=True, nonneg=True)
+
+        # FloorDiv(v + 128*i1, 8192): gcd(128*i1, 8192) = 128
+        # Old rule fails (128 != 8192), new rule: v < 128 => drop v
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(i0 + 128 * i1, 8192), {i0: 128}),
+            FloorDiv(128 * i1, 8192),
+        )
+        # v range equals gcd exactly — still safe since v < gcd (strict)
+        # v=127 max, 127 < 128
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(i0 + 6 * i1, 18), {i0: 6}),
+            FloorDiv(6 * i1, 18),
+        )
+        # v range exceeds gcd — cannot simplify
+        expr = FloorDiv(i0 + 128 * i1, 8192)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, {i0: 129}),
+            expr,
+        )
 
     def test_indexing_join(self):
         sizevars = SizeVarAllocator()
@@ -234,6 +383,27 @@ class TestIndexingSimplification(InductorTestCase):
         expected = FloorDiv(x * 15 + y, 3)
         self.assertEqual(expected, FloorDiv(actual, denominator))
 
+    def test_expand_floor_div_applied_symbolic_factor(self):
+        sizevars = SizeVarAllocator()
+        s = sympy.Symbol("s", integer=True, positive=True)
+        x = sympy.Symbol("x", integer=True, positive=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+
+        expr = s * x + FloorDiv(y, 3)
+        actual, denominator = sizevars.expand_floor_div(expr, (x, y))
+        self.assertNotEqual(expr, actual)
+        expected = FloorDiv(3 * s * x + y, 3)
+        self.assertEqual(expected, FloorDiv(actual, denominator))
+
+    def test_expand_floor_div_skipped_cross_tree_symbolic_factor(self):
+        sizevars = SizeVarAllocator()
+        s = sympy.Symbol("s", integer=True, positive=True)
+        x = sympy.Symbol("x", integer=True, positive=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+
+        expr = s * x + FloorDiv(y, 3)
+        self.assertFalse(sizevars.expand_floor_div(expr, (x,)))
+
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_int8_unpack(self):
         @torch.compile
@@ -254,6 +424,24 @@ class TestIndexingSimplification(InductorTestCase):
         if DO_PERF_TEST:
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
+
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
+    def test_int8_unpack_dynamic_shape(self):
+        @torch.compile(dynamic=True)
+        def f(x):
+            first_elements = x >> 4
+            second_elements = x & 15
+            unpacked = torch.stack([first_elements, second_elements], dim=-1).view(
+                *x.size()[:-1], -1
+            )
+            return unpacked * 2
+
+        x = torch.randint(0, 255, (2, 16, 32), dtype=torch.uint8, device=GPU_TYPE)
+
+        triton_code = run_and_get_triton_code(f, x)
+        # Dynamic shape coefficients should still be coalesced through the
+        # pointwise-cat view instead of loading from s*x1 + x0//2.
+        self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
 
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_floordiv_div_sympy_is_integer_bug(self):
@@ -366,6 +554,29 @@ class ExprPrinterTests(InductorTestCase):
         self.assertExpectedInline(cexpr(expr), """std::lrint((1.0/2.0)*x)""")
         self.assertExpectedInline(
             texpr(expr), """libdevice.llrint((1/2)*x).to(tl.int64)"""
+        )
+
+    def test_print_nan(self):
+        expr = sympy.nan
+        self.assertExpectedInline(pexpr(expr), """math.nan""")
+        self.assertExpectedInline(
+            cexpr(expr), """std::numeric_limits<double>::quiet_NaN()"""
+        )
+
+    def test_print_infinity(self):
+        expr = sympy.oo
+        self.assertExpectedInline(pexpr(expr), """math.inf""")
+        self.assertExpectedInline(
+            cexpr(expr),
+            """std::numeric_limits<double>::infinity()""",
+        )
+
+    def test_print_negative_infinity(self):
+        expr = -sympy.oo
+        self.assertExpectedInline(pexpr(expr), """-math.inf""")
+        self.assertExpectedInline(
+            cexpr(expr),
+            """-std::numeric_limits<double>::infinity()""",
         )
 
     def test_print_integer(self):
@@ -482,7 +693,7 @@ class ExprPrinterTests(InductorTestCase):
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(
                 texpr(expr),
-                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",  # noqa: B950 line too long
+                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",
             )
             self.assertEqual(
                 cexpr(expr),
@@ -614,6 +825,125 @@ class TestPrecomputedSizeHinting(InductorTestCase):
         self.assertEqual(hint, 53)
 
 
+class TestHintDisproves(InductorTestCase):
+    """Tests for hint-disproves fast-path in statically_known_true."""
+
+    def test_hint_disproves_false_claim(self):
+        """If the hint says the expression is False, statically_known_true
+        should return False without expensive sympy reasoning."""
+        sizevars = SizeVarAllocator()
+        s0 = sizevars.shape_env.create_symbol(10, source=ConstantSource("s0"))
+        sizevars.backed_var_to_val[s0] = sympy.Integer(10)
+
+        # s0 < 5 is False when s0=10
+        self.assertFalse(sizevars.statically_known_true(s0 < 5))
+
+    def test_hint_does_not_prove_true_claim(self):
+        """If the hint says True, statically_known_true should not
+        short-circuit — it must fall through to full reasoning."""
+        sizevars = SizeVarAllocator()
+        s0 = sizevars.shape_env.create_symbol(10, source=ConstantSource("s0"))
+        sizevars.backed_var_to_val[s0] = sympy.Integer(10)
+
+        # s0 > 5 is True for hint=10, but not provably universal
+        # (statically_known_true may or may not return True depending
+        # on range info — we just verify it doesn't crash)
+        sizevars.statically_known_true(s0 > 5)
+
+    def test_hint_disproves_with_complex_expr(self):
+        """Hint fast-path works on multi-symbol expressions."""
+        sizevars = SizeVarAllocator()
+        s0 = sizevars.shape_env.create_symbol(160, source=ConstantSource("s0"))
+        s1 = sizevars.shape_env.create_symbol(200, source=ConstantSource("s1"))
+        sizevars.backed_var_to_val[s0] = sympy.Integer(160)
+        sizevars.backed_var_to_val[s1] = sympy.Integer(200)
+
+        # (s0 + s1) < 100 is False when hints sum to 360
+        self.assertFalse(sizevars.statically_known_true((s0 + s1) < 100))
+
+
+class TestWideExpressionThresholds(InductorTestCase):
+    """Verify that safe_gcd / free-symbols thresholds only affect WIDE
+    expressions.  Small expressions must still get full simplification."""
+
+    def test_safe_gcd_small_expressions(self):
+        from torch.utils._sympy.functions import safe_gcd
+
+        a, b, c = sympy.symbols("a b c", integer=True, positive=True)
+        self.assertEqual(safe_gcd(a + b + c, 3), sympy.gcd(a + b + c, 3))
+        self.assertEqual(safe_gcd(a * b, a), sympy.gcd(a * b, a))
+
+    def test_safe_gcd_wide_expressions_use_fallback(self):
+        from torch.utils._sympy.functions import safe_gcd, simple_floordiv_gcd
+
+        syms = sympy.symbols(" ".join(f"s{i}" for i in range(30)), integer=True)
+        wide = sum(syms)
+        self.assertEqual(safe_gcd(wide, 160), simple_floordiv_gcd(wide, 160))
+
+    def test_is_multiple_of_structural_rules_on_wide(self):
+        sizevars = SizeVarAllocator()
+        syms = sympy.symbols(" ".join(f"s{i}" for i in range(30)), integer=True)
+        wide = sum(syms)
+        # Rule 2 (Mul): const * wide_expr divisible by const
+        self.assertTrue(sizevars._is_multiple_of(4096 * wide, 4096))
+        self.assertTrue(sizevars._is_multiple_of(160 * wide, 32))
+        # Rule 2 (Mul): wide_expr * other_const divisible by other_const
+        self.assertTrue(sizevars._is_multiple_of(wide * 256, 256))
+        self.assertTrue(sizevars._is_multiple_of(wide * 256, 64))
+        # Rule 2 (Mul): nested — 4096 * (wide + 1) divisible by 4096
+        self.assertTrue(sizevars._is_multiple_of(4096 * (wide + 1), 4096))
+        # Rule 2 (Mul): wide * a * b divisible by a*b
+        self.assertTrue(sizevars._is_multiple_of(wide * 12 * 8, 96))
+        # Rule 4 (FloorDiv): FloorDiv(wide * 160, 160) divisible by 1
+        self.assertTrue(sizevars._is_multiple_of(FloorDiv(wide * 160, 160), 1))
+        # statically_known_multiple_of: symbolic self-division
+        self.assertTrue(sizevars.statically_known_multiple_of(wide, wide))
+        self.assertTrue(sizevars.statically_known_multiple_of(wide * 4, wide * 4))
+
+    def test_remove_zero_terms_still_works_small(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0", integer=True, nonneg=True)
+        i1 = sympy.Symbol("i1", integer=True, nonneg=True)
+        result = sizevars.simplify_with_ranges(FloorDiv(i0 + 128 * i1, 8192), {i0: 128})
+        self.assertEqual(result, FloorDiv(128 * i1, 8192))
+
+    def test_modular_indexing_simplification_small(self):
+        i0 = sympy.Symbol("i0", integer=True)
+        i1 = sympy.Symbol("i1", integer=True)
+        self.assertEqual(
+            ModularIndexing(i0 + i1 * 10, 1, 10),
+            ModularIndexing(i0, 1, 10),
+        )
+
+    def test_statically_known_multiple_of_equality(self):
+        sizevars = SizeVarAllocator()
+        syms = sympy.symbols(" ".join(f"s{i}" for i in range(30)), integer=True)
+        wide = sum(syms)
+        self.assertTrue(sizevars.statically_known_multiple_of(wide, wide))
+
+    def test_wide_modular_indexing_not_decomposed(self):
+        """ModularIndexing with a wide base should not enter the per-term
+        simplification loop (its result would feed into sympy.expand which
+        has combinatorial cost on wide Add expressions)."""
+        syms = sympy.symbols(" ".join(f"s{i}" for i in range(40)), integer=True)
+        wide = sum(syms) + 138560
+        result = ModularIndexing(wide, 160, 930)
+        # Wide base should be left unsimplified
+        self.assertIsInstance(result, ModularIndexing)
+        self.assertEqual(result.args[0], wide)
+
+    def test_wide_simplify_with_ranges(self):
+        """simplify_with_ranges on expressions containing wide shapes
+        should still return a valid expression (not hang or error)."""
+        sizevars = SizeVarAllocator()
+        syms = sympy.symbols(" ".join(f"s{i}" for i in range(40)), integer=True)
+        wide = sum(syms)
+        i0 = sympy.Symbol("i0", integer=True)
+        expr = ModularIndexing(wide, 1, 160) + 160 * FloorDiv(wide, 160)
+        result = sizevars.simplify_with_ranges(expr, {i0: 10})
+        self.assertIsInstance(result, sympy.Basic)
+
+
 class TestOptimizationHintZeroDivision(InductorTestCase):
     """Test that optimization_hint handles ZeroDivisionError from ModularIndexing with zero-valued unbacked symbols."""
 
@@ -653,6 +983,25 @@ class TestOptimizationHintZeroDivision(InductorTestCase):
         expr = ModularIndexing(u0 + 1, u1, 4)
         hint = sizevars.optimization_hint(expr, fallback=8192)
         self.assertEqual(hint, 1)
+
+
+class TestOptimizationHintIdentityExpansion(InductorTestCase):
+    """Test that optimization_hint expands Identity wrappers after _sub_unbacked_exprs."""
+
+    def test_identity_wrapped_expr_resolves_to_int(self):
+        """An expression containing Identity-wrapped constants and an unbacked
+        symbol should resolve to a concrete int after substitution."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+
+        # Mirrors the real bug: -u0 * (-Identity(1) + Identity(0))
+        # simplifies to -u0 * (0 - 1) = u0.
+        # Without expand(identity=True) after _sub_unbacked_exprs,
+        # subs({u0: fallback}) leaves -Identity(1) + Identity(0) unexpanded,
+        # causing RuntimeError("Failed to realize expression to int").
+        expr = -u0 * (-Identity(sympy.Integer(1)) + Identity(sympy.Integer(0)))
+        hint = sizevars.optimization_hint(expr, fallback=42)
+        self.assertEqual(hint, 42)
 
 
 if __name__ == "__main__":

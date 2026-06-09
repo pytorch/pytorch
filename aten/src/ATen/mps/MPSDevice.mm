@@ -1,6 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/mps/IndexKernels.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSStream.h>
@@ -66,6 +65,7 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   static bool _macos_15_1_plus = is_os_version_at_least(15, 1);
   static bool _macos_15_2_plus = is_os_version_at_least(15, 2);
   static bool _macos_26_0_plus = is_os_version_at_least(26, 0);
+  static bool _macos_26_4_plus = is_os_version_at_least(26, 4);
 
   switch (version) {
     case MacOSVersion::MACOS_VER_14_4_PLUS:
@@ -78,6 +78,8 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
       return _macos_15_2_plus;
     case MacOSVersion::MACOS_VER_26_0_PLUS:
       return _macos_26_0_plus;
+    case MacOSVersion::MACOS_VER_26_4_PLUS:
+      return _macos_26_4_plus;
     default:
       return false;
   }

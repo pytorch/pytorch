@@ -62,6 +62,7 @@ from torch.torch_version import __version__ as __version__
 
 
 if TYPE_CHECKING:
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
     from torch.types import Device, IntLikeType
 
 
@@ -1423,6 +1424,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
+        * :func:`torch.topk` when called on a CPU or CUDA tensor
         * :func:`torch.gather` when called on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
@@ -1430,6 +1432,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
+        * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1437,7 +1440,6 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.AvgPool3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.AdaptiveAvgPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.AdaptiveAvgPool3d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.AdaptiveMaxPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.FractionalMaxPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.FractionalMaxPool3d` when attempting to differentiate a CUDA tensor
@@ -1494,7 +1496,7 @@ def use_deterministic_algorithms(
         will use some heuristics to pick the most promising configs rather
         than do autotuning.
       - Skip autotuning for reduction in coordinate descent tuning.
-      - Don't benchmarking for the computation/communication reordering pass
+      - Don't benchmark for the computation/communication reordering pass
       - Disable the feature that dynamically scale down RBLOCK triton config for higher
         occupancy.
 
@@ -1712,7 +1714,7 @@ def _check_with(
     error_type,
     cond: builtins.bool | SymBool,
     message: _Callable[[], str],
-):  # noqa: F811
+):
     if not isinstance(cond, (builtins.bool, SymBool)):
         raise TypeError(f"cond must be a bool, but got {type(cond)}")
 
@@ -1743,7 +1745,7 @@ def _check_with(
     raise error_type(message_evaluated)
 
 
-def _check(cond, message=None):  # noqa: F811
+def _check(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1797,7 +1799,7 @@ def _check_is_size(i, message=None, *, max=None):
         _advise_is_bounded(i, max)
 
 
-def _check_index(cond, message=None):  # noqa: F811
+def _check_index(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1815,7 +1817,7 @@ def _check_index(cond, message=None):  # noqa: F811
     _check_with(IndexError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
-def _check_value(cond, message=None):  # noqa: F811
+def _check_value(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1833,7 +1835,7 @@ def _check_value(cond, message=None):  # noqa: F811
     _check_with(ValueError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
-def _check_type(cond, message=None):  # noqa: F811
+def _check_type(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1851,7 +1853,7 @@ def _check_type(cond, message=None):  # noqa: F811
     _check_with(TypeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
-def _check_not_implemented(cond, message=None):  # noqa: F811
+def _check_not_implemented(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1874,7 +1876,7 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
     )
 
 
-def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
+def _check_tensor_all_with(error_type, cond, message=None):
     if not is_tensor(cond):
         raise TypeError(f"cond must be a tensor, but got {type(cond)}")
 
@@ -1885,7 +1887,7 @@ def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
 
 
 # C++ equivalent: `TORCH_CHECK_TENSOR_ALL`
-def _check_tensor_all(cond, message=None):  # noqa: F811
+def _check_tensor_all(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -2226,7 +2228,10 @@ import torch
 
 
 __all__.extend(
-    name for name in dir(torch) if isinstance(getattr(torch, name), torch.dtype)
+    # pyrefly: ignore [unresolvable-dunder-all]
+    name
+    for name in dir(torch)
+    if isinstance(getattr(torch, name), torch.dtype)
 )
 
 ################################################################################
@@ -2404,11 +2409,12 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
-    def __init__(self, mode, options, dynamic):
+    def __init__(self, mode, options, dynamic, name=None):
         from torch._inductor.compiler_bisector import CompilerBisector
 
         self.config: dict[str, _Any] = {}
         self.dynamic = dynamic
+        self.name = name
         self.apply_mode(mode)
         self.apply_options(options)
         self.apply_options(CompilerBisector.get_config_change("inductor"))
@@ -2435,6 +2441,7 @@ class _TorchCompileInductorWrapper:
             isinstance(other, _TorchCompileInductorWrapper)
             and self.config == other.config
             and self.dynamic == other.dynamic
+            and self.name == other.name
         )
 
     def apply_mode(self, mode: str | None):
@@ -2474,7 +2481,12 @@ class _TorchCompileInductorWrapper:
         from torch._inductor.compile_fx import compile_fx
 
         all_patches = {**self.config, **(config_patches or {})}
-        return compile_fx(model_, inputs_, config_patches=all_patches)
+        return compile_fx(
+            model_,
+            inputs_,
+            config_patches=all_patches,
+            compile_region_name=self.name,
+        )
 
     def get_compiler_config(self):
         from torch._inductor.compile_fx import get_patched_config_dict
@@ -2494,8 +2506,8 @@ class _TorchCompileInductorWrapper:
 class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
     compiler_name = "aotinductor"
 
-    def __init__(self, mode, options, dynamic):
-        super().__init__(mode, options, dynamic)
+    def __init__(self, mode, options, dynamic, name=None):
+        super().__init__(mode, options, dynamic, name)
         self.apply_options({"cpp_wrapper": True})
         self.apply_options({"aot_inductor.package": True})
 
@@ -2568,7 +2580,9 @@ def compile(
     backend: str | _Callable = "inductor",
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
+    name: str | None = None,
     disable: builtins.bool = False,
+    shapes_spec: _Any = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2581,7 +2595,9 @@ def compile(
     backend: str | _Callable = "inductor",
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
+    name: str | None = None,
     disable: builtins.bool = False,
+    shapes_spec: _Any = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2590,11 +2606,14 @@ def compile(
     *,
     fullgraph: builtins.bool = False,
     dynamic: builtins.bool | None = None,
-    backend: str | _Callable = "inductor",
+    backend: str | _Callable | None = None,
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
+    name: str | None = None,
     disable: builtins.bool = False,
     recompile_limit: builtins.int | None = None,
+    isolate_recompiles: builtins.bool = False,
+    shapes_spec: _Any = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -2684,7 +2703,28 @@ def compile(
           - `torch.compiler.keep_tensor_guards_unsafe`
 
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
+       name (str or None): Optional identifier for the compiled region. When supported by downstream
+        tooling, this is surfaced on wrapped compiled-region higher-order operators and other debug metadata.
        disable (bool): Turn torch.compile() into a no-op for testing
+       recompile_limit (int or None): Maximum number of recompilations allowed for this
+        ``torch.compile()`` call before falling back to eager. If None (default), uses
+        the global ``torch._dynamo.config.recompile_limit`` (default 8). With
+        ``fullgraph=True``, exceeding the limit raises ``FailOnRecompileLimitHit``.
+       isolate_recompiles (bool): If True, this ``torch.compile()`` call tracks
+        recompilations independently. By default, all ``torch.compile()`` calls on the
+        same function share a single set of compiled entries, so one call's
+        recompilations count against every other call's limit. With
+        ``isolate_recompiles=True``, each call gets its own isolated set of entries.
+        Lookups for an isolated compile call will still fall back to entries from
+        non-isolated compile calls (BC-friendly reuse), but new compilations are
+        stored separately. ``recompile_limit`` is checked per-region;
+        ``accumulated_recompile_limit`` is a global cap across all regions.
+        Default-strategy behavior is asymmetric: SKIP decisions (from
+        ``skip_code``, ``@torch._dynamo.skip``, FX-generated code, etc.) are
+        inherited by isolated regions — those remain skipped. RUN_ONLY persisted
+        by a non-isolated region hitting its recompile limit does NOT bleed
+        into isolated regions — each region manages its own RUN_ONLY state.
+        Default False.
 
     Example::
 
@@ -2708,6 +2748,18 @@ def compile(
             "Please use Python 3.13.3+."
         )
 
+    if backend is None:
+        from torch._dynamo.backends.registry import get_default_backend
+
+        backend = get_default_backend()
+
+    # Auto-wrap ParamsSpec → ShapesSpec for convenience
+    if shapes_spec is not None:
+        from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+
+        if isinstance(shapes_spec, ParamsSpec):
+            shapes_spec = ShapesSpec(shapes_spec)
+
     # Decorator mode
     if model is None:
 
@@ -2721,7 +2773,11 @@ def compile(
                 backend=backend,
                 mode=mode,
                 options=options,
+                name=name,
                 disable=disable,
+                recompile_limit=recompile_limit,
+                isolate_recompiles=isolate_recompiles,
+                shapes_spec=shapes_spec,
             )
 
         return fn
@@ -2766,9 +2822,9 @@ def compile(
 
     if backend == "inductor":
         if use_aoti:
-            backend = _TorchCompileAOTInductorWrapper(mode, options, dynamic)
+            backend = _TorchCompileAOTInductorWrapper(mode, options, dynamic, name)
         else:
-            backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+            backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
@@ -2779,6 +2835,8 @@ def compile(
         disable=disable,
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
+        isolate_recompiles=isolate_recompiles,
+        shapes_spec=shapes_spec,
     )(model)  # type: ignore[return-value]
 
 
@@ -2829,13 +2887,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
-from torch import fx as fx
-
-
-# Register MPS specific decomps
-torch.backends.mps._init()
-
-from torch import compiler as compiler
+from torch import compiler as compiler, fx as fx
 
 
 class _TritonLibrary:
@@ -2896,6 +2948,13 @@ else:
         if name in _lazy_modules:
             return importlib.import_module(f".{name}", __name__)
 
+        # set_vital
+        if name == "set_vital":
+            import warnings
+
+            warnings.warn(f"'{name}' is deprecated, please do not call", stacklevel=2)
+            return lambda *args: None
+
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
@@ -2948,12 +3007,6 @@ def _constrain_as_size(
     ```
     """
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)
-
-
-from torch import _logging
-
-
-_logging._init_logs()
 
 
 def _import_device_backends():
@@ -3012,11 +3065,18 @@ def _as_tensor_fullprec(t):
         return torch.as_tensor(t)
 
 
-# `_import_device_backends` should be kept at the end to ensure
-# all the other functions in this module that may be accessed by
-# an autoloaded backend are defined
+# `_import_device_backends` should run after the definitions above to ensure
+# all the other functions in this module that may be accessed by an autoloaded
+# backend are defined.
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+from torch import _logging
+
+
+# Keep `TORCH_LOGS` initialization after backend autoload so backends can
+# register their log names before `TORCH_LOGS` is parsed and validated.
+_logging._init_logs()
 
 # Register all registered custom / override ops in torch/_native
 import torch._native

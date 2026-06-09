@@ -155,7 +155,7 @@ def _pipelined_multi_all_gather_and_consume(
     communication:
 
         gathered = [
-            all_gather_tensor(x, gather_dim=0, group=group)
+            all_gather_single(x, gather_dim=0, group=group)
             for x in shard
         ]
 
@@ -304,7 +304,7 @@ def _pipelined_all_gather_and_consume(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        ag_out = all_gather_tensor(shard, gather_dim=0, group=group)
+        ag_out = all_gather_single(shard, gather_dim=0, group=group)
         shards = ag_out.chunk(group.size())
         for src_rank, shard in enumerate(shards):
             shard_consumer(shard, src_rank)
@@ -440,7 +440,7 @@ def _pipelined_produce_and_all2all(
     symm_mem.barrier(channel=0)
 
 
-lib = torch.library.Library("symm_mem", "DEF")  # noqa: TOR901
+lib = torch.library.Library("symm_mem", "DEF")
 lib.define(
     "fused_all_gather_matmul("
     "Tensor A, Tensor[] Bs, int gather_dim, str group_name, *, bool return_A = True) -> (Tensor?, Tensor[])",
@@ -862,7 +862,7 @@ def _fused_all_gather_matmul(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        all_gather_tensor(A_shard, gather_dim, group_name) @ B
+        all_gather_single(A_shard, gather_dim, group_name) @ B
 
     Optimal stride order for A_shard - if A_shard.movedim(gather_dim, 0) is
     contiguous, no extra copy is required for input layout transformation.
@@ -1111,7 +1111,7 @@ def _fused_all_gather_scaled_matmul(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        A = all_gather_tensor(A_shard, gather_dim, group_name)
+        A = all_gather_single(A_shard, gather_dim, group_name)
         leading_dims = A.shape[:-1]
         res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
         res = res.unflatten(0, leading_dims)
@@ -1214,7 +1214,7 @@ def _fused_matmul_reduce_scatter(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
+        reduce_scatter_single(A @ B, reduce_op, scatter_dim, group_name)
 
     Optimal stride order for A - if A.movedim(scatter_dim, 0) is contiguous, no
     extra copy is required for input layout transformation. Otherwise A needs
@@ -1246,7 +1246,7 @@ def _fused_matmul_reduce_scatter_fallback(
     scatter_dim: int,
     group_name: c10d.GroupName,
 ) -> torch.Tensor:
-    res = funcol.reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
+    res = funcol.reduce_scatter_single(A @ B, reduce_op, scatter_dim, group_name)
     res = funcol.wait_tensor(res)
     return res
 
@@ -1431,7 +1431,7 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
         use_fast_accum,
     )
     C = C.view(*output_shape[:-1], B.shape[1])
-    res = funcol.reduce_scatter_tensor(
+    res = funcol.reduce_scatter_single(
         C,
         reduce_op,
         orig_scatter_dim,  # need original scatter dim for 3D+ output tensor here
@@ -2008,7 +2008,9 @@ def is_nvshmem_available() -> bool:
     r"""
     is_nvshmem_available() -> bool
 
-    Check if NVSHMEM is available in current build and on current system.
+    Check if NVSHMEM (CUDA) or rocSHMEM (ROCm) is available in the current
+    build and usable at runtime. On ROCm, rocSHMEM ``VERSION`` must be at
+    least 3.3.0 (see ``rocshmem/rocshmem.hpp``).
     """
     try:
         from torch._C._distributed_c10d import _is_nvshmem_available
@@ -2270,8 +2272,25 @@ def reduce_scatter_offset(
         )
 
 
+def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
+    r"""
+    is_symm_mem_tensor(tensor) -> bool
+
+    Returns ``True`` if ``tensor`` was allocated via symmetric memory
+    (i.e. via :func:`torch.distributed._symmetric_memory.empty` or
+    :meth:`_SymmetricMemory.empty_strided_p2p`).
+
+    This is a non-collective, O(1) check.
+
+    Args:
+        tensor (:class:`torch.Tensor`): the tensor to check.
+    """
+    return _SymmetricMemory.is_symm_mem_tensor(tensor)
+
+
 __all__ = [
     "empty",
+    "is_symm_mem_tensor",
     "rendezvous",
     "is_nvshmem_available",
     "set_backend",

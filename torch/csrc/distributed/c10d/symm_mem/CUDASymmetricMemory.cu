@@ -10,6 +10,7 @@
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/env.h>
 #include <c10/util/error.h>
 
 #include <sys/socket.h>
@@ -498,8 +499,24 @@ struct RendezvousRequest {
   size_t buffer_size;
   size_t signal_pad_offset;
   bool has_multicast_support;
+  int clique_id;
   char hostname[HOST_NAME_MAX + 1];
 };
+
+static std::string import_err_msg(
+    int rank,
+    int peer,
+    const std::vector<RendezvousRequest>& reqs) {
+  std::ostringstream oss;
+  oss << ". Rank " << rank << " (host: " << reqs[rank].hostname
+      << ", device: " << reqs[rank].device_idx << ", fabric_info: {"
+      << at::cuda::get_nvml_fabric_info(reqs[rank].device_idx)
+      << "}) failed to import memory from rank " << peer
+      << " (host: " << reqs[peer].hostname
+      << ", device: " << reqs[peer].device_idx << ", NCCL_MNNVL_CLIQUE_ID: "
+      << c10::utils::get_env("NCCL_MNNVL_CLIQUE_ID").value_or("unset") << ").";
+  return oss.str();
+}
 
 void validate_rendezvous_requests(
     const std::vector<RendezvousRequest>& reqs,
@@ -511,7 +528,8 @@ void validate_rendezvous_requests(
   // Use (hostname, device_idx) pair to uniquely identify each allocation.
   std::set<std::pair<std::string, int>> device_host_pairs;
   for (auto req : reqs) {
-    device_host_pairs.insert(std::make_pair(std::string(req.hostname), req.device_idx));
+    device_host_pairs.insert(
+        std::make_pair(std::string(req.hostname), req.device_idx));
   }
   if (!allow_overlapping_devices() &&
       device_host_pairs.size() < (size_t)world_size) {
@@ -529,6 +547,35 @@ void validate_rendezvous_requests(
   }
 }
 
+// All ranks must be in the same NVLink domain (same clique_id). Detect
+// mismatches early before the import fails with an opaque CUDA error.
+static void validate_nvlink_fabric_support(
+    const std::vector<RendezvousRequest>& reqs,
+    int world_size) {
+  std::unordered_set<int> clique_ids;
+  for (const auto& req : reqs) {
+    if (req.clique_id >= 0) {
+      clique_ids.insert(req.clique_id);
+    }
+  }
+  if (clique_ids.size() > 1) {
+    std::ostringstream oss;
+    oss << "CUDASymmetricMemory::rendezvous: "
+        << "ranks have mismatched NVLink clique_ids. "
+        << "All ranks using fabric handles must be in the same NVLink domain. "
+        << "Per-rank info: ";
+    for (int r = 0; r < world_size; ++r) {
+      if (r > 0) {
+        oss << ", ";
+      }
+      oss << "rank " << r << " (host: " << reqs[r].hostname
+          << ", device: " << reqs[r].device_idx
+          << ", clique_id: " << reqs[r].clique_id << ')';
+    }
+    TORCH_CHECK(false, oss.str());
+  }
+}
+
 static bool check_group_multicast_support(
     const std::vector<RendezvousRequest>& reqs) {
   std::vector<size_t> ranks_with_multicast_support;
@@ -542,7 +589,7 @@ static bool check_group_multicast_support(
   } else {
     // We don't expect this to happen. But we want to let the user to know if
     // this happens.
-    if (ranks_with_multicast_support.size() != 0) {
+    if (!ranks_with_multicast_support.empty()) {
       LOG(WARNING)
           << "Only a subset of ranks in the group has multicast support: "
           << ranks_with_multicast_support << " (world_size=" << reqs.size()
@@ -723,11 +770,20 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       .block_size = block->block_size,
       .buffer_size = block->buffer_size,
       .signal_pad_offset = block->signal_pad_offset,
-      .has_multicast_support = device_has_multicast_support(block->device_idx)};
+      .has_multicast_support = device_has_multicast_support(block->device_idx),
+      .clique_id = at::cuda::get_fabric_clique_id(block->device_idx)};
 
   // Populate hostname field for host identification
   gethostname(local_req.hostname, sizeof(local_req.hostname));
-  auto reqs = storeExchange.all_gather(store, rank, world_size, local_req);
+  // At large rank counts, TCPStore gets overloaded during the metadata
+  // exchange. When PG rendezvous is enabled, route the metadata exchange
+  // through the process group's NCCL allgather instead.
+  bool use_pg = group->hasBackendForDeviceType(c10::DeviceType::CUDA) &&
+      group->getBackend(c10::DeviceType::CUDA)->getUsePgForSymmMemRendezvous();
+  std::vector<RendezvousRequest> reqs = use_pg
+      ? pg_all_gather(group, block->device_idx, local_req)
+      : storeExchange.all_gather(store, rank, world_size, local_req);
+  validate_nvlink_fabric_support(reqs, world_size);
   validate_rendezvous_requests(reqs, world_size);
 
   std::vector<int> pids(world_size);
@@ -739,8 +795,9 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   if constexpr (!use_fabric_handle) {
     imported_handles = ipc_channel.all_gather_fds(rank, pids, block_handle);
   } else {
-    imported_handles =
-        storeExchange.all_gather(store, rank, world_size, block_handle);
+    imported_handles = use_pg
+        ? pg_all_gather(group, block->device_idx, block_handle)
+        : storeExchange.all_gather(store, rank, world_size, block_handle);
   }
 
   std::vector<HandleType> handles(world_size);
@@ -760,15 +817,19 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     // note how in one case it's directly imported_handles[r] and in another
     // &(imported_handles[r]) so can't do with just type definitions
     if constexpr (!use_fabric_handle) {
-      C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
-          &handles[r],
-          (void*)(uintptr_t)imported_handles[r],
-          CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+      C10_CUDA_DRIVER_CHECK_MSG(
+          driver_api->cuMemImportFromShareableHandle_(
+              &handles[r],
+              (void*)(uintptr_t)imported_handles[r],
+              CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
+          import_err_msg(rank, r, reqs));
     } else {
-      C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
-          &handles[r],
-          (void*)&(imported_handles[r]),
-          CU_MEM_HANDLE_TYPE_FABRIC));
+      C10_CUDA_DRIVER_CHECK_MSG(
+          driver_api->cuMemImportFromShareableHandle_(
+              &handles[r],
+              (void*)&(imported_handles[r]),
+              CU_MEM_HANDLE_TYPE_FABRIC),
+          import_err_msg(rank, r, reqs));
     }
 #elif defined(USE_ROCM)
     C10_CUDA_CHECK(hipMemImportFromShareableHandle(
@@ -932,6 +993,10 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(void
   }
 
   return alloc_it->second;
+}
+
+bool CUDASymmetricMemoryAllocator::has_allocation(void* ptr) {
+  return find_block(ptr) != nullptr;
 }
 
 struct RegisterCUDASymmetricMemoryAllocator {

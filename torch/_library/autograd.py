@@ -106,6 +106,17 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     # The dispatcher passes any keyword-only-args as kwargs and the
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
+        if utils.is_out(op):
+            if _C.is_grad_enabled() and _C._any_requires_grad(
+                *args, **keyword_only_args
+            ):
+                raise RuntimeError(
+                    f"{op._opname}(): functions with out=... arguments don't "
+                    "support automatic differentiation, but one of the arguments "
+                    "requires grad."
+                )
+            return forward_no_grad(*args, Metadata(keyset, keyword_only_args))
+
         if _C.is_grad_enabled() and _C._any_requires_grad(*args):
             result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
         else:
@@ -127,7 +138,7 @@ def supports_tensorlist(cls: Any) -> Any:
     orig_apply = cls.apply
 
     @dataclass
-    class Metadata:
+    class TensorListMetadata:
         input_spec: _pytree.TreeSpec
         output_spec: _pytree.TreeSpec | None = None
         result_is_tuple: bool | None = None
@@ -135,7 +146,7 @@ def supports_tensorlist(cls: Any) -> Any:
     def new_forward(ctx, *args):
         metadata = args[-1]
         args = args[:-1]
-        if not isinstance(metadata, Metadata):
+        if not isinstance(metadata, TensorListMetadata):
             raise NotImplementedError(
                 "NYI: calling supports_tensorlist autograd.Function.forward directly. "
                 "You should probably be calling .apply instead. "
@@ -203,7 +214,7 @@ def supports_tensorlist(cls: Any) -> Any:
 
     def new_apply(*args):
         flat_args, input_spec = _pytree.tree_flatten(args, is_leaf=not_list_of_tensor)
-        metadata = Metadata(input_spec)
+        metadata = TensorListMetadata(input_spec)
         result = orig_apply(*flat_args, metadata)  # type: ignore[misc]
         if metadata.output_spec is None:
             raise AssertionError("metadata.output_spec must not be None")

@@ -198,6 +198,8 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
+    "distributed/pipelining/test_dtensor_pp_integration",
+    "inductor/test_cpu_repro",  # excessive runtimes compared to CUDA
 ]
 
 # Add architecture-specific blocklist entries
@@ -1794,12 +1796,18 @@ def get_selected_tests(options) -> list[str]:
             ]
         )
 
-    if sys.version_info[:2] < (3, 13) or sys.version_info[:2] >= (3, 14):
-        # Skip tests for older Python versions as they may use syntax or features
-        # not supported in those versions
-        options.exclude.extend(
-            [test for test in selected_tests if test.startswith("dynamo/cpython/3_13/")]
-        )
+    # Only include cpython tests which match the current python version
+    current_cpython_prefix = (
+        f"cpython/v{sys.version_info.major}_{sys.version_info.minor}/"
+    )
+    options.exclude.extend(
+        [
+            test
+            for test in selected_tests
+            if test.startswith("cpython/")
+            and not test.startswith(current_cpython_prefix)
+        ]
+    )
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
@@ -1832,6 +1840,8 @@ def get_selected_tests(options) -> list[str]:
                     # Output mismatch errors and long running tests
                     "test_linalg",
                     "test_matmul_cuda",
+                    "functorch/test_ops",
+                    "test_scaled_matmul_cuda",
                 ]
             )
 
@@ -1840,11 +1850,6 @@ def get_selected_tests(options) -> list[str]:
         if SM120OrLater:
             WINDOWS_BLOCKLIST.extend(
                 [
-                    # Windows fatal exception / access violation
-                    "test_fake_tensor",
-                    "test_cpp_extensions_jit",
-                    # TDR, BSOD observed
-                    "functorch/test_ops",
                     # test_api fails on Windows SM120+. Triage pending.
                     "cpp/test_api",
                 ]

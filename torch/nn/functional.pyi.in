@@ -18,6 +18,8 @@ from .common_types import (
     _size_any_t,
 )
 
+from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
+
 __all__ = [
     "GRID_SAMPLE_INTERPOLATION_MODES",
     "GRID_SAMPLE_PADDING_MODES",
@@ -455,6 +457,21 @@ def local_response_norm(
 ) -> Tensor: ...
 
 __all__ += ["local_response_norm"]
+
+def linear_cross_entropy(
+    input: Tensor,
+    linear_weight: Tensor,
+    target: Tensor,
+    *,
+    linear_bias: Tensor | None = ...,
+    weight: Tensor | None = ...,
+    reduction: str = ...,
+    ignore_index: int | None = ...,
+    label_smoothing: float = ...,
+    options: LinearCrossEntropyOptions | None = ...,
+) -> Tensor: ...
+
+__all__ += ["linear_cross_entropy"]
 
 def log_softmax(
     input: Tensor,

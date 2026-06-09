@@ -129,7 +129,7 @@ class BoundVars:
         interp.run(V.get_ops_handler(), initial_env=env)
         output = [node for node in subblock.graph.nodes if node.target == "output"]
         assert len(output) == 1
-        # dont bother unioning with value since the load from buffer will be
+        # don't bother unioning with value since the load from buffer will be
         # pessimistically assumed to be inf anyway
         return interp.env[output[0]]
 
@@ -169,7 +169,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         # many ops are unlikely to show up in optimizable indexing compute,
-        # so we dont have full coverage
+        # so we don't have full coverage
         return ValueRanges.unknown()
 
     def load(self, name: str, index: sympy.Expr) -> ValueRanges[Any]:
@@ -194,7 +194,12 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
         assert isinstance(index, ValueRanges)
         return cls.to_dtype(index, dtype)
 
+    @classmethod
+    def value_expr(cls, index: Any, dtype: torch.dtype) -> ValueRanges[Any]:
+        return cls.index_expr(index, dtype)
+
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def to_dtype(
         x: Any,
         dtype: torch.dtype,
@@ -237,10 +242,12 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
             return ValueRanges(cast(x.lower, dtype), cast(x.upper, dtype))
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def square(x: Any) -> ValueRanges[Any]:
         return ValueRanges.convex_min_zero_map(x, lambda y: PowByNatural(y, 2))
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def neg(x: Any) -> ValueRanges[Any]:
         return ValueRanges.decreasing_map(x, operator.neg)
 

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
+import typing
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from functools import lru_cache, partial, wraps
@@ -123,7 +124,7 @@ def _convert_out_params(f):
                 default=None,
                 annotation=t,
             )
-            for o, t in zip(out_names, out_annotation.__args__)
+            for o, t in zip(out_names, typing.get_args(out_annotation))
         ]
         # Drop the out parameter and concatenate the new kwargs in the signature
         params = chain((v for k, v in sig.parameters.items() if k != "out"), out_params)
@@ -447,8 +448,6 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.norm.ScalarOpt_dim,
             aten.norm.dtype_out,
             aten.norm.out,
-            aten.norm.names_dtype_out,
-            aten.norm.names_out,
             aten.norm.ScalarOpt_dtype_out,
             aten.norm.Scalar_out,
             aten.ones,
@@ -511,8 +510,6 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.std.correction,
             aten.std.out,
             aten.std.correction_out,
-            aten.std.names_out,
-            aten.std.correction_names_out,
             aten.std_mean.correction,
             aten.std_mean.correction_out,
             aten.stack,
