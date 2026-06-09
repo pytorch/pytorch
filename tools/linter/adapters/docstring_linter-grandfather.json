@@ -44,7 +44,7 @@
     "class CppOverrides": 496,
     "class CppScheduling": 961,
     "class CppVecKernel": 974,
-    "class OuterLoopFusedSchedulerNode": 177,
+    "class OuterLoopFusedSchedulerNode": 178,
     "def CppKernel.codegen_loops_impl()": 144,
     "def CppKernelProxy.codegen_functions()": 179,
     "def CppKernelProxy.legalize_lowp_fp_dtype_loopbody()": 228,
