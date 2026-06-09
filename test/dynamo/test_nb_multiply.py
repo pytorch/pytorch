@@ -98,7 +98,6 @@ class _InheritedSub(_BaseWithMul):
     pass
 
 
-@torch._dynamo.config.patch(enable_trace_unittest=True)
 class TestNbMultiply(torch._dynamo.test_case.TestCase):
     # --- Integer multiply ---
 

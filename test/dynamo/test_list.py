@@ -34,15 +34,6 @@ class TupleTests(torch._dynamo.test_case.TestCase):
 
     thetype = tuple
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     def assertEqual(self, a, b):
         return self.assertTrue(a == b, f"{a} != {b}")
 

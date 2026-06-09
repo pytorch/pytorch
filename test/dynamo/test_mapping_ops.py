@@ -76,14 +76,11 @@ class TestMpAssSubscript(torch._dynamo.test_case.TestCase):
 
     def setUp(self):
         super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
         self._b_prev = torch._dynamo.config.enable_trace_load_build_class
-        torch._dynamo.config.enable_trace_unittest = True
         torch._dynamo.config.enable_trace_load_build_class = True
 
     def tearDown(self):
         super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
         torch._dynamo.config.enable_trace_load_build_class = self._b_prev
 
     # -- parameterized over mapping container type --

@@ -29,13 +29,7 @@ class _BaseSequenceLen:
     def setUp(self):
         if self.thetype is None:
             self.skipTest("Base class - not meant to be run directly")
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
         super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
 
     @make_dynamo_test
     def test_len_basic(self):
@@ -99,15 +93,6 @@ class _BaseMappingLen:
     def get_mapping(self, items):
         """Override in subclass to return appropriate mapping type"""
         return dict(items)
-
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
 
     @make_dynamo_test
     def test_len_basic(self):
@@ -184,15 +169,6 @@ class _BaseSetLen:
         """Override in subclass to return appropriate set type"""
         return set(items)
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_len_basic(self):
         s = self.get_set([1, 2, 3])
@@ -248,15 +224,6 @@ class TestFrozenSetLen(_BaseSetLen, torch._dynamo.test_case.TestCase):
 class TestRangeLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on range objects"""
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_len_basic(self):
         r = range(5)
@@ -296,15 +263,6 @@ class TestRangeLen(torch._dynamo.test_case.TestCase):
 class TestStringLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on string objects"""
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_len_empty(self):
         s = ""
@@ -336,15 +294,6 @@ class TestStringLen(torch._dynamo.test_case.TestCase):
 
 class TestTensorLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on torch.Tensor objects"""
-
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
 
     @make_dynamo_test
     def test_len_1d(self):
@@ -393,8 +342,6 @@ class TestNNModuleLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on torch.nn module containers"""
 
     def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
         super().setUp()
 
         # Pre-construct nn.Module instances outside compiled regions
@@ -413,10 +360,6 @@ class TestNNModuleLen(torch._dynamo.test_case.TestCase):
         self.seq_5layers = torch.nn.Sequential(
             *[torch.nn.Linear(10, 10) for _ in range(5)]
         )
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
 
     @make_dynamo_test
     def test_len_sequential(self):
@@ -463,15 +406,6 @@ class TestNNModuleLen(torch._dynamo.test_case.TestCase):
 
 class TestDictViewLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on dict view objects (keys, values, items)"""
-
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
 
     @make_dynamo_test
     def test_len_dict_keys_view(self):
@@ -688,15 +622,6 @@ class SetSubclassCustomLen(set):
 class TestUserDefinedLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on user-defined classes with __len__"""
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_len_simple_custom_class(self):
         obj = CustomList([1, 2, 3])
@@ -735,15 +660,6 @@ class TestUserDefinedLen(torch._dynamo.test_case.TestCase):
 
 class TestSubclassOverloadedLen(torch._dynamo.test_case.TestCase):
     """Tests for custom classes that inherit from builtins and overload __len__"""
-
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
 
     @make_dynamo_test
     def test_list_subclass_custom_len(self):
@@ -828,15 +744,6 @@ class CustomDescriptorLenClass:
 class TestUserDefinedMappingLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on user-defined mapping (dict-like) classes"""
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_len_custom_mapping_basic(self):
         """Test len() on a basic custom mapping class"""
@@ -907,15 +814,6 @@ class TestUserDefinedMappingLen(torch._dynamo.test_case.TestCase):
 class TestDescriptorLenImpl(torch._dynamo.test_case.TestCase):
     """Test that len_impl handles descriptor-based __len__ correctly"""
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_regular_instance_len(self):
         """Test regular instance method __len__"""
@@ -976,15 +874,6 @@ class TestDescriptorLenImpl(torch._dynamo.test_case.TestCase):
 class TestRaisesTypeError(torch._dynamo.test_case.TestCase):
     """Tests for types that don't support len() - should raise TypeError like Python"""
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_len_slice_raises_type_error(self):
         """slice objects do not support len() - should raise TypeError"""
@@ -1039,15 +928,6 @@ class TestRaisesTypeError(torch._dynamo.test_case.TestCase):
 class TestDequeLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on collections.deque objects"""
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_len_basic(self):
         d = collections.deque([1, 2, 3])
@@ -1087,15 +967,6 @@ class TestDequeLen(torch._dynamo.test_case.TestCase):
 
 class TestMappingProxyLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on types.MappingProxyType objects"""
-
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
 
     @make_dynamo_test
     def test_len_basic(self):
@@ -1164,15 +1035,6 @@ class SimpleMetaclassClass(metaclass=MetaclassWithLen):
 class TestMetaclassLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on metaclasses, classmethods, staticmethods, and properties"""
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_metaclass_len_basic(self):
         """Test len() on a class with __len__ defined in metaclass"""
@@ -1231,15 +1093,6 @@ class FrozenData:
 class TestMutableMappingLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on mutable mapping types."""
 
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
-
     @make_dynamo_test
     def test_len_custom_mutable_mapping(self):
         """Test len() on custom mutable mapping."""
@@ -1256,15 +1109,6 @@ class TestMutableMappingLen(torch._dynamo.test_case.TestCase):
 
 class TestFrozenDataclassLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on frozen dataclasses."""
-
-    def setUp(self):
-        self.old = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-        super().setUp()
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self.old
-        return super().tearDown()
 
     @make_dynamo_test
     def test_len_frozen_dataclass_with_len(self):
