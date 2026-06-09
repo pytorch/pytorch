@@ -165,7 +165,11 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         templates_to_use.append(aten_mm_plus_mm)
 
     if use_triton_template(layout1, check_max_autotune=False):
-        templates_to_use.append(mm_plus_mm_template)
+        if layout1.device.type != "xpu":
+            # Accuracy issues with the Triton mm_plus_mm template on XPU:
+            # https://github.com/pytorch/pytorch/issues/184490
+            # https://github.com/pytorch/pytorch/issues/173473
+            templates_to_use.append(mm_plus_mm_template)
 
     # Single unified call for all templates
     choices.extend(
