@@ -1230,6 +1230,18 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
                 "local-reduce aux output"
             )
     main_output_transform = _match_quack_grouped_n_contract_main(output_value, mm_node)
+    if main_output_transform is None and isinstance(output_value, torch.fx.Node):
+        mm_meta = mm_node.meta.get("val")
+        output_meta = output_value.meta.get("val")
+        if (
+            mm_meta is not None
+            and output_meta is not None
+            and tuple(output_meta.shape) != tuple(mm_meta.shape)
+        ):
+            raise NotImplementedError(
+                "QUACK shape-changing main epilogues currently require a supported "
+                "local shape transform such as acc.view(M, -1, 2)[..., i]"
+            )
     return QuackOutputPlan(
         output_value=output_value,
         skip_nodes=frozenset(skip_nodes),

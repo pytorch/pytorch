@@ -1885,6 +1885,48 @@ class GemmEpilogueFusionTests(TestCase):
                 ).check_not("activation='").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_unsupported_shape_changing_main(self):
+        M = 32
+        K = 64
+        N = 32
+
+        def chunk_fn(a, b):
+            def epilogue(acc):
+                gate, up = acc.chunk(2, dim=-1)
+                return torch.nn.functional.silu(gate) * up
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(M, K, device="cuda", dtype=torch.float16)
+        gate_w = torch.randn(K, N, device="cuda", dtype=torch.float16)
+        up_w = torch.randn(K, N, device="cuda", dtype=torch.float16)
+        b = torch.cat((gate_w, up_w), dim=1)
+        with self.assertRaisesRegex(Exception, "shape-changing main epilogues"):
+            torch.compile(chunk_fn, backend="inductor", fullgraph=True)(a, b)
+
+        def group4_fn(a, b):
+            def epilogue(acc):
+                x = acc.view(M, -1, 4)
+                return x[..., 0] + x[..., 1]
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(M, K, device="cuda", dtype=torch.float16)
+        b = torch.randn(K, 4 * N, device="cuda", dtype=torch.float16)
+        with self.assertRaisesRegex(Exception, "shape-changing main epilogues"):
+            torch.compile(group4_fn, backend="inductor", fullgraph=True)(a, b)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_malformed_local_n_reduce_aux(self):
         M = 32
         N = 64
