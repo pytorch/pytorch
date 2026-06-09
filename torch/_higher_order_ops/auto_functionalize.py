@@ -945,6 +945,29 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
 
 
+def _clone_tensors(
+    kwargs: dict[str, Any],
+    tensors_to_clone: list[str],
+) -> dict[str, Any]:
+    """Clone specified kwargs entries using clone_preserve_strides.
+
+    Handles None (left as None) and list values (each non-None element cloned).
+    Returns a new dict; entries not in tensors_to_clone are unchanged references.
+    """
+    new_kwargs = dict(kwargs)
+    for name in tensors_to_clone:
+        val = kwargs[name]
+        if val is None:
+            new_kwargs[name] = None
+        elif isinstance(val, list):
+            new_kwargs[name] = [
+                clone_preserve_strides(x) if x is not None else None for x in val
+            ]
+        else:
+            new_kwargs[name] = clone_preserve_strides(val)
+    return new_kwargs
+
+
 # auto_functionalize functions
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
@@ -952,27 +975,14 @@ def auto_functionalized_dense(
     _only_clone_these_tensors: tuple[str, ...] | None = None,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
-    new_kwargs = dict(**kwargs)
-    result = []
-
     _mutable_args_names, _ = get_mutable_args(_mutable_op)
-    for name in _mutable_args_names:
-        if (
-            _only_clone_these_tensors is not None
-            and name not in _only_clone_these_tensors
-        ):
-            new_kwargs[name] = kwargs[name]
-        else:
-            new_kwargs[name] = (
-                [clone_preserve_strides(x) for x in kwargs[name]]
-                if kwargs[name] is not None and isinstance(kwargs[name], list)
-                else (
-                    clone_preserve_strides(kwargs[name])
-                    if kwargs[name] is not None
-                    else None
-                )
-            )
-        result.append(new_kwargs[name])
+    keys_to_clone = [
+        name
+        for name in _mutable_args_names
+        if _only_clone_these_tensors is None or name in _only_clone_these_tensors
+    ]
+    new_kwargs = _clone_tensors(kwargs, keys_to_clone)
+    result = [new_kwargs[name] for name in _mutable_args_names]
     out = _mutable_op(**new_kwargs)
 
     if isinstance(out, tuple):

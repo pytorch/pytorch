@@ -20,6 +20,7 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
+from torch._higher_order_ops.auto_functionalize import _clone_tensors
 from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
@@ -1549,10 +1550,7 @@ def triton_kernel_wrapper_functional_dense(
     # `clone_preserve_strides` calls are never executed at runtime
     # (inductor should always optimize them away).
     # Requires https://github.com/pytorch/pytorch/issues/109240
-    kwargs = {
-        key: (clone_preserve_strides(val) if key in tensors_to_clone else val)
-        for key, val in kwargs.items()
-    }
+    kwargs = _clone_tensors(kwargs, tensors_to_clone)
     triton_kernel_wrapper_mutation(
         kernel_idx=kernel_idx,
         constant_args_idx=constant_args_idx,
