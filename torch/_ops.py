@@ -829,11 +829,11 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         self.__name__ = f"{self._schema.name.split('::')[1]}.{self._overloadname}"
         self.__module__ = overloadpacket.__module__
         op.__module__ = overloadpacket.__module__
-        self.__qualname__ = self._name
+        self.__qualname__ = f"{self.__module__}.{self.__name__}"
         self.__annotations__ = {}
 
         # If the OpOverload was constructed from a Library.def in Python.
-        self._defined_in_python = self.__qualname__ in torch.library._defs
+        self._defined_in_python = self._name.split(".")[0] in torch.library._defs
 
         # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
         is_write = None
@@ -1165,6 +1165,7 @@ def _has_script_object_arg(schema: torch.FunctionSchema) -> bool:
 # You can obtain an OpOverload object through attribute query.
 class OpOverloadPacket(Generic[_P, _T]):
     __file__: ClassVar[str] = "torch.ops"
+    __qualname__: ClassVar[str] = ""
 
     def __init__(
         self,
@@ -1400,7 +1401,10 @@ class _OpNamespace(types.ModuleType):
         opoverloadpacket = OpOverloadPacket(
             qualified_op_name, op_name, op, overload_names
         )
-        opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
+        opoverloadpacket.__module__ = self.__module__
+        opoverloadpacket.__qualname__ = (
+            f"{opoverloadpacket.__module__}.{opoverloadpacket.__name__}"
+        )
         # cache the opoverloadpacket to ensure that each op corresponds to
         # a unique OpOverloadPacket object
         setattr(self, op_name, opoverloadpacket)
