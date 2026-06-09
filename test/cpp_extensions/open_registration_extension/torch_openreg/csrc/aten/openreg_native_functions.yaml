@@ -7,7 +7,12 @@ supported:
       structured: true
   - minimum.out:
       structured: true
-      define_meta: true
+  # A real out-of-tree vendor wanting torch.compile/FakeTensor to use its own shape logic would
+  # add `define_meta: true` here and define the meta with TORCH_PRIVATEUSE1_META_FUNC. openreg
+  # omits it on purpose: define_meta registers on the device-agnostic, process-global aten Meta
+  # key (overriding aten's meta for every device), which an autoloaded in-tree test fixture must
+  # not do. See test_gen_backend_stubs.py for the generated registration and tests/test_ops.py
+  # (test_define_meta_meta_override_is_scoped) for the runtime mechanism.
   # Non-structured op: out-as-primary only (no native structured kernel). The
   # backend supplies div_out via TORCH_PRIVATEUSE1_FUNC and torchgen derives the
   # functional/inplace variants from it.
