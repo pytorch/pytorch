@@ -13,7 +13,7 @@ from unittest.mock import patch
 import torch
 import torch._inductor
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import fresh_cache, run_and_get_code
+from torch._inductor.utils import fresh_cache, run_and_get_code, run_fw_bw_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
@@ -1853,6 +1853,148 @@ class ComboKernelMetadataTests(TestCase):
                 "'has_loadstore_with_contiguous_rdim'"
             )
         fc.run(code)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "batch_invariant": False,
+            "combo_kernels": False,
+            "deterministic": False,
+            "test_configs.force_filter_reduction_configs": False,
+        }
+    )
+    def test_checkpointed_standalone_reduction_uses_ac_stable_policy(self):
+        from torch.utils.checkpoint import checkpoint
+
+        def block(a):
+            return a.sum(-1)
+
+        def fn(a):
+            return checkpoint(block, a, use_reentrant=False).sum()
+
+        inp = torch.rand(32, 1024, device=GPU_TYPE, requires_grad=True)
+        _, codes = run_fw_bw_and_get_code(
+            lambda: torch.compile(fn, fullgraph=True)(inp)
+        )
+        code = " ".join(codes)
+
+        self.assertNotIn("'combo_grid_meta':", code)
+        self.assertIn("'optimize_mem': False", code)
+        self.assertIn("'ac_stable_reduction': True", code)
+        self.assertIn("'force_filter_reduction_configs': True", code)
+        self.assertIn("'dynamic_scale_rblock': False", code)
+        self.assertIn("'disable_reduction_coordesc': True", code)
+        self.assertIn("'has_loadstore_with_contiguous_rdim': True", code)
+
+        plain_inp = torch.rand(32, 1024, device=GPU_TYPE)
+        _, codes = run_and_get_code(torch.compile(block, fullgraph=True), plain_inp)
+        code = " ".join(codes)
+        self.assertNotIn("'ac_stable_reduction': True", code)
+        self.assertNotIn("'force_filter_reduction_configs': True", code)
+        self.assertNotIn("'dynamic_scale_rblock': False", code)
+        self.assertNotIn("'disable_reduction_coordesc': True", code)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "batch_invariant": False,
+            "deterministic": False,
+            "test_configs.force_filter_reduction_configs": False,
+        }
+    )
+    def test_checkpointed_combo_reduction_uses_ac_stable_policy(self):
+        from torch.utils.checkpoint import checkpoint
+
+        def block(a, b):
+            return a.sum(-1), b.mean(-1)
+
+        def fn(a, b):
+            x, y = checkpoint(block, a, b, use_reentrant=False)
+            return (x + y).sum()
+
+        inps = [
+            torch.rand(32, 1024, device=GPU_TYPE, requires_grad=True) for _ in range(2)
+        ]
+        _, codes = run_fw_bw_and_get_code(
+            lambda: torch.compile(fn, fullgraph=True)(*inps)
+        )
+        code = " ".join(codes)
+
+        self.assertIn("'combo_grid_meta':", code)
+        self.assertIn("'optimize_mem': False", code)
+        self.assertIn("'ac_stable_reduction': True", code)
+        self.assertIn("'dynamic_scale_rblock': False", code)
+        self.assertIn("'disable_reduction_coordesc': True", code)
+        self.assertIn("'disable_combo_kernel_autotune': True", code)
+        for num in range(2):
+            meta_start = code.find(f"'inductor_meta_{num}'")
+            self.assertNotEqual(meta_start, -1)
+            meta_end = code.find(f"'inductor_meta_{num + 1}'", meta_start + 1)
+            meta = code[meta_start : meta_end if meta_end != -1 else None]
+            self.assertIn("'ac_stable_reduction': True", meta)
+            self.assertIn("'force_filter_reduction_configs': True", meta)
+            self.assertIn("'dynamic_scale_rblock': False", meta)
+            self.assertIn("'disable_reduction_coordesc': True", meta)
+            self.assertIn("'has_loadstore_with_contiguous_rdim': True", meta)
+
+        def plain_fn(a, b):
+            return block(a, b)
+
+        plain_inps = [torch.rand(32, 1024, device=GPU_TYPE) for _ in range(2)]
+        _, codes = run_and_get_code(
+            torch.compile(plain_fn, fullgraph=True), *plain_inps
+        )
+        code = " ".join(codes)
+        self.assertIn("'combo_grid_meta':", code)
+        self.assertNotIn("'ac_stable_reduction': True", code)
+        self.assertNotIn("'force_filter_reduction_configs': True", code)
+        self.assertNotIn("'dynamic_scale_rblock': False", code)
+        self.assertNotIn("'disable_reduction_coordesc': True", code)
+
+    def test_combo_subkernel_fingerprint_includes_ac_stable_policy(self):
+        from torch._inductor.runtime.triton_heuristics import _subkernel_fingerprint
+
+        def meta(
+            *,
+            ac_stable_reduction=False,
+            force_filter_reduction_configs=False,
+            dynamic_scale_rblock=True,
+            disable_reduction_coordesc=False,
+        ):
+            return {
+                "heuristic_0": "reduction",
+                "size_hints_0": {"x": 32, "r0_": 1024},
+                "reduction_hint_0": "INNER",
+                "tile_hint_0": "DEFAULT",
+                "inductor_meta_0": {
+                    "num_load": 1,
+                    "num_store": 1,
+                    "num_reduction": 1,
+                    "ac_stable_reduction": ac_stable_reduction,
+                    "force_filter_reduction_configs": force_filter_reduction_configs,
+                    "dynamic_scale_rblock": dynamic_scale_rblock,
+                    "disable_reduction_coordesc": disable_reduction_coordesc,
+                    "has_loadstore_with_contiguous_rdim": True,
+                },
+            }
+
+        baseline = _subkernel_fingerprint(meta(), 0)
+        self.assertNotEqual(
+            baseline,
+            _subkernel_fingerprint(meta(force_filter_reduction_configs=True), 0),
+        )
+        self.assertNotEqual(
+            baseline,
+            _subkernel_fingerprint(meta(dynamic_scale_rblock=False), 0),
+        )
+        self.assertNotEqual(
+            baseline,
+            _subkernel_fingerprint(meta(ac_stable_reduction=True), 0),
+        )
+        self.assertNotEqual(
+            baseline,
+            _subkernel_fingerprint(meta(disable_reduction_coordesc=True), 0),
+        )
 
     @requires_gpu_and_triton
     def test_combo_per_kernel_inductor_meta_matches_standalone(self):
