@@ -547,6 +547,10 @@ template <>
 inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const std::optional<Tensor>& val, unsigned idx) {
   if (val.has_value()) {
     mtl_setBuffer(encoder, val.value(), idx);
+  } else {
+    // Clear the slot so the kernel sees a null pointer instead of a stale
+    // binding left at this index on the shared command encoder.
+    [encoder setBuffer:nil offset:0 atIndex:idx];
   }
 }
 
