@@ -58,7 +58,6 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     clone_input_helper,
     first_sample,
-    instantiate_parametrized_tests,
     IS_CI,
     IS_FBCODE,
     is_iterable_of_tensors,
@@ -216,11 +215,10 @@ meta_consistency_out_dtype_mismatch_xfails = {
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
-
-
-# Tests that don't involve accelerators (tag coverage, meta consistency)
 @unMarkDynamoStrictTest
 class TestCommon(TestCase):
+    exact_dtype = True
+
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod
     def tearDownClass(cls):
@@ -240,6 +238,27 @@ class TestCommon(TestCase):
             if len(filtered_ops) != 0:
                 raise AssertionError(err_msg)
 
+    # Validates that each OpInfo works correctly on different CUDA devices
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
+    def test_multiple_devices(self, devices, dtype, op):
+        for device_str in devices:
+            accelerator_device = torch.device(device_str)
+            # NOTE: only tests on first sample
+            samples = op.sample_inputs(accelerator_device, dtype)
+            sample = first_sample(self, samples)
+            result = op(sample.input, *sample.args, **sample.kwargs)
+
+            if isinstance(result, torch.Tensor):
+                self.assertTrue(result.device == accelerator_device)
+            elif is_iterable_of_tensors(result):
+                self.assertTrue(all(t.device == accelerator_device for t in result))
+            else:
+                self.skipTest(
+                    "Skipped! Only supports single tensor or iterable of tensor outputs."
+                )
+
     def test_pointwise_tag_coverage(self):
         pytorch_dir = os.path.abspath(__file__ + "/../../")
         files = [
@@ -254,10 +273,14 @@ class TestCommon(TestCase):
             "aten.max.default",
             "aten.max.dim",
             "aten.max.dim_max",
+            "aten.max.names_dim",
+            "aten.max.names_dim_max",
             "aten.max.unary_out",
             "aten.min.default",
             "aten.min.dim",
             "aten.min.dim_min",
+            "aten.min.names_dim",
+            "aten.min.names_dim_min",
             "aten.min.unary_out",
             # not pointwise
             "aten.isin.Tensor_Tensor",
@@ -267,6 +290,8 @@ class TestCommon(TestCase):
             "aten.isin.Scalar_Tensor",
             "aten.isin.Scalar_Tensor_out",
             "aten.mode.default",
+            "aten.mode.dimname",
+            "aten.mode.dimname_out",
             "aten.mode.values",
         )
 
@@ -399,34 +424,6 @@ class TestCommon(TestCase):
                             f"{overload} should have reduction tag",
                         )
 
-
-# Tests that apply to all operators and aren't related to any particular
-# accelerators
-@unMarkDynamoStrictTest
-class TestCommonDevice(TestCase):
-    exact_dtype = True
-
-    # Validates that each OpInfo works correctly on different accelerator devices
-    @onlyAccelerator
-    @deviceCountAtLeast(2)
-    @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
-    def test_multiple_devices(self, devices, dtype, op):
-        for device_str in devices:
-            device = torch.device(device_str)
-            # NOTE: only tests on first sample
-            samples = op.sample_inputs(device, dtype)
-            sample = first_sample(self, samples)
-            result = op(sample.input, *sample.args, **sample.kwargs)
-
-            if isinstance(result, torch.Tensor):
-                self.assertTrue(result.device == device)
-            elif is_iterable_of_tensors(result):
-                self.assertTrue(all(t.device == device for t in result))
-            else:
-                self.skipTest(
-                    "Skipped! Only supports single tensor or iterable of tensor outputs."
-                )
-
     @ops([op for op in op_db if has_reduction_tag(op)], dtypes=OpDTypes.none)
     def test_reduction_ops_reduce(self, device, op):
         """Test that operators with reduction tag actually reduce numel when dim is specified."""
@@ -481,7 +478,8 @@ class TestCommonDevice(TestCase):
             and op.formatted_name
             in ("signal_windows_exponential", "signal_windows_bartlett")
             and dtype == torch.float64
-            and ("cpu" in device or "cuda" in device or "xpu" in device)
+            and ("cuda" in device or "xpu" in device)
+            or "cpu" in device
         ):
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
@@ -518,8 +516,8 @@ class TestCommonDevice(TestCase):
             cuda_results = sample.output_process_fn_grad(cuda_results)
             cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
 
-            atol = None if torch.accelerator.is_available() else 0
-            rtol = None if torch.accelerator.is_available() else 0
+            atol = None if torch.xpu.is_available() else 0
+            rtol = None if torch.xpu.is_available() else 0
             if dtype.is_floating_point or dtype.is_complex:
                 atol, rtol = 1e-3, 1e-3
             self.assertEqual(cuda_results, cpu_results, atol=atol, rtol=rtol)
@@ -1902,7 +1900,7 @@ class TestCommonDevice(TestCase):
 
 
 @unMarkDynamoStrictTest
-class TestCompositeComplianceDevice(TestCase):
+class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
     # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
     # in aten/src/ATen/native/README.md for more details
@@ -2187,7 +2185,7 @@ class TestCompositeComplianceDevice(TestCase):
 
 
 @unMarkDynamoStrictTest
-class TestMathBitsDevice(TestCase):
+class TestMathBits(TestCase):
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
     # produces the same value
@@ -2416,15 +2414,6 @@ class _TestTagsMode(TorchDispatchMode):
 @unMarkDynamoStrictTest
 class TestTags(TestCase):
     @onlyCPU
-    @skipOps(
-        {
-            skip("sparse.sampled_addmm"),
-            skip("sparse.mm", variant_name="reduce"),
-            skip("nn.functional.max_pool1d"),
-            skip("to_sparse"),
-            skip("bmm", variant_name="triton_optimized"),
-        }
-    )
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_tags(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2452,7 +2441,6 @@ class TestSelfKwarg(TestCase):
 
 
 @unMarkDynamoStrictTest
-@instantiate_parametrized_tests
 class TestRefsOpsInfo(TestCase):
     import_paths = [
         "_refs",
@@ -2502,6 +2490,7 @@ class TestRefsOpsInfo(TestCase):
         "_refs.index_add_",
         "_refs.index_copy_",
         "_refs.index_fill_",
+        "_refs.native_group_norm",
     }
 
     not_in_decomp_table = {
@@ -2570,9 +2559,6 @@ class TestRefsOpsInfo(TestCase):
         "_refs.nn.functional.poisson_nll_loss",
         "_refs.nn.functional.softmax",
         "_refs.nn.functional.softmin",
-        # The frontend ref validates min_val <= max_val, but aten.hardtanh
-        # preserves native ATen semantics and allows inverted bounds.
-        "_refs.nn.functional.hardtanh",
         "_refs.positive",
         "_refs.ravel",
         "_refs.reshape",
@@ -2743,7 +2729,6 @@ fake_backward_skips = {
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     skip("nn.functional.ctc_loss"),
-    skip("bmm", variant_name="triton_optimized"),
 }
 
 fake_autocast_backward_xfails = {
@@ -2756,7 +2741,8 @@ fake_autocast_backward_xfails = {
 }
 
 
-class _TestFakeTensorBase(TestCase):
+@unMarkDynamoStrictTest
+class TestFakeTensor(TestCase):
     def setUp(self):
         super().setUp()
         # Turn on FakeTensor caching and cross-checking for these tests:
@@ -2878,45 +2864,6 @@ class _TestFakeTensorBase(TestCase):
                     allow_dynamic_output_shape_mode, match_results=False
                 )
 
-    def _test_fake_crossref_helper(self, device, dtype, op, context):
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
-
-        for sample in samples:
-            args = [sample.input] + list(sample.args)
-            kwargs = sample.kwargs
-
-            # skip these to speed up tests
-            common_skip_ops = (
-                aten.detach.default,
-                aten.empty_strided.default,
-                aten.copy_.default,
-                aten.is_same_size.default,
-            )
-
-            # TODO: enable check_aliasing, batch norm fails
-            try:
-                with torch._subclasses.CrossRefFakeMode(
-                    ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True
-                ):
-                    with (
-                        warnings.catch_warnings(),
-                        context(),
-                        torch.autograd.set_multithreading_enabled(False),
-                    ):
-                        composite_compliance.compute_expected_grads(
-                            op.get_op(),
-                            args,
-                            kwargs,
-                            sample.output_process_fn_grad,
-                            op.gradcheck_wrapper,
-                        )
-            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
-                pass
-
-
-@unMarkDynamoStrictTest
-class TestFakeTensorDevice(_TestFakeTensorBase):
-    @skipOps({skip("bmm", variant_name="triton_optimized")})
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_pointwise_ops(self, device, dtype, op):
         name = op.name
@@ -2970,24 +2917,10 @@ class TestFakeTensorDevice(_TestFakeTensorBase):
                 with mode:
                     op(input, *args, **kwargs)
 
-    @skipOps(
-        {
-            xfail("item"),
-            skip("native_batch_norm"),
-            skip("bmm", variant_name="triton_optimized"),
-        }
-    )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
         self._test_fake_helper(device, dtype, op, contextlib.nullcontext)
 
-    @skipOps(
-        {
-            xfail("item"),
-            skip("native_batch_norm"),
-            skip("bmm", variant_name="triton_optimized"),
-        }
-    )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake_autocast(self, device, dtype, op):
         device_type = torch.device(device).type
@@ -2999,10 +2932,52 @@ class TestFakeTensorDevice(_TestFakeTensorBase):
 
         self._test_fake_helper(device, dtype, op, context_fn)
 
+    def _test_fake_crossref_helper(self, device, dtype, op, context):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+
+            # skip these to speed up tests
+            common_skip_ops = (
+                aten.detach.default,
+                aten.empty_strided.default,
+                aten.copy_.default,
+                aten.is_same_size.default,
+            )
+
+            # TODO: enable check_aliasing, batch norm fails
+            try:
+                with torch._subclasses.CrossRefFakeMode(
+                    ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True
+                ):
+                    with (
+                        warnings.catch_warnings(),
+                        context(),
+                        torch.autograd.set_multithreading_enabled(False),
+                    ):
+                        composite_compliance.compute_expected_grads(
+                            op.get_op(),
+                            args,
+                            kwargs,
+                            sample.output_process_fn_grad,
+                            op.gradcheck_wrapper,
+                        )
+            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
+                pass
+
+    @onlyAccelerator
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(fake_backward_xfails | {skip("sparse.sampled_addmm")})
+    @skipOps(fake_backward_xfails)
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
+
+    @onlyCUDA
+    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
+    @skipOps(fake_backward_xfails | fake_autocast_backward_xfails)
+    def test_fake_crossref_backward_amp(self, device, dtype, op):
+        self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 
     @ops([op for op in ops_and_refs if op.is_factory_function])
     def test_strided_layout(self, device, dtype, op):
@@ -3014,15 +2989,7 @@ class TestFakeTensorDevice(_TestFakeTensorBase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
-class TestFakeTensorCUDA(_TestFakeTensorBase):
-    @onlyCUDA
-    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(fake_backward_xfails | fake_autocast_backward_xfails)
-    def test_fake_crossref_backward_amp(self, device, dtype, op):
-        self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
-
-
-class TestForwardADWithScalarsDevice(TestCase):
+class TestForwardADWithScalars(TestCase):
     @ops(
         [op for op in op_db if op.name in ["mul", "add", "div"]],
         allowed_dtypes=(torch.float32,),
@@ -3060,14 +3027,14 @@ class TestForwardADWithScalarsDevice(TestCase):
 
 
 instantiate_device_type_tests(
-    TestCommonDevice, globals(), allow_xpu=True, allow_mps=MACOS_VERSION >= 15.0
+    TestCommon, globals(), allow_xpu=True, allow_mps=MACOS_VERSION >= 15.0
 )
-instantiate_device_type_tests(TestCompositeComplianceDevice, globals())
-instantiate_device_type_tests(TestMathBitsDevice, globals())
-instantiate_device_type_tests(TestFakeTensorDevice, globals())
-instantiate_device_type_tests(TestFakeTensorCUDA, globals())
-instantiate_device_type_tests(TestTags, globals(), only_for="cpu")
-instantiate_device_type_tests(TestForwardADWithScalarsDevice, globals())
+instantiate_device_type_tests(TestCompositeCompliance, globals())
+instantiate_device_type_tests(TestMathBits, globals())
+instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
+instantiate_device_type_tests(TestFakeTensor, globals())
+instantiate_device_type_tests(TestTags, globals())
+instantiate_device_type_tests(TestForwardADWithScalars, globals())
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
