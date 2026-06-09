@@ -2314,6 +2314,12 @@ def export(
     # route it through dynamo's `shapes_spec` mechanism and skip the legacy
     # constraint processing.
     from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+    # constraint processing.
+    from torch.fx.experimental.dynamic_spec import (
+        _SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG,
+        ParamsSpec,
+        ShapesSpec,
+    )
 
     shapes_spec: ShapesSpec | None = None
     if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
@@ -2323,12 +2329,7 @@ def export(
                 "`constraints`. ShapesSpec controls dynamic behavior on its own."
             )
         if prefer_deferred_runtime_asserts_over_guards:
-            raise ValueError(
-                "`prefer_deferred_runtime_asserts_over_guards=True` cannot "
-                "be combined with `dynamic_shapes=ShapesSpec(...)`. "
-                "ShapesSpec currently uses unbacked symbols only, which "
-                "already emit runtime assertions; the flag has no effect."
-            )
+            raise ValueError(_SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG)
         shapes_spec = (
             ShapesSpec(dynamic_shapes)
             if isinstance(dynamic_shapes, ParamsSpec)
