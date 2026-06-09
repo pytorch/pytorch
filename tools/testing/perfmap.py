@@ -39,7 +39,7 @@ def detect(base):
 
     if not files:
         print(f"No changes found between {base} and HEAD.")
-        return []
+        return [], []
 
     all_changed_functions = set()
 
@@ -170,29 +170,36 @@ def detect(base):
 
     test_names = sorted(t.replace("_test.py", "") for t in matched_tests)
     print(f"\nOP_BENCHMARK_TESTS={' '.join(test_names)}")
-    return test_names
+    return test_names, sorted(matched_ops)
 
 
-def run(label, base):
+def run(label, base, tag="short"):
     label_dir = os.path.join(PERFMAP_DIR, label)
     os.makedirs(label_dir, exist_ok=True)
     tests_file = os.path.join(label_dir, "tests.txt")
 
+    ops_file = os.path.join(label_dir, "ops.txt")
+
     # First run: detect tests and save. Later runs: reuse saved list.
     if not os.path.exists(tests_file):
-        test_names = detect(base)
-        if not test_names:
-            print("No benchmarks found. Run on a branch with operator changes first.")
-            return
+        test_names, op_names = detect(base)
         with open(tests_file, "w") as f:
             f.write("\n".join(test_names))
+        with open(ops_file, "w") as f:
+            f.write("\n".join(op_names))
+        if not test_names:
+            print("No benchmarks found. Delete .perfmap/" + label + "/ and run on a branch with operator changes.")
+            return
     else:
         with open(tests_file) as f:
             test_names = [l.strip() for l in f if l.strip()]
+        with open(ops_file) as f:
+            op_names = [l.strip() for l in f if l.strip()]
         if not test_names:
-            print("Saved test list is empty. Delete .perfmap/{label}/ and run on a branch with changes.")
+            print("Saved test list is empty. Delete .perfmap/" + label + "/ and run on a branch with changes.")
             return
         print(f"Using saved test list: {' '.join(test_names)}")
+        print(f"Operators: {' '.join(op_names)}")
 
     branch = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -203,17 +210,42 @@ def run(label, base):
         capture_output=True, text=True,
     ).stdout.strip()
 
+    # Check benchmark dependencies
+    try:
+        import torch
+        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+    except ImportError:
+        print("PyTorch is not installed. Build and install it first.")
+        return
+
+    try:
+        import benchmark_cpp_extension  # noqa: F401
+    except ImportError:
+        print("Benchmark C++ extension not installed. Build it with:")
+        print("  cd benchmarks/operator_benchmark/pt_extension && pip install . --no-build-isolation && cd -")
+        return
+    except OSError as e:
+        print(f"Benchmark extension found but failed to load: {e}")
+        print("Torch shared libraries may not be on LD_LIBRARY_PATH. Try:")
+        print(f"  export LD_LIBRARY_PATH={torch_lib}:$LD_LIBRARY_PATH")
+        return
+
+    env = os.environ.copy()
+    env["LD_LIBRARY_PATH"] = torch_lib + ":" + env.get("LD_LIBRARY_PATH", "")
+
     run_dir = os.path.join(label_dir, f"{branch}_{commit}")
     os.makedirs(run_dir, exist_ok=True)
+
+    operators_flag = ",".join(op_names) if op_names else None
 
     for test in test_names:
         out_file = os.path.join(run_dir, f"{test}.json")
         print(f"Running {test}...")
-        subprocess.run(
-            [sys.executable, "-m", f"pt.{test}_test",
-             "--tag-filter", "long", "--output-json", os.path.abspath(out_file)],
-            cwd="benchmarks/operator_benchmark",
-        )
+        cmd = [sys.executable, "-m", f"pt.{test}_test",
+               "--tag-filter", tag, "--output-json", os.path.abspath(out_file)]
+        if operators_flag:
+            cmd += ["--operators", operators_flag]
+        subprocess.run(cmd, cwd="benchmarks/operator_benchmark", env=env)
 
     print(f"\nResults saved to {run_dir}")
 
@@ -290,7 +322,7 @@ if __name__ == "__main__":
         detect(base)
 
     elif args[0] == "run":
-        label, base = None, "upstream/viable/strict"
+        label, base, tag = None, "upstream/viable/strict", "short"
         i = 1
         while i < len(args):
             if args[i] == "--label" and i + 1 < len(args):
@@ -299,12 +331,15 @@ if __name__ == "__main__":
             elif args[i] == "--base" and i + 1 < len(args):
                 base = args[i + 1]
                 i += 2
+            elif args[i] == "--tag" and i + 1 < len(args):
+                tag = args[i + 1]
+                i += 2
             else:
                 i += 1
         if not label:
-            print("Usage: perfmap.py run --label <name>")
+            print("Usage: perfmap.py run --label <name> [--tag short|long]")
             sys.exit(1)
-        run(label, base)
+        run(label, base, tag)
 
     elif args[0] == "compare":
         label = None
