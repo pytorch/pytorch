@@ -721,6 +721,20 @@ def _match_quack_local_m_norm(
     )
 
 
+def _quack_output_uses_node(value: Any, needle: torch.fx.Node) -> bool:
+    seen: set[torch.fx.Node] = set()
+
+    def visit(item: Any) -> bool:
+        if item is needle:
+            return True
+        if not isinstance(item, torch.fx.Node) or item in seen:
+            return False
+        seen.add(item)
+        return any(visit(arg) for arg in pytree.tree_leaves((item.args, item.kwargs)))
+
+    return visit(value)
+
+
 def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOutputPlan:
     local_reduce = None
     aux_output = None
@@ -758,12 +772,12 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
                 or _match_quack_scaled_local_n_amax_reduce(aux_value, mm_node)
             )
             if local_reduce is not None and not local_reduce.keepdim:
-                skip_nodes.update(
-                    (local_reduce.view_node, local_reduce.reduce_node)
-                    + tuple(local_reduce.extra_skip_nodes)
-                )
-                if local_reduce.source_node is not mm_node:
-                    skip_nodes.add(local_reduce.source_node)
+                skip_nodes.update((local_reduce.reduce_node,))
+                skip_nodes.update(local_reduce.extra_skip_nodes)
+                if not _quack_output_uses_node(output_value[0], local_reduce.view_node):
+                    skip_nodes.add(local_reduce.view_node)
+                    if local_reduce.source_node is not mm_node:
+                        skip_nodes.add(local_reduce.source_node)
             elif isinstance(aux_value, torch.fx.Node):
                 aux_meta = aux_value.meta.get("val")
                 mm_meta = mm_node.meta.get("val")
