@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -290,6 +291,164 @@ class NativeSignature:
 
 
 @dataclass(frozen=True)
+class NativeFunctionCodegenInfo:
+    """
+    Centralizes how one native_functions.yaml entry fans out into generated C++ APIs.
+
+    This is the place to answer questions like:
+      aten::add.Tensor -> dispatcher wrapper: add_Tensor
+                       -> at::_ops handle: at::_ops::add_Tensor::{call, redispatch}
+                       -> public C++ API: at::add / Tensor::add
+    """
+
+    f: NativeFunction
+
+    @property
+    def func(self) -> FunctionSchema:
+        return self.f.func
+
+    @property
+    def schema(self) -> str:
+        return f"aten::{self.func}"
+
+    @property
+    def root_name(self) -> str:
+        return self.f.root_name
+
+    @property
+    def unambiguous_name(self) -> str:
+        return self.func.name.unambiguous_name()
+
+    @property
+    def dispatcher_name(self) -> str:
+        return dispatcher.name(self.func)
+
+    @property
+    def operators_api_name(self) -> str:
+        return f"at::_ops::{self.unambiguous_name}"
+
+    def dispatcher_signature(
+        self, *, prefix: str = "", symint: bool = True
+    ) -> DispatcherSignature:
+        return DispatcherSignature.from_schema(self.func, prefix=prefix, symint=symint)
+
+    def native_signature(
+        self, *, prefix: str = "", symint: bool = False
+    ) -> NativeSignature:
+        return NativeSignature(self.func, prefix=prefix, symint=symint)
+
+    def cpp_signature_group(
+        self, *, method: bool, fallback_binding: bool | None = None
+    ) -> CppSignatureGroup:
+        if fallback_binding is None:
+            fallback_binding = self.f.manual_cpp_binding
+        return CppSignatureGroup.from_native_function(
+            self.f, method=method, fallback_binding=fallback_binding
+        )
+
+    def function_cpp_signature_group(
+        self, *, fallback_binding: bool | None = None
+    ) -> CppSignatureGroup:
+        return self.cpp_signature_group(method=False, fallback_binding=fallback_binding)
+
+    def method_cpp_signature_group(
+        self, *, fallback_binding: bool | None = None
+    ) -> CppSignatureGroup | None:
+        if Variant.method not in self.f.variants:
+            return None
+        return self.cpp_signature_group(method=True, fallback_binding=fallback_binding)
+
+    def generated_headers(self) -> dict[str, object]:
+        # format_yaml() has a dedicated OrderedDict representer, so keep using it
+        # here to make the emitted key order explicit and stable.
+        aggregated_headers: OrderedDict[str, str] = OrderedDict(
+            [
+                ("operators", "ATen/Operators.h"),
+                ("functions", "ATen/Functions.h"),
+                ("redispatch_functions", "ATen/RedispatchFunctions.h"),
+                ("native", "ATen/NativeFunctions.h"),
+            ]
+        )
+        if Variant.method in self.f.variants:
+            aggregated_headers["methods"] = "ATen/core/TensorBody.h"
+
+        per_operator_headers: OrderedDict[str, str] = OrderedDict(
+            [
+                ("operators", f"ATen/ops/{self.root_name}_ops.h"),
+                ("functions", f"ATen/ops/{self.root_name}.h"),
+                ("native", f"ATen/ops/{self.root_name}_native.h"),
+            ]
+        )
+
+        return OrderedDict(
+            [
+                ("aggregated", aggregated_headers),
+                ("per_operator", per_operator_headers),
+            ]
+        )
+
+    @staticmethod
+    def _cpp_api_entry(
+        sig: CppSignature, *, name_prefix: str
+    ) -> OrderedDict[str, object]:
+        return OrderedDict(
+            [
+                ("name", sig.name()),
+                ("faithful", sig.faithful),
+                ("symint", sig.symint),
+                ("signature", sig.decl(name=f"{name_prefix}{sig.name()}")),
+            ]
+        )
+
+    def generated_cpp_entry_points(self) -> dict[str, object]:
+        dispatcher_sig = self.dispatcher_signature()
+        method_sig_group = self.method_cpp_signature_group()
+
+        return OrderedDict(
+            [
+                (
+                    "dispatcher",
+                    OrderedDict(
+                        [
+                            ("name", self.dispatcher_name),
+                            (
+                                "signature",
+                                dispatcher_sig.decl(name=self.dispatcher_name),
+                            ),
+                        ]
+                    ),
+                ),
+                (
+                    "operators_api",
+                    OrderedDict(
+                        [
+                            ("class", self.operators_api_name),
+                            ("call", f"{self.operators_api_name}::call"),
+                            ("redispatch", f"{self.operators_api_name}::redispatch"),
+                        ]
+                    ),
+                ),
+                (
+                    "functions",
+                    [
+                        self._cpp_api_entry(sig, name_prefix="at::")
+                        for sig in self.function_cpp_signature_group().signatures()
+                    ],
+                ),
+                (
+                    "methods",
+                    []
+                    if method_sig_group is None
+                    else [
+                        self._cpp_api_entry(sig, name_prefix="Tensor::")
+                        for sig in method_sig_group.signatures()
+                    ],
+                ),
+            ]
+        )
+
+
+@dataclass(frozen=True)
 class ViewInverseSignature:
     g: NativeFunctionsViewGroup
 
@@ -356,3 +515,4 @@ from torchgen.api import (
     structured,
     translate,
 )
+from torchgen.model import Variant

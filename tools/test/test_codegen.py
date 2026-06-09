@@ -9,9 +9,15 @@ import yaml
 from tools.autograd import gen_autograd_functions, load_derivatives
 
 from torchgen import dest
-from torchgen.api.types import CppSignatureGroup, DispatcherSignature
+from torchgen.api.types import (
+    CppSignatureGroup,
+    DispatcherSignature,
+    NativeFunctionCodegenInfo,
+)
 from torchgen.context import native_function_manager
 from torchgen.gen import (
+    compute_declaration_yaml,
+    compute_registration_declarations,
     get_native_function_declarations,
     get_native_function_schema_registrations,
     LineLoader,
@@ -389,6 +395,167 @@ TORCH_API bool kernel_1();
 } // namespace at
         """
         self.assertEqual("\n".join(declaration), target)
+
+
+class TestNativeFunctionCodegenInfo(unittest.TestCase):
+    def test_declarations_yaml_includes_cpp_entry_points(self) -> None:
+        native_function, _ = NativeFunction.from_yaml(
+            {
+                "func": "op.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)",
+                "dispatch": {"CPU": "op_out"},
+            },
+            loc=Location(__file__, 1),
+            valid_tags=set(),
+        )
+
+        declaration = typing.cast(
+            dict[str, object], compute_declaration_yaml(native_function)
+        )
+        generated_headers = typing.cast(
+            dict[str, dict[str, str]], declaration["generated_headers"]
+        )
+        cpp_entry_points = typing.cast(
+            dict[str, object], declaration["cpp_entry_points"]
+        )
+        dispatcher_entry = typing.cast(dict[str, str], cpp_entry_points["dispatcher"])
+        operators_api_entry = typing.cast(
+            dict[str, str], cpp_entry_points["operators_api"]
+        )
+        function_entries = typing.cast(
+            list[dict[str, object]], cpp_entry_points["functions"]
+        )
+        self.assertEqual(
+            generated_headers["per_operator"]["functions"],
+            "ATen/ops/op.h",
+        )
+        self.assertEqual(
+            generated_headers["per_operator"]["operators"],
+            "ATen/ops/op_ops.h",
+        )
+        self.assertEqual(
+            generated_headers["per_operator"]["native"],
+            "ATen/ops/op_native.h",
+        )
+        self.assertEqual(
+            generated_headers["aggregated"]["redispatch_functions"],
+            "ATen/RedispatchFunctions.h",
+        )
+        self.assertEqual(
+            dispatcher_entry["name"],
+            "op_out",
+        )
+        self.assertEqual(
+            operators_api_entry["class"],
+            "at::_ops::op_out",
+        )
+        self.assertEqual(
+            [typing.cast(str, entry["name"]) for entry in function_entries],
+            ["op_out", "op_outf"],
+        )
+
+    def test_method_variants_report_tensor_method_mapping(self) -> None:
+        native_function, _ = NativeFunction.from_yaml(
+            {
+                "func": "op(Tensor self, Tensor other) -> Tensor",
+                "variants": "function, method",
+                "dispatch": {"CPU": "op"},
+            },
+            loc=Location(__file__, 1),
+            valid_tags=set(),
+        )
+
+        info = NativeFunctionCodegenInfo(native_function)
+        generated_headers = typing.cast(
+            dict[str, dict[str, str]], info.generated_headers()
+        )
+        cpp_entry_points = typing.cast(
+            dict[str, object], info.generated_cpp_entry_points()
+        )
+        operators_api_entry = typing.cast(
+            dict[str, str], cpp_entry_points["operators_api"]
+        )
+        method_entries = typing.cast(
+            list[dict[str, object]], cpp_entry_points["methods"]
+        )
+        self.assertEqual(
+            generated_headers["aggregated"]["methods"],
+            "ATen/core/TensorBody.h",
+        )
+        self.assertEqual(
+            operators_api_entry["call"],
+            "at::_ops::op::call",
+        )
+        self.assertEqual(
+            [typing.cast(str, entry["name"]) for entry in method_entries],
+            ["op"],
+        )
+        self.assertTrue(
+            "Tensor::op(" in typing.cast(str, method_entries[0]["signature"])
+        )
+
+    def test_dispatcher_signatures_preserve_symint_variants(self) -> None:
+        native_function, _ = NativeFunction.from_yaml(
+            {
+                "func": "op(Tensor self, SymInt dim) -> Tensor",
+                "dispatch": {"CPU": "op"},
+            },
+            loc=Location(__file__, 1),
+            valid_tags=set(),
+        )
+
+        info = NativeFunctionCodegenInfo(native_function)
+        self.assertIn(
+            "c10::SymInt dim",
+            info.dispatcher_signature().decl(name=info.dispatcher_name),
+        )
+        self.assertIn(
+            "int64_t dim",
+            info.dispatcher_signature(symint=False).decl(name=info.dispatcher_name),
+        )
+
+    def test_cpp_signature_group_defaults_to_manual_cpp_binding(self) -> None:
+        native_function, _ = NativeFunction.from_yaml(
+            {
+                "func": "op(Tensor self) -> Tensor",
+                "manual_cpp_binding": True,
+            },
+            loc=Location(__file__, 1),
+            valid_tags=set(),
+        )
+
+        info = NativeFunctionCodegenInfo(native_function)
+        self.assertEqual(
+            [sig.name() for sig in info.function_cpp_signature_group().signatures()],
+            ["__dispatch_op"],
+        )
+
+    def test_registration_declarations_include_operators_api_breadcrumb(self) -> None:
+        native_function, backend_index = NativeFunction.from_yaml(
+            {
+                "func": "op(Tensor self) -> Tensor",
+                "dispatch": {"CPU": "op"},
+            },
+            loc=Location(__file__, 1),
+            valid_tags=set(),
+        )
+        backend_metadata: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = {
+            DispatchKey.CPU: {}
+        }
+        BackendIndex.grow_index(backend_metadata, backend_index)
+        backend_indices = {
+            DispatchKey.CPU: BackendIndex(
+                dispatch_key=DispatchKey.CPU,
+                use_out_as_primary=True,
+                external=False,
+                device_guard=False,
+                index=backend_metadata[DispatchKey.CPU],
+            )
+        }
+
+        registration = compute_registration_declarations(
+            native_function, backend_indices
+        )
+        self.assertIn('"operators_api": "at::_ops::op"', registration)
 
 
 # Test for native_function_generation
