@@ -2293,8 +2293,14 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
                 pred, [coll], _buf_last_use, _cand_buf_map
             )
             potential_peak, post_alloc_cache = _calculate_potential_peak_memory_reorder(
-                pred, [coll], coll, _curr_memory[coll][0],
-                candidate_delta, candidate_af, changed_bufs, _curr_memory,
+                pred,
+                [coll],
+                coll,
+                _curr_memory[coll][0],
+                candidate_delta,
+                candidate_af,
+                changed_bufs,
+                _curr_memory,
             )
             if potential_peak > peak_memory:
                 break
@@ -2304,9 +2310,16 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
                 _head = new_head
 
             _update_memory_tracking_after_swap_reorder(
-                pred, [coll], coll, candidate_delta, candidate_af,
-                changed_bufs, post_alloc_cache,
-                _curr_memory, _buf_last_use, snodes_allocfree,
+                pred,
+                [coll],
+                coll,
+                candidate_delta,
+                candidate_af,
+                changed_bufs,
+                post_alloc_cache,
+                _curr_memory,
+                _buf_last_use,
+                snodes_allocfree,
             )
             moved = True
             pred = _prev[coll]
@@ -2338,12 +2351,17 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
             changed_bufs = _find_buffers_with_changed_last_use_sink_waits(
                 succ, [wait], _buf_last_use, _cand_buf_map
             )
-            pre_wait_mem = _curr_memory[_prev[succ]][1] if _prev[succ] is not None else 0
             potential_peak, post_alloc_cache, size_free_cache = (
                 _calculate_potential_peak_memory_sink_waits(
-                    succ, [wait], wait, _curr_memory[wait][0],
-                    candidate_delta, candidate_af, changed_bufs,
-                    _curr_memory, snodes_allocfree,
+                    succ,
+                    [wait],
+                    wait,
+                    _curr_memory[wait][0],
+                    candidate_delta,
+                    candidate_af,
+                    changed_bufs,
+                    _curr_memory,
+                    snodes_allocfree,
                 )
             )
             if potential_peak > peak_memory:
@@ -2354,9 +2372,15 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
                 _head = new_head
 
             _update_memory_tracking_after_swap_sink_waits(
-                succ, [wait], candidate_delta, candidate_af,
-                changed_bufs, post_alloc_cache, size_free_cache,
-                _curr_memory, snodes_allocfree,
+                succ,
+                [wait],
+                candidate_delta,
+                candidate_af,
+                changed_bufs,
+                post_alloc_cache,
+                size_free_cache,
+                _curr_memory,
+                snodes_allocfree,
             )
             moved = True
             succ = _next[wait]
