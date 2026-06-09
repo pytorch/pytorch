@@ -82,6 +82,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     product,
     proxy_args_kwargs,
+    set_example_value,
     unpack_iterable,
     unwrap_if_wrapper,
 )
@@ -602,7 +603,9 @@ class BaseTorchVariable(VariableTracker):
     def hash_impl(self, tx: Any) -> tuple[int, bool]:
         return hash(self.value), False
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -3174,35 +3177,51 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # prior to tracing, which is essential for creating right
         # guards. So save the shape now, and check later if it has
         # changed. If a graph input out= tensor changed shape, graph break.
-        saved_out_shapes = None
+        saved_out_metadata = None
         out_kwarg_vt = None
+
+        def snapshot_out_metadata(out_tensor_vt: VariableTracker) -> Any:
+            fake = out_tensor_vt.as_proxy().node.meta["example_value"]
+            fake_mode = tx.fake_mode
+            if fake_mode is None:
+                raise AssertionError("fake_mode must not be None")
+            with fake_mode:
+                fake_snapshot = torch.empty_strided(
+                    tuple(fake.shape),
+                    tuple(fake.stride()),
+                    dtype=fake.dtype,
+                    device=fake.device,
+                    requires_grad=fake.requires_grad,
+                )
+            return (fake.shape, fake_snapshot)
+
         if "out" in kwargs:
             out_kwarg_vt = kwargs["out"]
 
             # e.g., out=(t1, t2, ...)
             if isinstance(out_kwarg_vt, (TupleVariable, ListVariable)):
-                saved_out_shapes = []
+                saved_out_metadata = []
                 for vt in out_kwarg_vt.items:
                     if vt.is_tensor():
-                        shape = vt.as_proxy().node.meta["example_value"].shape
+                        metadata = snapshot_out_metadata(vt)
                     else:
-                        shape = None
-                    saved_out_shapes.append(shape)
+                        metadata = None
+                    saved_out_metadata.append(metadata)
 
             # e.g., out=output_tensor
             if out_kwarg_vt.is_tensor():
-                saved_out_shapes = (
-                    out_kwarg_vt.as_proxy().node.meta["example_value"].shape
-                )
+                saved_out_metadata = snapshot_out_metadata(out_kwarg_vt)
 
         def should_graph_break_on_out_shape_change(
             out_tensor_vt: VariableTracker,
-            saved_out_shape: Any,
+            saved_out_metadata: Any,
             fake_out: torch.Tensor,
+            result_proxy: torch.fx.Proxy,
             result_node: torch.fx.Node,
         ) -> bool:
             if not isinstance(out_tensor_vt, variables.TensorVariable):
                 raise AssertionError("Expected out= value to be a tensor")
+            saved_out_shape, saved_out_fake = saved_out_metadata
             if saved_out_shape == fake_out.shape:
                 return False
 
@@ -3222,25 +3241,31 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 # to resize an internal out= view safely.
                 return True
 
-            def sync_same_object_aliases() -> None:
+            def collect_same_object_aliases() -> list[variables.TensorVariable]:
+                aliases = []
                 for vt in tx.output.current_tracer.tracked_proxyable_vt:
                     if not isinstance(vt, variables.TensorVariable):
                         continue
                     vt_fake = vt.as_proxy().node.meta.get("example_value")
                     if vt_fake is fake_out:
-                        vt.synchronize_attributes(tx)
+                        aliases.append(vt)
+                return aliases
 
             out_node = out_tensor_vt.as_proxy().node
             # pyrefly: ignore [missing-attribute]
             is_alias_of = torch._C._is_alias_of
+            same_object_nodes = []
             for node in tx.output.current_tracer.graph.nodes:
                 if node is result_node:
                     break
                 if node is out_node:
+                    same_object_nodes.append(node)
                     continue
                 other = node.meta.get("example_value")
                 if not isinstance(other, torch.Tensor):
                     continue
+                if other is fake_out:
+                    same_object_nodes.append(node)
                 if is_alias_of(fake_out, other) and (
                     node.op == "placeholder" or other is not fake_out
                 ):
@@ -3248,12 +3273,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     return True
 
             # The out= tensor was created inside the traced graph. The resize is
-            # represented by the out= op, but existing TensorVariables can cache
-            # size/stride from before fake propagation ran. Same-object aliases,
-            # e.g. no-op to(), share TensorImpl metadata in eager, so sync them
-            # together.
-            out_tensor_vt.synchronize_attributes(tx)
-            sync_same_object_aliases()
+            # represented by the out= op. Keep earlier producer nodes annotated
+            # with their pre-resize metadata, and move live Python variables that
+            # alias the same TensorImpl forward to the result node.
+            same_object_aliases = collect_same_object_aliases()
+            for node in same_object_nodes:
+                set_example_value(node, saved_out_fake)
+            for vt in same_object_aliases:
+                vt.proxy = result_proxy
+                vt.synchronize_attributes(tx)
             return False
 
         ctx = nullcontext
@@ -3290,7 +3318,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         # Handle e.g., `torch.add(a, b, out=result)`
-        if saved_out_shapes is not None:
+        if saved_out_metadata is not None:
             # out variants of torch operators like torch.sort and torch.sigmoid
             # mutate the tensors in the out field.
             #
@@ -3302,16 +3330,17 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # Note that although these tensor variables would hold different
             # proxies, the in-place mutation semantics is preserved in the FX
             # graph, so we won't have correctness issues.
-            if isinstance(saved_out_shapes, list):
-                for out_tensor_vt, saved_out_shape in zip(
+            if isinstance(saved_out_metadata, list):
+                for out_tensor_vt, saved_out_metadata_item in zip(
                     out_kwarg_vt.items,  # type: ignore[union-attr]
-                    saved_out_shapes,
+                    saved_out_metadata,
                 ):
-                    if saved_out_shape is None:
+                    if saved_out_metadata_item is None:
                         # This should be extremely rare, but it's kept for now
                         # until we invest in enforcing the `out=` kwarg for only
                         # torch methods.
                         continue
+                    saved_out_shape = saved_out_metadata_item[0]
 
                     if not out_tensor_vt.is_tensor():
                         raise AssertionError(
@@ -3320,8 +3349,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     fake_out = out_tensor_vt.proxy.node.meta["example_value"]
                     if should_graph_break_on_out_shape_change(
                         out_tensor_vt,
-                        saved_out_shape,
+                        saved_out_metadata_item,
                         fake_out,
+                        result_proxy,
                         result_proxy.node,
                     ):
                         unimplemented(
@@ -3355,13 +3385,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     raise AssertionError(
                         "Expected out= kwarg proxy node to have example_value metadata"
                     )
+                saved_out_shapes = saved_out_metadata[0]
                 fake_out = out_kwarg_vt.as_proxy().node.meta["example_value"]
-                if should_graph_break_on_out_shape_change(
+                graph_break = should_graph_break_on_out_shape_change(
                     out_kwarg_vt,
-                    saved_out_shapes,
+                    saved_out_metadata,
                     fake_out,
+                    result_proxy,
                     result_proxy.node,
-                ):
+                )
+                if graph_break:
                     unimplemented(
                         gb_type="Shape mismatch with out= tensor variant",
                         context=f"fn={self.value}, args={args}, kwargs={kwargs}",
@@ -4057,6 +4090,13 @@ class DispatchKeySetVariable(BaseTorchVariable):
     ) -> "DispatchKeySetVariable":
         install_guard(source.make_guard(GuardBuilder.DISPATCH_KEY_SET_MATCH))
         return cls(value, source=source)
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     def is_constant_fold_method(self, name: str) -> bool:
         return name == "has"
