@@ -1,3 +1,4 @@
+# Owner(s): ["module: benchmark"]
 name: operator-microbenchmark-compare
 
 on:

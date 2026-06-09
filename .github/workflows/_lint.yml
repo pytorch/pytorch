@@ -1,3 +1,4 @@
+# Owner(s): ["module: lint"]
 name: Run linters
 
 on:
