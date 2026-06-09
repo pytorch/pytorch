@@ -46,6 +46,7 @@ def _get_or_create_transfer_stream(device: torch.device) -> torch.Stream:
 # buffer is never in-flight when reused.
 _pinned_pool: dict[tuple[int, torch.dtype], list[torch.Tensor]] = {}
 _pool_enabled: bool = False
+_pool_managed_ptrs: set[int] = set()
 
 
 def _maybe_pool_alloc(numel: int, dtype: torch.dtype) -> torch.Tensor:
@@ -54,13 +55,19 @@ def _maybe_pool_alloc(numel: int, dtype: torch.dtype) -> torch.Tensor:
         key = (numel, dtype)
         bucket = _pinned_pool.get(key)
         if bucket:
-            return bucket.pop()
+            buf = bucket.pop()
+            _pool_managed_ptrs.add(buf.data_ptr())
+            return buf
+        buf = torch.empty(numel, dtype=dtype, device="cpu", pin_memory=True)
+        _pool_managed_ptrs.add(buf.data_ptr())
+        return buf
     return torch.empty(numel, dtype=dtype, device="cpu", pin_memory=True)
 
 
 def _pool_free(buf: torch.Tensor) -> None:
     """Return a pinned buffer to the pool, or free its storage if pool disabled."""
-    if _pool_enabled:
+    ptr = buf.data_ptr()
+    if ptr in _pool_managed_ptrs:
         key = (buf.nelement(), buf.dtype)
         _pinned_pool.setdefault(key, []).append(buf)
     else:
@@ -72,38 +79,38 @@ def _pool_free(buf: torch.Tensor) -> None:
 def _pool_clear() -> None:
     """Free all cached pinned buffers."""
     _pinned_pool.clear()
+    _pool_managed_ptrs.clear()
 
 
 import contextlib
 
 
 @contextlib.contextmanager
-def pinned_memory_pool():
-    """Context manager that enables pinned memory pooling for offload ops.
+def pinned_memory_pool(enabled: bool = True):
+    """Context manager that controls pinned memory pooling for offload ops.
 
     Without this context manager, ``ao.offload`` allocates a fresh pinned
     buffer every call and ``ao.wait_tensor`` does not cache freed buffers.
-    Inside the context, buffers are reused across calls, avoiding the
-    ~3 ms per-tensor ``cudaHostAlloc`` overhead::
+    Inside the context with ``enabled=True``, buffers are reused across
+    calls, avoiding the ~3 ms per-tensor ``cudaHostAlloc`` overhead::
 
         with pinned_memory_pool():
             for step in range(num_steps):
                 train_step()  # ao.offload/reload reuse pooled buffers
         # pinned buffers freed here
+
+    Nestable: inner contexts save and restore the outer state.
+    Pass ``enabled=False`` to temporarily disable pooling.
     """
     global _pool_enabled
-    _pool_enabled = True
+    saved = _pool_enabled
+    _pool_enabled = enabled
     try:
         yield
     finally:
-        _pool_clear()
-        _pool_enabled = False
-
-
-# --- Stride registry: preserves original tensor layout across offload/reload ---
-# offload stores the original (size, stride) keyed by CPU tensor data_ptr.
-# reload pops it to reconstruct the GPU tensor with the original layout.
-_stride_registry: dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
+        if not saved:
+            _pool_clear()
+        _pool_enabled = saved
 
 
 # --- Wait registry: maps data_ptr() -> (completion_event, device) ---
@@ -154,10 +161,6 @@ def offload(tensor: torch.Tensor) -> torch.Tensor:
 
     torch.accelerator.set_stream(transfer_stream)
     result = _maybe_pool_alloc(tensor.nelement(), tensor.dtype).view(tensor.shape)
-    _stride_registry[result.data_ptr()] = (
-        tuple(tensor.size()),
-        tuple(tensor.stride()),
-    )
     completion_event = _register_wait(result, device)
     result.copy_(tensor, non_blocking=True)
     transfer_stream.record_event(completion_event)
@@ -168,8 +171,6 @@ def offload(tensor: torch.Tensor) -> torch.Tensor:
 
 @offload.register_fake
 def _(tensor: torch.Tensor) -> torch.Tensor:
-    # Contiguous CPU buffer — strides are NOT preserved here (DMA needs contiguous).
-    # Original strides are restored by reload via _stride_registry.
     return torch.empty(tensor.shape, dtype=tensor.dtype, device="cpu")
 
 
@@ -177,25 +178,24 @@ def _(tensor: torch.Tensor) -> torch.Tensor:
 def reload(
     tensor: torch.Tensor,
     device: torch.device,
+    original_size: list[int],
+    original_stride: list[int],
 ) -> torch.Tensor:
     """Async reload a CPU tensor to GPU on the dedicated transfer stream.
 
     The GPU tensor is allocated on the compute stream to avoid cross-stream
     allocator ownership issues. The H2D copy runs on the transfer stream.
     The completion event is keyed by the output tensor's data_ptr.
+
+    ``original_size`` and ``original_stride`` restore the GPU tensor's
+    original layout (which may be non-contiguous, e.g. from transpose).
     """
     transfer_stream = _get_or_create_transfer_stream(device)
     current_stream = torch.accelerator.current_stream(device)
 
-    # Restore original strides if available (set by offload), otherwise contiguous.
-    stride_info = _stride_registry.pop(tensor.data_ptr(), None)
-    if stride_info is not None:
-        orig_size, orig_stride = stride_info
-        result = torch.empty_strided(
-            orig_size, orig_stride, dtype=tensor.dtype, device=device
-        )
-    else:
-        result = torch.empty(tensor.shape, dtype=tensor.dtype, device=device)
+    result = torch.empty_strided(
+        original_size, original_stride, dtype=tensor.dtype, device=device
+    )
     completion_event = _register_wait(result, device)
 
     transfer_stream.wait_stream(current_stream)
@@ -212,10 +212,12 @@ def reload(
 def _(
     tensor: torch.Tensor,
     device: torch.device,
+    original_size: list[int],
+    original_stride: list[int],
 ) -> torch.Tensor:
-    # Fake impl can't access _stride_registry, so returns contiguous.
-    # Real impl restores original strides via _stride_registry.
-    return torch.empty(tensor.shape, dtype=tensor.dtype, device=device)
+    return torch.empty_strided(
+        original_size, original_stride, dtype=tensor.dtype, device=device
+    )
 
 
 # ao::wait_tensor is defined via torch.library with an aliasing schema so the
