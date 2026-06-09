@@ -66,7 +66,7 @@ def manual_seed(seed: int) -> torch._C.Generator:
 
 
 _manual_seed_impl = deprecated(
-    "Use `set_device_index` instead.",
+    "Use `manual_seed` instead.",
     category=FutureWarning,
 )(manual_seed)
 
