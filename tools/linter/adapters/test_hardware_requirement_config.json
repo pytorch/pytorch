@@ -5,6 +5,7 @@
         "test/profiler/*_test.py"
     ],
     "exclude_patterns": [
-        "test/profiler/test_profiler.py"
+        "test/profiler/test_profiler.py",
+        "test/profiler/test_profiler_tree.py"
     ]
 }

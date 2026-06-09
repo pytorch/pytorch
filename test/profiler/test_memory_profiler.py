@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     TestCase,
+    TestHardwareRequirement,
 )
 from torch.utils import _pytree as pytree
 
@@ -53,6 +54,8 @@ def _lookup_tensor_categories(
 
 @skipIfTorchDynamo("TorchDynamo removes profiler altogether.")
 class TestMemoryProfiler(TestCase):
+    hardware_requirement = TestHardwareRequirement.GENERIC
+
     def test_config_check(self) -> None:
         with torch.profiler.profile() as prof:
             pass
@@ -132,6 +135,8 @@ class RecordInputOutputDispatchMode(torch.utils._python_dispatch.TorchDispatchMo
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestIdentifyGradients(TestCase):
+    hardware_requirement = TestHardwareRequirement.DEVICE_GENERIC
+
     def gradient_detected(
         self,
         prof: torch.profiler.profile,
@@ -336,6 +341,8 @@ class TestIdentifyGradients(TestCase):
 
 @skipIfTorchDynamo("TorchDynamo removes profiler altogether.")
 class TestDataFlow(TestCase):
+    hardware_requirement = TestHardwareRequirement.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         self.maxDiff = None
@@ -767,6 +774,8 @@ class TestDataFlow(TestCase):
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2E(TestCase):
+    hardware_requirement = TestHardwareRequirement.GENERIC
+
     def _run_and_format_categories(self, fn, indent=12):
         """Generate summary of assigned categories for expecttest."""
 
@@ -1258,6 +1267,8 @@ class TestMemoryProfilerE2E(TestCase):
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2EDeviceType(TestCase):
+    hardware_requirement = TestHardwareRequirement.DEVICE_GENERIC
+
     def _run_and_check_parameters_and_gradients(
         self, inner_fn, model, grads_none: bool = False
     ):
@@ -1486,6 +1497,8 @@ class TestMemoryProfilerE2EDeviceType(TestCase):
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerTimeline(TestCase):
+    hardware_requirement = TestHardwareRequirement.DEVICE_GENERIC
+
     @skipXPUIf(
         True,
         "The XPU Profiler will not cover this case for now. Will support it in next period.",

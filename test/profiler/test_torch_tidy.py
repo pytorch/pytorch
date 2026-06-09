@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    TestHardwareRequirement,
 )
 
 
@@ -62,6 +63,8 @@ class SimpleNet(nn.Module):
 
 
 class TestTorchTidyProfiler(TestCase):
+    hardware_requirement = TestHardwareRequirement.GENERIC
+
     def _get_tensor_fields(self, node, index):
         self.assertIsNotNone(node)
         self.assertIsInstance(

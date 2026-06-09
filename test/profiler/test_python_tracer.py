@@ -11,10 +11,13 @@ from torch.testing._internal.common_utils import (
     skipIfPythonVersionMismatch,
     TemporaryFileName,
     TestCase,
+    TestHardwareRequirement,
 )
 
 
 class TestPythonTracer(TestCase):
+    hardware_requirement = TestHardwareRequirement.GENERIC
+
     @skipIfPythonVersionMismatch(lambda major, minor, micro: major == 3 and minor == 12)
     def test_method_with_c_function(self):
         class A:

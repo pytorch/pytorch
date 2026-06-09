@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     TestCase,
+    TestHardwareRequirement,
 )
 
 
@@ -146,6 +147,8 @@ def _load_events(trace_path):
 class TestTraceValidatorRules(TestCase):
     """Synthetic tests for rules not exercised by real E2E payloads."""
 
+    hardware_requirement = TestHardwareRequirement.GENERIC
+
     def test_nccl_metadata_pass(self):
         events = [
             {
@@ -182,6 +185,7 @@ class TestTraceValidatorRules(TestCase):
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
 @instantiate_parametrized_tests
 class TestTraceValidatorE2E(TestCase):
+    hardware_requirement = TestHardwareRequirement.DEVICE_SPECIFIC
     _trace_dir: str = ""
     _payloads: dict = {}
 

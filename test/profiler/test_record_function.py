@@ -15,7 +15,11 @@ from torch.autograd import (
 )
 from torch.autograd.profiler import profile as _profile
 from torch.profiler import kineto_available, record_function
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TestCase,
+    TestHardwareRequirement,
+)
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -35,6 +39,8 @@ Json = dict[str, Any]
 
 
 class TestRecordFunction(TestCase):
+    hardware_requirement = TestHardwareRequirement.GENERIC
+
     def _record_function_with_param(self):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with _profile(

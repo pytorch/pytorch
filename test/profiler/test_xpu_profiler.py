@@ -9,13 +9,20 @@ from collections import defaultdict
 
 import torch
 from torch.profiler import DeviceType
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_XPU,
+    TestCase,
+    TestHardwareRequirement,
+)
 
 
 Verbose = False
 
 
 class XpuProfilerTest(TestCase):
+    hardware_requirement = TestHardwareRequirement.DEVICE_SPECIFIC
+
     @unittest.skipIf(not TEST_XPU, "test requires XPU")
     def test_profiler(self):
         t = torch.empty(1000, dtype=torch.int, device="xpu")

@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TEST_XPU,
     TestCase,
+    TestHardwareRequirement,
 )
 from torch.utils._triton import has_triton
 
@@ -58,6 +59,8 @@ Json = dict[str, Any]
 
 
 class TestExecutionTrace(TestCase):
+    hardware_requirement = TestHardwareRequirement.DEVICE_GENERIC
+
     def payload(self, device, use_device=False):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):

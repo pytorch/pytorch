@@ -10,7 +10,12 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+    TestHardwareRequirement,
+)
 
 
 if is_fbcode():
@@ -76,6 +81,7 @@ class PythonProfilerEventHandler(cpp.ProfilerEventHandler):
 
 
 class CppThreadTest(TestCase):
+    hardware_requirement = TestHardwareRequirement.DEVICE_GENERIC
     ThreadCount = 20  # set to 2 for debugging
     EventHandler = None
     TraceObject = None
