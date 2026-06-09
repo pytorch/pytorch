@@ -1360,6 +1360,11 @@ class PythonWrapperCodegen(CodeGen):
         # Additional files that are dependent to the wrapper (ex. cubin files)
         self.additional_files = []
 
+        # Precompiled kernel .so paths to link into the JIT cpp_wrapper
+        # (e.g. CUTLASS, ROCm CK). Populated by the scheduling layer when
+        # cpp_wrapper is set and not aot_mode.
+        self.external_kernel_libs: OrderedSet[str] = OrderedSet()
+
     @staticmethod
     def create(
         is_subgraph: bool,
@@ -1755,9 +1760,6 @@ class PythonWrapperCodegen(CodeGen):
         raise NotImplementedError(
             "AOTI div-by-zero check is only emitted by C++ wrappers"
         )
-
-    def write_assert_alignment(self, name: str, alignment: int, op_name: str) -> None:
-        self.writeline(f"assert_alignment({name}, {alignment}, {op_name!r})")
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
