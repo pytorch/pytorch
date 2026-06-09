@@ -1050,31 +1050,42 @@ class GemmEpilogueFusionTests(TestCase):
                 ).check("gemm_epilogue(").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
-    def test_cuda_inductor_quack_backend_rejects_row_reduce_feeding_main(self):
+    def test_cuda_inductor_quack_backend_row_reduce_feeds_main_groups(self):
         M = 128
         N = 64
-        group = 2
 
-        def fn(a, b):
-            def epilogue(acc):
-                x = acc.float().view(-1, group, N)
-                denom = x.sum(1, keepdim=True)
-                return (x / denom).view(M, N)
+        for group in (2, 4, 8, 16):
+            with self.subTest(group=group):
 
-            return gemm_epilogue_fusion(
-                torch.ops.aten.mm.default,
-                (a, b),
-                epilogue,
-                kernel_options={"backend": "QUACK"},
-            )
+                def fn(a, b):
+                    def epilogue(acc):
+                        x = acc.float().view(-1, group, N)
+                        denom = x.sum(1, keepdim=True)
+                        return (x / denom).view(M, N)
 
-        a = torch.rand(M, 64, device="cuda", dtype=torch.float16)
-        b = torch.rand(64, N, device="cuda", dtype=torch.float16)
+                    return gemm_epilogue_fusion(
+                        torch.ops.aten.mm.default,
+                        (a, b),
+                        epilogue,
+                        kernel_options={"backend": "QUACK"},
+                    )
 
-        with self.assertRaisesRegex(
-            Exception, "device-side value-producing row reduction"
-        ):
-            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+                a = torch.rand(M, 64, device="cuda", dtype=torch.float16)
+                b = torch.rand(64, N, device="cuda", dtype=torch.float16)
+
+                actual, (code,) = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                )
+                expected = fn(a, b)
+
+                torch.testing.assert_close(
+                    actual.float(), expected.float(), atol=5e-2, rtol=5e-2
+                )
+                FileCheck().check(f"local_reduce_group={group}").check(
+                    "local_reduce_dim=0"
+                ).check("local_reduce_feeds_main=True").check_not("extern_kernels.mm").run(
+                    code
+                )
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_large_group_reduce_feeding_main(self):
