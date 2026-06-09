@@ -7453,6 +7453,8 @@ class Scheduler:
 
             # should be true now because we checked `can_fuse_epilogue`
             assert len(node1.node.mutable_args) == 1
+
+            # Compare layouts, modulo dtype. We allow casting during codegen.
             layout1 = node1.node.mutable_args[0].layout
             layout2 = node2.node.layout
             assert isinstance(layout1, ir.Layout) and isinstance(layout2, ir.Layout)
