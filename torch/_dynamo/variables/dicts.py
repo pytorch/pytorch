@@ -61,7 +61,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
-from .object_protocol import vt_getitem
+from .object_protocol import generic_richcompare_bool, vt_getitem
 from .sets import SetVariable
 
 
@@ -1345,8 +1345,6 @@ class DictItemsVariable(DictViewVariable):
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6433-L6451
-        from ..utils import iter_contains
-
         if not is_hashable(item):
             raise_type_error(tx, f"unhashable type: '{item.python_type_name()}'")
 
@@ -1357,9 +1355,13 @@ class DictItemsVariable(DictViewVariable):
             if key_ht not in self.dv_dict.items:
                 return VariableTracker.build(tx, False)
             stored = self.dv_dict.items[key_ht]
-            return VariableTracker.build(tx, val.is_python_equal(stored))
+            return generic_richcompare_bool(tx, val, stored, "__eq__")
 
-        return iter_contains(self.view_items_vt, item, tx)
+        for el in self.view_items_vt:
+            r = generic_richcompare_bool(tx, el, item, "__eq__")
+            if r.is_constant_match(True):
+                return r
+        return ConstantVariable.create(False)
 
     def richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
