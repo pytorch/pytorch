@@ -23,7 +23,6 @@ import tempfile
 import textwrap
 import time
 import unittest
-import warnings
 from collections.abc import (
     Callable,
     Collection,
@@ -323,9 +322,13 @@ def do_bench_using_profiling(
     # to torch._inductor.runtime.benchmarking and change all the call site.
     # But that's not trivial due to so many call sites in and out of pytorch.
 
-    from torch._inductor.runtime.benchmarking import may_distort_benchmarking_result
+    from torch._inductor.runtime.benchmarking import (
+        gpu_benchmark_lock,
+        may_distort_benchmarking_result,
+    )
 
-    return may_distort_benchmarking_result(_do_bench_using_profiling)(
+    locked_bench = gpu_benchmark_lock(_do_bench_using_profiling)
+    return may_distort_benchmarking_result(locked_bench)(
         fn, warmup, rep, is_vetted_benchmarking
     )
 
@@ -2411,21 +2414,6 @@ def use_blackwell_cutedsl_grouped_mm(
 
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
-
-    # TODO: Enable CUTLASS in non-AOT cpp_wrapper mode. The CUTLASS
-    # codegen (CUDATemplateKernel.call_kernel) already has cpp_wrapper-aware
-    # arg handling, but the other half is missing: the non-triton branch of
-    # CppWrapperGpu._generate_kernel_call_helper unconditionally emits
-    # `kernels.<name>(...)`, and that AOTInductorModelKernels struct only
-    # exists in AOT mode. Fixing this requires adding dlopen/dlsym loading
-    # for the compiled CUTLASS .so, similar to how the triton branch uses
-    # static CUfunction + loadKernel for non-AOT mode.
-    if V.graph.cpp_wrapper and not V.graph.aot_mode:
-        warnings.warn(
-            "CUTLASS backend is not supported with non-AOT cpp_wrapper mode. "
-            "Skipping CUTLASS backend.",
-        )
-        return False
 
     gemm_size = V.graph.sizevars.optimization_hint(m * n * k, fallback=-1)
     if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:
