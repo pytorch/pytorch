@@ -96,7 +96,8 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
                 local_reduce_kwargs += ", local_reduce_feeds_main=True"
         if qtb.gemm_op in ("mm", "bmm"):
             call_args = [input_args[0], input_args[1]]
-            call_kwargs = epilogue_kwargs + local_reduce_kwargs
+            out_dtype_kwargs = "" if qtb.out_dtype is None else f", out_dtype={qtb.out_dtype!r}"
+            call_kwargs = out_dtype_kwargs + epilogue_kwargs + local_reduce_kwargs
         elif qtb.gemm_op == "scaled_mm":
             call_args = [input_args[0], input_args[1]]
             call_kwargs = (
