@@ -2209,6 +2209,13 @@ print(json.dumps({
     "mismatch_token_kinds": stats["guard_last_success_mismatch_token_kinds"],
     "mismatch_top_paths": stats["guard_last_success_mismatch_top_paths"],
     "disabled_reasons": stats["guard_last_success_disabled_reasons"],
+    "actual_attempt": stats["guard_last_success_actual_attempt"],
+    "actual_hit": stats["guard_last_success_actual_hit"],
+    "actual_miss": stats["guard_last_success_actual_miss"],
+    "actual_enable": stats["guard_last_success_actual_enable"],
+    "actual_disabled": stats["guard_last_success_actual_disabled"],
+    "actual_token_check_ns": stats["guard_last_success_actual_token_check_ns"],
+    "actual_train_ns": stats["guard_last_success_actual_train_ns"],
 }))
 """
         env = os.environ.copy()
@@ -2231,6 +2238,64 @@ print(json.dumps({
         self.assertIsInstance(stats["mismatch_reasons"], dict)
         self.assertIsInstance(stats["mismatch_token_kinds"], dict)
         self.assertIsInstance(stats["mismatch_top_paths"], dict)
+        self.assertGreaterEqual(stats["actual_attempt"], 0)
+        self.assertGreaterEqual(stats["actual_hit"], 0)
+        self.assertGreaterEqual(stats["actual_miss"], 0)
+        self.assertGreaterEqual(stats["actual_enable"], 0)
+        self.assertGreaterEqual(stats["actual_disabled"], 0)
+        self.assertGreaterEqual(stats["actual_token_check_ns"], 0)
+        self.assertGreaterEqual(stats["actual_train_ns"], 0)
+
+    def test_guard_last_success_actual_hits_after_stable_self_receipt(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("bias", torch.ones(4))
+
+    def forward(self):
+        return self.bias + 1
+
+m = Mod()
+compiled = torch.compile(m, backend="eager")
+expected = m.bias + 1
+assert torch.equal(compiled(), expected)
+
+guards.reset_guard_lookup_stats()
+for _ in range(8):
+    out = compiled()
+    assert torch.equal(out, expected)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "actual_attempt": stats["guard_last_success_actual_attempt"],
+    "actual_enable": stats["guard_last_success_actual_enable"],
+    "actual_hit": stats["guard_last_success_actual_hit"],
+    "actual_miss": stats["guard_last_success_actual_miss"],
+    "actual_disabled": stats["guard_last_success_actual_disabled"],
+    "disabled_reasons": stats["guard_last_success_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["actual_attempt"], 0)
+        self.assertGreater(stats["actual_enable"], 0)
+        self.assertGreater(stats["actual_hit"], 0)
+        self.assertEqual(stats["actual_miss"], 0)
+        self.assertEqual(stats["actual_disabled"], 0, stats["disabled_reasons"])
 
     def test_guard_last_success_global_dict_ignores_unrelated_version(self):
         script = r"""

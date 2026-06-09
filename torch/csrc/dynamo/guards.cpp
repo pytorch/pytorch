@@ -256,6 +256,13 @@ struct GuardLastSuccessStats {
   std::atomic<uint64_t> compare_mismatch{0};
   std::atomic<uint64_t> compare_mismatch_index_sum{0};
   std::atomic<uint64_t> compare_mismatch_index_max{0};
+  std::atomic<uint64_t> actual_attempt{0};
+  std::atomic<uint64_t> actual_hit{0};
+  std::atomic<uint64_t> actual_miss{0};
+  std::atomic<uint64_t> actual_enable{0};
+  std::atomic<uint64_t> actual_disabled{0};
+  std::atomic<uint64_t> actual_token_check_ns{0};
+  std::atomic<uint64_t> actual_train_ns{0};
 };
 
 struct GuardFastPlanDisabledPathStats {
@@ -305,6 +312,8 @@ constexpr size_t kGuardSubtreeProbeTopK = 64;
 constexpr size_t kGuardFastPlanDisabledTopK = 64;
 constexpr size_t kGuardFastPlanMaxTokens = 1024;
 constexpr size_t kGuardLastSuccessShadowMaxTokens = 65536;
+constexpr size_t kGuardLastSuccessActualMaxTokens = 65536;
+constexpr uint64_t kGuardLastSuccessActualStablePasses = 3;
 constexpr size_t kGuardSubtreeMemoSupportAnalysisMaxItems = 1024;
 
 struct GuardSubtreeMemoSupportAnalysis {
@@ -638,6 +647,13 @@ void reset_guard_lookup_stats() {
   store_zero(last_success_stats.compare_mismatch);
   store_zero(last_success_stats.compare_mismatch_index_sum);
   store_zero(last_success_stats.compare_mismatch_index_max);
+  store_zero(last_success_stats.actual_attempt);
+  store_zero(last_success_stats.actual_hit);
+  store_zero(last_success_stats.actual_miss);
+  store_zero(last_success_stats.actual_enable);
+  store_zero(last_success_stats.actual_disabled);
+  store_zero(last_success_stats.actual_token_check_ns);
+  store_zero(last_success_stats.actual_train_ns);
   {
     std::lock_guard<std::mutex> lock(guard_accessor_type_stats_mutex());
     guard_accessor_type_stats().clear();
@@ -889,6 +905,20 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(last_success_stats.compare_mismatch_index_sum);
   result["guard_last_success_compare_mismatch_index_max"] =
       load_relaxed(last_success_stats.compare_mismatch_index_max);
+  result["guard_last_success_actual_attempt"] =
+      load_relaxed(last_success_stats.actual_attempt);
+  result["guard_last_success_actual_hit"] =
+      load_relaxed(last_success_stats.actual_hit);
+  result["guard_last_success_actual_miss"] =
+      load_relaxed(last_success_stats.actual_miss);
+  result["guard_last_success_actual_enable"] =
+      load_relaxed(last_success_stats.actual_enable);
+  result["guard_last_success_actual_disabled"] =
+      load_relaxed(last_success_stats.actual_disabled);
+  result["guard_last_success_actual_token_check_ns"] =
+      load_relaxed(last_success_stats.actual_token_check_ns);
+  result["guard_last_success_actual_train_ns"] =
+      load_relaxed(last_success_stats.actual_train_ns);
   py::dict last_success_disabled_reasons;
   py::dict last_success_disabled_top_paths;
   {
@@ -1560,6 +1590,52 @@ static void record_guard_last_success_support_check(uint64_t check_ns) {
     return;
   }
   add_relaxed(guard_last_success_stats().support_check_ns, check_ns);
+}
+
+static void record_guard_last_success_actual_attempt() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_last_success_stats().actual_attempt, 1);
+}
+
+static void record_guard_last_success_actual_hit(uint64_t token_check_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_last_success_stats();
+  add_relaxed(stats.actual_hit, 1);
+  add_relaxed(stats.actual_token_check_ns, token_check_ns);
+}
+
+static void record_guard_last_success_actual_miss(uint64_t token_check_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_last_success_stats();
+  add_relaxed(stats.actual_miss, 1);
+  add_relaxed(stats.actual_token_check_ns, token_check_ns);
+}
+
+static void record_guard_last_success_actual_enable() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_last_success_stats().actual_enable, 1);
+}
+
+static void record_guard_last_success_actual_disabled() {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_last_success_stats().actual_disabled, 1);
+}
+
+static void record_guard_last_success_actual_train(uint64_t train_ns) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(guard_last_success_stats().actual_train_ns, train_ns);
 }
 
 static void record_guard_last_success_disabled_item_locked(
@@ -2926,6 +3002,19 @@ struct GuardLastSuccessReceipt {
     shadow_passes = 0;
     tokens.clear();
     debug_paths.clear();
+    reset_actual();
+  }
+
+  void reset_actual() {
+    actual_entry_key = nullptr;
+    actual_root_key = nullptr;
+    actual_shadow_passes = 0;
+    actual_enabled = false;
+    actual_disabled = false;
+    actual_requires_self = false;
+    actual_self_object = nullptr;
+    actual_self_type = nullptr;
+    actual_tokens.clear();
   }
 
   uint64_t update(
@@ -2988,9 +3077,32 @@ struct GuardLastSuccessReceipt {
   uint64_t shadow_passes{0};
   std::vector<GuardSubtreeEntryToken> tokens;
   std::vector<std::string> debug_paths;
+
+  void* actual_entry_key{nullptr};
+  void* actual_root_key{nullptr};
+  uint64_t actual_shadow_passes{0};
+  bool actual_enabled{false};
+  bool actual_disabled{false};
+  bool actual_requires_self{false};
+  PyObject* actual_self_object{nullptr};
+  PyTypeObject* actual_self_type{nullptr};
+  std::vector<GuardSubtreeEntryToken> actual_tokens;
 };
 
 extern thread_local const LocalState* active_guard_local_state;
+
+struct GuardLocalStateScope {
+  explicit GuardLocalStateScope(const LocalState* state)
+      : previous(active_guard_local_state) {
+    active_guard_local_state = state;
+  }
+
+  ~GuardLocalStateScope() {
+    active_guard_local_state = previous;
+  }
+
+  const LocalState* previous{nullptr};
+};
 
 static bool guard_subtree_memo_tokens_match(
     const std::vector<GuardSubtreeEntryToken>& tokens,
@@ -3071,6 +3183,149 @@ static bool guard_subtree_memo_tokens_match(
   return true;
 }
 
+static bool source_starts_with(
+    const std::string& source,
+    const char* prefix) {
+  const size_t prefix_len = std::strlen(prefix);
+  return source.size() >= prefix_len &&
+      source.compare(0, prefix_len, prefix) == 0;
+}
+
+static bool is_self_local_source_path(const std::string& source) {
+  static constexpr const char* kSelf = "L['self']";
+  if (!source_starts_with(source, kSelf)) {
+    return false;
+  }
+  return source.size() == std::strlen(kSelf) ||
+      source[std::strlen(kSelf)] == '.' ||
+      source[std::strlen(kSelf)] == '[';
+}
+
+static bool is_local_source_path(const std::string& source) {
+  return source_starts_with(source, "L[");
+}
+
+static PyObject* guard_last_success_self_key() {
+  static PyObject* key = PyUnicode_InternFromString("self");
+  return key;
+}
+
+static bool guard_last_success_current_self_matches(
+    GuardLastSuccessReceipt* receipt,
+    FrameLocalsMapping* f_locals) {
+  if (!receipt->actual_requires_self) {
+    return true;
+  }
+  PyObject* key = guard_last_success_self_key();
+  if (key == nullptr) {
+    PyErr_Clear();
+    return false;
+  }
+  PyObject* current_self = PyDict_GetItem((PyObject*)f_locals->to_dict(), key);
+  return current_self != nullptr && current_self == receipt->actual_self_object &&
+      Py_TYPE(current_self) == receipt->actual_self_type;
+}
+
+static bool guard_last_success_prepare_actual(
+    GuardLastSuccessReceipt* receipt,
+    FrameLocalsMapping* f_locals,
+    const std::vector<GuardSubtreeEntryToken>& tokens,
+    const std::vector<std::string>& debug_paths,
+    std::string& disabled_reason,
+    std::string& disabled_path) {
+  if (tokens.empty()) {
+    disabled_reason = "actual_empty_receipt";
+    return false;
+  }
+  if (tokens.size() != debug_paths.size()) {
+    disabled_reason = "actual_missing_debug_paths";
+    return false;
+  }
+  if (tokens.size() > kGuardLastSuccessActualMaxTokens) {
+    disabled_reason = "actual_token_cap_exceeded";
+    return false;
+  }
+
+  bool requires_self = false;
+  for (size_t i = 0; i < tokens.size(); ++i) {
+    const auto& token = tokens[i];
+    const auto& path = debug_paths[i];
+    if (token.kind == GuardSubtreeProbeTokenKind::FrameGlobals) {
+      disabled_reason = "actual_relaxed_token";
+      disabled_path = path;
+      return false;
+    }
+    if (is_local_source_path(path)) {
+      if (!is_self_local_source_path(path)) {
+        disabled_reason = "actual_unsupported_local";
+        disabled_path = path;
+        return false;
+      }
+      requires_self = true;
+    }
+  }
+
+  receipt->actual_requires_self = requires_self;
+  receipt->actual_self_object = nullptr;
+  receipt->actual_self_type = nullptr;
+  if (requires_self) {
+    PyObject* key = guard_last_success_self_key();
+    if (key == nullptr) {
+      PyErr_Clear();
+      disabled_reason = "actual_missing_self_key";
+      return false;
+    }
+    PyObject* current_self =
+        PyDict_GetItem((PyObject*)f_locals->to_dict(), key);
+    if (current_self == nullptr) {
+      disabled_reason = "actual_missing_self";
+      disabled_path = "L['self']";
+      return false;
+    }
+    receipt->actual_self_object = current_self;
+    receipt->actual_self_type = Py_TYPE(current_self);
+  }
+  return true;
+}
+
+static std::vector<GuardSubtreeEntryToken>
+guard_last_success_make_diagnostic_tokens(
+    const std::vector<GuardSubtreeEntryToken>& tokens,
+    const std::vector<std::string>& debug_paths) {
+  std::vector<GuardSubtreeEntryToken> diagnostic_tokens = tokens;
+  if (diagnostic_tokens.size() != debug_paths.size()) {
+    return diagnostic_tokens;
+  }
+  for (size_t i = 0; i < diagnostic_tokens.size(); ++i) {
+    auto& token = diagnostic_tokens[i];
+    if (is_global_source_path(debug_paths[i]) &&
+        token.object != nullptr && PyDict_CheckExact(token.object)) {
+      token.kind = GuardSubtreeProbeTokenKind::FrameGlobals;
+      token.version = 0;
+      token.size = 0;
+      token.list_items.clear();
+    }
+  }
+  return diagnostic_tokens;
+}
+
+static bool guard_last_success_actual_tokens_match(
+    GuardLastSuccessReceipt* receipt,
+    FrameLocalsMapping* f_locals) {
+  if (!guard_last_success_current_self_matches(receipt, f_locals)) {
+    return false;
+  }
+  if (receipt->actual_tokens.empty()) {
+    return false;
+  }
+  LocalState state;
+  GuardLocalStateScope local_state_scope(&state);
+  PyObject* root_value = receipt->actual_tokens[0].object;
+  const bool result =
+      guard_subtree_memo_tokens_match(receipt->actual_tokens, root_value);
+  return result;
+}
+
 struct GuardSubtreeMemoState {
   bool enabled{false};
   bool disabled{false};
@@ -3091,25 +3346,33 @@ thread_local std::vector<GuardSubtreeEntryToken>*
     active_guard_subtree_memo_recorder = nullptr;
 thread_local std::vector<std::string>*
     active_guard_subtree_memo_debug_paths = nullptr;
+thread_local bool active_guard_subtree_memo_relax_global_dicts = false;
 thread_local const LocalState* active_guard_local_state = nullptr;
 
 struct GuardSubtreeMemoRecorderScope {
   explicit GuardSubtreeMemoRecorderScope(
       std::vector<GuardSubtreeEntryToken>* tokens,
-      std::vector<std::string>* debug_paths = nullptr)
+      std::vector<std::string>* debug_paths = nullptr,
+      bool relax_global_dicts = false)
       : previous(active_guard_subtree_memo_recorder),
-        previous_debug_paths(active_guard_subtree_memo_debug_paths) {
+        previous_debug_paths(active_guard_subtree_memo_debug_paths),
+        previous_relax_global_dicts(
+            active_guard_subtree_memo_relax_global_dicts) {
     active_guard_subtree_memo_recorder = tokens;
     active_guard_subtree_memo_debug_paths = debug_paths;
+    active_guard_subtree_memo_relax_global_dicts = relax_global_dicts;
   }
 
   ~GuardSubtreeMemoRecorderScope() {
     active_guard_subtree_memo_recorder = previous;
     active_guard_subtree_memo_debug_paths = previous_debug_paths;
+    active_guard_subtree_memo_relax_global_dicts =
+        previous_relax_global_dicts;
   }
 
   std::vector<GuardSubtreeEntryToken>* previous{nullptr};
   std::vector<std::string>* previous_debug_paths{nullptr};
+  bool previous_relax_global_dicts{false};
 };
 
 static void append_guard_subtree_memo_token(
@@ -3121,19 +3384,6 @@ static void append_guard_subtree_memo_token(
     active_guard_subtree_memo_debug_paths->push_back(debug_path);
   }
 }
-
-struct GuardLocalStateScope {
-  explicit GuardLocalStateScope(const LocalState* state)
-      : previous(active_guard_local_state) {
-    active_guard_local_state = state;
-  }
-
-  ~GuardLocalStateScope() {
-    active_guard_local_state = previous;
-  }
-
-  const LocalState* previous{nullptr};
-};
 
 static PyObject* dict_version(PyObject* dummy, PyObject* args) {
   // Retrieves the version of a dictionary.
@@ -4979,7 +5229,7 @@ class GuardManager {
       if (C10_UNLIKELY(active_guard_subtree_memo_recorder != nullptr)) {
         append_guard_subtree_memo_token(
             active_guard_subtree_memo_recorder,
-            active_guard_subtree_memo_debug_paths != nullptr
+            active_guard_subtree_memo_relax_global_dicts
                 ? GuardSubtreeEntryToken::make_for_source(value, _source)
                 : GuardSubtreeEntryToken::make(value),
             _source);
@@ -5830,6 +6080,28 @@ class RootGuardManager : public GuardManager {
 
   bool check_nopybind(FrameLocalsMapping* value) override {
     return check_nopybind_template(value);
+  }
+
+  bool supports_subtree_memo_recursive(
+      GuardSubtreeMemoSupportAnalysis* analysis = nullptr) const override {
+    bool supported = GuardManager::supports_subtree_memo_recursive(analysis);
+    const bool collect_all = analysis != nullptr && analysis->collect_all;
+    if (!supported && !collect_all) {
+      return false;
+    }
+    for (const auto& guard : _epilogue_lambda_guards) {
+      if (!guard->supports_subtree_memo()) {
+        if (analysis != nullptr) {
+          analysis->set_if_empty(
+              guard->subtree_memo_unsupported_reason(), "L");
+        }
+        supported = false;
+        if (!collect_all) {
+          return false;
+        }
+      }
+    }
+    return supported;
   }
 
   // Fast check_verbose function.
@@ -8656,17 +8928,22 @@ static bool guard_last_success_shadow_enabled() {
       C10_UNLIKELY(guard_lookup_stats_enabled());
 }
 
+static bool guard_last_success_actual_enabled() {
+  return C10_UNLIKELY(guard_fast_plan_enabled());
+}
+
 bool run_root_guard_manager_with_last_success_receipt(
     void* receipt,
     void* entry_key,
     void* root,
     FrameLocalsMapping* f_locals,
     bool is_skip_guard_eval_unsafe) {
-  if (!guard_last_success_shadow_enabled() || receipt == nullptr) {
+  if (!guard_last_success_actual_enabled() || receipt == nullptr) {
     return run_root_guard_manager(root, f_locals);
   }
 
   record_guard_last_success_shadow_attempt();
+  record_guard_last_success_actual_attempt();
   GuardLastSuccessReceipt* state =
       static_cast<GuardLastSuccessReceipt*>(receipt);
   if (is_skip_guard_eval_unsafe) {
@@ -8680,24 +8957,58 @@ bool run_root_guard_manager_with_last_success_receipt(
     return run_root_guard_manager(root, f_locals);
   }
 
+  if (state->actual_enabled && state->actual_entry_key == entry_key &&
+      state->actual_root_key == root) {
+    const bool collect_stats = guard_lookup_stats_enabled();
+    const uint64_t token_start_ns =
+        collect_stats ? guard_lookup_time_ns() : 0;
+    const bool actual_match =
+        guard_last_success_actual_tokens_match(state, f_locals);
+    const uint64_t token_check_ns =
+        collect_stats ? guard_lookup_time_ns() - token_start_ns : 0;
+    if (actual_match) {
+      record_guard_last_success_actual_hit(token_check_ns);
+      return true;
+    }
+    record_guard_last_success_actual_miss(token_check_ns);
+    state->reset_actual();
+  }
+
+  if (state->actual_disabled && !guard_last_success_shadow_enabled()) {
+    return run_root_guard_manager(root, f_locals);
+  }
+
   RootGuardManager* root_mgr = static_cast<RootGuardManager*>(root);
   GuardSubtreeMemoSupportAnalysis analysis;
   analysis.collect_all = guard_lookup_stats_enabled();
-  const uint64_t support_start_ns = guard_lookup_time_ns();
-  const bool supported = root_mgr->supports_subtree_memo_recursive(&analysis);
-  record_guard_last_success_support_check(
-      guard_lookup_time_ns() - support_start_ns);
+  const bool should_train_actual = !state->actual_disabled;
+  const uint64_t support_start_ns =
+      guard_lookup_stats_enabled() ? guard_lookup_time_ns() : 0;
+  const bool supported = should_train_actual &&
+      root_mgr->supports_subtree_memo_recursive(&analysis);
+  if (should_train_actual) {
+    record_guard_last_success_support_check(
+        guard_lookup_stats_enabled() ? guard_lookup_time_ns() - support_start_ns
+                                     : 0);
+  }
   if (!supported) {
-    record_guard_last_success_incomplete(analysis);
-    state->reset();
-    return run_root_guard_manager(root, f_locals);
+    if (should_train_actual) {
+      record_guard_last_success_incomplete(analysis);
+      state->reset_actual();
+      state->actual_disabled = true;
+      record_guard_last_success_actual_disabled();
+    }
+    if (!guard_last_success_shadow_enabled()) {
+      return run_root_guard_manager(root, f_locals);
+    }
   }
 
   std::vector<GuardSubtreeEntryToken> tokens;
   std::vector<std::string> debug_paths;
   {
-    // This receipt is shadow-only diagnostics. The recorder deliberately
-    // disables nested manager fastplan so it can observe the full guard tree.
+    // The recorder deliberately disables nested manager fastplan so it can
+    // observe the full guard tree. Actual fast path uses the strict tokens;
+    // diagnostics derive a relaxed copy below.
     GuardSubtreeMemoRecorderScope recorder(&tokens, &debug_paths);
     const bool result = run_root_guard_manager(root, f_locals);
     if (!result) {
@@ -8721,6 +9032,49 @@ bool run_root_guard_manager_with_last_success_receipt(
     return true;
   }
 
+  const uint64_t actual_train_start_ns =
+      guard_lookup_stats_enabled() ? guard_lookup_time_ns() : 0;
+  std::string actual_disabled_reason;
+  std::string actual_disabled_path;
+  bool actual_disabled_now = false;
+  const bool actual_supported = should_train_actual && supported &&
+      guard_last_success_prepare_actual(
+          state,
+          f_locals,
+          tokens,
+          debug_paths,
+          actual_disabled_reason,
+          actual_disabled_path);
+  if (actual_supported) {
+    if (state->actual_entry_key == entry_key &&
+        state->actual_root_key == root &&
+        !state->actual_tokens.empty() &&
+        guard_subtree_token_vectors_match(tokens, state->actual_tokens)) {
+      state->actual_shadow_passes += 1;
+    } else {
+      state->actual_entry_key = entry_key;
+      state->actual_root_key = root;
+      state->actual_tokens = tokens;
+      state->actual_shadow_passes = 1;
+      state->actual_enabled = false;
+    }
+    if (!state->actual_enabled &&
+        state->actual_shadow_passes >= kGuardLastSuccessActualStablePasses) {
+      state->actual_enabled = true;
+      record_guard_last_success_actual_enable();
+    }
+  } else if (should_train_actual && supported) {
+    state->reset_actual();
+    state->actual_disabled = true;
+    actual_disabled_now = true;
+    record_guard_last_success_actual_disabled();
+  }
+  record_guard_last_success_actual_train(
+      guard_lookup_stats_enabled() ? guard_lookup_time_ns() - actual_train_start_ns
+                                   : 0);
+
+  std::vector<GuardSubtreeEntryToken> diagnostic_tokens =
+      guard_last_success_make_diagnostic_tokens(tokens, debug_paths);
   const uint64_t update_start_ns = guard_lookup_time_ns();
   bool stable = false;
   bool reset_state = false;
@@ -8728,7 +9082,7 @@ bool run_root_guard_manager_with_last_success_receipt(
   const uint64_t shadow_passes = state->update(
       entry_key,
       root,
-      std::move(tokens),
+      std::move(diagnostic_tokens),
       std::move(debug_paths),
       stable,
       reset_state,
@@ -8742,6 +9096,14 @@ bool run_root_guard_manager_with_last_success_receipt(
   }
   record_guard_last_success_shadow_success(
       state->tokens.size(), update_ns, compare_ns, shadow_passes);
+  if (actual_disabled_now && guard_lookup_stats_enabled()) {
+    std::lock_guard<std::mutex> lock(
+        guard_last_success_disabled_stats_mutex());
+    record_guard_last_success_disabled_item_locked(
+        actual_disabled_reason.empty() ? "actual_unsupported"
+                                       : actual_disabled_reason.c_str(),
+        actual_disabled_path);
+  }
   return true;
 }
 
