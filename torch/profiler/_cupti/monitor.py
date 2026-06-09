@@ -11,9 +11,29 @@ import threading
 import time
 from collections.abc import Callable, Iterable  # noqa: TC003
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import torch
+
+from .cupti_python import (
+    ActivityAPI,
+    ActivityCudaEvent2,
+    ActivityExternalCorrelation,
+    ActivityKernel11,
+    ActivityKind,
+    ActivityMemcpy6,
+    ActivityMemset4,
+    ActivityOverhead3,
+    ActivitySynchronization2,
+    CUPTI_ACTIVITY_FLAG_FLUSH_FORCED,
+    CUPTI_ERROR_MAX_LIMIT_REACHED,
+    CUPTI_SUCCESS,
+    disabled_driver_cbids,
+    disabled_runtime_cbids,
+    ExternalCorrelationKind,
+    find_cupti_library,
+    OVERHEAD_KIND_NAMES,
+)
 
 
 _PY_PROFILER = torch._C._profiler
@@ -25,13 +45,6 @@ logger = logging.getLogger(__name__)
 # CUPTI fills them. Warn once past this many outstanding buffers (1GB at the
 # default 4MB size) as a sign of that backpressure.
 _OUTSTANDING_WARN_THRESHOLD = 256
-
-_LIBCUPTI_PATH_ENV = "TORCH_CUPTI_MONITOR_LIBCUPTI_PATH"
-
-_CUPTI_SUCCESS = 0
-_CUPTI_ERROR_MAX_LIMIT_REACHED = 12
-
-_CUPTI_ACTIVITY_FLAG_FLUSH_FORCED = 1
 
 _DEFAULT_BUFFER_SIZE = 4 * 1024 * 1024
 _DEFAULT_FLUSH_PERIOD_S = 1.0
@@ -50,157 +63,28 @@ _RECORD_KIND_KERNEL = 1
 _RECORD_KIND_MEMCPY = 2
 _RECORD_KIND_MEMSET = 3
 
-_OVERHEAD_KIND_NAMES = {
-    0: "Unknown",
-    1: "Driver Compiler",
-    1 << 16: "Buffer Flush",
-    2 << 16: "Instrumentation",
-    3 << 16: "Resource",
-    4 << 16: "Runtime Triggered Module Loading",
-    5 << 16: "Lazy Function Loading",
-    6 << 16: "Command Buffer Full",
-    7 << 16: "Activity Buffer Request",
-    8 << 16: "UVM Activity Init",
-}
 _DEMANGLE_CACHE: dict[str, str] = {}
-_cc = None
-_USER_EXTERNAL_CORRELATION_KIND: int | None = None
-_CUPTI_ACTIVITY_KIND_MEMCPY: int | None = None
-_CUPTI_ACTIVITY_KIND_MEMSET: int | None = None
-_CUPTI_ACTIVITY_KIND_DRIVER: int | None = None
-_CUPTI_ACTIVITY_KIND_RUNTIME: int | None = None
-_CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL: int | None = None
-_CUPTI_ACTIVITY_KIND_OVERHEAD: int | None = None
-_CUPTI_ACTIVITY_KIND_CUDA_EVENT: int | None = None
-_CUPTI_ACTIVITY_KIND_SYNCHRONIZATION: int | None = None
-_CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION: int | None = None
-_DISABLED_RUNTIME_CBIDS: tuple[int, ...] = ()
-_DISABLED_DRIVER_CBIDS: tuple[int, ...] = ()
-_KERNEL_DTYPE = None
-_MEMCPY_DTYPE = None
-_MEMSET_DTYPE = None
-_API_DTYPE = None
-_EXTERNAL_CORRELATION_DTYPE = None
-_OVERHEAD_DTYPE = None
-_CUDA_EVENT_DTYPE = None
-_SYNCHRONIZATION_DTYPE = None
-
-
-def _find_cupti_library() -> str:
-    override = os.environ.get(_LIBCUPTI_PATH_ENV)
-    if override:
-        return override
-    # Resolve via pathfinder, the same mechanism cupti-python and torch use, so
-    # we share the single libcupti already loaded in the process. Diverging here
-    # (e.g. preferring a newer site-packages wheel for the v2 API) would create a
-    # second CUPTI instance that collides with the stock profiler's subscriber
-    # (CUPTI_ERROR_MULTIPLE_SUBSCRIBERS). Reaching a different libcupti has to be
-    # done at load time (e.g. LD_PRELOAD) so every consumer agrees on one.
-    from cuda.pathfinder import (  # pyrefly: ignore[missing-import]
-        load_nvidia_dynamic_lib,
-    )
-
-    return load_nvidia_dynamic_lib("cupti").abs_path
-
-
-def _require_cupti_python():
-    global _cc
-    global _USER_EXTERNAL_CORRELATION_KIND
-    global _CUPTI_ACTIVITY_KIND_MEMCPY
-    global _CUPTI_ACTIVITY_KIND_MEMSET
-    global _CUPTI_ACTIVITY_KIND_DRIVER
-    global _CUPTI_ACTIVITY_KIND_RUNTIME
-    global _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL
-    global _CUPTI_ACTIVITY_KIND_OVERHEAD
-    global _CUPTI_ACTIVITY_KIND_CUDA_EVENT
-    global _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION
-    global _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION
-    global _DISABLED_RUNTIME_CBIDS
-    global _DISABLED_DRIVER_CBIDS
-    global _KERNEL_DTYPE
-    global _MEMCPY_DTYPE
-    global _MEMSET_DTYPE
-    global _API_DTYPE
-    global _EXTERNAL_CORRELATION_DTYPE
-    global _OVERHEAD_DTYPE
-    global _CUDA_EVENT_DTYPE
-    global _SYNCHRONIZATION_DTYPE
-
-    if _cc is not None:
-        return _cc
-
-    try:
-        from cupti import cupti as imported_cc  # pyrefly: ignore[missing-import]
-    except ModuleNotFoundError as exc:
-        raise ImportError(
-            "torch.profiler._cupti_monitor requires the cupti-python package. "
-            "Install cupti-python to use the experimental CUPTI monitor."
-        ) from exc
-
-    _cc = imported_cc
-    _USER_EXTERNAL_CORRELATION_KIND = int(_cc.ExternalCorrelationKind.CUSTOM1)
-    _CUPTI_ACTIVITY_KIND_MEMCPY = int(_cc.ActivityKind.MEMCPY)
-    _CUPTI_ACTIVITY_KIND_MEMSET = int(_cc.ActivityKind.MEMSET)
-    _CUPTI_ACTIVITY_KIND_DRIVER = int(_cc.ActivityKind.DRIVER)
-    _CUPTI_ACTIVITY_KIND_RUNTIME = int(_cc.ActivityKind.RUNTIME)
-    _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL = int(_cc.ActivityKind.CONCURRENT_KERNEL)
-    _CUPTI_ACTIVITY_KIND_OVERHEAD = int(_cc.ActivityKind.OVERHEAD)
-    _CUPTI_ACTIVITY_KIND_CUDA_EVENT = int(_cc.ActivityKind.CUDA_EVENT)
-    _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION = int(_cc.ActivityKind.SYNCHRONIZATION)
-    _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION = int(
-        _cc.ActivityKind.EXTERNAL_CORRELATION
-    )
-    _DISABLED_RUNTIME_CBIDS = tuple(
-        int(cbid)
-        for cbid in (
-            _cc.Runtime_api_trace_cbid.cudaGetDevice_v3020,
-            _cc.Runtime_api_trace_cbid.cudaSetDevice_v3020,
-            _cc.Runtime_api_trace_cbid.cudaGetLastError_v3020,
-            _cc.Runtime_api_trace_cbid.cudaEventCreate_v3020,
-            _cc.Runtime_api_trace_cbid.cudaEventCreateWithFlags_v3020,
-            _cc.Runtime_api_trace_cbid.cudaEventDestroy_v3020,
-        )
-    )
-    _DISABLED_DRIVER_CBIDS = tuple(
-        int(cbid)
-        for cbid in (
-            _cc.Driver_api_trace_cbid.cuKernelGetAttribute,
-            _cc.Driver_api_trace_cbid.cuDevicePrimaryCtxGetState,
-            _cc.Driver_api_trace_cbid.cuCtxGetCurrent,
-        )
-    )
-    _KERNEL_DTYPE = _cc.activity_kernel11_dtype
-    _MEMCPY_DTYPE = _cc.activity_memcpy6_dtype
-    _MEMSET_DTYPE = _cc.activity_memset4_dtype
-    _API_DTYPE = _cc.activity_api_dtype
-    _EXTERNAL_CORRELATION_DTYPE = _cc.activity_external_correlation_dtype
-    _OVERHEAD_DTYPE = _cc.activity_overhead3_dtype
-    _CUDA_EVENT_DTYPE = _cc.activity_cuda_event2_dtype
-    _SYNCHRONIZATION_DTYPE = _cc.activity_synchronization2_dtype
-    return _cc
 
 
 def _default_always_on_activities() -> tuple[int, ...]:
-    _require_cupti_python()
     return (
-        int(cast(int, _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL)),
-        int(cast(int, _CUPTI_ACTIVITY_KIND_MEMCPY)),
-        int(cast(int, _CUPTI_ACTIVITY_KIND_MEMSET)),
+        ActivityKind.CONCURRENT_KERNEL,
+        ActivityKind.MEMCPY,
+        ActivityKind.MEMSET,
     )
 
 
 def _default_trace_window_activities() -> tuple[int, ...]:
-    _require_cupti_python()
     return (
-        int(cast(int, _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL)),
-        int(cast(int, _CUPTI_ACTIVITY_KIND_MEMCPY)),
-        int(cast(int, _CUPTI_ACTIVITY_KIND_MEMSET)),
-        int(cast(int, _CUPTI_ACTIVITY_KIND_RUNTIME)),
-        int(cast(int, _CUPTI_ACTIVITY_KIND_DRIVER)),
-        int(cast(int, _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION)),
-        int(cast(int, _CUPTI_ACTIVITY_KIND_OVERHEAD)),
-        int(cast(int, _CUPTI_ACTIVITY_KIND_CUDA_EVENT)),
-        int(cast(int, _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION)),
+        ActivityKind.CONCURRENT_KERNEL,
+        ActivityKind.MEMCPY,
+        ActivityKind.MEMSET,
+        ActivityKind.RUNTIME,
+        ActivityKind.DRIVER,
+        ActivityKind.EXTERNAL_CORRELATION,
+        ActivityKind.OVERHEAD,
+        ActivityKind.CUDA_EVENT,
+        ActivityKind.SYNCHRONIZATION,
     )
 
 
@@ -281,7 +165,6 @@ class CuptiMonitor:
         flush_period_s: float = _DEFAULT_FLUSH_PERIOD_S,
         annotation_resolver: Callable[[int, int, int], Any | None] | None = None,
     ) -> None:
-        _require_cupti_python()
         self.output_dir = Path(output_dir)
         self.activities = tuple(activities or _default_always_on_activities())
         self.buffer_size = buffer_size
@@ -290,7 +173,7 @@ class CuptiMonitor:
             annotation_resolver or _default_graph_annotation_resolver
         )
 
-        self._lib = ctypes.CDLL(_find_cupti_library())
+        self._lib = ctypes.CDLL(find_cupti_library())
         self._setup_prototypes()
 
         self._lock = threading.Lock()
@@ -393,24 +276,24 @@ class CuptiMonitor:
             self._lib.cuptiGetVersion(ctypes.byref(version)),
             "cuptiGetVersion",
         )
-        return int(version.value)
+        return version.value
 
     def _result_string(self, rc: int) -> str:
         result = ctypes.c_char_p()
         rc2 = self._lib.cuptiGetResultString(rc, ctypes.byref(result))
-        if rc2 == _CUPTI_SUCCESS and result.value is not None:
+        if rc2 == CUPTI_SUCCESS and result.value is not None:
             return result.value.decode()
         return f"rc={rc}"
 
     def _check(self, rc: int, name: str) -> None:
-        if rc != _CUPTI_SUCCESS:
+        if rc != CUPTI_SUCCESS:
             raise _CuptiError(f"{name} failed with {self._result_string(rc)}")
 
     def register_callbacks(self) -> None:
         if self._callbacks_registered:
             return
-        request_addr = _PY_PROFILER._cupti_monitor_buffer_request_callback_address()
-        complete_addr = _PY_PROFILER._cupti_monitor_buffer_complete_callback_address()
+        request_addr = _PY_PROFILER._cupti_monitor.buffer_request_callback_address()
+        complete_addr = _PY_PROFILER._cupti_monitor.buffer_complete_callback_address()
         self._check(
             self._lib.cuptiActivityRegisterCallbacks(
                 ctypes.c_void_p(request_addr),
@@ -421,7 +304,7 @@ class CuptiMonitor:
         self._callbacks_registered = True
 
     def register_timestamp_callback(self) -> None:
-        callback_addr = _PY_PROFILER._cupti_approximate_time_callback_address()
+        callback_addr = _PY_PROFILER._cupti_monitor.approximate_time_callback_address()
         self._check(
             self._lib.cuptiActivityRegisterTimestampCallback(
                 ctypes.c_void_p(callback_addr)
@@ -433,13 +316,13 @@ class CuptiMonitor:
     def start(self) -> None:
         if self._started:
             raise RuntimeError("CUPTI monitor is already started")
-        _PY_PROFILER._cupti_monitor_reset_buffers()
-        _PY_PROFILER._cupti_monitor_configure_buffers(self.buffer_size)
+        _PY_PROFILER._cupti_monitor.reset_buffers()
+        _PY_PROFILER._cupti_monitor.configure_buffers(self.buffer_size)
         self.register_callbacks()
         self._time_converter = _PY_PROFILER._ApproximateClockToUnixTimeConverter()
         self.register_timestamp_callback()
         self._session_start_unix_ns = time.time_ns()
-        self._session_start_approx_ns = int(_PY_PROFILER._get_approximate_time())
+        self._session_start_approx_ns = _PY_PROFILER._get_approximate_time()
         self._session_start_calibrated_unix_ns = self._convert_time(
             self._session_start_approx_ns
         )
@@ -470,7 +353,7 @@ class CuptiMonitor:
         if not self._started:
             return
         self._check(
-            self._lib.cuptiActivityFlushAll(_CUPTI_ACTIVITY_FLAG_FLUSH_FORCED),
+            self._lib.cuptiActivityFlushAll(CUPTI_ACTIVITY_FLAG_FLUSH_FORCED),
             "cuptiActivityFlushAll",
         )
         for activity in reversed(tuple(self._enabled_activities)):
@@ -488,7 +371,7 @@ class CuptiMonitor:
             self._flush_thread = None
         self._worker_stop.set()
         # Unblock the decode thread waiting in get_completed().
-        _PY_PROFILER._cupti_monitor_shutdown_buffers()
+        _PY_PROFILER._cupti_monitor.shutdown_buffers()
         if self._worker_thread is not None:
             self._worker_thread.join(timeout=5.0)
             if self._worker_thread.is_alive():
@@ -497,13 +380,13 @@ class CuptiMonitor:
         if self._worker_error is not None:
             raise RuntimeError("CUPTI monitor worker failed") from self._worker_error
         self._close_outputs()
-        self._final_allocated_buffers = _PY_PROFILER._cupti_monitor_allocated_buffers()
-        _PY_PROFILER._cupti_monitor_reset_buffers()
+        self._final_allocated_buffers = _PY_PROFILER._cupti_monitor.allocated_buffers()
+        _PY_PROFILER._cupti_monitor.reset_buffers()
         self._time_converter = None
         self._timestamp_callback = None
 
     def flush(self, *, forced: bool = False) -> None:
-        flag = _CUPTI_ACTIVITY_FLAG_FLUSH_FORCED if forced else 0
+        flag = CUPTI_ACTIVITY_FLAG_FLUSH_FORCED if forced else 0
         self._check(self._lib.cuptiActivityFlushAll(flag), "cuptiActivityFlushAll")
 
     def _convert_time(self, value: int) -> int:
@@ -511,7 +394,7 @@ class CuptiMonitor:
             return 0
         if self._time_converter is None:
             return value
-        return int(self._time_converter.to_unix_ns(int(value)))
+        return self._time_converter.to_unix_ns(value)
 
     def enable_activities(self, activities: Iterable[int]) -> tuple[int, ...]:
         newly_enabled = []
@@ -535,18 +418,18 @@ class CuptiMonitor:
             self._enabled_activities.remove(activity)
 
     def _apply_activity_filters(self, activity: int) -> None:
-        if activity == _CUPTI_ACTIVITY_KIND_RUNTIME and hasattr(
+        if activity == ActivityKind.RUNTIME and hasattr(
             self._lib, "cuptiActivityEnableRuntimeApi"
         ):
-            for cbid in _DISABLED_RUNTIME_CBIDS:
+            for cbid in disabled_runtime_cbids():
                 self._check(
                     self._lib.cuptiActivityEnableRuntimeApi(cbid, 0),
                     "cuptiActivityEnableRuntimeApi",
                 )
-        if activity == _CUPTI_ACTIVITY_KIND_DRIVER and hasattr(
+        if activity == ActivityKind.DRIVER and hasattr(
             self._lib, "cuptiActivityEnableDriverApi"
         ):
-            for cbid in _DISABLED_DRIVER_CBIDS:
+            for cbid in disabled_driver_cbids():
                 self._check(
                     self._lib.cuptiActivityEnableDriverApi(cbid, 0),
                     "cuptiActivityEnableDriverApi",
@@ -588,7 +471,7 @@ class CuptiMonitor:
         with self._lock:
             self._trace_window_events = []
             self._trace_window_start_ns = self._convert_time(
-                int(_PY_PROFILER._get_approximate_time())
+                _PY_PROFILER._get_approximate_time()
             )
             self._trace_window_active = True
 
@@ -635,10 +518,10 @@ class CuptiMonitor:
                 "started": self._started,
                 "activities": list(self._enabled_activities),
                 "buffers_completed": self._buffers_completed,
-                "buffers_allocated": _PY_PROFILER._cupti_monitor_allocated_buffers()
+                "buffers_allocated": _PY_PROFILER._cupti_monitor.allocated_buffers()
                 if self._started
                 else self._final_allocated_buffers,
-                "buffers_pending": _PY_PROFILER._cupti_monitor_pending_buffers(),
+                "buffers_pending": _PY_PROFILER._cupti_monitor.pending_buffers(),
                 "valid_total_mb": self._valid_bytes / (1024 * 1024),
                 "dropped_records": self._dropped_records,
                 "raw_chunks_written": self._raw_chunk_count,
@@ -654,8 +537,7 @@ class CuptiMonitor:
             if (
                 not self._started
                 or not self._trace_window_prepared
-                or _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION
-                not in self._enabled_activities
+                or ActivityKind.EXTERNAL_CORRELATION not in self._enabled_activities
             ):
                 return None
             external_id = self._next_user_external_id
@@ -663,7 +545,7 @@ class CuptiMonitor:
             self._trace_window_user_annotations[external_id] = name
         self._check(
             self._lib.cuptiActivityPushExternalCorrelationId(
-                _USER_EXTERNAL_CORRELATION_KIND, ctypes.c_uint64(external_id)
+                ExternalCorrelationKind.CUSTOM1, ctypes.c_uint64(external_id)
             ),
             "cuptiActivityPushExternalCorrelationId",
         )
@@ -675,18 +557,17 @@ class CuptiMonitor:
             if (
                 not self._started
                 or not self._trace_window_prepared
-                or _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION
-                not in self._enabled_activities
+                or ActivityKind.EXTERNAL_CORRELATION not in self._enabled_activities
             ):
                 return None
         last_id = ctypes.c_uint64()
         self._check(
             self._lib.cuptiActivityPopExternalCorrelationId(
-                _USER_EXTERNAL_CORRELATION_KIND, ctypes.byref(last_id)
+                ExternalCorrelationKind.CUSTOM1, ctypes.byref(last_id)
             ),
             "cuptiActivityPopExternalCorrelationId",
         )
-        return int(last_id.value)
+        return last_id.value
 
     def _open_outputs(self) -> None:
         self._raw_buffers_fp = _open_binary_append(self.output_dir / _RAW_BUFFER_FILE)
@@ -710,7 +591,7 @@ class CuptiMonitor:
             "flush_period_ns": int(self.flush_period_s * 1e9),
             "raw_buffer_dump": True,
             "activities": list(self.activities),
-            "libcupti_path": _find_cupti_library(),
+            "libcupti_path": find_cupti_library(),
         }
         payload = _safe_json_dumps(meta)
         with open(self.output_dir / _META_FILE, "wb") as fp:
@@ -735,8 +616,8 @@ class CuptiMonitor:
         try:
             while True:
                 # Blocks with the GIL released until a buffer is ready; returns
-                # None once stop() calls _cupti_monitor_shutdown_buffers().
-                item = _PY_PROFILER._cupti_monitor_get_completed()
+                # None once stop() calls _cupti_monitor.shutdown_buffers().
+                item = _PY_PROFILER._cupti_monitor.get_completed()
                 if item is None:
                     break
                 # layout_epoch is only meaningful for the v2 user-defined
@@ -745,13 +626,13 @@ class CuptiMonitor:
                 with self._lock:
                     self._processing_inflight += 1
                     self._buffers_completed += 1
-                    self._valid_bytes += int(valid_size)
+                    self._valid_bytes += valid_size
                 try:
                     self._process_completed_buffer(
-                        int(ctx), int(stream_id), int(buffer_ptr), int(valid_size)
+                        ctx, stream_id, buffer_ptr, valid_size
                     )
                 finally:
-                    _PY_PROFILER._cupti_monitor_return_buffer(int(buffer_ptr))
+                    _PY_PROFILER._cupti_monitor.return_buffer(buffer_ptr)
                     with self._processing_done:
                         self._processing_inflight -= 1
                         self._processing_done.notify_all()
@@ -763,7 +644,7 @@ class CuptiMonitor:
     def _maybe_warn_backpressure(self) -> None:
         if self._outstanding_warned:
             return
-        allocated = _PY_PROFILER._cupti_monitor_allocated_buffers()
+        allocated = _PY_PROFILER._cupti_monitor.allocated_buffers()
         if allocated >= _OUTSTANDING_WARN_THRESHOLD:
             self._outstanding_warned = True
             logger.warning(
@@ -778,7 +659,7 @@ class CuptiMonitor:
         with self._processing_done:
             while True:
                 if (
-                    _PY_PROFILER._cupti_monitor_pending_buffers() == 0
+                    _PY_PROFILER._cupti_monitor.pending_buffers() == 0
                     and self._processing_inflight == 0
                 ):
                     return
@@ -795,8 +676,8 @@ class CuptiMonitor:
             rc = self._lib.cuptiActivityGetNumDroppedRecords(
                 ctypes.c_void_p(ctx), ctypes.c_uint32(stream_id), ctypes.byref(dropped)
             )
-            if rc == _CUPTI_SUCCESS:
-                self._dropped_records += int(dropped.value)
+            if rc == CUPTI_SUCCESS:
+                self._dropped_records += dropped.value
             self._write_raw_buffer(ctx, stream_id, buffer_ptr, valid_size)
             return
 
@@ -807,7 +688,7 @@ class CuptiMonitor:
                 ctypes.c_size_t(valid_size),
                 ctypes.byref(record_ptr),
             )
-            if rc == _CUPTI_SUCCESS:
+            if rc == CUPTI_SUCCESS:
                 record_addr = record_ptr.value
                 if record_addr is None:
                     raise RuntimeError("CUPTI returned null activity record pointer")
@@ -817,7 +698,7 @@ class CuptiMonitor:
                         if self._trace_window_active:
                             self._trace_window_events.append(trace_event)
                 continue
-            if rc == _CUPTI_ERROR_MAX_LIMIT_REACHED:
+            if rc == CUPTI_ERROR_MAX_LIMIT_REACHED:
                 break
             raise _CuptiError(
                 f"cuptiActivityGetNextRecord failed with {self._result_string(rc)}"
@@ -827,8 +708,8 @@ class CuptiMonitor:
         rc = self._lib.cuptiActivityGetNumDroppedRecords(
             ctypes.c_void_p(ctx), ctypes.c_uint32(stream_id), ctypes.byref(dropped)
         )
-        if rc == _CUPTI_SUCCESS:
-            self._dropped_records += int(dropped.value)
+        if rc == CUPTI_SUCCESS:
+            self._dropped_records += dropped.value
 
     def _filter_trace_window_events(
         self, events: list[dict[str, Any]], start_ns: int
@@ -888,166 +769,165 @@ class CuptiMonitor:
         # share one name pointer, stable across collections. Only raw buffer
         # DUMPS lose names, since the dumped bytes hold the pointer, not the
         # string.
-        cc = _require_cupti_python()
-        kind = int(ctypes.c_int.from_address(record_addr).value)
-        if kind == _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL:
-            record = cc.ActivityKernel11.from_ptr(record_addr, readonly=True)
+        kind = ctypes.c_int.from_address(record_addr).value
+        if kind == ActivityKind.CONCURRENT_KERNEL:
+            record = ActivityKernel11.from_ptr(record_addr, readonly=True)
             annotation = self.annotation_resolver(
-                int(record.graph_node_id),
+                record.graph_node_id,
                 _RECORD_KIND_KERNEL,
-                int(record.correlation_id),
+                record.correlation_id,
             )
             kernel_name = _demangle_symbol(record.name)
-            start_ns = self._convert_time(int(record.start))
-            end_ns = self._convert_time(int(record.end))
+            start_ns = self._convert_time(record.start)
+            end_ns = self._convert_time(record.end)
             return {
                 "kind": "kernel",
-                "device_id": int(record.device_id),
-                "context_id": int(record.context_id),
-                "stream_id": int(record.stream_id),
-                "correlation_id": int(record.correlation_id),
-                "graph_node_id": int(record.graph_node_id),
-                "graph_id": int(record.graph_id),
+                "device_id": record.device_id,
+                "context_id": record.context_id,
+                "stream_id": record.stream_id,
+                "correlation_id": record.correlation_id,
+                "graph_node_id": record.graph_node_id,
+                "graph_id": record.graph_id,
                 "start_ns": start_ns,
                 "end_ns": end_ns,
                 "annotation": annotation,
                 "name": kernel_name,
             }
 
-        if kind == _CUPTI_ACTIVITY_KIND_MEMCPY:
-            record = cc.ActivityMemcpy6.from_ptr(record_addr, readonly=True)
+        if kind == ActivityKind.MEMCPY:
+            record = ActivityMemcpy6.from_ptr(record_addr, readonly=True)
             annotation = self.annotation_resolver(
-                int(record.graph_node_id),
+                record.graph_node_id,
                 _RECORD_KIND_MEMCPY,
-                int(record.correlation_id),
+                record.correlation_id,
             )
-            start_ns = self._convert_time(int(record.start))
-            end_ns = self._convert_time(int(record.end))
+            start_ns = self._convert_time(record.start)
+            end_ns = self._convert_time(record.end)
             return {
                 "kind": "gpu_memcpy",
-                "device_id": int(record.device_id),
-                "context_id": int(record.context_id),
-                "stream_id": int(record.stream_id),
-                "correlation_id": int(record.correlation_id),
-                "runtime_correlation_id": int(record.runtime_correlation_id),
-                "graph_node_id": int(record.graph_node_id),
-                "graph_id": int(record.graph_id),
+                "device_id": record.device_id,
+                "context_id": record.context_id,
+                "stream_id": record.stream_id,
+                "correlation_id": record.correlation_id,
+                "runtime_correlation_id": record.runtime_correlation_id,
+                "graph_node_id": record.graph_node_id,
+                "graph_id": record.graph_id,
                 "start_ns": start_ns,
                 "end_ns": end_ns,
-                "bytes": int(record.bytes),
-                "copy_kind": int(record.copy_kind),
-                "src_kind": int(record.src_kind),
-                "dst_kind": int(record.dst_kind),
-                "flags": int(record.flags_),
+                "bytes": record.bytes,
+                "copy_kind": record.copy_kind,
+                "src_kind": record.src_kind,
+                "dst_kind": record.dst_kind,
+                "flags": record.flags_,
                 "annotation": annotation,
                 "name": "Memcpy",
             }
 
-        if kind == _CUPTI_ACTIVITY_KIND_MEMSET:
-            record = cc.ActivityMemset4.from_ptr(record_addr, readonly=True)
+        if kind == ActivityKind.MEMSET:
+            record = ActivityMemset4.from_ptr(record_addr, readonly=True)
             annotation = self.annotation_resolver(
-                int(record.graph_node_id),
+                record.graph_node_id,
                 _RECORD_KIND_MEMSET,
-                int(record.correlation_id),
+                record.correlation_id,
             )
-            start_ns = self._convert_time(int(record.start))
-            end_ns = self._convert_time(int(record.end))
+            start_ns = self._convert_time(record.start)
+            end_ns = self._convert_time(record.end)
             return {
                 "kind": "gpu_memset",
-                "device_id": int(record.device_id),
-                "context_id": int(record.context_id),
-                "stream_id": int(record.stream_id),
-                "correlation_id": int(record.correlation_id),
-                "graph_node_id": int(record.graph_node_id),
-                "graph_id": int(record.graph_id),
+                "device_id": record.device_id,
+                "context_id": record.context_id,
+                "stream_id": record.stream_id,
+                "correlation_id": record.correlation_id,
+                "graph_node_id": record.graph_node_id,
+                "graph_id": record.graph_id,
                 "start_ns": start_ns,
                 "end_ns": end_ns,
-                "bytes": int(record.bytes),
-                "value": int(record.value),
-                "memory_kind": int(record.memory_kind),
-                "flags": int(record.flags_),
+                "bytes": record.bytes,
+                "value": record.value,
+                "memory_kind": record.memory_kind,
+                "flags": record.flags_,
                 "annotation": annotation,
                 "name": "Memset",
             }
 
-        if kind in (_CUPTI_ACTIVITY_KIND_RUNTIME, _CUPTI_ACTIVITY_KIND_DRIVER):
-            record = cc.ActivityAPI.from_ptr(record_addr, readonly=True)
-            start_ns = self._convert_time(int(record.start))
-            end_ns = self._convert_time(int(record.end))
+        if kind in (ActivityKind.RUNTIME, ActivityKind.DRIVER):
+            record = ActivityAPI.from_ptr(record_addr, readonly=True)
+            start_ns = self._convert_time(record.start)
+            end_ns = self._convert_time(record.end)
             return {
                 "kind": "cuda_runtime"
-                if kind == _CUPTI_ACTIVITY_KIND_RUNTIME
+                if kind == ActivityKind.RUNTIME
                 else "cuda_driver",
-                "cbid": int(record.cbid),
+                "cbid": record.cbid,
                 "start_ns": start_ns,
                 "end_ns": end_ns,
-                "process_id": int(record.process_id),
-                "thread_id": int(record.thread_id),
-                "correlation_id": int(record.correlation_id),
-                "return_value": int(record.return_value),
-                "name": f"cbid_{int(record.cbid)}",
+                "process_id": record.process_id,
+                "thread_id": record.thread_id,
+                "correlation_id": record.correlation_id,
+                "return_value": record.return_value,
+                "name": f"cbid_{record.cbid}",
             }
 
-        if kind == _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION:
-            record = cc.ActivityExternalCorrelation.from_ptr(record_addr, readonly=True)
+        if kind == ActivityKind.EXTERNAL_CORRELATION:
+            record = ActivityExternalCorrelation.from_ptr(record_addr, readonly=True)
             return {
                 "kind": "external_correlation",
-                "external_kind": int(record.external_kind),
-                "external_id": int(record.external_id),
-                "correlation_id": int(record.correlation_id),
+                "external_kind": record.external_kind,
+                "external_id": record.external_id,
+                "correlation_id": record.correlation_id,
                 "name": "external_correlation",
             }
 
-        if kind == _CUPTI_ACTIVITY_KIND_OVERHEAD:
-            record = cc.ActivityOverhead3.from_ptr(record_addr, readonly=True)
-            start_ns = self._convert_time(int(record.start))
-            end_ns = self._convert_time(int(record.end))
-            overhead_kind = int(record.overhead_kind)
+        if kind == ActivityKind.OVERHEAD:
+            record = ActivityOverhead3.from_ptr(record_addr, readonly=True)
+            start_ns = self._convert_time(record.start)
+            end_ns = self._convert_time(record.end)
+            overhead_kind = record.overhead_kind
             return {
                 "kind": "overhead",
                 "overhead_kind": overhead_kind,
-                "object_kind": int(record.object_kind),
+                "object_kind": record.object_kind,
                 "object_id": 0,
                 "start_ns": start_ns,
                 "end_ns": end_ns,
-                "correlation_id": int(record.correlation_id),
-                "name": _OVERHEAD_KIND_NAMES.get(
+                "correlation_id": record.correlation_id,
+                "name": OVERHEAD_KIND_NAMES.get(
                     overhead_kind,
                     f"overhead_{overhead_kind}",
                 ),
             }
 
-        if kind == _CUPTI_ACTIVITY_KIND_CUDA_EVENT:
-            record = cc.ActivityCudaEvent2.from_ptr(record_addr, readonly=True)
-            event_ts = self._convert_time(int(record.device_timestamp))
+        if kind == ActivityKind.CUDA_EVENT:
+            record = ActivityCudaEvent2.from_ptr(record_addr, readonly=True)
+            event_ts = self._convert_time(record.device_timestamp)
             return {
                 "kind": "cuda_event",
-                "device_id": int(record.device_id),
-                "context_id": int(record.context_id),
-                "stream_id": int(record.stream_id),
-                "event_id": int(record.event_id),
-                "correlation_id": int(record.correlation_id),
+                "device_id": record.device_id,
+                "context_id": record.context_id,
+                "stream_id": record.stream_id,
+                "event_id": record.event_id,
+                "correlation_id": record.correlation_id,
                 "device_timestamp_ns": event_ts,
-                "cuda_event_sync_id": int(record.cuda_event_sync_id),
+                "cuda_event_sync_id": record.cuda_event_sync_id,
                 "name": "cuda_event",
             }
 
-        if kind == _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION:
-            record = cc.ActivitySynchronization2.from_ptr(record_addr, readonly=True)
-            start_ns = self._convert_time(int(record.start))
-            end_ns = self._convert_time(int(record.end))
-            sync_type = int(record.type)
+        if kind == ActivityKind.SYNCHRONIZATION:
+            record = ActivitySynchronization2.from_ptr(record_addr, readonly=True)
+            start_ns = self._convert_time(record.start)
+            end_ns = self._convert_time(record.end)
+            sync_type = record.type
             return {
                 "kind": "cuda_sync",
                 "sync_type": sync_type,
                 "start_ns": start_ns,
                 "end_ns": end_ns,
-                "correlation_id": int(record.correlation_id),
-                "context_id": int(record.context_id),
-                "stream_id": int(record.stream_id),
-                "event_id": int(record.cuda_event_id),
-                "cuda_event_sync_id": int(record.cuda_event_sync_id),
-                "return_value": int(record.return_value),
+                "correlation_id": record.correlation_id,
+                "context_id": record.context_id,
+                "stream_id": record.stream_id,
+                "event_id": record.cuda_event_id,
+                "cuda_event_sync_id": record.cuda_event_sync_id,
+                "return_value": record.return_value,
                 "name": f"sync_{sync_type}",
             }
 
@@ -1058,15 +938,15 @@ class CuptiMonitor:
     ) -> None:
         if self._raw_buffers_fp is None:
             raise RuntimeError("raw buffer file is not open")
-        approx_ns = int(_PY_PROFILER._get_approximate_time())
+        approx_ns = _PY_PROFILER._get_approximate_time()
         unix_ns = self._convert_time(approx_ns)
         header = _RAW_CHUNK_HEADER.pack(
             _RAW_CHUNK_MAGIC,
             _RAW_CHUNK_VERSION,
             self._raw_chunk_count,
-            int(stream_id),
-            int(valid_size),
-            int(ctx),
+            stream_id,
+            valid_size,
+            ctx,
             approx_ns,
             unix_ns,
         )
@@ -1098,11 +978,11 @@ def enable_hes_early() -> None:
     # imported, that path causes subsequent cuptiActivityRegisterCallbacks() to
     # fail with CUPTI_ERROR_MULTIPLE_SUBSCRIBERS_NOT_SUPPORTED in this process,
     # while the direct ctypes call below works.
-    lib = ctypes.CDLL(_find_cupti_library())
+    lib = ctypes.CDLL(find_cupti_library())
     lib.cuptiActivityEnableHWTrace.argtypes = [ctypes.c_uint8]
     lib.cuptiActivityEnableHWTrace.restype = ctypes.c_int
     rc = lib.cuptiActivityEnableHWTrace(1)
-    if rc != _CUPTI_SUCCESS:
+    if rc != CUPTI_SUCCESS:
         raise _CuptiError(f"cuptiActivityEnableHWTrace failed with rc={rc}")
     _hes_enabled = True
 
