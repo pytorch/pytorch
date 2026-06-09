@@ -3183,9 +3183,21 @@ def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     return next(itertools.islice(dict.keys(d), n, n + 1))
 
 
+def set_base_iter(s: Iterable[T]) -> Iterator[T]:
+    if isinstance(s, set):
+        return set.__iter__(s)
+    if isinstance(s, frozenset):
+        return frozenset.__iter__(s)
+    return iter(s)
+
+
 def set_getitem(s: set[T], n: int) -> T:
-    # Set ordering might not be stable
-    return list(s)[n]
+    # Set ordering might not be stable. For set/frozenset subclasses, use the
+    # base iterator so guard reconstruction observes the internal set contents.
+    try:
+        return next(itertools.islice(set_base_iter(s), n, n + 1))
+    except StopIteration:
+        raise IndexError("set index out of range") from None
 
 
 def enum_repr(value: Any, local: bool) -> str:

@@ -817,10 +817,24 @@ class NonSerializableSetGetItemSource(ChainedSource):
         codegen.append_output(codegen.create_load_const(self.index))
         codegen.extend_output(create_call_function(2, False))
 
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        value = utils.set_getitem(
+            self.base.get_value(globals, locals, cache), self.index
+        )
+        cache[self] = value
+        return value
+
     @functools.cached_property
     def _name_template(self) -> str:
         # set ordering might not be stable
-        return f"list({{0}})[{_esc_str(self.index, apply_repr=True)}]"
+        return f"___set_getitem({{0}}, {_esc_str(self.index, apply_repr=True)})"
 
     def is_dict_key(self) -> bool:
         return False
