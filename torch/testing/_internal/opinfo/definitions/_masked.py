@@ -682,15 +682,9 @@ op_db: list[OpInfo] = [
                 "test_comprehensive",
                 device_type="cuda",
             ),
-            # Exception: cumulative ops are not yet supported for complex
+            # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
             ),
         ),
         # Can reuse the same inputs; dim is required in both
@@ -969,6 +963,16 @@ op_db: list[OpInfo] = [
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
+            ),
+            # masked.median raises ValueError for fully-masked rows on
+            # non-floating dtypes, but the trivial 0-d sample exercised by
+            # test_dtypes succeeds for ints / bool / complex64, fooling the
+            # detector into believing these dtypes are supported.
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_dtypes",
+                device_type="mps",
             ),
         ),
         sample_inputs_func=partial(

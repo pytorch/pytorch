@@ -8,6 +8,8 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 
+#include <optional>
+
 namespace torch::inductor {
 using namespace at;
 
@@ -67,25 +69,55 @@ Tensor _reinterpret_tensor(
   return self_;
 }
 
-static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
-  at::Tensor& grad = variable.mutable_grad();
-  if (new_grad.device() != kMeta) {
+static std::optional<Tensor> accumulate_grad_(
+    const Tensor& variable,
+    const std::optional<Tensor>& variable_grad,
+    const std::optional<Tensor>& new_grad) {
+  if (!new_grad.has_value()) {
+    if (!variable_grad.has_value() || !variable_grad->defined()) {
+      return std::nullopt;
+    }
+    at::Tensor grad = variable_grad->clone();
+    variable.mutable_grad() = grad;
+    return grad;
+  }
+
+  at::Tensor grad = variable_grad.has_value() && variable_grad->defined()
+      ? variable_grad->clone()
+      : Tensor();
+  if (new_grad->device() != kMeta && !grad.defined()) {
+    // Unlike eager AccumulateGrad, this op's schema does not allow the returned
+    // grad to alias any input. Clone when initializing grad so
+    // functionalization can safely model the output as fresh.
+    if (new_grad->is_sparse() || new_grad->is_sparse_csr() ||
+        new_grad->is_nested() || new_grad->is_mkldnn()) {
+      grad = new_grad->clone();
+    } else {
+      grad = torch::autograd::utils::clone_obey_contract(*new_grad, variable);
+    }
+  } else if (new_grad->device() != kMeta) {
     // Do not call into this codepath from C++ frontend, instead call directly
-    // into accumulateGrad with num_expected_refs set to 1 Here,
-    // num_expected_refs is set to 2 to steal the gradient when this is called
-    // from Python
+    // into accumulateGrad. The refcount argument only affects no-existing-grad
+    // steal paths, which are handled above to avoid input aliasing.
     torch::autograd::AccumulateGrad::accumulateGrad(
         variable,
         grad,
-        new_grad,
+        *new_grad,
         2 /* num_expected_refs */,
         [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
   } else {
     // no shape checking for `device="meta"` to workaround FSDP inplace mutation
     if (!grad.defined()) {
-      grad = new_grad;
+      grad = new_grad->clone();
     }
   }
+  if (!grad.defined()) {
+    return std::nullopt;
+  }
+  // Compiled autograd graphs use this op as the grad-accumulation side effect,
+  // but functionalization still requires the returned grad to be fresh.
+  variable.mutable_grad() = grad;
+  return grad;
 }
 
 TORCH_LIBRARY_FRAGMENT(inductor, m) {
@@ -103,8 +135,15 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
           c10::DispatchKey::CompositeExplicitAutograd, _reinterpret_tensor),
       {at::Tag::pt2_compliant_tag});
   m.def(
-      "accumulate_grad_(Tensor variable, Tensor new_grad) -> ()",
+      "accumulate_grad_(Tensor variable, Tensor? variable_grad, Tensor? new_grad) -> Tensor?",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_),
+      {at::Tag::pt2_compliant_tag});
+}
+
+TORCH_LIBRARY_FRAGMENT(inductor_prims, m) {
+  m.def(
+      "inductor_reserve_rng_state(Generator? generator, SymInt increment) "
+      "-> (Tensor, Tensor, Tensor)",
       {at::Tag::pt2_compliant_tag});
 }
 

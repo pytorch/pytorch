@@ -48,23 +48,6 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
       tokenizer[i],
       " != ",
       get()->name());
-  if (used_cudaMallocAsync) {
-#if CUDA_VERSION >= 11040
-    int version = 0;
-    C10_CUDA_CHECK(cudaDriverGetVersion(&version));
-    TORCH_CHECK(
-        version >= 11040,
-        "backend:cudaMallocAsync requires CUDA runtime "
-        "11.4 or newer, but cudaDriverGetVersion returned ",
-        version);
-#else // CUDA_VERSION >= 11040
-    TORCH_CHECK(
-        false,
-        "backend:cudaMallocAsync requires PyTorch to be built with "
-        "CUDA 11.4 or newer, but CUDA_VERSION is ",
-        CUDA_VERSION);
-#endif // CUDA_VERSION >= 11040
-  }
 #endif // USE_ROCM
   return i;
 }
@@ -112,6 +95,9 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
     } else if (key == "pinned_free_catch_all") {
       i = parsePinnedFreeCatchAll(tokenizer, i);
       used_native_specific_option = true;
+    } else if (key == "throw_on_cudamalloc_oom") {
+      i = parseThrowOnCudaMallocOom(tokenizer, i);
+      used_native_specific_option = true;
     } else {
       const auto& keys =
           c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
@@ -152,7 +138,7 @@ size_t CUDAAllocatorConfig::parseGraphCaptureRecordStreamReuse(
   return i;
 }
 
-double CUDAAllocatorConfig::parsePerProcessMemoryFraction(
+size_t CUDAAllocatorConfig::parsePerProcessMemoryFraction(
     const c10::CachingAllocator::ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
@@ -200,6 +186,17 @@ size_t CUDAAllocatorConfig::parsePinnedFreeCatchAll(
     size_t i) {
   tokenizer.checkToken(++i, ":");
   m_pinned_free_catch_all = tokenizer.toBool(++i);
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parseThrowOnCudaMallocOom(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  // Format: throw_on_cudamalloc_oom:true or throw_on_cudamalloc_oom:false
+  // When enabled, throws OOM error before calling cudaMalloc if the allocation
+  // would likely fail due to insufficient memory.
+  tokenizer.checkToken(++i, ":");
+  m_throw_on_cudamalloc_oom = tokenizer.toBool(++i);
   return i;
 }
 

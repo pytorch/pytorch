@@ -56,6 +56,7 @@ if torch.backends.mps.is_available():
             "cosh",
             "cross",
             "cumsum",
+            "cumprod",
             "cumulative_trapezoid",
             "diag",
             "diag_embed",
@@ -98,6 +99,7 @@ if torch.backends.mps.is_available():
             "linalg.diagonal",
             "linalg.householder_product",
             "linalg.svd",
+            "linalg.vander",
             "linalg.vecdot",
             "linalg.vector_norm",
             "log10",
@@ -129,6 +131,7 @@ if torch.backends.mps.is_available():
             "nn.functional.conv_transpose3d",
             "nn.functional.feature_alpha_dropoutwithout_train",
             "nn.functional.l1_loss",
+            "nn.functional.linear",
             "nn.functional.normalize",
             "nn.functional.padcircular",
             "nn.functional.pairwise_distance",
@@ -139,6 +142,7 @@ if torch.backends.mps.is_available():
             "nn.functional.triplet_margin_with_distance_loss",
             "nn.functional.unfold",
             "nonzero",
+            "nonzero_static",
             "norm",
             "normfro",
             "norminf",
@@ -154,6 +158,12 @@ if torch.backends.mps.is_available():
             "repeat",
             "repeat_interleave",
             "reshape_as",
+            # Random ops that produce complex output. Compared via summary
+            # stats by `_assert_random_op_match`, not element-wise equality.
+            "rand_like",
+            "randn_like",
+            "uniform",
+            "normalin_place",
             "reshape",
             "resolve_conj",
             "resolve_neg",
@@ -285,6 +295,7 @@ if torch.backends.mps.is_available():
             "logsumexp",
             "long",
             "masked.cumsum",
+            "masked.cumprod",
             "masked.mean",
             "masked.normalize",
             "masked.prod",
@@ -339,11 +350,9 @@ if torch.backends.mps.is_available():
             "put": None,
             "frexp": None,
             "geqrf": None,
-            "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
-            "lcm": None,
             "linalg.cond": None,
             "linalg.eigh": None,
             "linalg.eigvalsh": None,
@@ -405,7 +414,6 @@ if torch.backends.mps.is_available():
             ],
             "nn.functional.fractional_max_pool2d": None,
             "nn.functional.fractional_max_pool3d": None,
-            "nn.functional.group_norm": [torch.int16, torch.int32],
             "nn.functional.glu": [
                 torch.int32,
                 torch.uint8,
@@ -568,13 +576,11 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.int16,
             ],
-            "scatter_reduceamax": [torch.int32, torch.int64]
-            if MACOS_VERSION < 15.0
-            else [torch.int64],
-            "scatter_reduceamin": [torch.int32, torch.int64]
-            if MACOS_VERSION < 15.0
-            else [torch.int64],
-            "scatter_reducemean": [torch.bool],
+            # int64 lacks atomic_binary_op in Metal; the old MPSGraph path cast
+            # to int32 (silently lossy). amin/amax for int64 go through the
+            # sign-flip encode + ulong atomic_min/max bracket and work fine.
+            # bool prod/mean are excluded via dtypesIfMPS in the OpInfo itself.
+            "scatter_reduceprod": [torch.int64],
             "segment_reduce": None,
             "_segment.reduce": None,
             "segment.reduce": None,
@@ -596,22 +602,6 @@ if torch.backends.mps.is_available():
             "symeig": None,
             "take": None,
             "to": None,
-            "var_meanunbiased": [
-                torch.uint8,
-                torch.int8,
-                torch.int32,
-                torch.int16,
-                torch.bool,
-            ],
-            "var_mean": [torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool],
-            "std_mean": [torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool],
-            "std_meanunbiased": [
-                torch.uint8,
-                torch.int8,
-                torch.int32,
-                torch.int16,
-                torch.bool,
-            ],
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
@@ -628,7 +618,6 @@ if torch.backends.mps.is_available():
             "float_power": None,
             "linalg.matrix_rankhermitian": None,
             "linalg.pinvhermitian": None,
-            "nonzero_static": None,
             # MPS: input sizes must be divisible by output sizes
             "nn.functional.adaptive_avg_pool1d": None,
             "nn.functional.adaptive_avg_pool2d": None,
@@ -670,74 +659,32 @@ if torch.backends.mps.is_available():
             "put": None,
         }
 
-        if MACOS_VERSION < 15.0:
-            UNIMPLEMENTED_XFAILLIST.update(
-                {
-                    "quantile": None,
-                    "nanquantile": None,
-                }
-            )
         if sparse:
             UNIMPLEMENTED_XFAILLIST.update(UNIMPLEMENTED_XFAILLIST_SPARSE)
 
         UNDEFINED_XFAILLIST: dict[str, list | None] = {
             # Top 60 operators
-            # topk fails with duplicate indices
-            "topk": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            # Failures due to random output that they generate using
-            # Philox engine causing mismatch with CPU results
-            "multinomial": [
-                torch.float16,
-                torch.float32,
-                torch.bfloat16,
-            ],  # random results
-            "uniform": [torch.float16, torch.float32, torch.bfloat16],
-            "rand_like": [torch.float16, torch.float32, torch.bfloat16],
-            "randint": None,
-            "randint_like": None,
-            "randn": None,
-            "randn_like": None,
-            "bernoulli": [torch.float16, torch.float32, torch.bfloat16],
-            "exponential": [torch.float16, torch.float32, torch.bfloat16],
-            "log_normal": [torch.float16, torch.float32, torch.bfloat16],
-            "cauchy": [torch.float16, torch.float32, torch.bfloat16],
-            "geometric": [
-                torch.float16,
-                torch.float32,
-                torch.bfloat16,
-                torch.int32,
-                torch.int16,
-                torch.int64,
-                torch.int8,
-                torch.uint8,
-            ],
-            "nn.functional.feature_alpha_dropoutwith_train": [
-                torch.float16,
-                torch.float32,
-                torch.bfloat16,
-            ],
-            "normal": [torch.float16, torch.float32, torch.bfloat16],
-            "normalin_place": [torch.float16, torch.float32, torch.bfloat16],
-            "normalnumber_mean": [torch.float16, torch.float32, torch.bfloat16],
-            "nn.functional.alpha_dropout": [
-                torch.float16,
-                torch.float32,
-                torch.bfloat16,
-            ],
-            "nn.functional.dropout": [
-                torch.float16,
-                torch.float32,
-                torch.bfloat16,
-                torch.complex64,
-            ],
-            "nn.functional.dropout2d": [torch.float16, torch.float32, torch.bfloat16],
-            "nn.functional.dropout3d": [torch.float16, torch.float32, torch.bfloat16],
+            # PCA singular vectors are sign-ambiguous; the new Metal randn in
+            # #182386 shifted the sequence so seeded sample inputs land on
+            # different sign choices than CPU.
+            "pca_lowrank": [torch.float32],
+            # logcumsumexp on complex inputs disagrees with CPU at branch
+            # cuts (off by 2*pi); shifted RNG exposed a sample on the cut.
+            "logcumsumexp": [torch.complex64],
+            # Random ops: `test_output_match` / `test_output_grad_match` route
+            # these to a metadata + summary-stats comparator
+            # (`_assert_random_op_match`) since MPS and CPU consume independent
+            # Philox streams. The xfail entries that used to live here are
+            # gone with the comparator; if a new test under
+            # `mps_ops_modifier` needs them, add a per-test skip locally.
+            # `randint(to>1, dtype=bool)` errors at the CPU op itself with
+            # "to - 1 is out of bounds for bool" - not a comparator issue.
+            "randint": [torch.bool],
+            "randint_like": [torch.bool],
+            # `nn.functional.dropout` keeps a complex64 entry because the
+            # MPS dropout kernel doesn't support complex inputs at all (the
+            # shape comparison would fail to even run).
+            "nn.functional.dropout": [torch.complex64],
             # See https://github.com/pytorch/pytorch/issues/111479
             "nn.functional.multi_head_attention_forward": [
                 torch.float32,
@@ -783,7 +730,7 @@ if torch.backends.mps.is_available():
             # Failure due to precision issue for fp16
             # on both cpu and mps there are test cases that might produce inf result
             # 'nn.functional.pairwise_distance': [torch.float16],
-            # test blow pass on macOS 12 as it falls back to cpu
+            # test below pass on macOS 12 as it falls back to cpu
             # Argsort case using duplicate indices (undefined behaviour):
             #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
             #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
@@ -827,6 +774,10 @@ if torch.backends.mps.is_available():
             # Unsupported
             # This doesn't work on M1, but is partially working on M2 with the exception of torch.float16
             "nn.functional.conv3d": None,
+            # MPS uses float32 intermediates (opmath_t) while CPU uses native
+            # half/bfloat16 precision, causing unbounded divergence.
+            # Half precision is covered by test_grid_sampler_3d_half_precision.
+            "nn.functional.grid_sample": [torch.float16, torch.bfloat16],
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
@@ -897,7 +848,7 @@ if torch.backends.mps.is_available():
                     ),
                 )
 
-            # If ops is not supported for complex types, expect it to fail
+            # If op is not supported for complex types, expect it to fail
             if key not in SUPPORTED_COMPLEX_OPS:
                 addDecorator(
                     op,
@@ -920,31 +871,40 @@ if torch.backends.mps.is_available():
             "linalg.householder_product": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
-            "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
-            "grid_sampler_2d": None,
-            "grid_sampler_3d": None,
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
-            "aminmax": [torch.float32, torch.float16],
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
             "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
             # Correctness issues
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
             # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
-            # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
+            # On the backward pass for `sort` both are used (values and indices), thus resulting in a mismatch between CPU and MPS.
             # Running `msort` with stable `sort` passes.
             "msort": [torch.float16],
-            # Random output
-            "exponential": [torch.float16, torch.float32],
-            "log_normal": [torch.float16, torch.float32],
-            "cauchy": [torch.float16, torch.float32],
-            "geometric": [torch.float16, torch.float32],
+            # Random ops are routed to `_assert_random_op_match` for the
+            # forward leg of `test_output_grad_match`; the gradients (on the
+            # `mean`/`std` parameters of `normal`, etc.) are deterministic
+            # given the inputs and shouldn't need broad xfailing.
+            #
+            # Dropout family is the exception: backward reuses the forward's
+            # random mask, and since MPS and CPU draw different masks the
+            # backward gradients legitimately diverge. xfail the grad leg.
+            "nn.functional.dropout": [torch.float16, torch.float32],
+            "nn.functional.dropout2d": [torch.float16, torch.float32],
+            "nn.functional.dropout3d": [torch.float16, torch.float32],
+            "nn.functional.alpha_dropout": [torch.float16, torch.float32],
+            "nn.functional.feature_alpha_dropoutwith_train": [
+                torch.float16,
+                torch.float32,
+            ],
+            # PCA singular vectors are sign-ambiguous - same root cause as the
+            # forward leg above. RNG shift lands seeded samples on different
+            # sign choices.
+            "pca_lowrank": [torch.float32],
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,
-            # derivative for aten::nextafter is not implemented on CPU
-            "nextafter": None,
             # derivative for aten::floor_divide is not implemented on CPU
             "floor_divide": [torch.float16, torch.float32],
             # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
@@ -977,6 +937,10 @@ if torch.backends.mps.is_available():
         }
 
         SKIPLIST_GRAD = {
+            # topk index gather is flaky on fp16 - whether duplicates appear
+            # in the seeded sample input depends on prior test order's RNG
+            # draws, so we skip rather than xfail.
+            "topk": [torch.float16],
             "nn.functional.pairwise_distance": [torch.float16],
             # failed assertion `destination datatype must be fp32'
             "nn.functional.conv1d": [torch.float16],

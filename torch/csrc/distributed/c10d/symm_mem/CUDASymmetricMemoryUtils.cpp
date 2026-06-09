@@ -11,6 +11,9 @@
 #include <hip/hip_runtime_api.h>
 #endif
 
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 
@@ -26,6 +29,40 @@ bool device_has_multicast_support(int device_idx) {
 bool allow_overlapping_devices() {
   return c10::utils::check_env("TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES") ==
       true;
+}
+
+at::Tensor pg_all_gather_bytes(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    const void* data,
+    size_t nbytes,
+    int device_idx) {
+  TORCH_CHECK(pg != nullptr, "pg_all_gather_bytes: null ProcessGroup");
+  const auto world_size = pg->getSize();
+  TORCH_CHECK(world_size > 0);
+  const size_t total_bytes = static_cast<size_t>(world_size) * nbytes;
+
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  c10::cuda::CUDAGuard guard(device_idx);
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  auto device = c10::Device(c10::DeviceType::CUDA, device_idx);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  void* mutable_data = const_cast<void*>(data);
+  at::Tensor in_buf = at::from_blob(
+                          mutable_data,
+                          {static_cast<int64_t>(nbytes)},
+                          at::TensorOptions().dtype(at::kByte))
+                          .to(device);
+
+  at::Tensor out_buf = at::empty(
+      {static_cast<int64_t>(total_bytes)},
+      at::TensorOptions().dtype(at::kByte).device(device));
+
+  c10d::AllgatherOptions ag_opts;
+  ag_opts.asyncOp = false;
+  pg->all_gather_single(out_buf, in_buf, ag_opts);
+
+  return out_buf.cpu();
 }
 
 // Query environment variable to get the backend used for CUDA Symmetric Memory.
@@ -58,6 +95,7 @@ IpcChannel::IpcChannel()
       socket_ != -1, "Failed to create socket: ", c10::utils::str_error(errno));
 
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
+  // NOLINTNEXTLINE(modernize-use-ranges)
   std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
   TORCH_CHECK(
@@ -78,6 +116,7 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
   // Define destination socket address
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
   auto socket_name = get_socket_name(dst_pid);
+  // NOLINTNEXTLINE(modernize-use-ranges)
   std::copy(socket_name.begin(), socket_name.end(), addr.sun_path);
 
   // Prepare data to send
@@ -143,6 +182,7 @@ int IpcChannel::recv_fd() {
   // Define socket address to receive on: family AF_UNIX means unix domain
   // socket
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
+  // NOLINTNEXTLINE(modernize-use-ranges)
   std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
   // Prepare message header

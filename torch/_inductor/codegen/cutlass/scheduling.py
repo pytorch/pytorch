@@ -4,6 +4,8 @@ import logging
 from collections.abc import Sequence
 from typing import cast, TypeGuard
 
+import sympy
+
 from torch._inductor.codegen.cutlass.python_evt import (
     CutlassEVTCodegen,
     MockCutlassHandler,
@@ -40,7 +42,7 @@ class CUTLASSScheduling(BaseScheduling):
     """
     Partial Scheduling implementation for cutlass C++ Kernels.
     This class is intended to be used in combination with TritonScheduling,
-    and delegated to by CUDACombinedScheduling.
+    and delegated to by CUDACombinedScheduling/XPUCombinedScheduling.
 
     It handles fusion decisions and cutlass C++ specific template code generation.
     """
@@ -109,7 +111,7 @@ class CUTLASSScheduling(BaseScheduling):
             _, _, kernel_path = get_path(code_hash(src_code), "py")
 
             compile_wrapper = IndentedBuffer()
-            compile_wrapper.writeline("async_compile.cuda(r'''")
+            compile_wrapper.writeline(f"async_compile.{V.graph.device_type}(r'''")
             compile_wrapper.splice(src_code, strip=True)
             compile_wrapper.writeline(
                 f"''', 'so', aot_compile={str(V.graph.aot_mode)})"
@@ -121,6 +123,19 @@ class CUTLASSScheduling(BaseScheduling):
             wrapper.define_kernel(
                 kernel_name, compile_wrapper.getvalue(), metadata_comment
             )
+
+            # For JIT cpp_wrapper, the kernel call site emits a bare
+            # `extern "C"` symbol reference; compile the .so now so the
+            # wrapper compile can link against it via extra_flags.
+            # Autotune compiled a .so for the unfused kernel name
+            # (e.g. cutlass_<hash>), but at codegen time the kernel name
+            # gains a descriptive prefix (cutlass_fused_mm_<hash>), so the
+            # exported symbol differs and we need a fresh compile.
+            if V.graph.cpp_wrapper and not V.graph.aot_mode:
+                from ...codecache import CUDACodeCache
+
+                so_path, _, _ = CUDACodeCache.compile(src_code, "so")
+                wrapper.external_kernel_libs.add(so_path)
         return kernel_name
 
     def codegen_template(
@@ -194,6 +209,41 @@ class CUTLASSScheduling(BaseScheduling):
             list[BaseSchedulerNode], [n for n in nodes if n.node is not template_node]
         )
 
+    @staticmethod
+    def _is_compatible_reshape(
+        template_size: Sequence[sympy.Expr], node_size: Sequence[sympy.Expr]
+    ) -> bool:
+        """
+        Check if node_size is a compatible reshape of template_size.
+        This allows cases like template [8192, 3072] with node [16, 512, 3072]
+        where [16*512, 3072] == [8192, 3072] (prefix dims multiply to match).
+        """
+        if len(node_size) <= len(template_size):
+            return False
+        # Try to merge consecutive node dims to reconstruct template dims
+        t_idx = 0
+        n_idx = 0
+
+        def _matches_template_dim(lhs: sympy.Expr, rhs: sympy.Expr) -> bool:
+            # Fast path for concrete/static equality before invoking simplify.
+            if lhs == rhs:
+                return True
+            if V.graph.sizevars.statically_known_equals(lhs, rhs):
+                return True
+            return sympy.simplify(lhs - rhs) == 0
+
+        while t_idx < len(template_size) and n_idx < len(node_size):
+            product = node_size[n_idx]
+            n_idx += 1
+            # Try multiplying consecutive node dims until we match template dim
+            while not _matches_template_dim(product, template_size[t_idx]):
+                if n_idx >= len(node_size):
+                    return False
+                product = product * node_size[n_idx]
+                n_idx += 1
+            t_idx += 1
+        return t_idx == len(template_size) and n_idx == len(node_size)
+
     def _can_fuse_epilogue_impl(
         self,
         cutlass_template_buffer: CUTLASSTemplateBuffer,
@@ -236,12 +286,17 @@ class CUTLASSScheduling(BaseScheduling):
 
             name = node.get_computed_buffer_name()  # type: ignore[attr-defined]
             # dtype can differ, and strides can differ as long as they are broadcastable
+            # Allow compatible reshapes (e.g., [8192, 3072] vs [16, 512, 3072])
+            # where the node's shape is a split of the template's shape
             if node.get_size() != cutlass_template_buffer.get_size():
-                why(
-                    f"{name}'s size: {node.get_size()} differs from {cutlass_template_buffer.get_name()}'s \
+                if not self._is_compatible_reshape(
+                    cutlass_template_buffer.get_size(), node.get_size()
+                ):
+                    why(
+                        f"{name}'s size: {node.get_size()} differs from {cutlass_template_buffer.get_name()}'s \
 size: {cutlass_template_buffer.get_size()}"
-                )
-                return False
+                    )
+                    return False
 
         assert len(
             existing_epilogue_nodes
@@ -282,13 +337,13 @@ size: {cutlass_template_buffer.get_size()}"
                 not_implemented_op = not_implemented_op[4:]
                 why(
                     f"Cannot fuse epilogue node {node_to_fuse} into {cutlass_template_buffer.name}, \
-likely due to unsupported operation: {not_implemented_op}"  # noqa: G004, B950
+likely due to unsupported operation: {not_implemented_op}"
                 )
                 return False
             else:  # Likely due to unsupported dtype.
                 why(
                     f"Cannot fuse epilogue node {node_to_fuse} into {cutlass_template_buffer.name}. \
-Reason: {not_implemented_op}"  # noqa: G004, B950
+Reason: {not_implemented_op}"
                 )
                 return False
 

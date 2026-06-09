@@ -45,6 +45,54 @@ aten = torch.ops.aten
 log = logging.getLogger(__name__)
 
 
+def _propagate_use_strided_shard_flag(
+    op_strategy: OpStrategy,
+    op_schema: OpSchema,
+) -> None:
+    """Propagate use_strided_shard_as_shard_order from input specs to output specs.
+
+    When inputs carry _StridedShard with an explicit flag, all output (and input)
+    DTensorSpecs in the strategy that also contain _StridedShard must agree.
+    Strategy functions may forget to propagate the flag; this function fixes
+    them up centrally after the strategy is produced.
+    """
+    _use_strided: bool | None = None
+    for spec in op_schema.args_spec:
+        if any(isinstance(p, _StridedShard) for p in spec.placements):
+            val = spec.use_strided_shard_as_shard_order
+            if _use_strided is not None and _use_strided != val:
+                _use_strided = True
+            else:
+                _use_strided = val
+
+    if _use_strided is None:
+        return
+
+    def _fixup(spec: DTensorSpec) -> None:
+        if not any(isinstance(p, _StridedShard) for p in spec.placements):
+            return
+        if spec.use_strided_shard_as_shard_order == _use_strided:
+            return
+        spec.use_strided_shard_as_shard_order = _use_strided
+        if _use_strided:
+            spec.shard_order = None  # pyrefly: ignore[bad-assignment]
+        else:
+            spec.shard_order = DTensorSpec.compute_default_shard_order(spec.placements)
+
+    for op_spec in op_strategy.strategies:
+        out = op_spec.output_specs
+        if out is not None:
+            if isinstance(out, DTensorSpec):
+                _fixup(out)
+            else:
+                for s in out:
+                    if s is not None:
+                        _fixup(s)
+        if op_spec.input_specs is not None:
+            for s in op_spec.input_specs:
+                _fixup(s)
+
+
 def _length(obj) -> int:
     if obj is None:
         return 0
@@ -356,7 +404,28 @@ class ShardingPropagator:
             aten._unsafe_view.default: 1,
             aten.select_backward.default: 1,
             aten.slice_backward.default: 1,
+            # upsample backward ops: input_size (arg 2) is the full [N,C,...] shape
+            aten.upsample_nearest1d_backward.default: 2,
+            aten.upsample_nearest2d_backward.default: 2,
+            aten.upsample_nearest3d_backward.default: 2,
+            aten._upsample_nearest_exact1d_backward.default: 2,
+            aten._upsample_nearest_exact2d_backward.default: 2,
+            aten._upsample_nearest_exact3d_backward.default: 2,
+            aten._upsample_bilinear2d_aa_backward.default: 2,
+            aten._upsample_bicubic2d_aa_backward.default: 2,
+            aten._upsample_lanczos2d_aa_backward.default: 2,
+            aten.upsample_bicubic2d_backward.default: 2,
+            aten.upsample_bilinear2d_backward.default: 2,
+            aten.upsample_linear1d_backward.default: 2,
+            aten.upsample_trilinear3d_backward.default: 2,
         }
+        # ops with individual scalar shape args that need local adjustment
+        # maps op -> callable(input_specs, schema) -> adjusted schema
+        # populated by op modules (e.g. _math_ops.py) at registration time
+        self.op_to_scalar_shape_adjuster: dict[
+            OpOverload,
+            Callable[[list[DTensorSpec], OpSchema], OpSchema],
+        ] = {}
         # squeeze ops that need dim arg rewritten to only globally-singleton dims
         self.squeeze_op_to_dims_variant: dict[OpOverload, OpOverload] = {
             aten.squeeze.default: aten.squeeze.dims,
@@ -464,9 +533,18 @@ class ShardingPropagator:
         # NOTE: Use _fake_mode_lock to serialize access when running in
         # multi-threaded tests (lock must be set to threading.Lock()).
         # This is a nullcontext by default.
+        # NOTE: disable_proxy_modes_tracing() prevents make_fx from tracing
+        # into shard propagation. This op runs purely to derive output
+        # metadata (global shape/stride/dtype); it is not part of the real
+        # (local) computation. Without disabling the proxy tracer, the
+        # gen_fake_args() factory calls and op_schema.op(...) get recorded
+        # into the enclosing graph as dead code -- global-shape "shadow" nodes
+        # on empty_strided placeholders that no real output consumes.
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+
         with ShardingPropagator._fake_mode_lock:
             fake_mode = detect_fake_mode() or FakeTensorMode()
-            with fake_mode:
+            with fake_mode, disable_proxy_modes_tracing():
                 fake_args = op_schema.gen_fake_args()
                 fake_kwargs = op_schema.gen_fake_kwargs()
                 fake_out = op_schema.op(*fake_args, **fake_kwargs)
@@ -561,21 +639,11 @@ class ShardingPropagator:
                 if isinstance(spec, DTensorSpec):
                     output_tensor_meta_i = output_tensor_meta[i]
                     if not isinstance(output_tensor_meta_i, TensorMeta):
-                        # NOTE: aten.convolution_backward.default is an exception and it
-                        # needs extra handling because any Tensor in the output tuple
-                        # can be `None` depending on the output_mask parameter. This can
-                        # occur during double backpropagation or when certain gradients
-                        # are not needed (e.g., grad_input when input has requires_grad=False,
-                        # grad_weight/grad_bias when weight/bias have requires_grad=False,
-                        # or grad_bias when bias is None). We explicitly allow the
-                        # corresponding TensorMeta to be `None`.
-                        if (
-                            op == aten.convolution_backward.default
-                            and i in (0, 1, 2)
-                            and output_tensor_meta_i is None
-                        ):
-                            if not isinstance(output_specs, list):
-                                raise AssertionError
+                        # Some ops (e.g. convolution_backward, native_layer_norm_backward,
+                        # _fused_rms_norm_backward) have an output_mask parameter that
+                        # controls which outputs are computed. When output_mask[i] is
+                        # False, the output at position i is None and has no TensorMeta.
+                        if output_tensor_meta_i is None:
                             new_specs.append(None)
                             continue
                         else:
@@ -733,6 +801,7 @@ class ShardingPropagator:
 
         if op_strategy is not None:
             if isinstance(op_strategy, OpStrategy):
+                _propagate_use_strided_shard_flag(op_strategy, op_schema)
                 # single Op strategy
                 output_strategy = _select_min_cost_strategy(op_strategy, op_schema)
 
@@ -770,13 +839,12 @@ class ShardingPropagator:
                     )
                     suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
 
-                # shape and stride args need to be modified for
-                # view ops and new factory ops, potentially
+                # Rewrite shape/stride args from global to local when sharded.
+                # Covers view ops, new factory ops, and upsample backward ops
+                # whose shape args refer to global tensor dimensions.
                 if op_schema.op in self.op_to_shape_and_stride_idx:
                     if not isinstance(output_strategy.output_spec, DTensorSpec):
                         raise AssertionError
-                    # It happens when the output has the same shape as the input
-                    # and the input placements are not all Replicate().
                     if any(
                         isinstance(p, Shard | _StridedShard)
                         for p in output_strategy.output_spec.placements
@@ -787,6 +855,19 @@ class ShardingPropagator:
                         suggestion_schema = self._adjust_shape_and_stride_args(
                             out_tensor_meta, schema, output_strategy.output_spec
                         )
+                        needs_redistribute = True
+                        use_val_from_redistribute_schema = True
+
+                # adjust individual scalar shape args (e.g. N, C, HxW in group_norm)
+                if op_schema.op in self.op_to_scalar_shape_adjuster:
+                    if any(
+                        isinstance(p, Shard | _StridedShard)
+                        for spec in expected_input_specs
+                        for p in spec.placements
+                    ):
+                        schema = suggestion_schema or op_schema
+                        adjuster = self.op_to_scalar_shape_adjuster[op_schema.op]
+                        suggestion_schema = adjuster(expected_input_specs, schema)
                         needs_redistribute = True
                         use_val_from_redistribute_schema = True
 
@@ -813,6 +894,7 @@ class ShardingPropagator:
                                 mesh=output_specs.mesh,
                                 placements=output_specs.placements,
                                 tensor_meta=output_specs.tensor_meta,
+                                use_strided_shard_as_shard_order=output_specs.use_strided_shard_as_shard_order,
                             )
                             for _ in range(len(op_schema.op._schema.returns))
                         )
@@ -838,6 +920,7 @@ class ShardingPropagator:
                 for strategy in op_strategy.children:
                     if not isinstance(strategy, OpStrategy):
                         raise AssertionError
+                    _propagate_use_strided_shard_flag(strategy, op_schema)
                     selected_strategy = _select_min_cost_strategy(strategy)
                     selected_strategies.append(selected_strategy)
                     if selected_strategy.output_specs is not None:
@@ -973,8 +1056,7 @@ class ShardingPropagator:
             stride_idx = None
 
         expected_input_schema = list(schema.args_schema)
-        # adjust shape to be the same as that of the _local_tensor
-        # of the DTensor input arg at index 0, which is inferred
+        # rewrite args[shape_idx] from the global output shape to the local output shape
         local_shape, _ = compute_local_shape_and_global_offset(
             out_tensor_meta.shape, spec.mesh, spec.placements, skip_offset=True
         )

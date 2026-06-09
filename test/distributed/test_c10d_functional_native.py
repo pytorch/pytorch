@@ -11,14 +11,14 @@ import torch.distributed._functional_collectives as funcol
 from torch._C import FileCheck
 from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
-    all_gather_into_tensor_coalesced,
-    all_gather_tensor,
+    all_gather_single,
+    all_gather_single_coalesced,
     all_reduce,
     all_reduce_coalesced,
     all_to_all_single,
     AsyncCollectiveTensor,
-    reduce_scatter_tensor,
-    reduce_scatter_tensor_coalesced,
+    reduce_scatter_single,
+    reduce_scatter_single_coalesced,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import e4m3_type
@@ -28,7 +28,9 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    IS_LINUX,
     run_tests,
+    TEST_WITH_TORCHINDUCTOR,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -221,7 +223,7 @@ class TestWithNCCL(DistributedTestBase):
             raise AssertionError("Expected output to equal expect")
 
         # Test Python API and AsyncCollectiveTensor
-        output = all_gather_tensor(
+        output = all_gather_single(
             input,
             0,
             "default",
@@ -242,7 +244,7 @@ class TestWithNCCL(DistributedTestBase):
 
         with torch.inference_mode():
             input = torch.full((2, 2), float(self.rank), device=self.device)
-            out1 = funcol.all_gather_tensor(
+            out1 = funcol.all_gather_single(
                 input, gather_dim=0, group=torch.distributed.group.WORLD
             )
             out2 = out1.to(dtype=torch.bfloat16)
@@ -354,7 +356,7 @@ class TestWithNCCL(DistributedTestBase):
                 raise AssertionError(f"Expected output to equal expect[{i}]")
 
         # Test Python API and AsyncCollectiveTensor
-        outputs = all_gather_into_tensor_coalesced(
+        outputs = all_gather_single_coalesced(
             inputs,
             "default",
         )
@@ -384,7 +386,7 @@ class TestWithNCCL(DistributedTestBase):
             raise AssertionError(f"Expected output to equal {self.rank}")
 
         # Test Python API and AsyncCollectiveTensor
-        output = reduce_scatter_tensor(
+        output = reduce_scatter_single(
             input,
             "avg",
             0,
@@ -434,7 +436,7 @@ class TestWithNCCL(DistributedTestBase):
                 raise AssertionError(f"Expected output to equal {expected}")
 
         # Test Python API and AsyncCollectiveTensor
-        outputs = reduce_scatter_tensor_coalesced(
+        outputs = reduce_scatter_single_coalesced(
             inputs,
             "avg",
             [0] * 10,
@@ -585,7 +587,7 @@ class TestWithNCCL(DistributedTestBase):
                 try:
                     func(arg)
                     compiled(arg)
-                except BaseException as exc:  # noqa: B036
+                except BaseException as exc:
                     self.exc = exc
 
             def join(self):
@@ -616,10 +618,10 @@ class TestWithNCCL(DistributedTestBase):
         def fp8_rowwise_backward(in_, w, out_grad):
             out_grad_fp8, scale_out_grad = scale(out_grad)
             w_fp8, scale_w = scale(w.t().contiguous())
-            out_grad_fp8 = funcol.all_gather_tensor(
+            out_grad_fp8 = funcol.all_gather_single(
                 out_grad_fp8, gather_dim=0, group=torch.distributed.group.WORLD
             )
-            scale_out_grad = funcol.all_gather_tensor(
+            scale_out_grad = funcol.all_gather_single(
                 scale_out_grad, gather_dim=0, group=torch.distributed.group.WORLD
             )
             in_grad = torch._scaled_mm(
@@ -630,7 +632,7 @@ class TestWithNCCL(DistributedTestBase):
                 out_dtype=torch.bfloat16,
             )
 
-            out_grad = funcol.all_gather_tensor(
+            out_grad = funcol.all_gather_single(
                 out_grad.t().contiguous(),
                 gather_dim=0,
                 group=torch.distributed.group.WORLD,
@@ -842,7 +844,7 @@ class PyWorkTest(TestCase):
         self.assertEqual(pg.dels, 2)
 
         x = torch.rand(2, 2)
-        x = funcol.all_gather_tensor(x, 0, group=pg)
+        x = funcol.all_gather_single(x, 0, group=pg)
         gc.collect()
         self.assertEqual(pg.dels, 2)
         x.wait()
@@ -850,7 +852,7 @@ class PyWorkTest(TestCase):
         self.assertEqual(pg.dels, 3)
 
         x = torch.rand(2, 2)
-        x = funcol.reduce_scatter_tensor(x, "sum", 0, group=pg)
+        x = funcol.reduce_scatter_single(x, "sum", 0, group=pg)
         gc.collect()
         self.assertEqual(pg.dels, 3)
         x.wait()
@@ -1181,7 +1183,7 @@ class CompileTest(TestCase):
     @fresh_cache()
     def test_inductor_all_gather_into_tensor_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
-            ag0 = funcol.all_gather_tensor(arg, 0, "0")
+            ag0 = funcol.all_gather_single(arg, 0, "0")
             ag0 = funcol.wait_tensor(ag0)
             return ag0
 
@@ -1207,11 +1209,15 @@ class CompileTest(TestCase):
         AOTIRunnerUtil.run(func, (arg,))
         torch.accelerator.synchronize()
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHINDUCTOR or IS_LINUX,
+        "https://github.com/pytorch/pytorch/issues/146806",
+    )
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_inductor_all_gather_into_tensor_coalesced(self):
         def func(args: list[torch.Tensor]) -> torch.Tensor:
-            ag0 = funcol.all_gather_into_tensor_coalesced(args, "0")
+            ag0 = funcol.all_gather_single_coalesced(args, "0")
             ag0 = [funcol.wait_tensor(out) for out in ag0]
             return ag0
 
@@ -1286,7 +1292,7 @@ class CompileTest(TestCase):
     @fresh_cache()
     def test_inductor_reduce_scatter_tensor_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
-            rs0 = funcol.reduce_scatter_tensor(arg, "avg", 0, "0")
+            rs0 = funcol.reduce_scatter_single(arg, "avg", 0, "0")
             rs0 = funcol.wait_tensor(rs0)
             return rs0
 
@@ -1312,7 +1318,7 @@ class CompileTest(TestCase):
     @fresh_cache()
     def test_inductor_reduce_scatter_tensor_coalesced(self):
         def func(args: list[torch.Tensor]) -> torch.Tensor:
-            rs0 = funcol.reduce_scatter_tensor_coalesced(
+            rs0 = funcol.reduce_scatter_single_coalesced(
                 args, "avg", [0] * len(args), "0"
             )
             rs0 = [funcol.wait_tensor(out) for out in rs0]
@@ -1444,6 +1450,193 @@ class CompileTest(TestCase):
 
         code = run_and_get_triton_code(compiled, arg)
         (FileCheck().check("all_reduce_.default(buf0, 'avg', '0')").run(code))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_compile_all_gather_into_tensor_out(self):
+        def func(input, out):
+            y = torch.ops._c10d_functional.all_gather_into_tensor_out(
+                input, self.world_size, "0", out=out
+            )
+            y = torch.ops._c10d_functional.wait_tensor(y)
+            return y + 1
+
+        input_t = torch.ones(4, device=self.device)
+        out_t = torch.empty(4 * self.world_size, device=self.device)
+        compiled = torch.compile(func, fullgraph=True)
+        result = compiled(input_t, out_t)
+        self.assertEqual(result.shape, (4 * self.world_size,))
+
+        code = run_and_get_triton_code(compiled, input_t, out_t)
+        buf = find_buffer_assignments(code)[0]
+        (
+            FileCheck()
+            .check(f"{buf} = empty")
+            .check("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
+            .check_same(f"out={buf}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf})")
+            .run(code)
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_compile_reduce_scatter_tensor_out(self):
+        def func(input, out):
+            y = torch.ops._c10d_functional.reduce_scatter_tensor_out(
+                input, "sum", self.world_size, "0", out=out
+            )
+            y = torch.ops._c10d_functional.wait_tensor(y)
+            return y + 1
+
+        input_t = torch.ones(4 * self.world_size, device=self.device)
+        out_t = torch.empty(4, device=self.device)
+        compiled = torch.compile(func, fullgraph=True)
+        result = compiled(input_t, out_t)
+        self.assertEqual(result.shape, (4,))
+
+        code = run_and_get_triton_code(compiled, input_t, out_t)
+        buf = find_buffer_assignments(code)[0]
+        (
+            FileCheck()
+            .check(f"{buf} = empty")
+            .check("torch.ops._c10d_functional.reduce_scatter_tensor_out.default(")
+            .check_same(f"out={buf}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf})")
+            .run(code)
+        )
+
+
+class ACTCompileTest(TestCase):
+    """
+    Test that AsyncCollectiveTensor inputs to compiled regions are resolved
+    before AOT autograd tracing begins. ACTs are transient eager-mode wrappers
+    for async collective overlap; if they leak into the traced graph as input
+    types, AOT autograd records them in tangent metadata and then hits a type
+    mismatch at runtime because autograd produces plain-tensor tangents.
+    """
+
+    def test_act_compile_backward_tangent_mismatch(self):
+        """
+        When a bare AsyncCollectiveTensor (ACT) enters a torch.compiled
+        region and passes through a view op, the output remains an ACT.
+        If the ACT is not unwrapped before tracing, AOT autograd
+        fakifies it as-is and records it in SubclassCreationMeta. At runtime, autograd
+        produces a plain tensor tangent, causing:
+            RuntimeError: Expected a AsyncCollectiveTensor tangent
+            but got a plain Tensor.
+
+        This occurs in practice when TP async collectives produce a
+        DTensor(ACT), an eager caller does to_local() to get a bare ACT,
+        and that ACT flows into a compiled sub-module whose forward
+        contains view ops (unsqueeze, reshape, transpose, etc.).
+
+        We use unsqueeze (a view op that preserves ACT) to ensure the
+        compiled function's output carries ACT type, which is what
+        triggers the tangent metadata recording.
+        """
+        from unittest.mock import patch
+
+        elem = torch.randn(4, 4, requires_grad=True)
+        act = AsyncCollectiveTensor(elem)
+
+        compiled_fn = torch.compile(lambda x: x.unsqueeze(0), backend="aot_eager")
+
+        original_trigger_wait = AsyncCollectiveTensor.trigger_wait
+        wait_called = False
+
+        def tracked_trigger_wait(self):
+            nonlocal wait_called
+            wait_called = True
+            return original_trigger_wait(self)
+
+        with patch.object(AsyncCollectiveTensor, "trigger_wait", tracked_trigger_wait):
+            out = compiled_fn(act)
+            # Without ACT unwrapping, this raises:
+            #   RuntimeError: Expected a AsyncCollectiveTensor tangent
+            #   but got a plain Tensor.
+            out.sum().backward()
+
+        self.assertTrue(wait_called, "trigger_wait() was never called")
+
+        # Verify numerics: trigger_wait() must fire so the correct data
+        # flows through. ACT wraps elem, so results must match elem directly.
+        ref = elem.detach().unsqueeze(0)
+        self.assertEqual(out.detach(), ref)
+
+    def test_act_runtime_unwrap(self):
+        """
+        Verify that ACT inputs are resolved before the compiled graph
+        executes.
+
+        With inductor, triton kernels bypass __torch_dispatch__ entirely,
+        so an un-waited ACT would silently feed stale data to the kernel.
+        The aot_eager backend masks this because it runs graph ops through
+        __torch_dispatch__ (which calls trigger_wait). This test uses a
+        custom backend that asserts inputs are plain tensors to catch the
+        problem regardless of backend.
+        """
+
+        def assert_no_act_backend(gm, example_inputs):
+            from torch._dynamo.backends.common import aot_autograd
+
+            def inner_compiler(gm, example_inputs):
+                def compiled(args):
+                    for i, a in enumerate(args):
+                        self.assertNotIsInstance(
+                            a,
+                            AsyncCollectiveTensor,
+                            f"arg {i} is still an ACT — trigger_wait() "
+                            "was not called before the compiled function",
+                        )
+                    return gm(*args)
+
+                compiled._boxed_call = True
+                return compiled
+
+            return aot_autograd(fw_compiler=inner_compiler)(gm, example_inputs)
+
+        compiled_fn = torch.compile(lambda x: x * 2, backend=assert_no_act_backend)
+
+        # First call: triggers compilation.
+        elem1 = torch.randn(4, 4)
+        act1 = AsyncCollectiveTensor(elem1)
+        r1 = compiled_fn(act1)
+        self.assertEqual(r1, elem1 * 2)
+
+        # Second call: dynamo reuses cached graph. process_inputs does
+        # NOT run again — the runtime wrapper must unwrap ACTs.
+        elem2 = torch.randn(4, 4)
+        act2 = AsyncCollectiveTensor(elem2)
+        r2 = compiled_fn(act2)
+        self.assertEqual(r2, elem2 * 2)
+
+    def test_act_guard_recompiles(self):
+        """
+        Dynamo must recompile when an input switches between plain tensor
+        and AsyncCollectiveTensor (or vice versa).
+        """
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(lambda x: x * 2, backend=cnt)
+
+        elem = torch.randn(4, 4)
+
+        # Call 1: plain tensor — triggers first compilation.
+        r1 = compiled_fn(elem)
+        self.assertEqual(r1, elem * 2)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Call 2: ACT — should trigger a recompile because the input
+        # type changed from Tensor to AsyncCollectiveTensor.
+        act = AsyncCollectiveTensor(elem)
+        r2 = compiled_fn(act)
+        self.assertEqual(r2, elem * 2)
+        self.assertEqual(cnt.frame_count, 2)
+
+        # Call 3: plain tensor again — should reuse the first compiled
+        # graph, no new compilation.
+        r3 = compiled_fn(elem)
+        self.assertEqual(r3, elem * 2)
+        self.assertEqual(cnt.frame_count, 2)
 
 
 if __name__ == "__main__":

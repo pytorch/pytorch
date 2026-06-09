@@ -4,6 +4,7 @@
 #include <array>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <c10/util/thread_name.h>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
@@ -220,28 +221,17 @@ void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
 }
 
 void TCPStoreMasterDaemon::clearSocketWaitState(int socket) {
-  // Remove all the tracking state of the close FD
+  // Remove all the tracking state of the closed FD
   for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
-    for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
-      if (*vecIt == socket) {
-        vecIt = it->second.erase(vecIt);
-      } else {
-        ++vecIt;
-      }
-    }
-    if (it->second.empty()) {
+    auto& vec = it->second;
+    std::erase(vec, socket);
+    if (vec.empty()) {
       it = waitingSockets_.erase(it);
     } else {
       ++it;
     }
   }
-  for (auto it = keysAwaited_.begin(); it != keysAwaited_.end();) {
-    if (it->first == socket) {
-      it = keysAwaited_.erase(it);
-    } else {
-      ++it;
-    }
-  }
+  keysAwaited_.erase(socket);
 }
 
 // query communicates with the worker. The format

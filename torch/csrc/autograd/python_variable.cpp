@@ -1,10 +1,8 @@
 #include <ATen/DTensorState.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Resize.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/GPUTrace.h>
-#include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/SmallVector.h>
@@ -227,6 +225,14 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
       }
       return false;
     };
+    auto matchList = [&](c10::TypeKind kind) {
+      const auto& t = arg.real_type();
+      if (auto list_t = t->cast<c10::ListType>()) {
+        if (list_t->getElementType()->kind() == kind)
+          return true;
+      }
+      return false;
+    };
     if (argument.isNone()) {
       return py::none();
     } else if (match(c10::ScalarTypeType::Kind)) {
@@ -239,6 +245,31 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
           reinterpret_cast<PyObject*>(obj));
     } else if (match(c10::MemoryFormatType::Kind)) {
       return py::cast(static_cast<c10::MemoryFormat>(argument.toInt()));
+    } else if (matchList(c10::ScalarTypeType::Kind)) {
+      const auto& list = argument.toListRef();
+      py::list result(list.size());
+      for (const auto i : c10::irange(list.size())) {
+        auto* obj = getTHPDtype(static_cast<c10::ScalarType>(list[i].toInt()));
+        result[i] = py::reinterpret_borrow<py::object>(
+            reinterpret_cast<PyObject*>(obj));
+      }
+      return result;
+    } else if (matchList(c10::LayoutType::Kind)) {
+      const auto& list = argument.toListRef();
+      py::list result(list.size());
+      for (const auto i : c10::irange(list.size())) {
+        auto* obj = getTHPLayout(static_cast<c10::Layout>(list[i].toInt()));
+        result[i] = py::reinterpret_borrow<py::object>(
+            reinterpret_cast<PyObject*>(obj));
+      }
+      return result;
+    } else if (matchList(c10::MemoryFormatType::Kind)) {
+      const auto& list = argument.toListRef();
+      py::list result(list.size());
+      for (const auto i : c10::irange(list.size())) {
+        result[i] = py::cast(static_cast<c10::MemoryFormat>(list[i].toInt()));
+      }
+      return result;
     } else {
       return torch::jit::toPyObject(argument);
     }
@@ -388,53 +419,32 @@ static PyObject* THPVariable_WrapWithType(
   }
 
   c10::TensorImpl* tensor_impl = var.unsafeGetTensorImpl();
-  c10::impl::PyObjectSlot* pyobj_slot = tensor_impl->pyobj_slot();
-
-  PyObject* obj = pyobj_slot->load_pyobj();
-  if (obj) {
+  THPObjectPtr obj(PyObjectPreservation::get_or_init(*tensor_impl, [&]() {
+    PyTypeObject* type = reinterpret_cast<PyTypeObject*>(THPVariableClass);
     if (desired_type) {
-      check_tensor_subclass(obj, *desired_type);
+      type = *desired_type;
+    } else if (C10_UNLIKELY(var.device().type() == c10::kXLA)) {
+      if (auto clazz = getPythonTensorClass(var.device())) {
+        type = reinterpret_cast<PyTypeObject*>(clazz);
+      }
     }
-    return Py_NewRef(obj);
-  }
 
-  PyTypeObject* type = reinterpret_cast<PyTypeObject*>(THPVariableClass);
+    PyObject* wrapper = type->tp_alloc(type, 0);
+    TORCH_CHECK_WITH(
+        OutOfMemoryError,
+        wrapper,
+        "Failed to allocate a ",
+        type->tp_name,
+        " object");
+    auto v = reinterpret_cast<THPVariable*>(wrapper);
+    new (&v->cdata) Tensor(std::forward<T>(var));
+    return wrapper;
+  }));
+
   if (desired_type) {
-    type = *desired_type;
-  } else if (C10_UNLIKELY(var.device().type() == c10::kXLA)) {
-    if (auto clazz = getPythonTensorClass(var.device())) {
-      type = reinterpret_cast<PyTypeObject*>(clazz);
-    }
+    check_tensor_subclass(obj.get(), *desired_type);
   }
-
-  obj = type->tp_alloc(type, 0);
-  TORCH_CHECK(obj, "Failed to allocate a ", type->tp_name, " object");
-
-  // Ensure that PyUnstable_TryIncref calls don't fail spuriously in
-  // free-threaded Python.
-  PyUnstable_EnableTryIncRef(obj);
-
-  auto v = reinterpret_cast<THPVariable*>(obj);
-  new (&v->cdata) Tensor(std::forward<T>(var));
-
-  if (THPVariable_Unpack(obj).is_uniquely_owned()) {
-    // We can use a faster non-atomic code path if we have the only reference to
-    // a fresh Tensor.
-    PyObjectPreservation::init_fresh_nonatomic(tensor_impl, pyobj_slot, obj);
-    return obj;
-  }
-
-  PyObject* wrapper =
-      PyObjectPreservation::init_once(tensor_impl, pyobj_slot, obj);
-  if (wrapper != obj) {
-    // Another thread beat us to it
-    Py_DECREF(obj);
-    if (desired_type) {
-      check_tensor_subclass(wrapper, *desired_type);
-    }
-    return Py_NewRef(wrapper);
-  }
-  return obj;
+  return obj.release();
 }
 
 PyObject* THPVariable_Wrap(at::TensorBase&& var) {
@@ -524,14 +534,14 @@ static PyObject* view_func_impl(
 
         // Determine new SymInt / tensor state as needed.
         std::optional<std::vector<c10::SymInt>> new_symints = std::nullopt;
-        if (symint_visitor_fn != Py_None) {
+        if (!Py_IsNone(symint_visitor_fn)) {
           new_symints = map_py_func(
               py::cast<py::function>(symint_visitor_fn),
               view_func.get_symints());
         }
 
         std::optional<std::vector<at::Tensor>> new_tensors = std::nullopt;
-        if (tensor_visitor_fn != Py_None) {
+        if (!Py_IsNone(tensor_visitor_fn)) {
           new_tensors = map_py_func(
               py::cast<py::function>(tensor_visitor_fn),
               view_func.get_tensors());
@@ -1015,7 +1025,7 @@ static bool checked_istrue(PyObject* obj) {
   return result;
 }
 
-// pybind11 does not not use PyObject_Vectorcall currently; it seems
+// pybind11 does not use PyObject_Vectorcall currently; it seems
 // to materialize a tuple of args instead.
 template <std::size_t N>
 static py::object checked_vectorcall(
@@ -1140,9 +1150,9 @@ class NativeOpSchema {
     std::ostringstream ss;
     ss << op_.operator_name().name;
     if (!op_.operator_name().overload_name.empty()) {
-      ss << "." << op_.operator_name().overload_name;
+      ss << '.' << op_.operator_name().overload_name;
     }
-    ss << "(";
+    ss << '(';
     bool first = true;
     for (const auto& item : comparison_key_) {
       if (!first)
@@ -1154,7 +1164,7 @@ class NativeOpSchema {
         ss << item.iv;
       }
     }
-    ss << ")";
+    ss << ')';
     return ss.str();
   }
 
@@ -1290,19 +1300,21 @@ get_thread_local_native_sharding_propagator_cache() {
       thread_dict["__DTensor_fastpath_thread_cache_cleanup"] =
           py::capsule(new std::thread::id(this_thread_id), [](void* p) {
             auto* ptid = reinterpret_cast<std::thread::id*>(p);
+            std::optional<NativeShardingPropagatorCache>* popt_cache = nullptr;
             {
               std::lock_guard<std::mutex> inner_lock(
                   native_sharding_propagator_cache_cleanup_mutex);
               auto it = all_thread_caches.find(*ptid);
               if (it != all_thread_caches.end()) {
-                // We need to both:
-                // 1) free python objects, and
-                it->second->reset();
-                // 2) make sure we don't try to come back and mess with
-                // a destroyed thread-local at module unload (e.g.,
-                // process exit) time.
+                popt_cache = it->second;
                 all_thread_caches.erase(it);
               }
+            }
+            if (popt_cache != nullptr) {
+              // Destroy cached py::object values outside the cleanup mutex
+              // since pybind/Python deallocators can re-enter Python and
+              // temporarily drop the GIL.
+              popt_cache->reset();
             }
             delete ptid;
           });
@@ -1337,14 +1349,14 @@ static bool is_random_op(const c10::OperatorHandle& op) {
       memcmp(op_name.name.data(), "aten::", aten_namespace_prefix_len) != 0) {
     return false;
   }
-  static constexpr std::array<std::string_view, 6> random_names = {{
+  static constexpr auto random_names = std::to_array<std::string_view>({
       "native_dropout",
       "normal_",
       "rand_like",
       "randn_like",
       "uniform_",
       "bernoulli",
-  }};
+  });
   std::string_view name_without_namespace(
       op_name.name.c_str() + aten_namespace_prefix_len,
       op_name.name.size() - aten_namespace_prefix_len);
@@ -1877,7 +1889,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
     comparison_key = PyTuple_Pack(
         2,
         self_handle.attr(dtensor_interned_strings.op).ptr(),
-        args_to_hash_tup.release().ptr());
+        args_to_hash_tup.ptr());
   }
   if (!comparison_key) {
     return false;
@@ -2071,7 +2083,6 @@ static std::pair<TensorFlavor, py::object> check_for_dtensor_or_tensor(
   // the try_replicate_spec_for_scalar_tensor stuff in our caller
   // specifically handles 1-element tensors.
 
-  torch::jit::guardAgainstNamedTensor<at::Tensor>(tensor);
   auto py_tensor = py::cast(tensor);
 
   const auto dtensor = get_dtensor_class();
@@ -2292,33 +2303,47 @@ create_native_op_schema(
 
   const auto handle_non_dtensor_arg =
       [&comparison_key, &comparison_key_hash, &native_info](
-          size_t idx, c10::IValue arg) {
-        bool is_none_or_undefined =
-            arg.isNone() || (arg.isTensor() && !arg.toTensor().defined());
-        if (idx >= native_info.static_argnum || is_none_or_undefined) {
-          if (arg.isList()) {
-            const auto& list = arg.toList();
-            if (list.empty()) {
-              arg = c10::ivalue::Tuple::create({});
-            } else {
-              // WARNING: here we rely on c10::List being represented
-              // by a contiguous array of IValue for efficiency!
-              arg = c10::ivalue::Tuple::create(c10::ArrayRef<c10::IValue>(
-                  &(*list.begin()).get(), list.size()));
-            }
-          } else if (arg.isTensor() && !arg.toTensor().defined()) {
-            // Coerce undefined Tensor to None, just as we do when
-            // converting IValues to PyObject. Otherwise comparison
-            // doesn't work. (undefined Tensors can get here because
-            // check_for_dtensor_or_tensor calls them non-Tensors, but
-            // doesn't have a way to do the coercion for us.)
-            arg = c10::IValue();
+          size_t idx, c10::IValue arg) -> bool {
+    bool is_none_or_undefined =
+        arg.isNone() || (arg.isTensor() && !arg.toTensor().defined());
+    if (idx >= native_info.static_argnum || is_none_or_undefined) {
+      if (arg.isSymInt() && arg.toSymInt().is_symbolic()) {
+        // Symbolic SymInts are scoped to a single tracing/capture context,
+        // so cached sharding results containing them cannot be reused.
+        return true;
+      }
+      if (arg.isSymIntList()) {
+        const auto symints = arg.toSymIntList();
+        for (const auto sym_idx : c10::irange(symints.size())) {
+          if (symints.get(sym_idx).is_symbolic()) {
+            return true;
           }
-          comparison_key_hash =
-              c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
-          comparison_key.emplace_back(std::move(arg));
         }
-      };
+      }
+      if (arg.isList()) {
+        const auto& list = arg.toList();
+        if (list.empty()) {
+          arg = c10::ivalue::Tuple::create({});
+        } else {
+          // WARNING: here we rely on c10::List being represented
+          // by a contiguous array of IValue for efficiency!
+          arg = c10::ivalue::Tuple::create(
+              c10::ArrayRef<c10::IValue>(&(*list.begin()).get(), list.size()));
+        }
+      } else if (arg.isTensor() && !arg.toTensor().defined()) {
+        // Coerce undefined Tensor to None, just as we do when
+        // converting IValues to PyObject. Otherwise comparison
+        // doesn't work. (undefined Tensors can get here because
+        // check_for_dtensor_or_tensor calls them non-Tensors, but
+        // doesn't have a way to do the coercion for us.)
+        arg = c10::IValue();
+      }
+      comparison_key_hash =
+          c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
+      comparison_key.emplace_back(std::move(arg));
+    }
+    return false;
+  };
   const auto handle_dtensor_arg = [&comparison_key,
                                    &comparison_key_hash](py::object arg) {
     comparison_key_hash = c10::hash_combine(
@@ -2327,19 +2352,33 @@ create_native_op_schema(
   };
 
   const auto handle_non_tensor_or_undefined =
-      [&comparison_key, &comparison_key_hash](c10::IValue arg) {
-        // We reach here when arg is TensorFlavor::NON_TENSOR
-        // (not a Tensor at all or undefined Tensor)
-        // We coerce undefined Tensor to None, just as we do when
-        // converting IValues to PyObject. (same behaviour as
-        // handle_non_dtensor_arg)
-        if (arg.isTensor() && !arg.toTensor().defined()) {
-          arg = c10::IValue();
+      [&comparison_key, &comparison_key_hash](c10::IValue arg) -> bool {
+    // We reach here when arg is TensorFlavor::NON_TENSOR
+    // (not a Tensor at all or undefined Tensor)
+    // We coerce undefined Tensor to None, just as we do when
+    // converting IValues to PyObject. (same behaviour as
+    // handle_non_dtensor_arg)
+    if (arg.isSymInt() && arg.toSymInt().is_symbolic()) {
+      // Symbolic SymInts are scoped to a single tracing/capture context,
+      // so cached sharding results containing them cannot be reused.
+      return true;
+    }
+    if (arg.isSymIntList()) {
+      const auto symints = arg.toSymIntList();
+      for (const auto sym_idx : c10::irange(symints.size())) {
+        if (symints.get(sym_idx).is_symbolic()) {
+          return true;
         }
-        comparison_key_hash =
-            c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
-        comparison_key.emplace_back(std::move(arg));
-      };
+      }
+    }
+    if (arg.isTensor() && !arg.toTensor().defined()) {
+      arg = c10::IValue();
+    }
+    comparison_key_hash =
+        c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
+    comparison_key.emplace_back(std::move(arg));
+    return false;
+  };
 
   const bool allow_implicit_replication =
       at::get_dtensor_allow_implicit_replication();
@@ -2411,13 +2450,23 @@ create_native_op_schema(
                 item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
               handle_exactly_tensor(item_py_tensor);
             } else { // non-tensor
-              handle_non_tensor_or_undefined(item);
+              // Use handle_non_dtensor_arg to respect static_argnum.
+              // Non-tensor items in lists (e.g., ScalarList args to
+              // foreach ops) should only be included in the cache key
+              // if the list's argument index is >= static_argnum.
+              // Otherwise, step-varying scalars (like AdamW bias
+              // corrections) cause unbounded cache growth.
+              if (handle_non_dtensor_arg(idx, item)) {
+                return std::nullopt;
+              }
             }
           }
         } else {
           // non DTensor/Tensor args (i.e. int/float/bool), just add to
           // local_args
-          handle_non_dtensor_arg(idx, arg);
+          if (handle_non_dtensor_arg(idx, arg)) {
+            return std::nullopt;
+          }
         }
         break;
       }
@@ -2445,6 +2494,20 @@ create_native_op_schema(
   }
 
   if (native_info.static_kwargkey && !native_info.static_kwargkey.is_none()) {
+    // Only kwargs named in static_kwargkey affect sharding propagation and
+    // belong in the cache key. The Python comparison key
+    // (DTensor_OpSchema_recompute_comparison_key_impl) already filters this
+    // way; the C++ fast path must match. Without this filter, step-varying
+    // scalar kwargs (e.g. the `value` arg of addcdiv_ used by AdamW bias
+    // corrections) cause unbounded cache growth.
+    py::list static_kwargkey =
+        py::reinterpret_borrow<py::list>(native_info.static_kwargkey);
+    c10::SmallVector<std::string, 2> static_kwarg_names;
+    static_kwarg_names.reserve(static_kwargkey.size());
+    for (const auto& key : static_kwargkey) {
+      static_kwarg_names.push_back(py::cast<std::string>(key));
+    }
+
     // Separator to disambiguate kwargs from args in comparison and hashing.
     static constexpr int64_t kwargs_separator = 0x0011223344556677LL;
     comparison_key.emplace_back(static_cast<int64_t>(kwargs_separator));
@@ -2453,14 +2516,26 @@ create_native_op_schema(
     for (auto argument_it = args_kwargs.kwargs_begin();
          argument_it != args_kwargs.kwargs_end();
          ++argument_it) {
+      const auto underlying_index = argument_it.underlying_index();
+      const auto [tensor_flavor, py_tensor] =
+          check_for_dtensor_or_tensor(*argument_it);
+      // Skip non-tensor kwargs not listed in static_kwargkey.
+      if (tensor_flavor == TensorFlavor::NON_TENSOR) {
+        const auto& kwarg_name =
+            op.schema().arguments()[underlying_index].name();
+        if (std::find(
+                static_kwarg_names.begin(),
+                static_kwarg_names.end(),
+                kwarg_name) == static_kwarg_names.end()) {
+          continue;
+        }
+      }
+
       // Rather than hash/compare the string key, we can just use the
       // index of the kwarg in the schema!
-      const auto underlying_index = argument_it.underlying_index();
       comparison_key.emplace_back(c10::IValue(underlying_index));
       comparison_key_hash = hash_combine(
           comparison_key_hash, c10::IValue::hash(comparison_key.back().iv));
-      const auto [tensor_flavor, py_tensor] =
-          check_for_dtensor_or_tensor(*argument_it);
       switch (tensor_flavor) {
         case TensorFlavor::EXACTLY_DTENSOR:
         case TensorFlavor::DTENSOR_SUBCLASS: {
@@ -2495,11 +2570,16 @@ create_native_op_schema(
                   item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
                 handle_exactly_tensor(item_py_tensor);
               } else { // non-tensor
-                handle_non_tensor_or_undefined(item);
+                if (handle_non_tensor_or_undefined(item)) {
+                  return std::nullopt;
+                }
               }
             }
           } else {
-            handle_non_dtensor_arg(native_info.static_argnum, *argument_it);
+            if (handle_non_dtensor_arg(
+                    native_info.static_argnum, *argument_it)) {
+              return std::nullopt;
+            }
           }
           break;
         }
@@ -2574,7 +2654,7 @@ template <typename T>
 struct GetterBase {
   static PyObject* getter(THPVariable* self, void* /*unused*/) {
     HANDLE_TH_ERRORS
-    if (check_has_torch_function((PyObject*)self)) {
+    if (has_torch_function((PyObject*)self)) {
       return handle_torch_function_getter(self, T::name);
     }
     return THPVariable_Wrap(T::fn(THPVariable_Unpack(self)));
@@ -2640,7 +2720,7 @@ struct PropertyImag : GetterBase<PropertyImag> {
 
 static PyObject* THPVariable_get_cdata(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "_cdata");
   }
   const auto& var = THPVariable_Unpack(self);
@@ -2650,7 +2730,7 @@ static PyObject* THPVariable_get_cdata(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_get_version(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "_version");
   }
   const auto& var = THPVariable_Unpack(self);
@@ -2660,7 +2740,7 @@ static PyObject* THPVariable_get_version(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_get_grad_fn(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "grad_fn");
   }
   const auto& var = THPVariable_Unpack(self);
@@ -2676,11 +2756,11 @@ static int THPVariable_set_grad_fn(
     PyObject* obj,
     void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "_grad_fn", obj);
   }
   TORCH_CHECK(obj, "Deletion of _grad_fn not allowed. Detach tensor instead!");
-  TORCH_CHECK(obj == Py_None, "_grad_fn can be only set to None");
+  TORCH_CHECK(Py_IsNone(obj), "_grad_fn can be only set to None");
   THPVariable_Unpack(self).detach_();
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -2688,7 +2768,7 @@ static int THPVariable_set_grad_fn(
 
 static PyObject* THPVariable_is_leaf(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_leaf");
   }
   return PyBool_FromLong(!THPVariable_Unpack(self).grad_fn());
@@ -2700,7 +2780,7 @@ static int THPVariable_set_data(
     PyObject* data,
     void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "data", data);
   }
   TORCH_CHECK(
@@ -2720,11 +2800,11 @@ static int THPVariable_set_grad(
     PyObject* py_grad,
     void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "grad", py_grad);
   }
   const auto& var = THPVariable_Unpack(self);
-  if (!py_grad || py_grad == Py_None) {
+  if (!py_grad || Py_IsNone(py_grad)) {
     var.mutable_grad().reset();
     return 0;
   }
@@ -2786,7 +2866,7 @@ static int THPVariable_set_grad(
 
 static PyObject* THPVariable_get_volatile(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "volatile");
   }
   const char* msg = "volatile was removed (Variable.volatile is always False)";
@@ -2802,7 +2882,7 @@ static int THPVariable_set_volatile(
     PyObject* obj,
     void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "volatile", obj);
   }
   auto r = PyErr_WarnEx(PyExc_UserWarning, VOLATILE_WARNING, 1);
@@ -2814,7 +2894,7 @@ static int THPVariable_set_volatile(
 
 static PyObject* THPVariable_get_output_nr(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "output_nr");
   }
   const auto output_nr = THPVariable_Unpack(self).output_nr();
@@ -2826,7 +2906,7 @@ static PyObject* THPVariable_get_requires_grad(
     THPVariable* self,
     void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "requires_grad");
   }
   if (THPVariable_Unpack(self).requires_grad()) {
@@ -2839,7 +2919,7 @@ static PyObject* THPVariable_get_requires_grad(
 
 static PyObject* THPVariable_retains_grad(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "retains_grad");
   }
   if (THPVariable_Unpack(self).retains_grad()) {
@@ -2852,70 +2932,11 @@ static PyObject* THPVariable_retains_grad(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_get_ndim(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "ndim");
   }
   return THPUtils_packInt64(THPVariable_Unpack(self).dim());
   END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPVariable_get_names(PyObject* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    return handle_torch_function_getter((THPVariable*)self, "names");
-  }
-  // The long-term plan is to return a list of (python) torch.Dimname.
-  // However, for now, return a list of string.
-  const auto& tensor = THPVariable_Unpack(self);
-  auto size = tensor.dim();
-  THPObjectPtr tuple(PyTuple_New(size));
-  if (!tuple)
-    throw python_error();
-
-  const auto dimnames = tensor.names();
-  for (const auto i : c10::irange(size)) {
-    PyObject* str = nullptr;
-    if (dimnames[i].type() == at::NameType::WILDCARD) {
-      // PyTuple_SET_ITEM steals a reference to the object. When the tuple is
-      // deallocated, it'll decrement the refcount on Py_None, which is bad.
-      // To avoid this, we "create" a new reference to Py_None by increasing
-      // the refcount.
-      // Sources:
-      // - https://docs.python.org/3/c-api/tuple.html#c.PyTuple_SetItem
-      // -
-      // https://stackoverflow.com/questions/16400600/how-to-return-a-tuple-containing-a-none-value-from-the-c-api
-      Py_INCREF(Py_None);
-      str = Py_None;
-    } else {
-      str = THPUtils_packString(dimnames[i].symbol().toUnqualString());
-      if (!str)
-        throw python_error();
-    }
-    PyTuple_SET_ITEM(tuple.get(), i, str);
-  }
-  return tuple.release();
-  END_HANDLE_TH_ERRORS
-}
-
-static int THPVariable_set_names(
-    PyObject* self,
-    PyObject* names,
-    void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    return handle_torch_function_setter((THPVariable*)self, "names", names);
-  }
-  const auto& var = THPVariable_Unpack(self);
-  if (names == Py_None) {
-    at::internal_set_names_inplace(var, std::nullopt);
-  } else {
-    TORCH_CHECK(
-        THPUtils_checkDimnameList(names),
-        "names must either be None or a tuple of dim names");
-    at::internal_set_names_inplace(var, torch::parseDimnameList(names));
-  }
-  return 0;
-  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 static int THPVariable_set_requires_grad(
@@ -2923,15 +2944,15 @@ static int THPVariable_set_requires_grad(
     PyObject* obj,
     void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "requires_grad", obj);
   }
   TORCH_CHECK(obj && PyBool_Check(obj), "requires_grad must be a bool");
   const auto& var = THPVariable_Unpack(self);
-  auto requires_grad = (obj == Py_True);
+  auto requires_grad = (Py_IsTrue(obj));
   if (!var.is_leaf()) {
     THPUtils_setError(
-        autograd::utils::requires_grad_leaf_error(obj == Py_True).c_str());
+        autograd::utils::requires_grad_leaf_error(Py_IsTrue(obj)).c_str());
     return -1;
   }
   if (requires_grad &&
@@ -2946,7 +2967,7 @@ static int THPVariable_set_requires_grad(
 }
 
 static PyObject* THPVariable_get_name(THPVariable* self, void* unused) {
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     HANDLE_TH_ERRORS
     return handle_torch_function_getter(self, "name");
     END_HANDLE_TH_ERRORS
@@ -2961,12 +2982,11 @@ static PyObject* THPVariable_get_backwards_hooks(
     THPVariable* self,
     void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "_backward_hooks");
   }
   if (self->backward_hooks) {
-    Py_INCREF(self->backward_hooks);
-    return self->backward_hooks;
+    return Py_NewRef(self->backward_hooks);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -2977,11 +2997,11 @@ static int THPVariable_set_backwards_hooks(
     PyObject* obj,
     void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "_backward_hooks", obj);
   }
   TORCH_CHECK(obj, "Deletion of _backwards_hooks not allowed!");
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     obj = nullptr;
   }
   Py_XINCREF(obj);
@@ -3001,12 +3021,11 @@ static PyObject* THPVariable_get_post_accumulate_grad_hooks(
     THPVariable* self,
     void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "_post_accumulate_grad_hooks");
   }
   if (self->post_accumulate_grad_hooks) {
-    Py_INCREF(self->post_accumulate_grad_hooks);
-    return self->post_accumulate_grad_hooks;
+    return Py_NewRef(self->post_accumulate_grad_hooks);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -3017,12 +3036,12 @@ static int THPVariable_set_post_accumulate_grad_hooks(
     PyObject* obj,
     void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(
         self, "_post_accumulate_grad_hooks", obj);
   }
   TORCH_CHECK(obj, "Deletion of _post_accumulate_grad_hooks not allowed!");
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     obj = nullptr;
   }
   Py_XINCREF(obj);
@@ -3039,7 +3058,7 @@ static int THPVariable_set_post_accumulate_grad_hooks(
 
 static PyObject* THPVariable_get_base(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "_base");
   }
   const auto& tensor = THPVariable_Unpack(self);
@@ -3052,7 +3071,7 @@ static PyObject* THPVariable_get_base(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "shape");
   }
   return THPSize_NewFromSymSizes(THPVariable_Unpack(self));
@@ -3061,7 +3080,7 @@ static PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_cpu(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_cpu");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3071,7 +3090,7 @@ static PyObject* THPVariable_is_cpu(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_cuda(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_cuda");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3081,7 +3100,7 @@ static PyObject* THPVariable_is_cuda(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_mtia(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_mtia");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3091,7 +3110,7 @@ static PyObject* THPVariable_is_mtia(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_xla(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_xla");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3101,7 +3120,7 @@ static PyObject* THPVariable_is_xla(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_ipu(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_ipu");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3111,7 +3130,7 @@ static PyObject* THPVariable_is_ipu(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_xpu(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_xpu");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3121,7 +3140,7 @@ static PyObject* THPVariable_is_xpu(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_sparse(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_sparse");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3131,7 +3150,7 @@ static PyObject* THPVariable_is_sparse(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_sparse_csr(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_sparse_csr");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3141,7 +3160,7 @@ static PyObject* THPVariable_is_sparse_csr(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_mkldnn(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_mkldnn");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3151,7 +3170,7 @@ static PyObject* THPVariable_is_mkldnn(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_mps(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_mps");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3161,7 +3180,7 @@ static PyObject* THPVariable_is_mps(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_maia(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_maia");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3171,7 +3190,7 @@ static PyObject* THPVariable_is_maia(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_vulkan(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_vulkan");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3181,7 +3200,7 @@ static PyObject* THPVariable_is_vulkan(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_quantized(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_quantized");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3191,7 +3210,7 @@ static PyObject* THPVariable_is_quantized(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_meta(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_meta");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3201,7 +3220,7 @@ static PyObject* THPVariable_is_meta(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_complex(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_complex");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3211,7 +3230,7 @@ static PyObject* THPVariable_is_complex(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_is_nested(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_nested");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3231,7 +3250,7 @@ static PyObject* THPVariable_has_symbolic_sizes_strides(
 
 static PyObject* THPVariable_dtype(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "dtype");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3241,7 +3260,7 @@ static PyObject* THPVariable_dtype(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_layout(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "layout");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -3251,7 +3270,7 @@ static PyObject* THPVariable_layout(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_device(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "device");
   }
   return THPDevice_New(THPVariable_Unpack(self).device());
@@ -3260,7 +3279,7 @@ static PyObject* THPVariable_device(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_get_nbytes(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "nbytes");
   }
   return PyLong_FromSize_t(THPVariable_Unpack(self).nbytes());
@@ -3269,7 +3288,7 @@ static PyObject* THPVariable_get_nbytes(THPVariable* self, void* unused) {
 
 static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "grad_dtype");
   }
   const auto& var = THPVariable_Unpack(self);
@@ -3288,15 +3307,15 @@ static int THPVariable_set_grad_dtype(
     PyObject* obj,
     void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "grad_dtype", obj);
   }
   const auto& var = THPVariable_Unpack(self);
   TORCH_CHECK(
-      THPDtype_Check(obj) || obj == Py_None,
+      THPDtype_Check(obj) || Py_IsNone(obj),
       "grad_dtype must be a torch.dtype or None, but got ",
       Py_TYPE(obj)->tp_name);
-  if (var.grad().defined() && obj != Py_None) {
+  if (var.grad().defined() && !Py_IsNone(obj)) {
     auto new_dtype = reinterpret_cast<THPDtype*>(obj);
     TORCH_CHECK(
         var.grad().dtype() == new_dtype->scalar_type,
@@ -3308,7 +3327,7 @@ static int THPVariable_set_grad_dtype(
         "or ensure the new grad_dtype matches the existing gradient's dtype.");
   }
   std::optional<at::ScalarType> new_dtype;
-  if (obj != Py_None) {
+  if (!Py_IsNone(obj)) {
     auto* dtype = reinterpret_cast<THPDtype*>(obj);
     new_dtype = dtype->scalar_type;
   }
@@ -3319,7 +3338,7 @@ static int THPVariable_set_grad_dtype(
 
 static PyObject* THPVariable_get_itemsize(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "itemsize");
   }
   return PyLong_FromSize_t(THPVariable_Unpack(self).itemsize());
@@ -3460,11 +3479,6 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
     {"nbytes", (getter)THPVariable_get_nbytes, nullptr, nullptr, nullptr},
     {"itemsize", (getter)THPVariable_get_itemsize, nullptr, nullptr, nullptr},
-    {"names",
-     (getter)THPVariable_get_names,
-     (setter)THPVariable_set_names,
-     nullptr,
-     nullptr},
     {"real",
      (getter)PropertyReal::getter,
      (setter)THPVariable_set_real,
@@ -3791,13 +3805,10 @@ static int THPVariable_traverse(PyObject* self, visitproc visit, void* arg) {
       if (autograd_meta) {
         // Do NOT call grad_fn() here as that might trigger a recompute
         const auto& grad_fn = autograd_meta->grad_fn_;
-        if (grad_fn && grad_fn.use_count() == 1) {
-          // All Node can have a pyobj (stored in "pyobj_")
-          Py_VISIT(grad_fn->pyobj());
-          // PyNode are special as they also have an "obj" field
-          if (auto py_node_fn = dynamic_cast<PyNode*>(grad_fn.get())) {
-            Py_VISIT(py_node_fn->obj);
-          }
+        // Check that this python object is the sole owner of the grad_fn.
+        // The grad_fn's PyObject holds the other reference.
+        if (grad_fn && grad_fn.use_count() == 2) {
+          Py_VISIT(grad_fn->pyobj_slot()->load_pyobj());
         }
       }
     }
@@ -3893,21 +3904,21 @@ static void initTensorImplConversion(PyObject* module) {
 
 bool THPVariable_initModule(PyObject* module) {
   THPVariableMetaType.tp_base = &PyType_Type;
-  if (PyType_Ready(&THPVariableMetaType) < 0)
+  if (PyModule_AddType(module, &THPVariableMetaType) < 0)
     return false;
-  Py_INCREF(&THPVariableMetaType);
-  PyModule_AddObject(module, "_TensorMeta", (PyObject*)&THPVariableMetaType);
 
   static std::vector<PyMethodDef> methods;
   THPUtils_addPyMethodDefs(methods, torch::autograd::variable_methods);
   THPUtils_addPyMethodDefs(methods, extra_methods);
   THPVariableType.tp_methods = methods.data();
-  if (PyType_Ready(&THPVariableType) < 0)
+  if (PyModule_AddType(module, &THPVariableType) < 0)
     return false;
   Py_INCREF(&THPVariableType);
-  PyModule_AddObject(module, "TensorBase", (PyObject*)&THPVariableType);
-  Py_INCREF(&THPVariableType);
-  PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
+  if (PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType) <
+      0) {
+    Py_DECREF(&THPVariableType);
+    return false;
+  }
 #ifdef USE_DISTRIBUTED
   PyModule_AddObject(
       module,

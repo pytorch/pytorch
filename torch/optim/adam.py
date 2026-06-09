@@ -172,7 +172,7 @@ class Adam(Optimizer):
                             device=p.device,
                         )
                         if group["capturable"] or group["fused"]
-                        else torch.tensor(0.0, dtype=_get_scalar_dtype())
+                        else torch.tensor(0.0, dtype=_get_scalar_dtype(), device="cpu")
                     )
                     # Exponential moving average of gradient values
                     state["exp_avg"] = torch.zeros_like(
@@ -415,7 +415,7 @@ def _single_tensor_adam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 param.mul_(1 - lr * weight_decay)
             else:
                 # Nested if is necessary to bypass jitscript rules
@@ -687,7 +687,7 @@ def _multi_tensor_adam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 torch._foreach_mul_(device_params, 1 - lr * weight_decay)
             else:
                 # Reuse the intermediate memory (device_grads) already allocated for maximize

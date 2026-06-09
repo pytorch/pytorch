@@ -40,7 +40,7 @@ from torch._logging._internal import trace_structured_artifact
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactManager,
+    CacheArtifactRecorder,
 )
 from torch.utils._ordered_set import OrderedSet
 
@@ -48,7 +48,7 @@ from torch.utils._ordered_set import OrderedSet
 if TYPE_CHECKING:
     import types
 
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
 
 
@@ -57,6 +57,7 @@ class ReservedWorkflowIdUserError(ValueError):
 
 
 log = logging.getLogger(__name__)
+symbolic_shape_log = logging.getLogger("torch.fx.experimental.symbolic_shapes")
 
 LOCK_TIMEOUT = 10
 
@@ -113,7 +114,7 @@ LOCK_TIMEOUT = 10
 
 @functools.cache
 def _hash_containing_file(filepath: str) -> str:
-    # if the file does not exists we consider filepath to be the hash.
+    # if the file does not exist we consider filepath to be the hash.
     if not os.path.exists(filepath):
         return filepath
 
@@ -294,13 +295,16 @@ class FrameStateSizeEntry:
         return f"unusual {repr(self)}"
 
     def __post_init__(self) -> None:
-        assert not isinstance(self.scalar, torch.SymInt), self.scalar
+        if isinstance(self.scalar, torch.SymInt):
+            raise AssertionError(self.scalar)
         if isinstance(self.size, tuple):
             for s in self.size:
-                assert not isinstance(s, torch.SymInt), s
+                if isinstance(s, torch.SymInt):
+                    raise AssertionError(s)
         if isinstance(self.stride, tuple):
             for s1 in self.stride:
-                assert not isinstance(s1, torch.SymInt), s1
+                if isinstance(s1, torch.SymInt):
+                    raise AssertionError(s1)
 
     def is_size_dynamic(self, dim: int) -> bool:
         if self.size is auto_dynamic:
@@ -420,7 +424,7 @@ class FrameStateSizeEntry:
 
 
 def update_automatic_dynamic(
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     name: str,
     entry: FrameStateSizeEntry,
     *,
@@ -437,6 +441,10 @@ def update_automatic_dynamic(
         # Do some logs (damn, I spend more code logging than I do actually doing
         # the updates lol)
         if is_update and old_entry.scalar != mut_entry.scalar:
+            symbolic_shape_log.info(
+                "marking %s as dynamic (from automatic dynamic/PGO)",
+                name,
+            )
             log.debug(
                 "automatic dynamic int %s val %s != %s",
                 name,
@@ -471,6 +479,10 @@ def update_automatic_dynamic(
                 getattr(old_entry, tup_name)
                 if i is None
                 else getattr(old_entry, tup_name)[i]
+            )
+            symbolic_shape_log.info(
+                "marking %s as dynamic (from automatic dynamic/PGO)",
+                name,
             )
             log.debug(
                 "automatic dynamic %s %s %s %s != %s",
@@ -528,7 +540,7 @@ def update_automatic_dynamic(
 
 
 def process_automatic_dynamic(
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     name: str,
     entry: FrameStateSizeEntry,
     *,
@@ -569,7 +581,10 @@ def process_automatic_dynamic(
                     sub_state.automatic_dynamic[name],
                     is_unspecialized_nn_module=is_unspecialized_nn_module,
                 )
-        assert res is not None
+        if res is None:
+            raise AssertionError(
+                "expected at least one matching automatic_dynamic entry across ranks"
+            )
         return res
 
 
@@ -754,7 +769,10 @@ class PGOCacheArtifact(CacheArtifact):
         meta = write_local_impl(
             self._rewrite_cache_key_for_mega_cache(self.key), self.content
         )
-        assert meta is not None
+        if meta is None:
+            raise AssertionError(
+                "write_local_impl returned None during PGO cache population"
+            )
 
     @override
     @staticmethod
@@ -778,7 +796,10 @@ class PGOCacheArtifact(CacheArtifact):
 
 def hit(key: str, ty: str) -> defaultdict[CodeId, CodeState]:
     global _INIT_CODE_STATE
-    assert isinstance(_CODE_STATE, defaultdict)
+    if not isinstance(_CODE_STATE, defaultdict):
+        raise AssertionError(
+            f"expected _CODE_STATE to be a defaultdict, got {type(_CODE_STATE)}"
+        )
     log.info("get_code_state %s hit %s, %d entries", key, ty, len(_CODE_STATE))
     trace_structured_artifact(
         f"get_{ty}_code_state",
@@ -810,8 +831,8 @@ def get_local_code_state(cache_key: str) -> defaultdict[CodeId, CodeState] | Non
                         "get_code_state failed while reading %s", path, exc_info=True
                     )
                 else:
-                    CacheArtifactManager.record_artifact(
-                        PGOCacheArtifact.type(), cache_key, content
+                    CacheArtifactRecorder(PGOCacheArtifact.type(), cache_key).record(
+                        content
                     )
                     return hit(path, "local")
     return None
@@ -830,9 +851,15 @@ def lookup_remote_cache_entry(
     else:
         if cache_data is not None:
             try:
-                assert isinstance(cache_data, dict)
+                if not isinstance(cache_data, dict):
+                    raise AssertionError(
+                        f"expected cache_data to be a dict, got {type(cache_data)}"
+                    )
                 data = cache_data["data"]
-                assert isinstance(data, str)
+                if not isinstance(data, str):
+                    raise AssertionError(
+                        f"expected cache_data['data'] to be a str, got {type(data)}"
+                    )
                 payload = base64.b64decode(data)
                 if event_name is not None:
                     CompileEventLogger.pt2_compile(
@@ -846,8 +873,8 @@ def lookup_remote_cache_entry(
                     exc_info=True,
                 )
             else:
-                CacheArtifactManager.record_artifact(
-                    PGOCacheArtifact.type(), cache_key, payload
+                CacheArtifactRecorder(PGOCacheArtifact.type(), cache_key).record(
+                    payload
                 )
         else:
             log.info("get_code_state remote miss on %s", cache_key)
@@ -876,7 +903,10 @@ def get_extra_remote_code_state(cache_key: str) -> None:
     Reads an additional PGO profile from the given cache key, and merges it with the default PGO profile.
     """
     global _CODE_STATE
-    assert _CODE_STATE is not None
+    if _CODE_STATE is None:
+        raise AssertionError(
+            "_CODE_STATE must be initialized before reading extra remote code state"
+        )
 
     remote_cache = get_remote_cache()
     if remote_cache is not None:
@@ -893,7 +923,10 @@ def get_extra_remote_code_state(cache_key: str) -> None:
                 len(code_state) if code_state is not None else 0,
             )
             if code_state is not None:
-                assert not _CODE_STATE
+                if _CODE_STATE:
+                    raise AssertionError(
+                        "expected _CODE_STATE to be empty before merging extra remote state"
+                    )
                 _CODE_STATE = code_state
                 # log to tlparse
                 trace_structured_artifact(
@@ -933,7 +966,8 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
 
     log.info("get_code_state using default")
 
-    assert _CODE_STATE is not None
+    if _CODE_STATE is None:
+        raise AssertionError("_CODE_STATE should have been initialized above")
     return _CODE_STATE
 
 
@@ -987,13 +1021,14 @@ def write_local_impl(cache_key: str, pickled_code: bytes) -> tuple[str, int] | N
 def put_local_code_state(cache_key: str) -> None:
     with dynamo_timed(name := "pgo.put_local_code_state", log_pt2_compile_event=True):
         CompileEventLogger.pt2_compile(name, cache_key=cache_key)
-        assert _CODE_STATE is not None
+        if _CODE_STATE is None:
+            raise AssertionError(
+                "_CODE_STATE must be initialized before writing local code state"
+            )
 
         pickled_code = pickle.dumps(_CODE_STATE)
 
-        CacheArtifactManager.record_artifact(
-            PGOCacheArtifact.type(), cache_key, pickled_code
-        )
+        CacheArtifactRecorder(PGOCacheArtifact.type(), cache_key).record(pickled_code)
 
         meta = write_local_impl(cache_key, pickled_code)
         if meta is None:
@@ -1022,7 +1057,10 @@ def put_remote_code_state(cache_key: str, extra_code_state: bool = False) -> Non
         dynamo_compile_column_us="pgo_put_remote_code_state_time_us",
     ):
         CompileEventLogger.pt2_compile(name, cache_key=cache_key)
-        assert _CODE_STATE is not None
+        if _CODE_STATE is None:
+            raise AssertionError(
+                "_CODE_STATE must be initialized before writing remote code state"
+            )
 
         remote_cache = get_remote_cache()
 

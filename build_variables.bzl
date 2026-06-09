@@ -1,6 +1,5 @@
-# WARNING: the contents of this file must BOTH be valid Starlark (for Buck and
-
-# Bazel) as well as valid Python (for our cmake build).  This means that
+# WARNING: the contents of this file must BOTH be valid Starlark (for Buck)
+# as well as valid Python (for our cmake build).  This means that
 # load() directives are not allowed (as they are not recognized by Python).
 # If you want to fix this, figure out how run this file from cmake with a proper
 # Starlark interpreter as part of the default OSS build process.  If you need
@@ -16,23 +15,35 @@ GENERATED_LAZY_TS_CPP = [
     "lazy/generated/RegisterLazy.cpp",
 ]
 
-def libtorch_generated_sources(gencode_pattern):
-    return [gencode_pattern.format(name) for name in [
-        "torch/csrc/autograd/generated/Functions.cpp",
-        "torch/csrc/autograd/generated/VariableType_0.cpp",
-        "torch/csrc/autograd/generated/VariableType_1.cpp",
-        "torch/csrc/autograd/generated/VariableType_2.cpp",
-        "torch/csrc/autograd/generated/VariableType_3.cpp",
-        "torch/csrc/autograd/generated/VariableType_4.cpp",
-        "torch/csrc/autograd/generated/ViewFuncs.cpp",
-        "torch/csrc/autograd/generated/TraceType_0.cpp",
-        "torch/csrc/autograd/generated/TraceType_1.cpp",
-        "torch/csrc/autograd/generated/TraceType_2.cpp",
-        "torch/csrc/autograd/generated/TraceType_3.cpp",
-        "torch/csrc/autograd/generated/TraceType_4.cpp",
-        "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
-        "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
-    ]]
+def libtorch_generated_sources(gencode_pattern, path_prefix="torch/csrc/", only_type_vars=False):
+    type_vars = [
+        "autograd/generated/VariableType_0.cpp",
+        "autograd/generated/VariableType_1.cpp",
+        "autograd/generated/VariableType_2.cpp",
+        "autograd/generated/VariableType_3.cpp",
+        "autograd/generated/VariableType_4.cpp",
+        "autograd/generated/VariableType_5.cpp",
+        "autograd/generated/VariableType_6.cpp",
+        "autograd/generated/VariableType_7.cpp",
+        "autograd/generated/VariableType_8.cpp",
+        "autograd/generated/VariableType_9.cpp",
+        "autograd/generated/TraceType_0.cpp",
+        "autograd/generated/TraceType_1.cpp",
+        "autograd/generated/TraceType_2.cpp",
+        "autograd/generated/TraceType_3.cpp",
+        "autograd/generated/TraceType_4.cpp",
+        "autograd/generated/TraceType_5.cpp",
+        "autograd/generated/TraceType_6.cpp",
+        "autograd/generated/TraceType_7.cpp",
+        "autograd/generated/TraceType_8.cpp",
+        "autograd/generated/TraceType_9.cpp",
+        "autograd/generated/ADInplaceOrViewType_0.cpp",
+        "autograd/generated/ADInplaceOrViewType_1.cpp",
+    ] + ([] if only_type_vars else [
+        "autograd/generated/Functions.cpp",
+        "autograd/generated/ViewFuncs.cpp",
+    ])
+    return [gencode_pattern.format(path_prefix + name) for name in type_vars]
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
@@ -102,6 +113,7 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/profiler/collection.cpp",
+    "torch/csrc/profiler/cupti_monitor_native.cpp",
     "torch/csrc/profiler/data_flow.cpp",
     "torch/csrc/profiler/kineto_shim.cpp",
     "torch/csrc/mtia/profiler/MTIAMemoryProfiler.cpp",
@@ -484,6 +496,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/inductor_ops.cpp",
     "torch/csrc/jit/serialization/pickle.cpp",
     "torch/csrc/shim_common.cpp",
+    "torch/csrc/shim_exception_state.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -742,6 +755,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/cuda/shim_common.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner_cuda.cpp",
     "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
+    "torch/csrc/inductor/inductor_ops_gpu.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/stubs/cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
@@ -776,6 +790,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/CudaDMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/nccl_extension.cu",
+    "torch/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp",
@@ -808,6 +823,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/imethod.cpp",
     "torch/csrc/api/src/jit.cpp",
     "torch/csrc/api/src/mps.cpp",
+    "torch/csrc/api/src/print.cpp",
     "torch/csrc/api/src/serialize.cpp",
     "torch/csrc/api/src/nn/init.cpp",
     "torch/csrc/api/src/nn/module.cpp",
@@ -909,13 +925,13 @@ libtorch_python_core_sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/PyInterpreter.cpp",
     "torch/csrc/PyInterpreterHooks.cpp",
-    "torch/csrc/python_dimname.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/StorageMethods.cpp",
     "torch/csrc/StorageSharing.cpp",
     "torch/csrc/Stream.cpp",
     "torch/csrc/Event.cpp",
+    "torch/csrc/TensorIterator.cpp",
     "torch/csrc/TypeInfo.cpp",
     "torch/csrc/acc/Module.cpp",
     "torch/csrc/api/src/python/init.cpp",
@@ -1136,7 +1152,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/FunctionalizeFallbackKernel.cpp",
     "aten/src/ATen/MemoryOverlap.cpp",
     "aten/src/ATen/MapAllocator.cpp",
-    "aten/src/ATen/NamedTensorUtils.cpp",
     "aten/src/ATen/NestedTensorImpl.cpp",
     "aten/src/ATen/ParallelCommon.cpp",
     "aten/src/ATen/ParallelNative.cpp",
@@ -1150,7 +1165,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/TensorGeometry.cpp",
     "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorMeta.cpp",
-    "aten/src/ATen/TensorNames.cpp",
     "aten/src/ATen/TensorUtils.cpp",
     "aten/src/ATen/ThreadLocalState.cpp",
     "aten/src/ATen/FuncTorchTLS.cpp",
@@ -1163,13 +1177,11 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/DeprecatedTypeProperties.cpp",
     "aten/src/ATen/core/DeprecatedTypePropertiesRegistry.cpp",
     "aten/src/ATen/core/Dict.cpp",
-    "aten/src/ATen/core/Dimname.cpp",
     "aten/src/ATen/core/Formatting.cpp",
     "aten/src/ATen/core/function_schema.cpp",
     "aten/src/ATen/core/Generator.cpp",
     "aten/src/ATen/core/PythonOpRegistrationTrampoline.cpp",
     "aten/src/ATen/core/List.cpp",
-    "aten/src/ATen/core/NamedTensor.cpp",
     "aten/src/ATen/core/Tensor.cpp",
     "aten/src/ATen/core/VariableFallbackKernel.cpp",
     "aten/src/ATen/core/VariableHooksInterface.cpp",
@@ -1454,7 +1466,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/NaiveConvolutionTranspose2d.cpp",
     "aten/src/ATen/native/NaiveConvolutionTranspose3d.cpp",
     "aten/src/ATen/native/NaiveDilatedConvolution.cpp",
-    "aten/src/ATen/native/NamedTensor.cpp",
     "aten/src/ATen/native/Normalization.cpp",
     "aten/src/ATen/native/Onehot.cpp",
     "aten/src/ATen/native/PackedSequence.cpp",
@@ -1503,6 +1514,7 @@ aten_native_source_non_codegen_list = [
     # "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/UpSampleBicubic2d.cpp",
     "aten/src/ATen/native/UpSampleBilinear2d.cpp",
+    "aten/src/ATen/native/UpSampleLanczos2d.cpp",
     "aten/src/ATen/native/UpSampleLinear1d.cpp",
     "aten/src/ATen/native/UpSampleNearest1d.cpp",
     "aten/src/ATen/native/UpSampleNearest2d.cpp",

@@ -186,10 +186,12 @@ class CppTemplateKernel(CppKernel):
         assert isinstance(permuted, ir.ReinterpretView)
         return permuted
 
-    def maybe_codegen_profile(self) -> str:
+    def maybe_codegen_profile(self, prefix_kernel_name: str | None = None) -> str:
         if config.cpp.enable_kernel_profile:
             graph_id = V.graph.graph_id
             prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
+            if prefix and prefix_kernel_name:
+                prefix += prefix_kernel_name + "_"
             handle_str = (
                 "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
                 f'record_{prefix}{self.kernel_name}_("{prefix}{self.kernel_name}", nullptr);'
@@ -384,7 +386,7 @@ class CppTemplateKernel(CppKernel):
         1. `src` and `dst` buffer could be the same buffer in which case we are doing in-place compute
            and stores. In case `epilogue_nodes` are not provided, we do nothing.
         2. The `epilogue_nodes`, if exist, have computations on `src` before storing to `dst` but since
-           they come form the original Inductor IR, they might need to be adjusted before working with
+           they come from the original Inductor IR, they might need to be adjusted before working with
            `src` and `dst` as outlined below:
            a) `src` or `dst` buffer could be a sub-slice of the ranges the `epilogue_nodes`work on.
               In this case, the `offsets` could be provided to adjust the indices passed to

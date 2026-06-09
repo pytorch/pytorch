@@ -11,6 +11,16 @@ from torch.testing._internal.common_utils import make_dynamo_test
 lst = []
 
 
+class AlwaysEqualForListRemove:
+    def __eq__(self, other):
+        return True
+
+
+class NeverEqualForListRemove:
+    def __eq__(self, other):
+        return False
+
+
 class TupleTests(torch._dynamo.test_case.TestCase):
     # Tuple methods
     # + count
@@ -261,7 +271,8 @@ class ListTests(TupleTests):
         p = self.thetype("abcd")
         self.assertEqual(p.pop(), "d")
         self.assertEqual(p.pop(1), "b")
-        self.assertRaises(IndexError, p.pop, 10)
+        # The length of p is now 2, valid indices are 0, 1
+        self.assertRaises(IndexError, p.pop, 2)
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.pop, 2, 3)
@@ -276,6 +287,19 @@ class ListTests(TupleTests):
         # Wrong number of arguments
         self.assertRaises(TypeError, p.remove)
         self.assertRaises(TypeError, p.remove, 2, 3)
+
+    @make_dynamo_test
+    def test_remove_uses_item_richcompare(self):
+        p = [AlwaysEqualForListRemove()]
+        self.assertIsNone(p.remove(NeverEqualForListRemove()))
+        self.assertEqual(p, [])
+
+    @make_dynamo_test
+    def test_remove_matches_identity_before_richcompare(self):
+        item = NeverEqualForListRemove()
+        p = [item]
+        self.assertIsNone(p.remove(item))
+        self.assertEqual(p, [])
 
     @make_dynamo_test
     def test_reverse(self):

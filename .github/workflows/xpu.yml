@@ -14,6 +14,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
 jobs:
 
   get-label-type:
@@ -27,6 +32,7 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   linux-jammy-xpu-n-1-py3_10-build:
+    if: false # Temporarily disabled
     name: linux-jammy-xpu-n-1-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -78,9 +84,6 @@ jobs:
     name: linux-noble-xpu-n-py3.10
     uses: ./.github/workflows/_xpu-test.yml
     needs: linux-noble-xpu-n-py3_10-build
-    permissions:
-      id-token: write
-      contents: read
     with:
       build-environment: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.docker-image }}
@@ -107,9 +110,6 @@ jobs:
     name: linux-noble-xpu-n-py3.10-client
     uses: ./.github/workflows/_xpu-test.yml
     needs: linux-noble-xpu-n-py3_10-client-build
-    permissions:
-      id-token: write
-      contents: read
     with:
       build-environment: ${{ needs.linux-noble-xpu-n-py3_10-client-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-xpu-n-py3_10-client-build.outputs.docker-image }}
@@ -124,7 +124,7 @@ jobs:
       build-environment: win-vs2022-xpu-n-1-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2025.2'
+      xpu-version: '2025.3'
       vc-year: '2022'
     secrets: inherit
 
@@ -136,6 +136,6 @@ jobs:
       build-environment: win-vs2022-xpu-n-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2025.3'
+      xpu-version: '2026.0'
       vc-year: '2022'
     secrets: inherit

@@ -71,8 +71,11 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-{%- for config in build_configs %}
-  !{{ config["build_name"] }}-build:
+{%- if build_configs %}
+{%- set first = build_configs[0] %}
+
+  wheel-build:
+    name: ${{ matrix.build_name }}-build
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     {%- if os == "windows-arm64" %}
@@ -85,10 +88,39 @@ jobs:
     {%- endif %}
     {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes_windows_binary }}
-    !{{ upload.binary_env(config, True) }}
-    {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
-    {%- endif %}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        {%- for config in build_configs %}
+          - desired_python: "!{{ config['python_version'] | default('3.10') }}"
+            desired_cuda: "!{{ config['desired_cuda'] }}"
+            gpu_arch_version: "!{{ config['gpu_arch_version'] | default('') }}"
+            gpu_arch_type: "!{{ config['gpu_arch_type'] }}"
+            build_name: "!{{ config['build_name'] }}"
+            {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0 %}
+            pytorch_extra_install_requirements: "!{{ config['pytorch_extra_install_requirements'] }}"
+            {%- else %}
+            pytorch_extra_install_requirements: ""
+            {%- endif %}
+            {%- if config['libtorch_variant'] is defined %}
+            libtorch_config: "!{{ config['libtorch_config'] }}"
+            libtorch_variant: "!{{ config['libtorch_variant'] }}"
+            {%- endif %}
+        {%- endfor %}
+    env:
+      PYTORCH_ROOT: ${{ github.workspace }}
+      PACKAGE_TYPE: !{{ first['package_type'] }}
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
+      {%- if first['package_type'] == 'libtorch' %}
+      LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
+      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+      {%- endif %}
     steps:
 {%- if os == "windows-arm64" %}
       - name: Populate binary env
@@ -147,37 +179,67 @@ jobs:
       - uses: !{{ common.upload_artifact_action }}
         if: always()
         with:
-          name: !{{ config["build_name"] }}
+          name: ${{ matrix.build_name }}
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
 {%- if os != "windows-arm64" %}
       !{{ common.wait_and_kill_ssh_windows() }}
 {% endif %}
-  !{{ config["build_name"] }}-test:  # Testing
+
+  wheel-test:
+    name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - !{{ config["build_name"] }}-build
-      - get-label-type
+    needs: [get-label-type, wheel-build]
 {%- if os == "windows-arm64" %}
     runs-on: "windows-11-arm64-preview"
 {%- else %}
-{%- if config["gpu_arch_type"] == "cuda" %}
-{%- if branches == "nightly" %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-{%- else %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge.nonephemeral"
-{%- endif %}
-{%- else %}
-{%- if branches == "nightly" %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-{%- else %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-{%- endif %}
-{%- endif %}
+    runs-on: ${{ matrix.runs_on }}
 {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes_windows_binary }}
-    !{{ upload.binary_env(config, True) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        {%- for config in build_configs %}
+        {%- if os == "windows-arm64" %}
+          {%- set _runs_on = "windows-11-arm64-preview" %}
+        {%- elif config['gpu_arch_type'] == "cuda" %}
+          {%- if branches == "nightly" %}
+            {%- set _runs_on = "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge" %}
+          {%- else %}
+            {%- set _runs_on = "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge.nonephemeral" %}
+          {%- endif %}
+        {%- else %}
+          {%- if branches == "nightly" %}
+            {%- set _runs_on = "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge" %}
+          {%- else %}
+            {%- set _runs_on = "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" %}
+          {%- endif %}
+        {%- endif %}
+          - desired_python: "!{{ config['python_version'] | default('3.10') }}"
+            desired_cuda: "!{{ config['desired_cuda'] }}"
+            gpu_arch_version: "!{{ config['gpu_arch_version'] | default('') }}"
+            gpu_arch_type: "!{{ config['gpu_arch_type'] }}"
+            build_name: "!{{ config['build_name'] }}"
+            runs_on: "!{{ _runs_on }}"
+            {%- if config['libtorch_variant'] is defined %}
+            libtorch_config: "!{{ config['libtorch_config'] }}"
+            libtorch_variant: "!{{ config['libtorch_variant'] }}"
+            {%- endif %}
+        {%- endfor %}
+    env:
+      PYTORCH_ROOT: ${{ github.workspace }}
+      PACKAGE_TYPE: !{{ first['package_type'] }}
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      {%- if first['package_type'] == 'libtorch' %}
+      LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
+      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+      {%- endif %}
     steps:
 {%- if os == "windows-arm64" %}
       - name: Populate binary env
@@ -215,7 +277,7 @@ jobs:
       - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
         with:
-          name: !{{ config["build_name"] }}
+          name: ${{ matrix.build_name }}
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Populate binary env
         shell: bash
@@ -228,16 +290,59 @@ jobs:
 {%- if os != "windows-arm64" %}
       !{{ common.wait_and_kill_ssh_windows() }}
 {%- endif %}
-  {%- if branches == "nightly" %}
-  !{{ upload.upload_binaries(config, True) }}
-  {%- endif %}
-{%- endfor %}
+
+{%- if branches == "nightly" %}
+
+  wheel-upload:
+    name: ${{ matrix.build_name }}-upload
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: wheel-test
+    uses: ./.github/workflows/_binary-upload.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        {%- for config in build_configs %}
+          - desired_python: "!{{ config['python_version'] | default('3.10') }}"
+            desired_cuda: "!{{ config['desired_cuda'] }}"
+            gpu_arch_version: "!{{ config['gpu_arch_version'] | default('') }}"
+            gpu_arch_type: "!{{ config['gpu_arch_type'] }}"
+            build_name: "!{{ config['build_name'] }}"
+            {%- if config['libtorch_variant'] is defined %}
+            libtorch_config: "!{{ config['libtorch_config'] }}"
+            libtorch_variant: "!{{ config['libtorch_variant'] }}"
+            {%- endif %}
+        {%- endfor %}
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: !{{ first['package_type'] }}
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
+      DOCKER_IMAGE: "!{{ first['container_image'] }}"
+      DOCKER_IMAGE_TAG_PREFIX: "!{{ first['container_image_tag_prefix'] }}"
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      {%- if first['package_type'] == 'libtorch' %}
+      LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
+      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+      {%- endif %}
+      build_name: ${{ matrix.build_name }}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+{%- endif %}
+{%- endif %}
 
 {%- for lt_config in libtorch_extraction_configs %}
   !{{ lt_config["build_name"] }}-extract:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - !{{ lt_config["source_wheel_build_name"] }}-build
+      - wheel-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     timeout-minutes: 60

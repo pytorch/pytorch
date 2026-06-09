@@ -1,4 +1,5 @@
 import sys
+from typing import Literal
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE, precedence
@@ -97,6 +98,9 @@ class ExprPrinter(StrPrinter):
             f"_print_NegativeInfinity not implemented for {type(self)}"
         )
 
+    def _print_NaN(self, expr: sympy.Expr) -> str:
+        raise NotImplementedError(f"_print_NaN not implemented for {type(self)}")
+
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         raise NotImplementedError(f"_print_FloorDiv not implemented for {type(self)}")
 
@@ -175,6 +179,9 @@ class PythonPrinter(ExprPrinter):
 
     def _print_NegativeInfinity(self, expr: sympy.Expr) -> str:
         return "-math.inf"
+
+    def _print_NaN(self, expr: sympy.Expr) -> str:
+        return "math.nan"
 
     # WARNING: this is dangerous for Triton, which has C-style modulus
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
@@ -535,25 +542,29 @@ class CppPrinter(ExprPrinter):
         r = f"std::ceil({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
-    def _print_Min(self, expr: sympy.Expr) -> str:
+    def _print_min_max(self, expr: sympy.Expr, name: Literal["min", "max"]) -> str:
         # pyrefly: ignore [missing-attribute]
         args = [self._print(a) for a in expr.args]
+        if not expr.is_integer:
+            args = [f"static_cast<double>({arg})" for arg in args]
+            if len(args) == 2:
+                return f"std::{name}({args[0]}, {args[1]})"
+            # Initializer list overload
+            il = "{" + ", ".join(args) + "}"
+            return f"std::{name}<double>({il})"
+
         if len(args) == 2:
-            return f"std::min(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
+            return f"std::{name}(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"
-            return f"std::min<{INDEX_TYPE}>({il})"
+            return f"std::{name}<{INDEX_TYPE}>({il})"
+
+    def _print_Min(self, expr: sympy.Expr) -> str:
+        return self._print_min_max(expr, "min")
 
     def _print_Max(self, expr: sympy.Expr) -> str:
-        # pyrefly: ignore [missing-attribute]
-        args = [self._print(a) for a in expr.args]
-        if len(args) == 2:
-            return f"std::max(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
-        else:
-            # Initializer list overload
-            il = "{" + ", ".join(args) + "}"
-            return f"std::max<{INDEX_TYPE}>({il})"
+        return self._print_min_max(expr, "max")
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
@@ -655,3 +666,6 @@ class CppPrinter(ExprPrinter):
 
     def _print_NegativeInfinity(self, expr: sympy.Expr) -> str:
         return f"-{self._print_Infinity(expr)}"
+
+    def _print_NaN(self, expr: sympy.Expr) -> str:
+        return "std::numeric_limits<double>::quiet_NaN()"
