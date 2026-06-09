@@ -8431,18 +8431,23 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
     """Lower GEMM epilogue HOPs through backend-specific fused template paths."""
     backend = kernel_options.get("backend", "TRITON")
     split_k = kernel_options.get("SPLIT_K", False)
+    split_k_gemm_ops = (torch.ops.aten.mm.default, torch.ops.aten.addmm.default)
     if split_k and (
-        backend not in ("TRITON", "QUACK") or gemm_op != torch.ops.aten.mm.default
+        backend not in ("TRITON", "QUACK") or gemm_op not in split_k_gemm_ops
     ):
         raise NotImplementedError(
-            "GEMM epilogue SPLIT_K currently supports only the TRITON/QUACK aten.mm path"
+            "GEMM epilogue SPLIT_K currently supports only the TRITON/QUACK aten.mm/addmm path"
         )
     if split_k:
         from torch._inductor.kernel_inputs import MMKernelInputs
         from torch._inductor.select_algorithm import autotune_select_algorithm
         from torch._inductor.utils import get_k_splits
 
-        mat1, mat2 = args
+        bias = None
+        if gemm_op == torch.ops.aten.addmm.default:
+            bias, mat1, mat2 = args
+        else:
+            mat1, mat2 = args
         m, k = mat1.get_size()
         n = mat2.get_size()[1]
         if backend == "QUACK":
@@ -8458,7 +8463,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 mat1.get_device(), torch.float32, [k_split, m, n], [m * n, n, 1]
             )
             input_nodes = [
-                ir.TemplateBuffer.realize_template_input(arg) for arg in args
+                ir.TemplateBuffer.realize_template_input(arg) for arg in (mat1, mat2)
             ]
             choices: list[Any] = []
             quack_split_k_template.maybe_append_choice(
@@ -8480,6 +8485,14 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                     "mm",
                 )
                 acc, _ = autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
+        if gemm_op == torch.ops.aten.addmm.default:
+            alpha = gemm_kwargs.get("alpha", 1.0)
+            beta = gemm_kwargs.get("beta", 1.0)
+            if alpha != 1:
+                acc = lowerings[aten.mul](alpha, acc)
+            if beta != 0:
+                bias_term = bias if beta == 1 else lowerings[aten.mul](beta, bias)
+                acc = lowerings[aten.add](bias_term, acc)
         output = process_subgraph_nodes_replacing_gemm(
             subgraph.graph_module, list(args), gemm_op, acc
         )
