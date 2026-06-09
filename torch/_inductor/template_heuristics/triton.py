@@ -31,6 +31,7 @@ from ..kernel.mm import (
 )
 from ..kernel.mm_plus_mm import mm_plus_mm_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
+from ..runtime.hints import DeviceProperties
 from ..utils import (
     get_backend_num_stages,
     get_default_kpack,
@@ -2239,7 +2240,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 # One MFMA per warp, capped at 2 * parallel_mi_cu.
                 tile_area = cfg.mt.m * cfg.mt.n
                 try:
-                    warp_size = torch.cuda.get_device_properties(device).warp_size
+                    warp_size = DeviceProperties.create(device).warp_size or 64
                 except (RuntimeError, AttributeError) as e:
                     # Fallback to standard warp size if device properties unavailable
                     log.warning(
