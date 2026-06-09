@@ -583,6 +583,93 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
     )
 
 
+def _emit_quack_local_n_norm(
+    local_norm: QuackLocalNormInfo,
+    env: dict[torch.fx.Node, Any],
+    kernel: _QuackCuteDSLKernel,
+) -> str:
+    if 32 % local_norm.group_size != 0:
+        raise NotImplementedError(
+            "QUACK reductions feeding the main output currently require a "
+            "power-of-two group size that divides the same-fragment N width 32; "
+            "aux reductions can use other static groups"
+        )
+    source = _quack_cute_arg(local_norm.source_node, env)
+    groups_per_fragment = 32 // local_norm.group_size
+    grouped_name = f"tmp{kernel.cse.index}"
+    kernel.cse.index += 1
+    sum_name = f"tmp{kernel.cse.index}"
+    kernel.cse.index += 1
+    broadcast_name = f"tmp{kernel.cse.index}"
+    kernel.cse.index += 1
+    out_name = f"tmp{kernel.cse.index}"
+    kernel.cse.index += 1
+    kernel.body.writeline(
+        f"{grouped_name} = {source}.reshape("
+        f"((1, {local_norm.group_size}, {groups_per_fragment}), 1, 1))"
+    )
+    kernel.body.writeline(
+        f"{sum_name} = {grouped_name}.reduce("
+        "cute.ReductionOp.ADD, init_val=0.0, "
+        "reduction_profile=((None, 1, None), 1, 1))"
+    )
+    kernel.body.writeline(
+        f"{broadcast_name} = {sum_name}.reshape("
+        f"((1, 1, {groups_per_fragment}), 1, 1)).broadcast_to({grouped_name}.shape)"
+    )
+    kernel.body.writeline(
+        f"{out_name} = ({grouped_name} / {broadcast_name}).reshape({source}.shape)"
+    )
+    return out_name
+
+
+def _compile_quack_pointwise_nodes(
+    graph_module: torch.fx.GraphModule,
+    mm_node: torch.fx.Node,
+    skip_nodes: frozenset[torch.fx.Node],
+    env: dict[torch.fx.Node, Any],
+    kernel: _QuackCuteDSLKernel,
+    handler: Any,
+) -> None:
+    from torch._inductor.virtualized import ops, V
+
+    with V.set_kernel_handler(kernel), V.set_ops_handler(handler):
+        for node in graph_module.graph.nodes:
+            if (
+                node.op in ("placeholder", "output")
+                or node is mm_node
+                or node in skip_nodes
+            ):
+                continue
+            with V.set_current_node(node):
+                if node.op == "call_method":
+                    arg = _quack_cute_arg(node.args[0], env)
+                    if node.target == "relu":
+                        env[node] = ops.relu(arg).value
+                        continue
+                    if node.target == "clamp":
+                        result = arg
+                        if node.kwargs.get("min") is not None:
+                            result = ops.maximum(result, node.kwargs["min"]).value
+                        if node.kwargs.get("max") is not None:
+                            result = ops.minimum(result, node.kwargs["max"]).value
+                        env[node] = result
+                        continue
+                if node.op == "call_function":
+                    env[node] = _quack_cute_call_function(
+                        node.target,
+                        tuple(_quack_cute_arg(arg, env) for arg in node.args),
+                        {
+                            key: _quack_cute_arg(value, env)
+                            for key, value in node.kwargs.items()
+                        },
+                    )
+                    continue
+            raise NotImplementedError(
+                f"unsupported epilogue node: {node.format_node()}"
+            )
+
+
 def _quack_cute_epilogue_code(
     graph_module: torch.fx.GraphModule,
 ) -> tuple[list[str], str, list[torch.fx.Node], QuackLocalReduceInfo | None]:
@@ -590,7 +677,6 @@ def _quack_cute_epilogue_code(
         ModificationWrapperCuteDSL,
     )
     from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLCSEVariable
-    from torch._inductor.virtualized import ops, V
     from torch.utils._sympy.value_ranges import ValueRanges
 
     mm_node = _find_single_quack_gemm_node(graph_module)
@@ -622,79 +708,15 @@ def _quack_cute_epilogue_code(
     local_reduce = output_plan.local_reduce
     local_norm = output_plan.local_norm
 
-    with V.set_kernel_handler(kernel), V.set_ops_handler(handler):
-        for node in graph_module.graph.nodes:
-            if (
-                node.op in ("placeholder", "output")
-                or node is mm_node
-                or node in output_plan.skip_nodes
-            ):
-                continue
-            with V.set_current_node(node):
-                if node.op == "call_method":
-                    arg = _quack_cute_arg(node.args[0], env)
-                    if node.target == "relu":
-                        env[node] = ops.relu(arg).value
-                        continue
-                    if node.target == "clamp":
-                        result = arg
-                        if node.kwargs.get("min") is not None:
-                            result = ops.maximum(result, node.kwargs["min"]).value
-                        if node.kwargs.get("max") is not None:
-                            result = ops.minimum(result, node.kwargs["max"]).value
-                        env[node] = result
-                        continue
-                if node.op == "call_function":
-                    env[node] = _quack_cute_call_function(
-                        node.target,
-                        tuple(_quack_cute_arg(arg, env) for arg in node.args),
-                        {
-                            key: _quack_cute_arg(value, env)
-                            for key, value in node.kwargs.items()
-                        },
-                    )
-                    continue
-            raise NotImplementedError(
-                f"unsupported epilogue node: {node.format_node()}"
-            )
+    _compile_quack_pointwise_nodes(
+        graph_module, mm_node, output_plan.skip_nodes, env, kernel, handler
+    )
 
     if local_norm is not None:
         if local_norm.dim == 0:
             output_value = local_norm.source_node
         else:
-            if 32 % local_norm.group_size != 0:
-                raise NotImplementedError(
-                    "QUACK reductions feeding the main output currently require a "
-                    "power-of-two group size that divides the same-fragment N width 32; "
-                    "aux reductions can use other static groups"
-                )
-            source = _quack_cute_arg(local_norm.source_node, env)
-            groups_per_fragment = 32 // local_norm.group_size
-            grouped_name = f"tmp{kernel.cse.index}"
-            kernel.cse.index += 1
-            sum_name = f"tmp{kernel.cse.index}"
-            kernel.cse.index += 1
-            broadcast_name = f"tmp{kernel.cse.index}"
-            kernel.cse.index += 1
-            out_name = f"tmp{kernel.cse.index}"
-            kernel.cse.index += 1
-            kernel.body.writeline(
-                f"{grouped_name} = {source}.reshape("
-                f"((1, {local_norm.group_size}, {groups_per_fragment}), 1, 1))"
-            )
-            kernel.body.writeline(
-                f"{sum_name} = {grouped_name}.reduce("
-                "cute.ReductionOp.ADD, init_val=0.0, "
-                "reduction_profile=((None, 1, None), 1, 1))"
-            )
-            kernel.body.writeline(
-                f"{broadcast_name} = {sum_name}.reshape("
-                f"((1, 1, {groups_per_fragment}), 1, 1)).broadcast_to({grouped_name}.shape)"
-            )
-            kernel.body.writeline(
-                f"{out_name} = ({grouped_name} / {broadcast_name}).reshape({source}.shape)"
-            )
-            output_value = out_name
+            output_value = _emit_quack_local_n_norm(local_norm, env, kernel)
 
     return (
         kernel.body.lines,
