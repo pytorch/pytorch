@@ -557,6 +557,18 @@ def gen_define_meta_registrations(
         # at::DimnameList names (TensorMeta.h), so emit it unconditionally -- a 4-arg override
         # does not match the 5-arg virtual and fails to compile for MetaBase/precompute ops.
         # propagate_names is a no-op when names is empty (the MetaBase case).
+        #
+        # The super-call routes set_output to the structured base. For TensorIterator ops it does
+        # the iterator bookkeeping the native meta() relies on; MetaBase has no such logic -- its
+        # set_output_raw_strided is TORCH_INTERNAL_ASSERT(false) -- so a qualified super-call on a
+        # MetaBase op compiles but aborts at runtime. Emit it only for TensorIterator ops,
+        # mirroring in-tree register_dispatch_key (generate_super=structured_inherits is not None).
+        super_call = (
+            f"\n        at::meta::structured_{meta_name}::set_output_raw_strided("
+            "output_idx, sizes, strides, options, names);"
+            if g.out.structured_inherits is not None
+            else ""
+        )
         blocks.append(
             f"""\
 namespace {{
@@ -570,8 +582,7 @@ struct {struct_name} final : public {backend_struct} {{
             : at::detail::empty_strided_meta(sizes, strides, options.device(at::kMeta));
         if (!names.empty()) {{
             at::namedinference::propagate_names(outputs_[output_idx], names);
-        }}
-        at::meta::structured_{meta_name}::set_output_raw_strided(output_idx, sizes, strides, options, names);
+        }}{super_call}
     }}
     void set_output_strided(
         int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
