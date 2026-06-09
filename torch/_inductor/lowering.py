@@ -2785,7 +2785,7 @@ def make_fallback(
     get_decomp_fn=None,
 ):
     check_decomps = get_decomp_fn() if get_decomp_fn is not None else decompositions
-    if not (op not in check_decomps or override_decomp):
+    if op in check_decomps and not override_decomp:
         raise AssertionError(f"both a fallback and a decomp for same op: {op}")
     if (
         warn
@@ -6627,7 +6627,7 @@ def avg_pool2d_backward(
     count_include_pad,
     divisor_override=None,
 ):
-    if not (divisor_override is None or divisor_override != 0):
+    if divisor_override is not None and divisor_override == 0:
         raise AssertionError("divisor must be not zero")
     if not stride:
         stride = kernel_size
@@ -6806,7 +6806,7 @@ def avg_pool3d_backward(
     count_include_pad,
     divisor_override=None,
 ):
-    if not (divisor_override is None or divisor_override != 0):
+    if divisor_override is not None and divisor_override == 0:
         raise AssertionError("divisor must be not zero")
     if not stride:
         stride = kernel_size

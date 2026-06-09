@@ -75,7 +75,7 @@ def solve_for_tiling(expr: sympy.Expr) -> sympy.Expr | None:
     free_symbol = next(iter(expr.free_symbols))
 
     def _solve_simple_expr(expr: sympy.Expr) -> sympy.Expr | None:
-        if not (not expr.has(ModularIndexing) and not expr.has(FloorDiv)):
+        if expr.has(ModularIndexing) or expr.has(FloorDiv):
             raise AssertionError("expected no ModularIndexing or FloorDiv in expr")
         if len(expr.free_symbols) != 1:
             return None

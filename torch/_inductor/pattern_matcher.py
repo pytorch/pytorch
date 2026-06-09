@@ -145,7 +145,7 @@ FnsType = torch.fx.node.Target | str
 class Multiple:
     def __init__(self) -> None:
         # Ensure we're really a singleton.
-        if not ("MULTIPLE" not in globals() or self is MULTIPLE):
+        if "MULTIPLE" in globals() and self is not MULTIPLE:
             raise AssertionError("Multiple is not a singleton")
 
 

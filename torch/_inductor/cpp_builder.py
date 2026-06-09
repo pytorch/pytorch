@@ -2319,7 +2319,7 @@ class CppBuilder:
         # MSVC produces two files when precompiling: the actual .pch file, as well as an
         # object file which must be linked into the final library.  This class assumes
         # only one output file of note, so for now we'll error out here.
-        if not (not _IS_WINDOWS or not self._precompiling):
+        if _IS_WINDOWS and self._precompiling:
             raise AssertionError("Cannot currently precompile headers on Windows!")
 
         if self._compile_only:

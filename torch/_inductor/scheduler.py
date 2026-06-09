@@ -8657,7 +8657,7 @@ class Scheduler:
         self.free_buffers()
 
     def create_backend(self, device: torch.device) -> BaseScheduling:
-        if not (not is_gpu(device.type) or device.index is not None):
+        if is_gpu(device.type) and device.index is None:
             raise AssertionError(f"{device} should have been normalized in lowering")
         V.graph.add_device_info(device)
 
