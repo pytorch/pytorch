@@ -8567,17 +8567,16 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(mps_x, mps_y)
 
     def test_accelerator_default_generator(self):
-        for index in range(torch.accelerator.device_count()):
-            mps_default_generator = torch.mps.default_generators[index]
-            acc_default_generator = torch._C._accelerator_getDefaultGenerator(index)
-            self.assertEqual(mps_default_generator.device, acc_default_generator.device)
-            # Verify they share the same underlying GeneratorImpl
-            self.assertEqual(mps_default_generator.get_state(), acc_default_generator.get_state())
-            mps_default_generator.manual_seed(42)
-            self.assertEqual(acc_default_generator.initial_seed(), 42)
-            # Verify state stays in sync after reseeding
-            torch.mps.seed()
-            self.assertEqual(mps_default_generator.get_state(), acc_default_generator.get_state())
+        mps_default_generator = torch.mps._get_default_mps_generator()
+        acc_default_generator = torch._C._accelerator_getDefaultGenerator(0)
+        self.assertEqual(mps_default_generator.device, acc_default_generator.device)
+        # Verify they share the same underlying GeneratorImpl
+        self.assertEqual(mps_default_generator.get_state(), acc_default_generator.get_state())
+        mps_default_generator.manual_seed(42)
+        self.assertEqual(acc_default_generator.initial_seed(), 42)
+        # Verify state stays in sync after reseeding
+        torch.mps.seed()
+        self.assertEqual(mps_default_generator.get_state(), acc_default_generator.get_state())
 
     def test_device_synchronize(self):
         # just running some ops each followed by a synchronize to wait for
