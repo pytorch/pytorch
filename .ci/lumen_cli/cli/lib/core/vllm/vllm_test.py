@@ -216,6 +216,8 @@ class VllmTestRunner(BaseRunner):
 
     def _set_envs(self, inputs: VllmTestParameters):
         os.environ["TORCH_CUDA_ARCH_LIST"] = inputs.torch_cuda_arch_list
+        # vLLM has known third-party custom ops with aliasing schemas.
+        os.environ["TORCHINDUCTOR_ERROR_ON_CUSTOM_OP_ALIASING"] = "0"
         if not validate_cuda(get_env("TORCH_CUDA_ARCH_LIST")):
             logger.warning(
                 "Missing supported TORCH_CUDA_ARCH_LIST. "

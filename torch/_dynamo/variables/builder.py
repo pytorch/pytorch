@@ -2572,6 +2572,14 @@ class VariableBuilder:
                 )
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
 
+            if is_dynamic_value(value):
+                log.debug(
+                    "%s marked dynamic via dynamic-values list (value=%s)",
+                    self.source.name,
+                    value,
+                )
+                return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
+
             if is_unbacked_source(self.source.name):
                 log.debug(
                     "%s marked unbacked via unbacked-sources list", self.source.name
@@ -4246,6 +4254,41 @@ def is_unbacked_source(source_name: str, dim: int | None = None) -> bool:
     return False
 
 
+# Cache for the parsed `torch.compiler.config.dynamic_values` config.
+_DYNAMIC_VALUES: set[int] | None = None
+_DYNAMIC_VALUES_CONFIG_HASH: int | None = None
+
+
+def get_dynamic_values() -> set[int]:
+    global _DYNAMIC_VALUES, _DYNAMIC_VALUES_CONFIG_HASH
+
+    current_hash = hash(torch.compiler.config.dynamic_values)
+
+    if _DYNAMIC_VALUES is not None and _DYNAMIC_VALUES_CONFIG_HASH == current_hash:
+        return _DYNAMIC_VALUES
+
+    _DYNAMIC_VALUES = {
+        int(s)
+        for s in torch.compiler.config.dynamic_values.replace(" ", "").split(",")
+        if s
+    }
+    _DYNAMIC_VALUES_CONFIG_HASH = current_hash
+
+    return _DYNAMIC_VALUES
+
+
+def is_dynamic_value(value: int) -> bool:
+    """Return True if ``value`` matches an entry in the dynamic-values list."""
+    dynamic_values = get_dynamic_values()
+    if not dynamic_values:
+        return False
+    if isinstance(value, bool):
+        raise TypeError(
+            f"is_dynamic_value got a bool ({value}); callers must pass an int"
+        )
+    return value in dynamic_values
+
+
 def _symbolic_context_from_shapes_spec(
     e: Any,
     source: Source,
@@ -4664,6 +4707,15 @@ def _automatic_dynamic(
 
         if is_dynamic_source(name, i):
             log.debug("%s dim %d marked dynamic via dynamic-sources list", name, i)
+            automatic_dynamic_size = True
+
+        if is_dynamic_value(e.size(i)):
+            log.debug(
+                "%s dim %d marked dynamic via dynamic-values list (value=%s)",
+                name,
+                i,
+                e.size(i),
+            )
             automatic_dynamic_size = True
 
         if is_unbacked_source(name, i):
