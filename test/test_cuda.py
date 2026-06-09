@@ -5836,11 +5836,9 @@ class TestCudaAllocator(TestCase):
 
     def test_allocator_backend(self):
         def check_output(script: str) -> str:
-            return (
-                subprocess.check_output([sys.executable, "-c", script])
-                .decode("ascii")
-                .strip()
-            )
+            return subprocess.check_output(
+                [sys.executable, "-c", script], env={}, text=True
+            ).strip()
 
         test_script = """\
 import os
