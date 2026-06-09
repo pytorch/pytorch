@@ -24,6 +24,7 @@ Output is grep-friendly: grep 'HASH_TRACE' test.log to extract trace.
 """
 
 import hashlib
+import os
 import sys
 from typing import Any
 
@@ -107,12 +108,17 @@ def hash_trace_wrapper(max_ops: int = 200):
     """
     Context manager: prints tensor hashes for every ATen op within the block.
 
-    Always active when called — the caller controls scope by placing it
-    around specific test blocks.
+    Controlled by env var PYTORCH_TEST_HASH_TRACE:
+        - Set to "1" to enable (default in CI via test.sh)
+        - Unset → no-op (clean local test output)
 
     Usage:
         with hash_trace_wrapper():
             # ... computation to trace ...
     """
-    print("[HASH_TRACE] === Trace start ===", flush=True)
-    return PrintHashTrace(max_ops=max_ops)
+    from contextlib import nullcontext
+
+    if os.environ.get("PYTORCH_TEST_HASH_TRACE") == "1":
+        print("[HASH_TRACE] === Trace start ===", flush=True)
+        return PrintHashTrace(max_ops=max_ops)
+    return nullcontext()
