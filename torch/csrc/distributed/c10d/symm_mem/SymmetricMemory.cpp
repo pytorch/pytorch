@@ -263,6 +263,13 @@ at::Tensor empty_strided_p2p(
     c10::Device device,
     const std::optional<std::string>& group_name,
     std::optional<uint64_t> alloc_id) {
+  // Ensure device has an explicit index so downstream code (e.g. TeamManager)
+  // sees a consistent device identity.
+  if (!device.has_index()) {
+    device = c10::Device(
+        device.type(),
+        c10::impl::getDeviceGuardImpl(device.type())->getDevice().index());
+  }
   if (alloc_id.has_value()) {
     return empty_strided_p2p_persistent(
         size, stride, dtype, device, group_name, *alloc_id);
