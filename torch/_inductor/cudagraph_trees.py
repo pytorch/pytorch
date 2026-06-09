@@ -2893,8 +2893,15 @@ class CUDAGraphTreeManager:
 
     @staticmethod
     def format_dealloc_msg(
-        stack_trace: str | None, *, is_grad_output: bool = False
+        stack_trace: str | None,
+        *,
+        is_grad_output: bool = False,
+        assert_stack_trace: bool = True,
     ) -> str:
+        if config.test_configs.cudagraph_assert_stack_traces and assert_stack_trace:
+            assert stack_trace is not None, (
+                "Expected stack trace to be set for all cudagraph outputs"
+            )
         stack_trace = (
             stack_trace.strip() if stack_trace else "[Could not find stack trace]"
         )
@@ -2962,11 +2969,15 @@ class CUDAGraphTreeManager:
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
 
-                stack_trace, is_grad_output = stor_dealloc_info.get(
-                    storage_ref.data_ptr(), (None, False)
-                )
+                dealloc_info = stor_dealloc_info.get(storage_ref.data_ptr())
+                if dealloc_info is None:
+                    stack_trace, is_grad_output = None, False
+                else:
+                    stack_trace, is_grad_output = dealloc_info
                 msg = self.format_dealloc_msg(
-                    stack_trace, is_grad_output=is_grad_output
+                    stack_trace,
+                    is_grad_output=is_grad_output,
+                    assert_stack_trace=dealloc_info is not None,
                 )
                 torch._C._free_And_Remove_DeleterFn(_storage_deref)
 

@@ -593,6 +593,9 @@ def get_partition_cudagraph_metadata(
             partition_stack_traces.append(metadata.stack_traces[graph_output_idx])
             if graph_output_idx in metadata.cloned_output_idxs:
                 partition_cloned_idxs.add(i)
+        elif partition_map.stack_traces and i < len(partition_map.stack_traces):
+            # For partition-internal outputs, use stack traces from IR nodes
+            partition_stack_traces.append(partition_map.stack_traces[i])
         else:
             partition_stack_traces.append(None)
 

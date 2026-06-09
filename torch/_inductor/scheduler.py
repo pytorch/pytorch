@@ -8701,8 +8701,11 @@ class Scheduler:
                 input_mapping.append(name_to_graph_input_index.get(name))
 
             output_mapping = []
+            output_stack_traces: list[str | None] = []
             for node in signature.output_nodes:
                 output_mapping.append(name_to_graph_output_index.get(node.get_name()))
+                traces = node.get_stack_traces()
+                output_stack_traces.append(next(iter(traces)) if traces else None)
 
             V.graph.partition_maps.append(
                 GraphPartitionMap(
@@ -8710,6 +8713,7 @@ class Scheduler:
                     input_mapping,
                     output_mapping,
                     signature.constant_names,
+                    output_stack_traces,
                 )
             )
 
