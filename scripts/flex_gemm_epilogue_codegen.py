@@ -13,6 +13,7 @@ from typing import Annotated
 
 import torch
 import torch._inductor.config as inductor_config
+import torch.utils._pytree as pytree
 import typer
 from torch._higher_order_ops import (
     gemm_epilogue_fusion,
@@ -54,6 +55,10 @@ EPILOGUES = {
     "sqrt-abs": lambda acc: torch.sqrt(torch.abs(acc) + 1.0),
     "rsqrt-abs": lambda acc: torch.rsqrt(torch.abs(acc) + 1.0),
     "normalize-sum-n": lambda acc: acc / acc.sum(dim=1, keepdim=True),
+    "relu-local-sum-n32": lambda acc: (
+        acc.relu(),
+        acc.float().view(acc.shape[0], -1, 32).sum(-1),
+    ),
 }
 AUX_EPILOGUES = {
     # QUACK currently supports one captured aux tensor for plain mm.
@@ -288,6 +293,12 @@ def main(
     with inductor_config.patch({"max_autotune_gemm": False}):
         actual, codes = run_and_get_code(compiled, *args)
     torch.testing.assert_close(actual, eager, atol=1e-2, rtol=1e-2)
+    actual_leaves = pytree.tree_leaves(actual)
+    eager_leaves = pytree.tree_leaves(eager)
+    max_abs_diff = max(
+        (actual_leaf - eager_leaf).abs().max().item()
+        for actual_leaf, eager_leaf in zip(actual_leaves, eager_leaves)
+    )
 
     kernels = []
     for i, code in enumerate(codes):
@@ -319,7 +330,7 @@ def main(
     summary.extend(f"  - {out_dir / f'inductor_output_{i}.py'}" for i in range(len(codes)))
     summary.append(f"triton_kernels: {len(kernels)}")
     summary.extend(f"  - {out_dir / f'triton_kernel_{i}.py'}" for i in range(len(kernels)))
-    summary.append(f"max_abs_diff: {(actual - eager).abs().max().item()}")
+    summary.append(f"max_abs_diff: {max_abs_diff}")
 
     write_text(out_dir / "summary.txt", "\n".join(summary) + "\n")
     print("\n".join(summary))

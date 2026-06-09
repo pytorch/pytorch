@@ -8550,7 +8550,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                     "QUACK grouped_mm epilogue currently supports only 2D/3D "
                     "and m-major/contiguous 2D/2D grouped_mm with offsets and no bias"
                 )
-        epilogue_key, epilogue_source, epilogue_arg_placeholders = (
+        epilogue_key, epilogue_source, epilogue_arg_placeholders, local_reduce = (
             materialize_quack_epilogue(subgraph.graph_module)
         )
         gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
@@ -8585,6 +8585,15 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         epilogue_arg_indices = tuple(
             placeholders.index(node) for node in epilogue_arg_placeholders
         )
+        if local_reduce is not None:
+            if gemm_op != torch.ops.aten.mm.default or len(size) != 2:
+                raise NotImplementedError(
+                    "QUACK local-reduce tuple epilogues currently support only 2D aten.mm"
+                )
+            if epilogue_arg_indices:
+                raise NotImplementedError(
+                    "QUACK local-reduce tuple epilogues do not support captured tensor reads yet"
+                )
         if epilogue_arg_indices:
             if gemm_op != torch.ops.aten.mm.default or len(epilogue_arg_indices) != 1:
                 raise NotImplementedError(
@@ -8597,7 +8606,33 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                     "QUACK captured tensor epilogue args currently must match "
                     "the GEMM output shape or broadcast as [1, N] / [M, 1]"
                 )
+        local_reduce_out = None
+        local_reduce_out_index = None
+        mutated_inputs = []
+        if local_reduce is not None and not local_reduce.feeds_main:
+            m, n = size
+            group_size = local_reduce.group_size
+            local_reduce_val = local_reduce.reduce_node.meta.get("val")
+            local_reduce_dtype = getattr(local_reduce_val, "dtype", torch.float32)
+            if local_reduce_val is not None:
+                local_reduce_size = list(local_reduce_val.shape)
+                local_reduce_stride = list(local_reduce_val.stride())
+            else:
+                local_reduce_size = [m, FloorDiv(n, group_size)]
+                local_reduce_stride = [FloorDiv(n, group_size), 1]
+            local_reduce_out = empty_strided(
+                local_reduce_size,
+                local_reduce_stride,
+                dtype=local_reduce_dtype,
+                device=mat1.get_device_or_error(),
+            )
+
         input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
+        if local_reduce_out is not None:
+            local_reduce_node = ir.TemplateBuffer.realize_template_input(local_reduce_out)
+            local_reduce_out_index = len(input_nodes)
+            input_nodes.append(local_reduce_node)
+            mutated_inputs.append(local_reduce_node)
         choices: list[Any] = []
         quack_gemm_epilogue_template.maybe_append_choice(
             choices,
@@ -8610,10 +8645,16 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             beta=beta,
             out_dtype=gemm_kwargs.get("out_dtype"),
             epilogue_arg_indices=epilogue_arg_indices,
+            local_reduce_out_index=local_reduce_out_index,
+            local_reduce_group=local_reduce.group_size if local_reduce is not None else None,
+            local_reduce_feeds_main=local_reduce.feeds_main if local_reduce is not None else False,
+            mutated_inputs=mutated_inputs or None,
         )
         node, _ = autotune_select_algorithm(
             "quack_gemm_epilogue", choices, input_nodes, layout
         )
+        if local_reduce_out is not None:
+            return (node, local_reduce_out)
         return (node,)
 
     fusible_template_backends = OrderedSet(["TRITON", "CUTLASS"])

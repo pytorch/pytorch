@@ -127,6 +127,26 @@ class _QuackCuteDSLKernel:
         self.cse = _QuackCuteDSLCSE()
 
 
+@dataclass(frozen=True)
+class QuackLocalReduceInfo:
+    view_node: torch.fx.Node
+    reduce_node: torch.fx.Node
+    source_node: torch.fx.Node
+    keepdim: bool
+    group_size: int = 32
+    feeds_main: bool = False
+
+
+@dataclass(frozen=True)
+class QuackLocalNormInfo:
+    output_node: torch.fx.Node
+    div_node: torch.fx.Node
+    view_node: torch.fx.Node
+    reduce_node: torch.fx.Node
+    source_node: torch.fx.Node
+    group_size: int = 32
+
+
 def _quack_cute_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
     if isinstance(value, torch.fx.Node):
         if value in env:
@@ -281,9 +301,128 @@ def _quack_cute_call_function(
     raise NotImplementedError(f"unsupported epilogue op: {target}")
 
 
+def _normalize_reduce_dims(dim: Any) -> tuple[Any, ...]:
+    if isinstance(dim, (list, tuple)):
+        return tuple(dim)
+    return (dim,)
+
+
+def _match_quack_local_n_reduce(
+    node: Any, mm_node: torch.fx.Node
+) -> QuackLocalReduceInfo | None:
+    if not isinstance(node, torch.fx.Node):
+        return None
+    if node.op == "call_function" and node.target == torch.ops.aten.sum.dim_IntList:
+        view_node = node.args[0]
+        dims = _normalize_reduce_dims(
+            node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+        )
+        keepdim = (
+            node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
+        )
+        dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
+    elif node.op == "call_method" and node.target == "sum":
+        if len(node.args) < 2:
+            return None
+        view_node = node.args[0]
+        dims = _normalize_reduce_dims(node.args[1])
+        keepdim = (
+            node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
+        )
+        dtype = node.kwargs.get("dtype")
+    else:
+        return None
+    if dims not in ((-1,), (2,)) or dtype is not None:
+        return None
+    if not isinstance(view_node, torch.fx.Node):
+        return None
+    if view_node.op == "call_function" and view_node.target in (
+        torch.ops.aten.view.default,
+        torch.ops.aten.reshape.default,
+    ):
+        base = view_node.args[0]
+        shape = view_node.args[1]
+    elif view_node.op == "call_method" and view_node.target in ("view", "reshape"):
+        base = view_node.args[0]
+        shape = view_node.args[1:]
+    else:
+        return None
+    source_node = base
+    if base is not mm_node:
+        if not (
+            isinstance(base, torch.fx.Node)
+            and base.op == "call_function"
+            and base.target
+            in (
+                torch.ops.aten._to_copy.default,
+                torch.ops.prims.convert_element_type.default,
+            )
+            and base.args[0] is mm_node
+        ):
+            return None
+    if isinstance(shape, torch.Size):
+        shape = tuple(shape)
+    if not isinstance(shape, (list, tuple)) or len(shape) != 3:
+        return None
+    if shape[-2] != -1 or shape[-1] != 32:
+        return None
+    return QuackLocalReduceInfo(
+        view_node=view_node,
+        reduce_node=node,
+        source_node=source_node,
+        keepdim=bool(keepdim),
+        group_size=32,
+    )
+
+
+def _match_quack_local_n_norm(
+    node: Any, mm_node: torch.fx.Node
+) -> QuackLocalNormInfo | None:
+    if not isinstance(node, torch.fx.Node):
+        return None
+    if node.op == "call_function" and node.target in (
+        torch.ops.aten.view.default,
+        torch.ops.aten.reshape.default,
+    ):
+        div_node = node.args[0]
+        output_shape = node.args[1]
+    elif node.op == "call_method" and node.target in ("view", "reshape"):
+        div_node = node.args[0]
+        output_shape = node.args[1:]
+    else:
+        return None
+    if not isinstance(div_node, torch.fx.Node):
+        return None
+    if not (div_node.op == "call_function" and div_node.target == torch.ops.aten.div.Tensor):
+        return None
+    lhs, rhs = div_node.args[:2]
+    local_reduce = _match_quack_local_n_reduce(rhs, mm_node)
+    if local_reduce is None or lhs is not local_reduce.view_node:
+        return None
+    if isinstance(output_shape, torch.Size):
+        output_shape = tuple(output_shape)
+    if not isinstance(output_shape, (list, tuple)) or len(output_shape) != 2:
+        return None
+    output_meta = node.meta.get("val")
+    mm_meta = mm_node.meta.get("val")
+    if output_meta is not None and mm_meta is not None:
+        if tuple(output_meta.shape) != tuple(mm_meta.shape):
+            return None
+    if not local_reduce.keepdim:
+        return None
+    return QuackLocalNormInfo(
+        output_node=node,
+        div_node=div_node,
+        view_node=local_reduce.view_node,
+        reduce_node=local_reduce.reduce_node,
+        source_node=local_reduce.source_node,
+        group_size=local_reduce.group_size,
+    )
+
+
 def _quack_cute_epilogue_code(
     graph_module: torch.fx.GraphModule,
-) -> tuple[list[str], str, list[torch.fx.Node]]:
+) -> tuple[list[str], str, list[torch.fx.Node], QuackLocalReduceInfo | None]:
     from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
         ModificationWrapperCuteDSL,
     )
@@ -312,9 +451,49 @@ def _quack_cute_epilogue_code(
         env[node] = CuteDSLCSEVariable(
             f"aux{i}", ValueRanges.unknown(), dtype=torch.float32, shape=(1,)
         )
+    output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
+    if len(output_nodes) != 1:
+        raise NotImplementedError("QUACK GEMM epilogue backend expects one output")
+    output_value = _unwrap_output(output_nodes[0])
+    local_reduce = None
+    local_norm = _match_quack_local_n_norm(output_value, mm_node)
+    skip_nodes: set[torch.fx.Node] = set()
+    if local_norm is not None:
+        skip_nodes.update(
+            (
+                local_norm.output_node,
+                local_norm.div_node,
+                local_norm.view_node,
+                local_norm.reduce_node,
+            )
+        )
+    if isinstance(output_value, (tuple, list)):
+        if len(output_value) == 1:
+            output_value = output_value[0]
+        elif len(output_value) == 2:
+            local_reduce = _match_quack_local_n_reduce(output_value[1], mm_node)
+            if local_reduce is None or local_reduce.keepdim:
+                raise NotImplementedError(
+                    "QUACK tuple epilogue currently supports only "
+                    "(main, acc[.float()].view(M, -1, 32).sum(-1))"
+                )
+            output_value = output_value[0]
+            skip_nodes.update((local_reduce.view_node, local_reduce.reduce_node))
+            if local_reduce.source_node is not mm_node:
+                skip_nodes.add(local_reduce.source_node)
+        else:
+            raise NotImplementedError(
+                "QUACK GEMM epilogue backend expects one output or one supported "
+                "local-reduce aux output"
+            )
+
     with V.set_kernel_handler(kernel), V.set_ops_handler(handler):
         for node in graph_module.graph.nodes:
-            if node.op in ("placeholder", "output") or node is mm_node:
+            if (
+                node.op in ("placeholder", "output")
+                or node is mm_node
+                or node in skip_nodes
+            ):
                 continue
             with V.set_current_node(node):
                 if node.op == "call_method":
@@ -344,13 +523,27 @@ def _quack_cute_epilogue_code(
                 f"unsupported epilogue node: {node.format_node()}"
             )
 
-    output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
-    if len(output_nodes) != 1:
-        raise NotImplementedError("QUACK GEMM epilogue backend expects one output")
+    if local_norm is not None:
+        source = _quack_cute_arg(local_norm.source_node, env)
+        sum_name = f"tmp{kernel.cse.index}"
+        kernel.cse.index += 1
+        broadcast_name = f"tmp{kernel.cse.index}"
+        kernel.cse.index += 1
+        out_name = f"tmp{kernel.cse.index}"
+        kernel.cse.index += 1
+        kernel.body.writeline(
+            f"{sum_name} = {source}.reduce("
+            "cute.ReductionOp.ADD, init_val=0.0, reduction_profile=((None, 1), 1, 1))"
+        )
+        kernel.body.writeline(f"{broadcast_name} = cute.full_like({source}, {sum_name}[0])")
+        kernel.body.writeline(f"{out_name} = {source} / {broadcast_name}")
+        output_value = out_name
+
     return (
         kernel.body.lines,
-        str(_quack_cute_arg(_unwrap_output(output_nodes[0]), env)),
+        str(_quack_cute_arg(output_value, env) if not isinstance(output_value, str) else output_value),
         aux_placeholder_nodes,
+        local_reduce,
     )
 
 
@@ -375,8 +568,8 @@ def _render_quack_gemm_epilogue(
 
 def materialize_quack_epilogue(
     graph_module: torch.fx.GraphModule,
-) -> tuple[str, str, list[torch.fx.Node]]:
-    lines, result, aux_placeholder_nodes = _quack_cute_epilogue_code(graph_module)
+) -> tuple[str, str, list[torch.fx.Node], QuackLocalReduceInfo | None]:
+    lines, result, aux_placeholder_nodes, local_reduce = _quack_cute_epilogue_code(graph_module)
     key = (
         "flex_gemm_quack_epilogue_"
         + hashlib.sha256(graph_module.code.encode()).hexdigest()[:16]
@@ -387,6 +580,7 @@ def materialize_quack_epilogue(
             key, lines, result, [f"aux{i}" for i in range(len(aux_placeholder_nodes))]
         ),
         aux_placeholder_nodes,
+        local_reduce,
     )
 
 
