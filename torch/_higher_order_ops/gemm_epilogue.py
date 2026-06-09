@@ -583,11 +583,60 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
     )
 
 
+def _emit_quack_tensorssa_expr(
+    kernel: _QuackCuteDSLKernel,
+    expr: str,
+    *,
+    like: Any | None = None,
+    dtype: torch.dtype | None = None,
+    shape: Any | None = None,
+) -> Any:
+    return kernel.cse.generate(
+        kernel.body,
+        expr,
+        dtype=dtype if dtype is not None else getattr(like, "dtype", None),
+        shape=shape if shape is not None else getattr(like, "shape", None),
+    )
+
+
+def _emit_quack_tensorssa_reshape(
+    kernel: _QuackCuteDSLKernel, value: Any, shape: str
+) -> Any:
+    return _emit_quack_tensorssa_expr(kernel, f"{value}.reshape({shape})", like=value)
+
+
+def _emit_quack_tensorssa_reduce(
+    kernel: _QuackCuteDSLKernel,
+    value: Any,
+    *,
+    op: str,
+    init_val: str,
+    reduction_profile: str,
+) -> Any:
+    return _emit_quack_tensorssa_expr(
+        kernel,
+        f"{value}.reduce({op}, init_val={init_val}, reduction_profile={reduction_profile})",
+        like=value,
+    )
+
+
+def _emit_quack_tensorssa_broadcast_to(
+    kernel: _QuackCuteDSLKernel, value: Any, shape: str
+) -> Any:
+    return _emit_quack_tensorssa_expr(kernel, f"{value}.broadcast_to({shape})", like=value)
+
+
+def _emit_quack_tensorssa_div(
+    kernel: _QuackCuteDSLKernel, lhs: Any, rhs: Any
+) -> Any:
+    return _emit_quack_tensorssa_expr(kernel, f"{lhs} / {rhs}", like=lhs)
+
+
 def _emit_quack_local_n_norm(
     local_norm: QuackLocalNormInfo,
     env: dict[torch.fx.Node, Any],
     kernel: _QuackCuteDSLKernel,
-) -> str:
+) -> Any:
     if 32 % local_norm.group_size != 0:
         raise NotImplementedError(
             "QUACK reductions feeding the main output currently require a "
@@ -596,31 +645,28 @@ def _emit_quack_local_n_norm(
         )
     source = _quack_cute_arg(local_norm.source_node, env)
     groups_per_fragment = 32 // local_norm.group_size
-    grouped_name = f"tmp{kernel.cse.index}"
-    kernel.cse.index += 1
-    sum_name = f"tmp{kernel.cse.index}"
-    kernel.cse.index += 1
-    broadcast_name = f"tmp{kernel.cse.index}"
-    kernel.cse.index += 1
-    out_name = f"tmp{kernel.cse.index}"
-    kernel.cse.index += 1
-    kernel.body.writeline(
-        f"{grouped_name} = {source}.reshape("
-        f"((1, {local_norm.group_size}, {groups_per_fragment}), 1, 1))"
+    grouped = _emit_quack_tensorssa_reshape(
+        kernel,
+        source,
+        f"((1, {local_norm.group_size}, {groups_per_fragment}), 1, 1)",
     )
-    kernel.body.writeline(
-        f"{sum_name} = {grouped_name}.reduce("
-        "cute.ReductionOp.ADD, init_val=0.0, "
-        "reduction_profile=((None, 1, None), 1, 1))"
+    group_sum = _emit_quack_tensorssa_reduce(
+        kernel,
+        grouped,
+        op="cute.ReductionOp.ADD",
+        init_val="0.0",
+        reduction_profile="((None, 1, None), 1, 1)",
     )
-    kernel.body.writeline(
-        f"{broadcast_name} = {sum_name}.reshape("
-        f"((1, 1, {groups_per_fragment}), 1, 1)).broadcast_to({grouped_name}.shape)"
+    broadcast = _emit_quack_tensorssa_broadcast_to(
+        kernel,
+        _emit_quack_tensorssa_reshape(
+            kernel, group_sum, f"((1, 1, {groups_per_fragment}), 1, 1)"
+        ),
+        f"{grouped}.shape",
     )
-    kernel.body.writeline(
-        f"{out_name} = ({grouped_name} / {broadcast_name}).reshape({source}.shape)"
+    return _emit_quack_tensorssa_reshape(
+        kernel, _emit_quack_tensorssa_div(kernel, grouped, broadcast), f"{source}.shape"
     )
-    return out_name
 
 
 def _compile_quack_pointwise_nodes(
@@ -720,7 +766,7 @@ def _quack_cute_epilogue_code(
 
     return (
         kernel.body.lines,
-        str(_quack_cute_arg(output_value, env) if not isinstance(output_value, str) else output_value),
+        str(_quack_cute_arg(output_value, env) if isinstance(output_value, torch.fx.Node) else output_value),
         aux_placeholder_nodes,
         local_reduce,
     )
