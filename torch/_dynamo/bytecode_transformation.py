@@ -1720,7 +1720,15 @@ def fix_vars(
                     instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             if should_compute_arg():
-                instructions[i].arg = get_name_index(instructions[i].argval)
+                arg = get_name_index(instructions[i].argval)
+                if (
+                    sys.version_info >= (3, 15)
+                    and instructions[i].opname == "IMPORT_NAME"
+                ):
+                    arg <<= 2
+                    # Set the second bit to ensure eager imports, since lazy imports are only valid at module scope
+                    arg |= 0x02
+                instructions[i].arg = arg
         elif instructions[i].opcode in HAS_FREE:
             if should_compute_arg():
                 instructions[i].arg = freenames[instructions[i].argval]
