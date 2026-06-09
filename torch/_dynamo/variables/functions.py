@@ -98,12 +98,6 @@ from .constant import ConstantVariable
 from .user_defined import UserDefinedObjectVariable
 
 
-try:
-    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None  # type: ignore[assignment]
-
-
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import (
@@ -293,6 +287,15 @@ def wrap_bound_arg(
         # Create a lazy variable to avoid guarding on __defaults__ unless really
         # needed.
         return variables.LazyVariableTracker.create(val, source, tx=tx)
+
+
+def _is_fsdp_use_training_state(fn: object) -> bool:
+    fsdp_param_group = sys.modules.get(
+        "torch.distributed.fsdp._fully_shard._fsdp_param_group"
+    )
+    if fsdp_param_group is None:
+        return False
+    return fn is fsdp_param_group.FSDPParamGroup.use_training_state
 
 
 def wrap_args_kwargs(tx: "InstructionTranslatorBase", result: dict[str, Any]) -> None:
@@ -1709,10 +1712,7 @@ class UserMethodVariable(UserFunctionVariable):
                 return self.obj.call_method(
                     tx, self.fn.__name__, list(args), kwargs, constant=self.is_constant
                 )
-        elif (
-            _fsdp_param_group is not None
-            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
-        ):
+        elif _is_fsdp_use_training_state(self.fn):
             return variables.TorchCtxManagerClassVariable(self.fn).call_function(
                 tx, [self.obj, *args], kwargs
             )

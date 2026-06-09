@@ -4,6 +4,7 @@ This module provides decorators and utilities for controlling TorchDynamo's beha
 
 import functools
 import inspect
+import sys
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -1482,12 +1483,9 @@ def _einops_supports_dynamo_tracing(einops_mod: Any) -> bool:
 
 
 def _allow_lru_cache_trace_without_warning_for_einops() -> None:
-    import importlib
-
     for module_name, attr_names in _EINOPS_LRU_CACHE_WRAPPER_ALLOWLIST:
-        try:
-            module = importlib.import_module(module_name)
-        except ImportError:
+        module = sys.modules.get(module_name)
+        if module is None:
             continue
 
         for attr_name in attr_names:
@@ -1499,7 +1497,9 @@ def _allow_lru_cache_trace_without_warning_for_einops() -> None:
 # Dynamo can trace through einops 0.8.2+ directly (no allow_in_graph needed).
 # Older versions still need the allow_in_graph registration below.
 def _allow_in_graph_einops() -> None:
-    import einops
+    einops = sys.modules.get("einops")
+    if einops is None:
+        return
 
     if _einops_supports_dynamo_tracing(einops):
         if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
@@ -1511,14 +1511,8 @@ def _allow_in_graph_einops() -> None:
         _allow_lru_cache_trace_without_warning_for_einops()
         return
 
-    try:
-        # requires einops > 0.6.1, torch >= 2.0
-        from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
-            _ops_were_registered_in_torchdynamo,
-        )
-
-        # einops > 0.6.1 will call the op registration logic as it is imported.
-    except ImportError:
+    torch_specific = sys.modules.get("einops._torch_specific")
+    if not hasattr(torch_specific, "_ops_were_registered_in_torchdynamo"):
         # einops <= 0.6.1 doesn't handle unhashable SymInt in its lru_cache'd
         # helpers. Backport the try/except TypeError fallback from einops 0.7.0+
         # so allow_in_graph works during fake tensor validation.

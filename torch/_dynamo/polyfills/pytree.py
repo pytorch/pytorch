@@ -6,29 +6,36 @@ Python polyfills for torch.utils.pytree
 
 from __future__ import annotations
 
+import sys
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING, TypeVar
 
-import optree
-import optree._C
-import optree.utils
-from optree import (
-    is_namedtuple,
-    is_namedtuple_class,
-    is_namedtuple_instance,
-    is_structseq,
-    is_structseq_class,
-    is_structseq_instance,
-    namedtuple_fields,
-    structseq_fields,
-)
-
-import torch.utils._cxx_pytree as cxx_pytree  # noqa: F401
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import BUILTIN_TYPES, STANDARD_DICT_TYPES
 
 from ..decorators import substitute_in_graph
+
+
+optree: Any = sys.modules.get("optree")
+if optree is None:
+    raise ImportError("torch._dynamo.polyfills.pytree requires optree to be loaded")
+if getattr(optree, "_C", None) is None:
+    raise ImportError("torch._dynamo.polyfills.pytree requires optree._C")
+if getattr(optree, "utils", None) is None:
+    raise ImportError("torch._dynamo.polyfills.pytree requires optree.utils")
+
+import torch.utils._cxx_pytree as cxx_pytree  # noqa: F401
+
+
+is_namedtuple = optree.is_namedtuple
+is_namedtuple_class = optree.is_namedtuple_class
+is_namedtuple_instance = optree.is_namedtuple_instance
+is_structseq = optree.is_structseq
+is_structseq_class = optree.is_structseq_class
+is_structseq_instance = optree.is_structseq_instance
+namedtuple_fields = optree.namedtuple_fields
+structseq_fields = optree.structseq_fields
 
 
 if TYPE_CHECKING:
