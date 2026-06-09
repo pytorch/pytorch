@@ -2527,6 +2527,26 @@ torch.cuda.synchronize()
     def test_to_numpy(self):
         self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
 
+    def test_accelerator_default_generator(self):
+        torch.cuda.init()
+        for index in range(torch.accelerator.device_count()):
+            cuda_default_generator = torch.cuda.default_generators[index]
+            acc_default_generator = torch._C._accelerator_getDefaultGenerator(index)
+            self.assertEqual(
+                cuda_default_generator.device, acc_default_generator.device
+            )
+            # Verify they share the same underlying GeneratorImpl
+            self.assertEqual(
+                cuda_default_generator.get_state(), acc_default_generator.get_state()
+            )
+            cuda_default_generator.manual_seed(42)
+            self.assertEqual(acc_default_generator.initial_seed(), 42)
+            # Verify state stays in sync after reseeding
+            torch.cuda.seed()
+            self.assertEqual(
+                cuda_default_generator.get_state(), acc_default_generator.get_state()
+            )
+
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.cuda.is_current_stream_capturing())
 
