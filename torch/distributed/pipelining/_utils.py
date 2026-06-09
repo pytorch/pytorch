@@ -329,18 +329,26 @@ def _make_tensor_from_meta(
 
 def _derive_grad_metas(
     tensor_metas: tuple[TensorMeta, ...],
-) -> tuple[_TensorMeta | None, ...]:
+) -> tuple[TensorMeta | None, ...]:
     """Derive gradient metadata from tensor metadata.
 
     Returns metadata with the same shape/stride/dtype but ``requires_grad=False``.
     Entries where the source has ``requires_grad=False`` become ``None``.
     """
-    return tuple(
-        _TensorMeta(shape=m.shape, stride=m.stride, dtype=m.dtype, requires_grad=False)
-        if m.requires_grad
-        else None
-        for m in tensor_metas
-    )
+
+    def derive_one(m: TensorMeta) -> TensorMeta | None:
+        if not m.requires_grad:
+            return None
+        if isinstance(m, _DTensorMeta):
+            return None
+        return _TensorMeta(
+            shape=m.shape,
+            stride=m.stride,
+            dtype=m.dtype,
+            requires_grad=False,
+        )
+
+    return tuple(derive_one(m) for m in tensor_metas)
 
 
 class _MeshCache:
