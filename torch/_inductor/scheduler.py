@@ -33,7 +33,7 @@ from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
 
-from .ir import ComputedBuffer, Pointwise
+from .ir import ComputedBuffer
 
 
 if TYPE_CHECKING:
@@ -68,7 +68,7 @@ from .comm_analysis import (
     estimate_nccl_collective_runtime,
     estimate_nccl_collective_runtime_nccl_estimator,
 )
-from .dependencies import Dep, MemoryDep, StarDep, WeakDep
+from .dependencies import Dep, MemoryDep, StarDep, UserTritonDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
 from .fx_utils import count_flops_fx
 from .ir import (
@@ -2141,13 +2141,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         self._init_from_node(node)
         self.set_read_writes(node.get_read_writes())
 
-        if isinstance(node, ir.UserDefinedTritonKernel) and node.can_fuse_epilogue():
-            numel = math.prod(node.mutable_args[0].shape)
-            rnumel = 1
-            device = node.get_device_or_error()
-            # pyrefly: ignore [bad-assignment]
-            self.group = (device, (numel, rnumel))
-
     def debug_str_extra(self) -> str:
         return f"{self.get_name()}.node.kernel = {getattr(self.node, 'python_kernel_name', None)}"
 
@@ -2157,15 +2150,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
     def has_side_effects(self) -> bool:
         assert self.node is not None
         return hasattr(self.node, "has_side_effects") and self.node.has_side_effects()
-
-    def get_ranges(self) -> Sequence[Sequence[sympy.Expr]]:
-        if (
-            isinstance(self.node, ir.UserDefinedTritonKernel)
-            and self.node.can_fuse_epilogue()
-        ):
-            numel = math.prod(self.node.mutable_args[0].shape)
-            return ([numel], [])
-        return ([], [])
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         assert isinstance(self.node, ir.ExternKernel)
@@ -3053,28 +3037,279 @@ class FusedNestedReductions(FusedSchedulerNode):
         return FusedNestedReductions(self.node1, new_node2)
 
 
-class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
+class UserTritonSchedulerNode(ExternKernelSchedulerNode):
+    """
+    A scheduler node for user-defined Triton kernels.
+    """
+
+    # pyrefly: ignore [bad-override]
+    node: ir.UserDefinedTritonKernel
+
+    def __init__(self, scheduler: Scheduler, node: ir.UserDefinedTritonKernel) -> None:
+        super().__init__(scheduler, node)
+        assert isinstance(self.node, ir.UserDefinedTritonKernel)
+
+        self.only_tt_stores = self.node.formal_accesses.only_tt_stores
+        self.formal_reads = self.node.formal_accesses.read_writes.reads
+        self.formal_writes = self.node.formal_accesses.read_writes.writes
+        self.output_tile = self.node.output_tile
+        self.pid_remap = self.node.pid_remap
+
+        numel = math.prod(node.mutable_args[0].shape)
+        rnumel = 1
+        device = node.get_device_or_error()
+        # pyrefly: ignore [bad-assignment]
+        self.group = (device, (numel, rnumel))
+
+    def can_fuse_with(self, node2: BaseSchedulerNode) -> bool:
+        """
+        Allow a unary pointwise epilogue pointwise to be fused into this kernel.
+
+        Fusion of user-defined kernels is initially gated on `config.epilogue_fusion_user_defined_triton_kernel`
+        (see `Scheduler.unfusable_nodes`).
+        """
+
+        why = WhyNoFuse(self, node2)
+
+        # We allow FusedSchedulerNode, only if the last constituent node will
+        # have a materialised store. The remaining conditions must then hold for
+        # said `writing_node`.
+        writing_node: BaseSchedulerNode
+        if isinstance(node2, FusedSchedulerNode):
+            fused_names = OrderedSet(sn.get_name() for sn in node2.snodes)
+            epilogue_snodes = [
+                sn
+                for sn in node2.snodes
+                if any(
+                    not self.scheduler.can_buffer_be_removed_through_fusion(
+                        w.name, fused_names
+                    )
+                    for w in sn.read_writes.writes
+                    if w.name in self.scheduler.name_to_buf
+                )
+            ]
+            if len(epilogue_snodes) != 1:
+                why("fused epilogue introduces more than one materialized store")
+                return False
+            writing_node = epilogue_snodes[0]
+        else:
+            writing_node = node2
+
+        if not isinstance(writing_node, SchedulerNode):
+            why("epilogue of user's Triton kernel is not a SchedulerNode")
+            return False
+
+        if not self.only_tt_stores:
+            why("user Triton fusion only supports `tl.store`")
+            return False
+
+        if len(self.node.mutable_args) != 1 or len(self.formal_writes) != 1:
+            why("user's Triton kernel has multiple stores")
+            return False
+
+        formal_write = next(iter(self.formal_writes))
+        assert isinstance(formal_write, dependencies.UserTritonDep)
+        if formal_write.access_count != 1:
+            why("user's Triton kernel writes to output more than once")
+            return False
+
+        # Only fuse if the mutated arg is originally an "empty" tensor.
+        # This is because we don't know exactly which element of that tensor is being written to.
+        # If the kernel only writes to a subset of the tensor, then we only apply the epilogue to
+        # that subset. In these edge cases, our fusion is only correct if the original tensor is empty,
+        # where the semantics is that content values are UB, and we can rely on the fact that
+        # `epilogue(UB) == UB`.
+        def _is_empty_tensor(arg) -> bool:
+            if not isinstance(arg, ir.TensorBox):
+                return False
+            if not isinstance(arg.data, ir.StorageBox):
+                return False
+            if not isinstance(arg.data.data, ir.ComputedBuffer):
+                return False
+            if not isinstance(arg.data.data.data, ir.Pointwise):
+                return False
+            if not all(r == 0 for r in arg.data.data.data.ranges):
+                return False
+            return True
+
+        mutable_arg = self.node.mutable_args[0]
+        if not _is_empty_tensor(mutable_arg):
+            why("user's Triton kernel output is not an empty tensor")
+            return False
+
+        formal_arg_name = formal_write.name
+        if any(dep.name == formal_arg_name for dep in self.formal_reads):
+            why("user's Triton kernel reads from its output buffer")
+            return False
+
+        if not isinstance(writing_node.node, ComputedBuffer) or not isinstance(
+            writing_node.node.data, ir.Pointwise
+        ):
+            why("epilogue of user's Triton kernel is not Pointwise")
+            return False
+
+        # The epilogue may require additional index expressions.
+        # If the user has provided the dimensions of the "output tile", we may be able to fuse.
+        if self.output_tile:
+            from .codegen.simd import SIMDScheduling
+
+            node_schedule = node2.get_nodes()
+            _, (numel_ep, rnumel_ep) = node2.group
+            # TODO(jjvraw): Do we need to be explicit here about reductions? Or is it implied via
+            # FusedSchedulerNode.
+            if isinstance(node2, FusedSchedulerNode) and any(
+                isinstance(sn, SchedulerNode)
+                and isinstance(sn.node, ComputedBuffer)
+                and isinstance(sn.node.data, ir.Reduction)
+                for sn in node2.snodes
+            ):
+                # Reduction intermediates require a 1D tile large enough for a persistent
+                # reduction (single pass over the full reduction width).
+                if len(self.output_tile) != 1:
+                    why("reduction epilogue fusion only supports a 1D output_tile")
+                    return False
+                tile_val = self.node.kwargs[self.output_tile[0]]
+                if not V.graph.sizevars.statically_known_geq(tile_val, rnumel_ep):
+                    why("user kernel does not support 1d persistent reduction")
+                    return False
+            k = len(self.output_tile)
+            tiling = (
+                SIMDScheduling.create_tiling([numel_ep], [rnumel_ep])
+                if k == 1
+                else SIMDScheduling.create_tiling(
+                    list(self.node.mutable_args[0].shape[-k:]), [rnumel_ep]
+                )
+            )
+            if not SIMDScheduling.tiling_is_compatible(
+                # pyrefly: ignore [bad-argument-type]
+                node_schedule,
+                numel_ep,
+                rnumel_ep,
+                tiling,
+            ):
+                why(
+                    "epilogue iteration space is incompatible with output_tile dimensions"
+                )
+                return False
+        else:
+            if self.epilogue_requires_indexing(writing_node):
+                why(
+                    "epilogue requires expressions not available in user's Triton kernel"
+                )
+                return False
+
+        layout1 = self.node.mutable_args[0].layout
+        layout2 = writing_node.node.layout
+        assert isinstance(layout1, ir.Layout) and isinstance(layout2, ir.Layout)
+        if (
+            layout1.size != layout2.size
+            or layout1.stride != layout2.stride
+            or layout1.device != layout2.device
+        ):
+            why("user's Triton kernel and epilogue have different buffer layouts")
+            return False
+
+        written_buffer_name = self.node.mutation_outputs[0].name
+        # Other nodes read the real (pre-mutation) buffer, not the mutation output.
+        assert written_buffer_name is not None
+        real_written_buffer_name = self.scheduler.mutation_real_name.get(
+            written_buffer_name, written_buffer_name
+        )
+        mutation_buffer_names = OrderedSet(
+            [written_buffer_name, real_written_buffer_name]
+        )
+
+        # Exclude nodes that are part of this fusion attempt.
+        # For a FusedSchedulerNode epilogue, also exclude its constituent snodes since
+        # they appear individually in scheduler.nodes but will be consumed by the fusion.
+        fusion_node_set: OrderedSet[BaseSchedulerNode] = OrderedSet([self, node2])
+        if isinstance(node2, FusedSchedulerNode):
+            fusion_node_set.update(node2.snodes)
+
+        def _is_other_node_that_references_mutation_buffer(
+            other_node: BaseSchedulerNode,
+        ) -> bool:
+            if other_node in fusion_node_set:
+                return False
+            reads = OrderedSet([d.name for d in other_node.read_writes.reads])
+            return bool(reads & mutation_buffer_names)
+
+        if any(
+            _is_other_node_that_references_mutation_buffer(node)
+            for node in self.scheduler.nodes
+        ):
+            why("epilogue has other references")
+            return False
+
+        return self.scheduler.can_fuse_vertical(self, node2)
+
+    def epilogue_requires_indexing(self, node2: SchedulerNode) -> bool:
+        # The epilogue can only read from the output buffer.
+        # Any other tensor/s would require additional load expressions.
+        written_buffer_name = self.node.mutation_outputs[0].name
+        if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
+            return True
+
+        # Reductions always require additional indexing (reduction dimension);
+        # the symbol-usage check below is only valid for Pointwise nodes.
+        if not isinstance(node2.node, ComputedBuffer) or not isinstance(
+            node2.node.data, ir.Pointwise
+        ):
+            return True
+
+        # The epilogue depends on expressions not originally available in the user
+        # triton kernel.
+        # (e.g. indexing exprs used not in a load).
+        node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
+        for symbol in node2_inner_fn_free_symbols:
+            usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
+            if any(usage != "load" for usage in usages):
+                return True
+
+        return False
+
+
+class FusedUserTritonSchedulerNode(FusedSchedulerNode):
+    """A fused scheduler node combining a UserTritonSchedulerNode with an epilogue."""
+
+    kernel_node: UserTritonSchedulerNode
+
     def __init__(
         self,
         scheduler: Scheduler,
-        kernel_node: ExternKernelSchedulerNode,
-        fused_epilogue: SchedulerNode,
+        kernel_node: UserTritonSchedulerNode,
+        epilogue: SchedulerNode | FusedSchedulerNode,
     ) -> None:
-        assert isinstance(kernel_node.node, ir.UserDefinedTritonKernel)
-        snodes = typing.cast(list[BaseSchedulerNode], [kernel_node, fused_epilogue])
+        snodes = typing.cast(
+            list[BaseSchedulerNode], [kernel_node, *epilogue.get_nodes()]
+        )
         super().__init__(scheduler, snodes)
         self.kernel_node = kernel_node
-        self.fused_epilogue = fused_epilogue
+        self.epilogue = epilogue
         self.min_order = self.kernel_node.min_order
-        self.outputs = fused_epilogue.outputs
+        # pyrefly: ignore[bad-assignment]
+        self.outputs = self.writing_node.get_outputs()
+
+    @functools.cached_property
+    def writing_node(self) -> SchedulerNode:
+        ep_names = OrderedSet(sn.get_name() for sn in self.epilogue.get_nodes())
+        writers = [
+            sn
+            for sn in self.epilogue.get_nodes()
+            if any(
+                not self.scheduler.can_buffer_be_removed_through_fusion(n, ep_names)
+                for n in sn.get_buffer_names()
+            )
+        ]
+        assert len(writers) == 1
+        return typing.cast(SchedulerNode, writers[0])
 
     @classmethod
     def epilogue_fuse(
         cls,
-        node1: ExternKernelSchedulerNode,
-        node2: SchedulerNode,
+        node1: UserTritonSchedulerNode,
+        node2: SchedulerNode | FusedSchedulerNode,
     ) -> FusedSchedulerNode:
-        assert isinstance(node1.node, ir.UserDefinedTritonKernel)
         scheduler = node1.scheduler
 
         assert len(node1.node.mutation_outputs) == 1
@@ -3085,35 +3320,106 @@ class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
         # for `Scheduler.dead_node_elimination` to remove.
         real_name = scheduler.mutation_real_name.get(mutated_name, mutated_name)
         scheduler.name_to_buf[real_name].users.remove(NodeUser(node1))
+
+        ep_names = OrderedSet(sn.get_name() for sn in node2.get_nodes())
+        for name in node2.get_buffer_names():
+            if scheduler.can_buffer_be_removed_through_fusion(name, ep_names):
+                V.graph.removed_buffers.add(name)
+
         return cls(scheduler, node1, node2)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        assert isinstance(self.fused_epilogue.node, ir.ComputedBuffer)
+        """
+        Generate code for the fused user-defined Triton kernel.
+        """
+
         assert isinstance(self.kernel_node.node, ir.UserDefinedTritonKernel)
-        assert self.kernel_node.node.can_fuse_epilogue()
-        numel = math.prod(self.kernel_node.node.mutable_args[0].shape)
+        assert isinstance(self.writing_node.node, ir.ComputedBuffer)
         from torch._inductor.codegen.simd import SIMDScheduling
-
-        tiling, _ = SIMDScheduling.get_tiling_and_scores([self.fused_epilogue], numel)
-
         from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+        from torch._inductor.codegen.triton import FusedUserTritonKernel
 
-        kernel_features = SIMDKernelFeatures([self.fused_epilogue], numel)
+        ir_node = self.kernel_node.node
+        epilogue_nodes = typing.cast(list[SchedulerNode], self.epilogue.get_nodes())
 
-        from torch._inductor.codegen.triton import FusedUserDefinedTritonKernel
+        _, (numel_ep, rnumel) = self.epilogue.group
+        is_reduction_ep = not V.graph.sizevars.statically_known_equals(
+            rnumel, sympy.S.One
+        )
+        kernel_features = SIMDKernelFeatures(
+            # pyrefly: ignore [bad-argument-type]
+            epilogue_nodes,
+            numel_ep,
+            reduction_numel=rnumel,
+        )
 
-        fused_user_kernel = FusedUserDefinedTritonKernel(tiling, kernel_features, self)
+        excluded_names = (
+            OrderedSet([ir_node.mutation_outputs[0].name])
+            | self.epilogue.get_buffer_names()
+        )
+        external_reads = OrderedSet(
+            d.name
+            for sn in epilogue_nodes
+            for d in sn.read_writes.reads
+            if d.name not in excluded_names
+        )
+        additional_args = [
+            (f"_fused_in_ptr{i}", name) for i, name in enumerate(external_reads)
+        ]
+
+        epilogue_needs_indexing = any(
+            self.kernel_node.epilogue_requires_indexing(sn) for sn in epilogue_nodes
+        )
+        if is_reduction_ep:
+            # Only 1D-grid reductions are supported: XBLOCK=1, no tile alias needed.
+            block_aliases: dict[str, str] | None = {}
+            tiling = SIMDScheduling.create_tiling([numel_ep], [rnumel])
+        elif ir_node.output_tile:
+            k = len(ir_node.output_tile)
+            # output_tile is specified in tensor dimension order (outermost first),
+            # but Inductor's x/y convention is innermost-first.
+            block_aliases = dict(
+                zip(["XBLOCK", "YBLOCK", "ZBLOCK"][:k], reversed(ir_node.output_tile))
+            )
+            if k == 1:
+                tiling = SIMDScheduling.create_tiling([numel_ep], [sympy.S.One])
+            else:
+                tiling = SIMDScheduling.create_tiling(
+                    list(ir_node.mutable_args[0].shape[-k:]), [sympy.S.One]
+                )
+        else:
+            block_aliases = None
+            tiling = SIMDScheduling.create_tiling([numel_ep], [sympy.S.One])
+
+        pass_aliases = (
+            block_aliases if (epilogue_needs_indexing or is_reduction_ep) else None
+        )
+        # pid_remap is also in tensor dimension order (outermost first), reverse
+        # to match Inductor's grid dim ordering (dim 0 = x = innermost).
+        pid_cache = (
+            {
+                f"tl.program_id({i})": name
+                for i, name in enumerate(reversed(ir_node.pid_remap))
+            }
+            if ir_node.pid_remap
+            else {}
+        )
+        fused_user_kernel = FusedUserTritonKernel(
+            tiling,
+            kernel_features,
+            self,
+            additional_args,
+            block_aliases=pass_aliases,
+            pid_cache=pid_cache,
+        )
         new_kernel_src = fused_user_kernel.codegen()
 
         return self.kernel_node.node.codegen_with_epilogue_fusion(
-            wrapper, (self.fused_epilogue.node, new_kernel_src)
+            wrapper, (self.writing_node.node, new_kernel_src, additional_args)
         )
 
     def is_extern(self) -> bool:
         return True
-
-    def get_ranges(self) -> Sequence[Sequence[sympy.Expr]]:
-        return self.kernel_node.get_ranges()
 
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
@@ -4140,11 +4446,8 @@ class Scheduler:
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
-        if any(
-            isinstance(node, FusedExternTritonKernelSchedulerNode)
-            for node in self.nodes
-        ):
-            # if a user triton kernel has been epilogue-fused,
+        if any(isinstance(node, FusedUserTritonSchedulerNode) for node in self.nodes):
+            # if a user's Triton kernel has been epilogue-fused,
             # there is likely an opportunity to prune an NopKernel
             # (which is originally used to generate the buffer which the triton kernel writes to)
             self.dead_node_elimination()
@@ -4384,6 +4687,8 @@ class Scheduler:
             return NopKernelSchedulerNode(self, node)
         elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
             return SchedulerNode(self, node)
+        elif isinstance(node, ir.UserDefinedTritonKernel):
+            return UserTritonSchedulerNode(self, node)
         elif isinstance(node, ir.ExternKernel):
             return ExternKernelSchedulerNode(self, node)
         else:
@@ -7091,9 +7396,9 @@ class Scheduler:
             return not node.is_template() and not is_output_of_multi_outputs_template(
                 node.node
             )
+        if isinstance(node, UserTritonSchedulerNode):
+            return not config.epilogue_fusion_user_defined_triton_kernel
         if isinstance(node, ExternKernelSchedulerNode):
-            if isinstance(node.node, ir.UserDefinedTritonKernel):
-                return not node.node.can_fuse_epilogue()
             return not node.is_template() and not is_output_of_multi_outputs_template(
                 node.node
             )
@@ -7415,63 +7720,8 @@ class Scheduler:
             why("node1 is nop")
             return False
 
-        if isinstance(node1, ExternKernelSchedulerNode):
-            if not isinstance(node1.node, ir.UserDefinedTritonKernel):
-                why("node1 is extern but not a triton kernel")
-                return False
-
-            if not node1.node.can_fuse_epilogue():
-                why("node1's triton kernel doesn't support epilogue fusion")
-                return False
-
-            if not isinstance(node2, SchedulerNode):
-                why("node1 is extern but node2 is not SchedulerNode")
-                return False
-            if not isinstance(node2.node, ComputedBuffer):
-                why("node1 is extern but node2.node is not SchedulerNode")
-                return False
-            if not isinstance(node2.node.data, Pointwise):
-                why("node1 is extern but node2.node.data is not Pointwise")
-                return False
-
-            assert len(node1.node.mutation_outputs) == 1
-            written_buffer_name = node1.node.mutation_outputs[0].name
-
-            # The epilogue can only read from the output buffer.
-            # Any other tensor/s would require additional load expressions.
-            if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
-                why("epilogue reads from buffers other than the mutated output")
-                return False
-
-            # the epilogue depends on expressions which may not available in the user triton kernel
-            # (e.g. indexing exprs used not in a load)
-            node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
-            for symbol in node2_inner_fn_free_symbols:
-                usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
-                if any(usage != "load" for usage in usages):
-                    return False
-
-            # should be true now because we checked `can_fuse_epilogue`
-            assert len(node1.node.mutable_args) == 1
-            if node1.node.mutable_args[0].layout != node2.node.layout:
-                why("node1 and node2 uses different buf layouts")
-                return False
-
-            def _is_other_node_that_references_mutation_buffer(
-                other_node: BaseSchedulerNode,
-            ):
-                return (
-                    (other_node is not node1)
-                    and (other_node is not node2)
-                    and written_buffer_name in other_node.used_buffer_names()
-                )
-
-            if any(
-                _is_other_node_that_references_mutation_buffer(node)
-                for node in self.nodes
-            ):
-                return False
-
+        if isinstance(node1, UserTritonSchedulerNode):
+            return node1.can_fuse_with(node2)
         if (
             isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node2.is_template()
@@ -7710,10 +7960,10 @@ class Scheduler:
                         ),
                     ):
                         remaining.remove(rd)  # noqa: B909
-                    elif isinstance(cd, StarDep) and (
-                        self.fusable_stardep_write_and_read_on_empty_tensor(
-                            rd, cd, node1.node
-                        )
+                    elif isinstance(
+                        cd, UserTritonDep
+                    ) and self.fusable_usertriton_write_and_read_on_empty_tensor(
+                        rd, cd
                     ):
                         remaining.remove(rd)  # noqa: B909
 
@@ -7967,21 +8217,15 @@ class Scheduler:
         write_index = sympy_subs(write.index, dict(zip(write.var_names, write_vars)))
         return sizevars.statically_known_equals(read_index, write_index)
 
-    # on tensors that are "empty" (i.e. with undefined values),
-    # we relax the conditions for fusion and additionally allow matching a writing StarDep with any read dep.
-    # This makes use of the fact that `f(UB) = UB`.
-    def fusable_stardep_write_and_read_on_empty_tensor(
-        self, read: Dep, write: StarDep, writing_node: ir.Operation | None
+    # On tensors that are "empty" (i.e. with undefined values),
+    # we relax the conditions for fusion and additionally allow matching a writing
+    # UserTritonDep with any read dep. This makes use of the fact that `f(UB) = UB`.
+    def fusable_usertriton_write_and_read_on_empty_tensor(
+        self, read: Dep, write: UserTritonDep
     ) -> bool:
-        if not isinstance(writing_node, ir.UserDefinedTritonKernel):
-            return False
-        if not writing_node.can_fuse_epilogue():
-            return False
         read_name = self.mutation_renames.get(read.name, read.name)
         write_name = self.mutation_renames.get(write.name, write.name)
-        if isinstance(write, StarDep) and read_name == write_name:
-            return True
-        return False
+        return read_name == write_name
 
     @staticmethod
     def deps_match_normalized(dep1: Dep, dep2: Dep) -> bool:
@@ -8127,17 +8371,14 @@ class Scheduler:
             score = MixOrderReduction.get_fusion_score(node1, node2)
             return _construct_return_value(score, 0, True)
 
-        # For UserDefinedTritonKernel, the write deps are StarDep that won't
+        # For UserTritonSchedulerNode, the write deps are UserTritonDep that won't
         # match the epilogue's MemoryDep via set intersection.  For templates,
         # view/reshape between the template output and epilogue can produce
         # different index expressions that don't match via set intersection.
         # Fall back to name-based matching so that the fusion score reflects
         # the actual shared buffers.
         if (
-            (
-                isinstance(node1.node, ir.UserDefinedTritonKernel)
-                and node1.node.can_fuse_epilogue()
-            )
+            isinstance(node1, UserTritonSchedulerNode)
             or node1.is_template()
             or node2.is_template()
         ):
@@ -8457,7 +8698,7 @@ class Scheduler:
     ) -> None:
         assert isinstance(
             scheduler_node,
-            (ExternKernelSchedulerNode, FusedExternTritonKernelSchedulerNode),
+            (ExternKernelSchedulerNode, FusedUserTritonSchedulerNode),
         )
         # 'decide_inplace_update' stores the inplace update decisions in
         # the current kernel from where 'allocate' retrieve those decisions.
@@ -9783,11 +10024,10 @@ class BaseScheduling:  # noqa: docstring_linter
             return node1.fuse_with(node2)
         elif isinstance(node1, FusedMixOrderReductions):
             return node1.fuse_with(node2)
-        elif isinstance(node1, ExternKernelSchedulerNode) and isinstance(
-            node2, SchedulerNode
+        elif isinstance(node1, UserTritonSchedulerNode) and isinstance(
+            node2, (SchedulerNode, FusedSchedulerNode)
         ):
-            assert isinstance(node1.node, ir.UserDefinedTritonKernel)
-            return FusedExternTritonKernelSchedulerNode.epilogue_fuse(node1, node2)
+            return FusedUserTritonSchedulerNode.epilogue_fuse(node1, node2)
         else:
             return FusedSchedulerNode.fuse(node1, node2)
 

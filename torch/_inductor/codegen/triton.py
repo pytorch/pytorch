@@ -4,7 +4,6 @@ from __future__ import annotations
 import ast
 import collections
 import contextlib
-import copy
 import dataclasses
 import functools
 import itertools
@@ -62,8 +61,8 @@ from ..runtime.hints import (
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..scheduler import (
     BaseSchedulerNode,
-    FusedExternTritonKernelSchedulerNode,
     FusedSchedulerNode,
+    FusedUserTritonSchedulerNode,
     Scheduler,
     SchedulerNode,
 )
@@ -6985,17 +6984,95 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             code.writeline(f"{entry.mask_name()} = {entry.name} < {x}numel")
 
 
-class FusedUserDefinedTritonKernel(TritonKernel):
+@dataclasses.dataclass
+class UserTritonStore:
+    store_node: ast.Call
+    store_pointer_node: ast.Expr
+    store_value_node: ast.Expr
+
+
+@dataclasses.dataclass
+class UserTritonMeta:
+    stores: list[UserTritonStore]
+    func_def: ast.FunctionDef | None = None
+
+
+@functools.cache
+def identify_triton_stores(source_code: str) -> UserTritonMeta:
     """
-    When fusing a user-defined triton kernel with epilogues, we use this class to generate the modified triton kernel source
+    Parse Python source code of the Triton kernel and find all tl.store calls.
+    Returns a TritonStores object containing information about pointer, value, and mask.
+
+    tl.store signature: store(pointer, value, mask=None, boundary_check=(), ...)
+    """
+    return identify_triton_stores_from_ast(ast.parse(source_code))
+
+
+def identify_triton_stores_from_ast(tree: ast.Module) -> UserTritonMeta:
+    stores = []
+    func_def = None
+
+    def _extract_arg(node, arg_name, positional_index):
+        """
+        Extract an argument from a Call node, checking both positional and keyword args.
+        Returns the AST node for the argument, or None if not found.
+        """
+        # Check positional args first
+        if len(node.args) > positional_index:
+            return node.args[positional_index]
+
+        # Check keyword args
+        for keyword in node.keywords:
+            if keyword.arg == arg_name:
+                return keyword.value
+
+        return None
+
+    for node in ast.walk(tree):
+        # Store kernel function definition
+        if isinstance(node, ast.FunctionDef) and not func_def:
+            func_def = node
+        if isinstance(node, ast.Call):
+            # Check if this is a tl.store call
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "tl"
+                and node.func.attr == "store"
+            ):
+                # Extract required arguments
+                pointer_node = _extract_arg(node, "pointer", 0)
+                value_node = _extract_arg(node, "value", 1)
+
+                if pointer_node is None or value_node is None:
+                    continue
+
+                stores.append(UserTritonStore(node, pointer_node, value_node))
+
+    return UserTritonMeta(stores=stores, func_def=func_def)
+
+
+class FusedUserTritonKernel(TritonKernel):
+    """
+    When fusing a user-defined triton kernel with epilogues, we use this class
+    to generate the modified triton kernel source.
+
+    For now, we assume a single mutated buffer, enforced by fusion legality checks
+    in the scheduler.
     """
 
     def __init__(
         self,
         tiling: dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
-        scheduler_node: FusedExternTritonKernelSchedulerNode,
+        scheduler_node: FusedUserTritonSchedulerNode,
+        additional_buf_args: list[tuple[str, str]],
+        block_aliases: dict[str, str] | None = None,
+        pid_cache: dict[str, str] | None = None,
     ) -> None:
+        self.ir_node: ir.UserDefinedTritonKernel = scheduler_node.kernel_node.node
+        override_persistent = True if features.is_reduction() else None
+
         super().__init__(
             tiling,
             features=features,
@@ -7004,27 +7081,49 @@ class FusedUserDefinedTritonKernel(TritonKernel):
             fixed_config=None,
             hint_override=None,
             is_combo_kernel=False,
+            pid_cache=pid_cache,
+            override_persistent_reduction=override_persistent,
         )
         self.scheduler_node = scheduler_node
-        assert isinstance(
-            self.scheduler_node.kernel_node.node, ir.UserDefinedTritonKernel
-        )
-        self.ir_node: ir.UserDefinedTritonKernel = self.scheduler_node.kernel_node.node
-        assert self.ir_node.can_fuse_epilogue()
+        self.block_aliases = block_aliases
+        self.additional_buf_args = {buf: param for param, buf in additional_buf_args}
 
-        # must be true because `self.ir_node.can_fuse_epilogue()`
-        assert len(self.ir_node.kernel_stores.stores) == 1
+        self.kernel_ast = ast.parse(self.ir_node.kernel_src)
+        self.kernel_stores = identify_triton_stores_from_ast(self.kernel_ast)
+        assert len(self.kernel_stores.stores) == 1
         self.original_stored_expr = ast.unparse(
-            self.ir_node.kernel_stores.stores[0].store_value_node
+            self.kernel_stores.stores[0].store_value_node
+        ).replace("\n", "")
+        self.func_def = self.kernel_stores.func_def
+
+        self.new_store_cse_var: TritonCSEVariable | None = None
+        self.intermediate_cse_vars: dict[str, TritonCSEVariable] = {}
+
+        writing_node = scheduler_node.writing_node
+        assert isinstance(writing_node.node, ir.ComputedBuffer)
+        self.epilogue_output_names: OrderedSet[str] = writing_node.get_buffer_names()
+        assert isinstance(writing_node.node.layout, ir.Layout)
+        self.output_store_dtype: torch.dtype = writing_node.node.layout.dtype
+
+    def want_no_x_dim(self) -> bool:
+        # Legality enforces len(output_tile == 1) for reduction epilogues, so
+        # the non-reduction x-dimension always collapses to XBLOCK=1.
+        return self.features.is_reduction()
+
+    def _get_persistent_RBLOCK(self, rnumel) -> int:
+        if self.ir_node.output_tile:
+            # For now, only allow 1d persistent reductions, hence len(grid) == 1.
+            assert len(self.ir_node.output_tile) == 1
+            return int(self.ir_node.kwargs[self.ir_node.output_tile[0]])
+        raise AssertionError(
+            "Reduction epilogue fusion requires an annotated output_tile on the user kernel"
         )
-        self.original_stored_expr = self.original_stored_expr.replace("\n", "")
 
     def load(self, name: str, index: sympy.Expr) -> TritonCSEVariable:
-        # must be true because `self.ir_node.can_fuse_epilogue()`
         assert len(self.ir_node.mutable_args) == 1
         if name == self.ir_node.mutable_args[0].get_name():
-            # when the fused epilogue nodes tries to load the mutated buffer
-            # we replace the load with the expression stored by the user kernel
+            # Replace loads of the mutation buffer with the value the user
+            # kernel computed (the original tl.store expression).
             loaded_expr = self.original_stored_expr
             indexing = self.indexing(index)
             dtype = V.graph.get_dtype(name)
@@ -7036,8 +7135,30 @@ class FusedUserDefinedTritonKernel(TritonKernel):
                 self.loads, loaded_expr, dtype=dtype, shape=shape
             )
             return result_var
+        elif name in self.intermediate_cse_vars:
+            # An earlier epilogue snode stored to this buffer; return its
+            # captured CSE variable directly instead of emitting a tl.load.
+            return self.intermediate_cse_vars[name]
+        elif name in self.additional_buf_args:
+            # This is a "new" buffer which isn't in the original user's context
+            param_name = self.additional_buf_args[name]
+            dtype = V.graph.get_dtype(name)
+            indexing = self.indexing(index, block_ptr=False)
+            if indexing.expand_shape:
+                shape = indexing.expand_shape
+            else:
+                shape = TritonSymbols.get_block_shape(indexing.index)
+            line = (
+                f"tl.load({param_name} + ({indexing.index_str}), {indexing.mask_str})"
+            )
+            if (
+                dtype in (torch.float16, torch.bfloat16)
+                and config.triton.codegen_upcast_to_fp32
+            ):
+                line += ".to(tl.float32)"
+                dtype = torch.float32
+            return self.cse.generate(self.loads, line, dtype=dtype, shape=shape)
         else:
-            # The scheduler should prevent this.
             raise AssertionError(
                 f"Epilogue attempted to load from '{name}'. "
                 "Inductor indexing variables are not defined in user kernel scope. "
@@ -7046,75 +7167,125 @@ class FusedUserDefinedTritonKernel(TritonKernel):
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
-        assert isinstance(self.scheduler_node.fused_epilogue.node, ir.ComputedBuffer)
-        if name == self.scheduler_node.fused_epilogue.node.get_name():
-            # when the fused epilogue nodes tries to store to its destination buffer
-            # we remember this expr and then later replace it into the `tl.store` call of the original kernel
-            self.new_store_cse_var = value
-        else:
-            super().store(name, index, value, mode)
-
-    # returns a str which is the src code of a modified version of the user kernel that includes the epilogues
-    def codegen(self) -> str:
-        with self:
-            index_vars = self.split_and_set_ranges(
-                self.scheduler_node.fused_epilogue.get_ranges()
+        if name in self.epilogue_output_names:
+            self.new_store_cse_var = self.cse.generate(
+                self.compute,
+                f"{value}.to({triton_store_type(self.output_store_dtype)})",
+                dtype=self.output_store_dtype,
+                shape=value.shape,
             )
-            self.scheduler_node.fused_epilogue.codegen(index_vars)
+        else:
+            assert isinstance(value, TritonCSEVariable)
+            self.intermediate_cse_vars[name] = value
 
-        # Generate a new AST where the store value expr is replaced with the new value
-        new_ast = copy.deepcopy(self.ir_node.kernel_ast)
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            identify_triton_stores,
-            identify_triton_stores_from_ast,
-        )
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+        # The user-original tl.store pointer/mask are valid (checked in scheduler), and
+        # only the value operand is replaced via AST rewriting. We may share the same
+        # path as `self.store` here.
+        self.store(name, index, value)
 
-        # avoid redundant cache entry of new_ast
-        kernel_stores = identify_triton_stores_from_ast(new_ast)
-        assert len(kernel_stores.stores) == 1
+    def codegen_new_params(self) -> None:
+        assert self.func_def is not None
+        new_args = [ast.arg(arg=p) for p in self.additional_buf_args.values()]
+        self.func_def.args.args[:0] = new_args
 
-        new_store_value_node = ast.Name(self.new_store_cse_var.name)
+    def codegen_aliases(self) -> list[str]:
+        if not self.block_aliases:
+            return []
 
-        def _replace_arg(
-            call_node: ast.Call,
-            arg_name: str,
-            positional_index: int,
-            new_arg,
-        ):
-            if len(call_node.args) > positional_index:
-                call_node.args[positional_index] = new_arg
+        # Aliases are injected at the top of the function body, so use the
+        # function body's indentation level, not the store's col_offset
+        assert self.func_def is not None and self.func_def.body
+        body_indent = " " * self.func_def.body[0].col_offset
+        aliases = []
+        for varname, alias in self.block_aliases.items():
+            aliases.append(f"{body_indent}{varname}: tl.constexpr = {alias}")
 
-            # Check keyword args
-            for keyword in call_node.keywords:
-                if keyword.arg == arg_name:
-                    keyword.value = new_arg
+        return aliases
 
-        _replace_arg(
-            kernel_stores.stores[0].store_node, "value", 1, new_store_value_node
-        )
+    def codegen(self) -> str:
+        """
+        Returns a string which is the source code of a modified version of the user kernel that includes
+        the epilogue.
 
-        src_with_store_replaced = ast.unparse(new_ast)
+        There are two injection paths:
 
-        # then, we need to inject the additional `load` and `compute` lines generated when we `codegen` the epilogue nodes
+            1. block_aliases is not None
+               - Full body injection: range tree, static numels, indexing, loads, computes,
+                 and any BLOCK aliases are inserted after the function def line.
+            2. block_aliases is None (unary pointwise, no tile annotations):
+               - Only load/compute lines are inserted before the tl.store.
 
-        src_lines = src_with_store_replaced.splitlines()
+        In both paths the tl.store value operand is replaced with the epilogue output variable.
+        For reductions the pointer and mask are preserved unchanged; legality ensures the
+        output buffer has the same shape/layout as the user kernel's mutable argument.
+        """
+        with self:
+            for sn in self.scheduler_node.epilogue.get_nodes():
+                assert isinstance(sn, SchedulerNode)
+                index_vars = self.split_and_set_ranges(sn.get_ranges())
+                sn.codegen(index_vars)
 
-        # identify the store again, because the previous parse-modify-unparse could've change its location
-        kernel_stores = identify_triton_stores(src_with_store_replaced)
-        # python ast lineno is 1-indexed
-        store_line_index = kernel_stores.stores[0].store_node.lineno - 1
-
-        indentations = " " * kernel_stores.stores[0].store_node.col_offset
-
+        indentations = " " * self.kernel_stores.stores[0].store_node.col_offset
         load_lines = [indentations + l for l in self.loads.get_lines_ref()]
         compute_lines = [indentations + l for l in self.compute.get_lines_ref()]
 
-        new_src_lines = (
-            src_lines[:store_line_index]
-            + load_lines
-            + compute_lines
-            + src_lines[store_line_index:]
+        if self.additional_buf_args:
+            self.codegen_new_params()
+
+        def _replace_arg(call_node, arg_name, positional_index, new_arg):
+            replaced = False
+            if len(call_node.args) > positional_index:
+                call_node.args[positional_index] = new_arg
+                replaced = True
+            for keyword in call_node.keywords:
+                if keyword.arg == arg_name:
+                    keyword.value = new_arg
+                    replaced = True
+            assert replaced, f"Failed to replace '{arg_name}' in tl.store call"
+
+        assert self.new_store_cse_var is not None
+        _replace_arg(
+            self.kernel_stores.stores[0].store_node,
+            "value",
+            1,
+            ast.Name(self.new_store_cse_var.name),
         )
+        src_with_store_replaced = ast.unparse(self.kernel_ast)
+        src_lines = src_with_store_replaced.splitlines()
+        # Re-parse to get correct line numbers after AST modification + unparse.
+        kernel_stores = identify_triton_stores(src_with_store_replaced)
+        store_line_index = kernel_stores.stores[0].store_node.lineno - 1
+
+        if self.block_aliases is not None:
+            numel_buf = IndentedBuffer()
+            self.codegen_static_numels(numel_buf)
+            numel_lines = [indentations + l for l in numel_buf.get_lines_ref()]
+            body_lines = [indentations + l for l in self.body.get_lines_ref()]
+            indexing_lines = [
+                indentations + l for l in self.indexing_code.get_lines_ref()
+            ]
+            assert kernel_stores.func_def is not None
+            def_line_index = kernel_stores.func_def.lineno - 1
+            new_src_lines = (
+                src_lines[: def_line_index + 1]
+                + self.codegen_aliases()
+                + src_lines[def_line_index + 1 : store_line_index]
+                + numel_lines
+                + body_lines
+                + indexing_lines
+                + load_lines
+                + compute_lines
+                + src_lines[store_line_index:]
+            )
+        else:
+            new_src_lines = (
+                src_lines[:store_line_index]
+                + load_lines
+                + compute_lines
+                + src_lines[store_line_index:]
+            )
+
         return "\n".join(new_src_lines)
 
 
@@ -7288,6 +7459,7 @@ class TritonScheduling(SIMDScheduling):
     def benchmark_fused_nodes(self, nodes, n_spills_threshold=8) -> tuple[float, str]:
         """
         Benchmark fused list of nodes and return the execution time
+
         in milliseconds on randomly generated inputs.
         """
         src_code = self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)

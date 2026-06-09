@@ -33,9 +33,10 @@ from torch._inductor.utils import (
     run_and_get_code,
     triton_version_uses_attrs_dict,
 )
-from torch._library import capture_triton
+from torch._library import capture_triton, wrap_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
@@ -5972,6 +5973,555 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         out, code = run_and_get_code(torch.compile(fn), a, b, c)
         self.assertEqual(out, fn(a, b, c))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
+
+    @requires_cuda_and_triton
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8, "fp8e4nv (float8_e4m3fn) requires SM 8.9+"
+    )
+    def test_wrap_fusion_norm_quant(self):
+        @triton.jit
+        def _normalization_fwd(
+            X,
+            X_row_stride: tl.constexpr,
+            Y,
+            Y_row_stride: tl.constexpr,
+            W,
+            n_cols_X: tl.constexpr,
+            eps: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            row_idx = tl.program_id(0)
+            col_offsets = tl.arange(0, BLOCK_SIZE)
+            mask = col_offsets < n_cols_X
+
+            X += row_idx * X_row_stride
+            Y += row_idx * Y_row_stride
+
+            X_row = tl.load(X + col_offsets, mask=mask, other=0).to(tl.float32)
+            W_row = tl.load(W + col_offsets, mask=mask, other=0).to(tl.float32)
+
+            row_var = tl.sum(X_row * X_row, axis=0) / n_cols_X
+            inv_var = tl.math.rsqrt(row_var + eps)
+
+            normed = X_row * inv_var * W_row
+            tl.store(Y + col_offsets, normed.to(X_row.dtype), mask=mask)
+
+        def normalization(X: torch.Tensor, W: torch.Tensor, eps: float = 1e-6):
+            shape = X.shape
+            hidden_dim = shape[-1]
+            X = X.reshape(-1, hidden_dim)
+            num_rows, num_cols = X.shape
+
+            BLOCK_SIZE = triton.next_power_of_2(num_cols)
+            Y = torch.empty_like(X)
+
+            torch.library.wrap_triton(_normalization_fwd, output_tile=("BLOCK_SIZE",))[
+                (num_rows,)
+            ](
+                X,
+                X.stride(0),
+                Y,
+                Y.stride(0),
+                W,
+                num_cols,
+                eps,
+                BLOCK_SIZE=BLOCK_SIZE,
+            )
+
+            return Y.view(*shape)
+
+        FP8_DTYPE = torch.float8_e4m3fn
+        FP8_MAX = torch.finfo(FP8_DTYPE).max
+        FP8_MIN = -FP8_MAX
+
+        def fn(X, W):
+            X = normalization(X, W)
+            X_f32 = X.to(torch.float32)
+            abs_max = X_f32.abs().max(dim=-1, keepdim=True).values
+            S = abs_max / FP8_MAX
+            Y = (X_f32 / S).clamp(FP8_MIN, FP8_MAX).to(FP8_DTYPE)
+            return Y
+
+        X = torch.randn((4, 4096), device="cuda")
+        W = torch.randn((X.shape[-1]), device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), X, W)
+        self.assertEqual(
+            out.view(torch.uint8).to(torch.int32),
+            fn(X, W).view(torch.uint8).to(torch.int32),
+            atol=1,
+            rtol=0,
+        )
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    @requires_cuda_and_triton
+    def test_wrap_fusion_grouped_matmul(self):
+        # https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html
+        @triton.jit
+        def matmul_kernel(
+            a_ptr,
+            b_ptr,
+            c_ptr,
+            M,
+            N,
+            K,
+            stride_am,
+            stride_ak,
+            stride_bk,
+            stride_bn,
+            stride_cm,
+            stride_cn,
+            BLOCK_SIZE_M: tl.constexpr,
+            BLOCK_SIZE_N: tl.constexpr,
+            BLOCK_SIZE_K: tl.constexpr,  #
+            GROUP_SIZE_M: tl.constexpr,
+        ):
+            pid = tl.program_id(axis=0)
+            num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
+            num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+            num_pid_in_group = GROUP_SIZE_M * num_pid_n
+            group_id = pid // num_pid_in_group
+            first_pid_m = group_id * GROUP_SIZE_M
+            group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+            pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
+            pid_n = (pid % num_pid_in_group) // group_size_m
+
+            offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+            offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
+            offs_k = tl.arange(0, BLOCK_SIZE_K)
+            a_ptrs = a_ptr + (
+                offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak
+            )
+            b_ptrs = b_ptr + (
+                offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn
+            )
+
+            accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+            for k in range(tl.cdiv(K, BLOCK_SIZE_K)):
+                a = tl.load(
+                    a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0
+                )
+                b = tl.load(
+                    b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0
+                )
+                accumulator = tl.dot(a, b, accumulator)
+                a_ptrs += BLOCK_SIZE_K * stride_ak
+                b_ptrs += BLOCK_SIZE_K * stride_bk
+
+            c = accumulator.to(tl.float16)
+
+            offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+            offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+            c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+            c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+            tl.store(c_ptrs, c, mask=c_mask)
+
+        def fn(A, B, b):
+            M, K = A.shape
+            K, N = B.shape
+            C = torch.empty((M, N), device=A.device, dtype=torch.float16)
+            BLOCK_M, BLOCK_N, BLOCK_K = 64, 64, 32
+            GROUP_SIZE_M = 8
+            grid = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
+            torch.library.wrap_triton(
+                matmul_kernel,
+                output_tile=("BLOCK_SIZE_M", "BLOCK_SIZE_N"),
+                pid_remap=("pid_m", "pid_n"),
+            )[grid](
+                A,
+                B,
+                C,
+                M,
+                N,
+                K,
+                A.stride(0),
+                A.stride(1),
+                B.stride(0),
+                B.stride(1),
+                C.stride(0),
+                C.stride(1),
+                BLOCK_SIZE_M=BLOCK_M,
+                BLOCK_SIZE_N=BLOCK_N,
+                BLOCK_SIZE_K=BLOCK_K,
+                GROUP_SIZE_M=GROUP_SIZE_M,
+            )
+            return (C + b).relu()
+
+        A = torch.randn(1024, 512, device="cuda")
+        B = torch.randn(512, 2048, device="cuda")
+        b = torch.randn(2048, device="cuda")
+        out, code = run_and_get_code(torch.compile(fn), A, B, b)
+        self.assertEqual(out, fn(A, B, b))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_wrap_fusion_2d_matmul(self):
+        @triton.jit
+        def naive_matmul_kernel(
+            A,
+            B,
+            C,
+            M,
+            N,
+            K,
+            stride_am,
+            stride_ak,
+            stride_bk,
+            stride_bn,
+            stride_cm,
+            stride_cn,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+            BLOCK_K: tl.constexpr,
+        ):
+            pid_n = tl.program_id(0)
+            pid_m = tl.program_id(1)
+
+            rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+            rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+            rk = tl.arange(0, BLOCK_K)
+
+            A_ptr = A + (rm[:, None] * stride_am + rk[None, :] * stride_ak)
+            B_ptr = B + (rk[:, None] * stride_bk + rn[None, :] * stride_bn)
+
+            acc = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+            for _ in range(0, K, BLOCK_K):
+                a = tl.load(A_ptr)
+                b = tl.load(B_ptr)
+                acc += tl.dot(a, b)
+                A_ptr += BLOCK_K * stride_ak
+                B_ptr += BLOCK_K * stride_bk
+
+            C_ptr = C + (rm[:, None] * stride_cm + rn[None, :] * stride_cn)
+            mask = (rm[:, None] < M) & (rn[None, :] < N)
+            tl.store(C_ptr, acc, mask=mask)
+
+        def fn(A, B, b):
+            M, K = A.shape
+            K, N = B.shape
+
+            C = torch.empty((M, N), device=A.device, dtype=A.dtype)
+
+            BLOCK_M, BLOCK_N, BLOCK_K = 64, 64, 32
+            grid = (triton.cdiv(N, BLOCK_N), triton.cdiv(M, BLOCK_M))
+
+            torch.library.wrap_triton(
+                naive_matmul_kernel, output_tile=("BLOCK_M", "BLOCK_N")
+            )[grid](
+                A,
+                B,
+                C,
+                M,
+                N,
+                K,
+                A.stride(0),
+                A.stride(1),
+                B.stride(0),
+                B.stride(1),
+                C.stride(0),
+                C.stride(1),
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+                BLOCK_K=BLOCK_K,
+            )
+
+            return (C + b).relu()
+
+        A = torch.randn(1024, 512, device="cuda")
+        B = torch.randn(512, 2048, device="cuda")
+        b = torch.randn(2048, device="cuda")
+        out, code = run_and_get_code(torch.compile(fn), A, B, b)
+        self.assertEqual(out, fn(A, B, b))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_wrap_fusion_cast(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            wrap_triton(add_kernel, output_tile=("BLOCK_SIZE",))[grid](
+                a, b, out, a.numel(), BLOCK_SIZE=1024
+            )
+            return out.to(torch.float16)
+
+        a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    @requires_cuda_and_triton
+    def test_wrap_fusion_reduction_epilogue(self):
+        @triton.jit
+        def row_scale_kernel(x_ptr, out_ptr, row_stride, BLOCK_SIZE: tl.constexpr):
+            row = tl.program_id(0)
+            cols = tl.arange(0, BLOCK_SIZE)
+            x = tl.load(x_ptr + row * row_stride + cols)
+            tl.store(out_ptr + row * row_stride + cols, x * 2.0)
+
+        def fn(x):
+            B, N = x.shape
+            out = torch.empty_like(x)
+            BLOCK_SIZE = N
+            wrap_triton(row_scale_kernel, output_tile=("BLOCK_SIZE",))[(B,)](
+                x, out, x.stride(0), BLOCK_SIZE=BLOCK_SIZE
+            )
+            row_max = out.abs().amax(dim=-1, keepdim=True)
+            return out / row_max
+
+        x = torch.randn(4, 128, device="cuda")
+        out, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(out, fn(x))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
+
+    @requires_cuda_and_triton
+    def test_wrap_fusion_cumsum(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            wrap_triton(add_kernel, output_tile=("BLOCK_SIZE",))[grid](
+                a, b, out, a.numel(), BLOCK_SIZE=1024
+            )
+            return out + torch.cumsum(torch.ones_like(out), dim=0)
+
+        a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    @requires_cuda_and_triton
+    def test_wrap_fusion_non_unary_fusion_eq_shape(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b, c):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            wrap_triton(add_kernel, output_tile=("BLOCK_SIZE",))[grid](
+                a, b, out, a.numel(), BLOCK_SIZE=1024
+            )
+            out = out * c  # Non-unary epilogue
+
+            out2 = torch.empty_like(a)
+            add_kernel[grid](out, a, out2, a.numel(), BLOCK_SIZE=1024)
+            return out
+
+        a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        c = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a, b, c)
+        self.assertEqual(out, fn(a, b, c))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_wrap_fusion_non_unary_fusion_broadcasted_shape(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b, c):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            wrap_triton(add_kernel, output_tile=("BLOCK_SIZE",))[grid](
+                a, b, out, a.numel(), BLOCK_SIZE=1024
+            )
+            out = out * c  # Non-unary epilogue
+
+            out2 = torch.empty_like(a)
+            add_kernel[grid](out, a, out2, a.numel(), BLOCK_SIZE=1024)
+            return out
+
+        a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        c = torch.randn(8, dtype=torch.float32, device="cuda").unsqueeze(1)
+
+        out, code = run_and_get_code(torch.compile(fn), a, b, c)
+        self.assertEqual(out, fn(a, b, c))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_wrap_fusion_nested_store_codegen_aliases_indentation(self):
+        # tl.store stored at different indentation level to kernel body.
+        @triton.jit
+        def add_kernel_nested(
+            in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+        ):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            if BLOCK_SIZE > 0:
+                tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b, c):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            wrap_triton(add_kernel_nested, output_tile=("BLOCK_SIZE",))[grid](
+                a, b, out, a.numel(), BLOCK_SIZE=1024
+            )
+            return out * c
+
+        a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        c = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a, b, c)
+        self.assertEqual(out, fn(a, b, c))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_wrap_fusion_2d_tile_reduction_no_fuse(self):
+        @triton.jit
+        def tile2d_kernel(
+            x_ptr,
+            out_ptr,
+            stride_m,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            pid_m = tl.program_id(1)
+            pid_n = tl.program_id(0)
+            rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+            rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+            x = tl.load(x_ptr + rm[:, None] * stride_m + rn[None, :])
+            tl.store(out_ptr + rm[:, None] * stride_m + rn[None, :], x * 2.0)
+
+        def fn(x):
+            M, N = x.shape
+            out = torch.empty_like(x)
+            BLOCK_M, BLOCK_N = 32, 32
+            grid = (triton.cdiv(N, BLOCK_N), triton.cdiv(M, BLOCK_M))
+            wrap_triton(tile2d_kernel, output_tile=("BLOCK_N", "BLOCK_M"))[grid](
+                x, out, x.stride(0), BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N
+            )
+            row_max = out.abs().amax(dim=-1, keepdim=True)
+            return out / row_max
+
+        x = torch.randn(64, 64, device="cuda")
+        out, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(out, fn(x))
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=2)
+
+    # -------------------------------------------------------------------------
+    # wrap_triton argument validation
+    # -------------------------------------------------------------------------
+
+    @requires_cuda_and_triton
+    def test_wrap_triton_output_tile_wrong_type(self):
+        @triton.jit
+        def k(out_ptr, BLOCK: tl.constexpr):
+            tl.store(
+                out_ptr + tl.arange(0, BLOCK), tl.zeros((BLOCK,), dtype=tl.float32)
+            )
+
+        with self.assertRaisesRegex(
+            TypeError, "output_tile must be a tuple of strings"
+        ):
+            wrap_triton(k, output_tile=["BLOCK"])
+        with self.assertRaisesRegex(
+            TypeError, "output_tile must be a tuple of strings"
+        ):
+            wrap_triton(k, output_tile=("BLOCK", 42))
+
+    @requires_cuda_and_triton
+    def test_wrap_triton_output_tile_empty(self):
+        @triton.jit
+        def k(out_ptr, BLOCK: tl.constexpr):
+            tl.store(
+                out_ptr + tl.arange(0, BLOCK), tl.zeros((BLOCK,), dtype=tl.float32)
+            )
+
+        with self.assertRaisesRegex(ValueError, "output_tile must be non-empty"):
+            wrap_triton(k, output_tile=())
+
+    @requires_cuda_and_triton
+    def test_wrap_triton_pid_remap_without_output_tile(self):
+        @triton.jit
+        def k(out_ptr, BLOCK: tl.constexpr):
+            tl.store(
+                out_ptr + tl.arange(0, BLOCK), tl.zeros((BLOCK,), dtype=tl.float32)
+            )
+
+        with self.assertRaisesRegex(ValueError, "pid_remap requires output_tile"):
+            wrap_triton(k, pid_remap=("pid",))
+
+    @requires_cuda_and_triton
+    def test_wrap_triton_pid_remap_wrong_type(self):
+        @triton.jit
+        def k(out_ptr, BLOCK: tl.constexpr):
+            tl.store(
+                out_ptr + tl.arange(0, BLOCK), tl.zeros((BLOCK,), dtype=tl.float32)
+            )
+
+        with self.assertRaisesRegex(TypeError, "pid_remap must be a tuple of strings"):
+            wrap_triton(k, output_tile=("BLOCK",), pid_remap=["pid"])
+
+    @requires_cuda_and_triton
+    def test_wrap_triton_pid_remap_length_mismatch(self):
+        @triton.jit
+        def k(out_ptr, BM: tl.constexpr, BN: tl.constexpr):
+            tl.store(out_ptr + tl.arange(0, BM), tl.zeros((BM,), dtype=tl.float32))
+
+        with self.assertRaisesRegex(
+            ValueError, "pid_remap length.*must match.*output_tile length"
+        ):
+            wrap_triton(k, output_tile=("BM", "BN"), pid_remap=("pid_m",))
+
+    @requires_cuda_and_triton
+    def test_wrap_triton_output_tile_not_in_kwargs(self):
+        @triton.jit
+        def copy_kernel(src_ptr, dst_ptr, n, BLOCK: tl.constexpr):
+            offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            mask = offs < n
+            tl.store(dst_ptr + offs, tl.load(src_ptr + offs, mask=mask), mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            grid = (triton.cdiv(x.numel(), 16),)
+            wrap_triton(copy_kernel, output_tile=("WRONG",))[grid](
+                x, out, x.numel(), BLOCK=16
+            )
+            return out + 1
+
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError,
+            "output_tile name 'WRONG' is not a kernel argument",
+        ):
+            torch.compile(fn)(torch.randn(128, device="cuda"))
 
 
 if HAS_CUDA_AND_TRITON:

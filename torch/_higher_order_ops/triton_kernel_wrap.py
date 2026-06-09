@@ -1,4 +1,3 @@
-import ast
 import collections
 import copy
 import dataclasses
@@ -152,6 +151,8 @@ class KernelSideTable:
     id_to_kernel: dict[int, "TritonKernelType"] = {}
     kernel_to_id: dict["TritonKernelType", int] = {}
     constant_args: dict[int, dict[str, Any]] = {}
+    output_tiles: dict[int, tuple[str, ...]] = {}
+    pid_remaps: dict[int, tuple[str, ...]] = {}
     lock = threading.Lock()
 
     # Returns index on the table
@@ -189,12 +190,28 @@ class KernelSideTable:
             )
         return self.constant_args[idx]
 
+    def set_output_tile(self, kernel_idx: int, output_tile: tuple[str, ...]) -> None:
+        with self.lock:
+            self.output_tiles[kernel_idx] = output_tile
+
+    def get_output_tile(self, kernel_idx: int) -> "tuple[str, ...] | None":
+        return self.output_tiles.get(kernel_idx)
+
+    def set_pid_remap(self, kernel_idx: int, pid_remap: tuple[str, ...]) -> None:
+        with self.lock:
+            self.pid_remaps[kernel_idx] = pid_remap
+
+    def get_pid_remap(self, kernel_idx: int) -> "tuple[str, ...] | None":
+        return self.pid_remaps.get(kernel_idx)
+
     # Resets the table (only meant to be used in unit tests)
     # This is only safe assuming single threaded execution
     def reset_table(self) -> None:
         self.id_to_kernel = {}
         self.kernel_to_id = {}
         self.constant_args = {}
+        self.output_tiles = {}
+        self.pid_remaps = {}
 
 
 kernel_side_table = KernelSideTable()
@@ -905,7 +922,7 @@ def get_tma_stores(
 @dataclasses.dataclass
 class TensorAccesses:
     read_writes: "ReadWrites"
-    can_fuse_epilogue: bool
+    only_tt_stores: bool
 
 
 @MemoizeWithCycleCheck
@@ -927,7 +944,7 @@ def analyze_kernel_access(
 
     Returns ReadWrites with StarDep objects for each accessed tensor.
     """
-    from torch._inductor.dependencies import Dep, ReadWrites, StarDep
+    from torch._inductor.dependencies import Dep, ReadWrites, UserTritonDep
 
     # Name of mutation op to mutated parameter indices
     # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
@@ -948,6 +965,7 @@ def analyze_kernel_access(
     }
     UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
 
+    only_tt_stores = True
     write_stack: list[Param | Intermediate] = []
     read_stack: list[Param | Intermediate] = []
 
@@ -1008,9 +1026,12 @@ def analyze_kernel_access(
                         write_stack.append(arg)
                     if name in read_set:
                         read_stack.append(arg)
-            else:
-                write_stack.extend(op.args[idx] for idx in WRITE_OPS.get(op.name, []))
-                read_stack.extend(op.args[idx] for idx in READ_OPS.get(op.name, []))
+            elif op.name in WRITE_OPS:
+                if op.name != "tt.store":
+                    only_tt_stores = False
+                write_stack.extend(op.args[idx] for idx in WRITE_OPS[op.name])
+            elif op.name in READ_OPS:
+                read_stack.extend(op.args[idx] for idx in READ_OPS[op.name])
 
     # For these ops, only the first argument (base pointer) refers to actual
     # memory. The remaining arguments are shape/stride/offset metadata and
@@ -1056,10 +1077,12 @@ def analyze_kernel_access(
     read_count = _find_arg_access_count(read_stack, skip_loads=False)
 
     writes: OrderedSet[Dep] = OrderedSet(
-        StarDep(tensor_names[i]) for i in sorted(write_count.keys())
+        UserTritonDep(tensor_names[i], access_count=write_count[i])
+        for i in sorted(write_count.keys())
     )
     reads: OrderedSet[Dep] = OrderedSet(
-        StarDep(tensor_names[i]) for i in sorted(read_count.keys())
+        UserTritonDep(tensor_names[i], access_count=read_count[i])
+        for i in sorted(read_count.keys())
     )
 
     read_writes = ReadWrites(
@@ -1068,26 +1091,7 @@ def analyze_kernel_access(
         index_exprs=OrderedSet(),
     )
 
-    def _decide_can_fuse_epilogue():
-        # only do epilogue fusion if the kernel has a single output tensor
-        if len(write_count) != 1:
-            return False
-
-        written_arg_index = next(iter(write_count))
-        # only do epilogue fusion if the written tensor is written exactly once
-        if write_count[written_arg_index] != 1:
-            return False
-
-        written_arg_name = next(iter(writes)).name
-        #  cannot fuse if the kernel also reads from the output buffer
-        if any(read_dep.name == written_arg_name for read_dep in reads):
-            return False
-
-        return True
-
-    can_fuse_epilogue = _decide_can_fuse_epilogue()
-
-    return TensorAccesses(read_writes=read_writes, can_fuse_epilogue=can_fuse_epilogue)
+    return TensorAccesses(read_writes=read_writes, only_tt_stores=only_tt_stores)
 
 
 def identify_accessed_tensors(
@@ -1102,7 +1106,7 @@ def identify_accessed_tensors(
     3) Analyzes the graph to detect which input tensors are read and/or written
     """
 
-    from torch._inductor.dependencies import Dep, ReadWrites, StarDep
+    from torch._inductor.dependencies import Dep, ReadWrites, UserTritonDep
     from torch._inductor.ir import TensorBox
 
     ttir_module = None
@@ -1166,7 +1170,7 @@ def identify_accessed_tensors(
             for key, value in kwargs.items()
             if isinstance(value, (Tensor, TensorBox))
         ]
-        all_deps = OrderedSet(StarDep(name) for name in all_tensor_names)
+        all_deps = OrderedSet(UserTritonDep(name) for name in all_tensor_names)
         all_deps = typing.cast(OrderedSet[Dep], all_deps)
         return TensorAccesses(
             ReadWrites(
@@ -1174,71 +1178,8 @@ def identify_accessed_tensors(
                 writes=all_deps,
                 index_exprs=OrderedSet(),
             ),
-            can_fuse_epilogue=False,
+            only_tt_stores=False,  # Conservative false
         )
-
-
-@dataclasses.dataclass
-class TritonStore:
-    store_node: ast.Call
-    store_pointer_node: ast.Expr
-    store_value_node: ast.Expr
-
-
-@dataclasses.dataclass
-class TritonStores:
-    stores: list[TritonStore]
-
-
-@functools.cache
-def identify_triton_stores(source_code: str) -> TritonStores:
-    """
-    Parse Python source code of triton kernel and find all tl.store calls.
-    Returns a TritonStores object containing information about pointer, value, and mask.
-
-    tl.store signature: store(pointer, value, mask=None, boundary_check=(), ...)
-    """
-    return identify_triton_stores_from_ast(ast.parse(source_code))
-
-
-def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
-    stores = []
-
-    def _extract_arg(node, arg_name, positional_index):
-        """
-        Extract an argument from a Call node, checking both positional and keyword args.
-        Returns the AST node for the argument, or None if not found.
-        """
-        # Check positional args first
-        if len(node.args) > positional_index:
-            return node.args[positional_index]
-
-        # Check keyword args
-        for keyword in node.keywords:
-            if keyword.arg == arg_name:
-                return keyword.value
-
-        return None
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            # Check if this is a tl.store call
-            if (
-                isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "tl"
-                and node.func.attr == "store"
-            ):
-                # Extract required arguments
-                pointer_node = _extract_arg(node, "pointer", 0)
-                value_node = _extract_arg(node, "value", 1)
-
-                if pointer_node is None or value_node is None:
-                    continue
-
-                stores.append(TritonStore(node, pointer_node, value_node))
-
-    return TritonStores(stores=stores)
 
 
 ###############################################################################
@@ -2416,6 +2357,8 @@ class TraceableTritonKernelWrapper:
     kernel_idx: int | None
     grid: Optional["TritonGridType"]
     kernel_source: "Source | None"
+    output_tile: tuple[str, ...] | None
+    pid_remap: tuple[str, ...] | None
 
     def __init__(
         self,
@@ -2423,13 +2366,22 @@ class TraceableTritonKernelWrapper:
         kernel_idx: int | None,
         grid: Optional["TritonGridType"],
         kernel_source: "Source | None" = None,
+        output_tile: tuple[str, ...] | None = None,
+        pid_remap: tuple[str, ...] | None = None,
     ) -> None:
         self.kernel = None
         self.grid = None
         self.kernel_source = kernel_source
+        self.output_tile = output_tile
+        self.pid_remap = pid_remap
         tracing_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
-        if self.kernel is None:
+        if self.kernel is None or self.kernel_idx is None:
             raise AssertionError("kernel was not initialized properly")
+
+        if output_tile is not None:
+            kernel_side_table.set_output_tile(self.kernel_idx, output_tile)
+        if pid_remap is not None:
+            kernel_side_table.set_pid_remap(self.kernel_idx, pid_remap)
 
     def __getitem__(self, *args: Sequence[Any]) -> "TraceableTritonKernelWrapper":
         return tracing_triton_hopifier_singleton.call_getitem(self, args)  # type: ignore[return-value]
