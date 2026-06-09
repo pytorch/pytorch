@@ -34,6 +34,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     has_free_symbols,
     is_symbolic,
+    rebind_unbacked,
     ShapeEnv,
     StatelessSymbolicContext,
     statically_known_false,
@@ -3730,6 +3731,27 @@ def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
 
 
 class TestUnbacked(TestCase):
+    def test_rebind_unbacked_to_symbolic_expression(self):
+        shape_env = ShapeEnv()
+        fake_mode = torch._subclasses.FakeTensorMode(
+            allow_non_fake_inputs=True, shape_env=shape_env
+        )
+        graph = torch.fx.Graph()
+        node = graph.call_function(operator.add, args=(1, 1))
+
+        with fake_mode:
+            old = shape_env.create_unbacked_symint()
+            base = shape_env.create_unbacked_symint()
+            result = (base + 1) // 2
+
+        old_expr = old.node.expr
+        result_expr = result.node.expr
+        node.meta["unbacked_bindings"] = {old_expr: ()}
+
+        rebind_unbacked(shape_env, node, result)
+
+        self.assertEqual(shape_env.replacements[old_expr], result_expr)
+
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
@@ -4013,6 +4035,27 @@ class TestUnbacked(TestCase):
                 Exception, "Pending unbacked symbols.*not in returned outputs"
             ):
                 func_negative(x)
+
+    def test_ignore_fresh_unbacked_symbols_preserves_existing_pending(self):
+        shape_env = ShapeEnv()
+        fake_mode = torch._subclasses.FakeTensorMode(
+            allow_non_fake_inputs=True, shape_env=shape_env
+        )
+        with fake_mode:
+            pending = shape_env.create_unbacked_symint().node.expr
+
+            with shape_env.ignore_fresh_unbacked_symbols():
+                ignored = shape_env.create_unbacked_symint().node.expr
+                example_value = torch.empty(2)
+            with self.assertRaisesRegex(
+                Exception, f"Pending unbacked symbols {{{pending}}}"
+            ):
+                torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+                    shape_env,
+                    example_value,
+                )
+
+        self.assertNotIn(ignored, shape_env.pending_fresh_unbacked_symbols)
 
     def test_meta_copy(self):
         """
