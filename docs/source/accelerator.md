@@ -91,6 +91,13 @@ per-backend modules, the following APIs are delegated to each backend:
      reset_peak_memory_stats
 ```
 
+```{eval-rst}
+.. automodule:: torch.accelerator.random
+```
+```{eval-rst}
+.. currentmodule:: torch.accelerator.random
+```
+
 ## Random Number Generator
 ```{eval-rst}
 .. autosummary::
