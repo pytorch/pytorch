@@ -13,7 +13,11 @@ from torch._higher_order_ops import (
     matmul_epilogue,
     mm_epilogue,
 )
-from torch._higher_order_ops.gemm_epilogue import mx_e8m0_scale, nvfp4_e4m3_scale
+from torch._higher_order_ops.gemm_epilogue import (
+    mx_e8m0_scale,
+    nvfp4_e2m1_pack,
+    nvfp4_e4m3_scale,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -1815,6 +1819,18 @@ class GemmEpilogueFusionTests(TestCase):
             code
         )
 
+    def test_nvfp4_e2m1_pack_matches_reference(self):
+        from torch.testing._internal.common_quantized import (
+            _bfloat16_to_float4_e2m1fn_x2,
+        )
+
+        x = torch.linspace(-6.0, 6.0, 64, dtype=torch.float32).reshape(4, 16)
+        actual = nvfp4_e2m1_pack(x)
+        expected = _bfloat16_to_float4_e2m1fn_x2(x.to(torch.bfloat16))
+        self.assertEqual(actual.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(actual.shape, (4, 8))
+        self.assertEqual(actual.view(torch.uint8), expected.view(torch.uint8))
+
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_nvfp4_scale_aux_fuses(self):
         M = 64
@@ -1852,6 +1868,7 @@ class GemmEpilogueFusionTests(TestCase):
         ).check("local_reduce_op='nvfp4_e4m3_scale'").check_not(
             "extern_kernels.mm"
         ).run(code)
+
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_addmm_fp8_main_output_fuses(self):
