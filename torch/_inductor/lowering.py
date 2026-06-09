@@ -8558,14 +8558,18 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             aux_output,
             main_output_transform,
         ) = materialize_quack_epilogue(subgraph.graph_module)
+        quack_args = tuple(arg for arg in args if hasattr(arg, "get_size"))
         gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
-        mat1, mat2 = args[gemm_op_info.mat1_index], args[gemm_op_info.mat2_index]
+        mat1, mat2 = (
+            quack_args[gemm_op_info.mat1_index],
+            quack_args[gemm_op_info.mat2_index],
+        )
         if gemm_op == torch.ops.aten._grouped_mm.default and len(mat2.get_size()) == 3:
             m, n = mat1.get_size()[0], mat2.get_size()[2]
             size = [m, n]
             stride = [n, 1]
         elif gemm_op == torch.ops.aten._grouped_mm.default:
-            groups, m, n = args[2].get_size()[0], mat1.get_size()[0], mat2.get_size()[1]
+            groups, m, n = quack_args[2].get_size()[0], mat1.get_size()[0], mat2.get_size()[1]
             size = [groups, m, n]
             stride = [m * n, n, 1]
         elif gemm_op_info.is_batched:
@@ -8606,8 +8610,13 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             for node in subgraph.graph_module.graph.nodes
             if node.op == "placeholder"
         ]
+        tensor_placeholders = [
+            node
+            for node in placeholders
+            if isinstance(node.meta.get("val"), torch.Tensor)
+        ]
         epilogue_arg_indices = tuple(
-            placeholders.index(node) for node in epilogue_arg_placeholders
+            tensor_placeholders.index(node) for node in epilogue_arg_placeholders
         )
         if local_reduce is not None:
             if gemm_op != torch.ops.aten.mm.default or len(size) != 2:
@@ -8682,7 +8691,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 device=mat1.get_device_or_error(),
             )
 
-        input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
+        input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in quack_args]
         if local_reduce_out is not None:
             local_reduce_node = ir.TemplateBuffer.realize_template_input(local_reduce_out)
             local_reduce_out_index = len(input_nodes)
