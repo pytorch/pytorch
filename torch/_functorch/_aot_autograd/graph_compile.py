@@ -46,6 +46,7 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import py_sym_types
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchgen.utils import dataclass_repr
 
@@ -1348,6 +1349,82 @@ def prepare_hook_gm(
     return gm
 
 
+def propagate_output_meta_to_fw_module(
+    fx_g: torch.fx.GraphModule,
+    fw_module: torch.fx.GraphModule,
+    num_inner_fwd_outputs: int,
+):
+    """
+    Propagate cudagraph metadata from joint graph to forward module.
+    Maps output indices by returned storage and input indices by placeholder storage.
+    """
+    from torch._inductor.fx_utils import get_node_storage
+
+    # Get metadata from joint graph output node
+    joint_output_node = next(reversed(fx_g.graph.find_nodes(op="output")))
+    cloned_idxs = joint_output_node.meta.get("cloned_idxs", OrderedSet())
+    copy_input_idxs = joint_output_node.meta.get(
+        "cudagraph_copy_input_idxs", OrderedSet()
+    )
+
+    if not cloned_idxs and not copy_input_idxs:
+        return  # Nothing to propagate
+
+    # Get joint graph outputs
+    joint_outs = joint_output_node.args[0]
+
+    # Build storage -> joint_idx mapping for user outputs only
+    joint_storage_to_idx = {}
+    for i in range(num_inner_fwd_outputs):
+        node = joint_outs[i]
+        if isinstance(node, torch.fx.Node):
+            storage = get_node_storage(node)
+            if storage is not None:
+                joint_storage_to_idx[storage] = i
+
+    # Get fw_module outputs
+    fw_output_node = next(reversed(fw_module.graph.find_nodes(op="output")))
+    fw_outs = fw_output_node.args[0]
+
+    fw_cloned_idxs: OrderedSet[int] = OrderedSet()
+    if cloned_idxs:
+        for fw_idx, fw_node in enumerate(fw_outs):
+            if not isinstance(fw_node, torch.fx.Node):
+                continue
+
+            fw_storage = get_node_storage(fw_node)
+            if fw_storage is None:
+                continue
+
+            joint_idx = joint_storage_to_idx.get(fw_storage)
+            if joint_idx is not None and joint_idx in cloned_idxs:
+                fw_cloned_idxs.add(fw_idx)
+
+    if fw_cloned_idxs:
+        fw_output_node.meta["cloned_idxs"] = fw_cloned_idxs
+
+    if copy_input_idxs:
+        joint_placeholders = fx_g.graph.find_nodes(op="placeholder")
+        copy_input_storages = OrderedSet()
+        for idx in copy_input_idxs:
+            if idx >= len(joint_placeholders):
+                continue
+            storage = get_node_storage(joint_placeholders[idx])
+            if storage is not None:
+                copy_input_storages.add(storage)
+
+        fw_copy_input_idxs: OrderedSet[int] = OrderedSet()
+        for fw_idx, placeholder in enumerate(
+            fw_module.graph.find_nodes(op="placeholder")
+        ):
+            storage = get_node_storage(placeholder)
+            if storage in copy_input_storages:
+                fw_copy_input_idxs.add(fw_idx)
+
+        if fw_copy_input_idxs:
+            fw_output_node.meta["cudagraph_copy_input_idxs"] = fw_copy_input_idxs
+
+
 # Inline Autograd saved_tensors_hooks into epilogue of forward graph
 # and prologue of backward graph.
 # This changes forward graph outputs and inputs.
@@ -2189,6 +2266,7 @@ def _aot_stage2a_partition(
                     partition_fn,
                 )
             )
+            propagate_output_meta_to_fw_module(fx_g, fw_module, num_inner_fwd_outputs)
             num_inner_fwd_outputs, joint_inputs = (
                 _maybe_unlift_partitioned_effect_tokens(
                     fw_module,

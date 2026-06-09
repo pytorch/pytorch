@@ -1833,6 +1833,11 @@ class triton:
     # note: we are conservative here and choose a large limit.
     cudagraph_unexpected_rerecord_limit = 128
 
+    # Number of observed static-input address changes for the same
+    # cudagraph parent/function/input before treating that input as copied
+    # for future recordings. Set to None to disable.
+    cudagraph_static_input_auto_copy_threshold: int | None = None
+
     # Warn loudly when the number of cudagraphs due to dynamic shape
     # exceeds this limit
     cudagraph_dynamic_shape_warn_limit: int | None = 8

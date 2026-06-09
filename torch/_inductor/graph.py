@@ -428,6 +428,8 @@ class GraphLowering(torch.fx.Interpreter):
         # as_strided storage offsets are relative to the input's storage.
         self.graph_input_storage_offsets: dict[str, Expr] = {}
         self.partition_maps: list[GraphPartitionMap] | None = None
+        self.cudagraph_cloned_bufs: OrderedSet[str] = OrderedSet()
+        self.cudagraph_copy_input_idxs: OrderedSet[int] = OrderedSet()
         self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
@@ -1630,6 +1632,10 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
 
+        n_meta = V.graph.current_node.meta
+        self.cudagraph_copy_input_idxs.update(
+            n_meta.get("cudagraph_copy_input_idxs", ())
+        )
         fx_node_args = V.graph.current_node.args[0]  # type: ignore[arg-type]
         if not isinstance(fx_node_args, (tuple, list)):
             # nested subgraphs can have singleton outputs
@@ -1638,7 +1644,7 @@ class GraphLowering(torch.fx.Interpreter):
         result_correct_strides = []
 
         assert len(fx_node_args) == len(result)
-        for r, fx_node in zip(result, fx_node_args):
+        for i, (r, fx_node) in enumerate(zip(result, fx_node_args)):
             if not isinstance(r, (ir.TensorBox, ir.BaseView)):
                 result_correct_strides.append(r)
             elif isinstance(r.get_output_spec(), ir.CommBufferLayout):
@@ -1659,6 +1665,8 @@ class GraphLowering(torch.fx.Interpreter):
                 result_correct_strides.append(
                     ir.try_match_insignificant_strides(r, meta_strides)
                 )
+            if i in n_meta.get("cloned_idxs", ()):
+                self.cudagraph_cloned_bufs.add(result_correct_strides[-1].get_name())
 
         self.graph_outputs = result_correct_strides
         value: ir.IRNode

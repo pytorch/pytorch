@@ -26,6 +26,8 @@ __all__ = [
     "set_stance",
     "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
+    "cudagraph_mark_output_clone",
+    "cudagraph_mark_input_copy",
     "load_compiled_function",
     "wrap_numpy",
     "is_compiling",
@@ -435,6 +437,44 @@ def cudagraph_mark_step_begin():
     from torch._inductor import cudagraph_trees
 
     cudagraph_trees.mark_step_begin()
+
+
+def cudagraph_mark_output_clone(tensor: torch.Tensor) -> None:
+    """
+    Mark a tensor output to be cloned out of CUDA graph managed memory.
+
+    The marker is only interpreted by ``torch.compile`` with CUDA graphs
+    enabled. It preserves eager behavior, and the marker itself returns
+    ``None``. If the marked tensor is returned from the compiled graph, the
+    compiled runtime returns a fresh clone instead of returning a tensor backed
+    by CUDA graph private-pool memory.
+
+    If multiple returned tensors alias the same storage as the marked tensor,
+    they are cloned as one alias group so output-output aliasing is preserved.
+    """
+    from torch._inductor import cudagraph_prims
+
+    torch.ops.aten_cudagraphs.exclude_from_cudagraphs(tensor, clone=True)
+
+
+def cudagraph_mark_input_copy(tensor: torch.Tensor) -> None:
+    """
+    Mark a tensor input to be copied into CUDA graph managed memory.
+
+    The marker is only interpreted by ``torch.compile`` with CUDA graphs
+    enabled. It preserves eager behavior, and the marker itself returns
+    ``None``. When the marked tensor corresponds to a graph input that would
+    otherwise be treated as static-address input, the compiled runtime copies
+    it into CUDA graph managed memory for replay instead of requiring the input
+    address to remain stable.
+
+    Marked inputs that are mutated or alias another graph input are not captured
+    with copy semantics, because copying would change user-visible aliasing or
+    mutation behavior.
+    """
+    from torch._inductor import cudagraph_prims
+
+    torch.ops.aten_cudagraphs.copy_to_cudagraphs(tensor)
 
 
 def wrap_numpy(fn):
