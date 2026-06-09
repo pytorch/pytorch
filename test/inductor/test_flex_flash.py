@@ -11,6 +11,7 @@ import torch
 import torch._inductor.kernel.flex.flex_flash_attention as flex_flash_attention_module
 from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 from torch._inductor.kernel.flex.flex_flash_attention import (
+    _flash_attention_unavailable_message,
     _hierarchical_indexer_cute,
     ensure_flash_available,
     HierarchicalIndex,
@@ -2777,6 +2778,11 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
 
 class TestHierarchicalIndex(InductorTestCase):
+    def test_flash_attention_unavailable_message_has_install_link(self):
+        message = _flash_attention_unavailable_message()
+        self.assertIn("pip install --pre flash-attn-4", message)
+        self.assertIn("https://pypi.org/project/flash-attn-4/", message)
+
     def test_hierarchical_index_preserves_args(self):
         from sympy import Symbol
 
