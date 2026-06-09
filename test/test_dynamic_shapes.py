@@ -4210,6 +4210,21 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         eager_result = func(x, torch.tensor([5]))
         self.assertEqual(cnt.frame_count, 2)
 
+    @skipIfTorchDynamo("Test directly invokes torch.compile")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_getitem_0d_index(self):
+        # x[:, t] with a data-dependent 0-d tensor index lowers to select; this
+        # covers the getitem path, distinct from test_unbacked_select_index which
+        # exercises torch.select directly.
+        def func(table, idx):
+            return table[:, idx[0]]
+
+        compiled_func = torch.compile(func, fullgraph=True, dynamic=True)
+        table = torch.randn(3, 5)
+        for v in (0, 2, 4, -1, -5):
+            idx = torch.tensor([v])
+            self.assertEqual(compiled_func(table, idx), func(table, idx))
+
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_reshape2(self):
