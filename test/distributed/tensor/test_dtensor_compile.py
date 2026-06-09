@@ -261,8 +261,9 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
 
-        @torch.compile(backend="inductor", fullgraph=True)
+        @torch.compile(backend=cnt, fullgraph=True)
         def fn(x):
             return x + 1
 
@@ -293,6 +294,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             self.assertFalse(dt._local_tensor.completed)
             fn(dt)
 
+        self.assertEqual(cnt.frame_count, 1)
         self.assertGreaterEqual(
             len(wait_calls),
             1,
@@ -311,8 +313,11 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        compile_calls = 0
 
         def fw_compiler(gm, example_inputs):
+            nonlocal compile_calls
+            compile_calls += 1
             return gm
 
         fn = aot_function(lambda x: x + 1, fw_compiler=fw_compiler)
@@ -337,6 +342,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertNotIsInstance(dt_plain._local_tensor, AsyncCollectiveTensor)
         out = fn(dt_plain)
         self.assertEqual(out.to_local(), dt_plain.to_local() + 1)
+        self.assertEqual(compile_calls, 1)
 
     def test_compile_dtensor_local_tensor_act_backward_passthrough(self):
         # Passthrough forwards preserve ACT wrappers. If nested ACTs are
