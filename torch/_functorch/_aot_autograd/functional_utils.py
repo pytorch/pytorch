@@ -110,14 +110,18 @@ def mutated_input_storage_copy_length(
         return None
 
     try:
-        original_storage_len = compute_storage_length(original_inpt)
         updated_storage_len = compute_storage_length(updated_inpt)
     except RuntimeError:
         return None
 
-    if updated_storage_len > updated_inpt.numel() and (
-        original_storage_len >= updated_storage_len
-    ):
+    # If the updated tensor uses storage past its logical shape, a normal
+    # original_inpt.copy_(updated_inpt) would miss part of the mutation.  During
+    # dynamic-shape tracing the original input's physical storage length may be
+    # unavailable to the proxy tracer and fall back to its logical size, so do
+    # not require proving the original storage length here.  Eager already had
+    # to prove the mutation's as_strided access was in bounds to create
+    # updated_inpt in the first place.
+    if updated_storage_len > updated_inpt.numel():
         return updated_storage_len
     return None
 

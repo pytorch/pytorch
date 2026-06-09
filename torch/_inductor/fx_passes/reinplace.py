@@ -567,26 +567,17 @@ def _clone_for_scatter_decomposition(graph: torch.fx.Graph, inp: Any) -> torch.f
 
 
 def _source_from_aot_input_desc(desc: Any):
-    tracing_context = TracingContext.try_get()
-    sources = (
-        None
-        if tracing_context is None
-        else tracing_context.aotautograd_arg_pos_to_source
-    )
-    if sources is None:
-        return None
+    from torch._functorch._aot_autograd.descriptors import PlainAOTInput
 
-    from torch._functorch._aot_autograd.descriptors import (
-        PlainAOTInput,
-        SyntheticBaseAOTInput,
-        ViewBaseAOTInput,
-    )
-
-    while isinstance(desc, (SyntheticBaseAOTInput, ViewBaseAOTInput)):
-        desc = desc.base_of
-
-    if isinstance(desc, PlainAOTInput) and desc.idx < len(sources):
-        return sources[desc.idx]
+    if isinstance(desc, PlainAOTInput):
+        tracing_context = TracingContext.try_get()
+        sources = (
+            None
+            if tracing_context is None
+            else tracing_context.aotautograd_arg_pos_to_source
+        )
+        if sources is not None and desc.idx < len(sources):
+            return sources[desc.idx]
     return None
 
 
