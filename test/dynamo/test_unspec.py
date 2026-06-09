@@ -161,6 +161,21 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         for i in range(1, 5):
             self.assertFalse(same(res[i - 1], res[i]))
 
+    def test_random_random_fullgraph(self):
+        def fn(x):
+            return x + random.random()
+
+        x = torch.ones(5, 5)
+        random.seed(1)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        # Shake out random calls that happen during compilation, then reset the
+        # seed so compiled and eager execute from the same RNG state.
+        opt_fn(x)
+        random.seed(1)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
     def test_random_call_with_while_loop(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=3)
