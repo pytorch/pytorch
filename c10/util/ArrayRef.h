@@ -147,6 +147,7 @@ class ArrayRef : public HeaderOnlyArrayRef<T> {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
+  // NOLINTNEXTLINE(modernize-use-constraints)
   std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
       // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       U&& Temporary) = delete;
@@ -156,6 +157,7 @@ class ArrayRef : public HeaderOnlyArrayRef<T> {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
+  // NOLINTNEXTLINE(modernize-use-constraints)
   std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
       std::initializer_list<U>) = delete;
 
@@ -193,6 +195,7 @@ ArrayRef(const std::array<T, N>&) -> ArrayRef<T>;
 
 // C array constructor
 template <typename T, size_t N>
+// NOLINTNEXTLINE(*c-arrays*)
 ArrayRef(const T (&)[N]) -> ArrayRef<T>;
 
 // std::initializer_list constructor
@@ -276,40 +279,6 @@ template <typename T, size_t N>
 // NOLINTNEXTLINE(*c-arrays*)
 ArrayRef<T> makeArrayRef(const T (&Arr)[N]) {
   return ArrayRef<T>(Arr);
-}
-
-// WARNING: Template instantiation will NOT be willing to do an implicit
-// conversions to get you to an c10::ArrayRef, which is why we need so
-// many overloads.
-
-template <typename T>
-bool operator==(c10::ArrayRef<T> a1, c10::ArrayRef<T> a2) {
-  return a1.equals(a2);
-}
-
-template <typename T>
-bool operator!=(c10::ArrayRef<T> a1, c10::ArrayRef<T> a2) {
-  return !a1.equals(a2);
-}
-
-template <typename T>
-bool operator==(const std::vector<T>& a1, c10::ArrayRef<T> a2) {
-  return c10::ArrayRef<T>(a1).equals(a2);
-}
-
-template <typename T>
-bool operator!=(const std::vector<T>& a1, c10::ArrayRef<T> a2) {
-  return !c10::ArrayRef<T>(a1).equals(a2);
-}
-
-template <typename T>
-bool operator==(c10::ArrayRef<T> a1, const std::vector<T>& a2) {
-  return a1.equals(c10::ArrayRef<T>(a2));
-}
-
-template <typename T>
-bool operator!=(c10::ArrayRef<T> a1, const std::vector<T>& a2) {
-  return !a1.equals(c10::ArrayRef<T>(a2));
 }
 
 using IntArrayRef = ArrayRef<int64_t>;
