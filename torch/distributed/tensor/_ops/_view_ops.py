@@ -721,6 +721,7 @@ class _ViewShardingPropagator:
         # Mesh dims whose _StridedShard has already been matched to an output dim.
         # Populated by _analyze_split.
         self.matched_strided_mesh_dims: set[int] = set()
+        self.strict_replicate_fallback: set[tuple[int, int]] = set()
 
     # ------------------------------------------------------------------
     # Public API: analyze → rewrite_output_placements
@@ -803,7 +804,10 @@ class _ViewShardingPropagator:
                 isinstance(p, Shard | _StridedShard)
                 and not self.shard_allowed[p.dim][mesh_dim]
             ):
-                if self.strict_view:
+                if (
+                    self.strict_view
+                    and (p.dim, mesh_dim) not in self.strict_replicate_fallback
+                ):
                     raise RuntimeError(
                         f"This operation would remove or reshape sharded "
                         f"dimension {p.dim}, which requires redistribution. "
@@ -978,6 +982,23 @@ class _ViewShardingPropagator:
         if len(in_dims) == 0:
             return []
         in_dim = in_dims[0]
+        if isinstance(cmd.input_dim, Flatten):
+            # A plain Shard on a non-first flattened input dim would need an
+            # intermediate _StridedShard before this Split. The combined
+            # Flatten+Split rewrite does not preserve that placement exactly,
+            # so redistribute that mesh dim instead of raising later.
+            for flat_dim in cmd.input_dim.input_dims[1:]:
+                if not isinstance(flat_dim, InputDim):
+                    raise AssertionError(f"Expected InputDim, got {type(flat_dim)}")
+                for mesh_dim, placement in enumerate(self.input_src_placements):
+                    if (
+                        isinstance(placement, Shard)
+                        and placement.dim == flat_dim.input_dim
+                    ):
+                        self.shard_allowed[flat_dim.input_dim][mesh_dim] = False
+                        self.strict_replicate_fallback.add(
+                            (flat_dim.input_dim, mesh_dim)
+                        )
         out_size = cmd.group_shape[cmd.split_id]
         shard_mesh_dim, input_src_placement = self._find_shard_for_split(
             in_dim.input_dim, cmd, self.input_src_placements
@@ -1210,9 +1231,9 @@ class _ViewShardingPropagator:
         if isinstance(cmd, Split) and isinstance(cmd.input_dim, Flatten):
             first_dim = cmd.input_dim.input_dims[0]
             if isinstance(first_dim, InputDim) and p.dim != first_dim.input_dim:
-                raise RuntimeError(
-                    f"Shard(dim={p.dim}) through Split(Flatten(...), {cmd.group_shape}) "
-                    f"is not supported yet for non-first flatten dims."
+                raise AssertionError(
+                    f"Shard(dim={p.dim}) should have been demoted before "
+                    f"Split(Flatten(...), {cmd.group_shape}) rewrite."
                 )
         if isinstance(cmd, (Split, InputDim)):
             # Split/InputDim: 1:1 dim mapping, sharding transfers directly.

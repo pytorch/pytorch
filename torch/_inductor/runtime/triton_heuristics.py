@@ -981,8 +981,15 @@ class CachingAutotuner(KernelInterface):
     def prepare_for_caching(self) -> None:
         """
         Statically Launched CUDA Kernels have a raw cubin on them
-        that we don't need to store in the cache(since TritonBundler handles the collection for us)
+        that we don't need to store in the cache(since TritonBundler handles the collection for us),
+        this behavior is gated by keep_static_cubin_raw config.
         """
+        # Only cubin_raw must be retained: __getstate__ already nulls cubin_path
+        # on every serialize, so a cold-container load rehydrates the cubin from
+        # cubin_raw (reload_cubin_path calls reload_cubin_from_raw) instead of
+        # pointing at a missing file.
+        if torch._inductor.config.keep_static_cubin_raw:
+            return
         for result in self.compile_results:
             if isinstance(result, StaticTritonCompileResult):
                 # Don't save this in the inductor cache, as it is very large
@@ -3649,6 +3656,20 @@ def _handle_combo_kernel_per_subkernel_blocks(
     combo_meta = inductor_meta.get("combo_grid_meta")
     if combo_meta is None or "heuristic_0" not in combo_meta:
         return None
+
+    # CAP no-bench: combo_grid_meta carries a stitched config; skip the
+    # combo_tuning_groups computation and return a single stitched config.
+    # default_config holds BLOCK keys for the grid lambda; backend kwargs
+    # (HIP options like waves_per_eu) come from stitched_backend_kwargs.
+    stitched_warps = combo_meta.get("stitched_num_warps")
+    if stitched_warps is not None:
+        return [
+            triton.Config(
+                combo_meta["stitched_backend_kwargs"],
+                num_warps=stitched_warps,
+                num_stages=combo_meta["stitched_num_stages"],
+            )
+        ]
 
     num_kernels = combo_meta["num_kernels"]
     inductor_meta_clean = {
