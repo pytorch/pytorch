@@ -249,8 +249,7 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
-  std::shared_ptr<c10::SafePyObject> fake_mode_shim_;
-  bool allow_fallback_kernels_ = true;
+  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
 
   // Operator keys ("<qualified_name>/<overload_name>") that have a Python
   // decomposition or prim meta impl, snapshotted at mode creation. Used to gate

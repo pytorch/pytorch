@@ -21,6 +21,7 @@ from torch import Tensor
 from torch._guards import detect_fake_mode
 from torch._library.opaque_object import is_opaque_type
 from torch._logging import getArtifactLogger
+from torch._subclasses.fake_tensor import CppFakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
@@ -217,13 +218,14 @@ def run_functionalized_fw_and_collect_metadata(
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
-            if torch._C._get_active_cpp_fake_tensor_mode() is not None:
-                torch._C._activate_cpp_fake_tensor_mode()
+            cpp_fake_mode = CppFakeTensorMode._get_active_cpp_fake_tensor_mode()
+            if cpp_fake_mode is not None:
+                cpp_fake_mode.activate()
             try:
                 flat_f_outs = f(*flat_f_args)
             finally:
-                if torch._C._get_active_cpp_fake_tensor_mode() is not None:
-                    torch._C._deactivate_cpp_fake_tensor_mode()
+                if cpp_fake_mode is not None:
+                    cpp_fake_mode.deactivate()
 
             # Assert that f does NOT have an AOTOutputs in it, easy mistake to
             # make!  You need to drop the second output before calling this

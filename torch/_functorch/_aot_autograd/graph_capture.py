@@ -14,6 +14,7 @@ import torch.utils.dlpack
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
+from torch._subclasses.fake_tensor import CppFakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
@@ -123,8 +124,9 @@ def _create_graph(
             _allow_token_discovery=True,
         )
 
-    if torch._C._get_active_cpp_fake_tensor_mode() is not None:
-        torch._C._activate_cpp_fake_tensor_mode()
+    cpp_fake_mode = CppFakeTensorMode._get_active_cpp_fake_tensor_mode()
+    if cpp_fake_mode is not None:
+        cpp_fake_mode.activate()
     with (
         enable_python_dispatcher(),
         ctx,
@@ -138,8 +140,8 @@ def _create_graph(
                 _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
             )(*args)
         finally:
-            if torch._C._get_active_cpp_fake_tensor_mode() is not None:
-                torch._C._deactivate_cpp_fake_tensor_mode()
+            if cpp_fake_mode is not None:
+                cpp_fake_mode.deactivate()
 
         if args_descs is not None:
             flat_args_descs, _ = pytree.tree_flatten(args_descs)

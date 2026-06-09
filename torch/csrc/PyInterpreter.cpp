@@ -1021,9 +1021,10 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
   auto mode = c10::impl::FakeTensorModeTLS::get_state();
   TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
   TORCH_CHECK(
-      mode->fake_mode_shim_ != nullptr, "CppFakeModeShim must be set on mode");
+      mode->fake_mode_pyobj_ != nullptr,
+      "CppFakeTensorMode must be set on mode");
   py::object py_fake_mode = py::reinterpret_borrow<py::object>(
-      mode->fake_mode_shim_->ptr(getPyInterpreter()));
+      mode->fake_mode_pyobj_->ptr(getPyInterpreter()));
 
   const auto& schema = op.schema();
 

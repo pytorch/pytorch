@@ -333,6 +333,7 @@ def _collect_tensors_with_sources(
     Used by handle_autograd_grad to collect tensors from the outputs and inputs
     arguments for grad_fn reachability analysis.
     """
+    from torch._subclasses.fake_tensor import is_fake
     from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
     from .dicts import ConstDictVariable
@@ -347,7 +348,9 @@ def _collect_tensors_with_sources(
             raise AssertionError(
                 f"Expected fake_tensor to be a torch.Tensor, got {type(fake_tensor)}"
             )
-        if isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor):
+        if is_fake(fake_tensor):
+            # is_fake covers Python FakeTensors and C++ fake tensors (plain
+            # torch.Tensor with the Fake dispatch key).
             pass
         elif is_traceable_wrapper_subclass(fake_tensor):
             # For tensor subclasses (e.g. DTensor), verify the inner tensors
@@ -359,9 +362,7 @@ def _collect_tensors_with_sources(
                 out=plain,  # pyrefly: ignore[bad-argument-type]
             )
             if not all(
-                isinstance(t, torch._subclasses.fake_tensor.FakeTensor)
-                for t in plain
-                if isinstance(t, torch.Tensor)
+                is_fake(t) for t in plain if isinstance(t, torch.Tensor)
             ):
                 raise AssertionError(
                     f"Expected all plain tensors to be FakeTensors, got {[type(t) for t in plain]}"

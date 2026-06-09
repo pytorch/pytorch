@@ -28,7 +28,7 @@ from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
 
 # Runtime annotation consumers still resolve BoxedBool from module globals.
-from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses import CppFakeTensorMode, FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -534,7 +534,7 @@ def create_aot_state(
     # that we generate in torch.compile.
     stack.enter_context(torch.autograd.set_multithreading_enabled(False))
     stack.enter_context(preserve_rng_state())
-    if torch._C._get_active_cpp_fake_tensor_mode() is None:
+    if CppFakeTensorMode._get_active_cpp_fake_tensor_mode() is None:
         stack.enter_context(fake_mode)
     stack.enter_context(python_dispatcher_mode)
     stack.enter_context(PhiloxStateTracker())

@@ -99,6 +99,7 @@ from torch._inductor.utils import (
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
+from torch._subclasses.fake_tensor import CppFakeTensorMode
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
@@ -1280,6 +1281,7 @@ class _InProcessFxCompile(FxCompile):
         with (
             _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard(),
             dynamo_utils.preserve_rng_state(),
+            contextlib.ExitStack() as cpp_fake_stack,
         ):
             if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
                 import time
@@ -1356,6 +1358,23 @@ class _InProcessFxCompile(FxCompile):
                 # graph.
                 with torch.no_grad():
                     fake_mode = fake_tensor_prop(gm, example_inputs)
+
+            # Activate a C++ FakeTensorMode mirroring the python one for the rest
+            # of compilation; downstream fake_mode_context() sites route to it.
+            # Done after fake_tensor_prop, which produces the mode we derive from.
+            if (
+                config.use_cpp_fake_tensor
+                and hasattr(torch._C, "_is_fake_tensor")
+                and fake_mode is not None
+                and CppFakeTensorMode._get_active_cpp_fake_tensor_mode() is None
+            ):
+                cpp_fake_mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
+                    fake_mode.fake_tensor_converter, fake_mode.shape_env
+                )
+                cpp_fake_mode.set_allow_fallback_kernels(
+                    fake_mode.allow_fallback_kernels
+                )
+                cpp_fake_stack.enter_context(cpp_fake_mode.activated())
 
             _recursive_record_original_output_strides(gm)
 

@@ -9,7 +9,7 @@ import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
 from torch._library.opaque_object import is_opaque_type
 from torch._opaque_base import OpaqueBase
-from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses import CppFakeTensorMode, FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -145,7 +145,7 @@ def process_inputs(
                     # We already fakeified this tensor in Dynamo, don't
                     # dump the trace for it again
                     trace = False
-            cpp_fake_mode = torch._C._get_active_cpp_fake_tensor_mode()
+            cpp_fake_mode = CppFakeTensorMode._get_active_cpp_fake_tensor_mode()
             if cpp_fake_mode is not None:
                 return cpp_fake_mode.from_tensor(
                     x,

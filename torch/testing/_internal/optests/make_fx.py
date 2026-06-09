@@ -1,9 +1,83 @@
 # mypy: ignore-errors
 
+import contextlib
+import os
+
 import torch
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._utils import wrapper_set_seed
 import torch.utils._pytree as pytree
+
+
+MAKE_FX_CPP_FAKE_TENSOR = (
+    os.environ.get("MAKE_FX_CPP_FAKE_TENSOR", "0") == "1"
+    and hasattr(torch._C, "_is_fake_tensor")
+)
+
+
+@contextlib.contextmanager
+def cpp_fake_tensor_mode(shape_env=None):
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorConverter
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    if shape_env is None:
+        shape_env = ShapeEnv()
+    cpp_mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
+        FakeTensorConverter(), shape_env
+    )
+    with cpp_mode.activated():
+        yield shape_env
+
+
+_cpp_fake_arg_counter = 0
+
+
+def to_cpp_fake_symbolic(x):
+    global _cpp_fake_arg_counter
+    if not isinstance(x, torch.Tensor):
+        return x
+    from torch._dynamo.source import ConstantSource
+    from torch.fx.experimental.symbolic_shapes import (
+        DimDynamic,
+        StatelessSymbolicContext,
+    )
+
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+    _cpp_fake_arg_counter += 1
+    source = ConstantSource(f"cpp_fake_arg_{_cpp_fake_arg_counter}")
+    ctx = StatelessSymbolicContext(dynamic_sizes=[DimDynamic.DYNAMIC] * x.dim())
+    return CppFakeTensorMode._get_active_cpp_fake_tensor_mode().from_tensor(
+        x, source=source, symbolic_context=ctx
+    )
+
+
+def make_fx_cpp_fake(f, tracing_mode, decomposition_table=None, **kwargs):
+    """Like make_fx for fake/symbolic, but traces under tracing_mode="real"
+    inside an active C++ FakeTensorMode. Returns a callable, like make_fx."""
+    from torch._dispatch.python import enable_python_dispatcher
+
+    symbolic = tracing_mode == "symbolic"
+
+    def wrapped(*args):
+        with cpp_fake_tensor_mode():
+            if symbolic:
+                args = pytree.tree_map_only(torch.Tensor, to_cpp_fake_symbolic, args)
+                with enable_python_dispatcher():
+                    return make_fx(
+                        f,
+                        decomposition_table=decomposition_table,
+                        tracing_mode="real",
+                        **kwargs,
+                    )(*args)
+            return make_fx(
+                f,
+                decomposition_table=decomposition_table,
+                tracing_mode="real",
+                **kwargs,
+            )(*args)
+
+    return wrapped
 
 
 def make_fx_check(
@@ -19,7 +93,10 @@ def make_fx_check(
     def run(f, *args, **kwargs):
         return wrapper_set_seed(f, *args, **kwargs)
 
-    traced_f = make_fx(f, tracing_mode=tracing_mode)(*new_args)
+    if MAKE_FX_CPP_FAKE_TENSOR and tracing_mode in ("fake", "symbolic"):
+        traced_f = make_fx_cpp_fake(f, tracing_mode)(*new_args)
+    else:
+        traced_f = make_fx(f, tracing_mode=tracing_mode)(*new_args)
 
     msg = (
         "op(*args, **kwargs) and make_fx(op)(*args, **kwargs) produced different "

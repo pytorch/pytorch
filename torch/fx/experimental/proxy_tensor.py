@@ -52,6 +52,8 @@ from torch._logging import trace_structured
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    cpp_fake_tensor_mode_active,
     FakeTensor,
     FakeTensorMode,
     get_plain_tensors,
@@ -700,7 +702,7 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
         return {k: extract_val(v) for k, v in val.items()}
     elif isinstance(val, Tensor):
         if not val.is_sparse:
-            if _has_cpp_fake_tensor and torch._C._get_active_cpp_fake_tensor_mode() is not None:
+            if cpp_fake_tensor_mode_active():
                 return torch.empty_strided(  # revist this
                     val.shape, val.stride(), device=val.device, dtype=val.dtype
                 )
@@ -2762,12 +2764,11 @@ class _MakefxTracer:
                         f"Unexpected tracing type: {self.tracing_mode}"
                     )
 
-            if (
-                self.fake_tensor_mode is not None
-                and _has_cpp_fake_tensor
-                and torch._C._get_active_cpp_fake_tensor_mode() is not None
-            ):
-                torch._C._set_cpp_fake_tensor_mode_allow_fallback_kernels(
+            cpp_fake_mode = (
+                CppFakeTensorMode._get_active_cpp_fake_tensor_mode() if _has_cpp_fake_tensor else None
+            )
+            if self.fake_tensor_mode is not None and cpp_fake_mode is not None:
+                cpp_fake_mode.set_allow_fallback_kernels(
                     self.fake_tensor_mode.allow_fallback_kernels
                 )
 
@@ -2907,9 +2908,7 @@ class _MakefxTracer:
             ProxyTorchDispatchMode, self.proxy_mode
         )
         with ExitStack() as stack:
-            if self.fake_tensor_mode and not (
-                _has_cpp_fake_tensor and torch._C._get_active_cpp_fake_tensor_mode() is not None
-            ):
+            if self.fake_tensor_mode and not cpp_fake_tensor_mode_active():
                 stack.enter_context(self.fake_tensor_mode)
             stack.enter_context(self.python_dispatcher_mode)
             stack.enter_context(self.proxy_function_mode)

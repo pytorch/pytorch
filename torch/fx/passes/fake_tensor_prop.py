@@ -1,7 +1,7 @@
 from typing import Any
 
 import torch.fx
-from torch._subclasses.fake_tensor import FakeTensorMode, is_fake
+from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode, is_fake
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import py_sym_types, snapshot_fake
@@ -109,11 +109,8 @@ class FakeTensorProp(torch.fx.Interpreter):
         return self.propagate_dont_convert_inputs(*fake_args)
 
     def propagate_dont_convert_inputs(self, *args: object) -> Any:
-        import torch._C
-
-        if torch._C._get_active_cpp_fake_tensor_mode() is not None:
-            torch._C._activate_cpp_fake_tensor_mode()
-            try:
-                return super().run(*args)
-            finally:
-                torch._C._deactivate_cpp_fake_tensor_mode()
+        # Route through the active C++ FakeTensorMode if present, otherwise the
+        # Python fake mode.
+        cpp_fake_mode = CppFakeTensorMode._get_active_cpp_fake_tensor_mode()
+        with cpp_fake_mode.activated() if cpp_fake_mode is not None else self._mode:
+            return super().run(*args)

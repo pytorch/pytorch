@@ -4825,18 +4825,12 @@ def infer_scale_swizzle_ir(
     )
 
 
-@contextlib.contextmanager
-def _cpp_fake_mode_ctx():
-    torch._C._activate_cpp_fake_tensor_mode()
-    try:
-        yield
-    finally:
-        torch._C._deactivate_cpp_fake_tensor_mode()
-
-
 def fake_mode_context(
     fake_mode: torch._subclasses.FakeTensorMode,
 ) -> contextlib.AbstractContextManager[None]:
-    if torch._C._get_active_cpp_fake_tensor_mode() is not None:
-        return _cpp_fake_mode_ctx()
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+    cpp_mode = CppFakeTensorMode._get_active_cpp_fake_tensor_mode()
+    if cpp_mode is not None:
+        return cpp_mode.activated()
     return fake_mode

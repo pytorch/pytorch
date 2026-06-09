@@ -247,7 +247,7 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
     return False
 
 
-def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
+def maybe_get_fake_mode(t: object) -> FakeTensorMode | CppFakeTensorMode | None:
     from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, FakeTensor):
@@ -279,7 +279,100 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     elif isinstance(t, Tensor) and is_functorch_wrapped_tensor(t):
         unwrapped = torch._C._functorch.get_unwrapped(t)
         return maybe_get_fake_mode(unwrapped)
+    elif isinstance(t, Tensor):
+        return torch._C.maybe_get_fake_mode(t)
     return None
+
+
+class CppFakeTensorMode:
+    def __init__(
+        self,
+        *,
+        shape_env: Any = None,
+        fake_tensor_converter: Any = None,
+        allow_fallback_kernels: bool = True,
+    ) -> None:
+        self.shape_env = shape_env
+        self.fake_tensor_converter = fake_tensor_converter
+        self.allow_fallback_kernels = allow_fallback_kernels
+        self.allow_scalar_outputs = False
+        self.in_kernel_invocation = False
+
+    @classmethod
+    def create_cpp_fake_tensor_mode(
+        cls, fake_tensor_converter: Any, shape_env: Any = None
+    ) -> CppFakeTensorMode:
+        """Create the C++ FakeTensorMode from a converter and ShapeEnv.
+        """
+        self = cls(shape_env=shape_env, fake_tensor_converter=fake_tensor_converter)
+        # self is stored on the C++ mode so _get_active_cpp_fake_tensor_mode and
+        # op_impl handlers (PyInterpreter.cpp) observe the same single identity.
+        torch._C._create_cpp_fake_tensor_mode(fake_tensor_converter, shape_env, self)
+        return self
+
+    @classmethod
+    def _get_active_cpp_fake_tensor_mode(cls) -> CppFakeTensorMode | None:
+        return torch._C._get_active_cpp_fake_tensor_mode()
+
+    # op_impl handlers do `with fake_mode:`
+    def __enter__(self) -> CppFakeTensorMode:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def activate(self) -> None:
+        torch._C._activate_cpp_fake_tensor_mode()
+
+    def deactivate(self) -> None:
+        torch._C._deactivate_cpp_fake_tensor_mode()
+
+    @contextlib.contextmanager
+    def activated(self) -> Generator[CppFakeTensorMode, None, None]:
+        self.activate()
+        try:
+            yield self
+        finally:
+            self.deactivate()
+
+    def set_allow_fallback_kernels(self, allow: bool) -> None:
+        # Read by op_impl handlers (e.g. workaround_stride_incorrect_op).
+        self.allow_fallback_kernels = allow
+
+    def from_tensor(
+        self,
+        tensor: Tensor,
+        *,
+        static_shapes: bool | None = None,
+        source: Source | None = None,
+        symbolic_context: SymbolicContext | None = None,
+        trace: bool = True,
+    ) -> Tensor:
+        return torch._C._cpp_fake_from_tensor(
+            tensor, source=source, symbolic_context=symbolic_context
+        )
+
+    # need for op_impl
+    @contextlib.contextmanager
+    def in_kernel_invocation_manager(self) -> Generator[None, None, None]:
+        prev = self.in_kernel_invocation
+        self.in_kernel_invocation = True
+        with torch._C._PreserveDispatchKeyGuard():
+            torch._C._set_meta_in_tls_dispatch_include(True)
+            torch._C._dispatch_tls_set_dispatch_key_excluded(
+                torch._C.DispatchKey.Fake, True
+            )
+            try:
+                yield
+            finally:
+                self.in_kernel_invocation = prev
+
+
+def cpp_fake_tensor_mode_active() -> bool:
+    return (
+        hasattr(torch._C, "_is_fake_tensor")
+        and CppFakeTensorMode._get_active_cpp_fake_tensor_mode() is not None
+    )
 
 
 @functools.cache

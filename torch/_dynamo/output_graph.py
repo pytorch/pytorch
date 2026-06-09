@@ -61,7 +61,7 @@ from torch._guards import (
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensor
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
@@ -707,7 +707,7 @@ class OutputGraph(OutputGraphCommon):
         self.dynamo_compile_id: CompileId | None = CompileContext.current_compile_id()
 
         if config.use_cpp_fake_tensor:
-            self.cpp_fake_mode = torch._C._create_cpp_fake_tensor_mode(
+            self.cpp_fake_mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
                 fake_mode.fake_tensor_converter, shape_env
             )
         else:

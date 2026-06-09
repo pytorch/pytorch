@@ -30,6 +30,7 @@ from torch._prims_common import (
     ShapeType,
 )
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     DataDependentOutputException,
     DynamicOutputShapeException,
     FakeTensor,
@@ -68,50 +69,8 @@ op_implementations_dict = {}
 op_implementations_checks = []
 
 
-class CppFakeModeShim:
-    """Lightweight stand-in for FakeTensorMode used by C++ fake tensor op_impl handlers.
-
-    The @register_op_impl handlers receive fake_mode as their first argument and
-    access .shape_env, .fake_tensor_converter, and a couple of config flags.
-    When running under C++ FakeTensorMode there is no Python FakeTensorMode
-    object, so we construct this shim from the C++ mode's stored shape_env and
-    converter.
-
-    Some handlers use ``with fake_mode:`` to ensure sub-ops dispatch through
-    fake tensor mode.  Under C++ fake mode the Fake dispatch key is already
-    active, so this is a no-op context manager.
-    """
-
-    def __init__(self, shape_env: Any, fake_tensor_converter: Any) -> None:
-        self.shape_env = shape_env
-        self.fake_tensor_converter = fake_tensor_converter
-        self.allow_fallback_kernels = True
-        self.allow_scalar_outputs = False
-        self.in_kernel_invocation = False
-
-    @contextlib.contextmanager
-    def in_kernel_invocation_manager(self):  # type: ignore[no-untyped-def]
-        prev = self.in_kernel_invocation
-        self.in_kernel_invocation = True
-        with torch._C._PreserveDispatchKeyGuard():
-            torch._C._set_meta_in_tls_dispatch_include(True)
-            torch._C._dispatch_tls_set_dispatch_key_excluded(
-                torch._C.DispatchKey.Fake, True
-            )
-            try:
-                yield
-            finally:
-                self.in_kernel_invocation = prev
-
-    def __enter__(self) -> "CppFakeModeShim":
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        pass
-
-
 def in_kernel_invocation_manager(fake_mode):  # type: ignore[no-untyped-def]
-    if isinstance(fake_mode, CppFakeModeShim):
+    if isinstance(fake_mode, CppFakeTensorMode):
         return fake_mode.in_kernel_invocation_manager()
     return _py_in_kernel_invocation_manager(fake_mode)
 
@@ -322,7 +281,7 @@ def constructors(
     # to fail? hmmm)
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
-    if isinstance(fake_mode, CppFakeModeShim):
+    if isinstance(fake_mode, CppFakeTensorMode):
         return r
     return FakeTensor(fake_mode, r, out_device)
 
@@ -353,7 +312,7 @@ def _record_function_enter(
         real_handle = func(name, args)
     # Create a meta tensor with the same properties as the real handle
     meta_handle = torch.empty_like(real_handle, device="meta")
-    if isinstance(fake_mode, CppFakeModeShim):
+    if isinstance(fake_mode, CppFakeTensorMode):
         return meta_handle
     # Wrap it as a FakeTensor
     return FakeTensor(fake_mode, meta_handle, torch.device("cpu"))
@@ -392,7 +351,7 @@ def non_kwarg_to(
     inp = new_kwargs.pop("input")
     with in_kernel_invocation_manager(fake_mode):
         r = func(inp, **new_kwargs)
-    if isinstance(fake_mode, CppFakeModeShim):
+    if isinstance(fake_mode, CppFakeTensorMode):
         return r
     # TODO: I think this does the wrong thing if r is inp
     return fake_mode.fake_tensor_converter.from_meta_and_device(
@@ -1452,7 +1411,7 @@ def run_and_return_new_tensor_of_input_device(
 
     if out is new_kwargs["input"]:
         return out  # copy_
-    if isinstance(fake_mode, CppFakeModeShim):
+    if isinstance(fake_mode, CppFakeTensorMode):
         return out
     return FakeTensor(fake_mode, out, out_device)
 
@@ -1499,7 +1458,7 @@ def foreach_run_and_map_input_device(
     out_fake = []
 
     for i, meta_t in enumerate(out_meta):
-        if isinstance(fake_mode, CppFakeModeShim):
+        if isinstance(fake_mode, CppFakeTensorMode):
             out_fake.append(meta_t)
         else:
             device, _ = FakeTensor._find_common_device(func, [tl[i] for tl in tensor_lists])
@@ -1702,7 +1661,7 @@ def conv(
                 t = t.unsqueeze(2).to(memory_format=mem_fmt).squeeze(2)
             else:
                 t = t.to(memory_format=mem_fmt)
-        if isinstance(fake_mode, CppFakeModeShim):
+        if isinstance(fake_mode, CppFakeTensorMode):
             return t
         return FakeTensor(fake_mode, t, device)
 
@@ -1953,7 +1912,7 @@ def make_fast_binary_impl(
                 device="meta",
                 memory_format=torch.contiguous_format,
             )
-            if isinstance(mode, CppFakeModeShim):
+            if isinstance(mode, CppFakeTensorMode):
                 return out
             return FakeTensor(
                 mode,
@@ -1969,7 +1928,7 @@ def make_fast_binary_impl(
                 device="meta",
                 memory_format=torch.channels_last,
             )
-            if isinstance(mode, CppFakeModeShim):
+            if isinstance(mode, CppFakeTensorMode):
                 return out
             return FakeTensor(
                 mode,
@@ -1989,7 +1948,7 @@ def fast_detach(
 ) -> FakeTensor:
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
-    if isinstance(fake_mode, CppFakeModeShim):
+    if isinstance(fake_mode, CppFakeTensorMode):
         return out
     if include_real:
         return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)

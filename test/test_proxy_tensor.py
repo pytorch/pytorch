@@ -26,13 +26,40 @@ from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import (
     DecompositionInterpreter,
     get_isolated_graphmodule,
-    make_fx,
+    make_fx as _real_make_fx,
     ProxyTorchDispatchMode,
     PythonKeyTracer,
 )
+from torch.testing._internal.optests.make_fx import (
+    MAKE_FX_CPP_FAKE_TENSOR,
+    make_fx_cpp_fake,
+)
+
+
+# When MAKE_FX_CPP_FAKE_TENSOR=1 this whole suite exercises the C++ FakeTensor
+# mode: instead of tracing tracing_mode="fake"/"symbolic" directly, we trace
+# tracing_mode="real" inside an active C++ FakeTensorMode
+if MAKE_FX_CPP_FAKE_TENSOR:
+    def make_fx(f, *args, tracing_mode="real", decomposition_table=None, **kwargs):
+        if tracing_mode in ("fake", "symbolic"):
+            return make_fx_cpp_fake(
+                f, tracing_mode, decomposition_table=decomposition_table, **kwargs
+            )
+        # tracing_mode = "real"
+        return _real_make_fx(
+            f,
+            *args,
+            tracing_mode="real",
+            decomposition_table=decomposition_table,
+            **kwargs,
+        )
+else:
+    make_fx = _real_make_fx
+
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
+from torch.testing import make_tensor
 import torch._functorch.config
 import re
 
@@ -1010,6 +1037,74 @@ def forward(self, x_1):
 
         fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
         self.assertEqual(fake_mode, existing_fake_mode)
+
+
+class TestHOPProxyTensor(TestCase):
+    # The user-facing HOP wrappers (torch.cond, etc.) route through
+    # torch.compile/Dynamo, which creates Python FakeTensorMode that conflicts
+    # with the active C++ fake mode. Exercise the internal HOP
+    # ops directly here instead.
+    def _make_arg(self, *shape, low=0.1, high=2):
+        return make_tensor(*shape, low=low, high=high, dtype=torch.float, device="cpu")
+
+    def _test(self, f, inps):
+        gm = make_fx(f, tracing_mode="fake")(*inps)
+        new_inps = tree_map(_create_new_input, inps)
+        self.assertEqual(gm(*new_inps), f(*new_inps))
+
+    def test_cond_simple(self):
+        from torch._higher_order_ops.cond import cond_op
+
+        def f(x):
+            return cond_op(x.sum() > 2, lambda x: (x.cos(),), lambda x: (x.sin(),), [x])
+
+        self._test(f, (self._make_arg(2, 2, 2),))
+
+    def test_while_loop_simple(self):
+        from torch._higher_order_ops.while_loop import while_loop_op
+
+        def f(iter_t, x):
+            def cond_fn(iter_t, x):
+                return iter_t > 0
+
+            def body_fn(iter_t, x):
+                return iter_t - 1, x.cos()
+
+            return while_loop_op(cond_fn, body_fn, (iter_t, x), ())
+
+        self._test(f, (torch.tensor(3), self._make_arg(2, 3, 4)))
+
+    def test_map_simple(self):
+        from torch._higher_order_ops.map import map_impl
+
+        def inner_f(x0, x1, y0, y1):
+            return [x0.cos().add_(1.0) * y0, (x1 + y1.sin()).cos_().view(x1.size())]
+
+        def f(x0, x1, y0, y1):
+            return map_impl(inner_f, [x0, x1], (y0, y1))
+
+        self._test(
+            f,
+            (
+                self._make_arg(2, 2, 2),
+                self._make_arg(2, 2, 2),
+                self._make_arg(1),
+                self._make_arg(1),
+            ),
+        )
+
+    def test_scan_simple(self):
+        from torch._higher_order_ops.scan import scan_op
+
+        def combine_fn(carry, x):
+            result = carry @ x + x
+            return result, carry.clone()
+
+        def f(init, xs):
+            return scan_op(combine_fn, [init], [xs], ())
+
+        self._test(f, (self._make_arg(2, 2), self._make_arg(2, 2, 2)))
+
 
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
@@ -2138,6 +2233,17 @@ out_symbolic_tensor_segfaults = {
 
 out_symbolic_tensor_failures.update(out_symbolic_tensor_segfaults)
 
+
+# need to skip for C++ bc internal torch.compile creates a Python
+# FakeTensorMode that conflicts with the active C++ fake mode
+_CPP_FAKE_HOP_SKIP = {
+    "cond",
+    "map",
+    "scan",
+    "while_loop",
+    "while_loop_stack_output",
+}
+
 # Copies inputs to inplace operations to avoid inplace modifications
 #   to leaves requiring gradient
 def _get_safe_inplace(inplace_variant):
@@ -2183,8 +2289,12 @@ def skipIfNameMatches(pattern):
         return wrapper
     return decorator
 
-# Auto functionalize shouldn't work with make_fx directly
-filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
+# Auto functionalize shouldn't work with make_fx directly. Under C++ fake mode,
+# also exclude the user-facing HOP wrappers (see _CPP_FAKE_HOP_SKIP above).
+_hop_skip = {"auto_functionalize"}
+if MAKE_FX_CPP_FAKE_TENSOR:
+    _hop_skip.update(_CPP_FAKE_HOP_SKIP)
+filtered_hop_db = [op for op in hop_db if op.name not in _hop_skip]
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
