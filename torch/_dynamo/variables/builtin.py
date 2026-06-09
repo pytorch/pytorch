@@ -60,6 +60,7 @@ from ..source import (
     GlobalSource,
     is_constant_source,
     Source,
+    SyntheticLocalSource,
     TypeSource,
 )
 from ..utils import (
@@ -147,6 +148,14 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 log = logging.getLogger(__name__)
+
+
+def _is_from_synthetic_local_source(source: Source | None) -> bool:
+    while source is not None:
+        if isinstance(source, SyntheticLocalSource):
+            return True
+        source = getattr(source, "base", None)
+    return False
 
 
 IN_PLACE_DESUGARING_MAP = {
@@ -2531,6 +2540,14 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args=[f"id() takes exactly one argument ({len(args)} given)"],
             )
         arg = args[0]
+
+        if _is_from_synthetic_local_source(arg.source):
+            unimplemented(
+                gb_type="id() with synthetic local",
+                context=f"id({arg})",
+                explanation="Dynamo cannot resolve or guard the real Python identity of synthetic pregraph inputs.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
         real_id = arg.get_id(tx)
         if real_id is not None:

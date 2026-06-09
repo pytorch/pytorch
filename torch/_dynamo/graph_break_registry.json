@@ -4582,6 +4582,16 @@
       ]
     }
   ],
+  "GB7066": [
+    {
+      "Gb_type": "id() with synthetic local",
+      "Context": "id({arg})",
+      "Explanation": "Dynamo cannot resolve or guard the real Python identity of synthetic pregraph inputs.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0311": [
     {
       "Gb_type": "torch.cond: improper operands",

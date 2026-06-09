@@ -1373,6 +1373,61 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         m3 = deepcopy(m1)
         self.assertEqual(GenerationTracker.get_generation_value(m3), cur_generation)
 
+    def _check_construct_module_with_tensor_constant_attr(
+        self, *, register_buffer: bool
+    ):
+        class MyMod(torch.nn.Module):
+            def __init__(self, constant) -> None:
+                super().__init__()
+                if register_buffer:
+                    self.register_buffer("buf", torch.full((2, 2), 3.0))
+                self.param = torch.nn.Parameter(torch.full((2, 2), 2.0))
+                self.constant = constant
+
+            def forward(self, x):
+                result = x + self.param + self.constant
+                if register_buffer:
+                    result = result + self.buf
+                return result
+
+        def fn(x):
+            return MyMod(torch.ones((2, 2)))(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(2, 2)
+
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_construct_module_with_tensor_constant_attr_and_buffer(self):
+        self._check_construct_module_with_tensor_constant_attr(register_buffer=True)
+
+    def test_construct_module_with_tensor_constant_attr_without_buffer(self):
+        self._check_construct_module_with_tensor_constant_attr(register_buffer=False)
+
+    def test_construct_module_with_nested_non_module_parameter_ctor_graph_breaks(self):
+        class Helper:
+            def __init__(self) -> None:
+                self.param = torch.nn.Parameter(torch.ones(2, 2))
+
+        class MyMod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.helper = Helper()
+
+            def forward(self, x):
+                return x + self.helper.param
+
+        def fn(x):
+            return MyMod()(x)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamo does not know how to trace the function .*Helper",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2, 2))
+
     def test_simple_torch_function(self):
         def foo(x):
             # function call, twice to test wrapping

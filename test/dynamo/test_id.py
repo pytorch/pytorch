@@ -455,6 +455,21 @@ class IdTests(torch._dynamo.test_case.TestCase):
             result = torch.compile(wrapper, backend="eager", fullgraph=True)(x)
             self.assertEqual(result, wrapper(x))
 
+    def test_id_chained_synthetic_local_graph_breaks(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.ones(2))
+
+            def forward(self, x):
+                return x + id(self.param)
+
+        def fn(x):
+            return M()(x)
+
+        with self.assertRaisesRegex(Unsupported, "id\\(\\) with synthetic local"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
