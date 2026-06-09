@@ -24,6 +24,13 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
+from torch._higher_order_ops.gemm_epilogue import (
+    _gemm_epilogue_fusion,
+    _SUPPORTED_GEMM_OP_NAMES,
+    GEMM_EPILOGUE_OPS,
+    materialize_quack_epilogue,
+)
+from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
@@ -8372,6 +8379,15 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
     - Other nodes are executed via V.graph.run_node
 
     """
+    return process_subgraph_nodes_replacing_gemm(graph_module, args)
+
+
+def process_subgraph_nodes_replacing_gemm(
+    graph_module: torch.fx.GraphModule,
+    args: list[Any],
+    gemm_op: Callable[..., Any] | None = None,
+    gemm_replacement: Any = None,
+):
     output = _MISSING
 
     for i, node in enumerate(graph_module.graph.nodes):
@@ -8384,6 +8400,13 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
             output = torch.fx.Interpreter.output(V.graph, node, output_args, kwargs)
         else:
             assert node not in V.graph.env
+            if (
+                gemm_op is not None
+                and node.op == "call_function"
+                and node.target == gemm_op
+            ):
+                V.graph.env[node] = gemm_replacement
+                continue
             # Track current node for error diagnostics; restore after run_node to handle nested calls correctly
             saved_current_node = V.graph.current_node
             try:
@@ -8394,6 +8417,312 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
 
     if output is _MISSING:
         raise RuntimeError("No output node found in graph")
+
+    return output
+
+
+@register_lowering(hints_wrapper, type_promotion_kind=None)
+def hints_wrapper_lowering(subgraph, args, kwargs, hints):
+    return process_subgraph_nodes(subgraph.graph_module, list(args))
+
+
+@register_lowering(_gemm_epilogue_fusion, type_promotion_kind=None)
+def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
+    """Lower GEMM epilogue HOPs through backend-specific fused template paths."""
+    backend = kernel_options.get("backend", "TRITON")
+    split_k = kernel_options.get("SPLIT_K", False)
+    if gemm_op == torch.ops.aten._scaled_mm_v2.default:
+        if backend != "TRITON" or split_k:
+            raise NotImplementedError(
+                "_scaled_mm_v2 epilogue lowering currently supports only the default TRITON fallback path"
+            )
+        return process_subgraph_nodes(subgraph.graph_module, list(args))
+    split_k_gemm_ops = (torch.ops.aten.mm.default, torch.ops.aten.addmm.default)
+    if split_k and (
+        backend not in ("TRITON", "QUACK") or gemm_op not in split_k_gemm_ops
+    ):
+        raise NotImplementedError(
+            "GEMM epilogue SPLIT_K currently supports only the TRITON/QUACK aten.mm/addmm path"
+        )
+    if split_k:
+        from torch._inductor.kernel_inputs import MMKernelInputs
+        from torch._inductor.select_algorithm import autotune_select_algorithm
+        from torch._inductor.utils import get_k_splits
+
+        gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
+        bias = args[0] if gemm_op == torch.ops.aten.addmm.default else None
+        mat1 = args[gemm_op_info.mat1_index]
+        mat2 = args[gemm_op_info.mat2_index]
+        m, k = mat1.get_size()
+        n = mat2.get_size()[1]
+        if backend == "QUACK":
+            from torch._inductor.kernel.quack_splitk import quack_split_k_template
+
+            k_splits = get_k_splits(m, n, k)
+            if not k_splits:
+                raise NotImplementedError(
+                    "no valid split-K choices for QUACK GEMM epilogue"
+                )
+            k_split = k_splits[0]
+            layout = ir.FixedLayout(
+                mat1.get_device(), torch.float32, [k_split, m, n], [m * n, n, 1]
+            )
+            input_nodes = [
+                ir.TemplateBuffer.realize_template_input(arg) for arg in (mat1, mat2)
+            ]
+            choices: list[Any] = []
+            quack_split_k_template.maybe_append_choice(
+                choices, input_nodes=input_nodes, layout=layout, k_split=k_split
+            )
+            partials, _ = autotune_select_algorithm(
+                "quack_split_k", choices, input_nodes, layout
+            )
+            acc = sum_(partials, axis=0)
+        else:
+            from torch._inductor.kernel.mm import decompose_k_fp32_subgraph_template
+
+            layout = ir.FixedLayout(mat1.get_device(), torch.float32, [m, n])
+            kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=torch.float32)
+            with config.patch(max_autotune_gemm=True):
+                choices = V.choices.get_template_configs(
+                    kernel_inputs,
+                    [decompose_k_fp32_subgraph_template],
+                    "mm",
+                )
+                acc, _ = autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
+        if gemm_op == torch.ops.aten.addmm.default:
+            alpha = gemm_kwargs.get("alpha", 1.0)
+            beta = gemm_kwargs.get("beta", 1.0)
+            if alpha != 1:
+                acc = lowerings[aten.mul](alpha, acc)
+            if beta != 0:
+                bias_term = bias if beta == 1 else lowerings[aten.mul](beta, bias)
+                acc = lowerings[aten.add](bias_term, acc)
+        output = process_subgraph_nodes_replacing_gemm(
+            subgraph.graph_module, list(args), gemm_op, acc
+        )
+        if isinstance(output, tuple):
+            return tuple(
+                to_dtype(item, mat1.get_dtype(), use_compute_types=False)
+                for item in output
+            )
+        return to_dtype(output, mat1.get_dtype(), use_compute_types=False)
+
+    if backend == "QUACK":
+        if (
+            gemm_op not in GEMM_EPILOGUE_OPS
+            or not GEMM_EPILOGUE_OPS[gemm_op].supports_quack
+        ):
+            raise NotImplementedError(
+                "QUACK GEMM epilogue backend currently supports only "
+                f"aten.{_SUPPORTED_GEMM_OP_NAMES}"
+            )
+        from torch._inductor.kernel.quack_gemm_epilogue import (
+            quack_gemm_epilogue_template,
+        )
+        from torch._inductor.select_algorithm import autotune_select_algorithm
+
+        alpha = gemm_kwargs.get("alpha", 1.0)
+        beta = gemm_kwargs.get("beta", 1.0)
+        if gemm_op == torch.ops.aten._scaled_mm.default and (
+            len(args) != 4
+            or gemm_kwargs.get("out_dtype") is None
+            or gemm_kwargs.get("bias") is not None
+            or gemm_kwargs.get("scale_result") is not None
+            or gemm_kwargs.get("use_fast_accum", False)
+        ):
+            raise NotImplementedError(
+                "QUACK _scaled_mm epilogue currently supports only "
+                "(A, B, scale_a, scale_b) with explicit out_dtype"
+            )
+        if gemm_op == torch.ops.aten._grouped_mm.default:
+            grouped_mm_supported = (
+                len(args) == 3
+                and len(args[0].get_size()) == 2
+                and len(args[1].get_size()) in (2, 3)
+                and gemm_kwargs.get("bias") is None
+            )
+            varlen_k_layout_supported = len(args[1].get_size()) != 2 or (
+                args[0].get_stride()[0] == 1 and args[1].get_stride()[1] == 1
+            )
+            if not grouped_mm_supported or not varlen_k_layout_supported:
+                raise NotImplementedError(
+                    "QUACK grouped_mm epilogue currently supports only 2D/3D "
+                    "and m-major/contiguous 2D/2D grouped_mm with offsets and no bias"
+                )
+        epilogue_key, epilogue_source, epilogue_arg_placeholders, local_reduce, aux_output = (
+            materialize_quack_epilogue(subgraph.graph_module)
+        )
+        gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
+        mat1, mat2 = args[gemm_op_info.mat1_index], args[gemm_op_info.mat2_index]
+        if gemm_op == torch.ops.aten._grouped_mm.default and len(mat2.get_size()) == 3:
+            m, n = mat1.get_size()[0], mat2.get_size()[2]
+            size = [m, n]
+            stride = [n, 1]
+        elif gemm_op == torch.ops.aten._grouped_mm.default:
+            groups, m, n = args[2].get_size()[0], mat1.get_size()[0], mat2.get_size()[1]
+            size = [groups, m, n]
+            stride = [m * n, n, 1]
+        elif gemm_op_info.is_batched:
+            b, m, n = mat1.get_size()[0], mat1.get_size()[1], mat2.get_size()[2]
+            size = [b, m, n]
+            stride = [m * n, n, 1]
+        else:
+            m, n = mat1.get_size()[0], mat2.get_size()[1]
+            size = [m, n]
+            stride = [n, 1]
+        layout = ir.FixedLayout(
+            mat1.get_device_or_error(),
+            gemm_kwargs.get("out_dtype", mat1.get_dtype()),
+            size,
+            stride,
+        )
+        placeholders = [
+            node
+            for node in subgraph.graph_module.graph.nodes
+            if node.op == "placeholder"
+        ]
+        epilogue_arg_indices = tuple(
+            placeholders.index(node) for node in epilogue_arg_placeholders
+        )
+        if local_reduce is not None:
+            if gemm_op != torch.ops.aten.mm.default or len(size) != 2:
+                raise NotImplementedError(
+                    "QUACK local-reduce tuple epilogues currently support only 2D aten.mm"
+                )
+            if epilogue_arg_indices:
+                raise NotImplementedError(
+                    "QUACK local-reduce tuple epilogues do not support captured tensor reads yet"
+                )
+        if aux_output is not None:
+            if gemm_op != torch.ops.aten.mm.default or len(size) != 2:
+                raise NotImplementedError(
+                    "QUACK generic aux tuple epilogues currently support only 2D aten.mm"
+                )
+            if epilogue_arg_indices:
+                raise NotImplementedError(
+                    "QUACK generic aux tuple epilogues do not support captured tensor reads yet"
+                )
+            if local_reduce is not None:
+                raise NotImplementedError(
+                    "QUACK generic aux tuple epilogues cannot be combined with local reduce"
+                )
+        if epilogue_arg_indices:
+            if gemm_op != torch.ops.aten.mm.default or len(epilogue_arg_indices) != 1:
+                raise NotImplementedError(
+                    "QUACK epilogues with captured tensor reads currently support only one mm aux tensor"
+                )
+            epilogue_arg_size = args[epilogue_arg_indices[0]].get_size()
+            m, n = size
+            if epilogue_arg_size not in (size, [1, n], [m, 1]):
+                raise NotImplementedError(
+                    "QUACK captured tensor epilogue args currently must match "
+                    "the GEMM output shape or broadcast as [1, N] / [M, 1]"
+                )
+        local_reduce_out = None
+        local_reduce_out_index = None
+        aux_out = None
+        aux_out_index = None
+        mutated_inputs = []
+        if local_reduce is not None and not local_reduce.feeds_main:
+            m, n = size
+            group_size = local_reduce.group_size
+            local_reduce_val = local_reduce.reduce_node.meta.get("val")
+            local_reduce_dtype = getattr(local_reduce_val, "dtype", torch.float32)
+            if local_reduce_val is not None:
+                local_reduce_size = list(local_reduce_val.shape)
+                local_reduce_stride = list(local_reduce_val.stride())
+            else:
+                if local_reduce.dim == 0:
+                    local_reduce_size = [FloorDiv(m, group_size), n]
+                    local_reduce_stride = [n, 1]
+                else:
+                    local_reduce_size = [m, FloorDiv(n, group_size)]
+                    local_reduce_stride = [FloorDiv(n, group_size), 1]
+            local_reduce_out = empty_strided(
+                local_reduce_size,
+                local_reduce_stride,
+                dtype=local_reduce_dtype,
+                device=mat1.get_device_or_error(),
+            )
+        if aux_output is not None:
+            aux_val = aux_output.output_value.meta.get("val")
+            if aux_val is None:
+                raise NotImplementedError(
+                    "QUACK generic aux tuple epilogues require fake tensor metadata"
+                )
+            aux_out = empty_strided(
+                list(aux_val.shape),
+                list(aux_val.stride()),
+                dtype=aux_val.dtype,
+                device=mat1.get_device_or_error(),
+            )
+
+        input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
+        if local_reduce_out is not None:
+            local_reduce_node = ir.TemplateBuffer.realize_template_input(local_reduce_out)
+            local_reduce_out_index = len(input_nodes)
+            input_nodes.append(local_reduce_node)
+            mutated_inputs.append(local_reduce_node)
+        if aux_out is not None:
+            aux_node = ir.TemplateBuffer.realize_template_input(aux_out)
+            aux_out_index = len(input_nodes)
+            input_nodes.append(aux_node)
+            mutated_inputs.append(aux_node)
+        choices: list[Any] = []
+        quack_gemm_epilogue_template.maybe_append_choice(
+            choices,
+            input_nodes=input_nodes,
+            layout=layout,
+            epilogue_name=epilogue_key,
+            epilogue_source=epilogue_source,
+            gemm_op=gemm_op_info.quack_name,
+            alpha=alpha,
+            beta=beta,
+            out_dtype=gemm_kwargs.get("out_dtype"),
+            epilogue_arg_indices=epilogue_arg_indices,
+            local_reduce_out_index=local_reduce_out_index,
+            aux_out_index=aux_out_index,
+            local_reduce_group=local_reduce.group_size if local_reduce is not None else None,
+            local_reduce_dim=local_reduce.dim if local_reduce is not None else None,
+            local_reduce_feeds_main=local_reduce.feeds_main if local_reduce is not None else False,
+            mutated_inputs=mutated_inputs or None,
+        )
+        node, _ = autotune_select_algorithm(
+            "quack_gemm_epilogue", choices, input_nodes, layout
+        )
+        if local_reduce_out is not None:
+            return (node, local_reduce_out)
+        if aux_out is not None:
+            return (node, aux_out)
+        return (node,)
+
+    fusible_template_backends = OrderedSet(["TRITON", "CUTLASS"])
+    if backend not in fusible_template_backends:
+        raise NotImplementedError(
+            f"GEMM epilogue backend {backend} does not support Inductor template "
+            "epilogue fusion yet"
+        )
+
+    operation_len = len(V.graph.operations)
+    patches = [
+        patch.object(config, "max_autotune_gemm", True),
+        patch.object(config, "max_autotune_gemm_backends", backend),
+    ]
+    if backend == "TRITON":
+        patches.append(patch.object(config.triton, "num_decompose_k_splits", 0))
+    if backend == "CUTLASS":
+        patches.append(
+            patch.object(config.cutlass, "cutlass_epilogue_fusion_enabled", True)
+        )
+
+    with contextlib.ExitStack() as stack:
+        for config_patch in patches:
+            stack.enter_context(config_patch)
+        output = process_subgraph_nodes(subgraph.graph_module, list(args))
+
+    for op in V.graph.operations[operation_len:]:
+        op._gemm_epilogue_must_fuse = True
 
     return output
 
