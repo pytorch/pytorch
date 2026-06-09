@@ -6470,7 +6470,9 @@ def geometric(self, p, generator=None):
         0 < p and p < 1,
         lambda: f"geometric_ expects p to be in (0, 1), but got p={p}",
     )
-    return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
+    rand_dtype = torch.float32 if utils.is_integer_dtype(self.dtype) else self.dtype
+    rand = torch.rand_like(self, dtype=rand_dtype)
+    return torch.floor(torch.log1p(-rand) / math.log1p(-p)) + 1
 
 
 @register_decomposition(aten.log_normal)
