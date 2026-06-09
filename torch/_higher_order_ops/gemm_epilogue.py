@@ -34,6 +34,7 @@ _QUACK_SUPPORTED_GEMM_OPS = {
     torch.ops.aten.addmm.default,
     torch.ops.aten.bmm.default,
     torch.ops.aten.baddbmm.default,
+    torch.ops.aten._scaled_mm.default,
 }
 
 
@@ -45,7 +46,7 @@ def _find_single_quack_gemm_node(graph_module: torch.fx.GraphModule) -> torch.fx
     ]
     if len(gemm_nodes) != 1:
         raise NotImplementedError(
-            "QUACK GEMM epilogue backend currently supports one mm/addmm/bmm/baddbmm body"
+            "QUACK GEMM epilogue backend currently supports one mm/addmm/bmm/baddbmm/_scaled_mm body"
         )
     return gemm_nodes[0]
 

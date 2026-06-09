@@ -6,7 +6,8 @@ from torch._C import FileCheck
 from torch._higher_order_ops import gemm_epilogue_fusion
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM
+from torch.testing._internal.common_quantized import ceil_div, to_blocked
 from torch.testing._internal.inductor_utils import _quantize_tensorwise
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -199,6 +200,59 @@ class GemmEpilogueFusionTests(TestCase):
         FileCheck().check("triton_tem_fused__scaled_mm").check("maximum").check_not(
             "extern_kernels._scaled_mm"
         ).run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_routes_scaled_mm_relu_to_quack_hook(self):
+        if not PLATFORM_SUPPORTS_MX_GEMM:
+            self.skipTest("MX GEMM is not supported")
+
+        def fn(a, b, scale_a, scale_b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={"out_dtype": torch.bfloat16},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        m, k, n = 128, 32, 128
+        a = torch.eye(m, k, device="cuda", dtype=torch.bfloat16).to(
+            torch.float8_e4m3fn
+        )
+        b = torch.eye(n, k, device="cuda", dtype=torch.bfloat16).to(
+            torch.float8_e4m3fn
+        ).t()
+        scale_a = to_blocked(
+            torch.full(
+                (m, ceil_div(k, 32)),
+                1.0,
+                device="cuda",
+                dtype=torch.float8_e8m0fnu,
+            )
+        )
+        scale_b = to_blocked(
+            torch.full(
+                (n, ceil_div(k, 32)),
+                1.0,
+                device="cuda",
+                dtype=torch.float8_e8m0fnu,
+            )
+        )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            scale_a,
+            scale_b,
+        )
+
+        torch.testing.assert_close(
+            actual, fn(a, b, scale_a, scale_b), atol=0.05, rtol=1e-2
+        )
+        FileCheck().check("@cute.jit").check("gemm_epilogue(").check(
+            "scale_a="
+        ).check("scale_b=").check_not("extern_kernels._scaled_mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_cutlass_backend_uses_cutlass_template_fusion(self):

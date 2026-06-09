@@ -8417,11 +8417,12 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             torch.ops.aten.addmm.default: ("addmm", 1, 2),
             torch.ops.aten.bmm.default: ("bmm", 0, 1),
             torch.ops.aten.baddbmm.default: ("baddbmm", 1, 2),
+            torch.ops.aten._scaled_mm.default: ("scaled_mm", 0, 1),
         }
         if gemm_op not in quack_gemm_ops:
             raise NotImplementedError(
                 "QUACK GEMM epilogue backend currently supports only "
-                "aten.mm/addmm/bmm/baddbmm"
+                "aten.mm/addmm/bmm/baddbmm/_scaled_mm"
             )
         from torch._inductor.kernel.quack_gemm_epilogue import (
             quack_gemm_epilogue_template,
@@ -8430,12 +8431,23 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
 
         alpha = gemm_kwargs.get("alpha", 1.0)
         beta = gemm_kwargs.get("beta", 1.0)
+        if gemm_op == torch.ops.aten._scaled_mm.default and (
+            len(args) != 4
+            or gemm_kwargs.get("out_dtype") is None
+            or gemm_kwargs.get("bias") is not None
+            or gemm_kwargs.get("scale_result") is not None
+            or gemm_kwargs.get("use_fast_accum", False)
+        ):
+            raise NotImplementedError(
+                "QUACK _scaled_mm epilogue currently supports only "
+                "(A, B, scale_a, scale_b) with explicit out_dtype"
+            )
         epilogue_key, epilogue_source = materialize_quack_epilogue(
             subgraph.graph_module
         )
         gemm_op_name, mat1_idx, mat2_idx = quack_gemm_ops[gemm_op]
         mat1, mat2 = args[mat1_idx], args[mat2_idx]
-        if gemm_op_name in ("mm", "addmm"):
+        if gemm_op_name in ("mm", "addmm", "scaled_mm"):
             m, n = mat1.get_size()[0], mat2.get_size()[1]
             size = [m, n]
             stride = [n, 1]
@@ -8445,7 +8457,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             stride = [m * n, n, 1]
         layout = ir.FixedLayout(
             mat1.get_device_or_error(),
-            mat1.get_dtype(),
+            gemm_kwargs.get("out_dtype", mat1.get_dtype()),
             size,
             stride,
         )
@@ -8460,6 +8472,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             gemm_op=gemm_op_name,
             alpha=alpha,
             beta=beta,
+            out_dtype=gemm_kwargs.get("out_dtype"),
         )
         node, _ = autotune_select_algorithm(
             "quack_gemm_epilogue", choices, input_nodes, layout
