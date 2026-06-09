@@ -42,6 +42,7 @@ from torch._inductor.cudagraph_utils import (
     get_partition_cudagraph_metadata,
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
+    should_assert_cudagraph_output_stack_trace,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.utils import (
@@ -258,6 +259,11 @@ def cudagraph_post_compile(
         assert stack_traces is not None, (
             "stack_traces should not be None in cudagraph_post_compile"
         )
+        stack_trace_required = getattr(cached_info, "stack_trace_required", None)
+        if stack_trace_required is None:
+            stack_trace_required = [
+                stack_trace is not None for stack_trace in stack_traces
+            ]
 
         prepare_cudagraph_post_compile(
             compiled_graph, example_inputs, boxed_forward_device_index
@@ -274,6 +280,7 @@ def cudagraph_post_compile(
         cudagraphify_kwargs = dict(
             device_index=device_index,
             stack_traces=stack_traces,
+            stack_trace_required=stack_trace_required,
             is_backward=is_backward,
             is_inference=is_inference,
             constants=tuple(tensor_constants.values()),
@@ -368,11 +375,20 @@ def cudagraph_partition_post_compile(
     assert compiled_graph.cudagraph_info.stack_traces is not None, (
         "stack_traces should not be None in cudagraph_partition_post_compile"
     )
+    stack_trace_required = getattr(
+        compiled_graph.cudagraph_info, "stack_trace_required", None
+    )
+    if stack_trace_required is None:
+        stack_trace_required = [
+            stack_trace is not None
+            for stack_trace in compiled_graph.cudagraph_info.stack_traces
+        ]
     graph_metadata = CudagraphMetadata(
         compiled_graph.cudagraph_info.placeholders,
         static_input_idxs,
         mutated_input_idxs,
         compiled_graph.cudagraph_info.stack_traces,
+        stack_trace_required,
         tensor_constants,
         compiled_graph.cudagraph_cloned_idxs,
         compiled_graph.cudagraph_copy_input_idxs,
@@ -404,6 +420,7 @@ def cudagraph_partition_post_compile(
             static_input_idxs=tuple(partition_static_input_idxs),
             device_index=device_index,
             stack_traces=partition_metadata.stack_traces,
+            stack_trace_required=partition_metadata.stack_trace_required,
             is_backward=is_backward,
             is_inference=is_inference,
             constants=tuple(partition_metadata.constants.values()),
@@ -717,17 +734,24 @@ class CompiledFxGraph(OutputCode):
                 output = output_node(gm)
                 # output args are tuple of first argument
                 assert len(output.args) == 1
-                # Use stack traces captured on the output node before
-                # post-grad passes, which may strip stack_trace from
-                # individual arg nodes.
+                # output_stack_traces is set by the partitioner before passes run
                 stack_traces = output.meta.get("output_stack_traces") or [
                     (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
                     for arg in output.args[0]  # type: ignore[union-attr]
                 ]
+                stack_trace_required = output.meta.get("output_stack_trace_required")
+                if stack_trace_required is None:
+                    stack_trace_required = [
+                        should_assert_cudagraph_output_stack_trace(arg)
+                        for arg in output.args[0]  # type: ignore[union-attr]
+                    ]
                 cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
                 placeholders = tuple(get_placeholder_info(gm.graph))
                 cudagraph_info = CudagraphCachedInfo(
-                    placeholders, stack_traces, cudagraph_fail_reasons
+                    placeholders,
+                    stack_traces,
+                    stack_trace_required,
+                    cudagraph_fail_reasons,
                 )
 
         self.cudagraph_info = cudagraph_info
