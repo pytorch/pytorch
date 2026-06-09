@@ -762,11 +762,10 @@ def get_default_generator(device: torch.device) -> Any:
 
 def get_device_rng_state(device: torch.device) -> torch.Tensor:
     """Get the RNG state tensor for a device."""
-    device_mod = getattr(torch, device.type, None)
-    if device_mod is not None and hasattr(device_mod, "get_rng_state"):
-        idx = device.index if device.index is not None else 0
-        return device_mod.get_rng_state(idx)
-    return torch.get_rng_state()
+    if device.type == "cpu":
+        return torch.get_rng_state()
+    idx = device.index if device.index is not None else 0
+    return torch.accelerator.get_rng_state(idx)
 
 
 def top_saved_tensors_hooks() -> Any:
