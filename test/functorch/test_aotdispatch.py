@@ -5745,7 +5745,7 @@ class <lambda>(torch.nn.Module):
             str(signature.backward_signature.gradients_to_user_inputs), """{}"""
         )
         self.assertExpectedInline(
-            str(signature.backward_signature.loss_output), """getitem_3"""
+            str(signature.backward_signature.loss_output), """sum_1"""
         )
 
         # Also check the inference graph
@@ -5792,6 +5792,36 @@ class <lambda>(torch.nn.Module):
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
         # 9 outputs: 2 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
+
+    def test_aot_export_module_joint_unused_parameter_gradient(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.randn(3))
+                self.p2 = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self):
+                return ((self.p1.detach() * self.p2).sum(),)
+
+        mod = M()
+        fx_g, signature = aot_export_module(
+            mod, (), trace_joint=True, output_loss_index=0
+        )
+
+        output_node = next(n for n in fx_g.graph.nodes if n.op == "output")
+        self.assertEqual(len(output_node.args[0]), 2)
+        self.assertEqual(signature.parameters, ["p1", "p2"])
+        self.assertEqual(
+            signature.backward_signature.loss_output, output_node.args[0][0].name
+        )
+        self.assertEqual(signature.backward_signature.gradients_to_user_inputs, {})
+        self.assertEqual(
+            set(signature.backward_signature.gradients_to_parameters.values()), {"p2"}
+        )
+
+        loss, p2_grad = fx_g(mod.p1, mod.p2)
+        self.assertEqual(loss, (mod.p1.detach() * mod.p2).sum())
+        self.assertEqual(p2_grad, mod.p1.detach())
 
     def test_aot_export_simplified_basic(self):
         def f(x, y):
