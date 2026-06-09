@@ -22,6 +22,19 @@ class GemmEpilogueFusionTests(TestCase):
 
         torch.testing.assert_close(actual, (a @ b).relu())
 
+    def test_cutlass_backend_is_accepted(self):
+        a = torch.randn(2, 3)
+        b = torch.randn(3, 4)
+
+        actual = gemm_epilogue_fusion(
+            torch.ops.aten.mm.default,
+            (a, b),
+            lambda acc: acc.relu(),
+            kernel_options={"backend": "CUTLASS"},
+        )
+
+        torch.testing.assert_close(actual, (a @ b).relu())
+
     def test_exports_as_gemm_epilogue_fusion_region(self):
         def fn(a, b):
             return gemm_epilogue_fusion(
@@ -54,6 +67,33 @@ class GemmEpilogueFusionTests(TestCase):
 
         torch.testing.assert_close(actual, fn(a, b))
         self.assertFalse(inductor_config.max_autotune_gemm)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_cutlass_backend_uses_cutlass_template_fusion(self):
+        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
+
+        if not try_import_cutlass() or torch.version.cuda is None:
+            self.skipTest("CUTLASS is not available")
+
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: acc.relu(),
+                kernel_options={"backend": "CUTLASS"},
+            )
+
+        a = torch.randn(512, 512, device="cuda", dtype=torch.float16)
+        b = torch.randn(512, 512, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
+        FileCheck().check("async_compile.cuda").check("cutlass").check_not(
+            "extern_kernels.mm"
+        ).run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_routes_relu_to_quack_hook(self):

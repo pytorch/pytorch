@@ -8445,16 +8445,26 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         )
         return (node,)
 
-    if backend != "TRITON":
+    fusible_template_backends = {"TRITON", "CUTLASS", "CPP"}
+    if backend not in fusible_template_backends:
         raise NotImplementedError(
-            f"GEMM epilogue backend {backend} is not implemented in Inductor"
+            f"GEMM epilogue backend {backend} does not support Inductor template "
+            "epilogue fusion yet"
         )
 
     operation_len = len(V.graph.operations)
-    with (
+    patches = [
         patch.object(config, "max_autotune_gemm", True),
-        patch.object(config, "max_autotune_gemm_backends", "TRITON"),
-    ):
+        patch.object(config, "max_autotune_gemm_backends", backend),
+    ]
+    if backend == "CUTLASS":
+        patches.append(
+            patch.object(config.cutlass, "cutlass_epilogue_fusion_enabled", True)
+        )
+
+    with contextlib.ExitStack() as stack:
+        for config_patch in patches:
+            stack.enter_context(config_patch)
         output = process_subgraph_nodes(subgraph.graph_module, list(args))
 
     for op in V.graph.operations[operation_len:]:
