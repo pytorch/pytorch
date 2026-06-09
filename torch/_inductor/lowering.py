@@ -8671,13 +8671,16 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                     "QUACK generic aux tuple epilogues cannot be combined with local reduce"
                 )
         if epilogue_arg_indices:
-            if gemm_op != torch.ops.aten.mm.default or len(epilogue_arg_indices) != 1:
+            if gemm_op not in (torch.ops.aten.mm.default, torch.ops.aten.bmm.default) or len(epilogue_arg_indices) != 1:
                 raise NotImplementedError(
-                    "QUACK epilogues with captured tensor reads currently support only one mm aux tensor"
+                    "QUACK epilogues with captured tensor reads currently support only one mm/bmm aux tensor"
                 )
             epilogue_arg_size = quack_args[epilogue_arg_indices[0]].get_size()
-            m, n = size
-            if epilogue_arg_size not in (size, [1, n], [m, 1]):
+            *prefix, m, n = size
+            valid_epilogue_arg_sizes = (size, [1, n], [m, 1])
+            if gemm_op == torch.ops.aten.bmm.default:
+                valid_epilogue_arg_sizes = (size,)
+            if epilogue_arg_size not in valid_epilogue_arg_sizes:
                 raise NotImplementedError(
                     "QUACK captured tensor epilogue args currently must match "
                     "the GEMM output shape or broadcast as [1, N] / [M, 1]"
