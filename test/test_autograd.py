@@ -12128,6 +12128,16 @@ get_out().sum().backward()
                     self.assertEqual(future.result()(), tensor.grad)
                 self.assertIsNotNone(tensor.grad)
 
+    def test_batch_norm_errors_on_third_order_grad(self):
+        x = torch.randn(8, 3, requires_grad=True)
+        y = torch.nn.functional.batch_norm(x, None, None, training=True)
+        (g,) = torch.autograd.grad(y.sum(), x, create_graph=True)
+        (g2,) = torch.autograd.grad(g.sum(), x, create_graph=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "batch_norm does not support 3rd\\+ order derivatives"
+        ):
+            torch.autograd.grad(g2.sum(), x)
+
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):

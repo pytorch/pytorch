@@ -4865,17 +4865,28 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   for (auto s : input.sizes().slice(2)) {
     M *= s;
   }
+  Tensor mean;
+  Tensor invstd;
+  if (training) {
+    mean = toNonOptTensor(save_mean).to(input.scalar_type());
+    invstd = toNonOptTensor(save_invstd).to(input.scalar_type());
+    if (at::GradMode::is_enabled() && input.requires_grad()) {
+      auto node = c10::make_intrusive<DelayedError>(
+          "batch_norm does not support 3rd+ order derivatives.",
+          /* num inputs */ 3);
+      auto result = node->apply({mean, invstd, input});
+      mean = std::move(result[0]);
+      invstd = std::move(result[1]);
+    }
+  } else {
+    mean = toNonOptTensor(running_mean);
+    invstd = toNonOptTensor(running_var).add(Scalar(eps)).pow_(-0.5);
+  }
   // for half inputs, save_mean, save_invstd are float (ideally, we would cast
   // everything else, but not now)
-  auto mu = unsqueeze_dim1(
-      training ? toNonOptTensor(save_mean).to(input.scalar_type())
-               : toNonOptTensor(running_mean),
-      input);
+  auto mu = unsqueeze_dim1(mean, input);
   auto input_sub_mu = input - mu;
-  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(
-      training ? toNonOptTensor(save_invstd).to(input.scalar_type())
-               : toNonOptTensor(running_var).add(Scalar(eps)).pow(-0.5),
-      input);
+  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(invstd, input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
 
