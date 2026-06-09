@@ -99,6 +99,28 @@ void initModule(PyObject* module) {
     return at::getDeviceAllocator(device_type)->initialized();
   });
 
+  m.def("_accelerator_isLazyInitialized", []() {
+    const auto device_type = at::accelerator::getAccelerator();
+    if (!device_type.has_value()) {
+      return false;
+    }
+    // For devices that don't support lazy init (e.g. MPS), skip the
+    // initialization check but still respect bad fork status.
+    if (!torch::utils::is_device_lazy_init_supported(device_type.value())) {
+      return !torch::utils::is_device_in_bad_fork(device_type.value());
+    }
+    return torch::utils::is_device_initialized(device_type.value()) &&
+        !torch::utils::is_device_in_bad_fork(device_type.value());
+  });
+
+  m.def("_accelerator_isInBadFork", []() {
+    const auto device_type = at::accelerator::getAccelerator();
+    if (!device_type.has_value()) {
+      return false;
+    }
+    return torch::utils::is_device_in_bad_fork(device_type.value());
+  });
+
   m.def("_accelerator_emptyCache", []() { at::accelerator::emptyCache(); });
 
   m.def("_accelerator_emptyHostCache", []() {
@@ -180,6 +202,12 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_setAllocatorSettings", [](std::string env) {
     c10::CachingAllocator::setAllocatorSettings(env);
+  });
+
+  m.def("_accelerator_getDefaultGenerator", [](c10::DeviceIndex device_index) {
+    const auto device_type = at::accelerator::getAccelerator(true).value();
+    torch::utils::maybe_initialize_device(device_type);
+    return at::accelerator::getDefaultGenerator(device_index);
   });
 
   // Accelerator Graph class binding
