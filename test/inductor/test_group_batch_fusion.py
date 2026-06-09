@@ -781,6 +781,10 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_dropout"], 1)
         counters.clear()
 
+    @unittest.skipIf(
+        GPU_TYPE == "mps",
+        "batch_linear_lhs auto-enable is not supported for MPS",
+    )
     @requires_gpu()
     def test_gpu_auto_enable_batch_linear_lhs(self):
         # Verify that batch_linear_lhs fusion is auto-enabled when example inputs
