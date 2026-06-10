@@ -657,6 +657,101 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
             "DDPOptimizer should activate for compiled regions inside nested DDP",
         )
 
+    @torch._dynamo.config.patch(capture_record_comm=True)
+    def test_record_comm_capture(self):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x):
+            with dist.record_comm("my_collective"):
+                y = x + 1
+            return y
+
+        result = fn(torch.randn(4))
+        self.assertEqual(result.shape, (4,))
+
+        graph = backend.graphs[0]
+        graph_code = graph.print_readable(False)
+        self.assertIn("_record_comm_enter", graph_code)
+        self.assertIn("_record_comm_exit", graph_code)
+
+    @torch._dynamo.config.patch(capture_record_comm=True)
+    def test_record_comm_nested_capture(self):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x):
+            with dist.record_comm("outer"):
+                x = x + 1
+                with dist.record_comm("inner"):
+                    x = x * 2
+            return x
+
+        result = fn(torch.ones(4))
+        self.assertEqual(result, torch.ones(4) * 4)
+
+        graph = backend.graphs[0]
+        nodes = [n for n in graph.graph.nodes if n.op == "call_function"]
+        record_nodes = [
+            n
+            for n in nodes
+            if hasattr(n.target, "__name__") and "record_comm" in n.target.__name__
+        ]
+        self.assertEqual(len(record_nodes), 4)
+        self.assertEqual(record_nodes[0].args, ("outer",))
+        self.assertEqual(record_nodes[1].args, ("inner",))
+        self.assertEqual(record_nodes[2].target.__name__, "_record_comm_exit")
+        self.assertEqual(record_nodes[3].target.__name__, "_record_comm_exit")
+
+        # Inner exit should reference inner enter's handle
+        self.assertIs(record_nodes[2].args[0], record_nodes[1])
+        # Outer exit should reference outer enter's handle
+        self.assertIs(record_nodes[3].args[0], record_nodes[0])
+
+    def test_record_comm_no_capture(self):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x):
+            with dist.record_comm("my_collective"):
+                y = x + 1
+            return y
+
+        result = fn(torch.randn(4))
+        self.assertEqual(result.shape, (4,))
+
+        graph = backend.graphs[0]
+        graph_code = graph.print_readable(False)
+        self.assertNotIn("_record_comm_enter", graph_code)
+        self.assertNotIn("_record_comm_exit", graph_code)
+
+    @torch._dynamo.config.patch(capture_record_comm=True)
+    def test_record_comm_survives_aot_autograd(self):
+        """Verify record_comm ops survive through AOTAutograd (not just Dynamo)."""
+        aot_graphs = []
+
+        def capture_fw(gm, example_inputs):
+            aot_graphs.append(gm)
+            return gm
+
+        from torch._dynamo.backends.common import aot_autograd
+
+        @torch.compile(backend=aot_autograd(fw_compiler=capture_fw), fullgraph=True)
+        def fn(x):
+            with dist.record_comm("aot_test"):
+                y = x + 1
+            return y
+
+        fn(torch.randn(4))
+        self.assertEqual(len(aot_graphs), 1)
+
+        node_names = [
+            n.target.__name__
+            for n in aot_graphs[0].graph.nodes
+            if n.op == "call_function" and hasattr(n.target, "__name__")
+        ]
+        self.assertIn("with_effects", node_names)
+
 
 # These tests aren't really distributed, but need multiple GPUs to run
 class TestMultiGPU(torch._inductor.test_case.TestCase):
@@ -2647,6 +2742,39 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         actual = compiled_fn(x, w)
         self.assertEqual(actual, expected)
+
+    @torch._dynamo.config.patch(capture_record_comm=True)
+    def test_record_comm_with_all_reduce(self):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def fn(x):
+            with dist.record_comm("test::all_reduce"):
+                dist.all_reduce(x, async_op=False)
+            return x
+
+        x = torch.ones(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        result = compiled_fn(x)
+        self.assertEqual(result, torch.ones(4, 4, device=self.device))
+        self.assertEqual(torch._C._distributed_c10d._get_comm_profiling_name(), "")
+
+        graph = backend.graphs[0]
+        call_nodes = [
+            (n.target.__name__ if hasattr(n.target, "__name__") else str(n.target))
+            for n in graph.graph.nodes
+            if n.op == "call_function"
+        ]
+        enter_idx = next(
+            i for i, name in enumerate(call_nodes) if "record_comm_enter" in name
+        )
+        reduce_idx = next(
+            i for i, name in enumerate(call_nodes) if "all_reduce" in name
+        )
+        exit_idx = next(
+            i for i, name in enumerate(call_nodes) if "record_comm_exit" in name
+        )
+        self.assertLess(enter_idx, reduce_idx)
+        self.assertLess(reduce_idx, exit_idx)
 
     def test_compiled_all_gather_into_tensor_returns_none(self):
         def fn(output, input, w):

@@ -690,6 +690,12 @@ capture_func_transforms = True
 # are treated as nullcontext.
 capture_profiler_record_function: bool = False
 
+# Enable capturing dist.record_comm into the FX graph.
+# When True, _record_comm_enter/_exit ops are emitted to the graph and
+# preserved through compilation. When False, record_comm is treated as
+# nullcontext.
+capture_record_comm: bool = False
+
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 

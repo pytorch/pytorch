@@ -1325,6 +1325,74 @@ class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
             super().reconstruct_type(codegen)
 
 
+class RecordCommVariable(ContextWrappingVariable):
+    """
+    Emits _c10d_functional._record_comm_enter/_exit ops into the FX graph so
+    the comm profiling name survives compilation. Behaves like nullcontext when
+    config.capture_record_comm is False.
+    """
+
+    @staticmethod
+    def create(
+        record_args: Sequence[VariableTracker],
+        record_kwargs: dict[str, VariableTracker],
+        **kwargs: Any,
+    ) -> "RecordCommVariable":
+        target_values = None
+        if config.capture_record_comm:
+            name = (
+                record_args[0].as_python_constant()
+                if record_args
+                else record_kwargs["name"].as_python_constant()
+            )
+            target_values = [name]
+        else:
+            warning_once(log, "dist.record_comm will be ignored")
+        return RecordCommVariable(
+            target_values=target_values, initial_values=None, **kwargs
+        )
+
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
+        if config.capture_record_comm:
+            (name,) = self.target_values
+            self.proxy = tx.output.create_node(
+                "call_function",
+                torch.ops._c10d_functional._record_comm_enter,
+                (name,),
+                {},
+            )
+        return self
+
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
+        if config.capture_record_comm:
+            tx.output.create_node(
+                "call_function",
+                torch.ops._c10d_functional._record_comm_exit,
+                (self.proxy,),
+                {},
+            )
+        return variables.CONSTANT_VARIABLE_NONE
+
+    def module_name(self) -> str:
+        return "torch.distributed" if config.capture_record_comm else "contextlib"
+
+    def fn_name(self) -> str:
+        return "record_comm" if config.capture_record_comm else "nullcontext"
+
+    def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        if config.capture_record_comm:
+            unimplemented(
+                gb_type="record_comm escaped from compiled region",
+                context=str(self),
+                explanation="Dynamo doesn't support graph break inside record_comm region.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        else:
+            super().reconstruct_type(codegen)
+
+
 class PreserveVersionContextVariable(ContextWrappingVariable):
     """
     Wraps torch.autograd._unsafe_preserve_version_counter

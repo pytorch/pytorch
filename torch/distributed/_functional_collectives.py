@@ -1635,6 +1635,90 @@ torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops.default) 
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops)  # type: ignore[has-type]
 
 
+from torch._library.opaque_object import get_opaque_type_name, register_opaque_type
+
+# Opaque handle for record_comm ops.  Wraps the previous profiling name so
+# it can flow through the FX graph as a reference-typed opaque object,
+# surviving AOTAutograd/make_fx tracing. Reference type is needed
+# because the handle's prev_name depends on runtime state (the profiling
+# name active when _record_comm_enter is called), so it cannot be baked
+# as a compile-time constant.
+from torch._opaque_base import OpaqueBase
+
+
+class RecordCommHandle(OpaqueBase):
+    def __init__(self, prev_name: str = "") -> None:
+        self.prev_name = prev_name
+
+
+register_opaque_type(RecordCommHandle, typ="reference")
+
+_record_comm_lib = torch.library.Library("_c10d_functional", "FRAGMENT")
+_record_comm_handle_type = get_opaque_type_name(RecordCommHandle)
+
+_record_comm_lib.define(
+    f"_record_comm_enter(str name) -> {_record_comm_handle_type}",
+    tags=[torch.Tag.pt2_compliant_tag],
+)
+_record_comm_lib.define(
+    f"_record_comm_exit({_record_comm_handle_type} handle) -> ()",
+    tags=[torch.Tag.pt2_compliant_tag],
+)
+
+
+def _record_comm_enter_impl(name: str) -> RecordCommHandle:
+    from torch.distributed.distributed_c10d import _record_comm_enter
+
+    prev = _record_comm_enter(name)
+    return RecordCommHandle(prev)
+
+
+def _record_comm_exit_impl(handle: RecordCommHandle) -> None:
+    from torch.distributed.distributed_c10d import _record_comm_exit
+
+    _record_comm_exit(handle.prev_name)
+
+
+lib_impl.impl(
+    "_record_comm_enter", _record_comm_enter_impl, "CompositeExplicitAutograd"
+)
+lib_impl.impl("_record_comm_exit", _record_comm_exit_impl, "CompositeExplicitAutograd")
+
+
+@torch.library.register_fake("_c10d_functional::_record_comm_enter")
+def _record_comm_enter_fake(name: str) -> RecordCommHandle:
+    return RecordCommHandle("")
+
+
+@torch.library.register_fake("_c10d_functional::_record_comm_exit")
+def _record_comm_exit_fake(handle: RecordCommHandle) -> None:
+    pass
+
+
+torch.fx.node.has_side_effect(  # type: ignore[has-type]
+    torch.ops._c10d_functional._record_comm_enter
+)
+torch.fx.node.has_side_effect(  # type: ignore[has-type]
+    torch.ops._c10d_functional._record_comm_exit
+)
+
+# Register as effectful so that AOTAutograd threads effect tokens through
+# these ops, preventing them from being DCE'd during functionalization.
+# The opaque handle provides the data dependency between enter/exit, but
+# without effect tokens the nodes can still be removed because they have
+# no tensor outputs connected to the graph output.
+from torch._higher_order_ops.effects import _register_effectful_op
+from torch._library.effects import EffectType
+
+
+_register_effectful_op(
+    torch.ops._c10d_functional._record_comm_enter.default, EffectType.ORDERED
+)
+_register_effectful_op(
+    torch.ops._c10d_functional._record_comm_exit.default, EffectType.ORDERED
+)
+
+
 # Register legacy ops for backward compatibility
 # TODO(yifu): remove these in functional collective beta release
 legacy_lib = torch.library.Library("c10d_functional", "DEF")

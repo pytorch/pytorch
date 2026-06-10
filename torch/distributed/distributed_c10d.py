@@ -6883,6 +6883,16 @@ def _register_pg_in_world(
         _world.pg_to_tag[pg] = pg_tag
 
 
+def _record_comm_enter(name: str) -> str:
+    prev = torch._C._distributed_c10d._get_comm_profiling_name()
+    torch._C._distributed_c10d._set_comm_profiling_name(name)
+    return prev
+
+
+def _record_comm_exit(prev_name: str) -> None:
+    torch._C._distributed_c10d._set_comm_profiling_name(prev_name)
+
+
 @contextlib.contextmanager
 def record_comm(name: str):
     """Context manager to set a custom profiling name for communication collectives.
@@ -6900,9 +6910,8 @@ def record_comm(name: str):
         >>> with dist.record_comm("FSDP::all_gather (layer1)"):
         ...     dist.all_gather_into_tensor(output, input, group=pg)
     """
-    prev = torch._C._distributed_c10d._get_comm_profiling_name()
-    torch._C._distributed_c10d._set_comm_profiling_name(name)
+    prev = _record_comm_enter(name)
     try:
         yield
     finally:
-        torch._C._distributed_c10d._set_comm_profiling_name(prev)
+        _record_comm_exit(prev)
