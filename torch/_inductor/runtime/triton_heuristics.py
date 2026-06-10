@@ -33,6 +33,11 @@ from typing import (
 import torch
 from torch._dynamo.utils import counters, set_feature_use
 from torch._inductor import metrics
+from torch._inductor._flex_attention_config import (
+    flex_attention_kind,
+    flex_kernel_options_example,
+    flex_kernel_selected_options,
+)
 from torch._inductor.config import triton as inductor_triton_config
 from torch._prims_common import compute_required_storage_length
 from torch.utils._debug_mode import get_active_debug_mode
@@ -117,6 +122,60 @@ class InductorConfig(Config):
 
 class NoTritonConfigsError(RuntimeError):
     pass
+
+
+def _flex_attention_resource_hint(
+    inductor_meta: dict[str, Any], config: Config | None
+) -> str:
+    config_args = inductor_meta.get("config_args", {})
+    if not isinstance(config_args, dict):
+        return ""
+
+    kind = flex_attention_kind(config_args)
+    if kind is None:
+        return ""
+
+    selected_options = flex_kernel_selected_options(
+        kind,
+        config_args,
+        None if config is None else config.num_stages,
+        None if config is None else config.num_warps,
+    )
+    return (
+        f"\n\nFlexAttention {kind} selected config uses too much shared "
+        f"memory: {selected_options}. Reduce the kernel resource usage with "
+        f"explicit kernel_options using smaller tile sizes and/or lower "
+        f"num_stages or num_warps. For example: "
+        f"{flex_kernel_options_example(kind)}. "
+        f"Alternatively, compiling with "
+        f"mode='max-autotune-no-cudagraphs' can try additional "
+        f"FlexAttention configs automatically."
+    )
+
+
+def _no_valid_triton_configs_message(
+    exc: BaseException | None,
+    inductor_meta: dict[str, Any],
+    config: Config | None,
+) -> str:
+    if exc is None:
+        return "No valid triton configs."
+
+    exc_msg = str(exc)
+    hint = (
+        _flex_attention_resource_hint(inductor_meta, config)
+        if (
+            (isinstance(exc, OutOfResources) and exc.name == "shared memory")
+            or (
+                isinstance(exc, torch.cuda.OutOfMemoryError)
+                and "out of resource:" in exc_msg
+                and "Required:" in exc_msg
+                and "Hardware limit:" in exc_msg
+            )
+        )
+        else ""
+    )
+    return f"No valid triton configs. {type(exc).__name__}: {exc}{hint}"
 
 
 if TYPE_CHECKING:
@@ -682,14 +741,18 @@ class CachingAutotuner(KernelInterface):
 
         compile_results = []
         exc = None
+        last_failed_config = None
         for c in self.configs:
             try:
                 compile_results.append(self._precompile_config(c))
             except (OutOfResources, PTXASError, IntelGPUError) as e:
                 exc = e
-        if len(compile_results) == 0:
+                last_failed_config = c
+        if not compile_results:
             raise NoTritonConfigsError(
-                f"No valid triton configs. {type(exc).__name__}: {exc}"
+                _no_valid_triton_configs_message(
+                    exc, self.inductor_meta, last_failed_config
+                )
             )
         self.compile_results = compile_results
         self.configs = None
@@ -868,9 +931,8 @@ class CachingAutotuner(KernelInterface):
                 launcher, exc = self._make_launcher(result)
                 if launcher is not None:
                     launchers.append(launcher)
-            if len(launchers) == 0:
-                result = self.compile_results[-1]
-                config = result.config
+            if not launchers:
+                config = self.compile_results[-1].config
                 if (
                     isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
                     and (
@@ -878,11 +940,18 @@ class CachingAutotuner(KernelInterface):
                     )
                     and self.inductor_meta.get("dynamic_disable_pipelining", True)
                 ):
-                    self.launchers = [self.compile_by_disabling_pipelining(config)]
-                    return
+                    try:
+                        self.launchers = [self.compile_by_disabling_pipelining(config)]
+                        return
+                    except (OutOfResources, torch.cuda.OutOfMemoryError) as retry_exc:
+                        raise RuntimeError(
+                            _no_valid_triton_configs_message(
+                                retry_exc, self.inductor_meta, config
+                            )
+                        ) from retry_exc
                 raise RuntimeError(
-                    f"No valid triton configs. {type(exc).__name__}: {exc}"
-                )
+                    _no_valid_triton_configs_message(exc, self.inductor_meta, config)
+                ) from exc
         self.launchers = launchers
 
     def _prune_compile_results_to_launcher(self, launcher: LauncherType) -> None:

@@ -4575,6 +4575,125 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @skip_on_mps
     @skip_on_xpu
+    def test_shared_memory_error_hint(self, device):
+        from torch._inductor.runtime import triton_heuristics
+
+        config = types.SimpleNamespace(num_stages=5, num_warps=8)
+        exc = triton_heuristics.OutOfResources(266240, 232448, "shared memory")
+        cases = (
+            (
+                "forward",
+                {
+                    "SPARSE_Q_BLOCK_SIZE": 128,
+                    "SPARSE_KV_BLOCK_SIZE": 128,
+                    "BLOCK_M": 128,
+                    "BLOCK_N": 128,
+                },
+                "fwd_BLOCK_M",
+            ),
+            (
+                "backward",
+                {
+                    "SPARSE_Q_BLOCK_SIZE": 128,
+                    "SPARSE_KV_BLOCK_SIZE": 128,
+                    "BLOCK_M1": 64,
+                    "BLOCK_N1": 128,
+                    "BLOCK_M2": 128,
+                    "BLOCK_N2": 64,
+                },
+                "bwd_BLOCK_M1",
+            ),
+        )
+
+        for kind, config_args, option_name in cases:
+            with self.subTest(kind=kind):
+                msg = triton_heuristics._no_valid_triton_configs_message(
+                    exc,
+                    {"config_args": config_args},
+                    config,
+                )
+                self.assertIn(
+                    f"FlexAttention {kind} selected config uses too much shared memory",
+                    msg,
+                )
+                self.assertIn(option_name, msg)
+                self.assertIn("max-autotune-no-cudagraphs", msg)
+
+        launcher_exc = torch.cuda.OutOfMemoryError(
+            "out of resource: kernel Required: 266240 Hardware limit:232448 "
+            "Reducing block sizes or `num_stages` may help."
+        )
+        msg = triton_heuristics._no_valid_triton_configs_message(
+            launcher_exc,
+            {"config_args": cases[0][1]},
+            config,
+        )
+        self.assertIn(
+            "FlexAttention forward selected config uses too much shared memory",
+            msg,
+        )
+
+        non_shared_memory_errors = (
+            triton_heuristics.OutOfResources(1024, 512, "registers"),
+            torch.cuda.OutOfMemoryError("CUDA out of memory"),
+        )
+        for exc in non_shared_memory_errors:
+            with self.subTest(exc=type(exc).__name__):
+                msg = triton_heuristics._no_valid_triton_configs_message(
+                    exc,
+                    {"config_args": cases[0][1]},
+                    config,
+                )
+                self.assertNotIn("FlexAttention", msg)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    def test_real_shared_memory_error_hint(self, device):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=256,
+            KV_LEN=256,
+            device=device,
+            BLOCK_SIZE=128,
+        )
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 1, 256, 512),
+            device=device,
+            dtype=torch.float16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        with self.assertRaisesRegex(
+            InductorError,
+            "(?s)FlexAttention forward selected config uses too much shared memory.*"
+            "fwd_BLOCK_M.*fwd_num_stages",
+        ):
+            torch.compile(flex_attention, fullgraph=True)(
+                query,
+                key,
+                value,
+                block_mask=block_mask,
+                kernel_options={
+                    "BACKEND": "TRITON",
+                    "BLOCK_M": 128,
+                    "BLOCK_N": 128,
+                    "num_stages": 5,
+                    "num_warps": 8,
+                },
+            )
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
     def test_invalid_decode_kernel_options_error(self, device):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -4607,6 +4726,49 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     "fwd_BLOCK_N": 64,
                 },
             )
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    def test_decode_fwd_block_m_updates_safe_boundary(self, device):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=32,
+            KV_LEN=128,
+            device=device,
+            BLOCK_SIZE=128,
+        )
+        make_tensor = functools.partial(
+            torch.randn,
+            device=device,
+            dtype=torch.float16,
+        )
+        query = make_tensor(1, 1, 32, 64)
+        key = make_tensor(1, 1, 128, 64)
+        value = make_tensor(1, 1, 128, 64)
+
+        _, code = run_and_get_code(
+            torch.compile(flex_attention, fullgraph=True),
+            query,
+            key,
+            value,
+            block_mask=block_mask,
+            kernel_options={
+                "BACKEND": "TRITON_DECODE",
+                "fwd_BLOCK_M": 64,
+                "fwd_BLOCK_N": 64,
+            },
+        )
+        source = "\n".join(code)
+        FileCheck().check("BLOCK_M : tl.constexpr = 64").check(
+            "SAFE_M_BOUNDARY : tl.constexpr = False"
+        ).run(source)
 
     @supported_platform
     @skip_on_cpu
