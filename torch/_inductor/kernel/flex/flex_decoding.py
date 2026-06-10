@@ -22,9 +22,10 @@ from ...select_algorithm import (
 )
 from ...utils import can_use_tma
 from .common import (
+    _flex_kernel_options_example,
+    _flex_kernel_tuning_options,
     create_indices_fake,
     create_num_blocks_fake_generator,
-    flex_kernel_tuning_options,
     freeze_irnodes,
     get_fwd_subgraph_outputs,
     load_flex_template,
@@ -55,9 +56,8 @@ def _raise_flex_decoding_kernel_options_error(
         f"SPARSE_KV_BLOCK_SIZE={sparse_kv_block_size}, and "
         f"{_format_kernel_options(kernel_options, ('BLOCK_M', 'BLOCK_N'))}. "
         "Pass compatible values with kernel_options. Available decode tuning "
-        f"options are {flex_kernel_tuning_options('decode')}. For example: "
-        "kernel_options={'fwd_BLOCK_M': 16, 'fwd_BLOCK_N': 128, "
-        "'fwd_num_warps': 2, 'fwd_num_stages': 3}. If you did not pin "
+        f"options are {_flex_kernel_tuning_options('decode')}. For example: "
+        f"{_flex_kernel_options_example('decode')}. If you did not pin "
         "these options, compiling with mode='max-autotune-no-cudagraphs' "
         "can also fix this by trying more FlexAttention configs."
     )

@@ -49,7 +49,7 @@ from ...utils import load_template
 SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
 
 
-def flex_kernel_options_example(kind: str) -> str:
+def _flex_kernel_options_example(kind: str) -> str:
     match kind:
         case "backward":
             return (
@@ -64,7 +64,7 @@ def flex_kernel_options_example(kind: str) -> str:
             )
 
 
-def flex_kernel_tuning_options(kind: str) -> str:
+def _flex_kernel_tuning_options(kind: str) -> str:
     match kind:
         case "backward":
             return (
