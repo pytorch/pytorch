@@ -142,6 +142,7 @@ void filterEngineConfigs(
     cudnn_frontend::EngineConfigList& to,
     bool deterministic,
     bool allow_tf32,
+    bool allow_reduced_precision_reduction,
     c10::ScalarType scalar_type) {
   auto filter = [=](cudnnBackendDescriptor_t c) {
     if (deterministic) {
@@ -159,6 +160,13 @@ void filterEngineConfigs(
       if (!allow_tf32 &&
           cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(
               c)) {
+        return true;
+      }
+    }
+    if (!allow_reduced_precision_reduction &&
+        (scalar_type == kHalf || scalar_type == kBFloat16)) {
+      if (cudnn_frontend::hasNumericalNote<
+              CUDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION>(c)) {
         return true;
       }
     }
@@ -580,13 +588,17 @@ auto get_generator_sources(
     const Tensor& x,
     const bool deterministic,
     const bool allow_tf32,
+    const bool allow_reduced_precision_reduction,
     const cudnnBackendHeurMode_t heur_mode,
     const bool heuristic,
     const bool fallback) {
   // Method for engine config generator based on heuristics
   const auto heurgen_method =
-      [/*&desc,*/ &x, deterministic, allow_tf32, heur_mode](
-          cudnn_frontend::OperationGraph& opGraph)
+      [/*&desc,*/ &x,
+       deterministic,
+       allow_tf32,
+       allow_reduced_precision_reduction,
+       heur_mode](cudnn_frontend::OperationGraph& opGraph)
       -> cudnn_frontend::EngineConfigList {
     auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
                           .setOperationGraph(opGraph)
@@ -600,12 +612,14 @@ auto get_generator_sources(
         filtered_configs,
         deterministic,
         allow_tf32,
+        allow_reduced_precision_reduction,
         x.scalar_type());
     return filtered_configs;
   };
   // Method for engine config generator based on fallback list
-  const auto fallback_method = [&desc, &x, deterministic, allow_tf32](
-                                   cudnn_frontend::OperationGraph& opGraph)
+  const auto fallback_method =
+      [&desc, &x, deterministic, allow_tf32, allow_reduced_precision_reduction](
+          cudnn_frontend::OperationGraph& opGraph)
       -> cudnn_frontend::EngineConfigList {
     auto fallback = cudnn_frontend::EngineFallbackListBuilder()
                         .setOperationGraph(opGraph)
@@ -618,6 +632,7 @@ auto get_generator_sources(
         filtered_configs,
         deterministic,
         allow_tf32,
+        allow_reduced_precision_reduction,
         x.scalar_type());
     return filtered_configs;
   };
@@ -746,7 +761,8 @@ auto get_plans_from_find(
     const IntArrayRef stride,
     const IntArrayRef dilation,
     const bool deterministic,
-    const bool allow_tf32) {
+    const bool allow_tf32,
+    const bool allow_reduced_precision_reduction) {
   auto opGraph =
       build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
   void* data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
@@ -754,7 +770,14 @@ auto get_plans_from_find(
   // We don't care about getting the best ordering of algos if we're roing to
   // run all of them
   auto sources = get_generator_sources(
-      desc, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT, true, true);
+      desc,
+      x,
+      deterministic,
+      allow_tf32,
+      allow_reduced_precision_reduction,
+      CUDNN_HEUR_MODE_INSTANT,
+      true,
+      true);
   cudnn_frontend::EngineConfigGenerator generator(
       sources.size(), sources.data());
   cudnn_frontend::executionPlans_t valid_plans;
@@ -795,7 +818,8 @@ auto get_plans_from_find_fused(
     const IntArrayRef stride,
     const IntArrayRef dilation,
     const bool deterministic,
-    const bool allow_tf32) {
+    const bool allow_tf32,
+    const bool allow_reduced_precision_reduction) {
   auto opGraph = build_opgraph_fused(
       handle, x, y, w, z, b, alpha, key, padding, stride, dilation);
   void* data_ptrs[] = {
@@ -807,6 +831,7 @@ auto get_plans_from_find_fused(
       x,
       deterministic,
       allow_tf32,
+      allow_reduced_precision_reduction,
       CUDNN_HEUR_MODE_INSTANT,
       true,
       true);
@@ -852,6 +877,7 @@ auto get_configs_from_heuristics(
     const IntArrayRef dilation,
     const bool deterministic,
     const bool allow_tf32,
+    const bool allow_reduced_precision_reduction,
     const bool fallback) {
   auto opGraph =
       build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
@@ -860,7 +886,14 @@ auto get_configs_from_heuristics(
       ? CUDNN_HEUR_MODE_B
       : CUDNN_HEUR_MODE_INSTANT;
   auto sources = get_generator_sources(
-      desc, x, deterministic, allow_tf32, heuristic_mode, !fallback, fallback);
+      desc,
+      x,
+      deterministic,
+      allow_tf32,
+      allow_reduced_precision_reduction,
+      heuristic_mode,
+      !fallback,
+      fallback);
 
   cudnn_frontend::EngineConfigGenerator generator(
       sources.size(), sources.data());
@@ -883,6 +916,7 @@ auto get_configs_from_heuristics_fused(
     const IntArrayRef dilation,
     const bool deterministic,
     const bool allow_tf32,
+    const bool allow_reduced_precision_reduction,
     const bool fallback) {
   auto opGraph = build_opgraph_fused(
       handle, x, y, w, z, b, alpha, key, padding, stride, dilation);
@@ -895,6 +929,7 @@ auto get_configs_from_heuristics_fused(
       x,
       deterministic,
       allow_tf32,
+      allow_reduced_precision_reduction,
       heuristic_mode,
       !fallback,
       fallback);
@@ -1026,6 +1061,8 @@ void run_single_conv(
     const bool deterministic,
     const bool allow_tf32) {
   cudnnHandle_t handle = getCudnnHandle();
+  auto allow_reduced_precision_reduction =
+      at::globalContext().allowReducedPrecisionReductionCuDNN();
   CacheKeyWrapper key(
       operation,
       y,
@@ -1063,6 +1100,7 @@ void run_single_conv(
         dilation,
         deterministic,
         allow_tf32,
+        allow_reduced_precision_reduction,
         false);
     if (try_configs(configs, opgraph_tag, key, handle, x, y, w, operation)) {
       return;
@@ -1081,6 +1119,7 @@ void run_single_conv(
         dilation,
         deterministic,
         allow_tf32,
+        allow_reduced_precision_reduction,
         true);
     if (try_configs(configs, opgraph_tag, key, handle, x, y, w, operation)) {
       return;
@@ -1099,7 +1138,8 @@ void run_single_conv(
         stride,
         dilation,
         deterministic,
-        allow_tf32);
+        allow_tf32,
+        allow_reduced_precision_reduction);
     // Replicate v7 behavior: clear cached blocks as benchmark incurs
     // significant memory consumptiont that is not needed after this step
     if (at::native::_cudnn_get_conv_benchmark_empty_cache()) {
@@ -1124,6 +1164,8 @@ void run_fused_conv(
     const bool deterministic,
     const bool allow_tf32) {
   cudnnHandle_t handle = getCudnnHandle();
+  auto allow_reduced_precision_reduction =
+      at::globalContext().allowReducedPrecisionReductionCuDNN();
 
   CacheKeyFusedWrapper key(
       y,
@@ -1166,6 +1208,7 @@ void run_fused_conv(
             dilation,
             deterministic,
             allow_tf32,
+            allow_reduced_precision_reduction,
             false);
     if (try_configs_fused(configs, opgraph_tag, key, handle, x, y, w, z, b)) {
       return;
@@ -1186,6 +1229,7 @@ void run_fused_conv(
         dilation,
         deterministic,
         allow_tf32,
+        allow_reduced_precision_reduction,
         true);
     if (try_configs_fused(configs, opgraph_tag, key, handle, x, y, w, z, b)) {
       return;
@@ -1206,7 +1250,8 @@ void run_fused_conv(
         stride,
         dilation,
         deterministic,
-        allow_tf32);
+        allow_tf32,
+        allow_reduced_precision_reduction);
     try_plans_fused(plans, key, handle, x, y, w, z, b);
   }
 }

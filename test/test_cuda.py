@@ -1223,6 +1223,26 @@ print(t.is_pinned())
             self.assertEqual(torch.backends.cudnn.depthwise_kernel, "native")
         self.assertEqual(torch.backends.cudnn.depthwise_kernel, "auto")
 
+    def test_cudnn_allow_reduced_precision_reduction_get_set(self):
+        orig = torch._C._get_cudnn_allow_reduced_precision_reduction()
+        self.assertEqual(torch.backends.cudnn.allow_reduced_precision_reduction, orig)
+        with torch.backends.cudnn.flags(
+            enabled=None,
+            benchmark=None,
+            deterministic=None,
+            allow_tf32=None,
+            allow_reduced_precision_reduction=False,
+        ):
+            self.assertFalse(torch.backends.cudnn.allow_reduced_precision_reduction)
+        with torch.backends.cudnn.flags(
+            enabled=None,
+            benchmark=None,
+            deterministic=None,
+            allow_tf32=None,
+            allow_reduced_precision_reduction=True,
+        ):
+            self.assertTrue(torch.backends.cudnn.allow_reduced_precision_reduction)
+
     @recover_orig_fp32_precision
     def test_fp32_precision_with_tf32(self):
         with torch.backends.cudnn.flags(

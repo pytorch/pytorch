@@ -242,7 +242,8 @@ class TestModule(TestCase):
 
                 # === Do forward pass. ===
                 args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
-                output = m(*args, **kwargs)
+                with torch.backends.cudnn.flags(enabled=True, allow_reduced_precision_reduction=False):
+                    output = m(*args, **kwargs)
 
                 # === Check saved/loaded module gives the same output. ===
                 with tempfile.TemporaryFile() as f:

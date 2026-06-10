@@ -868,6 +868,31 @@ static PyObject* THPModule_allowTF32CuDNN(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_setAllowReducedPrecisionReductionCuDNN(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_allow_reduced_precision_reduction_cudnn expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowReducedPrecisionReductionCuDNN(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_allowReducedPrecisionReductionCuDNN(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (at::globalContext().allowReducedPrecisionReductionCuDNN())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_setFloat32MatmulPrecision(
     PyObject* _unused,
     PyObject* arg) {
@@ -2034,6 +2059,14 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_mkldnn_enabled", THPModule_setUserEnabledMkldnn, METH_O, nullptr},
     {"_get_cudnn_allow_tf32", THPModule_allowTF32CuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_allow_tf32", THPModule_setAllowTF32CuDNN, METH_O, nullptr},
+    {"_get_cudnn_allow_reduced_precision_reduction",
+     THPModule_allowReducedPrecisionReductionCuDNN,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cudnn_allow_reduced_precision_reduction",
+     THPModule_setAllowReducedPrecisionReductionCuDNN,
+     METH_O,
+     nullptr},
     {"_get_onednn_allow_tf32", THPModule_allowTF32OneDNN, METH_NOARGS, nullptr},
     {"_set_onednn_allow_tf32", THPModule_setAllowTF32OneDNN, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},

@@ -384,6 +384,8 @@ class TORCH_API Context {
       Float32Precision p);
   bool allowTF32CuDNN(std::optional<Float32Op> op = std::nullopt) const;
   void setAllowTF32CuDNN(bool /*b*/);
+  bool allowReducedPrecisionReductionCuDNN() const;
+  void setAllowReducedPrecisionReductionCuDNN(bool /*b*/);
   bool allowTF32OneDNN() const;
   void setAllowTF32OneDNN(bool /*b*/);
   bool allowTF32CuBLAS() const;
@@ -498,6 +500,7 @@ class TORCH_API Context {
       : at::Float32MatmulPrecision::HIGHEST;
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
+  bool allow_reduced_precision_reduction_cudnn = true;
   CuBLASReductionOption allow_fp16_reduction_cublas =
       CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
   CuBLASReductionOption allow_bf16_reduction_cublas =
