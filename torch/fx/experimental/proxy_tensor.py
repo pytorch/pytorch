@@ -2945,19 +2945,29 @@ class _MakefxTracer:
             return fake_x
 
         # NB: don't match on bools.
-        if type(x) is int and (
-            self._dynamic_spec is not None or self.tracing_mode == "symbolic"
-        ):
-            shape_env: ShapeEnv = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
-            sym_node: torch.SymInt = shape_env.create_symintnode(  # type: ignore[assignment]
-                shape_env.create_symbol(x, source, positive=None),
-                hint=x,
-                source=source,
-            )
+        if type(x) is int:
             if isinstance(leaf_spec, (IntVar, SymInt)):
+                # Spec-declared scalar: allocate an unbacked symbol (u0, ...)
+                # so the spec path stays sound (no 0/1 or size>=2 backed
+                # assumptions), then wire it to the spec leaf. Mirrors the
+                # UNBACKED tensor-dim path in _symbolic_context_from_shapes_spec.
+                shape_env: ShapeEnv = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
+                sym_node: torch.SymInt = shape_env.create_unbacked_symint(
+                    source=source
+                )
                 _wire_spec_slot(leaf_spec, sym_node)
-            # Otherwise leaf_spec is int or None (validated by _walk_spec).
-            return sym_node
+                return sym_node
+            if self.tracing_mode == "symbolic":
+                # Legacy whole-graph auto-dynamic: every int becomes a backed
+                # symbol. (leaf_spec is None here — no spec in play.)
+                shape_env = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
+                return shape_env.create_symintnode(
+                    shape_env.create_symbol(x, source, positive=None),
+                    hint=x,
+                    source=source,
+                )
+            # Otherwise: an int not declared in the spec stays static; fall
+            # through and return it unchanged below.
 
         if isinstance(x, torch.ScriptObject) or is_opaque_value(x):
             if is_opaque_value_type(

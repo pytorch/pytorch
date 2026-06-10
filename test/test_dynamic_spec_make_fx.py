@@ -112,6 +112,7 @@ class f(torch.nn.Module):
 
         shape = _first_tensor_placeholder_shape(gm)
         self.assertIsInstance(shape[0], torch.SymInt)
+        self.assertTrue(free_unbacked_symbols(shape[0]))
 
     def test_all_none_spec_keeps_dims_static(self):
         """A TensorSpec with all-None dims (= all static) yields concrete ints."""
@@ -228,6 +229,8 @@ class <lambda>(torch.nn.Module):
         s1 = tensor_shapes[1][0]
         self.assertIsInstance(s0, torch.SymInt)
         self.assertIsInstance(s1, torch.SymInt)
+        self.assertTrue(free_unbacked_symbols(s0))
+        self.assertTrue(free_unbacked_symbols(s1))
         self.assertEqual(str(s0), str(s1))
 
     def test_int_input_with_intvar_spec(self):
@@ -244,8 +247,36 @@ class <lambda>(torch.nn.Module):
             if isinstance(val, torch.SymInt)
         ]
         self.assertEqual(len(sym_placeholders), 1)
+        self.assertTrue(free_unbacked_symbols(sym_placeholders[0]))
 
-    def test_dict_shorthand_accepted(self):
+    def test_int_input_marked_dynamic_is_unbacked(self):
+        """An int input declared dynamic via ``IntVar`` must become an
+        *unbacked* symbol (``u0``), not a backed one (``s0``): the ShapesSpec
+        path is unbacked-only for soundness (no 0/1 or ``size>=2``
+        assumptions)."""
+        gm = make_fx(
+            _ModXN(),
+            tracing_mode="fake",
+            _dynamic_spec={"x": T([None]), "n": IntVar("n")},
+        )(torch.randn(4), 7)
+
+        sym_placeholders = [
+            val
+            for val in _user_input_placeholder_vals(gm)
+            if isinstance(val, torch.SymInt)
+        ]
+        self.assertEqual(len(sym_placeholders), 1)
+        sym = sym_placeholders[0]
+
+        # Print the traced graph and the symbol for visibility.
+        graph_str = gm.print_readable(print_output=False)
+        print(graph_str)
+        print("int-input symbol:", sym, "expr:", sym.node.expr)
+
+        # Core check: the symbol is unbacked (u-prefixed), not backed (s0).
+        self.assertTrue(free_unbacked_symbols(sym))
+        self.assertEqual(str(sym.node.expr), "u0")
+        self.assertIn("u0", graph_str)
         """A bare ``dict`` is accepted as shorthand for
         ``ShapesSpec(PARAMS(dict))``."""
 
@@ -260,6 +291,7 @@ class <lambda>(torch.nn.Module):
 
         shape = _first_tensor_placeholder_shape(gm)
         self.assertIsInstance(shape[0], torch.SymInt)
+        self.assertTrue(free_unbacked_symbols(shape[0]))
         self.assertEqual(int(shape[1]), 3)
 
     def test_requires_tracing_mode_fake(self):
@@ -287,7 +319,7 @@ class <lambda>(torch.nn.Module):
 
         with self.assertRaisesRegex(
             TypeError,
-            r"make_fx\(_dynamic_spec=\.\.\.\) expects a dict, ShapesSpec, or ParamsSpec",
+            r"dynamic spec expects a dict, ShapesSpec, or ParamsSpec",
         ):
             make_fx(
                 f,
@@ -337,6 +369,7 @@ class f(torch.nn.Module):
         shape = _first_tensor_placeholder_shape(gm)
         sym = shape[0]
         self.assertIsInstance(sym, torch.SymInt)
+        self.assertTrue(free_unbacked_symbols(sym))
         # ``gm.shape_env`` is only set in ``tracing_mode='symbolic'``,
         # so reach into the SymInt's own shape env instead.
         shape_env = sym.node.shape_env
