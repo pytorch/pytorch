@@ -2275,18 +2275,32 @@ def cat(inputs, dim=0):
     def additional_pointwise_ops(op: torch._ops.OpOverload):
         return op in (aten.cat.default, aten.constant_pad_nd.default)
 
-    if len(inputs) <= config.max_complex_pointwise_cat_inputs or (
-        (len(inputs) <= config.max_pointwise_cat_inputs)
-        and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
+    input_op_counts = [op_count(t) for t in inputs]
+    all_inputs_simple = all(count <= MAX_SIMPLE_OP_COUNT for count in input_op_counts)
+
+    if len(inputs) <= config.max_pointwise_cat_inputs and (
+        len(inputs) <= config.max_complex_pointwise_cat_inputs or all_inputs_simple
     ):
         pointwise_uses = all(
+            is_pointwise_use(use, additional_pointwise_ops)
+            for use in V.current_node.users
+        )
+        has_pointwise_use = any(
             is_pointwise_use(use, additional_pointwise_ops)
             for use in V.current_node.users
         )
         # fuse in case we will be used in a pointwise node, and there are any inputs we
         # we can prevent materialization of.
         fuse_pointwise_use = (
-            any(should_lower_cat_input(inp) for inp in inputs) and pointwise_uses
+            any(should_lower_cat_input(inp) for inp in inputs)
+            and pointwise_uses
+            and (
+                all_inputs_simple
+                or (
+                    has_pointwise_use
+                    and len(inputs) <= config.max_complex_pointwise_cat_inputs
+                )
+            )
         )
 
         # horizontal fuse in case all inputs will require a copy kernel anyway.
@@ -2333,7 +2347,9 @@ def cat(inputs, dim=0):
         has_multi_consumers = any_input_has_multi_consumers()
 
         horizontal_fuse_cat = (
-            all(should_lower_cat_input(inp) for inp in inputs) and not fusable_reduction
+            all_inputs_simple
+            and all(should_lower_cat_input(inp) for inp in inputs)
+            and not fusable_reduction
         )
 
         if not has_multi_consumers and (fuse_pointwise_use or horizontal_fuse_cat):
