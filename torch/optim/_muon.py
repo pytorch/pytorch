@@ -105,6 +105,12 @@ class Muon(Optimizer):
             raise ValueError(f"momentum should be >= 0 but is: {momentum}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"weight decay should be >= 0 but is: {weight_decay}")
+        if not 1 <= ns_steps < 100:
+            raise ValueError(
+                f"ns_steps must be a positive integer less than 100 but is: {ns_steps}"
+            )
+        if not eps > 0:
+            raise ValueError(f"eps must be positive but is: {eps}")
         if adjust_lr_fn is not None and adjust_lr_fn not in [
             "original",
             "match_rms_adamw",

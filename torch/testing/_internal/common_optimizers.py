@@ -932,9 +932,38 @@ def optim_error_inputs_func_muon(device, dtype):
             error_regex="Muon does not support complex parameters",
             error_on=OptimizerErrorEnum.STEP_ERROR,
         ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[param],
+                kwargs={"ns_steps": 0},
+                desc="ns_steps must be at least 1",
+            ),
+            error_type=ValueError,
+            error_regex="ns_steps must be a positive integer less than 100",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[param],
+                kwargs={"ns_steps": 100},
+                desc="ns_steps must be less than 100",
+            ),
+            error_type=ValueError,
+            error_regex="ns_steps must be a positive integer less than 100",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[param],
+                kwargs={"eps": -1.0},
+                desc="eps must be positive",
+            ),
+            error_type=ValueError,
+            error_regex="eps must be positive",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
     ]
     return error_inputs
-
 
 def optim_inputs_func_nadam(device, dtype=None):
     cuda_supported_configs = [
