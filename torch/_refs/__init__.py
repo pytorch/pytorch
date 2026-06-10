@@ -3821,20 +3821,47 @@ def istft(
     else:
         end = expected_output_signal_len
 
-    y = aten.slice.Tensor(y, 1, start, end, 1)
-    window_envelop = aten.slice.Tensor(window_envelop, 1, start, end, 1)
+    # Clamp end to the valid signal range before slicing so that downstream
+    # meta / fake-tensor execution never sees an out-of-bounds access.
+    # The eager C++ path relies on slice's implicit clamping, but the
+    # compile path may convert slice to narrow which does not clamp.
+    # Use sym_min (not the builtin min) so the clamp stays symbolic under
+    # dynamic shapes: builtin min would evaluate ``end < expected_output_signal_len``
+    # to a concrete bool, installing a guard for backed symints (forcing a
+    # recompile when the relationship flips) or raising
+    # GuardOnDataDependentSymNode for unbacked symints.
+    clamped_end = sym_min(end, expected_output_signal_len)
+
+    y = aten.slice.Tensor(y, 1, start, clamped_end, 1)
+    window_envelop = aten.slice.Tensor(window_envelop, 1, start, clamped_end, 1)
 
     y = y / window_envelop
     if original_ndim == 2:
         y = y.squeeze(0)
 
-    if end > expected_output_signal_len:
+    # Pad the tail symbolically so dynamic shapes don't force a guard on the
+    # ``end`` vs ``expected_output_signal_len`` relationship. sym_max keeps the
+    # pad >= 0, so a zero pad is a no-op when the signal already covers the
+    # requested length. The warning needs a concrete decision, so it is gated on
+    # statically_known_true: it fires for the common concrete-int case but
+    # installs no guard when the relationship isn't statically known.
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    if statically_known_true(end > expected_output_signal_len):
         warnings.warn(
             "The length of signal is shorter than the length parameter. Result is being "
             + "padded with zeros in the tail. Please check your center and hop_length settings",
             stacklevel=2,
         )
-        y = aten.constant_pad_nd(y, (0, end - expected_output_signal_len), 0)
+    # Only emit the pad when the signal may be shorter than the requested
+    # length. Skipping it in the statically-known no-pad case avoids turning the
+    # view returned by eager (e.g. the squeeze) into a copy, which keeps
+    # _refs.istft view-consistent with the aten op. When the relationship is not
+    # statically known (dynamic shapes), pad symbolically with sym_max so a zero
+    # pad is a no-op and no specializing guard is installed.
+    if not statically_known_true(end <= expected_output_signal_len):
+        pad = sym_max(end - expected_output_signal_len, 0)
+        y = aten.constant_pad_nd(y, (0, pad), 0)
     return y
 
 
