@@ -372,7 +372,8 @@ def _add_nv_gemm_choices_impl(
 
     if variant == GemmVariant.GROUPED_GEMM:
         a_tensor, b_tensor, offs_tensor = dummy_tensors
-        assert b_tensor is not None
+        if b_tensor is None:
+            raise AssertionError("expected b_tensor to be non-None")
         args = cutlass_api.arguments.GroupedGemmArguments(
             a_tensor,
             b_tensor,
