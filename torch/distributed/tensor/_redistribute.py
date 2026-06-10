@@ -1526,6 +1526,227 @@ def _gen_transform_infos(
     )
 
 
+def redistribute_local_tensors(
+    items: list[tuple[torch.Tensor, DTensorSpec, DTensorSpec]],
+) -> list[torch.Tensor]:
+    """Redistribute N tensors, coalescing collectives within groups that
+    share the same (mesh, src_placements, dst_placements)."""
+    n = len(items)
+    if n == 0:
+        return []
+    if n == 1:
+        t, src, dst = items[0]
+        return [redistribute_local_tensor(t, src, dst)]
+
+    results: list[torch.Tensor | None] = [None] * n
+    groups: defaultdict[tuple, list[int]] = defaultdict(list)
+    for i, (_, src, dst) in enumerate(items):
+        groups[(src.mesh, src.placements, dst.placements)].append(i)
+
+    # Dict insertion order ensures all ranks issue collectives in the same order.
+    for indices in groups.values():
+        if len(indices) > 1:
+            coalesced = _try_coalesced_redistribute([items[i] for i in indices])
+            if coalesced is not None:
+                for idx, result in zip(indices, coalesced, strict=True):
+                    results[idx] = result
+                continue
+        for idx in indices:
+            t, src, dst = items[idx]
+            results[idx] = redistribute_local_tensor(t, src, dst)
+
+    return results  # type: ignore[return-value]
+
+
+def _try_coalesced_redistribute(
+    items: list[tuple[torch.Tensor, DTensorSpec, DTensorSpec]],
+) -> list[torch.Tensor] | None:
+    """Single coalesced collective for tensors sharing (mesh, placements).
+    Returns None to fall back to per-tensor redistribution."""
+    mesh = items[0][1].mesh
+    if not mesh._is_current_rank_part_of_mesh():
+        return None
+
+    # Transform depends on placements and mesh, not tensor shape.
+    first_src, first_dst = items[0][1], items[0][2]
+    assert_no_mixed_partial_types(first_src.placements)
+    assert_no_mixed_partial_types(first_dst.placements)
+    # During tracing, SymInts in tensor_meta are not hashable, so we must
+    # use the non-cached version (same pattern as redistribute_local_tensor).
+    if _are_we_tracing():
+        transform_infos = _gen_transform_infos_non_cached(first_src, first_dst, None)
+    else:
+        transform_infos = _gen_transform_infos(first_src, first_dst, None)
+    optimized = _optimize_transform_infos(
+        transform_infos,
+        mesh,
+        first_src.placements,
+        first_dst.placements,
+    )
+    if len(optimized) != 1:
+        return None
+
+    ref = optimized[0]
+    comm_type = ref._comm_type_key()
+    if comm_type not in ("all_reduce", "reduce_scatter", "all_gather"):
+        return None
+    src_placement, dst_placement = ref.src_dst_placements
+    # Subclasses (e.g. _MaskPartial, _StridedShard) have custom reduction logic.
+    if comm_type in ("all_reduce", "reduce_scatter"):
+        if type(src_placement) is not Partial:
+            return None
+    elif comm_type == "all_gather":
+        if type(src_placement) is not Shard:
+            return None
+
+    if isinstance(ref, _FlattenedTransformInfo):
+        collective_mesh, avg_scale = ref.mesh, ref.avg_scale
+    else:
+        collective_mesh, avg_scale = mesh, None
+
+    num_chunks = collective_mesh.size(mesh_dim=ref.mesh_dim)
+    if num_chunks == 1:
+        return [tensor for tensor, _, _ in items]
+
+    if comm_type == "all_reduce":
+        results = funcol.all_reduce_coalesced(
+            [tensor for tensor, _, _ in items],
+            reduceOp=cast(Partial, src_placement).reduce_op,
+            group=(collective_mesh, ref.mesh_dim),
+        )
+        if avg_scale is not None:
+            results = [r / avg_scale for r in results]
+        return results
+
+    if comm_type == "all_gather":
+        # keep in sync with Shard._to_replicate_tensor
+        return _coalesced_allgather(
+            items,
+            cast(Shard, src_placement),
+            collective_mesh,
+            ref.mesh_dim,
+        )
+
+    # reduce_scatter — keep in sync with Shard._reduce_shard_tensor
+    return _coalesced_reduce_scatter(
+        items,
+        cast(Shard, dst_placement),
+        cast(Partial, src_placement),
+        collective_mesh,
+        ref.mesh_dim,
+        avg_scale,
+    )
+
+
+def _coalesced_allgather(
+    items: list[tuple[torch.Tensor, DTensorSpec, DTensorSpec]],
+    shard_spec: Shard,
+    collective_mesh: DeviceMesh,
+    mesh_dim: int,
+) -> list[torch.Tensor]:
+    """Coalesced allgather for Shard→Replicate. Keep in sync with
+    Shard._to_replicate_tensor."""
+    from torch._utils import _maybe_view_chunk_cat
+
+    shard_dim = shard_spec.dim
+    num_chunks = collective_mesh.size(mesh_dim=mesh_dim)
+
+    # Pad each tensor for uneven sharding, then make contiguous
+    padded_tensors: list[torch.Tensor] = []
+    logical_dim_sizes: list[int] = []
+    for tensor, src_spec, _ in items:
+        logical_dim_size = (
+            src_spec.tensor_meta.shape[  # pyrefly: ignore [missing-attribute]
+                shard_dim
+            ]
+        )
+        logical_dim_sizes.append(logical_dim_size)
+        padded_tensors.append(
+            shard_spec._maybe_pad_tensor(tensor, logical_dim_size, num_chunks)
+        )
+
+    results = funcol.all_gather_into_tensor_coalesced(
+        padded_tensors,
+        group=(collective_mesh, mesh_dim),
+    )
+
+    # all_gather_into_tensor_coalesced gathers on dim 0; reshuffle if needed.
+    # Match the AsyncCollectiveTensor handling in all_gather_tensor(): wait
+    # early if _maybe_view_chunk_cat can't use the view optimization.
+    if shard_dim != 0:
+        import math
+
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        reshuffled: list[torch.Tensor] = []
+        for r in results:
+            if isinstance(r, AsyncCollectiveTensor):
+                shape = list(r.shape)
+                numel_between = math.prod(shape[1:shard_dim]) if shard_dim > 1 else 1
+                if not (shape[0] == num_chunks and numel_between == 1):
+                    r = r.wait()  # type: ignore[assignment]
+            reshuffled.append(_maybe_view_chunk_cat(r, num_chunks, shard_dim))
+        results = reshuffled
+
+    # Unpad results with uneven sharding
+    for i, logical_dim_size in enumerate(logical_dim_sizes):
+        results[i] = shard_spec._maybe_unpad_tensor(
+            results[i],
+            logical_dim_size,
+            num_chunks,
+        )
+
+    return results
+
+
+def _coalesced_reduce_scatter(
+    items: list[tuple[torch.Tensor, DTensorSpec, DTensorSpec]],
+    shard_spec: Shard,
+    partial_spec: Partial,
+    collective_mesh: DeviceMesh,
+    mesh_dim: int,
+    avg_scale: int | None,
+) -> list[torch.Tensor]:
+    """Coalesced reduce_scatter for Partial→Shard. Keep in sync with
+    Shard._reduce_shard_tensor."""
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+    shard_dim = shard_spec.dim
+    num_chunks = collective_mesh.size(mesh_dim=mesh_dim)
+
+    padded_tensors: list[torch.Tensor] = []
+    pad_sizes_list: list[list[int] | None] = []
+    for tensor, _, _ in items:
+        if guard_or_true(tensor.size(shard_dim) % num_chunks != 0):
+            scattered_list, pad_sizes = shard_spec._split_tensor(
+                tensor, num_chunks, with_padding=True, contiguous=True
+            )
+            padded_tensors.append(torch.cat(scattered_list, dim=shard_dim))
+            pad_sizes_list.append(pad_sizes)
+        else:
+            padded_tensors.append(tensor.contiguous())
+            pad_sizes_list.append(None)
+
+    results = funcol.reduce_scatter_tensor_coalesced(
+        padded_tensors,
+        partial_spec.reduce_op,
+        [shard_dim] * len(padded_tensors),
+        group=(collective_mesh, mesh_dim),
+    )
+    for i, pad_sizes in enumerate(pad_sizes_list):
+        if pad_sizes is not None:
+            results[i] = Shard._maybe_unpad_tensor_with_sizes(
+                shard_dim,
+                results[i],
+                pad_sizes,
+                collective_mesh._sym_get_coordinate(mesh_dim),
+                False,
+            )
+    if avg_scale is not None:
+        results = [r / avg_scale for r in results]
+    return results
+
+
 def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
