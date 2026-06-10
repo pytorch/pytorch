@@ -5710,6 +5710,10 @@ class CppScheduling(BaseScheduling):
             self.codegen_comment(self.kernel_group.scheduled_nodes, kernel_name)
             if config.cpp.enable_kernel_profile:
                 V.graph.wrapper_code.write_kernel_context_guard_begin()
+            if (
+                config.cpp.enable_kernel_profile
+                and config.cpp.enable_kernel_context_guard
+            ):
                 V.graph.wrapper_code.write_kernel_context_guard(
                     kernel_name,
                     self.kernel_group.scheduled_nodes,  # type: ignore[arg-type]
