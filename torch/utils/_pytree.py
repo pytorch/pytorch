@@ -2034,8 +2034,18 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
         return _LEAF_SPEC
 
     if json_schema["type"] not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
+        serialized_type_name = json_schema["type"]
         raise NotImplementedError(
-            f"Deserializing {json_schema['type']} in pytree is not registered.",
+            f"Deserializing {serialized_type_name} in pytree failed because the "
+            "serialized type is not registered in this process. If this type is "
+            "defined in another package, import that package before loading this "
+            "artifact so its pytree registrations run. If you control the type, "
+            "register it with "
+            "`torch.utils._pytree.register_pytree_node(..., "
+            "serialized_type_name=...)` or "
+            "`torch.export.register_dataclass(..., serialized_type_name=...)` "
+            f"before deserializing. The `serialized_type_name` must match "
+            f"{serialized_type_name!r}.",
         )
 
     typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[json_schema["type"]]

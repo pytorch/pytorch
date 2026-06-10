@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
+import dataclasses
 import functools
 import gc
 import io
@@ -35,6 +36,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils import _pytree as pytree
 
 
 def skipif(predicate: Callable[[str, bool], bool], reason: str):
@@ -220,6 +222,61 @@ class TestAOTInductorPackage(TestCase):
             torch.randn(10, 10, device=self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    def test_custom_output_type_missing_pytree_registration_error(self):
+        if self.device != "cpu" or self.package_cpp_only:
+            raise unittest.SkipTest("Only needs one CPU Python package variant")
+
+        @dataclasses.dataclass
+        class CustomOutput:
+            value: torch.Tensor
+
+        torch.export.register_dataclass(
+            CustomOutput,
+            serialized_type_name="test_aot_inductor_package.CustomOutput",
+        )
+        self.addCleanup(pytree._deregister_pytree_node, CustomOutput)
+        self.addCleanup(pytree.treespec_loads.cache_clear)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return CustomOutput(x + 1)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package_path = Path(tmpdir) / "model.pt2"
+            example_inputs = (torch.ones(2),)
+            ep = torch.export.export(Model(), example_inputs, strict=True)
+            torch._inductor.aoti_compile_and_package(
+                ep,
+                package_path=str(package_path),
+            )
+
+            loaded = torch._inductor.aoti_load_package(str(package_path))
+            self.assertEqual(loaded(*example_inputs).value, torch.full((2,), 2.0))
+
+            script = f"""
+import torch
+
+model = torch._inductor.aoti_load_package({str(package_path)!r})
+model(torch.ones(2))
+"""
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn(
+            "import that package before loading this artifact",
+            proc.stderr,
+        )
+        self.assertIn("torch.export.register_dataclass", proc.stderr)
+        self.assertIn(
+            "test_aot_inductor_package.CustomOutput",
+            proc.stderr,
+        )
 
     def test_remove_intermediate_files(self):
         # For CUDA, generated cpp files contain absolute path to the generated cubin files.
