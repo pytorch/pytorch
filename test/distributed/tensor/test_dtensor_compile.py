@@ -66,7 +66,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import checkpoint
 
@@ -1481,10 +1481,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         out_dt = torch.matmul(tmp_dt, x_dt).permute(0, 2, 1)
         out_dt.sum().backward()
 
-    @unittest.skipIf(
-        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/180656",
-    )
     def test_dynamo_dtensor_from_local_redistribute(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
