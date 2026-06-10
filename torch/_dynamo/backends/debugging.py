@@ -37,6 +37,7 @@ from torch._dynamo.output_graph import GraphCompileReason
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
 from torch._inductor.output_code import OutputCode
+from torch._subclasses.fake_tensor import DataDependentOutputException
 
 from .common import aot_autograd
 from .registry import CompiledFn, CompilerFn, register_debug_backend as register_backend
@@ -103,6 +104,8 @@ def eager_noexcept(
     def inner(*args: Any) -> Any:
         try:
             return gm(*args)
+        except DataDependentOutputException:
+            raise
         except Exception as e:
             raise torch._dynamo.exc.TorchDynamoException(
                 "Unexpected exception when running generated GraphModule"
