@@ -133,7 +133,7 @@ class BlockDescriptorTestBase(InductorTestCase):
         compile_kwargs: dict | None = None,
         expected_num_block_pointers: int | None = None,
         expected_num_programs: int = 1,
-        expected_num_triton_kernels: int = 1,
+        expected_num_triton_kernels: int | None = 1,
         config_patches: dict | None = None,
         rtol: float | None = None,
         atol: float | None = None,
@@ -1569,6 +1569,207 @@ class CommonTemplate:
                 self.assertTrue("boundary_check=[0, 1, 2]" in code)
                 # Loading b
                 self.assertTrue("boundary_check=[0, 1]" in code)
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+        }
+    )
+    @parametrize(
+        "reduction_fn,atol",
+        [
+            (lambda x: x.sum(), 1e-2),
+            (lambda x: x.max(), 0),
+            (lambda x: x.min(), 0),
+            (lambda x: x.prod(), 1e-2),
+        ],
+    )
+    def test_split_reduction_block_ptr(self, reduction_fn, atol):
+        N = 100003
+        x = torch.randn(1, N, device=self.device)
+        # Split reduction produces 2 kernels (inner reduce + final combine)
+        # and should emit block pointers for loads/stores.
+        self._run_and_compare(
+            reduction_fn,
+            x,
+            expected_num_triton_kernels=2,
+            atol=atol,
+            rtol=1e-2,
+        )
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+        }
+    )
+    def test_split_reduction_block_ptr_outer(self):
+        M = 100003
+        N = 32
+        x = torch.randn(M, N, device=self.device)
+
+        def f(x):
+            return x.sum(dim=0)
+
+        self._run_and_compare(
+            f,
+            x,
+            expected_num_triton_kernels=2,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+        }
+    )
+    def test_split_reduction_block_ptr_inner(self):
+        M = 32
+        N = 100003
+        x = torch.randn(M, N, device=self.device)
+
+        def f(x):
+            return x.sum(dim=1)
+
+        self._run_and_compare(
+            f,
+            x,
+            expected_num_triton_kernels=2,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+        }
+    )
+    @parametrize(
+        "reduction_fn,atol",
+        [
+            (lambda x: x.sum(), 1e-2),
+            (lambda x: x.max(), 0),
+            (lambda x: x.min(), 0),
+            (lambda x: x.prod(), 1e-2),
+        ],
+    )
+    def test_split_reduction_no_redundant_masking(self, reduction_fn, atol):
+        # When _multilayer_wrap_loader pads OOB with the reduction
+        # identity, the tl.where accumulator masking is redundant and
+        # should be eliminated for all scalar reduction types.
+        N = 100003
+        x = torch.randn(1, N, device=self.device)
+
+        _, code = self._run_and_compare(
+            reduction_fn,
+            x,
+            expected_num_triton_kernels=2,
+            atol=atol,
+            rtol=1e-2,
+        )
+
+        first_kernel = code[0]
+        acc_lines = "\n".join(
+            line.strip()
+            for line in first_kernel.splitlines()
+            if "_acc" in line and "tl.where" in line
+        )
+        self.assertExpectedInline(acc_lines, """""")
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+        }
+    )
+    def test_split_reduction_no_redundant_masking_inner_dim(self):
+        # Same optimization should fire for inner-dim reductions (dim=1)
+        # which is the shape that triggered the NullKernelHandler bug.
+        M = 32
+        N = 100003
+        x = torch.randn(M, N, device=self.device)
+
+        def f(x):
+            return x.sum(dim=1)
+
+        _, code = self._run_and_compare(
+            f,
+            x,
+            expected_num_triton_kernels=2,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+
+        first_kernel = code[0]
+        acc_lines = "\n".join(
+            line.strip()
+            for line in first_kernel.splitlines()
+            if "_acc" in line and "tl.where" in line
+        )
+        self.assertExpectedInline(acc_lines, """""")
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+        }
+    )
+    def test_split_reduction_identity_padding_tracking(self):
+        # Verify per-load identity padding tracking when split
+        # reductions with different identity elements (sum=0,
+        # prod=1) are compiled together.
+        N = 100003
+        x = torch.randn(1, N, device=self.device)
+        y = torch.randn(1, N, device=self.device)
+
+        def f_same_input(x):
+            return torch.sum(x) + torch.prod(x)
+
+        def f_different_inputs(x, y):
+            return torch.sum(x) + torch.prod(y)
+
+        def f_sum_with_pointwise(x):
+            return torch.sum(x + 1)
+
+        for f, args in [
+            (f_same_input, (x,)),
+            (f_different_inputs, (x, y)),
+            (f_sum_with_pointwise, (x,)),
+        ]:
+            self._run_and_compare(
+                f,
+                *args,
+                expected_num_triton_kernels=None,
+                atol=1e-2,
+                rtol=1e-2,
+            )
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+        }
+    )
+    def test_split_reduction_non_power_of_2(self):
+        # When the split block_size is not a power of 2, the Triton
+        # reduction tile has OOB elements padded with 0 by
+        # boundary_check. For reductions with identity != 0 (e.g. prod),
+        # the accumulator masking must NOT be skipped.
+        N = 100003
+        x = torch.randn(1, N, device=self.device)
+
+        for f in [lambda x: x.sum(), lambda x: x.prod()]:
+            self._run_and_compare(
+                f,
+                x,
+                expected_num_triton_kernels=2,
+                atol=1e-2,
+                rtol=1e-2,
+            )
 
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")

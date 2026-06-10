@@ -2184,6 +2184,8 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.store_buffer_names: OrderedSet[str] = OrderedSet()
         self._load_mask: str | None = None
         self._load_other: None | int | float = None
+        # maps from cse_var name to identity padding values
+        self._identity_padding_values: dict[str, bool | int | float] = {}
         # OrderedSet in set_current_node
         self.current_node: SchedulerNode | None = None
         self.node_to_bounds: dict[torch.fx.Node, ValueRanges[Any]] | None = None
