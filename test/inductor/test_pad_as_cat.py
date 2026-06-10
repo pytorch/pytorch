@@ -75,6 +75,26 @@ class TestCatMultiConsumer(TestCase):
             f"Expected {expected_bytes} bytes, got {metrics.num_bytes_accessed}.",
         )
 
+    @torch._inductor.config.patch(force_pointwise_cat=True)
+    @requires_gpu()
+    def test_zero_stride_cat_source_uses_scalar_reduction_load(self):
+        def fn(cls_token, patches, pos):
+            y = torch.cat([cls_token.expand(8, 2, 32), patches], dim=1) + pos
+            return torch.var_mean(y, dim=2, correction=0, keepdim=True)
+
+        args = (
+            torch.randn(1, 1, 32, device=GPU_TYPE),
+            torch.randn(8, 4, 32, device=GPU_TYPE),
+            torch.randn(1, 6, 32, device=GPU_TYPE),
+        )
+        expected = fn(*args)
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+
+        self.assertEqual(actual, expected)
+        self.assertRegex(code, r"tl\.load\(in_ptr0 \+ \(?r0_\d+\)?, r0_mask")
+        self.assertNotIn("tl.load(in_ptr0 + tl.broadcast_to", code)
+        self.assertNotIn("tl.load(in_ptr0 + (tl.broadcast_to", code)
+
 
 class TestPadAsCat(TestCase):
     @requires_gpu()

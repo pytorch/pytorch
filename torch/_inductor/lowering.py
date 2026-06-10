@@ -1705,6 +1705,13 @@ def pointwise_cat(inputs, dim=0):
 
     inputs_loaders = [inp.make_loader() for inp in inputs]
 
+    def can_load_for_all_cat_regions(inp: TensorBox) -> bool:
+        strides = inp.maybe_get_stride()
+        # Out-of-region pointwise_cat indices only vary in the cat dimension.
+        return strides is not None and V.graph.sizevars.statically_known_equals(
+            strides[dim], 0
+        )
+
     def inner_fn(idx):
         idx_dim = ops.index_expr(idx[dim], torch.int64)
 
@@ -1736,13 +1743,16 @@ def pointwise_cat(inputs, dim=0):
             # in same int bitwidth as shape
             idx_load[dim] = Identity(idx_load[dim] - inputs_ranges[i][0])
 
-            masked_loads.append(
-                ops.masked(
-                    mask,
-                    lambda: inputs_loaders[i](idx_load),
-                    0.0,  # this value should be unused
-                ),
-            )
+            if can_load_for_all_cat_regions(inputs[i]):
+                masked_loads.append(inputs_loaders[i](idx_load))
+            else:
+                masked_loads.append(
+                    ops.masked(
+                        mask,
+                        lambda: inputs_loaders[i](idx_load),
+                        0.0,  # this value should be unused
+                    ),
+                )
 
         next_val = masked_loads[-1]
         for i in range((len(inputs)) - 2, -1, -1):
