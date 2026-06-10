@@ -589,7 +589,7 @@ class TestOperators(TestCase):
                 # Tensor-likes are not close
                 xfail("native_batch_norm"),
                 # Tensor-likes are not close
-                xfail("_native_batch_norm_legit"),
+                xfail("_native_batch_norm_legit", device_type="cpu"),
                 xfail("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
@@ -2341,6 +2341,8 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
+            # Removed in next PR
+            skip("native_group_norm", dtypes=(torch.float32,), device_type="cpu"),
         },
     )
     @opsToleranceOverride(
