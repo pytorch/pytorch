@@ -4726,6 +4726,25 @@ def meta_zero(self):
     return torch.empty_like(self)
 
 
+def _check_hardtanh_limits(self, min_val, max_val) -> None:
+    if utils.is_boolean_dtype(self.dtype):
+        raise RuntimeError("Bool inputs not supported for hardtanh")
+
+    if utils.is_integer_dtype(self.dtype):
+        min_val = int(min_val)
+        max_val = int(max_val)
+        if self.dtype == torch.uint8 and (min_val < 0 or max_val < 0):
+            raise RuntimeError(
+                "cannot do hardtanh on an unsigned type with negative limits"
+            )
+
+
+@register_meta(aten.hardtanh.default)
+def meta_hardtanh(self, min_val=-1, max_val=1):
+    _check_hardtanh_limits(self, min_val, max_val)
+    return torch.empty_like(self)
+
+
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
 def meta_fill_(self, val):
     if isinstance(val, torch.Tensor):
@@ -4748,6 +4767,12 @@ def meta_fill(self, val):
 
 @register_meta(aten.relu_.default)
 def meta_relu_(self):
+    return self
+
+
+@register_meta(aten.hardtanh_.default)
+def meta_hardtanh_(self, min_val=-1, max_val=1):
+    _check_hardtanh_limits(self, min_val, max_val)
     return self
 
 
