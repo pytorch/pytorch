@@ -393,6 +393,12 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    # Handle beta=0 case early to avoid shape validation issues when bias shape
+    # doesn't match output shape
+    if beta == 0:
+        out = alpha * torch.mm(mat1, mat2)
+        return out
+
     if mat1.device.type not in ["cpu", "mps"]:
         if (
             statically_known_true(mat1.size(-1) == 1)

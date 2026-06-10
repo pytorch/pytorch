@@ -4520,6 +4520,27 @@ for dtype in (torch.int32, torch.int64):
             ),
         )
 
+    @skipCPUIf(True, "CUDA-only: CPU eager doesn't skip shape check when beta=0")
+    def test_addmm_beta_zero_mismatched_bias(self):
+        # Test that addmm with beta=0 works even when bias shape doesn't match output
+        def fn(bias, x, weight):
+            # bias shape [512] doesn't match output [4, 10000]
+            # but beta=0 means bias is zeroed out, so shape shouldn't matter
+            return torch.addmm(bias, x, weight.t(), beta=0.0, alpha=0.1)
+
+        d_model = 512
+        vocab_size = 10000
+        batch_size = 4
+
+        self.common(
+            fn,
+            (
+                torch.randn(d_model, device=self.device),
+                torch.randn(batch_size, d_model, device=self.device),
+                torch.randn(vocab_size, d_model, device=self.device),
+            ),
+        )
+
     def test_addmv(self):
         def fn(a, b, c):
             return torch.addmv(a, b, c)
