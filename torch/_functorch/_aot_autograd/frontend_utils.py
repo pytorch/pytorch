@@ -16,7 +16,8 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
 from .descriptors import BufferAOTInput, DifferentiableAOTInput, ParamAOTInput
-from .schemas import AOTConfig, FakifiedFlatArgs
+from .schemas import ActInputPath, AOTConfig, FakifiedFlatArgs
+from .utils import get_loaded_async_collective_tensor_type
 
 
 if TYPE_CHECKING:
@@ -36,7 +37,7 @@ def process_inputs(
     fake_mode: FakeTensorMode,
     shape_env: ShapeEnv | None,
     ignore_shape_env: bool = False,
-) -> tuple[FakifiedFlatArgs, list[tuple[int, tuple[str, ...]]]]:
+) -> tuple[FakifiedFlatArgs, list[ActInputPath]]:
     """Convert real tensor inputs into fake tensors for AOT autograd tracing.
 
     Called at compile time (not runtime) to produce the fake inputs that AOT
@@ -65,13 +66,10 @@ def process_inputs(
     # SubclassCreationMeta for output tangent metadata. At runtime, autograd
     # produces plain tensor tangents, causing a type mismatch. Unwrapping
     # here prevents ACT from appearing in the traced metadata.
-    try:
-        from torch.distributed._functional_collectives import AsyncCollectiveTensor
-    except ImportError:
-        AsyncCollectiveTensor = None
-
-    act_input_paths: list[tuple[int, tuple[str, ...]]] = []
+    AsyncCollectiveTensor = get_loaded_async_collective_tensor_type()
+    act_input_paths: list[ActInputPath] = []
     if AsyncCollectiveTensor is not None:
+        tracing_context = torch._guards.TracingContext.try_get()
         for i, a in enumerate(flat_args):
             resolved_arg = _resolve_input_async_collectives(
                 a, i, (), act_input_paths, AsyncCollectiveTensor
@@ -79,7 +77,7 @@ def process_inputs(
             # Rebuilt wrapper inputs must keep Dynamo's symbolic context so
             # fakeification does not allocate source-less shape symbols.
             if resolved_arg is not a and isinstance(resolved_arg, torch.Tensor):
-                if tracing_context := torch._guards.TracingContext.try_get():
+                if tracing_context is not None:
                     if a in tracing_context.tensor_to_context:
                         tracing_context.tensor_to_context[resolved_arg] = (
                             tracing_context.tensor_to_context[a]
@@ -180,7 +178,7 @@ def _resolve_input_async_collectives(
     x: object,
     idx: int,
     attr_path: tuple[str, ...],
-    act_input_paths: list[tuple[int, tuple[str, ...]]],
+    act_input_paths: list[ActInputPath],
     AsyncCollectiveTensor: type[AsyncCollectiveTensor],
 ) -> object:
     """Wait on ACT inputs, recording each top-level or wrapper-subclass path."""
