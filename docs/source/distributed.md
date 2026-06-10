@@ -518,13 +518,21 @@ used to create new DeviceMesh, with a mesh shape describing the device topology.
 .. autofunction:: recv
 ```
 
+(distributed-p2p)=
+### Asynchronous point-to-point operations
 {func}`~torch.distributed.isend` and {func}`~torch.distributed.irecv`
 return distributed request objects when used. In general, the type of this object is unspecified
 as they should never be created manually, but they are guaranteed to support two methods:
 
 - `is_completed()` - returns True if the operation has finished
-- `wait()` - will block the process until the operation is finished.
-  `is_completed()` is guaranteed to return True once it returns.
+- `wait()` - For CPU operations, blocks the calling thread until the operation is
+  finished. For CUDA tensors with NCCL, `wait()` synchronizes the operation with the
+  currently active CUDA stream (i.e., it makes subsequent work on that stream wait
+  for NCCL work) and by default does not block the CPU thread. If a timeout
+  is specified, or if `TORCH_NCCL_BLOCKING_WAIT=1`, `wait()` blocks the CPU thread until
+  completion or timeout.
+  Also see
+  [Synchronous and asynchronous collective operations](#distributed-async-collectives).
 
 ```{eval-rst}
 .. autofunction:: isend
@@ -550,6 +558,7 @@ as they should never be created manually, but they are guaranteed to support two
 .. autoclass:: P2POp
 ```
 
+(distributed-async-collectives)=
 ## Synchronous and asynchronous collective operations
 
 Every collective operation function supports the following two kinds of operations,
