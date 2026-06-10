@@ -559,7 +559,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
             if epilogue_nodes:
                 final_node = cast(SchedulerNode, epilogue_nodes[-1])
-                out_layout = cast(Layout, final_node.node.get_layout())
+                out_layout = cast(
+                    Layout,
+                    final_node.node.get_layout(),  # pyrefly: ignore [missing-attribute]
+                )
             else:
                 out_layout = cast(Layout, ctb.layout)
             precompile_shapes["output"] = [int(s) for s in out_layout.size]
@@ -676,7 +679,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
         input_nodes = cast(list[Buffer], ctb.inputs)
         if epilogue_nodes:
             final_node = cast(SchedulerNode, epilogue_nodes[-1])
-            output_layout = cast(Layout, final_node.node.get_layout())
+            output_layout = cast(
+                Layout,
+                final_node.node.get_layout(),  # pyrefly: ignore [missing-attribute]
+            )
         else:
             output_layout = cast(Layout, ctb.layout)
 
