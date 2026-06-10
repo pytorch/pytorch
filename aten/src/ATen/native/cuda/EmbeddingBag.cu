@@ -73,6 +73,8 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
       const scalar_t *weightFeat = weight + featureDim * weight_stride1;
       int64_t begin = bag == 0 ? 0 : offsets[bag]; // forces first offset to be 0 instead of asserting on it
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
+      CUDA_KERNEL_ASSERT(begin >= 0 && begin <= numIndices);
+      CUDA_KERNEL_ASSERT(end >= 0 && end <= numIndices);
       CUDA_KERNEL_ASSERT(end >= begin);
       scalar_t weightFeatMax = 0;
       int64_t bag_size_ = 0;
@@ -134,6 +136,8 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
       const scalar_t *weightFeat = weight + featureDim * weight_stride1;
       int64_t begin = bag == 0 ? 0 : offsets[bag]; // forces first offset to be 0 instead of asserting on it
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
+      CUDA_KERNEL_ASSERT(begin >= 0 && begin <= numIndices);
+      CUDA_KERNEL_ASSERT(end >= 0 && end <= numIndices);
       CUDA_KERNEL_ASSERT(end >= begin);
       accscalar_t weightFeatSum = 0;
       int64_t bag_size_ = 0;
