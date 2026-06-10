@@ -894,6 +894,10 @@ wrap_top_frame = False
 # and AOTAutograd runtime wrapper.
 record_runtime_overhead = True
 
+# Route simple, side-effect-free tensor bytecode through a direct FX/fake-value
+# path instead of the generic VariableTracker operator dispatch.
+enable_tensor_ssa_fastpath = True
+
 # Flag to enable the use of torch.compile().aot_compile() API. Should be always True.
 enable_aot_compile = True
 

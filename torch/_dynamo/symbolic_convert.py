@@ -502,7 +502,13 @@ def stack_op(fn: Callable[..., object]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def impl(self: InstructionTranslator, inst: Instruction) -> None:
-        self.push(fn_var.call_function(self, self.popn(nargs), {}))
+        args = self.popn(nargs)
+        from .tensor_ssa import maybe_fastpath_tensor_stack_op
+
+        result = maybe_fastpath_tensor_stack_op(self, fn, args)
+        if result is None:
+            result = fn_var.call_function(self, args, {})
+        self.push(result)
 
     return impl
 

@@ -349,6 +349,7 @@ from typing import TypeVar
 # creation so that we don't type erase
 VTTypeAlias = TypeVar("VTTypeAlias")
 T = TypeVar("T")
+_NO_PRECOMPUTED_VALUE = object()
 
 DimList = list
 
@@ -3547,6 +3548,7 @@ def wrap_fx_proxy(
     proxy: Any,
     example_value: Any | None = None,
     subclass_type: type | None = None,
+    precomputed_example_value: Any = _NO_PRECOMPUTED_VALUE,
     **options: Any,
 ) -> VariableTracker:
     kwargs = {
@@ -3554,6 +3556,7 @@ def wrap_fx_proxy(
         "proxy": proxy,
         "example_value": example_value,
         "subclass_type": subclass_type,
+        "precomputed_example_value": precomputed_example_value,
         **options,
     }
     if subclass_type is None:
@@ -3630,9 +3633,22 @@ def wrap_fx_proxy_cls(
     proxy: Any,
     example_value: Any | None = None,
     subclass_type: type | None = None,
+    precomputed_example_value: Any = _NO_PRECOMPUTED_VALUE,
     **options: Any,
 ) -> VTTypeAlias:
-    if example_value is None:
+    if precomputed_example_value is not _NO_PRECOMPUTED_VALUE:
+        # This is the traced-op case where the caller already ran fake
+        # propagation. Keep the post-processing shared with wrap_fx_proxy_cls.
+        # pyrefly: ignore[bad-assignment]
+        out: VTTypeAlias = handle_traced_output(
+            precomputed_example_value,
+            tx,
+            proxy,
+            options,
+            subclass_type,
+            target_cls,
+        )
+    elif example_value is None:
         out: VTTypeAlias = _wrap_fx_proxy(
             target_cls, tx, proxy, example_value, subclass_type, **options
         )

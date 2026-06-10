@@ -957,6 +957,12 @@ class TensorVariable(VariableTracker):
                 ],
             )
 
+        from ..tensor_ssa import maybe_fastpath_tensor_method
+
+        fastpath_result = maybe_fastpath_tensor_method(tx, self, name, args, kwargs)
+        if fastpath_result is not None:
+            return fastpath_result
+
         try:
             handler_method = getattr(self, f"method_{name}")
         except AttributeError:
