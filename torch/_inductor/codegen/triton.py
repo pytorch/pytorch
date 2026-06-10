@@ -1505,18 +1505,12 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def minimum(a, b):
-        if torch.version.hip:
-            return f"tl.minimum({a}, {b}, tl.PropagateNan.ALL)"
-        else:
-            return f"triton_helpers.minimum({a}, {b})"
+        return f"tl.minimum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
-        if torch.version.hip:
-            return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
-        else:
-            return f"triton_helpers.maximum({a}, {b})"
+        return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
