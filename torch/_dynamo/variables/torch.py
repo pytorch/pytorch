@@ -599,7 +599,7 @@ class BaseTorchVariable(VariableTracker):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         return hash(self.value), False
 
     def richcompare_impl(

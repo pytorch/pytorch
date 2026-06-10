@@ -1457,7 +1457,7 @@ class GetAttrVariable(VariableTracker):
         except AttributeError:
             raise NotImplementedError(f"{self} is not a constant") from None
 
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         # GetAttrVariable can wrap various types (bound methods, descriptors,
         # etc.) with different C tp_hash.  Resolve to the actual value and hash.
         try:
@@ -1679,7 +1679,7 @@ class TypingVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.value
 
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         return hash(self.value), False
 
     def get_real_python_backed_value(self) -> Any:
@@ -2549,7 +2549,7 @@ class WeakRefVariable(VariableTracker):
         codegen(self.callback_vt)
         codegen.extend_output(create_call_function(2, False))
 
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         # CPython weakref_hash: hash(referent)
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/weakrefobject.c#L186
         from .object_protocol import generic_hash_impl
