@@ -24,6 +24,56 @@ def _is_supported(input: torch.Tensor) -> bool:
     return major in (9, 10)
 
 
+# quack splits each row across a CTA cluster (at most 16 on SM90/SM100, the
+# only archs _is_supported accepts) and stages the per-CTA row tile in shared
+# memory. Rows whose tile exceeds the smem budget even at the max cluster size
+# cannot launch, and far beyond that (e.g. N=2^28) the CuTe DSL compiler hangs
+# or crashes before any smem check could fire (gh-186800). Bound N here so
+# such rows fall back to aten. The reserve covers the reduction buffer,
+# mbarriers, and smem alignment (mirrors quack's _BWD_SMEM_RESERVED_BYTES).
+_SMEM_RESERVED_BYTES = 4 * 1024
+_MAX_CLUSTER_N = 16
+# The kernel rounds the per-CTA tile up to vecsize * threads_per_row elements
+# (reduction_base._get_tiled_copy). Both are powers of 2 with vecsize <= 8 and
+# threads_per_row <= 256, so rounding up to 2048 never under-estimates.
+_TILE_ROUND_ELEMS = 2048
+# RmsNormBwdConfig.smem_stages default; both analytical heuristics use it.
+_BWD_SMEM_STAGES = 2
+
+
+def _smem_budget_bytes(device: torch.device) -> int:
+    props = torch.cuda.get_device_properties(device)
+    smem = getattr(
+        props, "shared_memory_per_block_optin", props.shared_memory_per_block
+    )
+    return smem - _SMEM_RESERVED_BYTES
+
+
+def _row_tile_elems(n: int) -> int:
+    per_cta = -(-n // _MAX_CLUSTER_N)
+    return -(-per_cta // _TILE_ROUND_ELEMS) * _TILE_ROUND_ELEMS
+
+
+def _fwd_fits_smem(input: torch.Tensor, n: int) -> bool:
+    # Fwd smem holds one row tile of x (rmsnorm.py sX).
+    return _row_tile_elems(n) * input.element_size() <= _smem_budget_bytes(input.device)
+
+
+def _bwd_fits_smem(input: torch.Tensor, grad_out: torch.Tensor, n: int) -> bool:
+    # Quack's RMSNormBackward.__init__ raises for N > 128K with fp32 x; fall
+    # back instead of surfacing its ValueError.
+    if input.element_size() >= 4 and n > 128 * 1024:
+        return False
+    # Bwd smem holds smem_stages buffers of both x and dout (rmsnorm.py
+    # sX/sdO).
+    tile_bytes = (
+        _row_tile_elems(n)
+        * _BWD_SMEM_STAGES
+        * (input.element_size() + grad_out.element_size())
+    )
+    return tile_bytes <= _smem_budget_bytes(input.device)
+
+
 def _n_yields_valid_cp_size(n: int, dtype: torch.dtype) -> bool:
     # quack picks vecsize = gcd(N, 128 // dtype_bits) and lowers each thread's
     # gmem->smem copy to cp.async, whose PTX cp_size only accepts 32, 64, or
@@ -77,6 +127,8 @@ def _fused_rms_norm_cond(
         return False
     if not _n_yields_valid_cp_size(math.prod(normalized_shape), input.dtype):
         return False
+    if not _fwd_fits_smem(input, math.prod(normalized_shape)):
+        return False
     # Non-contiguous weight would require a reshape+copy that we haven't
     # measured; fall through to aten until we do.
     if weight is not None and not weight.is_contiguous():
@@ -128,6 +180,8 @@ def _fused_rms_norm_backward_cond(
     if input.numel() == 0:
         return False
     if not _n_yields_valid_cp_size(math.prod(normalized_shape), input.dtype):
+        return False
+    if not _bwd_fits_smem(input, grad_out, math.prod(normalized_shape)):
         return False
     if weight is not None and not weight.is_contiguous():
         return False
