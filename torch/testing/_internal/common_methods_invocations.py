@@ -4382,6 +4382,13 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         ((1, 3), 1, {'eps' : 1e-5}),
         ((0, 2), 1, {'eps' : 1e-5}),
         ((S, S, S), 1, {'eps' : 0.5}),
+        # For testing channels_last on CPU.  Ideally, we would also have a test with
+        # HxW >= 2048, which uses an alternative channels_last path, but tensors that
+        # large cause a variety of failures that are not especially solvable relating to
+        # different data summation orders, and we end up adding a bunch of XFAILs and
+        # not really improving test coverage (while also causing several tests to be
+        # extremely slow).
+        ((2, 6, 5, 3), 2, {"eps": 1e-5}),
     )
 
     # num_channels is inferred to be input.shape[1] dimension
@@ -4409,6 +4416,9 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
 def sample_inputs_native_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
     for si in sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         inp: torch.Tensor = si.input
+        mem_fmt = torch.channels_last if device == "cpu" and inp.ndim == 4 else torch.contiguous_format
+        inp = inp.to(memory_format=mem_fmt)
+
         weight: torch.Tensor | None = si.kwargs.get("weight", None)
         bias: torch.Tensor | None = si.kwargs.get("bias", None)
         N: int = inp.shape[0]
@@ -4459,6 +4469,9 @@ def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs)
 def reference_inputs_native_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
     for si in reference_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         inp: torch.Tensor = si.input
+        mem_fmt = torch.channels_last if device == "cpu" and inp.ndim == 4 else torch.contiguous_format
+        inp = inp.to(memory_format=mem_fmt)
+
         weight: torch.Tensor | None = si.kwargs.get("weight", None)
         bias: torch.Tensor | None = si.kwargs.get("bias", None)
         N: int = inp.shape[0]
@@ -16285,13 +16298,10 @@ op_db: list[OpInfo] = [
         reference_inputs_func=reference_inputs_native_group_norm,
         sample_inputs_func=sample_inputs_native_group_norm,
         skips=(
-            DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
             # native_group_norm expects contiguous inputs
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cpu"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
-            # composite compliance fails with "performing in-place operation add_"
-            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance", "test_backward"),
             # likely due to dispatching through infinitely_differentiable_native_group_norm_backward
             DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_grad_match", device_type="mps", dtypes=(torch.float32,)),
             # lazy dispatch failure
