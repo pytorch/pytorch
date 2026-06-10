@@ -104,6 +104,7 @@ from torch._inductor.utils import (
     determine_aoti_mmap_flags,
     is_linux,
     is_windows,
+    parallel_num_threads,
     XPU_KERNEL_FORMAT,
 )
 from torch._library.fake_class_registry import FakeScriptObject
@@ -128,6 +129,7 @@ from torch.fx.experimental.symbolic_shapes import (
     has_guarding_hint,
     ShapeEnv,
 )
+from torch.utils._device import _device_constructors
 from torch.utils._ordered_set import OrderedSet
 
 from .cache_key import (
@@ -203,6 +205,35 @@ autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
 log = logging.getLogger(__name__)
 
 AOTAUTOGRAD_CACHE_PREFIX = "a"
+
+
+def _device_constructor_sort_key(target: Any) -> str:
+    return ".".join(
+        x
+        for x in (
+            getattr(target, "__module__", None),
+            getattr(target, "__qualname__", None),
+            getattr(target, "__name__", None),
+            repr(target),
+        )
+        if x
+    )
+
+
+@lru_cache(None)
+def _default_device_constructor_targets() -> tuple[Any, ...]:
+    return tuple(sorted(_device_constructors(), key=_device_constructor_sort_key))
+
+
+@lru_cache(None)
+def _default_device_constructor_overload_packets() -> tuple[Any, ...]:
+    packets: list[Any] = []
+    for target in _default_device_constructor_targets():
+        if (name := getattr(target, "__name__", None)) is None:
+            continue
+        if (packet := getattr(torch.ops.aten, name, None)) is not None:
+            packets.append(packet)
+    return tuple(packets)
 
 
 def get_cpp_wrapper_cubin_path_name() -> str:
@@ -1057,6 +1088,9 @@ class CacheabilityValidator:
         if config._pre_fusion_custom_pass is not None:
             if not isinstance(config._pre_fusion_custom_pass, CustomSchedulerPass):
                 self.bypass("Unsupported _pre_fusion_custom_pass")
+        if config._post_fusion_custom_pass is not None:
+            if not isinstance(config._post_fusion_custom_pass, CustomSchedulerPass):
+                self.bypass("Unsupported _post_fusion_custom_pass")
         for p in config._fuse_ddp_communication_passes:
             if callable(p) and not isinstance(p, CustomGraphPass):
                 self.bypass("Unsupported _fuse_ddp_communication_pass")
@@ -1193,10 +1227,136 @@ class FxGraphHashDetails:
     # don't affect compiled output (like compile_region_name which is
     # just a debug label).
     EXCLUDED_KWARGS = ["graph_id", "compile_region_name"]
+    TENSOR_METADATA_KEYS = ("val", "example_value")
+    LIKE_FACTORY_TARGETS = (
+        torch.empty_like,
+        torch.full_like,
+        torch.ones_like,
+        torch.rand_like,
+        torch.randint_like,
+        torch.randn_like,
+        torch.zeros_like,
+    )
+    LIKE_FACTORY_PACKETS = (
+        torch.ops.aten.empty_like,
+        torch.ops.aten.full_like,
+        torch.ops.aten.ones_like,
+        torch.ops.aten.rand_like,
+        torch.ops.aten.randint_like,
+        torch.ops.aten.randn_like,
+        torch.ops.aten.zeros_like,
+    )
+
+    @classmethod
+    def _contains_tensor(cls, value: Any) -> bool:
+        if isinstance(value, torch.Tensor):
+            return True
+        if isinstance(value, (list, tuple, OrderedSet, frozenset)):
+            return any(cls._contains_tensor(x) for x in value)
+        if isinstance(value, dict):
+            return any(
+                cls._contains_tensor(x)
+                for x in itertools.chain(value.keys(), value.values())
+            )
+        return False
+
+    @classmethod
+    def _contains_cpu_tensor(cls, value: Any) -> bool:
+        if isinstance(value, torch.Tensor):
+            return value.device.type == "cpu"
+        if isinstance(value, (list, tuple, OrderedSet, frozenset)):
+            return any(cls._contains_cpu_tensor(x) for x in value)
+        if isinstance(value, dict):
+            return any(
+                cls._contains_cpu_tensor(x)
+                for x in itertools.chain(value.keys(), value.values())
+            )
+        return False
+
+    @staticmethod
+    def _device_type(value: Any) -> str | None:
+        if isinstance(value, torch.device):
+            return value.type
+        if isinstance(value, str):
+            try:
+                return torch.device(value).type
+            except RuntimeError:
+                return None
+        return None
+
+    @classmethod
+    def _is_factory_target(
+        cls, target: Any, targets: tuple[Any, ...], packets: tuple[Any, ...]
+    ) -> bool:
+        if target in targets or target in packets:
+            return True
+        overload_packet = getattr(target, "overloadpacket", None)
+        return overload_packet in packets
+
+    @classmethod
+    def _tensor_metadata(cls, node: torch.fx.Node) -> tuple[Any, ...]:
+        return tuple(
+            node.meta[key] for key in cls.TENSOR_METADATA_KEYS if key in node.meta
+        )
+
+    @classmethod
+    def _factory_device_type(cls, node: torch.fx.Node) -> str | None:
+        if node.op != "call_function":
+            return None
+
+        is_default_device_factory = cls._is_factory_target(
+            node.target,
+            _default_device_constructor_targets(),
+            _default_device_constructor_overload_packets(),
+        )
+        is_like_factory = cls._is_factory_target(
+            node.target,
+            cls.LIKE_FACTORY_TARGETS,
+            cls.LIKE_FACTORY_PACKETS,
+        )
+        if not (is_default_device_factory or is_like_factory):
+            return None
+
+        device_type = cls._device_type(node.kwargs.get("device"))
+        if device_type is not None:
+            return device_type
+
+        schema = getattr(node.target, "_schema", None)
+        if schema is not None:
+            for arg, value in zip(schema.arguments, node.args):
+                if arg.name == "device":
+                    device_type = cls._device_type(value)
+                    if device_type is not None:
+                        return device_type
+
+        if is_like_factory:
+            return None
+        return torch.device(torch.get_default_device()).type
+
+    @classmethod
+    def _may_generate_cpu_cpp_code(
+        cls, gm: torch.fx.GraphModule | None, example_inputs: Sequence[InputType]
+    ) -> bool:
+        if cls._contains_cpu_tensor(example_inputs):
+            return True
+        if gm is None:
+            return False
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                tensor_metadata = cls._tensor_metadata(node)
+                if cls._contains_cpu_tensor(tensor_metadata):
+                    return True
+                if not cls._contains_tensor(tensor_metadata) and (
+                    cls._factory_device_type(node) == "cpu"
+                ):
+                    return True
+        return False
 
     def __init__(
         self,
-        gm: torch.fx.GraphModule,
+        gm: torch.fx.GraphModule | None,
         example_inputs: Sequence[InputType],
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
@@ -1280,9 +1440,6 @@ class FxGraphHashDetails:
                         (kernel_source, constant_args, configs)
                     )
 
-        # Alignment checks
-        self.inputs_to_check = inputs_to_check
-
         no_tensor_inputs = not any(isinstance(x, torch.Tensor) for x in example_inputs)
         # This device index is usually already encoded by the device of the inputs
         # but fx graphs don't necessarily have tensor inputs. If there aren't any,
@@ -1296,6 +1453,17 @@ class FxGraphHashDetails:
             torch.is_deterministic_algorithms_warn_only_enabled(),
             torch.utils.deterministic.fill_uninitialized_memory,  # type: ignore[attr-defined]
         )
+
+        # CPU C++ kernels specialize on torch.get_num_threads() when cpp.threads
+        # is left at its runtime default and dynamic threading is disabled.
+        # Include that resolved value so FX graph cache entries compiled under
+        # one thread count are not reused under another.
+        if (
+            config.cpp.threads < 1
+            and not config.cpp.dynamic_threads
+            and self._may_generate_cpu_cpp_code(gm, example_inputs)
+        ):
+            self.cpp_runtime_thread_count = parallel_num_threads()
 
         # Provenance tracking level affects whether provenance data is stored
         # in the CompiledFxGraph, so it must be part of the cache key.
@@ -1363,6 +1531,9 @@ class FxGraphHashDetails:
         self._pre_fusion_custom_pass = self._get_custom_pass_detail_unsafe(
             config._pre_fusion_custom_pass
         )
+        self._post_fusion_custom_pass = self._get_custom_pass_detail_unsafe(
+            config._post_fusion_custom_pass
+        )
         self._fuse_ddp_communication_passes = self._get_custom_pass_detail_unsafe(
             config._fuse_ddp_communication_passes
         )
@@ -1402,6 +1573,7 @@ class FxGraphHashDetails:
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
     # - _pre_fusion_custom_pass
+    # - _post_fusion_custom_pass
     # - _fuse_ddp_communication_passes
     # Their types can be found in `torch/_inductor/config.py`, but:
     # - if they are string names, we can cache them safely (one is by default)
@@ -1927,7 +2099,27 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
-            check = bool(evaluate_guards(graph.guards_expr, symints))
+            # Older cache entries were serialized before guard source locations
+            # were stored, so keep accepting entries with only guards_expr.
+            guards_expr_with_source = getattr(graph, "guards_expr_with_source", None)
+            guards_expr_with_source_arg_count = getattr(
+                graph, "guards_expr_with_source_arg_count", None
+            )
+            # AOTAutograd can load an FX graph using a custom guard checker and
+            # an argument list that differs from the one Inductor used to save
+            # these per-guard expressions. In that case, preserve the custom
+            # evaluate_guards fallback below.
+            can_replay_guards_with_source = (
+                guards_expr_with_source is not None
+                and guards_expr_with_source_arg_count == len(symints)
+                and not config.unsafe_skip_cache_dynamic_shape_guards
+            )
+            if can_replay_guards_with_source:
+                check = shape_env.evaluate_guards_expression_with_source_info(
+                    guards_expr_with_source, symints
+                )
+            else:
+                check = bool(evaluate_guards(graph.guards_expr, symints))
             assert check is True
             log.debug(
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
@@ -1982,8 +2174,14 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         assert shape_env is not None
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         guards = shape_env.get_pruned_guards(symints)
-        compiled_graph.guards_expr = shape_env.produce_guards_expression(
+        (
+            compiled_graph.guards_expr,
+            compiled_graph.guards_expr_with_source,
+        ) = shape_env.produce_guards_expression_with_source_info(
             placeholders=symints, guards=guards
+        )
+        compiled_graph.guards_expr_with_source_arg_count = (
+            len(symints) if compiled_graph.guards_expr_with_source is not None else None
         )
         try:
             backend = torch.utils._triton.triton_backend()
@@ -3382,6 +3580,12 @@ def _precompile_header(
         "CppBuilder does not currently support precompiling on Windows!"
     )
 
+    # extra_flags carries link-time inputs (e.g. precompiled kernel .so paths
+    # for CUTLASS/ROCm CK under JIT cpp_wrapper). Preprocessing and PCH
+    # compilation don't link, so g++ rejects .so paths as unused linker
+    # input. Strip them here.
+    compile_command.pop("extra_flags", None)
+
     # Get the preprocessed output from the header file to be precompiled.  This allows
     # us to properly invalidate the file cache when any header dependency changes.  This
     # is thread-safe, as each thread will get its own temporary directory.
@@ -4389,6 +4593,8 @@ def touch(filename: str) -> None:
 
 @clear_on_fresh_cache
 class PyCodeCache:
+    """Caches generated Python modules and their source mappings."""
+
     # Track the loaded modules so we can remove the on-disk artifacts when
     # clearing the cache. Note also that we may load the same path more
     # than once, but attach different attributes, i.e., due to different
@@ -4406,9 +4612,15 @@ class PyCodeCache:
         return write(source_code, "py", extra=extra)
 
     @classmethod
-    def load(cls, source_code: str, extra: str = "") -> ModuleType:
+    def load(
+        cls,
+        source_code: str,
+        extra: str = "",
+        *,
+        set_sys_modules: bool | None = None,
+    ) -> ModuleType:
         key, path = write(source_code, "py", extra=extra)
-        return cls.load_by_key_path(key, path)
+        return cls.load_by_key_path(key, path, set_sys_modules=set_sys_modules)
 
     @classmethod
     def load_by_key_path(
@@ -4417,19 +4629,26 @@ class PyCodeCache:
         path: str,
         linemap: list[tuple[int, str]] | None = None,
         attrs: dict[str, Any] | None = None,
+        *,
+        set_sys_modules: bool | None = None,
     ) -> ModuleType:
         if linemap is None:
             linemap = []
 
+        in_toplevel = in_toplevel_process()
+        set_sys_modules = in_toplevel if set_sys_modules is None else set_sys_modules
+
         # we only cache when attrs is None
         if attrs is None and path in cls.modules_no_attr:
-            return cls.modules_no_attr[path]
+            mod = cls.modules_no_attr[path]
+            if set_sys_modules:
+                sys.modules.setdefault(mod.__name__, mod)
+            return mod
 
-        in_toplevel = in_toplevel_process()
-        mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
+        mod = _reload_python_module(key, path, set_sys_modules=set_sys_modules)
 
         # unzip into separate lines/nodes lists
-        if in_toplevel:
+        if set_sys_modules:
             cls.linemaps[path] = list(zip(*linemap))
 
         if attrs is not None:
@@ -4709,6 +4928,16 @@ class CUTLASSCodeCache:
 
         key, input_path = write(source_code, cls._SOURCE_CODE_SUFFIX, extra=extra)
         return key, input_path
+
+    @classmethod
+    def get_output_path(cls, source_code: str, dst_file_ext: str) -> str:
+        """
+        Returns the deterministic output path for `compile(source_code, dst_file_ext)`
+        without performing the compile. Useful when a caller needs to reference the
+        compiled artifact path before an async compile has finished.
+        """
+        _, input_path = cls.write(source_code, dst_file_ext)
+        return input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
 
     @classmethod
     def compile(
