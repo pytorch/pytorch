@@ -1,5 +1,6 @@
 # Owner(s): ["module: cpp-extensions"]
 
+import importlib
 import os
 import re
 import unittest
@@ -14,7 +15,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skipIfTorchDynamo,
-    TEST_XPU,
     xfailIfTorchDynamo,
 )
 
@@ -42,6 +42,16 @@ except ImportError as e:
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
         "`python run_test.py -i test_cpp_extensions_aot_ninja` instead."
     ) from e
+
+
+# cpu and mps use the ATen-dispatched .cpp extension (device-agnostic ops);
+# cuda and xpu use backend-specific kernel extensions from setup.py.
+_SIGMOID_ADD_BACKENDS = (
+    ("cpu", "torch_test_cpp_extension.cpp"),
+    ("mps", "torch_test_cpp_extension.cpp"),
+    ("cuda", "torch_test_cpp_extension.cuda"),
+    ("xpu", "torch_test_cpp_extension.sycl"),
+)
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -85,17 +95,29 @@ class TestCppExtensionAOT(common.TestCase):
         expected_tensor_grad = torch.ones([4, 4], dtype=torch.double).mm(weights.t())
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    def test_cuda_extension(self):
-        import torch_test_cpp_extension.cuda as cuda_extension
-
-        x = torch.zeros(100, device="cuda", dtype=torch.float32)
-        y = torch.zeros(100, device="cuda", dtype=torch.float32)
-
-        z = cuda_extension.sigmoid_add(x, y).cpu()
-
-        # 2 * sigmoid(0) = 2 * 0.5 = 1
-        self.assertEqual(z, torch.ones_like(z))
+    def test_sigmoid_add_extension(self):
+        for device_type, module_name in _SIGMOID_ADD_BACKENDS:
+            with self.subTest(device_type=device_type):
+                if device_type != "cpu":
+                    device_mod = getattr(torch, device_type, None)
+                    if device_mod is None:
+                        raise unittest.SkipTest(f"{device_type} is not registered")
+                    is_available = getattr(device_mod, "is_available", None)
+                    if is_available is not None and not is_available():
+                        raise unittest.SkipTest(f"{device_type} not available")
+                    if device_type == "xpu" and os.getenv("USE_NINJA", "0") == "0":
+                        raise unittest.SkipTest(
+                            "sycl extension requires ninja to build"
+                        )
+                try:
+                    ext = importlib.import_module(module_name)
+                except ImportError:
+                    raise unittest.SkipTest(f"{module_name} not built") from None
+                x = torch.zeros(100, device=device_type, dtype=torch.float32)
+                y = torch.zeros(100, device=device_type, dtype=torch.float32)
+                z = ext.sigmoid_add(x, y).cpu()
+                # 2 * sigmoid(0) = 2 * 0.5 = 1
+                self.assertEqual(z, torch.ones_like(z))
 
     @unittest.skipIf(not torch.backends.mps.is_available(), "MPS not found")
     def test_mps_extension(self):
@@ -109,22 +131,6 @@ class TestCppExtensionAOT(common.TestCase):
         mps_output = mps_extension.get_mps_add_output(x.to("mps"), y.to("mps"))
 
         self.assertEqual(cpu_output, mps_output.to("cpu"))
-
-    @unittest.skipIf(not TEST_XPU, "XPU not found")
-    @unittest.skipIf(
-        os.getenv("USE_NINJA", "0") == "0",
-        "sycl extension requires ninja to build",
-    )
-    def test_sycl_extension(self):
-        import torch_test_cpp_extension.sycl as sycl_extension
-
-        x = torch.zeros(100, device="xpu", dtype=torch.float32)
-        y = torch.zeros(100, device="xpu", dtype=torch.float32)
-
-        z = sycl_extension.sigmoid_add(x, y).cpu()
-
-        # 2 * sigmoid(0) = 2 * 0.5 = 1
-        self.assertEqual(z, torch.ones_like(z))
 
     @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
