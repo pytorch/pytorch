@@ -5506,12 +5506,12 @@ class Scheduler:
 
                 if config.multi_kernel_hints:
                     multi_node.finalize_as_triton_callers(
-                        hint_override_best_fusion_choice
+                        hint_override_best_fusion_choice  # pyrefly: ignore [bad-argument-type]
                     )
                 else:
-                    multi_node.finalize_as_triton_caller(
-                        hint_override_best_fusion_choice[None]
-                    )
+                    best = hint_override_best_fusion_choice[None]
+                    # pyrefly: ignore [bad-argument-type]
+                    multi_node.finalize_as_triton_caller(best)
                 return FusionResult.fuse(True)
 
             if bench_epilogue:
