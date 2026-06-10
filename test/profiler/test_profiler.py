@@ -25,6 +25,7 @@ from unittest.mock import patch
 
 import expecttest
 
+
 # Suppress libkineto USDT profiler_start/profiler_stop logs in this verbose
 # profiler test file. USDT is the highest libkineto log type, so use one level
 # above it.
