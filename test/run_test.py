@@ -521,13 +521,14 @@ def run_test(
     if is_cpp_test:
         stepcurrent_key = f"{test_file}_{os.urandom(8).hex()}"
     else:
-        unittest_args.extend(
-            [
-                f"--shard-id={test_module.shard}",
-                f"--num-shards={test_module.num_shards}",
-            ]
-        )
         stepcurrent_key = f"{test_file}_{test_module.shard}_{os.urandom(8).hex()}"
+        if test_module.num_shards > 1:
+            unittest_args.extend(
+                [
+                    f"--shard-id={test_module.shard}",
+                    f"--num-shards={test_module.num_shards}",
+                ]
+            )
 
     if options.verbose:
         unittest_args.append(f"-{'v' * options.verbose}")  # in case of pytest
