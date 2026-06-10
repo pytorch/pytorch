@@ -777,13 +777,13 @@ class GLU(Module):
 class GELU(Module):
     r"""Applies the Gaussian Error Linear Units function.
 
-    .. math:: \text{GELU}(x) = x * \Phi(x)
+   .. math:: \text{GELU}(x) = x * \Phi(x)
 
-    where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
+   where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
-    When the approximate argument is 'tanh', Gelu is estimated with:
+   When ``approximate='none'``, GELU is computed as:
 
-    .. math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt{2 / \pi} * (x + 0.044715 * x^3)))
+   .. math:: \text{GELU}(x) = 0.5 * x * \left(1 + \text{erf}\left(\frac{x}{\sqrt{2}}\right)\right)
 
     Args:
         approximate (str, optional): the gelu approximation algorithm to use:
