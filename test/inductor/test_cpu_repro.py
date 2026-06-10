@@ -3082,6 +3082,26 @@ class CPUReproTests(TestCase):
                     f"Expected 2 vec kernels, got {metrics.generated_cpp_vec_kernel_count}"
                 )
 
+    @requires_vectorization
+    def test_index_put_accumulate_atomic_add_vec_scalar_index(self):
+        def fn(values, idx0, idx1):
+            out = torch.zeros(1, 32, 1, 1)
+            return aten.index_put(out, [None, None, idx0, idx1], values, True)
+
+        inps = (
+            torch.ones(1, 32, 10, 20),
+            torch.zeros(10, 1, dtype=torch.long),
+            torch.zeros(20, dtype=torch.long),
+        )
+
+        torch._dynamo.reset()
+        metrics.reset()
+        opt_fn = torch.compile(fn, backend="inductor")
+        actual, code = run_and_get_cpp_code(opt_fn, *inps)
+        FileCheck().check("atomic_add_vec").run(code)
+        self.assertEqual(fn(*inps), actual)
+        self.assertGreater(metrics.generated_cpp_vec_kernel_count, 0)
+
     def test_large_mean(self):
         size = (30000, 100000)
         t = torch.rand(size, dtype=torch.float)
