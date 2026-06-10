@@ -21,6 +21,8 @@ from ...select_algorithm import (
 )
 from ...utils import can_use_tma
 from .common import (
+    _flex_kernel_options_example,
+    _flex_kernel_tuning_options,
     create_indices_fake,
     create_num_blocks_fake_generator,
     freeze_irnodes,
@@ -37,10 +39,32 @@ prims = torch.ops.prims
 log = logging.getLogger(__name__)
 
 
+def raise_flex_decoding_kernel_options_error(
+    kernel_options: dict[str, Any],
+    sparse_q_block_size: int,
+    sparse_kv_block_size: int,
+) -> None:
+    formated_kernel_options = ", ".join(
+        f"{name}={kernel_options[name]}" for name in ("BLOCK_M", "BLOCK_N")
+    )
+    raise ValueError(
+        "Invalid FlexAttention decode kernel options: Q and KV block sizes must "
+        "be divisible by the selected tile sizes. Got "
+        f"SPARSE_Q_BLOCK_SIZE={sparse_q_block_size}, "
+        f"SPARSE_KV_BLOCK_SIZE={sparse_kv_block_size}, and "
+        f"{formated_kernel_options}. "
+        "Pass compatible values with kernel_options. Available decode tuning "
+        f"options are {_flex_kernel_tuning_options('decode')}. For example: "
+        f"{_flex_kernel_options_example('decode')}. If you did not pin "
+        "these options, compiling with mode='max-autotune-no-cudagraphs' "
+        "can also fix this by trying more FlexAttention configs."
+    )
+
+
 def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> bool:
     """Decide which kernel to use, return true if use flex decoding kernel.
     Note:
-       Since the number of splits is calculated based of the number of batch and head dims
+       Since the number of splits is calculated based on the number of batch and head dims
        we need to ensure that the batch and head dims are statically known. Otherwise we just
        use the main flex_attention kernel.
     """
@@ -161,6 +185,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,  # q_indices
         _,  # full_q_num_blocks,
         _,  # full_q_indices,
+        _,  # dq_write_order
+        _,  # dq_write_order_full
+        _,  # dq_kv_order
+        _,  # dq_kv_order_spt
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         _,
@@ -204,7 +232,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     has_full_blocks = full_kv_num_blocks is not None
     kernel_options.setdefault("HAS_FULL_BLOCKS", has_full_blocks)
     if not has_full_blocks:
-        # Create a plackeholder full block list in case it is empty
+        # Create a placeholder full block list in case it is empty
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
@@ -318,17 +346,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
+    invalid_block_options: dict[str, Any] | None = None
 
     for conf in configs:
-        if conf.block_n > SPARSE_KV_BLOCK_SIZE:
-            conf.block_n = SPARSE_KV_BLOCK_SIZE
-
-        if SPARSE_Q_BLOCK_SIZE % kernel_options["BLOCK_M"] != 0:
-            continue
-
-        if SPARSE_KV_BLOCK_SIZE % conf.block_n != 0:
-            continue
-
         cur_kernel_options = original_kernel_options.copy()
         # Remove prefix for forward kernels options and delete backward kernel options.
         for k in list(cur_kernel_options.keys()):
@@ -338,11 +358,29 @@ def create_flex_decoding_kernel(*args, **kwargs):
             if k.startswith("bwd_"):
                 cur_kernel_options.pop(k)
         # Performance tuning
-        cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
+        cur_kernel_options.setdefault(
+            "BLOCK_N", min(conf.block_n, SPARSE_KV_BLOCK_SIZE)
+        )
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
         cur_kernel_options.setdefault("num_warps", conf.num_warps)
         cur_kernel_options.setdefault("num_stages", conf.num_stages)
+
+        if (
+            cur_kernel_options["SPARSE_Q_BLOCK_SIZE"] % cur_kernel_options["BLOCK_M"]
+            != 0
+            or cur_kernel_options["SPARSE_KV_BLOCK_SIZE"]
+            % cur_kernel_options["BLOCK_N"]
+            != 0
+        ):
+            invalid_block_options = cur_kernel_options
+            if len(configs) == 1:
+                raise_flex_decoding_kernel_options_error(
+                    cur_kernel_options,
+                    SPARSE_Q_BLOCK_SIZE,
+                    SPARSE_KV_BLOCK_SIZE,
+                )
+            continue
 
         if cur_kernel_options.get("num_consumer_groups", False):
             cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
@@ -382,6 +420,13 @@ def create_flex_decoding_kernel(*args, **kwargs):
             mutated_inputs=[buf_M, buf_L],
             call_sizes=query.get_size(),
             **cur_kernel_options,
+        )
+
+    if not choices and invalid_block_options is not None:
+        raise_flex_decoding_kernel_options_error(
+            invalid_block_options,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
         )
 
     filtered_score_mod_buffers = [

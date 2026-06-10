@@ -49,6 +49,40 @@ from ...utils import load_template
 SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
 
 
+def _flex_kernel_options_example(kind: str) -> str:
+    match kind:
+        case "backward":
+            return (
+                "kernel_options={'bwd_BLOCK_M1': 32, 'bwd_BLOCK_N1': 32, "
+                "'bwd_BLOCK_M2': 32, 'bwd_BLOCK_N2': 32, "
+                "'bwd_num_stages': 1, 'bwd_num_warps': 4}"
+            )
+        case _:
+            return (
+                "kernel_options={'fwd_BLOCK_M': 32, 'fwd_BLOCK_N': 64, "
+                "'fwd_num_stages': 1, 'fwd_num_warps': 4}"
+            )
+
+
+def _flex_kernel_tuning_options(kind: str) -> str:
+    match kind:
+        case "backward":
+            return (
+                "BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2, num_warps, and "
+                "num_stages; use the bwd_ prefix to set backward-only options"
+            )
+        case "decode":
+            return (
+                "BLOCK_M, BLOCK_N, num_warps, and num_stages; use the fwd_ "
+                "prefix to set decode-only options"
+            )
+        case _:
+            return (
+                "BLOCK_M, BLOCK_N, num_warps, and num_stages; use the fwd_ "
+                "prefix to set forward-only options"
+            )
+
+
 def zeros_and_scatter_lowering(shape: list[int], indices, values):
     """To support backwards on captured buffers we register a specific lowering for our specific custom up"""
     # Always accumulate into fp32 then cast
@@ -195,10 +229,29 @@ def realize_captures_for_cutedsl(buffers):
 
     view_captures: dict[str, ReinterpretView] = {}
 
+    def _add_alignment_check_for_input(input_buffer: InputBuffer) -> None:
+        # Preserved captures can be used by vectorized CuteDSL loads, so make
+        # sure the wrapper still emits copy_if_misaligned for graph inputs.
+        # Normal template inputs are already in inputs_to_check; captures need
+        # to be added explicitly because they were not direct template inputs
+        # when alignment-check inputs were selected.
+        name = input_buffer.get_name()
+        graph_input_names = getattr(V.graph, "graph_input_names", [])
+        if name in graph_input_names:
+            idx = graph_input_names.index(name)
+            inputs_to_check = list(V.graph.inputs_to_check or ())
+            if idx not in inputs_to_check:
+                V.graph.inputs_to_check = [*inputs_to_check, idx]
+
     def _realize(x):
         if x is None or isinstance(x, sympy.Expr):
             return x
         realized = ExternKernel.realize_input(x)
+        if isinstance(realized, StorageBox) and realized.is_input_buffer():
+            # Plain graph inputs are commonly represented as
+            # TensorBox(StorageBox(InputBuffer(...))).  Preserve the underlying
+            # input/view instead of materializing it with ExternKernel.copy_input.
+            realized = realized.data
         if isinstance(realized, ReinterpretView):
             layout = realized.get_layout()
             capture_index = len(V.graph._cutedsl_capture_nodes) + len(view_captures)
@@ -217,6 +270,7 @@ def realize_captures_for_cutedsl(buffers):
                 ),
             )
         if isinstance(realized, InputBuffer):
+            _add_alignment_check_for_input(realized)
             return realized
         return ExternKernel.copy_input(realized)
 

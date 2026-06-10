@@ -24,6 +24,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
+from ..custom_graph_pass import get_custom_graph_passes
 from ..pattern_matcher import (
     Arg,
     CallFunction,
@@ -190,10 +191,18 @@ def remove_no_ops(
                 val = n.meta.get("val")
                 if isinstance(val, torch.Tensor) and val.device.type == "meta":
                     with graph.inserting_before(output_node):
+                        # size/stride may be symbolic under dynamic shapes;
+                        # materialize them so we never pass raw SymInts as args.
+                        # Use materialize_symints (roots backed sizes on input
+                        # placeholders) rather than create_size_node(n, d), which
+                        # would query `n` and pin it alive, blocking the
+                        # eliminate_dead_code() that removes this meta tensor.
+                        size = graph.materialize_symints(val.size())
+                        stride = graph.materialize_symints(val.stride())
                         n.replace_all_uses_with(
                             graph.call_function(
                                 torch.ops.aten.empty_strided.default,
-                                args=(val.size(), val.stride()),
+                                args=(size, stride),
                                 kwargs={"dtype": val.dtype, "device": val.device},
                             )
                         )
@@ -655,9 +664,9 @@ def joint_graph_passes(
     # must occur before other passes
     canonicalize_aten_ir_passes(graph)
 
-    if config.joint_custom_pre_pass is not None:
+    for joint_custom_pre_pass in get_custom_graph_passes(config.joint_custom_pre_pass):
         GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
-            config.joint_custom_pre_pass
+            joint_custom_pre_pass
         )
         count += 1
 
@@ -698,9 +707,11 @@ def joint_graph_passes(
         # we'll instead explicitly turn off the config
         count += replace_random_passes(graph)
 
-    if config.joint_custom_post_pass is not None:
+    for joint_custom_post_pass in get_custom_graph_passes(
+        config.joint_custom_post_pass
+    ):
         GraphTransformObserver(graph, "joint_custom_post_pass").apply_graph_pass(
-            config.joint_custom_post_pass
+            joint_custom_post_pass
         )
         count += 1
 
@@ -741,7 +752,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
             and user.target in (aten.index.Tensor, aten.index_put.default)
             and hasattr(user.meta.get("val"), "device")
         ):
-            user_devices.add(user.meta["val"].device)
+            user_devices.add(user.meta["val"].device)  # type: ignore[union-attr]
         else:
             return  # bail out
 
@@ -788,6 +799,9 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         return
 
     if arg_val.dtype in allowed and dtype1 in allowed and dtype2 in allowed:
+        # A narrower intermediate can be worth materializing before upcasting.
+        if dtype1.itemsize < dtype2.itemsize:
+            return
         if config.emulate_precision_casts and not _is_lossless_fp_widening_cast(
             arg_val.dtype, dtype1
         ):
@@ -962,6 +976,14 @@ def _partial_softmax_pattern(linear_func, reverse=False, to_dtype=False):
     return CallFunction(aten.sub.Tensor, scaled, amax)
 
 
+def _preserve_scaled_softmax_nonfinite_semantics(scaled, stable, dim, keepdim):
+    # This pattern also matches the raw scaled - amax(scaled) expression.  Only
+    # use the stable form when it preserves that expression's nonfinite behavior.
+    original = scaled - torch.amax(scaled, dim=dim, keepdim=keepdim)
+    finite_scaled = torch.all(torch.isfinite(scaled), dim=dim, keepdim=True)
+    return torch.where(finite_scaled, stable, original)
+
+
 def _other_is_broadcasted_in_dim(match):
     # Check that the scaling factor is constant across the reduction dim,
     # so scaling doesn't change which index corresponds to the maximum value
@@ -1001,7 +1023,9 @@ def _other_is_broadcasted_in_dim(match):
 
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
+        scaled = inp * other
         if dtype is not None:
+            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -1014,7 +1038,10 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
 
-        return (inp - max_) * (sign * other)
+        stable = (inp - max_) * (sign * other)
+        return _preserve_scaled_softmax_nonfinite_semantics(
+            scaled, stable, dim, keepdim
+        )
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
@@ -1031,7 +1058,9 @@ for reverse, to_dtype in itertools.product((False, True), repeat=2):
 
 def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
+        scaled = inp / other
         if dtype is not None:
+            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -1044,7 +1073,10 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
 
-        return (inp - max_) / (sign * other)
+        stable = (inp - max_) / (sign * other)
+        return _preserve_scaled_softmax_nonfinite_semantics(
+            scaled, stable, dim, keepdim
+        )
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
@@ -1140,8 +1172,13 @@ def scatter_upon_const_tensor(
         # Create a mask for where to scatter
         mask = selector_expanded == indices_view
 
-        # Use torch.where to implement the scatter pointwise operation
-        return torch.where(mask, val, background_val)
+        # Use torch.where to implement the scatter pointwise operation.
+        # When val and background_val are Python scalars, torch.where promotes
+        # the result to the default floating dtype (float32), which loses the
+        # const tensor's dtype. Cast back to dtype so the rewrite preserves
+        # aten.scatter.value semantics (the result has self's dtype, with the
+        # scalar value cast to it).
+        return torch.where(mask, val, background_val).to(dtype)
 
     # replace the scatter operation with pointwise equivalent
     # pyrefly: ignore [bad-argument-type]
