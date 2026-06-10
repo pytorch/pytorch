@@ -117,30 +117,20 @@ __global__ void tma_scatter_add_kernel(
 
     extern __shared__ char smem_raw[];
 
-    // One warp per entry: lane 0 issues TMA commands, __syncwarp() synchronizes.
     constexpr int threads_per_entry = C10_WARP_SIZE;
     int entry_in_block = threadIdx.x / threads_per_entry;
     int lane = threadIdx.x - entry_in_block * threads_per_entry;
 
-    // smem layout: [data region: entries_per_block * 2 * chunk_elems scalars]
-    //              [mbarrier region: entries_per_block * 2 uint64_t, 8-byte aligned]
-    // Mbarrier memory must never alias with data targeted by TMA operations.
-    int buf_elems = 2 * chunk_elems;
-    int data_region_bytes = entries_per_block * buf_elems * static_cast<int>(sizeof(scalar_t));
+    int data_region_bytes = entries_per_block * chunk_elems * static_cast<int>(sizeof(scalar_t));
     int mbar_offset = (data_region_bytes + 7) & ~7;
 
-    scalar_t* buf0 = reinterpret_cast<scalar_t*>(smem_raw) + entry_in_block * buf_elems;
-    uint64_t* mbar0 = reinterpret_cast<uint64_t*>(smem_raw + mbar_offset) + entry_in_block * 2;
-    uint64_t* mbar1 = mbar0 + 1;
-    uint64_t* mbars[2] = {mbar0, mbar1};
+    scalar_t* buf0 = reinterpret_cast<scalar_t*>(smem_raw) + entry_in_block * chunk_elems;
+    uint64_t* mbar0 = reinterpret_cast<uint64_t*>(smem_raw + mbar_offset) + entry_in_block;
 
     if (lane == 0) {
         tma::mbar_init(mbar0, 1u);
-        tma::mbar_init(mbar1, 1u);
     }
     __syncwarp();
-
-    int mbar_phase[2] = {0, 0};
 
     {
         int entry_id = blockIdx.x * entries_per_block + entry_in_block;
@@ -153,33 +143,23 @@ __global__ void tma_scatter_add_kernel(
         const scalar_t* src_entry = src_data + static_cast<int64_t>(entry_id) * src_stride;
         scalar_t* dst_entry = self_data + ind * self_stride;
 
-        int phase = 0;
-        for (int off = blockIdx.y * chunk_elems; off < D;
-             off += gridDim.y * chunk_elems, phase++) {
-            int cur = phase & 1;
-            int cur_elems = min(chunk_elems, D - off);
-            uint32_t cur_bytes = cur_elems * sizeof(scalar_t);
+        int off = blockIdx.y * chunk_elems;
+        if (off >= D) return;
 
-            if (phase >= 2 && lane == 0) {
-                tma::wait_group_lt1();
-            }
-            __syncwarp();
-
-            if (lane == 0) {
-                tma::mbar_expect_tx(mbars[cur], cur_bytes);
-                tma::bulk_load(buf0 + cur * chunk_elems, src_entry + off, cur_bytes, mbars[cur]);
-            }
-            while (!tma::mbar_try_wait_parity(
-                mbars[cur], static_cast<uint32_t>(mbar_phase[cur] & 1))) {}
-            mbar_phase[cur]++;
-
-            if (lane == 0) {
-                tma::bulk_reduce_add<scalar_t>(dst_entry + off, buf0 + cur * chunk_elems, cur_bytes);
-                tma::commit_group();
-            }
-        }
+        int cur_elems = min(chunk_elems, D - off);
+        uint32_t cur_bytes = cur_elems * sizeof(scalar_t);
 
         if (lane == 0) {
+            tma::mbar_expect_tx(mbar0, cur_bytes);
+            tma::bulk_load(buf0, src_entry + off, cur_bytes, mbar0);
+        }
+
+        while (!tma::mbar_try_wait_parity(
+            mbar0, static_cast<uint32_t>(0))) {}
+
+        if (lane == 0) {
+            tma::bulk_reduce_add<scalar_t>(dst_entry + off, buf0, cur_bytes);
+            tma::commit_group();
             tma::wait_group_lt0();
         }
         __syncwarp();
@@ -199,22 +179,21 @@ void tma_scatter_add_kernel_launch(
     constexpr int max_threads = 256;
     // One warp per entry: lane 0 issues TMA commands, __syncwarp() synchronizes.
     constexpr int threads_per_entry = C10_WARP_SIZE;
-    int chunk_elems = std::min(D, static_cast<int>(512 / sizeof(scalar_t)));
+    int chunk_elems = std::min(D, static_cast<int>(2048 / sizeof(scalar_t)));
     int num_chunks = at::ceil_div(D, chunk_elems);
 
     int entries_per_block = max_threads / threads_per_entry;
     int grid_x = at::ceil_div(num_ind, entries_per_block);
-    // Spread chunks across grid.y but keep at least 4 per block for pipeline benefit
-    constexpr int min_chunks_per_block = 4;
-    uint32_t grid_y = std::min(
-        static_cast<uint32_t>(std::max(1, num_chunks / min_chunks_per_block)),
-        static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1]));
     int block_size = entries_per_block * threads_per_entry;
 
-    int buf_elems = 2 * chunk_elems;
-    int data_region_bytes = entries_per_block * buf_elems * static_cast<int>(sizeof(scalar_t));
+    TORCH_INTERNAL_ASSERT(
+        num_chunks <= at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
+        "scatter_add: D too large for grid.y (num_chunks=", num_chunks, ")");
+    uint32_t grid_y = static_cast<uint32_t>(num_chunks);
+
+    int data_region_bytes = entries_per_block * chunk_elems * static_cast<int>(sizeof(scalar_t));
     int mbar_offset = (data_region_bytes + 7) & ~7;
-    int smem = mbar_offset + entries_per_block * 2 * static_cast<int>(sizeof(uint64_t));
+    int smem = mbar_offset + entries_per_block * static_cast<int>(sizeof(uint64_t));
 
     int64_t self_stride = self_stride_bytes / sizeof(scalar_t);
     int64_t src_stride = src_stride_bytes / sizeof(scalar_t);
