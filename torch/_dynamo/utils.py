@@ -4156,6 +4156,15 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
             )
+        elif node.op == "call_function" and node.target is torch.arange:
+            # Fake arange may fail in lower-level prims while eager reports
+            # public, user-visible arange validation errors.
+            try:
+                torch.arange(*args, **kwargs)
+            except RuntimeError as arange_e:
+                from torch._dynamo.exc import raise_observed_exception
+
+                raise_observed_exception(RuntimeError, tx, args=list(arange_e.args))
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         _wrap_graph_break_with_torch_runtime_err(
             lambda: unimplemented(
