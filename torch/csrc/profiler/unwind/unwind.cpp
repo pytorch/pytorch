@@ -5,6 +5,124 @@
 
 #if !defined(__linux__) || !(defined(__x86_64__) || defined(__aarch64__)) || \
     !defined(__has_include) || !__has_include("ext/stdio_filebuf.h")
+
+#ifdef _MSC_VER
+// clang-format off
+#include <windows.h>
+#include <winnt.h>
+#include <dbghelp.h>
+// clang-format on
+#include <codecvt>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
+
+#pragma comment(lib, "dbghelp.lib")
+
+namespace torch::unwind {
+std::vector<void*> unwind() {
+  constexpr ULONG MAX_FRAMES = 8192;
+  std::vector<void*> frames(MAX_FRAMES);
+  auto real = RtlCaptureStackBackTrace(1, MAX_FRAMES, frames.data(), nullptr);
+  frames.resize(real);
+  return frames;
+}
+
+std::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
+  constexpr int MAX_NAME_LEN = 256;
+  HMODULE h_module = nullptr;
+  wchar_t module_full_path[MAX_NAME_LEN] = {0};
+  BOOL get_module_ok = GetModuleHandleExW(
+      GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+      reinterpret_cast<LPCWSTR>(addr),
+      &h_module);
+  if (!get_module_ok || h_module == NULL) {
+    return std::nullopt;
+  }
+
+  DWORD fname_length =
+      GetModuleFileNameW(h_module, module_full_path, MAX_NAME_LEN);
+  if (fname_length == 0) {
+    return std::nullopt;
+  }
+
+  wchar_t* last_slash_pos = wcsrchr(module_full_path, L'\\');
+  std::wstring module_base_name_w;
+  if (last_slash_pos) {
+    module_base_name_w = std::wstring(last_slash_pos + 1);
+  } else {
+    module_base_name_w = std::wstring(module_full_path);
+  }
+  std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
+  std::string module_base_name = conv.to_bytes(module_base_name_w);
+
+  uint64_t module_base_addr = reinterpret_cast<uint64_t>(h_module);
+  uint64_t addr_64 = reinterpret_cast<uint64_t>(addr);
+  uint64_t offset = addr_64 - module_base_addr;
+
+  return std::make_optional(
+      std::make_pair(std::move(module_base_name), offset));
+}
+
+std::vector<Frame> symbolize(const std::vector<void*>& frames, Mode mode) {
+  HANDLE hProcess = GetCurrentProcess();
+  DWORD flags = SymGetOptions();
+  SymSetOptions(flags | SYMOPT_DEFERRED_LOADS);
+  auto inited = SymInitialize(hProcess, NULL, TRUE);
+  if (!inited) {
+    return {};
+  }
+
+  std::vector<Frame> frame_details;
+  frame_details.reserve(frames.size());
+  char symbol_buf[sizeof(SYMBOL_INFO) + MAX_SYM_NAME] = {0};
+
+  for (void* frame_addr : frames) {
+    Frame detail;
+    detail.filename = "??";
+    detail.funcname = "??";
+    detail.lineno = 0;
+    if (!frame_addr) {
+      frame_details.push_back(std::move(detail));
+      continue;
+    }
+
+    DWORD64 addr = reinterpret_cast<DWORD64>(frame_addr);
+    PSYMBOL_INFO pSymbol = reinterpret_cast<PSYMBOL_INFO>(symbol_buf);
+    pSymbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+    pSymbol->MaxNameLen = MAX_SYM_NAME;
+    DWORD64 disp = 0;
+    if (SymFromAddr(hProcess, addr, &disp, pSymbol)) {
+      detail.funcname = pSymbol->Name;
+    }
+
+    IMAGEHLP_LINE64 line_info = {0};
+    line_info.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+    DWORD line_disp = 0;
+    if (SymGetLineFromAddr64(hProcess, addr, &line_disp, &line_info)) {
+      detail.filename = line_info.FileName;
+      detail.lineno = static_cast<uint64_t>(line_info.LineNumber);
+    }
+
+    frame_details.push_back(std::move(detail));
+  }
+
+  SymCleanup(hProcess);
+  return frame_details;
+}
+
+Stats stats() {
+  TORCH_WARN_ONCE(
+      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+  return {};
+}
+
+} // namespace torch::unwind
+
+#else
+
 namespace torch::unwind {
 std::vector<void*> unwind() {
   TORCH_WARN_ONCE(
@@ -33,7 +151,8 @@ Stats stats() {
 }
 
 } // namespace torch::unwind
-
+#endif
+    
 #else
 
 #include <c10/util/flat_hash_map.h>
