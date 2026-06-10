@@ -1796,6 +1796,9 @@ class TensorVariable(VariableTracker):
         value: Any | None = None,
     ) -> Any | None:
         if value is not None and config.enable_dynamo_decompositions:
+            if not self._can_decompose_addc_ops(tensor1, tensor2, value):
+                return None
+
             from torch._inductor import inductor_prims
 
             orig_self = self
@@ -1804,29 +1807,87 @@ class TensorVariable(VariableTracker):
             work_tensor1: VariableTracker = tensor1
             work_tensor2: VariableTracker = tensor2
             work_value: VariableTracker = value
-            use_cuda_opmath = self._should_use_cuda_opmath_for_addc_ops()
-            if use_cuda_opmath:
-                work_self = TensorVariable._to_dtype_var(tx, self, torch.float32)
-                work_tensor1 = TensorVariable._to_dtype_var(tx, tensor1, torch.float32)
-                work_tensor2 = TensorVariable._to_dtype_var(tx, tensor2, torch.float32)
+            compute_dtype = self._addc_opmath_dtype(tensor1, tensor2)
+            if compute_dtype is not None:
+                work_self = TensorVariable._to_dtype_var(tx, self, compute_dtype)
+                work_tensor1 = TensorVariable._to_dtype_var(tx, tensor1, compute_dtype)
+                work_tensor2 = TensorVariable._to_dtype_var(tx, tensor2, compute_dtype)
                 if value.is_tensor():
-                    work_value = TensorVariable._to_dtype_var(tx, value, torch.float32)
+                    work_value = TensorVariable._to_dtype_var(tx, value, compute_dtype)
 
             mul_var = variables.TorchInGraphFunctionVariable(torch.mul)
             fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
             product = mul_var.call_function(tx, [work_tensor1, work_tensor2], {})
             result = fma_var.call_function(tx, [product, work_value, work_self], {})
-            if use_cuda_opmath and orig_dtype is not None:
+            if (
+                compute_dtype is not None
+                and orig_dtype is not None
+                and compute_dtype != orig_dtype
+            ):
                 result = TensorVariable._to_dtype_var(tx, result, orig_dtype)
             return orig_self.call_method(tx, "copy_", [result], {})
         return None
 
-    def _should_use_cuda_opmath_for_addc_ops(self) -> bool:
-        return (
-            self.dtype in (torch.float16, torch.bfloat16)
-            and isinstance(self.device, torch.device)
+    def _addc_opmath_dtype(
+        self, tensor1: VariableTracker, tensor2: VariableTracker
+    ) -> torch.dtype | None:
+        dtype = self._promoted_addc_tensor_dtype(tensor1, tensor2)
+        if dtype is None or not (dtype.is_floating_point or dtype.is_complex):
+            return None
+
+        if (
+            isinstance(self.device, torch.device)
             and self.device.type in {"cuda", "xpu"}
+            and dtype in (torch.float16, torch.bfloat16)
+        ):
+            return torch.float32
+
+        return dtype
+
+    def _can_decompose_addc_ops(
+        self,
+        tensor1: VariableTracker,
+        tensor2: VariableTracker,
+        value: VariableTracker,
+    ) -> bool:
+        if self.dtype is None or not (
+            self.dtype.is_floating_point or self.dtype.is_complex
+        ):
+            return False
+
+        if self.dtype is torch.complex32:
+            return False
+
+        if isinstance(value, TensorVariable) and value.ndim != 0:
+            return False
+
+        dtype = self._promoted_addc_tensor_dtype(tensor1, tensor2)
+        value_dtype = value.dtype if isinstance(value, TensorVariable) else None
+        value_constant = (
+            value.as_python_constant() if value.is_python_constant() else None
         )
+        return not (
+            not self.dtype.is_complex
+            and (
+                (dtype is not None and dtype.is_complex)
+                or (value_dtype is not None and value_dtype.is_complex)
+                or isinstance(value_constant, complex)
+            )
+        )
+
+    def _promoted_addc_tensor_dtype(
+        self, tensor1: VariableTracker, tensor2: VariableTracker
+    ) -> torch.dtype | None:
+        if not (
+            isinstance(tensor1, TensorVariable) and isinstance(tensor2, TensorVariable)
+        ):
+            return None
+
+        if self.dtype is None or tensor1.dtype is None or tensor2.dtype is None:
+            return None
+
+        dtype = torch.promote_types(self.dtype, tensor1.dtype)
+        return torch.promote_types(dtype, tensor2.dtype)
 
     @staticmethod
     def _to_dtype_var(
@@ -1978,19 +2039,22 @@ class TensorVariable(VariableTracker):
         value: VariableTracker | None = None,
     ) -> VariableTracker | None:
         if value is not None and config.enable_dynamo_decompositions:
+            if not self._can_decompose_addc_ops(tensor1, tensor2, value):
+                return None
+
             orig_self = self
             orig_dtype = self.dtype
             work_self: VariableTracker = self
             work_tensor1: VariableTracker = tensor1
             work_tensor2: VariableTracker = tensor2
             work_value = value
-            use_cuda_opmath = self._should_use_cuda_opmath_for_addc_ops()
-            if use_cuda_opmath:
-                work_self = TensorVariable._to_dtype_var(tx, self, torch.float32)
-                work_tensor1 = TensorVariable._to_dtype_var(tx, tensor1, torch.float32)
-                work_tensor2 = TensorVariable._to_dtype_var(tx, tensor2, torch.float32)
+            compute_dtype = self._addc_opmath_dtype(tensor1, tensor2)
+            if compute_dtype is not None:
+                work_self = TensorVariable._to_dtype_var(tx, self, compute_dtype)
+                work_tensor1 = TensorVariable._to_dtype_var(tx, tensor1, compute_dtype)
+                work_tensor2 = TensorVariable._to_dtype_var(tx, tensor2, compute_dtype)
                 if value.is_tensor():
-                    work_value = TensorVariable._to_dtype_var(tx, value, torch.float32)
+                    work_value = TensorVariable._to_dtype_var(tx, value, compute_dtype)
 
             result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
                 tx, [work_tensor1, work_tensor2], {}
@@ -1999,7 +2063,11 @@ class TensorVariable(VariableTracker):
 
             fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
             fma_result = fma_var.call_function(tx, [result, work_value, work_self], {})
-            if use_cuda_opmath and orig_dtype is not None:
+            if (
+                compute_dtype is not None
+                and orig_dtype is not None
+                and compute_dtype != orig_dtype
+            ):
                 fma_result = TensorVariable._to_dtype_var(tx, fma_result, orig_dtype)
             return orig_self.call_method(tx, "copy_", [fma_result], {})
         return None
@@ -2454,6 +2522,69 @@ class TensorVariable(VariableTracker):
             ),
         )
 
+    def nb_floor_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__floordiv__(x)`` calls — the
+        # ``operator.floordiv`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.floordiv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
+    def nb_true_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__truediv__(x)`` calls — the
+        # ``operator.truediv`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.truediv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
+    def nb_remainder_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__mod__(x)`` calls — the
+        # ``operator.mod`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.mod, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # Tensor.__hash__ is `return id(self)`, so hash == id.
         # Always use the FakeTensor identity so aliased tensors
@@ -2791,6 +2922,57 @@ class SymNodeVariable(VariableTracker):
             tx,
             tx.output.create_proxy(
                 "call_function", operator.mul, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_floor_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.floordiv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_true_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.truediv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_remainder_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.mod, *proxy_args_kwargs([lhs, rhs], {})
             ),
             sym_num=None,
         )

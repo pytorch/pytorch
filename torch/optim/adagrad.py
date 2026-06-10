@@ -523,14 +523,9 @@ def _multi_tensor_adagrad(
 
         if lr_decay == 0:
             minus_clr = [-lr] * len(device_state_steps)
-        elif torch.compiler.is_compiling():
-            minus_clr = [
-                -lr / (1 + (step.to(torch.float64) - 1) * lr_decay)
-                for step in device_state_steps
-            ]
         else:
             minus_clr = [
-                -lr / (1 + (_get_value(step) - 1) * lr_decay)
+                -lr / (1 + (step.to(torch.float64) - 1) * lr_decay)
                 for step in device_state_steps
             ]
 
