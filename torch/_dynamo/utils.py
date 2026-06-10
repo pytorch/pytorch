@@ -3287,17 +3287,17 @@ def iter_contains(
     from .variables import ConstantVariable
     from .variables.object_protocol import generic_richcompare_bool
 
-    if search.is_python_constant():
+    items = list(items)
+    # CPython's list_contains/set_contains use PyObject_RichCompareBool(item,
+    # search, Py_EQ) with an identity shortcut. The constant fast path is only
+    # valid when every element is a constant too; a non-constant element earlier
+    # in the sequence has an __eq__ that must be honored in order (it may match,
+    # or raise), so fall through to the per-element richcompare loop otherwise.
+    if search.is_python_constant() and all(x.is_python_constant() for x in items):
         search_val = search.as_python_constant()
-        # CPython's list_contains/set_contains use PyObject_RichCompareBool
-        # which has an identity shortcut: if v is w, return True for eq.
-        # Check identity first (matters for NaN).
         found_const = any(
-            x.is_python_constant()
-            and (
-                x.as_python_constant() is search_val
-                or x.as_python_constant() == search_val
-            )
+            x.as_python_constant() is search_val
+            or x.as_python_constant() == search_val
             for x in items
         )
         return ConstantVariable.create(found_const)
