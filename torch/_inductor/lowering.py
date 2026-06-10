@@ -7426,7 +7426,10 @@ def div_prim(a, b):
     # Disable CPU optimization to avoid precision issues.
     # see https://github.com/pytorch/pytorch/issues/157959
     if (divisor := get_constant_value(b)) is not None and a.get_device().type != "cpu":
-        # Replace divide by constant with multiply by reciprocal
+        # Replace divide by constant with multiply by reciprocal.
+        # This is correct even when division_rounding is enabled: eager CUDA
+        # also replaces constant divisions with reciprocal multiplies, so
+        # matching eager means doing the same here.
 
         if divisor.value == 0:
             reciprocal = math.copysign(float("inf"), divisor.value)

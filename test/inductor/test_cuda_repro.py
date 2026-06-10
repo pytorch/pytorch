@@ -3074,6 +3074,78 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
                 self.assertEqual(eager_div, compiled_div)
 
+    @config.patch({"eager_numerics.division_rounding": True})
+    def test_truediv_by_constant_emulate_division_rounding(self):
+        # Eager CUDA replaces `tensor / scalar` with `tensor * (1/scalar)`
+        # using a reciprocal computed in double precision (see
+        # BinaryDivTrueKernel.cu, is_cpu_scalar branch).  Inductor's
+        # div_prim applies the same optimisation via get_constant_value,
+        # so the two should be bitwise identical regardless of the
+        # division_rounding flag.
+
+        @torch.compile
+        def compiled_divide(x):
+            return x / 6.0
+
+        x = torch.randn(100, dtype=torch.float32, device=device_type)
+
+        torch._dynamo.reset()
+        compiled_out = compiled_divide(x)
+        eager_out = x / 6.0
+
+        self.assertEqual(eager_out, compiled_out, atol=0, rtol=0)
+
+    @config.patch({"eager_numerics.division_rounding": True})
+    def test_truediv_tensor_by_tensor_emulate_division_rounding(self):
+        # When both operands are tensors passed as arguments, eager CUDA
+        # uses true IEEE division (DivFunctor path in BinaryDivTrueKernel.cu).
+        # Inductor sees the divisor as a dynamic value, so it emits
+        # ops.truediv which becomes tl.div_rn under division_rounding.
+        # Both use true division -> bitwise match.
+
+        @torch.compile
+        def compiled_divide(x, y):
+            return x / y
+
+        x = torch.randn(100, dtype=torch.float32, device=device_type)
+        y = torch.tensor(6.0, device=device_type, dtype=torch.float32)
+
+        torch._dynamo.reset()
+        compiled_out = compiled_divide(x, y)
+        eager_out = x / y
+
+        self.assertEqual(eager_out, compiled_out, atol=0, rtol=0)
+
+    @unittest.expectedFailure
+    @config.patch({"eager_numerics.division_rounding": True})
+    def test_truediv_by_inlined_tensor_constant_emulate_division_rounding(self):
+        # Known mismatch: when a constant tensor is created inside the
+        # compiled function, inductor constant-folds it and applies the
+        # reciprocal optimisation (same as the scalar path).  But eager
+        # sees `tensor / tensor` — both operands are CUDA tensors — so
+        # it dispatches to true IEEE division (DivFunctor path in
+        # BinaryDivTrueKernel.cu).  The two differ by up to 1 ULP.
+        #
+        # We cannot fix this in div_prim because by the time the IR
+        # reaches get_constant_value, the distinction between "originally
+        # a Python scalar" and "originally a tensor that was constant-
+        # folded" has been erased — both look like ir.Constant.  Skipping
+        # the reciprocal optimisation for all constants (as PR #179719
+        # tried) would fix this case but break the more common
+        # `tensor / scalar` pattern where eager also uses reciprocal.
+
+        @torch.compile
+        def compiled_divide(x):
+            return x / torch.tensor(6.0, device=device_type, dtype=torch.float32)
+
+        x = torch.randn(100, dtype=torch.float32, device=device_type)
+
+        torch._dynamo.reset()
+        compiled_out = compiled_divide(x)
+        eager_out = x / torch.tensor(6.0, device=device_type, dtype=torch.float32)
+
+        self.assertEqual(eager_out, compiled_out, atol=0, rtol=0)
+
     @skipIfXpu(msg="triton dependency - torch-xpu-ops: 2554")
     @config.patch({"eager_numerics.division_rounding": False})
     @xfailIfROCm
