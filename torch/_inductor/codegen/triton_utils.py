@@ -7,7 +7,7 @@ import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config
-from ..runtime.hints import AttrsDescriptorWrapper
+from ..runtime.hints import AttrsDescriptorWrapper, DeviceProperties
 from ..utils import (
     _type_of,
     device_supports_fp64,
@@ -37,6 +37,27 @@ def should_unwrap_unspec_arg(name: str):
     return False
 
 
+def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
+    dtype: torch.dtype, arg_name: str | None = None
+) -> bool:
+    # Triton rejects fp8e4nv pointer types before sm89, but eager CUDA can
+    # still dequantize float8_e4m3fn values by treating storage as raw bytes.
+    if dtype != torch.float8_e4m3fn or torch.version.hip is not None:
+        return False
+    if arg_name is not None and not arg_name.startswith("in_ptr"):
+        return False
+
+    try:
+        device = V.graph.get_current_device_or_throw()
+    except AttributeError:
+        return False
+
+    if device.type != "cuda":
+        return False
+
+    return DeviceProperties.create(device).cc < 89
+
+
 def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
     if isinstance(arg, TensorArg):
         typ = _type_of(arg.dtype)
@@ -47,6 +68,8 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
                 return "fp32"
             else:
                 return new_typ
+        elif use_uint8_triton_storage_for_cuda_float8_e4m3fn(arg.dtype, arg.name):
+            return "*u8"
         else:
             return typ
     if isinstance(arg, SizeArg):
@@ -83,7 +106,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
         elif isinstance(arg.expr, bool):
             return "i1"
 
-        # if this is a integer
+        # if this is an integer
         if size_dtype == "tl.int32":
             return "i32"
         elif size_dtype == "tl.int64":
@@ -122,6 +145,21 @@ def non_constexpr_signature(signature):
             new_signature.append(arg)
 
     return new_signature
+
+
+def select_tile_hint(size_hints, signature):
+    """Pick TileHint.SQUARE vs TileHint.DEFAULT for 2D pointwise; None for 1D.
+
+    SQUARE applies when the kernel has exactly 2 size hints and 4 non-constexpr
+    signature args (input, output, and 2 numel args -> a square 2D tile).
+    """
+    from torch._inductor.runtime.hints import TileHint
+
+    if len(size_hints) != 2:
+        return None
+    if len(non_constexpr_signature(signature)) == 4:
+        return TileHint.SQUARE
+    return TileHint.DEFAULT
 
 
 def signature_to_meta(
