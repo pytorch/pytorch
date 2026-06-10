@@ -1234,8 +1234,37 @@ This feature is a prototype and may have compatibility breaking changes in the f
 .. py:module:: torch.types
 ```
 
+## Version information
+
 ```{eval-rst}
+.. py:data:: torch.__version__
+
+   A string containing the version of PyTorch.
+
 .. py:module:: torch.version
+```
+
+The `torch.version` module contains version information for the installed
+PyTorch build.
+
+```{eval-rst}
+.. py:data:: torch.version.cuda
+
+   The CUDA version used to build PyTorch, or ``None`` if CUDA was not
+   available.
+
+.. py:data:: torch.version.git_version
+
+   The Git commit used to build PyTorch, if available.
+
+.. py:data:: torch.version.hip
+
+   The ROCm HIP version used to build PyTorch, or ``None`` if ROCm was not
+   available.
+
+.. py:data:: torch.version.debug
+
+   Whether PyTorch was built with debug mode enabled.
 ```
 
 % Compiler configuration module - documented in torch.compiler.config.md
