@@ -3419,7 +3419,7 @@ class SIMDScheduling(BaseScheduling):
                 return None
 
     def codegen_sync(self):
-        V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
+        V.graph.wrapper_code.generate_debug_sync(V.graph.wrapper_code)
 
     def _codegen_standalone_kernel(
         self, node_info: NodeInfo, only_gen_src_code: bool
