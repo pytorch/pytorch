@@ -136,7 +136,7 @@ jobs:
       contents: read
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@jeanschmidt/imds_ipv6
         if: ${{ !contains(matrix.runner, 'b200') && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}

@@ -158,7 +158,7 @@ jobs:
       build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@jeanschmidt/imds_ipv6
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}

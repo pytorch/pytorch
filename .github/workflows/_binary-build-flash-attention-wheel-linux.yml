@@ -83,7 +83,7 @@ jobs:
       TORCH_VERSION: "2.10.0"
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@jeanschmidt/imds_ipv6
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           fail-silently: false
