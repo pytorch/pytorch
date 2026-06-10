@@ -1492,7 +1492,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_power_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         z: VariableTracker | None,
         reverse: bool = False,
@@ -1501,7 +1501,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_power_z_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         v: VariableTracker,
         w: VariableTracker,
     ) -> VariableTracker:
@@ -1513,7 +1513,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_power_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         z: VariableTracker | None,
     ) -> VariableTracker:
