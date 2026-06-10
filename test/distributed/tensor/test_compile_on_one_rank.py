@@ -3,6 +3,7 @@
 import difflib
 import functools
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -10,7 +11,12 @@ import torch.distributed.config as dist_config
 import torch.nn as nn
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -221,6 +227,115 @@ class TestCompileOnOneRank(DTensorTestBase):
         opt = torch.compile(f, backend="aot_eager", fullgraph=True)
         out = opt(x)
         self.assertEqual(out, f(x))
+
+
+def _factory_from_input_device(x):
+    # Factory op whose device + dtype are derived from an input tensor, mirroring
+    # real CooR graphs (e.g. token_dispatcher.py: torch.zeros(..., device=x.device)
+    # and SimpleFSDP mixed-precision casts). Shape is incidental.
+    return torch.zeros(4, x.shape[1], device=x.device, dtype=x.dtype)
+
+
+def _indexed_cuda_device_nodes(gm):
+    """Nodes carrying a concrete, indexed cuda device in their args/kwargs.
+
+    These are the rank-specific constants that make a make_fx graph non
+    device-agnostic. A device-agnostic graph derives device in-graph (via
+    prim.device) and so has none of these.
+    """
+    found = []
+    for node in gm.graph.nodes:
+        operands = list(node.args) + list(node.kwargs.values())
+        for operand in operands:
+            if (
+                isinstance(operand, torch.device)
+                and operand.type == "cuda"
+                and operand.index is not None
+            ):
+                found.append(node)
+                break
+    return found
+
+
+class TestCompileOnOneRankDeviceAsParameter(TestCase):
+    """Device-as-parameter for the make_fx tracing path used by graph_trainer/CooR.
+
+    Under compile_on_one_rank, a factory op whose device is derived from an input
+    tensor's .device should trace with its device= fed by an in-graph
+    prim.device(input) node, instead of baking the input's concrete device index.
+    That keeps the traced graph device-agnostic so one compiled artifact runs on
+    each rank's real GPU without --virtual-local-rank.
+    """
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @dist_config.patch(compile_on_one_rank=True)
+    def test_factory_device_derived_from_input_not_baked(self):
+        gm = make_fx(_factory_from_input_device, tracing_mode="fake")(
+            torch.randn(2, 8, device="cuda:0")
+        )
+        targets = [n.target for n in gm.graph.nodes]
+        self.assertIn(
+            torch.ops.prim.device.default,
+            targets,
+            "device should be derived in-graph from the input via prim.device",
+        )
+        baked = _indexed_cuda_device_nodes(gm)
+        self.assertEqual(
+            baked,
+            [],
+            f"no node should bake a concrete indexed cuda device; found: {baked}",
+        )
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @dist_config.patch(compile_on_one_rank=True)
+    def test_factory_device_is_runtime_agnostic(self):
+        gm = make_fx(_factory_from_input_device, tracing_mode="fake")(
+            torch.randn(2, 8, device="cuda:0")
+        )
+        self.assertEqual(
+            gm(torch.randn(2, 8, device="cuda:0")).device, torch.device("cuda:0")
+        )
+        self.assertEqual(
+            gm(torch.randn(2, 8, device="cuda:1")).device, torch.device("cuda:1")
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_default_path_unchanged_bakes_device(self):
+        # Without compile_on_one_rank the device stays baked (the feature must be
+        # gated so it does not perturb the default tracing path).
+        gm = make_fx(_factory_from_input_device, tracing_mode="fake")(
+            torch.randn(2, 8, device="cuda:0")
+        )
+        self.assertNotIn(
+            torch.ops.prim.device.default, [n.target for n in gm.graph.nodes]
+        )
+        self.assertTrue(_indexed_cuda_device_nodes(gm))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @dist_config.patch(compile_on_one_rank=True)
+    def test_to_copy_explicit_device_derived_from_input(self):
+        # An explicit-device dtype cast (the SimpleFSDP mixed-precision pattern,
+        # aten._to_copy with a device= kwarg) also gets its baked device rewired
+        # to prim.device(input), alongside the factory-op path.
+        def f(x):
+            return x.to(device="cuda:0", dtype=torch.bfloat16)
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(2, 8, device="cuda:0"))
+        self.assertIn(torch.ops.prim.device.default, [n.target for n in gm.graph.nodes])
+        self.assertEqual(_indexed_cuda_device_nodes(gm), [])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @dist_config.patch(compile_on_one_rank=True)
+    def test_no_input_on_device_raises(self):
+        # A cuda factory in a graph whose only input is on CPU has no input to
+        # derive the device from, so we raise rather than silently emit a
+        # non-portable graph. (The general fix -- a synthesized device input
+        # parameter supplied by the executor -- is a planned follow-up.)
+        def f(x):
+            return torch.zeros(x.shape[0], device="cuda:0")
+
+        with self.assertRaisesRegex(RuntimeError, "no graph input is on that device"):
+            make_fx(f, tracing_mode="fake")(torch.randn(2, device="cpu"))
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import functools
 import inspect
 import logging
 import operator
+import sys
 import threading
 import typing
 import typing_extensions
@@ -26,6 +27,7 @@ from typing import (
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
@@ -1150,6 +1152,84 @@ def _fetch_proxies_and_all_constant_flag(
     return f_flat_args_kwargs, tuple(proxy_flat_args_kwargs), all_constant
 
 
+def _coor_enabled() -> bool:
+    """True when compile-on-one-rank (CooR) device-as-parameter rewriting should run.
+
+    Reads ``torch.distributed.config`` via ``sys.modules`` WITHOUT importing it: if the
+    module is not already loaded, CooR cannot be enabled (its flag cannot have been set
+    or patched), so this returns ``False`` and the core proxy-tracing path never drags
+    ``torch.distributed`` into a non-distributed program. When the module is loaded the
+    flag is read live, so ``config.patch(...)`` is honored.
+    """
+    dist_config = sys.modules.get("torch.distributed.config")
+    if dist_config is None:
+        return False
+    return dist_config.compile_on_one_rank
+
+
+def _is_indexed_accelerator_device(obj: object) -> TypeGuard[torch.device]:
+    """A concrete device with an explicit index (e.g. cuda:0, xpu:1) -- the
+    rank-specific case we rewrite to ``prim.device(input)``.
+
+    The rewrite is device-type agnostic: the operand follows whatever device its input
+    is, so a graph traced on cuda vs rocm becomes identical (both ``prim.device(arg)``).
+
+    TODO: revisit two cases left baked here, for fuller device-type agnosticism:
+      - bare ``cpu``: left baked because cpu is identical on every rank/host (already
+        portable), and cpu helper tensors (e.g. an index tensor) should stay on cpu
+        rather than follow an accelerator input; parameterizing it would also need the
+        no-input handling (cpu factories often have no cpu input to derive from).
+      - unindexed accelerator (``device("cuda")``, index None): bakes only the device
+        *type*, so two nodes on different accelerator types (cuda vs rocm) still differ.
+        Doesn't occur in practice today (factory/cast ops resolve to an indexed device
+        or omit ``device``); closing it needs matching an input by device *type* rather
+        than exact device, which conflates multiple indices of one type.
+    """
+    return isinstance(obj, torch.device) and obj.index is not None and obj.type != "cpu"
+
+
+def _device_edge(tracer: _ProxyTracer, device: torch.device) -> Proxy:
+    """Return a ``prim.device(input)`` proxy that yields ``device`` at runtime.
+
+    Rewrites a baked rank-specific device into a graph edge derived from an existing
+    graph input that lives on that device, making the traced graph device-agnostic for
+    CooR. Cached per device on the tracer for CSE. Raises if no input is on ``device``;
+    the general fix for that case (a synthesized device input parameter) is a follow-up.
+
+    Caveat: we pick *one* representative input per device, so the rewrite bakes in the
+    trace-time input device-co-location partition -- it is only valid at runtime if
+    inputs that shared a device at trace time still share one. For single-device CooR
+    that is the trivial one-class partition; for mixed-device graphs it is a real
+    assumption. TODO: since the assumption is created here, core should record this
+    partition (e.g. as graph metadata) and expose a helper to recompute it from runtime
+    inputs; a serialization/precompile layer (e.g. torchtitan) then consumes that to
+    reject a load whose input co-location differs. Fingerprint the *overlap* equivalence
+    classes over input indices, NOT the device identities -- the latter would defeat the
+    device-index/type agnosticism this rewrite provides.
+    """
+    cached = tracer._device_edge_cache.get(device)
+    if cached is not None:
+        return cached
+    ref_node = None
+    for node in tracer.graph.find_nodes(op="placeholder"):
+        val = node.meta.get("val")
+        if isinstance(val, torch.Tensor) and val.device == device:
+            ref_node = node
+            break
+    if ref_node is None:
+        raise RuntimeError(
+            f"device_as_parameter: an op targets {device} but no graph input is on that "
+            f"device; cannot make it device-agnostic. (Supplying device as an explicit "
+            f"graph input is the planned resolution.)"
+        )
+    edge = tracer.create_proxy(
+        "call_function", torch.ops.prim.device.default, (Proxy(ref_node, tracer),), {}
+    )
+    edge.node.meta["val"] = device
+    tracer._device_edge_cache[device] = edge
+    return edge
+
+
 def proxy_call(
     proxy_mode: ProxyTorchDispatchMode,
     func: OpOverload,
@@ -1235,6 +1315,16 @@ def proxy_call(
                 "It may be possible to trace this with dynamic shapes; try setting tracing_mode='symbolic' "
                 "in your make_fx call."
             )
+
+    # [device-as-parameter] Under compile-on-one-rank, replace a baked rank-specific
+    # device operand (e.g. device(type='cuda', index=0)) with a prim.device(input)
+    # edge so the traced graph is device-agnostic. Only the node operand changes; the
+    # fake op below still runs with the real device, so the fake output is unaffected.
+    if _coor_enabled():
+        proxy_flat_args_kwargs = [
+            _device_edge(tracer, e) if _is_indexed_accelerator_device(e) else e
+            for e in proxy_flat_args_kwargs
+        ]
 
     proxy_args, proxy_kwargs = pytree.tree_unflatten(proxy_flat_args_kwargs, spec)
 
@@ -1403,6 +1493,7 @@ def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> N
     tracer.opaque_tracker = WeakIdKeyDictionary()
     tracer._opaque_real_obj_proxy = {}
     tracer.sympy_expr_tracker = {}
+    tracer._device_edge_cache = {}
     # Stores the torch function that was called during tracing
     tracer.torch_fn_metadata = None
     # Stores the counts for every torch function called. This is to help
@@ -1424,6 +1515,8 @@ class PythonKeyTracer(Tracer):
     symnode_tracker: _SymNodeDict
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
+    # [device-as-parameter] cache of prim.device(input) edges, keyed by device (CooR)
+    _device_edge_cache: dict[torch.device, Proxy]
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
@@ -2126,6 +2219,8 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     symnode_tracker: _SymNodeDict
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
+    # [device-as-parameter] cache of prim.device(input) edges, keyed by device (CooR)
+    _device_edge_cache: dict[torch.device, Proxy]
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
