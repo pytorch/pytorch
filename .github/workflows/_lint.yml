@@ -37,7 +37,7 @@ jobs:
           checkout-mode: treeless
 
       - name: Setup uv
-        uses: pytorch/test-infra/.github/actions/setup-uv@main
+        uses: astral-sh/setup-uv@v8.1.0
         with:
           python-version: "3.12"
           activate-environment: true
