@@ -1359,13 +1359,8 @@ class _InProcessFxCompile(FxCompile):
                 with torch.no_grad():
                     fake_mode = fake_tensor_prop(gm, example_inputs)
 
-            # Activate a C++ FakeTensorMode mirroring the python one for the rest
-            # of compilation; downstream fake_mode_context() sites route to it.
-            # Done after fake_tensor_prop, which produces the mode we derive from.
             if (
                 config.use_cpp_fake_tensor
-                and hasattr(torch._C, "_is_fake_tensor")
-                and fake_mode is not None
                 and CppFakeTensorMode._get_active_cpp_fake_tensor_mode() is None
             ):
                 cpp_fake_mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
@@ -3050,32 +3045,45 @@ def _compile_fx_main(
             with V.set_fake_mode(fake_mode), compiled_autograd._disable(), context():
                 return inference_compiler(unlifted_gm, example_inputs_)
 
-        with (
-            V.set_fake_mode(fake_mode),
-            torch._guards.tracing(tracing_context),
-            compiled_autograd._disable(),
-            functorch_config.patch(
-                unlift_effect_tokens=True,
-                selective_decompose=config.selective_decompose,
-            ),
-        ):
-            try:
-                return dynamo_common.aot_autograd(
-                    fw_compiler=fw_compiler,
-                    bw_compiler=bw_compiler,
-                    inference_compiler=inference_compiler,
-                    decompositions=decompositions,
-                    partition_fn=partition_fn,
-                    keep_inference_input_mutations=True,
-                    compiler_config_extra=compiler_config_extra,
-                    ignore_shape_env=ignore_shape_env,
-                    pre_grad_passes=run_pre_grad_passes,
-                    compile_region_name=compile_region_name,
-                )(model_, example_inputs_)
-            except ShortenTraceback as e:
-                # We will also shorten the traceback inside dynamo.
-                # This is only useful if inductor is called directly with an FX graph.
-                raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+        with contextlib.ExitStack() as cpp_fake_stack:
+            if (
+                config.use_cpp_fake_tensor
+                and CppFakeTensorMode._get_active_cpp_fake_tensor_mode() is None
+            ):
+                cpp_fake_mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
+                    fake_mode.fake_tensor_converter, fake_mode.shape_env
+                )
+                cpp_fake_mode.set_allow_fallback_kernels(
+                    fake_mode.allow_fallback_kernels
+                )
+                cpp_fake_stack.enter_context(cpp_fake_mode.activated())
+
+            with (
+                V.set_fake_mode(fake_mode),
+                torch._guards.tracing(tracing_context),
+                compiled_autograd._disable(),
+                functorch_config.patch(
+                    unlift_effect_tokens=True,
+                    selective_decompose=config.selective_decompose,
+                ),
+            ):
+                try:
+                    return dynamo_common.aot_autograd(
+                        fw_compiler=fw_compiler,
+                        bw_compiler=bw_compiler,
+                        inference_compiler=inference_compiler,
+                        decompositions=decompositions,
+                        partition_fn=partition_fn,
+                        keep_inference_input_mutations=True,
+                        compiler_config_extra=compiler_config_extra,
+                        ignore_shape_env=ignore_shape_env,
+                        pre_grad_passes=run_pre_grad_passes,
+                        compile_region_name=compile_region_name,
+                    )(model_, example_inputs_)
+                except ShortenTraceback as e:
+                    # We will also shorten the traceback inside dynamo.
+                    # This is only useful if inductor is called directly with an FX graph.
+                    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
 
 
 def graph_returns_tuple(gm: GraphModule) -> bool:
