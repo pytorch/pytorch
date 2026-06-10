@@ -741,13 +741,14 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
 
   std::vector<int64_t> shape( output->dim(), 1);
   shape[output_channels_dim] = -1;
-  at::Tensor bias_contig =  bias->reshape(shape).contiguous(memory_format);
+  at::Tensor bias_reshaped = bias->reshape(shape);
+  auto bias_contig = bias_reshaped.expect_contiguous(memory_format);
   // Make sure that NC11 strides follow formula
-  bias_contig.resize_(bias_contig.sizes(), memory_format );
+  bias_contig->resize_(bias_contig->sizes(), memory_format );
 
   // TODO: Workaround since MIOpen does not support NHWC bias
   // See #64426
-  output->add_( bias_contig );
+  output->add_( *bias_contig );
 
   /* MIOpen does not support NHWC bias; Activate once support is added.
   bdesc.set( bias_contig );
@@ -939,13 +940,13 @@ void miopen_convolution_forward_out(
   convolution_shape_check(
       c, input, weight, output, padding, stride, dilation, groups);
 
-  Tensor weight_contig = weight->contiguous(memory_format);
-  Tensor input_contig = input->contiguous(memory_format);
+  auto weight_contig = weight->expect_contiguous(memory_format);
+  auto input_contig = input->expect_contiguous(memory_format);
 
   raw_miopen_convolution_forward_out(
       *output,
-      input_contig,
-      weight_contig,
+      *input_contig,
+      *weight_contig,
       padding,
       stride,
       dilation,
@@ -1058,12 +1059,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_transpose_back
     bool benchmark,
     bool deterministic,
     std::array<bool,3> output_mask) {
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
+  auto grad_output = grad_output_t.expect_contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
     grad_input = miopen_convolution_transpose_backward_input(
-        grad_output,
+        *grad_output,
         weight,
         padding,
         stride,
@@ -1075,7 +1076,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_transpose_back
   if (output_mask[1]) {
     grad_weight = miopen_convolution_transpose_backward_weight(
         weight.sizes(),
-        grad_output,
+        *grad_output,
         input,
         padding,
         stride,
@@ -1085,7 +1086,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_transpose_back
         deterministic);
   }
   if (output_mask[2]) {
-    grad_bias = miopen_convolution_backward_bias(grad_output);
+    grad_bias = miopen_convolution_backward_bias(*grad_output);
   }
 
   return std::tuple<Tensor,Tensor,Tensor>{std::move(grad_input), std::move(grad_weight), std::move(grad_bias)};
@@ -1227,13 +1228,13 @@ Tensor miopen_convolution_backward_input(
   convolution_shape_check(
       c, grad_input, weight, grad_output, padding, stride, dilation, groups);
 
-  Tensor weight_contig = weight->contiguous(memory_format);
-  Tensor grad_output_contig = grad_output->contiguous(memory_format);
+  auto weight_contig = weight->expect_contiguous(memory_format);
+  auto grad_output_contig = grad_output->expect_contiguous(memory_format);
 
   raw_miopen_convolution_backward_input_out(
       *grad_input,
-      grad_output_contig,
-      weight_contig,
+      *grad_output_contig,
+      *weight_contig,
       padding,
       stride,
       dilation,
@@ -1452,11 +1453,11 @@ Tensor miopen_convolution_backward_weight(
     bool depthwise=false) {
   auto memory_format = miopen_conv_suggest_memory_format(input_t, grad_output_t);
 
-  Tensor grad_output_contig_t = grad_output_t.contiguous(memory_format);
-  TensorArg grad_output_contig{grad_output_contig_t, "grad_output", 1};
+  auto grad_output_contig_m = grad_output_t.expect_contiguous(memory_format);
+  TensorArg grad_output_contig{*grad_output_contig_m, "grad_output", 1};
 
-  Tensor input_contig_t = input_t.contiguous(memory_format);
-  TensorArg input{input_contig_t, "input", 2};
+  auto input_contig_m = input_t.expect_contiguous(memory_format);
+  TensorArg input{*input_contig_m, "input", 2};
 
   checkAllSameType(c, {grad_output_contig, input});
   checkAllSameGPU(c, {grad_output_contig, input});
@@ -1529,7 +1530,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_backward(
     bool benchmark,
     bool deterministic,
     std::array<bool,3> output_mask) {
-  Tensor grad_output = grad_output_t.to(input.suggest_memory_format());
+  auto grad_output = grad_output_t.expect_contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
   if (input.numel() == 0) {
@@ -1546,7 +1547,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_backward(
     if (output_mask[0]) {
       grad_input = miopen_convolution_backward_input(
           input.sizes(),
-          grad_output,
+          *grad_output,
           weight,
           padding,
           stride,
@@ -1558,7 +1559,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_backward(
     if (output_mask[1]) {
       grad_weight = miopen_convolution_backward_weight(
           weight.sizes(),
-          grad_output,
+          *grad_output,
           input,
           padding,
           stride,
@@ -1568,7 +1569,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_backward(
           deterministic);
     }
     if (output_mask[2]) {
-      grad_bias = miopen_convolution_backward_bias(grad_output);
+      grad_bias = miopen_convolution_backward_bias(*grad_output);
     }
   }
 
@@ -1728,13 +1729,13 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_depthwise_convolution_back
     bool benchmark,
     bool deterministic,
     std::array<bool,3> output_mask) {
-  Tensor grad_output = grad_output_t.to(input.suggest_memory_format());
+  auto grad_output = grad_output_t.expect_contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
     grad_input = miopen_convolution_backward_input(
         input.sizes(),
-        grad_output,
+        *grad_output,
         weight,
         padding,
         stride,
@@ -1747,7 +1748,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_depthwise_convolution_back
   if (output_mask[1]) {
     grad_weight = miopen_convolution_backward_weight(
         weight.sizes(),
-        grad_output,
+        *grad_output,
         input,
         padding,
         stride,
@@ -1758,7 +1759,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_depthwise_convolution_back
         true);
   }
   if (output_mask[2]) {
-    grad_bias = miopen_convolution_backward_bias(grad_output);
+    grad_bias = miopen_convolution_backward_bias(*grad_output);
   }
 
   return std::tuple<Tensor,Tensor,Tensor>{std::move(grad_input), std::move(grad_weight), std::move(grad_bias)};
@@ -1815,19 +1816,15 @@ Tensor miopen_convolution_add_relu(
     IntArrayRef dilation,
     int64_t groups) {
   auto memory_format = miopen_conv_suggest_memory_format(input_t, weight_t);
-  const Tensor input = input_t.contiguous(memory_format);
-  const Tensor weight = weight_t.contiguous(memory_format);
-  Tensor z = z_t;
-  if (z.suggest_memory_format() != memory_format) {
-    z = z.to(memory_format);
-  }
-  z = z.contiguous(memory_format);
+  auto input = input_t.expect_contiguous(memory_format);
+  auto weight = weight_t.expect_contiguous(memory_format);
+  auto z = z_t.expect_contiguous(memory_format);
 
   // FuseFrozenConvAddRelu performs some tensor shape checking
   Tensor output_t = at::detail::empty_cuda(
       conv_output_size(
-          input.sizes(), weight.sizes(), padding, stride, dilation),
-      input.options().memory_format(memory_format));
+          input->sizes(), weight->sizes(), padding, stride, dilation),
+      input->options().memory_format(memory_format));
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -1846,9 +1843,9 @@ Tensor miopen_convolution_add_relu(
 
   raw_miopen_convolution_add_relu_out(
       output_t,
-      input,
-      weight,
-      z,
+      *input,
+      *weight,
+      *z,
       _alpha,
       _bias,
       stride,
@@ -1870,14 +1867,14 @@ Tensor miopen_convolution_relu(
     IntArrayRef dilation,
     int64_t groups) {
   auto memory_format = miopen_conv_suggest_memory_format(input_t, weight_t);
-  const Tensor input = input_t.contiguous(memory_format);
-  const Tensor weight = weight_t.contiguous(memory_format);
+  auto input = input_t.expect_contiguous(memory_format);
+  auto weight = weight_t.expect_contiguous(memory_format);
 
   // FuseFrozenConvAddRelu performs some tensor shape checking
   Tensor output_t = at::detail::empty_cuda(
       conv_output_size(
-          input.sizes(), weight.sizes(), padding, stride, dilation),
-      input.options().memory_format(memory_format));
+          input->sizes(), weight->sizes(), padding, stride, dilation),
+      input->options().memory_format(memory_format));
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -1895,8 +1892,8 @@ Tensor miopen_convolution_relu(
 
   raw_miopen_convolution_add_relu_out(
       output_t,
-      input,
-      weight,
+      *input,
+      *weight,
       output_t, // use output_t as z to satisfy MIOpen API
       0, // alpha
       _bias,
