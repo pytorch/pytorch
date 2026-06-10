@@ -191,6 +191,22 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(fields[kernel], frozenset({0, int(Kernel.START)}))
         self.assertEqual(fields[memcpy], all_memcpy)
 
+    def test_monitor_buffer_size_from_env(self):
+        # The per-buffer pool size is user-configurable: an explicit buffer_size
+        # arg wins, otherwise TORCH_CUPTI_MONITOR_BUFFER_SIZE is honored, else the
+        # 4 MiB default. No CUDA -- this only reads the constructor config.
+        import unittest.mock
+
+        from torch.profiler._cupti.monitor import _DEFAULT_BUFFER_SIZE, CuptiMonitor
+
+        self.assertEqual(CuptiMonitor().buffer_size, _DEFAULT_BUFFER_SIZE)
+        with unittest.mock.patch.dict(
+            "os.environ", {"TORCH_CUPTI_MONITOR_BUFFER_SIZE": "1048576"}
+        ):
+            self.assertEqual(CuptiMonitor().buffer_size, 1048576)
+            # An explicit arg overrides the env var.
+            self.assertEqual(CuptiMonitor(buffer_size=2048).buffer_size, 2048)
+
     def test_monitor_external_correlation_not_started(self):
         # External-correlation push/pop are no-ops until the monitor is started (no
         # subscriber yet), returning None rather than touching CUPTI's global stack.
@@ -278,6 +294,49 @@ class TestCuptiMonitorCUDA(TestCase):
             self.assertEqual(len(start), len(name))
             self.assertTrue(all(int(e) - int(s) >= 0 for s, e in zip(start, end)))
         self.assertTrue(any(len(n) > 0 for c in columns for n in c[int(Kernel.NAME)]))
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_singleton_flush_accessible(self):
+        # A user can reach the process-wide monitor singleton through the public
+        # accessors and flush it: instance() constructs/returns it, get_monitor()
+        # hands back that same object, and flush(sync=True) on the singleton
+        # delivers everything collected up to the call.
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.cupti_python import ActivityKind, CuptiError
+        from torch.profiler._cupti.records import Kernel
+
+        kernel = ActivityKind.CONCURRENT_KERNEL
+        lock = threading.Lock()
+        columns: list = []
+
+        def on_columns(cols):
+            if kernel in cols:
+                with lock:
+                    columns.append(cols[kernel])
+
+        mon = cupti_monitor.instance()
+        self.assertIs(cupti_monitor.get_monitor(), mon)
+        # Drop the singleton after the observer is torn down so the next instance()
+        # caller gets a fresh monitor (cleanups run LIFO: unregister first).
+        self.addCleanup(setattr, cupti_monitor, "_instance", None)
+        try:
+            obs = mon.register({kernel: {Kernel.START, Kernel.END}}, on_columns)
+        except CuptiError as e:
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        self.addCleanup(mon.unregister, obs)
+
+        x = torch.randn(128, 128, device="cuda")
+        for _ in range(3):
+            x = torch.relu(x @ x)
+        x.sum().item()
+        torch.cuda.synchronize()
+
+        # Flush via the singleton fetched from the public accessor, not the local
+        # handle, to exercise the user-visible path.
+        cupti_monitor.get_monitor().flush(forced=True, sync=True)
+
+        total = sum(len(c[int(Kernel.START)]) for c in columns)
+        self.assertGreater(total, 0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_multiple_observers(self):
