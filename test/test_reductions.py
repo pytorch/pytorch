@@ -101,8 +101,70 @@ def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
 
     return result
 
+class _TestReductionsBase(TestCase):
+    # TODO: refactor to use comparators from common_utils
+    def _assert_matches_numpy(self, t, n):
+        self.assertEqual(n.shape, t.shape)
+        if t.dtype == torch.float:
+            self.assertEqual(n, t, rtol=1e-03, atol=1e-05, equal_nan=True)
+        else:
+            self.assertEqual(n, t, equal_nan=True)
+
+    # TODO: kill this and replace with common creation ops
+    def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True,
+                      use_complex=False) -> dict[str, list[torch.Tensor]]:
+        float_types = [torch.double,
+                       torch.float]
+        int_types = [torch.int64,
+                     torch.int32,
+                     torch.int16]
+
+        complex_types = [torch.complex64,
+                         torch.complex128]
+
+        def make_contiguous(shape, dtype) -> torch.Tensor:
+            if dtype in float_types:
+                val = torch.randn(shape, dtype=dtype)
+                val = val * ((val_range[1] - val_range[0]) / (math.pi * 2.0))
+                val = val + ((val_range[1] - val_range[0]) / 2.0)
+                val = torch.clamp(val, min=val_range[0], max=val_range[1])
+                return val
+            result = torch.zeros(shape, dtype=dtype)
+            result.apply_(lambda x: random.randint(val_range[0], val_range[1]))
+            return result
+
+        def make_non_contiguous(shape, dtype) -> torch.Tensor:
+            contig = make_contiguous(shape, dtype)
+            non_contig = torch.empty(shape + (2, 2), dtype=dtype)[..., 0]
+            non_contig = non_contig.select(-1, -1)
+            non_contig.copy_(contig)
+            self.assertFalse(non_contig.is_contiguous())
+            return non_contig
+
+        def make_contiguous_slice(size, dtype) -> torch.Tensor:
+            contig = make_contiguous((1, size), dtype)
+            non_contig = contig[:1, 1:size - 1]
+            self.assertTrue(non_contig.is_contiguous())
+            return contig
+
+        types = []
+        if use_floating:
+            types += float_types
+        if use_integral:
+            types += int_types
+        if use_complex:
+            types += complex_types
+        tensors: dict[str, list[torch.Tensor]] = {"cont": [], "noncont": [], "slice": []}
+        for dtype in types:
+            tensors["cont"].append(make_contiguous(shape, dtype))
+            tensors["noncont"].append(make_non_contiguous(shape, dtype))
+            tensors["slice"].append(make_contiguous_slice(sum(list(shape)), dtype))
+
+        return tensors
+
+
 @instantiate_parametrized_tests
-class TestReductions(TestCase):
+class TestReductions(_TestReductionsBase):
 
     @parametrize("dtype", [torch.float, torch.bfloat16])
     def test_dim_reduction_lastdim(self, dtype):
@@ -243,7 +305,7 @@ class TestReductions(TestCase):
         self.assertEqual(a_float.mean(), a.mean(dtype=torch.float32))
 
     @parametrize("dtype", [torch.half, torch.bfloat16, torch.float, torch.double])
-    def test_mean_out_is_alias_of_return(self, dtype, device):
+    def test_mean_out_is_alias_of_return(self, dtype):
         a = torch.tensor([[[1.0, 1.0, 1.0, 1.0]], [[2.0, 2.0, 2.0, 2.0]], [[3.0, 3.0, 3.0, 3.0]]],
                          dtype=dtype, device="cpu")
         out = torch.empty((1, 1, 4), dtype=dtype, device="cpu")
@@ -845,7 +907,7 @@ as the input tensor excluding its innermost dimension'):
     # cater to functions where specifying the `dim` parameter is necessary.
 
 # Strategy 2: device-agnostic tests
-class TestReductionsDevice(TestCase):
+class TestReductionsDevice(_TestReductionsBase):
     ###########################################################################
     # ReductionOpInfo unit tests
     ###########################################################################
@@ -1453,66 +1515,6 @@ class TestReductionsDevice(TestCase):
         res1 = x1.sum(dim=(0, 2), keepdim=True)
         res2 = x1.sum(axis=(0, 2), keepdims=True)
         self.assertEqual(res1, res2)
-
-    # TODO: kill this and replace with common creation ops
-    def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True,
-                      use_complex=False) -> dict[str, list[torch.Tensor]]:
-        float_types = [torch.double,
-                       torch.float]
-        int_types = [torch.int64,
-                     torch.int32,
-                     torch.int16]
-
-        complex_types = [torch.complex64,
-                         torch.complex128]
-
-        def make_contiguous(shape, dtype) -> torch.Tensor:
-            if dtype in float_types:
-                val = torch.randn(shape, dtype=dtype)
-                val = val * ((val_range[1] - val_range[0]) / (math.pi * 2.0))
-                val = val + ((val_range[1] - val_range[0]) / 2.0)
-                val = torch.clamp(val, min=val_range[0], max=val_range[1])
-                return val
-            result = torch.zeros(shape, dtype=dtype)
-            result.apply_(lambda x: random.randint(val_range[0], val_range[1]))
-            return result
-
-        def make_non_contiguous(shape, dtype) -> torch.Tensor:
-            contig = make_contiguous(shape, dtype)
-            non_contig = torch.empty(shape + (2, 2), dtype=dtype)[..., 0]
-            non_contig = non_contig.select(-1, -1)
-            non_contig.copy_(contig)
-            self.assertFalse(non_contig.is_contiguous())
-            return non_contig
-
-        def make_contiguous_slice(size, dtype) -> torch.Tensor:
-            contig = make_contiguous((1, size), dtype)
-            non_contig = contig[:1, 1:size - 1]
-            self.assertTrue(non_contig.is_contiguous())
-            return contig
-
-        types = []
-        if use_floating:
-            types += float_types
-        if use_integral:
-            types += int_types
-        if use_complex:
-            types += complex_types
-        tensors: dict[str, list[torch.Tensor]] = {"cont": [], "noncont": [], "slice": []}
-        for dtype in types:
-            tensors["cont"].append(make_contiguous(shape, dtype))
-            tensors["noncont"].append(make_non_contiguous(shape, dtype))
-            tensors["slice"].append(make_contiguous_slice(sum(list(shape)), dtype))
-
-        return tensors
-
-    # TODO: refactor this to use comparators from common_utils
-    def _assert_matches_numpy(self, t, n):
-        self.assertEqual(n.shape, t.shape)
-        if t.dtype == torch.float:
-            self.assertEqual(n, t, rtol=1e-03, atol=1e-05, equal_nan=True)
-        else:
-            self.assertEqual(n, t, equal_nan=True)
 
     # TODO: update this and tests that use it to use the device argument properly
     @dtypes(*all_types())
