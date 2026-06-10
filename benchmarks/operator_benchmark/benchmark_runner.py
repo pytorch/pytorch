@@ -20,7 +20,7 @@ parser = argparse.ArgumentParser(
 )
 
 
-def parse_args():
+def parse_args(args=None):
     parser.add_argument(
         "--tag-filter",
         "--tag_filter",
@@ -170,6 +170,21 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--force-device",
+        "--force_device",
+        help="Force all tests to run on the provided architecture, replacing the original device",
+        default=None,
+    )
+
+    parser.add_argument(
+        "--force-init-on-cpu",
+        "--force_init_on_cpu",
+        help="Initialize the model on CPU, and then move to the device",
+        action="store_true",
+        default=False,
+    )
+
+    parser.add_argument(
         "--output-csv",
         "--output_csv",
         help="CSV file path to store the results",
@@ -183,7 +198,7 @@ def parse_args():
         default="benchmark-results.json",
     )
 
-    args, _ = parser.parse_known_args()
+    args, _ = parser.parse_known_args(args)
 
     if args.omp_num_threads:
         # benchmark_utils.set_omp_threads sets the env variable OMP_NUM_THREADS
@@ -203,8 +218,8 @@ def parse_args():
     return args
 
 
-def main():
-    args = parse_args()
+def main(args=None):
+    args = parse_args(args)
     benchmark_core.BenchmarkRunner(args).run()
 
 
