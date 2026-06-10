@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows:
       - pull
+      - rocm-mi210
       - trunk
       - trunk-rocm-sandbox
       - periodic
