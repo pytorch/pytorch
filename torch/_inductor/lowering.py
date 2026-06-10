@@ -532,8 +532,9 @@ def _register_lowering(
 def register_lowering(
     aten_fn,
     broadcast=False,
-    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
-    | None = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_kind: (
+        ELEMENTWISE_TYPE_PROMOTION_KIND | None
+    ) = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
     lowering_dict=lowerings,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
@@ -1478,9 +1479,11 @@ def _register_unbacked_slice_size_bindings(dim, start, end, step, size):
     current_node = V.graph.current_node
     node_unbacked_bindings = resolve_unbacked_bindings(
         V.graph.sizevars.shape_env,
-        current_node.meta.get("unbacked_bindings", {})
-        if current_node is not None
-        else {},
+        (
+            current_node.meta.get("unbacked_bindings", {})
+            if current_node is not None
+            else {}
+        ),
     )
     sym_size, sym_storage = None, None
     if node_unbacked_bindings:
@@ -2895,11 +2898,15 @@ make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
 make_fallback(aten.rrelu_with_noise_functional)
 
-# TODO: mlazos reevaluate if we want to codegen something different
+# Registered as fallbacks so the cpp_wrapper / AOTI codegen path sees these
+# non-aten custom ops. ``CppWrapperGpu`` intercepts them and either emits
+# inline CUDA/HIP runtime calls or raises a compile-time unsupported-op error.
 make_fallback(torch.ops.streams.record_event.default)
 make_fallback(torch.ops.streams.wait_event.default)
 make_fallback(torch.ops.streams.synchronize_event.default)
 make_fallback(torch.ops.streams.synchronize_device.default)
+make_fallback(torch.ops.streams.synchronize_stream.default)
+make_fallback(torch.ops.streams.wait_stream.default)
 
 
 @register_lowering(aten.rand)

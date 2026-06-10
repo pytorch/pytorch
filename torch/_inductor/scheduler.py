@@ -3456,7 +3456,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for device_nodes in device_groups.values():
                 stream_groups: dict[int, list[BaseSchedulerNode]] = defaultdict(list)
                 for node in device_nodes:
-                    stream_groups[scheduler.node_to_stream.get(node, 0)].append(node)
+                    stream_groups[scheduler.get_node_stream(node)].append(node)
                 for stream_nodes in stream_groups.values():
                     grouped_nodes.extend(
                         [
@@ -4138,6 +4138,7 @@ class Scheduler:
         self._multi_stream_nodes: bool = False
         # Maps stream_idx → user_object_index for retrieving user stream objects
         self.stream_idx_to_user_obj_idx: dict[int, int] = {}
+        self.user_obj_idx_to_stream_idx: dict[int, int] = {}
         self._populate_stream_assignments()
 
         self.nodes = self.fuse_nodes(self.nodes)
@@ -4284,6 +4285,35 @@ class Scheduler:
                 )
         return name_to_donated_buf
 
+    @staticmethod
+    def _get_node_user_obj_idx(node: BaseSchedulerNode) -> int | None:
+        """Return the user-object stream index carried by a scheduler node."""
+        if node.node is None:
+            return None
+
+        user_obj_idx = node.node.get_stream_idx()
+        if user_obj_idx is not None:
+            return user_obj_idx
+
+        origin_node = node.node.get_origin_node()
+        if origin_node is not None:
+            custom = origin_node.meta.get("custom") or {}
+            return custom.get("stream")
+
+        origin_streams: OrderedSet[int] = OrderedSet()
+        for origin in node.node.get_origins():
+            custom = getattr(origin, "meta", {}).get("custom") or {}
+            origin_stream = custom.get("stream")
+            if origin_stream is not None:
+                origin_streams.add(origin_stream)
+
+        if len(origin_streams) > 1:
+            raise AssertionError(
+                f"Scheduler node {node.get_name()} has origins on multiple "
+                f"streams: {list(origin_streams)}"
+            )
+        return next(iter(origin_streams)) if origin_streams else None
+
     def _populate_stream_assignments(self) -> None:
         """Populate node_to_stream and buff_to_stream from IR node stream_idx.
 
@@ -4293,21 +4323,12 @@ class Scheduler:
         """
         from .stream_constants import DEFAULT_STREAM_IDX
 
-        # Map user_object_index to stream index (1-indexed for side streams)
-        user_obj_to_stream_idx: dict[int, int] = {}
-        stream_idx_counter = itertools.count(1)  # 0 is reserved for default stream
-
         for node in self.nodes:
             stream_idx = DEFAULT_STREAM_IDX
 
-            if node.node is not None:
-                user_obj_idx = node.node.get_stream_idx()
-                if user_obj_idx is not None:
-                    if user_obj_idx not in user_obj_to_stream_idx:
-                        new_stream_idx = next(stream_idx_counter)
-                        user_obj_to_stream_idx[user_obj_idx] = new_stream_idx
-                        self.stream_idx_to_user_obj_idx[new_stream_idx] = user_obj_idx
-                    stream_idx = user_obj_to_stream_idx[user_obj_idx]
+            user_obj_idx = self._get_node_user_obj_idx(node)
+            if user_obj_idx is not None:
+                stream_idx = self._get_or_create_stream_idx_for_user_obj(user_obj_idx)
 
             self.node_to_stream[node] = stream_idx
 
@@ -4340,6 +4361,65 @@ class Scheduler:
             for stream_idx in self.node_to_stream.values()
         )
 
+    def _get_or_create_stream_idx_for_user_obj(self, user_obj_idx: int) -> int:
+        stream_idx = self.user_obj_idx_to_stream_idx.get(user_obj_idx)
+        if stream_idx is None:
+            # 0 is reserved for the default stream.
+            stream_idx = len(self.user_obj_idx_to_stream_idx) + 1
+            self.user_obj_idx_to_stream_idx[user_obj_idx] = stream_idx
+            self.stream_idx_to_user_obj_idx[stream_idx] = user_obj_idx
+        return stream_idx
+
+    def get_node_stream(self, node: BaseSchedulerNode) -> int:
+        """Return and cache the stream assignment for a scheduler node.
+
+        Fusion, combo-kernel creation, and custom passes can replace scheduler
+        nodes after the initial stream assignment pass. Preserve the original
+        metadata by inferring the replacement node's stream from its children,
+        IR metadata, or output buffers instead of silently defaulting to stream
+        0.
+        """
+        from .stream_constants import DEFAULT_STREAM_IDX
+
+        if node in self.node_to_stream:
+            return self.node_to_stream[node]
+
+        child_streams = OrderedSet(
+            self.get_node_stream(child)
+            for child in node.get_nodes()
+            if child is not node
+        )
+        if len(child_streams) == 1:
+            stream_idx = next(iter(child_streams))
+        elif len(child_streams) > 1:
+            raise AssertionError(
+                f"Scheduler node {node.get_name()} combines multiple streams: "
+                f"{list(child_streams)}"
+            )
+        elif (user_obj_idx := self._get_node_user_obj_idx(node)) is not None:
+            stream_idx = self._get_or_create_stream_idx_for_user_obj(user_obj_idx)
+        else:
+            buffer_streams = OrderedSet(
+                self.buff_to_stream[buf_name]
+                for buf_name in node.get_buffer_names()
+                if buf_name in self.buff_to_stream
+            )
+            if len(buffer_streams) > 1:
+                raise AssertionError(
+                    f"Scheduler node {node.get_name()} has outputs on multiple "
+                    f"streams: {list(buffer_streams)}"
+                )
+            stream_idx = (
+                next(iter(buffer_streams)) if buffer_streams else DEFAULT_STREAM_IDX
+            )
+
+        self.node_to_stream[node] = stream_idx
+        if stream_idx != DEFAULT_STREAM_IDX:
+            self._multi_stream_nodes = True
+        for buf_name in node.get_buffer_names():
+            self.buff_to_stream.setdefault(buf_name, stream_idx)
+        return stream_idx
+
     def _has_multi_stream_nodes(self) -> bool:
         """Check if any nodes are assigned to non-default streams."""
         return self._multi_stream_nodes
@@ -4357,7 +4437,7 @@ class Scheduler:
         """
         if not self._has_multi_stream_nodes():
             return False
-        return self.get_buf_stream(buf_name) != self.node_to_stream.get(node, 0)
+        return self.get_buf_stream(buf_name) != self.get_node_stream(node)
 
     @property
     def current_device(self) -> torch.device | None:
@@ -5761,9 +5841,7 @@ class Scheduler:
 
         # Propagate stream assignment to the fused node so that subsequent
         # fusion rounds still respect stream boundaries.
-        stream1 = self.node_to_stream.get(node1)
-        if stream1 is not None:
-            self.node_to_stream[node3] = stream1
+        self.node_to_stream[node3] = self.get_node_stream(node1)
 
         return node3
 
@@ -6124,9 +6202,12 @@ class Scheduler:
             self.name_to_fused_node.update(
                 {n.get_name(): combo_node for n in combo_node.get_nodes()}
             )
-            stream = self.node_to_stream.get(accepted[0])
-            if stream is not None:
-                self.node_to_stream[combo_node] = stream
+            accepted_streams = OrderedSet(self.get_node_stream(n) for n in accepted)
+            if len(accepted_streams) != 1:
+                raise AssertionError(
+                    f"Combo kernel combines multiple streams: {list(accepted_streams)}"
+                )
+            self.node_to_stream[combo_node] = next(iter(accepted_streams))
 
         for num, node_list in enumerate(
             ForeachKernelSchedulerNode.group_nodes_for_combo_kernels(self)
@@ -7386,9 +7467,9 @@ class Scheduler:
 
         # Prevent fusion across stream boundaries
         if self._has_multi_stream_nodes():
-            stream1 = self.node_to_stream.get(node1)
-            stream2 = self.node_to_stream.get(node2)
-            if stream1 is not None and stream2 is not None and stream1 != stream2:
+            stream1 = self.get_node_stream(node1)
+            stream2 = self.get_node_stream(node2)
+            if stream1 != stream2:
                 return False
 
         if isinstance(node1, FusedNestedReductions):
@@ -9440,7 +9521,9 @@ class Scheduler:
                         num_streams = 1
                         if self._has_multi_stream_nodes():
                             # Count unique streams (excluding default stream 0)
-                            unique_streams = OrderedSet(self.node_to_stream.values())
+                            unique_streams = OrderedSet(
+                                self.get_node_stream(n) for n in self.nodes
+                            )
                             num_streams = (
                                 max(unique_streams) + 1 if unique_streams else 1
                             )
@@ -9677,7 +9760,7 @@ class Scheduler:
     def generate_stream_ctx_enter(self, node: BaseSchedulerNode) -> None:
         """Code-gen to enter the Stream context assigned to node."""
         assert not isinstance(node, NopKernelSchedulerNode)
-        node_stream = self.node_to_stream[node]
+        node_stream = self.get_node_stream(node)
         self._current_stream_ctx = V.graph.wrapper_code.codegen_cuda_stream_enter(
             stream_idx=node_stream,
         )
@@ -9694,28 +9777,30 @@ class Scheduler:
         Stream context switching is only generated if ``node``'s assigned stream is different from
         the previous node's stream. NopKernelSchedulerNodes have stream=None and inherit the
         enclosing stream context (or do nothing if no context is active yet).
+
+        Replacement nodes created after the pre-fusion stream assignment pass
+        infer their stream from preserved child or buffer metadata.
         """
-        assert node in self.node_to_stream
         stream = (
             None
             if isinstance(node, NopKernelSchedulerNode)
-            else self.node_to_stream[node]
+            else self.get_node_stream(node)
         )
         if self.current_stream_idx == stream:
             # Covers: same stream as current (no switch needed), and both None
             # (nop node before any stream context — nothing to do).
             return
-        elif self.current_stream_idx is not None and stream is None:
+        if stream is None:
             # Don't generate ctx switching. Memory planning code (e.g., delete buffers) on current
             # node goes to previous stream ctx.
             return
-        elif self.current_stream_idx is None and stream is not None:
-            # Enter new ctx, update current stream status.
-            self.generate_stream_ctx_enter(node)
-        else:
+
+        if self.current_stream_idx is not None:
             # Switching from previous stream ctx to the new stream ctx.
             self.generate_stream_ctx_exit()
-            self.generate_stream_ctx_enter(node)
+
+        # Enter new ctx, update current stream status.
+        self.generate_stream_ctx_enter(node)
 
 
 class BaseScheduling:  # noqa: docstring_linter
