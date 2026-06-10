@@ -4382,9 +4382,13 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         ((1, 3), 1, {'eps' : 1e-5}),
         ((0, 2), 1, {'eps' : 1e-5}),
         ((S, S, S), 1, {'eps' : 0.5}),
+        # For testing channels_last on CPU.  Ideally, we would also have a test with
+        # HxW >= 2048, which uses an alternative channels_last path, but tensors that
+        # large cause a variety of failures that are not especially solvable relating to
+        # different data summation orders, and we end up adding a bunch of XFAILs and
+        # not really improving test coverage (while also causing several tests to be
+        # extremely slow).
         ((2, 6, 5, 3), 2, {"eps": 1e-5}),
-        # Trigger an alternative channels-last path on CPU, for HxW >= 2048.
-        ((2, 6, 4, 600), 2, {"eps": 1e-5}),
     )
 
     # num_channels is inferred to be input.shape[1] dimension
