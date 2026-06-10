@@ -491,11 +491,11 @@ _SOFTMAX_FWD_N_PLACEMENTS = 2
 _SOFTMAX_BWD_N_PLACEMENTS = 3
 
 
-# @register_single_dim_strategy(
-#     [aten.cumsum.default, aten.cumprod.default, aten.logcumsumexp.default],
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten.cumsum.default, aten.cumprod.default, aten.logcumsumexp.default],
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def scan_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -512,23 +512,6 @@ def scan_single_dim_strategy(
         strategies.append([Partial("sum"), Partial("sum")])
         strategies.append([Partial("avg"), Partial("avg")])
     return strategies
-
-
-@register_op_strategy(
-    [aten.cumsum.default, aten.cumprod.default, aten.logcumsumexp.default],
-    schema_info=RuntimeSchemaInfo(1),
-)
-def scan_strategy(op_schema: OpSchema) -> OpStrategy:
-    args_schema = op_schema.args_schema
-    input_strategy = args_schema[0]
-    if not isinstance(input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
-    dim = args_schema[1]
-    if not isinstance(dim, int):
-        raise AssertionError(f"Expected int, got {type(dim)}")
-    return common_reduction_strategy(
-        input_strategy, [dim], keep_dim=True, reduction_linear=False
-    )
 
 
 @register_op_strategy(
@@ -609,11 +592,11 @@ def kthvalue_strategy(
     return strategies
 
 
-# @register_single_dim_strategy(
-#     [aten.cummax.default, aten.cummin.default],
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten.cummax.default, aten.cummin.default],
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def cummax_cummin_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -623,15 +606,6 @@ def cummax_cummin_single_dim_strategy(
     return _shard_except_dim_strategy(
         _SORT_LIKE_N_PLACEMENTS, op, args_schema, kwargs_schema, active_dim=dim
     )
-
-
-@register_op_strategy(
-    [aten.cummax.default, aten.cummin.default],
-    schema_info=RuntimeSchemaInfo(1),
-)
-def cummax_cummin_strategy(op_schema: OpSchema) -> OpStrategy:
-    dim = cast(int, op_schema.args_schema[1])
-    return sort_strategy(op_schema, dim)
 
 
 @register_op_strategy(
@@ -932,11 +906,11 @@ def pooling_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 # Category F: Softmax-like ops
-# @register_single_dim_strategy(
-#     [aten._log_softmax.default, aten._softmax.default, aten._safe_softmax.default],
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten._log_softmax.default, aten._softmax.default, aten._safe_softmax.default],
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def softmax_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -952,53 +926,14 @@ def softmax_single_dim_strategy(
     )
 
 
-@register_op_strategy(
-    [aten._log_softmax.default, aten._softmax.default, aten._safe_softmax.default],
-    schema_info=RuntimeSchemaInfo(1),
+@register_single_dim_strategy(
+    [
+        aten._log_softmax_backward_data.default,
+        aten._softmax_backward_data.default,
+    ],
+    schema_info=RuntimeSchemaInfo(2),
+    allow_uneven_sharding=True,
 )
-def softmax_strategy(op_schema: OpSchema) -> OpStrategy:
-    input_strategy, softmax_dim, *_ = op_schema.args_schema
-    input_strategy = cast(OpStrategy, input_strategy)
-
-    softmax_dim = cast(int, softmax_dim)
-    softmax_dim = normalize_dim(softmax_dim, input_strategy.ndim)
-
-    output_strategy = OpStrategy([])
-    for input_placement_strategy in input_strategy.strategies:
-        redistribute_costs = []
-        input_src_spec = input_placement_strategy.output_spec
-
-        # make sure input is replicated along the softmax dim
-        input_target_spec = DTensorSpec(
-            mesh=input_strategy.mesh,
-            placements=replicate_reduction_dims(
-                input_src_spec.placements, [softmax_dim]
-            ),
-            tensor_meta=input_src_spec.tensor_meta,
-        )
-        redistribute_costs.append(
-            generate_redistribute_costs(input_strategy, input_target_spec)
-        )
-        output_target_spec = input_target_spec
-        output_strategy.strategies.append(
-            OpSpec(
-                output_specs=output_target_spec,
-                input_specs=[input_target_spec],
-                redistribute_cost=redistribute_costs,
-            )
-        )
-
-    return output_strategy
-
-
-# @register_single_dim_strategy(
-#     [
-#         aten._log_softmax_backward_data.default,
-#         aten._softmax_backward_data.default,
-#     ],
-#     schema_info=RuntimeSchemaInfo(2),
-#     allow_uneven_sharding=True,
-# )
 def softmax_backward_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -1012,61 +947,6 @@ def softmax_backward_single_dim_strategy(
         kwargs_schema,
         active_dim=softmax_dim,
     )
-
-
-@register_op_strategy(
-    [
-        aten._log_softmax_backward_data.default,
-        aten._softmax_backward_data.default,
-    ],
-    schema_info=RuntimeSchemaInfo(2),
-)
-def softmax_backward_strategy(op_schema: OpSchema) -> OpStrategy:
-    grad_out_strategy, out_strategy, softmax_dim, _ = op_schema.args_schema
-    grad_out_strategy = cast(OpStrategy, grad_out_strategy)
-    out_strategy = cast(OpStrategy, out_strategy)
-    softmax_dim = cast(int, softmax_dim)
-    softmax_dim = normalize_dim(softmax_dim, grad_out_strategy.ndim)
-
-    grad_in_strategy = OpStrategy([])
-    for grad_out_placement_strat, out_placement_strat in zip(
-        grad_out_strategy.strategies, out_strategy.strategies
-    ):
-        # follow the sharding of the grad_out or out depending on which has more shards
-        grad_out_src_spec = grad_out_placement_strat.output_spec
-        out_src_spec = out_placement_strat.output_spec
-        src_spec = (
-            grad_out_src_spec
-            if grad_out_src_spec.num_shards >= out_src_spec.num_shards
-            else out_src_spec
-        )
-
-        # make sure inputs are replicated along the softmax dim
-        tgt_spec = DTensorSpec(
-            mesh=grad_out_strategy.mesh,
-            placements=replicate_reduction_dims(src_spec.placements, [softmax_dim]),
-        )
-        new_grad_out_spec = DTensorSpec(
-            mesh=tgt_spec.mesh,
-            placements=tgt_spec.placements,
-            tensor_meta=grad_out_src_spec.tensor_meta,
-        )
-        new_out_spec = DTensorSpec(
-            mesh=tgt_spec.mesh,
-            placements=tgt_spec.placements,
-            tensor_meta=out_src_spec.tensor_meta,
-        )
-        redist_grad_out_cost = generate_redistribute_costs(grad_out_strategy, tgt_spec)
-        redist_out_cost = generate_redistribute_costs(out_strategy, tgt_spec)
-        grad_in_strategy.strategies.append(
-            OpSpec(
-                output_specs=tgt_spec,
-                input_specs=(new_grad_out_spec, new_out_spec),
-                redistribute_cost=[redist_grad_out_cost, redist_out_cost],
-            )
-        )
-
-    return grad_in_strategy
 
 
 @register_op_strategy(
@@ -1461,11 +1341,11 @@ def rms_norm_bwd_single_dim_strategy(
     return strategies
 
 
-# @register_single_dim_strategy(
-#     [aten.topk.default],
-#     schema_info=RuntimeSchemaInfo(2),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten.topk.default],
+    schema_info=RuntimeSchemaInfo(2),
+    allow_uneven_sharding=True,
+)
 def topk_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -1477,11 +1357,11 @@ def topk_single_dim_strategy(
     )
 
 
-# @register_single_dim_strategy(
-#     aten.sort.default,
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    aten.sort.default,
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def sort_default_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -1493,14 +1373,14 @@ def sort_default_single_dim_strategy(
     )
 
 
-# @register_single_dim_strategy(
-#     aten.sort.stable,
-#     schema_info=RuntimeSchemaInfo(
-#         1,
-#         static_kwargkey=["dim", "descending", "stable"],
-#     ),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    aten.sort.stable,
+    schema_info=RuntimeSchemaInfo(
+        1,
+        static_kwargkey=["dim", "descending", "stable"],
+    ),
+    allow_uneven_sharding=True,
+)
 def sort_stable_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -1510,67 +1390,6 @@ def sort_stable_single_dim_strategy(
     return _shard_except_dim_strategy(
         _SORT_LIKE_N_PLACEMENTS, op, args_schema, kwargs_schema, active_dim=sort_dim
     )
-
-
-def sort_strategy(op_schema: OpSchema, sort_dim: int) -> OpStrategy:
-    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
-    sort_dim = normalize_dim(sort_dim, input_strategy.ndim)
-    single_mesh_dim_strategies = []
-    all_replicate: PlacementList = [Replicate()] * 3
-    single_mesh_dim_strategies.append(all_replicate)
-    for dim in range(input_strategy.ndim):
-        if dim != sort_dim:
-            dim_shardings: PlacementList = [Shard(dim)] * 3
-            single_mesh_dim_strategies.append(dim_shardings)
-    return expand_to_full_mesh_op_strategy(
-        input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
-    )
-
-
-@register_op_strategy(
-    [aten.topk.default],
-    schema_info=RuntimeSchemaInfo(2),
-)
-def topk_strategy(op_schema: OpSchema) -> OpStrategy:
-    topk_dim = (
-        cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else -1
-    )
-    return sort_strategy(op_schema, topk_dim)
-
-
-@register_op_strategy(
-    aten.sort.default,
-    schema_info=RuntimeSchemaInfo(
-        1,
-    ),
-)
-def sort_default_strategy(op_schema: OpSchema) -> OpStrategy:
-    # mostly copy paste from topk_strategy
-    input_strategy = op_schema.args_schema[0]
-    if not isinstance(input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
-    sort_dim = -1
-    if len(op_schema.args_schema) > 1:
-        sort_dim = cast(int, op_schema.args_schema[1])
-    return sort_strategy(op_schema, sort_dim)
-
-
-@register_op_strategy(
-    aten.sort.stable,
-    schema_info=RuntimeSchemaInfo(
-        1,
-        static_kwargkey=["dim", "descending", "stable"],
-    ),
-)
-def sort_stable_strategy(op_schema: OpSchema) -> OpStrategy:
-    # mostly copy paste from topk_strategy
-    input_strategy = op_schema.args_schema[0]
-    if not isinstance(input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
-    sort_dim = -1
-    if "dim" in op_schema.kwargs_schema:
-        sort_dim = cast(int, op_schema.kwargs_schema["dim"])
-    return sort_strategy(op_schema, sort_dim)
 
 
 @register_op_strategy(
@@ -1976,9 +1795,9 @@ def _adjust_group_norm_scalars(
     for d in local_shape[2:]:
         hxw_local *= d
     args = list(schema.args_schema)
-    # Find scalar arg positions: first 1-3 args are tensors (input, weight?, bias?),
-    # then N, C, HxW, group, eps. Count tensor args to find the offset.
-    num_tensor_args = sum(isinstance(a, DTensorSpec) for a in args)
+    # Find scalar arg positions: tensor slots (DTensorSpec or None for optionals)
+    # precede N, C, HxW. Count both to find the offset.
+    num_tensor_args = sum(isinstance(a, (DTensorSpec, type(None))) for a in args)
     args[num_tensor_args] = n_local
     args[num_tensor_args + 1] = c_local
     args[num_tensor_args + 2] = hxw_local
