@@ -109,6 +109,7 @@ from ._aot_autograd.runtime_wrappers import (  # noqa: F401
     SerializableCompiledFunction,
 )
 from ._aot_autograd.schemas import (  # noqa: F401
+    ActInputPath,
     AOTConfig,
     AOTDispatchCompiler,
     AOTGraphCapture,
@@ -1054,7 +1055,7 @@ def prepare_aot_module_simplified(
     ShapeEnv | None,
     pytree.TreeSpec | None,
     PytreeThunk | None,
-    list[tuple[int, tuple[str, ...]]],
+    list[ActInputPath],
 ]:
     if not flatten:
         if kwargs is not None:

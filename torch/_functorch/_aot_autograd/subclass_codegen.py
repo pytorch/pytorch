@@ -10,15 +10,14 @@ subclass types, symint positions) is baked in at compile time.
 import functools
 import keyword
 import logging
-import sys
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from typing import cast, TYPE_CHECKING
-from typing_extensions import TypeIs
 
 import torch
 from torch import SymInt
 
-from .schemas import OpaqueMeta, PlainTensorMeta, SubclassCreationMeta
+from .schemas import ActInputPaths, OpaqueMeta, PlainTensorMeta, SubclassCreationMeta
+from .utils import get_loaded_async_collective_tensor_type
 
 
 log = logging.getLogger(__name__)
@@ -71,20 +70,10 @@ class _CodegenState:
         return name
 
 
-def _is_async_collective_tensor_type(
-    tp: object,
-) -> TypeIs[type["AsyncCollectiveTensor"]]:
-    """Check for the ACT type without importing distributed collectives eagerly."""
-    if "torch.distributed._functional_collectives" not in sys.modules:
-        return False
-    from torch.distributed._functional_collectives import AsyncCollectiveTensor
-
-    return tp is AsyncCollectiveTensor
-
-
 def _maybe_wait_async_collective_tensor(x: object) -> object:
     """Wait on ACT values and leave all other runtime inputs unchanged."""
-    if _is_async_collective_tensor_type(type(x)):
+    AsyncCollectiveTensor = get_loaded_async_collective_tensor_type()
+    if AsyncCollectiveTensor is not None and type(x) is AsyncCollectiveTensor:
         return cast("AsyncCollectiveTensor", x).trigger_wait()
     return x
 
@@ -315,7 +304,7 @@ def _codegen_subclass_wrapper_source(
     out_metas: list[PlainTensorMeta | SubclassCreationMeta],
     num_fw_outs_saved_for_bw: int | None,
     frozen_inp_indices: frozenset[int] = frozenset(),
-    act_input_paths: Sequence[tuple[int, tuple[str, ...]]] | None = None,
+    act_input_paths: ActInputPaths | None = None,
 ) -> tuple[str, dict[str, object]]:
     """Generate source and globals for a subclass wrapper.
 
@@ -458,7 +447,7 @@ def codegen_subclass_wrapper(
     out_metas: list[PlainTensorMeta | SubclassCreationMeta],
     num_fw_outs_saved_for_bw: int | None,
     frozen_inp_indices: frozenset[int] = frozenset(),
-    act_input_paths: Sequence[tuple[int, tuple[str, ...]]] | None = None,
+    act_input_paths: ActInputPaths | None = None,
 ) -> Callable[..., object]:
     """Generate a specialized wrapper function for subclass unwrap/wrap."""
     source, globals_dict = _codegen_subclass_wrapper_source(
