@@ -244,5 +244,97 @@ class TestTensorType(TestCase):
         self.assertEqual(storage.size(), tensor.numel())
 
 
+class TestDispatch(TestCase):
+    def test_dispatch_key_registration(self):
+        """Test that PrivateUse1 dispatch keys are correctly registered"""
+        relevant_ops = [
+            "aten::empty.memory_format",
+            "aten::empty_strided",
+            "aten::_copy_from",
+            "aten::_copy_from_and_resize",
+            "aten::view",
+            "aten::resize_",
+            "aten::as_strided",
+            "aten::_reshape_alias",
+            "aten::_local_scalar_dense",
+            "aten::_has_compatible_shallow_copy_type",
+            "aten::set_.source_Tensor",
+            "aten::set_.source_Storage",
+            "aten::set_.source_Storage_storage_offset",
+            "aten::abs.out",
+            "aten::quantize_per_tensor",
+            "aten::_fused_sdp_choice",
+            "aten::_scaled_dot_product_fused_attention_overrideable",
+            "aten::_scaled_dot_product_fused_attention_overrideable_backward",
+            "aten::sub.Tensor",
+            "openreg::custom_abs",
+        ]
+        for op_name in relevant_ops:
+            self.assertTrue(
+                torch._C._dispatch_has_kernel_for_dispatch_key(op_name, "PrivateUse1"),
+                f"{op_name} should have a PrivateUse1 kernel",
+            )
+
+        autograd_ops = [
+            "openreg::custom_autograd_fn_returns_self",
+            "openreg::custom_autograd_fn_aliasing",
+        ]
+        for op_name in autograd_ops:
+            self.assertTrue(
+                torch._C._dispatch_has_kernel_for_dispatch_key(
+                    op_name, "AutogradPrivateUse1"
+                ),
+                f"{op_name} should have an AutogradPrivateUse1 kernel",
+            )
+
+        self.assertFalse(
+            torch._C._dispatch_has_kernel_for_dispatch_key(
+                "aten::add.Tensor", "PrivateUse1"
+            ),
+            "add.Tensor should not have a direct PrivateUse1 kernel (resolves via global fallback)",
+        )
+
+        self.assertTrue(
+            torch._C._dispatch_has_computed_kernel_for_dispatch_key(
+                "aten::add.Tensor", "PrivateUse1"
+            )
+        )
+        self.assertTrue(
+            torch._C._dispatch_has_computed_kernel_for_dispatch_key(
+                "aten::mul.Tensor", "PrivateUse1"
+            )
+        )
+
+    def test_cpu_fallback_numerical_correctness(self):
+        """Test that ops routed via CPU fallback produce correct results"""
+        x_cpu = torch.randn(3, 4)
+        y_cpu = torch.randn(3, 4)
+        x = x_cpu.to("openreg")
+        y = y_cpu.to("openreg")
+
+        global_fallback_ops = [
+            ("aten::add.Tensor", torch.add, (x, y), (x_cpu, y_cpu)),
+            ("aten::mul.Tensor", torch.mul, (x, y), (x_cpu, y_cpu)),
+        ]
+        for op_name, op_fn, device_args, cpu_args in global_fallback_ops:
+            self.assertFalse(
+                torch._C._dispatch_has_kernel_for_dispatch_key(op_name, "PrivateUse1"),
+                f"{op_name} should resolve via global CPU fallback, not a direct kernel",
+            )
+            result = op_fn(*device_args)
+            self.assertEqual(result.device.type, "openreg")
+            self.assertEqual(result.cpu(), op_fn(*cpu_args))
+
+        self.assertFalse(
+            torch._C._dispatch_has_kernel_for_dispatch_key(
+                "aten::add_.Tensor", "PrivateUse1"
+            ),
+        )
+        z = x.clone()
+        z.add_(y)
+        expected = x_cpu.clone().add_(y_cpu)
+        self.assertEqual(z.cpu(), expected)
+
+
 if __name__ == "__main__":
     run_tests()
