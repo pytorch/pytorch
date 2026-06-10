@@ -218,7 +218,7 @@ class CuptiMonitor:
     def __init__(
         self,
         *,
-        buffer_size: int = _DEFAULT_BUFFER_SIZE,
+        buffer_size: int | None = None,
         flush_period_s: float | None = None,
     ) -> None:
         # The monitor is the engine and the multiplexer: it owns the single CUPTI
@@ -229,6 +229,15 @@ class CuptiMonitor:
         # It uses CUPTI's v2 user-defined-record API: a subscriber + per-field
         # selection, decoded columnar against a record layout computed from the
         # field-size spec (no captured layout needed). This requires libcupti >= 13.2.
+        #
+        # Per-buffer pool size (bytes). An explicit arg wins; otherwise it comes from
+        # TORCH_CUPTI_MONITOR_BUFFER_SIZE (default 4 MiB). Bigger buffers complete less
+        # often (fewer worker wakeups, lower overhead) at the cost of more pinned host
+        # memory and coarser delivery.
+        if buffer_size is None:
+            buffer_size = int(
+                os.environ.get("TORCH_CUPTI_MONITOR_BUFFER_SIZE", _DEFAULT_BUFFER_SIZE)
+            )
         self.buffer_size = buffer_size
         # Background-drain flush period (seconds). An explicit arg wins; otherwise it
         # comes from TORCH_CUPTI_MONITOR_FLUSH_PERIOD_S (default 1.0). Sign-encoded:
