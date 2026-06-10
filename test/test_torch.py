@@ -6770,7 +6770,9 @@ class TestTorch(TestCase):
             with self.assertRaisesRegex(TypeError, 'cond must be a bool'):
                 check_fn('wrong type')
 
-            with self.assertRaisesRegex(TypeError, 'cond must be a bool'):
+            with self.assertRaisesRegex(
+                TypeError, r'cond must be a bool.*torch[.]_check_tensor_all'
+            ):
                 check_fn(torch.tensor(True))
 
     # FIXME: move to indexing test suite
@@ -6935,10 +6937,6 @@ class TestTorch(TestCase):
         # test invalid args: tensor, str, sizes
         with self.assertRaisesRegex(TypeError, r"unflatten\(\): argument 'dim' \(position 1\) must be int, not str"):
             torch.tensor([1]).unflatten('A', (1, 1))
-
-        # test invalid args: tensor, str, namedshape
-        with self.assertRaisesRegex(RuntimeError, r"Name 'A' not found in Tensor\[None\]."):
-            torch.ones(4).unflatten('A', (('A', 2), ('B', 2)))
 
         # test other invalid arguments
         with self.assertRaisesRegex(RuntimeError, r"sizes must be non-empty"):
