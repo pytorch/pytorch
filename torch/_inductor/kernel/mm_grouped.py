@@ -483,6 +483,14 @@ def tuned_grouped_mm(
     )
 
 
+def _expect_single_scale(scales: list[TensorBox] | tuple[TensorBox, ...], name: str) -> TensorBox:
+    if len(scales) != 1:
+        raise NotImplementedError(
+            f"_scaled_grouped_mm_v2 lowering currently expects one {name} tensor"
+        )
+    return scales[0]
+
+
 @register_lowering(aten._scaled_grouped_mm.default, type_promotion_kind=None)
 def tuned_scaled_grouped_mm(
     mat_a: TensorBox,
@@ -513,6 +521,54 @@ def tuned_scaled_grouped_mm(
         offs,
         bias,
         scale_result,
+        out_dtype,
+        use_fast_accum,
+        layout,
+    )
+
+
+@register_lowering(aten._scaled_grouped_mm_v2.default, type_promotion_kind=None)
+def tuned_scaled_grouped_mm_v2(
+    mat_a: TensorBox,
+    mat_b: TensorBox,
+    scale_a: list[TensorBox],
+    recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[TensorBox],
+    recipe_b: list[int],
+    swizzle_b: list[int],
+    offs: TensorBox | None = None,
+    bias: TensorBox | None = None,
+    out_dtype: torch.dtype | None = None,
+    contraction_dim: list[int] | None = None,
+    use_fast_accum: bool = False,
+    layout: Layout | None = None,
+) -> TensorBox:
+    if list(recipe_a) != [1] or list(recipe_b) != [1]:
+        raise NotImplementedError(
+            "_scaled_grouped_mm_v2 lowering currently supports only RowWise scaling"
+        )
+    if list(swizzle_a) or list(swizzle_b):
+        raise NotImplementedError(
+            "_scaled_grouped_mm_v2 RowWise lowering expects no scale swizzle"
+        )
+    if contraction_dim:
+        raise NotImplementedError(
+            "_scaled_grouped_mm_v2 lowering does not support contraction_dim yet"
+        )
+    out_dtype = out_dtype or torch.bfloat16
+    return _tuned_grouped_mm_common(
+        "aten._scaled_grouped_mm_v2.default",
+        "scaled_grouped_mm",
+        aten__scaled_grouped_mm,
+        triton_scaled_grouped_mm_template,
+        mat_a,
+        mat_b,
+        _expect_single_scale(scale_a, "scale_a"),
+        _expect_single_scale(scale_b, "scale_b"),
+        offs,
+        bias,
+        None,
         out_dtype,
         use_fast_accum,
         layout,

@@ -6161,6 +6161,48 @@ class CppTemplateBuffer(TemplateBuffer):
             return super().get_layout()
 
 
+class QuackSplitKTemplateBuffer(TemplateBuffer):
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: Sequence[IRNode],
+        k_split: int,
+    ) -> None:
+        super().__init__(layout, inputs, make_kernel_render=None)
+        self.k_split = k_split
+
+    def should_allocate(self) -> bool:
+        return False
+
+
+@dataclasses.dataclass(frozen=True)
+class QuackGemmEpilogueConfig:
+    epilogue_name: str
+    epilogue_source: str
+    gemm_op: str
+    alpha: float
+    beta: float
+    out_dtype: Any | None = None
+    scaled_mm_scale_a_len: int = 1
+    scaled_mm_scale_b_len: int = 1
+    scaled_grouped_mm_kind: str | None = None
+    epilogue_arg_indices: tuple[int, ...] = ()
+    epilogue_arg_kinds: tuple[str, ...] = ()
+    local_reduce_out_index: int | None = None
+    aux_out_index: int | None = None
+    local_reduce_group: int | None = None
+    local_reduce_dim: int | None = None
+    local_reduce_op: str | None = None
+    local_reduce_scale: float = 1.0
+    local_reduce_max_power: int = 8
+    local_reduce_feeds_main: bool = False
+    local_reduce_source_from_epilogue: bool = False
+    main_output_transform: str | None = None
+    main_output_transform_group: int | None = None
+    concat_layout: tuple[str, ...] = ()
+    tuned: bool = True
+
+
 class CuteDSLTemplateBuffer(TemplateBuffer):
     """
     Buffer for CuteDSL (CUTLASS Python DSL) template kernels.

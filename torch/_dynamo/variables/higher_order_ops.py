@@ -3790,6 +3790,104 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
+    _HOP_NAME = "torch.ops.higher_order.flex_gemm"
+    _ALLOW_FALLBACK_TO_EAGER = False
+
+    def install_subgraph_in_output_graph(
+        self,
+        tx: "InstructionTranslator",
+        fn_vt: VariableTracker,
+        fn_args_vt: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+        body_gmod: GraphModule,
+        attr_name: str = "wrap_body",
+    ) -> str:
+        return tx.output.install_subgraph(
+            "flex_gemm_body",
+            body_gmod,
+        )
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if kwargs:
+            unimplemented(
+                gb_type="flex_gemm: unexpected kwargs",
+                context=f"args: {args}, kwargs: {kwargs}",
+                explanation="flex_gemm internal HOP expects positional args only.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        if (
+            len(args) != 5
+            or not isinstance(args[2], (ListVariable, TupleVariable))
+            or not isinstance(args[3], ConstDictVariable)
+            or not isinstance(args[4], ConstDictVariable)
+        ):
+            unimplemented(
+                gb_type="flex_gemm: improper args/kwargs",
+                context=f"args: {args}, kwargs: {kwargs}",
+                explanation=(
+                    "flex_gemm expects 5 positional arguments: "
+                    "gemm_op, body_fn, args, kwargs, kernel_options. args is "
+                    "expected to be list/tuple and kwargs/kernel_options are "
+                    "expected to be dicts."
+                ),
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        _check_supported_callable_arg(tx, args[1], "body_fn")
+        operands = args[2].unpack_var_sequence(tx)
+        fn_kwargs_vt = args[3].keys_as_python_constant()
+        fn_kwargs = args[3].as_python_constant()
+        kernel_options = args[4].as_python_constant()
+        hop_name = self._HOP_NAME
+        if hop_name is None:
+            raise AssertionError("FlexGEMM HOP name must be set")
+        (
+            p_args,
+            _,
+            example_value,
+            body_r,
+            body_gmod,
+            _,
+            body_graph_output_vts,
+            _,
+        ) = self.create_wrapped_node(
+            tx,
+            args[1],
+            operands,
+            fn_kwargs_vt,
+            hop_name,
+        )
+
+        from torch._higher_order_ops.gemm_epilogue import _normalize_flex_gemm_op
+
+        body_node = p_args[0]
+        lifted_args = p_args[1:]
+        p_args = (
+            _normalize_flex_gemm_op(args[0].as_python_constant()),
+            body_node,
+            tuple(lifted_args),
+            fn_kwargs,
+            kernel_options,
+        )
+
+        return _call_function_with_auto_output_flattening(  # type: ignore[return-type]
+            tx,
+            self.value,
+            p_args,
+            {},
+            example_value,
+            body_r,
+            body_graph_output_vts,
+        )
+
+
 class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.hints_wrapper"
     _ALLOW_FALLBACK_TO_EAGER = False
@@ -5966,6 +6064,7 @@ _hop_name_to_variable_class = {
     "executorch_call_delegate": ExecutorchCallDelegateHigherOrderVariable,
     "out_dtype": OutDtypeHigherOrderVariable,
     "wrap": WrapHigherOrderVariable,
+    "flex_gemm": FlexGemmHigherOrderVariable,
     "hints_wrapper": HintsWrapperHigherOrderVariable,
     "flex_attention": FlexAttentionHigherOrderVariable,
     "flex_attention_backward": FlexAttentionBackwardHighOrderVariable,
