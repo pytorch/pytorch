@@ -8,6 +8,7 @@ import operator
 import os
 import re
 import sys
+import textwrap
 import time
 import typing_extensions
 from collections import defaultdict
@@ -54,7 +55,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
-from . import config, ir, metrics
+from . import config, ir
 from .codegen.common import (
     BackendFeature,
     DeviceOpOverrides,
@@ -360,7 +361,15 @@ def is_mkldnn_conv(node: Node) -> bool:
 
 
 class GraphLowering(torch.fx.Interpreter):
-    """Lower an FX graph into Inductor IR and track compilation state."""
+    """Lowers an FX graph to Inductor IR and drives backend code generation.
+
+    Walks the FX graph node-by-node, materializing inputs/outputs and
+    constants, dispatching each call to an Inductor lowering, and accumulating
+    the resulting IR nodes. Holds graph-wide state needed by lowerings and
+    codegen (sizevars, scheduler inputs, device/dtype tracking, wrapper code,
+    etc.) and orchestrates the call into `codegen()` to produce a wrapper +
+    kernel module via the configured backend (Python/C++ wrappers, AOTI).
+    """
 
     graph_outputs: list[ir.IRNode]
 
@@ -2562,32 +2571,279 @@ class GraphLowering(torch.fx.Interpreter):
                 return self.codegen()
             else:
                 if not self.aot_mode:
-                    # Lazy kernel compilation does not require two passes
-                    # TODO: need to consolidate the logic between AOT and JIT
+                    # cpp_wrapper JIT does not require two passes
                     return self.codegen()
 
-                # first pass
-                self.cpp_wrapper = False
-                compiled = self.compile_to_module().call
+                # AOTI with lazy compile: single codegen pass producing
+                # two separate C++ files — JIT (for autotuning) and AOTI
+                # (for packaging) — via DualIndentedBuffer.
+                # wrapper_code is the JIT variant; the AOTI variant is
+                # populated into wrapper_codegen._aot_output.
+                from .codegen.cpp_wrapper_gpu import (
+                    CppWrapperGpu,
+                    generate_aoti_kernel_config_header,
+                )
 
-                real_inputs = extract_real_inputs()
-                with torch.utils._python_dispatch._disable_current_modes():
-                    compiled(real_inputs)
-                del real_inputs
+                wrapper_code, kernel_code = self.codegen()
+                assert isinstance(self.wrapper_code, CppWrapperGpu)
+                lazy_kernel_names = list(self.wrapper_code._lazy_kernel_names)
+                if lazy_kernel_names:
+                    try:
+                        self._run_jit_variant_for_autotune(
+                            wrapper_code,
+                            kernel_code,
+                            extract_real_inputs,
+                            lazy_kernel_names,
+                        )
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "When autotune_at_compile_time is False, AOTInductor generates "
+                            "both JIT code and AOT code. The JIT code failed to run."
+                        ) from exc
 
-                # second pass
-                self.cpp_wrapper = True
-                self.removed_buffers.clear()
-                self.removed_operations.clear()
-                self.inplaced_to_remove.clear()
-                V.graph.sizevars.precomputed_replacements.clear()
-                V.graph.sizevars.inv_precomputed_replacements.clear()
-                metrics.reset()
-                with config.patch({"triton.autotune_at_compile_time": False}):
-                    return self.codegen()
+                # Prepend config header with kernel compile results
+                # to the AOTI source for packaging.
+                config_header = generate_aoti_kernel_config_header(lazy_kernel_names)
+                aot_output: str | None = self.wrapper_code._aot_output
+                if aot_output is None:
+                    raise RuntimeError(
+                        "When autotune_at_compile_time is False, AOTInductor generates "
+                        "both JIT code and AOT code. The AOT code should not be None."
+                    )
+                aoti_wrapper = ValueWithLineMap(
+                    config_header + "\n" + aot_output,
+                    wrapper_code.line_map,
+                )
+
+                return aoti_wrapper, kernel_code
         else:
             # cpu
             return self.codegen()
+
+    @staticmethod
+    def _python_source_literal(name: str, source: str | None) -> str:
+        if source is None:
+            return f"{name} = None\n"
+        if source == "":
+            return f"{name} = ''\n"
+        if '"""' in source:
+            return f"{name} = {source!r}\n"
+        return f'{name} = (\nr"""\n{source}"""\n)\n'
+
+    @staticmethod
+    def _tensor_repro_expr(tensor: torch.Tensor) -> str:
+        return (
+            f"_make_strided_tensor({tuple(tensor.size())!r}, "
+            f"{tuple(tensor.stride())!r}, {tensor.storage_offset()!r}, "
+            f"{tensor.dtype}, {str(tensor.device)!r})"
+        )
+
+    @classmethod
+    def _log_jit_variant_for_autotune_repro(
+        cls,
+        *,
+        cpp_source: str,
+        kernel_source: str | None,
+        device_type: str,
+        num_outputs: int,
+        kernel_names: list[str],
+        input_exprs: list[str],
+    ) -> None:
+        from .codecache import output_code_log, PyCodeCache
+
+        if not (
+            output_code_log.isEnabledFor(logging.DEBUG)
+            or output_code_log.isEnabledFor(logging.INFO)
+        ):
+            return
+
+        input_lines = "".join(f"        {expr},\n" for expr in input_exprs)
+        log_name = "JIT wrapper code for AOT lazy autotuning"
+        source = (
+            textwrap.dedent(
+                """
+            import torch
+            from torch._inductor import config
+            from torch._inductor.codecache import (
+                CppWrapperCodeCache,
+                CudaKernelParamCache,
+                get_cpp_wrapper_cubin_path_name,
+            )
+
+            {cpp_wrapper_src}
+            {kernel_src}
+            kernel_names = {kernel_names!r}
+
+
+            def _make_strided_tensor(size, stride, storage_offset, dtype, device):
+                if 0 in size:
+                    storage_size = storage_offset + 1
+                else:
+                    storage_size = storage_offset + 1 + sum(
+                        (dim - 1) * stride_dim
+                        for dim, stride_dim in zip(size, stride)
+                    )
+                base = torch.zeros((storage_size,), dtype=dtype, device=device)
+                return torch.as_strided(base, size, stride, storage_offset)
+
+
+            def make_inputs():
+                return [
+            {input_lines}    ]
+
+
+            def main():
+                for name in kernel_names:
+                    CudaKernelParamCache.cache.pop(name, None)
+                with config.patch('aot_inductor.link_libtorch', True):
+                    compiled_fn = CppWrapperCodeCache.load_pybinding(
+                        argtypes=['std::vector<AtenTensorHandle>'],
+                        main_code=cpp_wrapper_src,
+                        device_type={device_type!r},
+                        num_outputs={num_outputs!r},
+                        kernel_code=kernel_src,
+                    )
+                input_tensors = make_inputs()
+                input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(
+                    input_tensors
+                )
+                output_handles = compiled_fn(input_handles)
+                output_tensors = torch._C._aoti.alloc_tensors_by_stealing_from_void_ptrs(
+                    output_handles
+                )
+                print(f'Produced {{len(output_tensors)}} outputs')
+                cubin_path_name = get_cpp_wrapper_cubin_path_name()
+                for name in kernel_names:
+                    params = CudaKernelParamCache.get(name)
+                    if params and cubin_path_name in params:
+                        print(f'{{name}}: {{params[cubin_path_name]}}')
+
+
+            if __name__ == '__main__':
+                main()
+            """
+            )
+            .lstrip()
+            .format(
+                cpp_wrapper_src=cls._python_source_literal(
+                    "cpp_wrapper_src", cpp_source
+                ),
+                kernel_src=cls._python_source_literal("kernel_src", kernel_source),
+                kernel_names=kernel_names,
+                input_lines=input_lines,
+                device_type=device_type,
+                num_outputs=num_outputs,
+            )
+        )
+        output_code_log.debug("%s: \n%s", log_name, source)
+        _, path = PyCodeCache.write(source)
+        output_code_log.info("%s written to: %s", log_name, path)
+
+    def _run_jit_variant_for_autotune(
+        self,
+        wrapper_code,
+        kernel_code,
+        extract_real_inputs,
+        kernel_names: list[str],
+    ) -> None:
+        """Compile dual-wrapper-mode C++ as JIT variant and run to autotune kernels.
+
+        Compiles the dual-wrapper-mode C++ source without -DAOT_INDUCTOR, which
+        activates the JIT path (inductor_entry_impl). Running this with
+        real inputs triggers lazy Triton compilation and autotuning,
+        populating CudaKernelParamCache for the AOTI packaging step.
+        """
+        from .codecache import (
+            CppWrapperCodeCache,
+            CudaKernelParamCache,
+            get_cpp_wrapper_cubin_path_name,
+        )
+
+        cpp_source = wrapper_code.value
+        kernel_source = kernel_code.value if kernel_code else None
+
+        # The JIT wrapper keeps lazy kernel state in function-local statics.
+        # Compile a fresh wrapper for each first pass so autotuning always reruns.
+        cpp_source += f"\n// AOTI lazy autotune first pass: {id(self)}\n"
+        for name in kernel_names:
+            CudaKernelParamCache.cache.pop(name, None)
+
+        # Prefer the GPU device for the JIT compile: the wrapper includes
+        # cpp_wrapper/<gpu>.h which transitively pulls in cuda_runtime.h.
+        # A "cpu" device would precompile cpp_wrapper/cpu.h, which does not
+        # include the CUDA headers needed to compile the kernel call sites.
+        device_type = next(
+            (d for d in self.device_types if d in ("cuda", "xpu")),
+            next((d for d in self.device_types if d != "meta"), "cpu"),
+        )
+
+        real_inputs = extract_real_inputs()
+
+        def materialize_constant(name: str) -> torch.Tensor:
+            constant = self.constants[name]
+            if isinstance(constant, FakeTensor):
+                constant = defake(constant)
+            assert isinstance(constant, torch.Tensor), (
+                f"Expected tensor constant for {name}"
+            )
+            return constant
+
+        # Non-tensor scalars become 0-d CPU tensors; None and ints/floats
+        # that the graph specialized away aren't part of the C++ wrapper
+        # signature and must be skipped.
+        input_tensors: list[torch.Tensor] = []
+        input_exprs: list[str] = []
+        for arg in real_inputs:
+            if arg is None:
+                continue
+            if isinstance(arg, torch.Tensor):
+                input_tensors.append(arg)
+                input_exprs.append(self._tensor_repro_expr(arg))
+            else:
+                input_tensors.append(torch.tensor(arg, device="cpu"))
+                input_exprs.append(f"torch.tensor({arg!r}, device='cpu')")
+        for name in self.constants:
+            constant = materialize_constant(name)
+            input_tensors.append(constant)
+            input_exprs.append(self._tensor_repro_expr(constant))
+
+        self._log_jit_variant_for_autotune_repro(
+            cpp_source=cpp_source,
+            kernel_source=kernel_source,
+            device_type=device_type,
+            num_outputs=len(self.graph_outputs),
+            kernel_names=kernel_names,
+            input_exprs=input_exprs,
+        )
+
+        # This temporary Python-loaded wrapper can depend on libtorch even when
+        # the final packaged AOTI artifact is built with link_libtorch=False.
+        with config.patch("aot_inductor.link_libtorch", True):
+            compiled_fn = CppWrapperCodeCache.load_pybinding(
+                argtypes=["std::vector<AtenTensorHandle>"],
+                main_code=cpp_source,
+                device_type=device_type,
+                num_outputs=len(self.graph_outputs),
+                kernel_code=kernel_source,
+            )
+
+        input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(
+            input_tensors
+        )
+        del real_inputs, input_tensors, input_exprs
+
+        output_handles = compiled_fn(input_handles)
+        output_tensors = torch._C._aoti.alloc_tensors_by_stealing_from_void_ptrs(
+            output_handles
+        )
+        del output_tensors
+
+        # Collect cubin files produced by lazy compilation for AOTI packaging
+        cubin_path_name = get_cpp_wrapper_cubin_path_name()
+        for name in kernel_names:
+            params = CudaKernelParamCache.get(name)
+            if params and cubin_path_name in params:
+                self.wrapper_code.additional_files.append(params[cubin_path_name])
 
     def _update_scheduler(self) -> None:
         """
