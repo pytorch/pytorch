@@ -3031,6 +3031,24 @@ class TestTensorCreation(TestCase):
         f16_tensor = torch.arange(0, 6, step=2, dtype=dtype, device=device)
         self.assertEqual(ref_tensor, f16_tensor)
 
+    @dtypes(torch.bfloat16, torch.float16)
+    @onlyCPU
+    def test_arange_lowp_precision(self, device, dtype):
+        start = -912.2
+        step = 4.64
+        n = 50
+        end = start + step * n
+
+        result = torch.arange(start, end, step, dtype=dtype, device=device)
+
+        expected = torch.tensor(
+            [start + step * i for i in range(len(result))],
+            dtype=torch.float32,
+            device=device,
+        ).to(dtype)
+
+        self.assertEqual(result, expected, atol=0, rtol=0)
+
     @dtypes(*all_types_and_complex_and(torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.bfloat16))
     def test_linspace(self, device, dtype):

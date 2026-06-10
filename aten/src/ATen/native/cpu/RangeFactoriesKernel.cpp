@@ -27,17 +27,25 @@ void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scala
     at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       int64_t idx(p_begin);
       TensorIterator it(iter);
-      cpu_serial_kernel_vec(
-          it,
-          [start, step, &idx]() -> scalar_t {
-            return start + step * (idx++);
-          },
-          [start, step, &idx]() -> Vectorized<scalar_t> {
-            Vectorized<scalar_t> res;
-            res = Vectorized<scalar_t>::arange(start + step * idx, step);
-            idx += Vectorized<scalar_t>::size();
-            return res;
-          }, {p_begin, p_end});
+      if constexpr (std::is_same_v<scalar_t, at::Half> || std::is_same_v<scalar_t, at::BFloat16>) {
+        cpu_serial_kernel(
+            it,
+            [start, step, &idx]() -> scalar_t {
+              return start + step * (idx++);
+            }, {p_begin, p_end});
+      } else {
+        cpu_serial_kernel_vec(
+            it,
+            [start, step, &idx]() -> scalar_t {
+              return start + step * (idx++);
+            },
+            [start, step, &idx]() -> Vectorized<scalar_t> {
+              Vectorized<scalar_t> res;
+              res = Vectorized<scalar_t>::arange(start + step * idx, step);
+              idx += Vectorized<scalar_t>::size();
+              return res;
+            }, {p_begin, p_end});
+      }
     });
   });
 }
