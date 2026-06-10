@@ -26,6 +26,7 @@ from torch.utils._sympy.functions import (
     RoundDecimal,
     RoundToInt,
     ToFloat,
+    TruncDiv,
     TruncToInt,
 )
 
@@ -140,8 +141,8 @@ class ReferenceAnalysis:
         return FloorDiv(a, b)
 
     @staticmethod
-    def truncdiv(a, b) -> NoReturn:
-        raise NotImplementedError("TODO: truncdiv")
+    def truncdiv(a, b):
+        return TruncDiv(a, b)
 
     @staticmethod
     def add(a, b):
@@ -257,7 +258,7 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
 
     @staticmethod
     def truncdiv(a, b):
-        return a / b
+        return math.trunc(a / b)
 
     @staticmethod
     def to_dtype(x, dtype):
@@ -534,10 +535,8 @@ class TensorReferenceAnalysis:
         return torch.ops.aten.div.Tensor_mode(a, b, rounding_mode="floor")
 
     @staticmethod
-    def truncdiv(a, b) -> NoReturn:
-        raise NotImplementedError(
-            "no C-style truncdiv operation available from frontend atm"
-        )
+    def truncdiv(a, b):
+        return torch.ops.aten.div.Tensor_mode(a, b, rounding_mode="trunc")
 
     @staticmethod
     def add(a, b):

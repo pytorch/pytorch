@@ -104,6 +104,9 @@ class ExprPrinter(StrPrinter):
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         raise NotImplementedError(f"_print_FloorDiv not implemented for {type(self)}")
 
+    def _print_TruncDiv(self, expr: sympy.Expr) -> str:
+        raise NotImplementedError(f"_print_TruncDiv not implemented for {type(self)}")
+
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
         raise NotImplementedError(f"_print_PythonMod not implemented for {type(self)}")
 
@@ -191,6 +194,10 @@ class PythonPrinter(ExprPrinter):
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         x, div = (self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args)
         return f"{x} // {div}"
+
+    def _print_TruncDiv(self, expr: sympy.Expr) -> str:
+        x, div = (self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args)
+        return f"math.trunc({x} / {div})"
 
     # WARNING: this is dangerous for Triton, when lhs, rhs > 2**53, Python
     # does a special algorithm
@@ -428,6 +435,15 @@ class CppPrinter(ExprPrinter):
         if expr.is_integer:
             return f"c10::div_floor_integer(static_cast<int64_t>({x}), static_cast<int64_t>({div}))"
         return f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
+
+    def _print_TruncDiv(self, expr: sympy.Expr) -> str:
+        x, div = expr.args
+        x = self.doprint(x)
+        div = self.doprint(div)
+        if expr.is_integer:
+            # C++ integer division truncates toward zero
+            return f"static_cast<int64_t>({x}) / static_cast<int64_t>({div})"
+        return f"std::trunc(static_cast<double>({x}) / static_cast<double>({div}))"
 
     def _print_floor(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:

@@ -32,6 +32,7 @@ from .functions import (
     RoundToInt,
     safe_pow,
     ToFloat,
+    TruncDiv,
     TruncToFloat,
     TruncToInt,
 )
@@ -729,6 +730,29 @@ class SymPyValueRangeAnalysis:
             else:
                 products.append(r)
 
+        return ValueRanges(min(products), max(products))
+
+    @staticmethod
+    def truncdiv(a, b):
+        a = ValueRanges.wrap(a)
+        b = ValueRanges.wrap(b)
+        if 0 in b:
+            if b.lower >= 0 and a.lower >= 0:
+                return ValueRanges(0, int_oo)
+            if b.upper <= 0 and a.upper <= 0:
+                return ValueRanges(0, int_oo)
+            if b.upper <= 0 and a.lower >= 0:
+                return ValueRanges(-int_oo, 0)
+            if b.lower >= 0 and a.upper <= 0:
+                return ValueRanges(-int_oo, 0)
+            return ValueRanges.unknown_int()
+        products = []
+        for x, y in itertools.product([a.lower, a.upper], [b.lower, b.upper]):
+            r = TruncDiv(x, y)
+            if r is sympy.nan:
+                products.append((sympy.sign(x) * sympy.sign(y)) * int_oo)
+            else:
+                products.append(r)
         return ValueRanges(min(products), max(products))
 
     @classmethod

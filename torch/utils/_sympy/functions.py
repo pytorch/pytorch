@@ -83,6 +83,7 @@ def safe_gcd(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
 
 __all__ = [
     "FloorDiv",
+    "TruncDiv",
     "ModularIndexing",
     "Where",
     "PythonMod",
@@ -318,6 +319,59 @@ class FloorDiv(sympy.Function):
         except sympy.PolynomialError:
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
+        return None
+
+    def _eval_is_nonnegative(self) -> bool | None:
+        p, q = self.args[:2]
+        if all([p.is_integer, q.is_integer, p.is_nonnegative, q.is_nonnegative]):
+            return True
+        return None
+
+
+class TruncDiv(sympy.Function):
+    """C-style truncating integer division (rounds toward zero)."""
+
+    nargs: tuple[int, ...] = (2,)
+    precedence: int = 35  # lower precedence than add
+    is_integer: bool = True
+
+    @property
+    def base(self) -> sympy.Basic:
+        return self.args[0]
+
+    @property
+    def divisor(self) -> sympy.Basic:
+        return self.args[1]
+
+    def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
+        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
+        return f"TruncDiv({base}, {divisor})"
+
+    @classmethod
+    def eval(cls, base: sympy.Integer, divisor: sympy.Integer) -> sympy.Basic | None:
+        if divisor.is_zero:
+            raise ZeroDivisionError("division by zero")
+        if is_infinite(base) and is_infinite(divisor):
+            return sympy.nan
+        if base is sympy.nan or divisor is sympy.nan:
+            return sympy.nan
+        if base.is_zero:
+            return sympy.S.Zero
+        if base.is_integer and equal_valued(divisor, 1):
+            return base
+        if base.is_integer and equal_valued(divisor, -1):
+            return sympy.Mul(base, -1)
+        if base == divisor:
+            return sympy.S.One
+        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
+            # Use exact integer arithmetic to avoid float precision loss on large values
+            b_val, d_val = int(base), int(divisor)
+            q = abs(b_val) // abs(d_val)
+            return sympy.Integer(q if (b_val >= 0) == (d_val >= 0) else -q)
+        if isinstance(base, sympy.Number) and isinstance(divisor, sympy.Number):
+            # Concrete float inputs: evaluate to a float result
+            return sympy.Float(math.trunc(float(base) / float(divisor)))
         return None
 
     def _eval_is_nonnegative(self) -> bool | None:

@@ -343,7 +343,6 @@ bool allclose(
 // Note that this is consistent with NumPy's isclose but divergent from
 // Python's isclose, which computes the max error symmetrically as
 // max(rtol * max(abs(A), abs(B)), atol).
-// TODO: use bitwise operator overloads once we add them
 // TODO: revisit complex inputs and equal_nan=true after
 //  https://github.com/numpy/numpy/issues/15959 is resolved
 Tensor isclose(
@@ -372,23 +371,7 @@ Tensor isclose(
   // Computes equality closeness
   Tensor close = self == other;
   if (equal_nan && (self.is_floating_point() || self.is_complex())) {
-    // For CompositeCompliance, if `other` is a CCT and `self` is a regular
-    // Tensor, then we can't perform inplace op into `self` with `other`. NOTE:
-    // Inplacing into `close` is fine because it is generated from out-of-place
-    // with args `self` and `other`. So if either of them is a CCT then `close`
-    // will also be a `CCT`.
-    if (isTensorSubclassLike(other)) {
-      close.__ior__(self.isnan().bitwise_and(other.isnan()));
-    } else {
-      // In-place __iand__ requires the target shape to equal the broadcast
-      // result. Check shapes to pick the right in-place target, or fall back
-      // to out-of-place for mutual broadcast (e.g. [3,1] vs [1,4] -> [3,4]).
-      if (self.sizes() == other.sizes()) {
-        close.__ior__(self.isnan().__iand__(other.isnan()));
-      } else {
-        close.__ior__(self.isnan().bitwise_and(other.isnan()));
-      }
-    }
+    close |= self.isnan() & other.isnan();
   }
 
   // In case of zero tolerances the closeness inequality degenerates to an
@@ -423,8 +406,7 @@ Tensor isclose(
   Tensor actual_error = (cast_self - cast_other).abs();
 
   // Computes finite closeness
-  close.__ior__(
-      at::isfinite(actual_error).__iand__(actual_error <= allowed_error));
+  close |= at::isfinite(actual_error) & (actual_error <= allowed_error);
 
   return close;
 }

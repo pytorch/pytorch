@@ -60,7 +60,7 @@ UNARY_OPS = [
 BINARY_OPS = [
     "truediv",
     "floordiv",
-    # "truncdiv",  # TODO
+    "truncdiv",
     # NB: pow is float_pow
     "add",
     "mul",
@@ -140,7 +140,7 @@ def valid_binary(fn, a, b):
         return False
     elif fn == "mod" and (a < 0 or b <= 0):
         return False
-    elif (fn in ["div", "truediv", "floordiv"]) and b == 0:
+    elif (fn in ["div", "truediv", "floordiv", "truncdiv"]) and b == 0:
         return False
     return True
 
@@ -508,8 +508,7 @@ class TestSympyInterp(TestCase):
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )
     def test_interp(self, fn):
-        # SymPy does not implement truncation for Expressions
-        if fn in ("div", "truncdiv", "minimum", "maximum", "mod"):
+        if fn in ("div", "minimum", "maximum", "mod"):
             return
 
         is_integer = None
@@ -554,8 +553,7 @@ class TestSympyInterp(TestCase):
         if fn in ("log", "exp"):
             return
 
-        # Sympy does not support truncation on symbolic shapes
-        if fn in ("truncdiv", "mod"):
+        if fn in ("mod",):
             return
 
         vals = CONSTANTS
@@ -627,7 +625,7 @@ class TestSympyInterp(TestCase):
     )
     def test_tensor_interp(self, fn):
         # Skip operations not implemented or not applicable for tensors
-        if fn in ("div", "truncdiv", "int_truediv", "mod", "round_decimal"):
+        if fn in ("div", "int_truediv", "mod", "round_decimal"):
             return
 
         is_integer = None

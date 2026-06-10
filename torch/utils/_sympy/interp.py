@@ -40,6 +40,7 @@ from .functions import (
     RoundDecimal,
     RoundToInt,
     ToFloat,
+    TruncDiv,
     TruncToFloat,
     TruncToInt,
     Where,
@@ -73,6 +74,7 @@ def handlers():
         FloatTrueDiv: "truediv",
         FloorDiv: "floordiv",
         CleanDiv: "floordiv",  # TODO: hmm?
+        TruncDiv: "truncdiv",
         TruncToFloat: "trunc",
         Where: "where",
         sympy.Add: "add",

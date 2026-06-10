@@ -251,17 +251,6 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
     def neg(x: Any) -> ValueRanges[Any]:
         return ValueRanges.decreasing_map(x, operator.neg)
 
-    # TODO: this is slightly inaccurate because truncdiv operates at integer
-    # precision, but we're going through float truediv which means we can
-    # potentially lose precision on the bounds
-    @classmethod
-    def truncdiv(cls, a: Any, b: Any) -> ValueRanges[Any]:
-        x = cls.truediv(a, b)
-        if x == ValueRanges.unknown():
-            return x
-
-        return cls.trunc(x)
-
     @classmethod
     def sub(cls, a: Any, b: Any) -> ValueRanges[Any]:
         return cls.add(a, cls.neg(b))

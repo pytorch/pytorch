@@ -191,18 +191,85 @@ void TestAbsValue(DeprecatedTypeProperties& type) {
   Tensor r = at::abs(at::scalar_tensor(-3, type.options()));
   ASSERT_EQ_RESOLVED(r.item<int32_t>(), 3);
 }
-/*
-   TODO(zach): operator overloads
-#if 0
-{
-std::cout << "eq (value):" << std::endl;
-Tensor a = Tensor(10.f);
-std::cout << (a == 11_i64) << " -- should be 0" << std::endl;
-std::cout << (a == 10_i64) << " -- should be 1" << std::endl;
-std::cout << (a == 10.) << " -- should be 1" << std::endl;
+
+//TODO(zach): operator overloads
+//operator overloads tests implemented below
+void TestComparisonOperatorOverload(DeprecatedTypeProperties& type){
+  Tensor a = at::scalar_tensor(10.f, type.options());
+  //Comparisons
+  ASSERT_TRUE((a == 10.f).item<bool>());
+  ASSERT_TRUE((a != 11.f).item<bool>());
+  ASSERT_TRUE((a > 9.f).item<bool>());
+  ASSERT_TRUE((a <= 10.f).item<bool>());
+  ASSERT_TRUE((a >= 10.f).item<bool>());
+
+  Tensor a2 = at::scalar_tensor(10.f, type.options());
+  Tensor a3 = at::scalar_tensor(5.f, type.options());
+  ASSERT_TRUE((a == a2).item<bool>());
+  ASSERT_FALSE((a == a3).item<bool>());
+
+
+  ASSERT_TRUE((10.f == a).item<bool>());
+  ASSERT_TRUE((11.f > a).item<bool>());
+
+  Tensor b = rand({3,4}, type);
+  auto result = (b > 0.5f);
+  ASSERT_EQ(result.scalar_type(), at::kBool);
+  ASSERT_EQ(result.sizes()[0], 3);
+  ASSERT_EQ(result.sizes()[1], 4);
+
+  auto self_eq = (b == b);
+  ASSERT_TRUE(self_eq.all().item<bool>());
+
+  Tensor c = rand({3,4}, type);
+  auto tensor_cmp = (b == c);
+  ASSERT_EQ(tensor_cmp.scalar_type(), at::kBool);
 }
-#endif
-*/
+
+void TestArithmeticOperatorOverload(DeprecatedTypeProperties& type){
+  Tensor a = at::scalar_tensor(10.f, type.options());
+  Tensor b = at::scalar_tensor(5.f, type.options());
+  
+  ASSERT_TRUE((a + 5.f).allclose(at::scalar_tensor(15.f, type.options())));
+  ASSERT_TRUE((a - 5.f).allclose(at::scalar_tensor(5.f, type.options())));
+  ASSERT_TRUE((a * 2.f).allclose(at::scalar_tensor(20.f, type.options())));
+  ASSERT_TRUE((a / 2.f).allclose(at::scalar_tensor(5.f, type.options())));
+  
+  ASSERT_TRUE((a + b).allclose(at::scalar_tensor(15.f, type.options())));
+  ASSERT_TRUE((a - b).allclose(at::scalar_tensor(5.f, type.options())));
+  ASSERT_TRUE((a * b).allclose(at::scalar_tensor(50.f, type.options())));
+  ASSERT_TRUE((a / b).allclose(at::scalar_tensor(2.f, type.options())));
+  
+  ASSERT_TRUE((5.f + a).allclose(at::scalar_tensor(15.f, type.options())));
+  ASSERT_TRUE((2.f * a).allclose(at::scalar_tensor(20.f, type.options())));
+  
+  Tensor c = rand({3, 4}, type);
+  auto result = (c + 1.f);
+  ASSERT_EQ(result.scalar_type(), c.scalar_type());
+  ASSERT_EQ(result.sizes()[0], 3);
+  ASSERT_EQ(result.sizes()[1], 4);
+}
+
+void TestBitwiseOperatorOverload(DeprecatedTypeProperties& type){
+  if (type.scalarType() == kFloat || type.scalarType() == kHalf || 
+      type.scalarType() == kDouble || type.scalarType() == kBFloat16) {
+    return;
+  }
+  
+  Tensor a = at::scalar_tensor(12, type.options());
+  Tensor b = at::scalar_tensor(10, type.options());  
+  
+  ASSERT_EQ((a & 10).item<int>(), 8);   
+  ASSERT_EQ((a | 10).item<int>(), 14);  
+  ASSERT_EQ((a ^ 10).item<int>(), 6);   
+  
+  ASSERT_EQ((a & b).item<int>(), 8);
+  ASSERT_EQ((a | b).item<int>(), 14);
+  ASSERT_EQ((a ^ b).item<int>(), 6);
+  
+  ASSERT_EQ((10 & a).item<int>(), 8);
+  ASSERT_EQ((10 | a).item<int>(), 14);
+}
 
 void TestAddingAValueWithScalar(DeprecatedTypeProperties& type) {
   Tensor a = rand({4, 3}, type);
@@ -353,6 +420,9 @@ void test(DeprecatedTypeProperties& type) {
   TestCopy(type);
   TestCopyBroadcasting(type);
   TestAbsValue(type);
+  TestComparisonOperatorOverload(type);
+  TestArithmeticOperatorOverload(type);
+  TestBitwiseOperatorOverload(type);
   TestAddingAValueWithScalar(type);
   TestSelect(type);
   TestZeroDim(type);
