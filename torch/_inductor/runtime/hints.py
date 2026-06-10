@@ -84,8 +84,14 @@ if has_triton_package():
             res = AttrsDescriptor.from_dict(
                 {"arg_properties": kwargs, "cls": AttrsDescriptor.__name__}
             )
-            assert res.property_values["tt.divisibility"] == 16
-            assert res.property_values["tt.equal_to"] == 1
+            if res.property_values["tt.divisibility"] != 16:
+                raise AssertionError(
+                    f"Expected tt.divisibility == 16, got {res.property_values['tt.divisibility']}"
+                )
+            if res.property_values["tt.equal_to"] != 1:
+                raise AssertionError(
+                    f"Expected tt.equal_to == 1, got {res.property_values['tt.equal_to']}"
+                )
             return res
 
     elif hasattr(triton.compiler.compiler, "AttrsDescriptor"):
@@ -264,7 +270,8 @@ class HalideMeta(typing.NamedTuple):
         if self.scheduler:
             args.append(f"autoscheduler={self.scheduler}")
         if self.scheduler_flags:
-            assert self.scheduler
+            if not self.scheduler:
+                raise AssertionError("scheduler_flags requires scheduler to be set")
             for k, v in self.scheduler_flags.items():
                 args.append(f"autoscheduler.{k}={v}")
         return args
