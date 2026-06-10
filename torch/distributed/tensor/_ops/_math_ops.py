@@ -25,6 +25,7 @@ from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
     is_tensor_evenly_shardable,
+    is_tensor_evenly_shardable_on_dim,
     normalize_dim,
     normalize_dims,
     register_op_strategy,
@@ -247,6 +248,69 @@ def get_placement_from_reduction_op(reduction_op: ReductionOpType) -> Placement:
     return Partial(reduction_op)
 
 
+def common_reduction_strategy(
+    input_strategy: OpStrategy,
+    reduce_dims: list[int],
+    keep_dim: bool = False,
+    reduction_linear: bool = True,
+    reduction_op: ReductionOpType = "sum",
+) -> OpStrategy:
+    """
+    reduction_linear means that the reduction `f` follows this rule:
+        f([f(a), f(b)]) = f([a, b])
+
+    reduction linear should be super set of linearity.
+    """
+    reduction_strategy = OpStrategy([])
+
+    for op_spec in input_strategy.strategies:
+        is_reduction_linear = reduction_linear
+        if reduction_op == "avg":
+            output_spec = op_spec.output_spec
+            local_shape = list(output_spec.tensor_meta.shape)  # type:ignore[union-attr]
+            for dim in reduce_dims:
+                if not is_tensor_evenly_shardable_on_dim(local_shape, output_spec, dim):
+                    is_reduction_linear = False
+                    break
+
+        for p in op_spec.output_spec.placements:
+            if isinstance(p, Partial) and p.reduce_op != reduction_op:
+                is_reduction_linear = False
+                break
+
+        if not is_reduction_linear:
+            input_placements = replicate_reduction_dims(
+                op_spec.output_spec.placements, reduce_dims
+            )
+        else:
+            input_placements = op_spec.output_spec.placements
+
+        input_spec = DTensorSpec(
+            mesh=input_strategy.mesh,
+            placements=input_placements,
+            tensor_meta=op_spec.output_spec.tensor_meta,
+        )
+
+        reduce_dims_map = _infer_reduce_dims_map(reduce_dims, input_spec.ndim, keep_dim)
+        out_placements = map_placements_after_reduction(
+            input_spec.placements, reduce_dims, reduce_dims_map, reduction_op
+        )
+        reduction_strategy.strategies.append(
+            OpSpec(
+                output_specs=DTensorSpec(
+                    mesh=input_strategy.mesh,
+                    placements=out_placements,
+                ),
+                input_specs=(input_spec,),
+                redistribute_cost=[
+                    generate_redistribute_costs(input_strategy, input_spec)
+                ],
+            )
+        )
+
+    return reduction_strategy
+
+
 def _reduction_single_dim_strategy(
     args_schema: tuple[Any, ...],
     reduction_dims: list[int] | None,
@@ -347,6 +411,11 @@ NON_LINEAR_BOOL_REDUCTION_OPS = [
     aten.any.dims,
     aten.any.out,
 ]
+
+ARGMAX_ARGMIN_OPS = {
+    aten.argmax.default: "max",
+    aten.argmin.default: "min",
+}
 
 
 LINEAR_REDUCTION_OPS = [
@@ -478,11 +547,6 @@ def max_min_dim_single_dim_strategy(
     return _shard_non_reduction_dim(args_schema, dim, keep_dim, n_outputs=2)
 
 
-@register_single_dim_strategy(
-    [aten.argmax.default, aten.argmin.default],
-    schema_info=RuntimeSchemaInfo(1),
-    allow_uneven_sharding=True,
-)
 def argmax_argmin_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -512,6 +576,29 @@ def argmax_argmin_single_dim_strategy(
             out_d = d - sum(1 for rd in reduce_dims if rd < d)
         strategies.append([_ShardingPlaceholder(out_d), _ShardingPlaceholder(d)])
     return strategies
+
+
+@register_op_strategy(list(ARGMAX_ARGMIN_OPS.keys()), schema_info=RuntimeSchemaInfo(1))
+def argmax_argmin_strategy(op_schema: OpSchema) -> OpStrategy:
+    args_schema = op_schema.args_schema
+    input_strategy = args_schema[0]
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+
+    dims = None
+    if len(args_schema) > 1:
+        dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
+
+    reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
+    keep_dim = len(args_schema) > 2 and bool(args_schema[2])
+    reduction_op = ARGMAX_ARGMIN_OPS[op_schema.op]
+    return common_reduction_strategy(
+        input_strategy,
+        reduce_dims,
+        keep_dim=keep_dim,
+        reduction_linear=False,
+        reduction_op=reduction_op,
+    )
 
 
 def _shard_except_dim_strategy(
