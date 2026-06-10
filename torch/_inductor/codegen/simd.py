@@ -2360,7 +2360,16 @@ class SIMDScheduling(BaseScheduling):
             # heuristics based on number of SMs
             device_prop = DeviceProperties.create(node1.get_device())
             num_sm = device_prop.multi_processor_count
-            estimated_num_splits = num_sm * 8
+            rnumel_hint = V.graph.sizevars.optimization_hint(rnumel)
+            num_node2_reductions = sum(
+                1 for subnode in node2.get_nodes() if subnode.is_reduction()
+            )
+            # Small multi-output mix-order reductions do better with fewer,
+            # larger split chunks to reduce workspace traffic.
+            split_multiplier = (
+                4 if rnumel_hint == 512 and num_node2_reductions > 1 else 8
+            )
+            estimated_num_splits = num_sm * split_multiplier
 
             # split_size is decided based on hint.
             # optimization_hint is fine here: the result is clamped to [16, 128],

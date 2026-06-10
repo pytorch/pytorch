@@ -4886,6 +4886,15 @@ def persistent_reduction(
         new_configs = []
         rsplit_size = inductor_meta.get("RSPLIT_SIZE")
         rnumel_hint = size_hints["r0_"]
+        # Keep this special case narrow: it targets small multi-output
+        # mix-order kernels where RSPLIT_SIZE=32 was validated against nearby
+        # RSPLIT_SIZE=128 cases that should keep the generic postprocess.
+        small_multi_output_mix_order = (
+            rnumel_hint == 512
+            and rsplit_size == 32
+            and inductor_meta.get("num_reduction", 0) > 1
+            and not max_autotune_enabled
+        )
         min_x_block = 1
         if rnumel_hint <= 512:
             min_x_block = 4
@@ -4900,7 +4909,11 @@ def persistent_reduction(
             required_x_block = max(
                 required_x_block, tma_min_block_sizes.get("XBLOCK", 1)
             )
-        x_block = min(max(rsplit_size // 32, min_x_block, required_x_block), 16)
+        if small_multi_output_mix_order:
+            x_block = max(2, required_x_block)
+        else:
+            x_block = max(rsplit_size // 32, min_x_block, required_x_block)
+        x_block = min(x_block, 16)
         for c in configs:
             c.kwargs["RSPLIT_SIZE"] = rsplit_size
             # small XBLOCK to use less registers/smem
@@ -4911,15 +4924,20 @@ def persistent_reduction(
             # With large rnumel, we have higher chance of out-of-shared memory
             # To avoid adding too much autotuning overhead, we just constrain NUM_STAGES
             # if rnumel is large
-            if inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
+            if small_multi_output_mix_order:
+                MAX_NUM_STAGES = 1
+            elif inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
                 MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
             else:
                 MAX_NUM_STAGES = 1
             c.kwargs["NUM_STAGES"] = min(max(num_iters // 4, 1), MAX_NUM_STAGES)
 
             if rnumel_hint <= 1024:
-                c.num_warps //= 2
-                c.num_warps = max(c.num_warps, 1)
+                if small_multi_output_mix_order:
+                    c.num_warps = 1
+                else:
+                    c.num_warps //= 2
+                    c.num_warps = max(c.num_warps, 1)
                 new_configs.append(c)
 
                 if max_autotune_enabled:

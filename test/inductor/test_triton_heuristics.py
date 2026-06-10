@@ -60,6 +60,7 @@ from torch._inductor.runtime.triton_heuristics import (
     CachingAutotunerPlugin,
     DEFER,
     make_matmul_triton_config,
+    persistent_reduction,
     template,
     triton_config,
 )
@@ -208,6 +209,32 @@ class TestTritonHeuristics(TestCase):
         cfg = autotuner.configs[0]
         self.assertEqual(cfg.kwargs["XBLOCK"], 128)
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 512)
+
+    def test_mix_order_small_multi_output_rsplit_config(self):
+        cfg = persistent_reduction(
+            size_hints={"x": 32768, "r0_": 512},
+            triton_meta={},
+            inductor_meta={"RSPLIT_SIZE": 32, "num_reduction": 2},
+            return_configs=True,
+        )[0]
+        self.assertEqual(cfg.kwargs["RSPLIT_SIZE"], 32)
+        self.assertEqual(cfg.kwargs["XBLOCK"], 2)
+        self.assertEqual(cfg.kwargs["NUM_STAGES"], 1)
+        self.assertEqual(cfg.num_warps, 1)
+
+        # Do not apply the special postprocess to nearby r0=128 cases. Those
+        # were neutral/noisy in the benchmark sweep and should keep the generic
+        # mix-order config shape.
+        cfg = persistent_reduction(
+            size_hints={"x": 524288, "r0_": 128},
+            triton_meta={},
+            inductor_meta={"RSPLIT_SIZE": 128, "num_reduction": 2},
+            return_configs=True,
+        )[0]
+        self.assertEqual(cfg.kwargs["RSPLIT_SIZE"], 128)
+        self.assertEqual(cfg.kwargs["XBLOCK"], 4)
+        self.assertEqual(cfg.kwargs["NUM_STAGES"], 3)
+        self.assertEqual(cfg.num_warps, 4)
 
     def _test_artificial_zgrid(self):
         def forward(primals_1, primals_2, primals_5):
