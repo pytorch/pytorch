@@ -22,6 +22,9 @@ class TestQuackVendor(TestCase):
     def test_vendored_quack_gemm_imports_from_torch_vendor(self):
         import torch._vendor.quack as quack
         from torch._vendor.quack.gemm_act import gemm_act
+        from torch._vendor.quack.gemm_blockscaled_interface import (
+            mxfp8_scaled_mm_epilogue,
+        )
         from torch._vendor.quack.gemm_config import GemmConfig
         from torch._vendor.quack.trace import TraceContext
 
@@ -33,6 +36,7 @@ class TestQuackVendor(TestCase):
                 for obj in (
                     gemm_act,
                     GemmConfig,
+                    mxfp8_scaled_mm_epilogue,
                 )
             )
         )

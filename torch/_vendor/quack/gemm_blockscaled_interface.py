@@ -17,6 +17,7 @@ the quack kernel consumes. No data is copied.
 """
 
 from functools import lru_cache
+from collections.abc import Callable
 from typing import Optional, Tuple
 
 import torch
@@ -87,6 +88,48 @@ def _compile_cached(
         fake_mD,
         fake_mSFA,
         fake_mSFB,
+    )
+
+
+@lru_cache(maxsize=64)
+def _compile_epilogue_cached(
+    m: int,
+    n: int,
+    k: int,
+    l: int,
+    mma_tiler_mn: Tuple[int, int],
+    cluster_shape_mn: Tuple[int, int],
+    out_torch_dtype,
+    ab_dtype_cutlass,
+    sf_dtype_cutlass,
+    tensor_epilogue_fn: Callable,
+    tensor_epilogue_key: str,
+):
+    dev = torch.device("cuda")
+    rm = ceil_div(m, 128)
+    rn = ceil_div(n, 128)
+    rk = ceil_div(k // _SF_VEC_SIZE, 4)
+    fake_mA = torch.empty(l, m, k, dtype=torch.float8_e4m3fn, device=dev).permute(1, 2, 0)
+    fake_mB = torch.empty(l, n, k, dtype=torch.float8_e4m3fn, device=dev).permute(1, 2, 0)
+    fake_mD = torch.empty(l, m, n, dtype=out_torch_dtype, device=dev).permute(1, 2, 0)
+    fake_sc_A = torch.empty(l, rm, rk, 512, dtype=torch.float8_e8m0fnu, device=dev)
+    fake_sc_B = torch.empty(l, rn, rk, 512, dtype=torch.float8_e8m0fnu, device=dev)
+    fake_mSFA = scale_view_for_kernel(fake_sc_A, m, k // _SF_VEC_SIZE, l)
+    fake_mSFB = scale_view_for_kernel(fake_sc_B, n, k // _SF_VEC_SIZE, l)
+    return compile_blockscaled_gemm_tvm_ffi(
+        ab_dtype_cutlass,
+        sf_dtype_cutlass,
+        _SF_VEC_SIZE,
+        _TORCH_TO_CUTLASS_D[out_torch_dtype],
+        mma_tiler_mn,
+        cluster_shape_mn,
+        fake_mA,
+        fake_mB,
+        fake_mD,
+        fake_mSFA,
+        fake_mSFB,
+        tensor_epilogue_fn=tensor_epilogue_fn,
+        tensor_epilogue_key=tensor_epilogue_key,
     )
 
 
@@ -210,6 +253,43 @@ def mxfp8_gemm_out(
         cutlass.Float8E8M0FNU,
     )
     runner(mA, mB, mD, sfa, sfb)
+
+
+def mxfp8_scaled_mm_epilogue(
+    A: Tensor,
+    B: Tensor,
+    A_scale: Tensor,
+    B_scale: Tensor,
+    epilogue_fn: Callable,
+    epilogue_key: str,
+    out_dtype: torch.dtype = torch.bfloat16,
+    *,
+    mma_tiler_mn: Optional[Tuple[int, int]] = None,
+    cluster_shape_mn: Optional[Tuple[int, int]] = None,
+) -> Tensor:
+    m, n, k, l, mA, mB, _scA, _scB, sfa, sfb, was_2d = _to_kernel_layout(A, B, A_scale, B_scale)
+    out_shape = (m, n) if was_2d else (l, m, n)
+    out = torch.empty(out_shape, dtype=out_dtype, device=A.device)
+    mD = (out.unsqueeze(0) if was_2d else out).permute(1, 2, 0)
+    if mma_tiler_mn is None or cluster_shape_mn is None:
+        tlr, clu = _default_tiler_cluster(m, n)
+        mma_tiler_mn = mma_tiler_mn or tlr
+        cluster_shape_mn = cluster_shape_mn or clu
+    runner = _compile_epilogue_cached(
+        m,
+        n,
+        k,
+        l,
+        mma_tiler_mn,
+        cluster_shape_mn,
+        out_dtype,
+        cutlass.Float8E4M3FN,
+        cutlass.Float8E8M0FNU,
+        epilogue_fn,
+        epilogue_key,
+    )
+    runner(mA, mB, mD, sfa, sfb)
+    return out
 
 
 def mxfp8_gemm(

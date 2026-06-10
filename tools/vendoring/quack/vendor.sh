@@ -63,9 +63,12 @@ PYTORCH_ONLY_FILES=(
     cute_dsl_mlir_threading.py
 )
 
-FLEX_GEMM_CREATED_FILES=()
+FLEX_GEMM_CREATED_FILES=(
+    _compile_payload.py
+)
 
 FILES=(
+    _compile_payload.py
     _compile_worker.py
     activation.py
     autotuner.py

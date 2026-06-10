@@ -20,7 +20,7 @@ from typing import NamedTuple
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import Boolean, Float32, const_expr
+from cutlass import Boolean, Float32, Int32, Uint8, const_expr
 
 from .epi_utils import assume_stride_divisibility, setup_epi_tensor
 from .sm90_utils import partition_for_epilogue
@@ -456,6 +456,85 @@ class ColVecLoad(VecLoad):
         return [tDsV, tDrV_cvt]
 
 
+class VecTupleLoad(EpiOp):
+    vec_op_cls = VecLoad
+
+    def param_fields(self):
+        return [(self.name, object, None)]
+
+    def to_params(self, gemm, args):
+        tensors = getattr(args, self.name)
+        if tensors is None:
+            return {self.name: None}
+        return {self.name: tuple(assume_stride_divisibility(tensor) for tensor in tensors)}
+
+    def smem_bytes(self, arg_tensor, cta_tile_shape_mnk, epi_tile, warp_shape_mnk=None):
+        return sum(
+            (
+                self.vec_op_cls(f"{self.name}{i}").smem_bytes(
+                    tensor, cta_tile_shape_mnk, epi_tile, warp_shape_mnk
+                )
+                for i, tensor in enumerate(arg_tensor)
+            ),
+            EpiSmemBytes(),
+        )
+
+    def smem_struct_field(self, gemm, params):
+        annotations = {}
+        for i, tensor in enumerate(getattr(params, self.name)):
+            size = self.vec_op_cls(f"{self.name}{i}")._tile_size(gemm.cta_tile_shape_mnk)
+            annotations[f"v{i}"] = cute.struct.Align[
+                cute.struct.MemRange[tensor.element_type, size], 16
+            ]
+        storage = type(f"{self.name}Storage", (), {"__annotations__": annotations})
+        return (f"s_{self.name}", cute.struct(storage))
+
+    def get_smem_tensor(self, gemm, params, storage_epi):
+        storage = getattr(storage_epi, f"s_{self.name}")
+        return tuple(
+            getattr(storage, f"v{i}").get_tensor(
+                cute.make_layout(
+                    self.vec_op_cls(f"{self.name}{i}")._tile_size(gemm.cta_tile_shape_mnk)
+                )
+            )
+            for i, _ in enumerate(getattr(params, self.name))
+        )
+
+    def needs_async_fence(self):
+        return True
+
+    def epi_m_major_score(self, arg_tensor, gemm):
+        return sum(
+            self.vec_op_cls(f"{self.name}{i}").epi_m_major_score(tensor, gemm)
+            for i, tensor in enumerate(arg_tensor)
+        )
+
+    @cute.jit
+    def begin(self, gemm, param, smem_tensor, ctx):
+        states = []
+        for i, tensor in enumerate(param):
+            states.append(
+                self.vec_op_cls(f"{self.name}{i}").begin(gemm, tensor, smem_tensor[i], ctx)
+            )
+        return tuple(states)
+
+    def begin_loop(self, gemm, state, epi_coord):
+        values = []
+        for i, tensor_state in enumerate(state):
+            values.append(
+                self.vec_op_cls(f"{self.name}{i}").begin_loop(gemm, tensor_state, epi_coord)
+            )
+        return tuple(values)
+
+
+class RowVecTupleLoad(VecTupleLoad):
+    vec_op_cls = RowVecLoad
+
+
+class ColVecTupleLoad(VecTupleLoad):
+    vec_op_cls = ColVecLoad
+
+
 class TileStore(EpiOp):
     """Tile-sized output tensor stored via TMA (e.g. postact).
 
@@ -696,6 +775,136 @@ class TileLoad(EpiOp):
         return state.tRS_rTile
 
 
+class TileTupleLoad(EpiOp):
+    def _tma_atoms_key(self):
+        return f"tma_atoms_{self.name}"
+
+    def _smem_layouts_key(self):
+        return f"epi_{self.name}_smem_layouts_staged"
+
+    def _epi_tiles_key(self):
+        return f"epi_tiles_{self.name}"
+
+    def _layout_gemm_attr(self, index):
+        return f"_tile_tuple_load_layout_{self.name}_{index}"
+
+    def _dtype_gemm_attr(self, index):
+        return f"_tile_tuple_load_dtype_{self.name}_{index}"
+
+    def param_fields(self):
+        return [
+            (self._tma_atoms_key(), object, None),
+            (self.name, object, None),
+            (self._smem_layouts_key(), object, None),
+            (self._epi_tiles_key(), object, None),
+        ]
+
+    def to_params(self, gemm, args):
+        tensors = getattr(args, self.name)
+        tma_atoms, tma_tensors, smem_layouts, epi_tiles = [], [], [], []
+        for i, tensor in enumerate(tensors):
+            setattr(gemm, self._layout_gemm_attr(i), cutlass.utils.LayoutEnum.from_tensor(tensor))
+            setattr(gemm, self._dtype_gemm_attr(i), tensor.element_type)
+            tma_atom, tma_tensor, smem_layout, epi_tile = setup_epi_tensor(
+                gemm, tensor, epi_tile=None, op_type="load", stage=gemm.epi_c_stage
+            )
+            tma_atoms.append(tma_atom)
+            tma_tensors.append(tma_tensor)
+            smem_layouts.append(smem_layout)
+            epi_tiles.append(epi_tile)
+        return {
+            self._tma_atoms_key(): tuple(tma_atoms),
+            self.name: tuple(tma_tensors),
+            self._smem_layouts_key(): tuple(smem_layouts),
+            self._epi_tiles_key(): tuple(epi_tiles),
+        }
+
+    def is_tile_load(self):
+        return True
+
+    def smem_bytes(self, arg_tensor, cta_tile_shape_mnk, epi_tile, warp_shape_mnk=None):
+        return sum(
+            (
+                EpiSmemBytes(
+                    c_stage=cute.size(cute.shape(epi_tile)) * tensor.element_type.width // 8
+                )
+                for tensor in arg_tensor
+            ),
+            EpiSmemBytes(),
+        )
+
+    def smem_struct_field(self, gemm, params):
+        annotations = {}
+        for i, smem_layout in enumerate(getattr(params, self._smem_layouts_key())):
+            annotations[f"v{i}"] = cute.struct.Align[
+                cute.struct.MemRange[
+                    getattr(gemm, self._dtype_gemm_attr(i)), cute.cosize(smem_layout)
+                ],
+                gemm.buffer_align_bytes,
+            ]
+        storage = type(f"{self.name}Storage", (), {"__annotations__": annotations})
+        return (f"s_{self.name}", cute.struct(storage))
+
+    def get_smem_tensor(self, gemm, params, storage_epi):
+        storage = getattr(storage_epi, f"s_{self.name}")
+        return tuple(
+            getattr(storage, f"v{i}").get_tensor(smem_layout.outer, swizzle=smem_layout.inner)
+            for i, smem_layout in enumerate(getattr(params, self._smem_layouts_key()))
+        )
+
+    def tma_atoms(self, gemm, params):
+        return list(getattr(params, self._tma_atoms_key()))
+
+    def load_g2s_copy_fn(self, gemm, params, smem_tensor, tile_coord_mnkl, varlen_manager, epi_pipeline):
+        copy_fns = []
+        for tma_atom, tensor, epi_tile, smem in zip(
+            getattr(params, self._tma_atoms_key()),
+            getattr(params, self.name),
+            getattr(params, self._epi_tiles_key()),
+            smem_tensor,
+        ):
+            copy_tile_fn, _, _ = gemm.epilog_gmem_copy_and_partition(
+                tma_atom,
+                varlen_manager.offset_batch_epi(tensor, tile_coord_mnkl[3]),
+                gemm.cta_tile_shape_mnk[:2],
+                epi_tile,
+                smem,
+                tile_coord_mnkl,
+            )
+            copy_fns.append(copy_utils.tma_producer_copy_fn(copy_tile_fn, epi_pipeline))
+        return copy_utils.chain_tma_producer_copy_fns(tuple(copy_fns))
+
+    @cute.jit
+    def begin(self, gemm, param, smem_tensor, ctx):
+        assert gemm.arch in (90, 100, 120), "TileTupleLoad requires the SM90/SM100/SM120 epilogue path"
+        states = []
+        smem_load_ref = ctx.tiled_copy_t2r if const_expr(gemm.arch == 100) else gemm.tiled_mma
+        for i, smem in enumerate(smem_tensor):
+            tiled_copy_s2r, tRS_rTile, tSR_rTile, tSR_sTile = gemm.epilog_smem_load_and_partition(
+                smem_load_ref,
+                getattr(gemm, self._layout_gemm_attr(i)),
+                getattr(gemm, self._dtype_gemm_attr(i)),
+                smem,
+                ctx.tRS_rD_layout,
+                ctx.tidx,
+            )
+            states.append(_TileLoadState(tiled_copy_s2r, tRS_rTile, tSR_rTile, tSR_sTile))
+        return tuple(states)
+
+    @cute.jit
+    def load_s2r(self, gemm, param, state, stage_idx):
+        for tile_state in state:
+            cute.copy(
+                tile_state.tiled_copy_s2r,
+                tile_state.tSR_sTile[None, None, None, stage_idx],
+                tile_state.tSR_rTile,
+            )
+
+    @cute.jit
+    def begin_loop(self, gemm, state, epi_coord):
+        return tuple(tile_state.tRS_rTile for tile_state in state)
+
+
 @cute.jit
 def vec_multiply(gemm, tRS_rD, tDrColVec, tDrRowVec):
     """Multiply tRS_rD by colvec and/or rowvec in-place. Uses packed f32x2 on SM100."""
@@ -758,6 +967,73 @@ def colvec_reduce_accumulate(gemm, tDrReduce, tRS_rInput, transform_fn=None, rSc
                     else:
                         row_sum = cute.arch.add_packed_f32x2(val, row_sum)
                 tDrReduce_mn[m, 0] += row_sum[0] + row_sum[1]
+
+
+@cute.jit
+def grouped_colvec_reduce_accumulate(gemm, tDrReduce, tRS_rInput, transform_fn=None):
+    """Accumulate per-element values for grouped-N sum reductions."""
+    if const_expr(tDrReduce is not None):
+        if const_expr(transform_fn is None):
+            transform_fn = lambda x: x
+        for i in cutlass.range(cute.size(tDrReduce), unroll_full=True):
+            tDrReduce[i] += transform_fn(tRS_rInput[i])
+
+
+@cute.jit
+def grouped_colvec_reduce_accumulate_amax_abs(gemm, tDrReduce, tRS_rInput):
+    """Accumulate per-element absolute maxima for grouped-N reductions."""
+    if const_expr(tDrReduce is not None):
+        for i in cutlass.range(cute.size(tDrReduce), unroll_full=True):
+            val = tRS_rInput[i]
+            tDrReduce[i] = cute.arch.fmax(tDrReduce[i], cute.arch.fmax(val, -val))
+
+
+@cute.jit
+def grouped_rowvec_reduce_accumulate(gemm, tDrReduce, tRS_rInput, transform_fn=None):
+    """Accumulate per-element values for grouped-M reductions."""
+    if const_expr(tDrReduce is not None):
+        if const_expr(transform_fn is None):
+            transform_fn = lambda x: x
+        for i in cutlass.range(cute.size(tDrReduce), unroll_full=True):
+            tDrReduce[i] += transform_fn(tRS_rInput[i])
+
+
+@cute.jit
+def grouped_rowvec_reduce_value(gemm, tRS_rInput, row_state):
+    """Return per-element grouped-M sums for value-producing row reductions.
+
+    This mirrors GroupedRowVecReduce's same-warp M-lane shuffle, but produces a
+    register value immediately so it can feed the main output before stores.
+    """
+    result = None
+    if const_expr(row_state is not None):
+        group_m = const_expr(gemm.local_reduce_group)
+        lane_layout_MN = row_state[0]
+        lanes_in_M = cute.size(lane_layout_MN, mode=[0])
+        lanes_in_N = cute.size(lane_layout_MN, mode=[1])
+        assert group_m <= lanes_in_M, (
+            "grouped_rowvec_reduce_value requires group_m to fit within one warp M-lane group"
+        )
+        assert lanes_in_M % group_m == 0, (
+            "grouped_rowvec_reduce_value requires lanes_in_M divisible by group_m"
+        )
+        if const_expr(lanes_in_N > 1):
+            assert lane_layout_MN.stride[1] == 1, (
+                "grouped_rowvec_reduce_value assumes contiguous N lanes when lanes_in_N > 1"
+            )
+        result = cute.make_rmem_tensor_like(tRS_rInput, tRS_rInput.element_type)
+        cute.autovec_copy(tRS_rInput, result)
+        result_flt = cute.filter_zeros(result)
+        if const_expr(group_m > 1):
+            for i in cutlass.range(cute.size(result_flt), unroll_full=True):
+                reduction_rows = group_m // 2
+                while reduction_rows > 0:
+                    result_flt[i] += cute.arch.shuffle_sync_bfly(
+                        result_flt[i],
+                        offset=cute.crd2idx((reduction_rows, 0), lane_layout_MN),
+                    )
+                    reduction_rows = reduction_rows // 2
+    return result
 
 
 @cute.jit
@@ -865,6 +1141,290 @@ class VecReduce(EpiOp):
         if const_expr(epi_coord[self._reduce_dim()] == 0):
             cute.filter_zeros(result).fill(0.0)
         return result
+
+
+class GroupedColVecReduce(VecReduce):
+    """Column-vector reductions over contiguous N groups inside a CTA tile."""
+
+    dim = 0
+    epi_m_major_preference = -1
+
+    @cute.jit
+    def begin(self, gemm, param, smem_tensor, ctx):
+        result = None
+        if const_expr(param is not None):
+            group_n = const_expr(gemm.local_reduce_group)
+            if const_expr(group_n == 0 or group_n == ctx.tile_N):
+                return ColVecReduce.begin(self, gemm, param, smem_tensor, ctx)
+            assert ctx.tile_N % group_n == 0
+            # Keep per-element accumulators; grouping happens at end_loop after we
+            # recover logical N coordinates from the same epilogue partition.
+            vec_mma_layout = cute.make_layout((ctx.tile_M, ctx.tile_N))
+            tDrReduce_layout = ctx.partition_for_epilogue_fn(
+                cute.make_rmem_tensor(vec_mma_layout, Float32)
+            ).layout
+            tDrReduce = cute.make_rmem_tensor(tDrReduce_layout, Float32)
+            result = (tDrReduce, smem_tensor)
+        return result
+
+    @cute.jit
+    def begin_loop(self, gemm, state, epi_coord):
+        result = None
+        if const_expr(state is not None):
+            group_n = const_expr(gemm.local_reduce_group)
+            if const_expr(group_n == 0 or group_n == gemm.cta_tile_shape_mnk[1]):
+                return ColVecReduce.begin_loop(self, gemm, state, epi_coord)
+            tDrReduce = state[0]
+            result = tDrReduce[None, None, None, epi_coord[0], epi_coord[1]]
+            cute.filter_zeros(result).fill(0.0)
+        return result
+
+    @cute.jit
+    def end_loop(
+        self,
+        gemm,
+        param,
+        state,
+        epi_coord,
+        epi_tile,
+        tiled_copy_t2r,
+        tiled_copy_r2s,
+        tile_coord_mnkl,
+        varlen_manager,
+        tidx,
+    ):
+        if const_expr(param is not None):
+            group_n = const_expr(gemm.local_reduce_group)
+            if const_expr(group_n == 0 or group_n == gemm.cta_tile_shape_mnk[1]):
+                return ColVecReduce.end_loop(
+                    self,
+                    gemm,
+                    param,
+                    state,
+                    epi_coord,
+                    epi_tile,
+                    tiled_copy_t2r,
+                    tiled_copy_r2s,
+                    tile_coord_mnkl,
+                    varlen_manager,
+                    tidx,
+                )
+            tDrReduce = state[0]
+            tDrReduce_cur = tDrReduce[None, None, None, epi_coord[0], epi_coord[1]]
+            tiled_copy = tiled_copy_t2r if tiled_copy_t2r is not None else tiled_copy_r2s
+            reference_src = tiled_copy_t2r is None
+
+            partition_for_epilogue_fn = partial(
+                partition_for_epilogue,
+                epi_tile=epi_tile,
+                tiled_copy=tiled_copy,
+                tidx=tidx,
+                reference_src=reference_src,
+            )
+            tile_M, tile_N = gemm.cta_tile_shape_mnk[:2]
+            groups_per_cta = const_expr(tile_N // group_n)
+            tDcD = partition_for_epilogue_fn(cute.make_identity_tensor((tile_M, tile_N)))
+            tDcD_cur = tDcD[None, None, None, epi_coord[0], epi_coord[1]]
+            tDrReduce_flt = cute.filter_zeros(tDrReduce_cur)
+            tDcD_flt = cute.filter_zeros(tDcD_cur)
+
+            batch_idx = tile_coord_mnkl[3]
+            limit_m = min(
+                varlen_manager.len_m(batch_idx) - tile_coord_mnkl[0] * tile_M,
+                tile_M,
+            )
+            limit_n_groups = param.shape[2] if not varlen_manager.varlen_m else param.shape[1]
+            if const_expr(not varlen_manager.varlen_m):
+                mColVec = param[batch_idx, None, None]
+            else:
+                mColVec = cute.domain_offset(
+                    (varlen_manager.params.cu_seqlens_m[batch_idx], None),
+                    param[None, None],
+                )
+            gColVec = cute.local_tile(
+                mColVec,
+                (tile_M, groups_per_cta),
+                (tile_coord_mnkl[0], tile_coord_mnkl[1]),
+            )
+            for i in cutlass.range(0, cute.size(tDrReduce_flt), group_n, unroll_full=True):
+                row_idx = tDcD_flt[i][0]
+                n_idx = tDcD_flt[i][1]
+                group_idx = n_idx // group_n
+                group_value = tDrReduce_flt[i]
+                if const_expr(gemm.local_reduce_op != 4):
+                    for j in cutlass.range_constexpr(1, group_n):
+                        if const_expr(
+                            gemm.local_reduce_op == 1
+                            or gemm.local_reduce_op == 2
+                            or gemm.local_reduce_op == 3
+                        ):
+                            group_value = cute.arch.fmax(group_value, tDrReduce_flt[i + j])
+                        else:
+                            group_value += tDrReduce_flt[i + j]
+                if const_expr(gemm.local_reduce_op == 2):
+                    bits = Float32(group_value).bitcast(Int32)
+                    exp_unbiased = ((bits >> 23) & 0xFF) - 127
+                    scale_unbiased = exp_unbiased - gemm.local_reduce_max_power
+                    scale_unbiased = cutlass.max(cutlass.min(scale_unbiased, 128), -127)
+                    group_value = Uint8(scale_unbiased + 127).bitcast(param.element_type)
+                else:
+                    if const_expr(gemm.local_reduce_op == 3):
+                        group_value *= 1.0 / 6.0
+                        group_value = cute.arch.fmin(
+                            cute.arch.fmax(group_value, 0.015625), 448.0
+                        )
+                    if const_expr(gemm.local_reduce_scale != 1.0):
+                        group_value *= gemm.local_reduce_scale
+                    if const_expr(param.element_type != Float32):
+                        group_value = group_value.to(param.element_type)
+                if row_idx < limit_m and group_idx < limit_n_groups:
+                    gColVec[row_idx, group_idx] = group_value
+
+
+class GroupedRowVecReduce(VecReduce):
+    """Row-vector reductions over contiguous M groups inside a CTA tile.
+
+    This first implementation is intentionally narrow: the M group must fit within
+    the M lane group of a single warp. Larger groups that cross warp-M partitions
+    need an additional shared-memory partial reduction and are rejected.
+    """
+
+    dim = 1
+    epi_m_major_preference = 4
+
+    def _smem_warps(self, warp_shape_mnk):
+        return 0
+
+    @cute.jit
+    def begin(self, gemm, param, smem_tensor, ctx):
+        result = None
+        group_m = const_expr(gemm.local_reduce_group)
+        if const_expr(
+            param is None
+            and gemm.local_reduce_feeds_main
+            and gemm.local_reduce_dim == 0
+            and group_m != 0
+        ):
+            tiled_copy = ctx.tiled_copy_t2r if ctx.tiled_copy_t2r is not None else ctx.tiled_copy_r2s
+            reference_src = ctx.tiled_copy_t2r is None
+            lane_layout_MN, _ = _get_lane_warp_layouts(tiled_copy, reference_src)
+            result = (lane_layout_MN,)
+        elif const_expr(param is not None):
+            if const_expr(group_m == 0 or group_m == ctx.tile_M):
+                return RowVecReduce.begin(self, gemm, param, smem_tensor, ctx)
+            assert ctx.tile_M % group_m == 0
+            vec_mma_layout = cute.make_layout((ctx.tile_M, ctx.tile_N))
+            tDrReduce_layout = ctx.partition_for_epilogue_fn(
+                cute.make_rmem_tensor(vec_mma_layout, Float32)
+            ).layout
+            tDrReduce = cute.make_rmem_tensor(tDrReduce_layout, Float32)
+            result = (tDrReduce, smem_tensor)
+        return result
+
+    @cute.jit
+    def begin_loop(self, gemm, state, epi_coord):
+        result = None
+        if const_expr(state is not None):
+            group_m = const_expr(gemm.local_reduce_group)
+            if const_expr(
+                gemm.local_reduce_feeds_main and gemm.local_reduce_dim == 0
+            ):
+                return state
+            if const_expr(group_m == 0 or group_m == gemm.cta_tile_shape_mnk[0]):
+                return RowVecReduce.begin_loop(self, gemm, state, epi_coord)
+            tDrReduce = state[0]
+            result = tDrReduce[None, None, None, epi_coord[0], epi_coord[1]]
+            cute.filter_zeros(result).fill(0.0)
+        return result
+
+    @cute.jit
+    def end_loop(
+        self,
+        gemm,
+        param,
+        state,
+        epi_coord,
+        epi_tile,
+        tiled_copy_t2r,
+        tiled_copy_r2s,
+        tile_coord_mnkl,
+        varlen_manager,
+        tidx,
+    ):
+        if const_expr(param is not None):
+            group_m = const_expr(gemm.local_reduce_group)
+            if const_expr(group_m == 0 or group_m == gemm.cta_tile_shape_mnk[0]):
+                return RowVecReduce.end_loop(
+                    self,
+                    gemm,
+                    param,
+                    state,
+                    epi_coord,
+                    epi_tile,
+                    tiled_copy_t2r,
+                    tiled_copy_r2s,
+                    tile_coord_mnkl,
+                    varlen_manager,
+                    tidx,
+                )
+            tDrReduce = state[0]
+            tDrReduce_cur = tDrReduce[None, None, None, epi_coord[0], epi_coord[1]]
+            tiled_copy = tiled_copy_t2r if tiled_copy_t2r is not None else tiled_copy_r2s
+            reference_src = tiled_copy_t2r is None
+
+            lane_layout_MN, _ = _get_lane_warp_layouts(tiled_copy, reference_src)
+            lanes_in_M = cute.size(lane_layout_MN, mode=[0])
+            lanes_in_N = cute.size(lane_layout_MN, mode=[1])
+            assert group_m <= lanes_in_M, (
+                "GroupedRowVecReduce currently requires group_m to fit within one warp M-lane group"
+            )
+            assert lanes_in_M % group_m == 0, (
+                "GroupedRowVecReduce requires lanes_in_M divisible by group_m"
+            )
+            if const_expr(lanes_in_N > 1):
+                assert lane_layout_MN.stride[1] == 1, (
+                    "GroupedRowVecReduce assumes contiguous N lanes when lanes_in_N > 1"
+                )
+
+            partition_for_epilogue_fn = partial(
+                partition_for_epilogue,
+                epi_tile=epi_tile,
+                tiled_copy=tiled_copy,
+                tidx=tidx,
+                reference_src=reference_src,
+            )
+            tile_M, tile_N = gemm.cta_tile_shape_mnk[:2]
+            groups_per_cta = const_expr(tile_M // group_m)
+            tDcD = partition_for_epilogue_fn(cute.make_identity_tensor((tile_M, tile_N)))
+            tDcD_cur = tDcD[None, None, None, epi_coord[0], epi_coord[1]]
+            tDrReduce_flt = cute.filter_zeros(tDrReduce_cur)
+            tDcD_flt = cute.filter_zeros(tDcD_cur)
+
+            if const_expr(group_m > 1):
+                for i in cutlass.range(cute.size(tDrReduce_flt), unroll_full=True):
+                    reduction_rows = group_m // 2
+                    while reduction_rows > 0:
+                        tDrReduce_flt[i] += cute.arch.shuffle_sync_bfly(
+                            tDrReduce_flt[i],
+                            offset=cute.crd2idx((reduction_rows, 0), lane_layout_MN),
+                        )
+                        reduction_rows = reduction_rows // 2
+
+            batch_idx = tile_coord_mnkl[3]
+            limit_n = min(param.shape[2] - tile_coord_mnkl[1] * tile_N, tile_N)
+            limit_m_groups = param.shape[1]
+            mRowVec = param[batch_idx, None, None]
+            gRowVec = cute.local_tile(
+                mRowVec,
+                (groups_per_cta, tile_N),
+                (tile_coord_mnkl[0], tile_coord_mnkl[1]),
+            )
+            for i in cutlass.range(cute.size(tDrReduce_flt), unroll_full=True):
+                row_idx = tDcD_flt[i][0]
+                col_idx = tDcD_flt[i][1]
+                group_idx = row_idx // group_m
+                if row_idx % group_m == 0 and group_idx < limit_m_groups and col_idx < limit_n:
+                    gRowVec[group_idx, col_idx] = tDrReduce_flt[i]
 
 
 class ColVecReduce(VecReduce):
