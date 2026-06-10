@@ -7842,7 +7842,7 @@ If not, they are drawn without replacement, which means that when a
 sample index is drawn for a row, it cannot be drawn again for that row.
 
 .. note::
-    When drawn without replacement, :attr:`num_samples` must be lower than
+    When drawn without replacement, :attr:`num_samples` must be less than or equal to the
     number of non-zero elements in :attr:`input` (or the min number of non-zero
     elements in each row of :attr:`input` if it is a matrix).
 
