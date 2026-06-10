@@ -206,7 +206,7 @@ def _iter_tensor(x_tensor):
                     x_tensor.crow_indices(), x_tensor.col_indices()
                 )
                 .repeat_interleave(x_blocksize[0] * x_blocksize[1], 1)
-                .mul_(torch.tensor(x_blocksize, device=x_tensor.device).reshape(2, 1))
+                .mul_(torch.tensor(x_blocksize, device=x_tensor.device).view(2, 1))
                 .add_(
                     torch.stack(
                         torch.where(torch.ones(x_blocksize, device=x_tensor.device))
@@ -224,7 +224,7 @@ def _iter_tensor(x_tensor):
                     x_tensor.ccol_indices(), x_tensor.row_indices(), transpose=True
                 )
                 .repeat_interleave(x_blocksize[0] * x_blocksize[1], 1)
-                .mul_(torch.tensor(x_blocksize, device=x_tensor.device).reshape(2, 1))
+                .mul_(torch.tensor(x_blocksize, device=x_tensor.device).view(2, 1))
                 .add_(
                     torch.stack(
                         torch.where(torch.ones(x_blocksize, device=x_tensor.device))

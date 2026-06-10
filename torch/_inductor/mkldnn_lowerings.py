@@ -221,7 +221,7 @@ def _convert_to_0d_constant(
     const_value = get_constant_value(data)
     if const_value is not None:
         return V.graph.add_tensor_constant(
-            torch.tensor(const_value.value, dtype=dtype).reshape([])
+            torch.tensor(const_value.value, dtype=dtype).view([])
         )
 
     tensor_box.realize()

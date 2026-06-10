@@ -3791,7 +3791,7 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
         repack_w = torch.ops.aten._convert_weight_to_int4pack_for_cpu(
             concat_unpacked_wgt, 1
         )
-        concat_scale_zp = torch.cat(scale_zps, dim=1).contiguous()
+        concat_scale_zp = torch.cat(scale_zps, dim=1)
         return repack_w, concat_scale_zp
 
     graph = gm.graph
