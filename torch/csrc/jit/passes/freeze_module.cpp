@@ -35,7 +35,7 @@ std::string concatName(const Iter& begin, const Iter& end) {
   for (Iter it = begin; it != end; ++it) {
     const std::string& sub_name = *it;
     if (!combined_name.empty()) {
-      combined_name += ".";
+      combined_name += '.';
     }
     combined_name += sub_name;
   }
