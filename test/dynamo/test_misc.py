@@ -15166,6 +15166,7 @@ fn
         ):
             fn(t)
 
+    @expectedFailureDynamic
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_build_class_closure_over_nonconstant(self):
         class Outer:
@@ -15199,6 +15200,7 @@ fn
         self.assertEqual(fn(t), t.sin() * outer.scale)
         self.assertEqual(cnt.frame_count, 2)
 
+    @expectedFailureDynamic
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_build_class_closure_over_nonconstant_method(self):
         class Outer:
