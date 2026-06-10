@@ -831,6 +831,22 @@ class TestCustomOp(CustomOpTestCaseBase):
             infer_schema(d, mutates_args=()), """(Tensor x) -> (Tensor[], Tensor)"""
         )
 
+        def d2(
+            x: Tensor,
+            y: Optional[list[Tensor]],
+        ) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(
+            infer_schema(d2, mutates_args=()),
+            """(Tensor x, Tensor[]? y) -> Tensor""",
+        )
+
+        self.assertExpectedInline(
+            infer_schema(d2, mutates_args={"y"}),
+            """(Tensor x, Tensor(a1!)[]? y) -> Tensor""",
+        )
+
         def e() -> Tensor:
             return torch.empty([])
 
@@ -3873,6 +3889,46 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(result.numel(), 0)
         self.assertEqual(out, x)
         self.assertGreater(out._version, version)
+
+    def test_mutated_optional_list(self):
+        @torch.library.custom_op(
+            "_torch_testing::g", mutates_args={"y"}
+        )
+        def g(x: Tensor, y: Optional[List[Tensor]]) -> None:
+            if y is not None:
+                for t in y:
+                    t.copy_(x ** 2)
+            return
+
+        x = torch.randn(3)
+        y = [torch.randn(3), torch.randn(3)]
+        initial_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y)
+        )
+        g(x, y)
+        new_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y)
+        )
+        self.assertEqual(initial_versions[0], new_versions[0], 'Expected x args to stay put')
+        for prev, after in zip(initial_versions[1], new_versions[1]):
+            self.assertGreater(after, prev, 'Expected y arg to advance to another ver')
+
+        # the optional call ver
+        new_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y)
+        )
+        g(x, None)
+        new_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y)
+        )
+        self.assertEqual(initial_versions[0], new_versions[0], 'Expected x args to stay put')
+
+        # functionalization
+        x = torch.randn(3)
+        y = [torch.randn(3), torch.randn(3)]
+        g_ = torch.compile(g, fullgraph=True)
+        g_(x, y)
+        self.assertEqual(y[0], x**2)
 
     def test_mutated_no_warning(self):
         # Run in subprocess since the warning is emitted only once

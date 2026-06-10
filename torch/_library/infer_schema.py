@@ -341,7 +341,7 @@ def derived_types(
 def get_supported_param_types():
     data: list[tuple[type | typing._SpecialForm, str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
-        (Tensor, "Tensor", True, True, False),
+        (Tensor, "Tensor", True, True, True),
         (int, "SymInt", True, False, True),
         (float, "float", True, False, True),
         (bool, "bool", True, False, True),
