@@ -37,5 +37,31 @@ struct MyStackClass : torch::CustomClassHolder {
     return std::make_tuple(1337.0f, 123);
   }
 };
+
+// --- Torchbind inheritance test classes ---
+
+struct Animal : public torch::CustomClassHolder {
+  virtual std::string speak() = 0;
+  virtual ~Animal() = default;
+};
+
+struct Dog : Animal {
+  std::string speak() override;
+};
+
+struct Cat : Animal {
+  std::string speak() override;
+};
+
+struct Puppy : Dog {
+  std::string speak() override;
+};
+
+struct AnimalShelter : public torch::CustomClassHolder {
+  c10::intrusive_ptr<Animal> animal_;
+  explicit AnimalShelter(c10::intrusive_ptr<Animal> animal);
+  std::string resident_speak();
+};
+
 } // namespace jit
 } // namespace torch

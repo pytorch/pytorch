@@ -379,6 +379,15 @@ struct TORCH_API ClassType : public NamedType {
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
+  // Base class support for custom class inheritance.
+  void setBaseType(ClassTypePtr base) {
+    baseType_ = std::move(base);
+  }
+
+  const ClassTypePtr& baseType() const {
+    return baseType_;
+  }
+
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
@@ -436,6 +445,9 @@ struct TORCH_API ClassType : public NamedType {
 
   // For error reporting accesses to class level attributes.
   std::vector<std::string> unresolved_class_attributes_;
+
+  // Optional base ClassType for custom class inheritance.
+  ClassTypePtr baseType_;
 };
 
 }

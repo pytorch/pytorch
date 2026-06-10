@@ -462,6 +462,15 @@ bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
     }
     return true;
   }
+
+  // Check custom class inheritance chain.
+  if (auto rhsClass = rhs.castRaw<ClassType>()) {
+    for (auto cur = baseType_.get(); cur; cur = cur->baseType_.get()) {
+      if (cur == rhsClass) {
+        return true;
+      }
+    }
+  }
   return Type::isSubtypeOfExt(rhs, why_not);
 }
 

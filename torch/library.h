@@ -481,6 +481,10 @@ class ClassNotSelected {
   ClassNotSelected& def(...) {
     return *this;
   }
+  template <typename Base>
+  ClassNotSelected& def_base() {
+    return *this;
+  }
 };
 
 // A SelectiveStr is like a const char*, except that it also comes

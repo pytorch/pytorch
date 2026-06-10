@@ -787,3 +787,48 @@ TORCH_LIBRARY_IMPL(_TorchScriptTesting, BackendSelect, m) {
 }
 
 } // namespace
+
+// --- Torchbind inheritance test class implementations ---
+
+namespace torch {
+namespace jit {
+
+std::string Dog::speak() {
+  return "woof";
+}
+std::string Cat::speak() {
+  return "meow";
+}
+std::string Puppy::speak() {
+  return "yip";
+}
+AnimalShelter::AnimalShelter(c10::intrusive_ptr<Animal> animal)
+    : animal_(std::move(animal)) {}
+std::string AnimalShelter::resident_speak() {
+  return animal_->speak();
+}
+
+} // namespace jit
+} // namespace torch
+
+// --- Torchbind inheritance registrations ---
+
+using torch::jit::Animal;
+using torch::jit::AnimalShelter;
+using torch::jit::Cat;
+using torch::jit::Dog;
+using torch::jit::Puppy;
+
+TORCH_LIBRARY_FRAGMENT(_TorchScriptTesting, m) {
+  m.class_<Animal>("_Animal");
+
+  m.class_<Dog>("_Dog").def_base<Animal>().def(torch::init<>());
+
+  m.class_<Cat>("_Cat").def_base<Animal>().def(torch::init<>());
+
+  m.class_<Puppy>("_Puppy").def_base<Dog>().def(torch::init<>());
+
+  m.class_<AnimalShelter>("_AnimalShelter")
+      .def(torch::init<c10::intrusive_ptr<Animal>>())
+      .def("resident_speak", &AnimalShelter::resident_speak);
+}

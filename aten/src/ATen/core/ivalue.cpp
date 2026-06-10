@@ -30,10 +30,12 @@ namespace ivalue {
 // This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
 void checkCustomClassType(const ClassType* expected_type, const Type* actual_type) {
-  // NB: doing pointer comparison here
-  // If in the future there ever arises a need to call operator== on custom class
-  // Type's, this needs to be changed!
-  TORCH_CHECK(actual_type == static_cast<const Type*>(expected_type),
+  // Fast path: pointer equality.
+  if (actual_type == static_cast<const Type*>(expected_type)) {
+    return;
+  }
+  // Slow path: check inheritance chain via isSubtypeOf.
+  TORCH_CHECK(actual_type && actual_type->isSubtypeOf(*expected_type),
               "Tried to convert an IValue of type ",
               actual_type ? actual_type->repr_str() : std::string("*NULL*"),
               " to custom class type ",

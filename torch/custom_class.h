@@ -165,6 +165,21 @@ class class_ : public ::torch::detail::class_base {
     return *this;
   }
 
+  /// Declares that CurClass inherits from Base in the TorchScript type
+  /// system, enabling polymorphic use of derived custom classes where the
+  /// base type is expected.
+  template <typename Base>
+  class_& def_base() {
+    static_assert(
+        std::is_base_of_v<Base, CurClass>,
+        "def_base<Base>(): CurClass must inherit from Base");
+    auto baseType =
+        c10::getCustomClassType<c10::intrusive_ptr<Base>>();
+    classTypePtr->setBaseType(
+        std::dynamic_pointer_cast<c10::ClassType>(baseType));
+    return *this;
+  }
+
   /// Method registration API for static methods.
   template <typename Func>
   class_& def_static(
