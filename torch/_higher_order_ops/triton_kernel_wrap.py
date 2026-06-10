@@ -1398,8 +1398,17 @@ def triton_kernel_wrapper_mutation_dense(
     # avoid mutating the original inputs
     kwargs = kwargs.copy()
     constant_args = constant_args.copy()
+    backend_options = {} if backend_options is None else backend_options
     # pyrefly: ignore [missing-attribute]
     for name in kernel.arg_names:
+        if name in backend_options:
+            # Preserve the single-kwarg form for names that are both kernel
+            # parameters and backend options. Triton's binder uses that kwarg
+            # to bind the kernel parameter, and _pack_args still exposes it to
+            # backend.parse_options(). Moving it into positional args here
+            # would reconstruct the invalid duplicate form:
+            # kernel(..., False, enable_fp_fusion=False).
+            break
         if name in kwargs:
             args.append(kwargs.pop(name))
         elif name in constant_args:
@@ -1407,10 +1416,9 @@ def triton_kernel_wrapper_mutation_dense(
         else:
             break
 
-    backend_options = {} if backend_options is None else backend_options
     # This path directly calls the original Triton kernel. If a backend option
-    # name also binds a kernel argument, it is already in kwargs/constant_args,
-    # so do not pass the same name again as an extra launch kwarg.
+    # name also binds a kernel argument, it remains in kwargs/constant_args
+    # above, so do not pass the same name again as an extra launch kwarg.
     launch_backend_options = {
         k: v
         for k, v in backend_options.items()
@@ -2246,6 +2254,18 @@ class TritonHOPifier:
         # even when a kwarg also binds a kernel parameter. Preserve those
         # concrete candidates separately from the normalized kernel arguments.
         backend_option_kwargs = dict(kwargs)
+
+        if isinstance(variable.kernel, Autotuner):
+            config_conflicts = sorted(
+                set(backend_option_kwargs).intersection(
+                    *(set(config.kwargs) for config in variable.kernel.configs)
+                )
+            )
+            if config_conflicts:
+                self.raise_unsupported(
+                    "Triton launch kwargs conflict with autotune config kwargs: "
+                    f"{config_conflicts!r}."
+                )
 
         for name in list(kwargs):
             if name not in jit_arg_names:

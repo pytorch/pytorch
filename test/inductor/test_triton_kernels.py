@@ -2707,12 +2707,19 @@ def forward(self, arg0_1, arg1_1):
         x = torch.randn(4, device=GPU_TYPE)
         out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
         self.assertEqual(out, x + x)
-        self.assertIn("'backend_options': {'enable_fp_fusion': False}", code)
+        self.assertIn("'backend_options':", code)
+        self.assertIn("'enable_fp_fusion': False", code)
 
     @requires_gpu
     def test_triton_kernel_backend_options_also_used_as_kernel_kwarg(self):
-        # Triton exposes keyword args to backend option parsing even when the
-        # same name also binds a kernel parameter; preserve both meanings.
+        # For `def kernel(..., enable_fp_fusion: tl.constexpr)`, the call
+        # `kernel[grid](..., enable_fp_fusion=False)` has two meanings in
+        # direct Triton: the binder uses it as a kernel parameter, and
+        # _pack_args still exposes it to backend.parse_options(), so Triton
+        # also parses it as a compiler option. Preserve both meanings without
+        # replaying it as the illegal form
+        # `kernel[grid](..., False, enable_fp_fusion=False)`, which passes the
+        # same kernel parameter both positionally and by keyword.
         @triton.jit
         def add_kernel(
             in_ptr0,
@@ -2750,9 +2757,122 @@ def forward(self, arg0_1, arg1_1):
 
         x = torch.randn(4, device=GPU_TYPE)
         y = torch.randn(4, device=GPU_TYPE)
+        eager_backend_out = torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        self.assertEqual(eager_backend_out, x * y)
+
         out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
         self.assertEqual(out, x * y)
-        self.assertIn("'backend_options': {'enable_fp_fusion': False}", code)
+        self.assertIn("'backend_options':", code)
+        self.assertIn("'enable_fp_fusion': False", code)
+
+    @requires_gpu
+    def test_triton_kernel_backend_options_also_kernel_kwarg_with_autotune(self):
+        # Same dual-meaning kwarg case as above, but through a user-provided
+        # triton.Config. The launch kwarg should remain both a kernel
+        # parameter and a backend option after the autotune wrapper is applied.
+        @triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
+            key=[],
+        )
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            enable_fp_fusion: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            if enable_fp_fusion:
+                result = x + y
+            else:
+                result = x * y
+            tl.store(out_ptr + offsets, result, mask=mask)
+
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                enable_fp_fusion=False,
+            )
+            return output
+
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
+        eager_backend_out = torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        self.assertEqual(eager_backend_out, x * y)
+
+        out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(out, x * y)
+        self.assertIn("@triton_heuristics.user_autotune", code)
+        self.assertIn("'backend_options':", code)
+        self.assertIn("'enable_fp_fusion': False", code)
+
+    @requires_gpu
+    def test_triton_kernel_autotune_config_conflicts_with_launch_kwarg(self):
+        # Direct Triton errors when a generic autotune config kwarg is also
+        # passed as a launch kwarg. The config does not override the launch
+        # kwarg; it would create duplicate keyword arguments at launch.
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"BLOCK_SIZE": 128, "enable_fp_fusion": True}, num_warps=4
+                )
+            ],
+            key=[],
+        )
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            enable_fp_fusion: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            if enable_fp_fusion:
+                result = x + y
+            else:
+                result = x * y
+            tl.store(out_ptr + offsets, result, mask=mask)
+
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                enable_fp_fusion=False,
+            )
+            return output
+
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
+        msg = "Triton launch kwargs conflict with autotune config kwargs"
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            torch.compile(f, fullgraph=True)(x, y)
 
     @requires_gpu
     def test_triton_kernel_backend_options_with_autotune(self):
@@ -2795,7 +2915,8 @@ def forward(self, arg0_1, arg1_1):
         out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
         self.assertEqual(out, x + x)
         self.assertIn("@triton_heuristics.user_autotune", code)
-        self.assertIn("'backend_options': {'enable_fp_fusion': False}", code)
+        self.assertIn("'backend_options':", code)
+        self.assertIn("'enable_fp_fusion': False", code)
 
     @requires_gpu
     def test_triton_kernel_special_kwargs_with_autotune_use_configs(self):

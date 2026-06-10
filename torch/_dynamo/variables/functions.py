@@ -3374,7 +3374,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         backend_option_kwargs: dict[str, Any],
         default_args: dict[str, Any],
         tx: "InstructionTranslatorBase",
-    ) -> "variables.ConstantVariable":
+    ) -> Optional[ConstantVariable]:
         from .dicts import ConstDictVariable
 
         # as we can only pass tensors as non-const args in fx graph,
