@@ -43,7 +43,11 @@ from .wrapper import (
     codegen_reinterpret_view_helper,
     EnterSubgraphLine,
     ExitSubgraphLine,
+    FreeIfNotReusedLine,
+    FreeLine,
     HasWriteLine,
+    KernelCallLine,
+    NullLine,
     PythonWrapperCodegen,
     SymbolicCallArg,
 )
@@ -1390,6 +1394,71 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.writeline("} // namespace torch::aot_inductor")
         self.prefix.writeline("using namespace torch::aot_inductor;")
 
+    def _emit_wrapper_lines(self, target: IndentedBuffer) -> None:
+        if not V.graph.aot_mode or V.graph.is_const_graph:
+            super()._emit_wrapper_lines(target)
+            return
+        from .wrapper import WrapperLine
+
+        i = 0
+        while i < len(self.lines):
+            line = self.lines[i]
+            if isinstance(line, KernelCallLine):
+                i = self._emit_wrapped_kernel_call(i, target)
+                continue
+            if isinstance(line, WrapperLine):
+                # pyrefly: ignore [missing-attribute]
+                line.codegen(target)
+            else:
+                target.writeline(line)
+            i += 1
+
+    def _emit_wrapped_kernel_call(self, start_idx: int, target: IndentedBuffer) -> int:
+        """Emit the ``KernelCallLine`` at ``start_idx`` inline in
+        ``target``, and outline the contiguous trailing frees into an
+        ``AOTI_NOINLINE static void free_after_<kernel>_<id>(...)``
+        helper. Returns the index past the consumed lines.
+        """
+        kernel_line = self.lines[start_idx]
+        assert isinstance(kernel_line, KernelCallLine)
+
+        kernel_line.codegen(target)
+
+        teardown_body = IndentedBuffer()
+        teardown_buffers: list[str] = []
+        i = start_idx + 1
+        with self.set_writeline(teardown_body, teardown_body.writeline):
+            while i < len(self.lines):
+                nxt = self.lines[i]
+                if isinstance(nxt, FreeLine) or (
+                    isinstance(nxt, FreeIfNotReusedLine) and not nxt.is_reused
+                ):
+                    # Skip MultiOutputLayout / TMADescriptor — their
+                    # make_buffer_free returns empty, no reset is emitted.
+                    if self.make_buffer_free(nxt.node):
+                        teardown_buffers.append(nxt.node.get_name())
+                    nxt.codegen(teardown_body)
+                elif isinstance(nxt, NullLine):
+                    pass
+                else:
+                    break
+                i += 1
+
+        if not teardown_buffers:
+            return i
+
+        callsite_id = next(self.kernel_callsite_id)
+        helper_name = f"free_after_{kernel_line.kernel_name}_{callsite_id}"
+        params = ", ".join(f"RAIIAtenTensorHandle& {n}" for n in teardown_buffers)
+        body = textwrap.indent(teardown_body.getvalue().rstrip(), "    ")
+        self.kernel_call_wrappers.splice(f"""
+AOTI_NOINLINE static void {helper_name}({params}) {{
+{body}
+}}
+""")
+        target.writeline(f"{helper_name}({', '.join(teardown_buffers)});")
+        return i
+
     def finalize_prefix(self):
         prior = self.prefix
         aot_mode_decls = IndentedBuffer()
@@ -1425,6 +1494,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # aot_mode_decls is AOTI-only; splice_aot routes correctly across modes
         # (no-op on plain IndentedBuffer in pure-JIT).
         self.prefix.splice_aot(aot_mode_decls)
+        self.prefix.splice_aot(self.kernel_call_wrappers)
         self.prefix.splice(prior)
 
     @staticmethod
