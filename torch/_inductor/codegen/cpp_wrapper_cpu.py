@@ -317,6 +317,51 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.codegen_int_array_var_cache = {}
         self.needs_vec_isa = self.device == "cpu"
 
+    @contextlib.contextmanager
+    def _preserve_device_guard_state(self):
+        last_seen_device_guard_index = self.last_seen_device_guard_index
+        try:
+            yield
+        finally:
+            self.last_seen_device_guard_index = last_seen_device_guard_index
+
+    @contextlib.contextmanager
+    def _preserve_codegen_state(self, graphs):
+        wrapper_state = (
+            OrderedSet(self.allocated),
+            OrderedSet(self.freed),
+            dict(self.reuses),
+            dict(self.allocated_workspaces),
+            OrderedSet(self.declared_int_array_vars),
+            dict(self.codegen_int_array_var_cache),
+            OrderedSet(self.kernel_numel_expr),
+            OrderedSet(self.used_cond_predicate),
+        )
+        subgraph_state = [
+            (
+                graph,
+                OrderedSet(graph.removed_buffers),
+                OrderedSet(graph.inplaced_to_remove),
+            )
+            for graph in graphs
+        ]
+        try:
+            yield
+        finally:
+            (
+                self.allocated,
+                self.freed,
+                self.reuses,
+                self.allocated_workspaces,
+                self.declared_int_array_vars,
+                self.codegen_int_array_var_cache,
+                self.kernel_numel_expr,
+                self.used_cond_predicate,
+            ) = wrapper_state
+            for graph, removed_buffers, inplaced_to_remove in subgraph_state:
+                graph.removed_buffers = removed_buffers
+                graph.inplaced_to_remove = inplaced_to_remove
+
     @staticmethod
     def create(
         is_subgraph: bool,
@@ -2625,6 +2670,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_conditional(self, conditional):
+        """Emit ABI-compatible C++ for a higher-order conditional."""
         outer_inputs = [f"{buf.codegen_reference()}" for buf in conditional.operands]
         outer_outputs = []
         for out in conditional.outputs:
@@ -2648,15 +2694,65 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # the predicate is not a Tensor: SymBool or Python bool
             predicate = conditional.predicate.codegen_reference()
 
-        self.writeline(f"if ({predicate}) {{")
-        self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
-        self.codegen_subgraph(conditional.true_subgraph, outer_inputs, outer_outputs)
-        self.writeline(ExitSubgraphLine(self))
-        self.writeline("} else {")
-        self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
-        self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
-        self.writeline(ExitSubgraphLine(self))
-        self.writeline("}")
+        def codegen_original_conditional() -> None:
+            self.writeline(f"if ({predicate}) {{")
+            with self._preserve_device_guard_state():
+                self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
+                self.codegen_subgraph(
+                    conditional.true_subgraph, outer_inputs, outer_outputs
+                )
+                self.writeline(ExitSubgraphLine(self))
+            self.writeline("} else {")
+            with self._preserve_device_guard_state():
+                self.writeline(
+                    EnterSubgraphLine(self, conditional.false_subgraph.graph)
+                )
+                self.codegen_subgraph(
+                    conditional.false_subgraph, outer_inputs, outer_outputs
+                )
+                self.writeline(ExitSubgraphLine(self))
+            self.writeline("}")
+
+        if not V.graph.is_dual_wrapper_mode:
+            return codegen_original_conditional()
+
+        graphs = (
+            conditional.true_subgraph.graph,
+            conditional.false_subgraph.graph,
+        )
+        jit_code = IndentedBuffer(initial_indent=self.wrapper_call._indent)
+        with (
+            self._preserve_codegen_state(graphs),
+            self._target_buf("wrapper_call", jit_code),
+            self.set_writeline(jit_code, jit_code.writeline_jit),
+        ):
+            self.writeline("{")
+            with self._preserve_device_guard_state():
+                self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
+                self.codegen_subgraph(
+                    conditional.true_subgraph, outer_inputs, outer_outputs
+                )
+                self.writeline(ExitSubgraphLine(self))
+            self.writeline("}")
+            self.writeline("{")
+            with self._preserve_device_guard_state():
+                self.writeline(
+                    EnterSubgraphLine(self, conditional.false_subgraph.graph)
+                )
+                self.codegen_subgraph(
+                    conditional.false_subgraph, outer_inputs, outer_outputs
+                )
+                self.writeline(ExitSubgraphLine(self))
+            self.writeline("}")
+
+        aot_code = AotOnlyBuffer(initial_indent=self.wrapper_call._indent)
+        with (
+            self._target_buf("wrapper_call", aot_code),
+            self.set_writeline(aot_code, aot_code.writeline_aot),
+        ):
+            codegen_original_conditional()
+
+        self.writeline(DualWrapperCodeLine(jit_code, aot_code))
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
         # TODO (desertfire) - This function is the old way of supporting
@@ -2678,6 +2774,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.pop_codegened_graph()
 
     def codegen_while_loop(self, while_loop, stack_output=False):
+        """Emit ABI-compatible C++ for a higher-order while_loop.
+
+        In dual-wrapper mode, keep the real loop on the AOTI side while making
+        the JIT first pass visit the condition and body once for lazy autotune.
+        """
         if stack_output:
             raise NotImplementedError("NYI cpp wrapper for while_loop_stack_output")
         is_bool_pred = isinstance(
@@ -2718,26 +2819,64 @@ class CppWrapperCpu(PythonWrapperCodegen):
         body_outer_inputs = list(cond_outer_inputs)
         body_outer_outputs = body_outer_inputs[: len(outer_carried_inputs)]
 
-        self.writeline("while (1) {")
-        self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
-        self.codegen_subgraph(
-            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
-        )
+        def codegen_original_while_loop() -> None:
+            self.writeline("while (1) {")
+            with self._preserve_device_guard_state():
+                self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
+                self.codegen_subgraph(
+                    while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+                )
 
-        if is_bool_pred:
-            cond_result = f"{cond_result_name}"
-        else:
-            cond_result = f"{cond_result_name}_scalar"
-            self.codegen_tensor_item(torch.bool, cond_result_name, cond_result)
-        self.writeline(f"if (!{cond_result}) break;")
+                if is_bool_pred:
+                    cond_result = f"{cond_result_name}"
+                else:
+                    cond_result = f"{cond_result_name}_scalar"
+                    self.codegen_tensor_item(torch.bool, cond_result_name, cond_result)
+                self.writeline(f"if (!{cond_result}) break;")
 
-        self.writeline(ExitSubgraphLine(self))
-        self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-        self.codegen_subgraph(
-            while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+                self.writeline(ExitSubgraphLine(self))
+                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+                self.codegen_subgraph(
+                    while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+                )
+                self.writeline(ExitSubgraphLine(self))
+                self.writeline("}")
+
+        if not V.graph.is_dual_wrapper_mode:
+            return codegen_original_while_loop()
+
+        graphs = (
+            while_loop.cond_subgraph.graph,
+            while_loop.body_subgraph.graph,
         )
-        self.writeline(ExitSubgraphLine(self))
-        self.writeline("}")
+        jit_code = IndentedBuffer(initial_indent=self.wrapper_call._indent)
+        with (
+            self._preserve_codegen_state(graphs),
+            self._target_buf("wrapper_call", jit_code),
+            self.set_writeline(jit_code, jit_code.writeline_jit),
+        ):
+            self.writeline("{")
+            with self._preserve_device_guard_state():
+                self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
+                self.codegen_subgraph(
+                    while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+                )
+                self.writeline(ExitSubgraphLine(self))
+                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+                self.codegen_subgraph(
+                    while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+                )
+                self.writeline(ExitSubgraphLine(self))
+            self.writeline("}")
+
+        aot_code = AotOnlyBuffer(initial_indent=self.wrapper_call._indent)
+        with (
+            self._target_buf("wrapper_call", aot_code),
+            self.set_writeline(aot_code, aot_code.writeline_aot),
+        ):
+            codegen_original_while_loop()
+
+        self.writeline(DualWrapperCodeLine(jit_code, aot_code))
 
     def generate_extern_kernel_args_decl_if_needed(
         self,
