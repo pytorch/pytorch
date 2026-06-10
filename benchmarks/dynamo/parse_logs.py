@@ -21,7 +21,8 @@ full_log = Path(sys.argv[1]).read_text()
 
 # If the log contains a gist URL, extract it so we can include it in the CSV
 gist_url = ""
-m = re.search(r"https://gist.github.com/[a-f0-9]+", full_log)
+# m = re.search(r"https://gist.github.com/[a-f0-9]+", full_log) . needed since regex . means match any character
+m = re.search(r"https://gist\.github\.com/[a-f0-9]+", full_log)
 if m is not None:
     gist_url = m.group(0)
 
