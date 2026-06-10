@@ -41,6 +41,14 @@ TORCH_API Module import_ir_module(
     bool load_debug_files = true,
     bool restore_shapes = false);
 
+// Load with pre-populated storage context (standard archive format).
+TORCH_API Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
+    std::shared_ptr<torch::jit::DeserializationStorageContext> storage_context,
+    std::optional<at::Device> device,
+    ExtraFilesMap& extra_files);
+
 // For reading unified serialization format from torch.Package
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
