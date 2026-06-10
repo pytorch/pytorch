@@ -337,7 +337,10 @@ class TestSparseSemiStructured(TestCase):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
         A_sparse = to_sparse_semi_structured(A)
 
-        B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
+        if dtype is torch.int8:
+            B = torch.randint(-3, 4, dense_input_shape, device=A_sparse.device, dtype=torch.int8)
+        else:
+            B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
 
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
         if dtype is torch.int8:
@@ -375,7 +378,10 @@ class TestSparseSemiStructured(TestCase):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
         A_sparse = to_sparse_semi_structured(A)
 
-        B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
+        if dtype is torch.int8:
+            B = torch.randint(-3, 4, dense_input_shape, device=A_sparse.device, dtype=torch.int8)
+        else:
+            B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
 
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
         if dtype is torch.int8 and dense_input_shape == (1, 128):
