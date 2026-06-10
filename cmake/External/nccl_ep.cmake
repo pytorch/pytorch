@@ -8,23 +8,27 @@ if(NOT __NCCL_EP_INCLUDED)
   # (headers + libnccl in __NCCL_BUILD_DIR). NCCL_EP_BUILDDIR == NCCL_HOME so
   # nccl_ep's artifacts (libnccl_ep.a, headers) land in the same tree, leaving
   # the core NCCL build untouched.
-  # Build nccl_ep for the same CUDA archs as the rest of PyTorch
-  # (TORCH_CUDA_ARCH_LIST), dropping anything below sm_90 since nccl_ep requires
-  # Hopper+. PyTorch disables CMAKE_CUDA_ARCHITECTURES in favor of
-  # TORCH_CUDA_ARCH_LIST, so convert "9.0;10.0;..." to "90;100;...". If nothing
-  # qualifies (list unset, or a symbolic value like "Common"/"All"), pass no
-  # flag and let nccl_ep's CMakeLists pick its own CUDA-version default.
+  # Build nccl_ep for the same CUDA archs as the rest of PyTorch, dropping
+  # anything below sm_90 since nccl_ep requires Hopper+. PyTorch disables
+  # CMAKE_CUDA_ARCHITECTURES in favor of TORCH_CUDA_ARCH_LIST, so derive the arch
+  # list from there. If nothing qualifies (list unset, or a symbolic value like
+  # "Common"/"All"), pass no flag and let nccl_ep's CMakeLists pick its own
+  # CUDA-version default.
   if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
+    # Usually only set in the environment (e.g. by setup.py), not as a cache var.
     set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   endif()
+  # TORCH_CUDA_ARCH_LIST may be space- or ;-separated; normalize to a CMake list.
+  string(REPLACE " " ";" __nccl_ep_archs "${TORCH_CUDA_ARCH_LIST}")
+  # Reduce each entry to its compact sm number, dropping any decoration:
+  # "9.0" / "9.0a" / "10.0+PTX" -> "90" / "90" / "100".
+  list(TRANSFORM __nccl_ep_archs REPLACE "^([0-9]+)\\.([0-9]+).*$" "\\1\\2")
+  # Drop anything that wasn't a numeric arch spec (e.g. "Common", "All", "").
+  list(FILTER __nccl_ep_archs INCLUDE REGEX "^[0-9]+$")
   set(__NCCL_EP_ARCHS "")
-  string(REPLACE " " ";" __nccl_ep_arch_list "${TORCH_CUDA_ARCH_LIST}")
-  foreach(__arch IN LISTS __nccl_ep_arch_list)
-    if(__arch MATCHES "^([0-9]+)\\.([0-9]+)")
-      set(__compact "${CMAKE_MATCH_1}${CMAKE_MATCH_2}")
-      if(__compact GREATER_EQUAL 90)
-        list(APPEND __NCCL_EP_ARCHS "${__compact}")
-      endif()
+  foreach(__arch IN LISTS __nccl_ep_archs)
+    if(__arch GREATER_EQUAL 90)  # nccl_ep is Hopper+ only
+      list(APPEND __NCCL_EP_ARCHS "${__arch}")
     endif()
   endforeach()
   set(__NCCL_EP_ARCH_ARG "")
