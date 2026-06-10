@@ -30,8 +30,14 @@ from functools import partial
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, get_runtime_metrics_context
-from torch._guards import compile_context, CompileContext
+from torch._guards import (
+    active_fake_mode,
+    compile_context,
+    CompileContext,
+    detect_fake_mode,
+)
 from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
@@ -55,9 +61,13 @@ from torch._inductor.utils import (
     set_tracing_context_output_strides,
 )
 from torch._opaque_base import OpaqueBase
+from torch._subclasses.fake_tensor import fake_tensor_tls, FakeTensor, get_plain_tensors
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._python_dispatch import is_in_torch_dispatch_mode
+from torch.utils._python_dispatch import (
+    is_in_torch_dispatch_mode,
+    is_traceable_wrapper_subclass,
+)
 
 from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -65,11 +75,12 @@ from .runtime.autotune_cache import AutotuneCacheBundler
 
 if TYPE_CHECKING:
     from collections import Counter
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
     from torch._inductor import metrics
     from torch._inductor.graph import GraphLowering
     from torch._library.fake_class_registry import FakeScriptObject
+    from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.export.pt2_archive._package_weights import Weights
     from torch.fx.experimental.symbolic_shapes import _ShapeGuardExpression
 
@@ -77,6 +88,57 @@ if TYPE_CHECKING:
     from .triton_bundler import TritonBundle
 
 log = logging.getLogger(__name__)
+
+
+@contextlib.contextmanager
+def _allow_fake_mode_to_fakify_compiled_region_tensors(
+    fake_mode: FakeTensorMode,
+) -> Iterator[None]:
+    old = fake_tensor_tls.allow_non_fake_inputs_override
+    fake_tensor_tls.allow_non_fake_inputs_override = True
+    try:
+        yield
+    finally:
+        fake_tensor_tls.allow_non_fake_inputs_override = old
+
+
+def _detect_fake_mode_for_compiled_region(
+    inputs: Sequence[Any],
+) -> FakeTensorMode | None:
+    fake_mode = active_fake_mode()
+    if fake_mode is None:
+        for input in pytree.tree_leaves(inputs):
+            if isinstance(input, FakeTensor):
+                fake_mode = input.fake_mode
+                break
+            if is_traceable_wrapper_subclass(input):
+                plain_tensors: list[torch.Tensor | int | torch.SymInt | OpaqueBase] = []
+                get_plain_tensors(input, out=plain_tensors)
+                for plain_tensor in plain_tensors:
+                    if isinstance(plain_tensor, FakeTensor):
+                        fake_mode = plain_tensor.fake_mode
+                        break
+            if fake_mode is not None:
+                break
+    if fake_mode is None:
+        return None
+
+    plain_tensors: list[torch.Tensor | int | torch.SymInt | OpaqueBase] = []
+    for input in pytree.tree_leaves(inputs):
+        if isinstance(input, torch.Tensor):
+            if is_traceable_wrapper_subclass(input):
+                get_plain_tensors(input, out=plain_tensors)
+            else:
+                plain_tensors.append(input)
+
+    if plain_tensors:
+        raise AssertionError(
+            "Please convert all Tensors to FakeTensors first or instantiate "
+            "FakeTensorMode with 'allow_non_fake_inputs'. Found in Inductor "
+            f"compiled region input {plain_tensors[0]}"
+        )
+
+    return fake_mode
 
 
 @dataclasses.dataclass
@@ -755,17 +817,30 @@ class CompiledFxGraph(OutputCode):
         # while its saved compile context is restored, then clear the saved
         # context after leaving the compile_context manager.
         try:
+            # The HOP wrapper has its own FakeTensor propagation path. The
+            # direct compiled callable can only run under FakeTensorMode when
+            # it has no tensor inputs and only needs to fakify internal buffers.
+            fake_mode = None
+            if not (self._wrap_compiled_regions and is_in_torch_dispatch_mode()):
+                fake_mode = _detect_fake_mode_for_compiled_region(inputs)
             with autotune_cache_context:
                 try:
-                    # Checking the profiler directly is faster than nullcontext
-                    if torch.autograd.profiler._is_profiler_enabled:
-                        with torch._C._profiler._RecordFunctionFast(
-                            f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
-                            keyword_values={"scope": "user_scope"},
-                        ):
+                    with (
+                        contextlib.nullcontext()
+                        if fake_mode is None
+                        else _allow_fake_mode_to_fakify_compiled_region_tensors(
+                            fake_mode
+                        )
+                    ):
+                        # Checking the profiler directly is faster than nullcontext
+                        if torch.autograd.profiler._is_profiler_enabled:
+                            with torch._C._profiler._RecordFunctionFast(
+                                f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
+                                keyword_values={"scope": "user_scope"},
+                            ):
+                                return self.current_callable(inputs)
+                        else:
                             return self.current_callable(inputs)
-                    else:
-                        return self.current_callable(inputs)
                 finally:
                     get_runtime_metrics_context().finish()
                     if has_active_autotune_cache_bundler:
@@ -1231,7 +1306,6 @@ class RegionalOutputCode(OutputCode):
             return
         assert self._serialized_graph_module is not None
         # Get fake mode from example inputs
-        from torch._guards import detect_fake_mode
 
         fake_mode = detect_fake_mode(example_inputs)
         if fake_mode is None:
