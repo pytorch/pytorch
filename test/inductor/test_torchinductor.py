@@ -4528,6 +4528,24 @@ for dtype in (torch.int32, torch.int64):
             ),
         )
 
+    def test_addmm_beta_zero_nonbroadcastable_bias(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest(f"{GPU_TYPE} only test")
+
+        def fn(bias, x, weight):
+            return torch.addmm(bias, x, weight.t(), beta=0.0, alpha=0.25)
+
+        x = torch.randn(3, 7, device=self.device)
+        weight = torch.randn(11, 7, device=self.device)
+        bias = torch.zeros(7, device=self.device)
+        eager_out = fn(bias, x, weight)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        compiled_out = compiled_fn(bias, x, weight)
+
+        self.assertEqual(eager_out.shape, compiled_out.shape)
+        self.assertEqual(eager_out.shape, torch.Size([3, 11]))
+        torch.testing.assert_close(eager_out, compiled_out)
+
     def test_addmv(self):
         def fn(a, b, c):
             return torch.addmv(a, b, c)
