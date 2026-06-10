@@ -14,9 +14,8 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
-    onlyNativeDeviceTypes,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -185,7 +184,7 @@ class TestSortAndSelect(TestCase):
         ):
             torch.sort(input=x)
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_sort_large_slice(self, device):
         # tests direct cub path
         x = torch.randn(4, 1024000, device=device)
@@ -216,7 +215,6 @@ class TestSortAndSelect(TestCase):
                 torch.arange(start=1, end=2 * ncopies, step=2, device=device),
             )
 
-    @onlyCUDA
     @dtypes(torch.float16)
     @largeTensorTest("200GB")  # Unfortunately 80GB A100 is not large enough
     def test_sort_large(self, device, dtype):
@@ -285,13 +283,12 @@ class TestSortAndSelect(TestCase):
                         self.assertEqual(r1.values.stride(), t.stride())
                         self.assertEqual(r1.indices.stride(), t.stride())
 
-    @onlyCUDA
     @dtypes(torch.float32)
     def test_sort_discontiguous(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
 
     @slowTest  # this test is slow on CPU, but not on CUDA
-    @onlyCPU
+    @onlyAccelerator
     @dtypes(torch.float32)
     def test_sort_discontiguous_slow(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
@@ -876,9 +873,7 @@ class TestSortAndSelect(TestCase):
         run_test(device, torch.uint8)
         run_test(device, torch.bool)
 
-    @onlyCUDA
-    def test_topk_noncontiguous_gpu(self, device):
-        # test different topk paths on cuda
+    def test_topk_noncontiguous(self, device):
         single_block_t = torch.randn(20, device=device)[::2]
         multi_block_t = torch.randn(20000, device=device)[::2]
         sort_t = torch.randn(200000, device=device)[::2]
@@ -998,7 +993,6 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(val, expected_val, atol=0, rtol=0)
             self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
-    @onlyNativeDeviceTypes
     @dtypesIfCUDA(*all_types_and(torch.bfloat16))
     @dtypes(*all_types_and(torch.bfloat16, torch.half))
     def test_topk_zero(self, device, dtype):
@@ -1253,7 +1247,6 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
     @dtypes(torch.float)
-    @onlyNativeDeviceTypes  # Fails on XLA
     def test_kthvalue_scalar(self, device, dtype):
         # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
         # Tests that passing a scalar tensor or 1D tensor with 1 element work either way
@@ -1413,7 +1406,7 @@ class TestSortAndSelect(TestCase):
                     c = torch.isin(a, b, assume_unique=assume_unique)
                     self.assertEqual(c, ec)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(*all_types())
     def test_isin_different_devices(self, device, dtype):
         a = torch.arange(6, device=device, dtype=dtype).reshape([2, 3])
@@ -1440,7 +1433,6 @@ class TestSortAndSelect(TestCase):
         finally:
             torch.set_num_threads(prev_num_threads)
 
-    @onlyCUDA
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @slowTest
     @largeTensorTest("170GB", "cpu")
