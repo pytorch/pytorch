@@ -1807,10 +1807,49 @@ def _optimize(
     )
 
 
+_EXPLAIN_OPTIMIZE_KWARGS = frozenset(
+    {
+        "dynamic",
+        "isolate_recompiles",
+        "recompile_limit",
+        "shapes_spec",
+    }
+)
+
+
+def _split_explain_kwargs(
+    extra_kwargs: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    optimize_kwargs = {
+        key: value
+        for key, value in extra_kwargs.items()
+        if key in _EXPLAIN_OPTIMIZE_KWARGS
+    }
+    call_kwargs = {
+        key: value
+        for key, value in extra_kwargs.items()
+        if key not in _EXPLAIN_OPTIMIZE_KWARGS
+    }
+    if optimize_kwargs and call_kwargs:
+        raise TypeError(
+            "torch._dynamo.explain received both optimization kwargs "
+            f"({', '.join(sorted(optimize_kwargs))}) and function kwargs "
+            f"({', '.join(sorted(call_kwargs))}). Use "
+            "torch._dynamo.explain(f, dynamic=True)(*args, **kwargs) to pass "
+            "optimization kwargs, or torch._dynamo.explain(f)(*args, **kwargs) "
+            "to pass function kwargs."
+        )
+    return optimize_kwargs, call_kwargs
+
+
 # TODO(voz): Consider making "explain" output alongside a run / part of a run
 @patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f: Callable[..., Any], *extra_args: Any, **extra_kwargs: Any) -> Any:
     from .backends.debugging import ExplainOutput
+
+    optimize_kwargs: dict[str, Any] = {}
+    if not extra_args and extra_kwargs:
+        optimize_kwargs, extra_kwargs = _split_explain_kwargs(extra_kwargs)
 
     def inner(*args: Any, **kwargs: Any) -> ExplainOutput:
         # TODO(voz): Do we want a decorator for this?
@@ -1848,6 +1887,7 @@ def explain(f: Callable[..., Any], *extra_args: Any, **extra_kwargs: Any) -> Any
             dynamo_graph_accumulating_compiler,
             nopython=False,
             guard_export_fn=guard_export_print,
+            **optimize_kwargs,
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
         opt_f(*args, **kwargs)
