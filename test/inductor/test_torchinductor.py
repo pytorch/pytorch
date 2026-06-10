@@ -3217,6 +3217,14 @@ class CommonTemplate:
                 inp = torch.full((2, n), float("inf"), device=self.device, dtype=_dtype)
                 self.assertEqual(cfn(inp), fn(inp))
 
+    def test_cumsum_uint8(self):
+        def fn(x):
+            return x.cumsum(-1)
+
+        cfn = torch.compile(fn)
+        inp = torch.randint(0, 10, (8, 16), dtype=torch.uint8, device=self.device)
+        self.assertEqual(cfn(inp), fn(inp))
+
     @xfail_if_triton_cpu
     def test_logcumsumexp(self):
         def fn(x):
