@@ -323,6 +323,9 @@ DEFINE_DISPATCH(
     clamp_max_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(
     isin_default_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(
+    isin_sorting_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_NO_CPU_DISPATCH(isin_sorting_stub)
 
 bool allclose(
     const Tensor& self,
@@ -946,6 +949,19 @@ TORCH_IMPL_FUNC(isin_Tensor_Tensor_out)
     return;
   }
 
+  if (elements.is_mps()) {
+    out.fill_(invert);
+    if (elements.numel() <=
+        46.0 * std::pow(static_cast<double>(test_elements.numel()), 0.155)) {
+      isin_default_stub(
+          elements.device().type(), elements, test_elements, invert, out);
+    } else {
+      isin_sorting_stub(
+          elements.device().type(), elements, test_elements, invert, out);
+    }
+    return;
+  }
+
   // Heuristic taken from numpy's implementation.
   // See
   // https://github.com/numpy/numpy/blob/fb215c76967739268de71aa4bda55dd1b062bc2e/numpy/lib/arraysetops.py#L575
@@ -980,13 +996,13 @@ TORCH_IMPL_FUNC(isin_Scalar_Tensor_out)
  bool assume_unique,
  bool invert,
  const Tensor& out) {
-  // redispatch
+  // Wrap at the promoted dtype so a Python float scalar doesn't force the
+  // computation to float64 (and so backends without float64 support work).
+  auto promoted = at::native::result_type(test_elements, elements);
+  auto wrapped =
+      at::scalar_tensor(elements, test_elements.options().dtype(promoted));
   at::isin_out(
-      const_cast<Tensor&>(out),
-      wrapped_scalar_tensor(elements, test_elements.device()),
-      test_elements,
-      assume_unique,
-      invert);
+      const_cast<Tensor&>(out), wrapped, test_elements, assume_unique, invert);
 }
 
 TORCH_IMPL_FUNC(isposinf_out)(const Tensor& self, const Tensor& result) {

@@ -53,4 +53,8 @@ using isin_default_fn =
     void (*)(const Tensor&, const Tensor&, bool, const Tensor&);
 DECLARE_DISPATCH(isin_default_fn, isin_default_stub)
 
+using isin_sorting_fn =
+    void (*)(const Tensor&, const Tensor&, bool, const Tensor&);
+DECLARE_DISPATCH(isin_sorting_fn, isin_sorting_stub)
+
 } // namespace at::native

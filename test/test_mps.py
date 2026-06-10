@@ -9981,7 +9981,8 @@ class TestLogical(TestCaseMPS):
     def test_isin(self):
         def helper(dtype):
             shapes = [([2, 5], [3, 5, 2]), ([10, 3, 5], [20, 1, 3]),
-                      ([5], [10]), ([0], [5]), ([5], [0])]
+                      ([5], [10]), ([0], [5]), ([5], [0]),
+                      ([20, 50], [3, 5, 2]), ([100, 30, 50], [20, 1, 3]), ([500], [10])]
             for shape_tuple in shapes:
                 for inverted in [True, False]:
                     if dtype.is_floating_point:

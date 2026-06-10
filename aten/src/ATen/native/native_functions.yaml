@@ -3070,8 +3070,7 @@
   variants: function
   structured: True
   dispatch:
-    CPU, CUDA: isin_Tensor_Tensor_out
-    MPS: isin_Tensor_Tensor_out_mps
+    CPU, CUDA, MPS: isin_Tensor_Tensor_out
 
 - func: isin.Tensor_Tensor(Tensor elements, Tensor test_elements, *, bool assume_unique=False, bool invert=False) -> Tensor
   variants: function
@@ -3091,8 +3090,7 @@
   variants: function
   structured: True
   dispatch:
-    CPU, CUDA: isin_Scalar_Tensor_out
-    MPS: isin_Scalar_Tensor_out_mps
+    CPU, CUDA, MPS: isin_Scalar_Tensor_out
 
 - func: isin.Scalar_Tensor(Scalar element, Tensor test_elements, *, bool assume_unique=False, bool invert=False) -> Tensor
   variants: function
