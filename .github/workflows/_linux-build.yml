@@ -34,6 +34,12 @@ on:
         default: "7.5"
         description: |
           List of CUDA architectures CI build should target.
+      pytorch-rocm-arch:
+        required: false
+        type: string
+        default: ""
+        description: |
+          List of ROCm architectures CI build should target.
       runner_prefix:
         required: false
         default: ""
@@ -267,6 +273,7 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           BUILD_ADDITIONAL_PACKAGES: ${{ inputs.build-additional-packages }}
+          PYTORCH_ROCM_ARCH: ${{ inputs.pytorch-rocm-arch }}
           RUNNER: ${{ inputs.runner }}
         run: |
           START_TIME=$(date +%s)
@@ -338,6 +345,7 @@ jobs:
             -e OUR_GITHUB_JOB_ID \
             -e HUGGING_FACE_HUB_TOKEN \
             -e BUILD_ADDITIONAL_PACKAGES \
+            -e PYTORCH_ROCM_ARCH \
             -e RUNNER \
             --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
             --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
@@ -560,6 +568,7 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           BUILD_ADDITIONAL_PACKAGES: ${{ inputs.build-additional-packages }}
+          PYTORCH_ROCM_ARCH: ${{ inputs.pytorch-rocm-arch }}
           RUNNER: ${{ inputs.runner }}
           SKIP_SCCACHE_INITIALIZATION: 1
         shell: bash
