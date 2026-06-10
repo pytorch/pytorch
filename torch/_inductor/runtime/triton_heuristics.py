@@ -1060,9 +1060,7 @@ class CachingAutotuner(KernelInterface):
                 cfg, "num_buffers_warp_spec", 0
             )
 
-        compile_meta["debug"] = self.inductor_meta.get(
-            "assert_indirect_indexing", True
-        ) and not self.inductor_meta.get("is_hip", False)
+        compile_meta["debug"] = self.inductor_meta.get("assert_indirect_indexing", True)
 
         # device type will be "hip" rather than "cuda" here
         compile_meta["device_type"] = self.device_props.type
@@ -2997,7 +2995,13 @@ class DebugAutotuner(CachingAutotuner):
             return
         else:
             possible_names = _find_names(self)
-            kernel_name = f"{max(possible_names, key=len)}"
+            if possible_names:
+                kernel_name = f"{max(possible_names, key=len)}"
+            else:
+                # In the AOTI lazy compile path, the CachingAutotuner is not
+                # bound to a module-level name, so _find_names returns empty.
+                # Fall back to the kernel name recorded in inductor_meta.
+                kernel_name = self.inductor_meta.get("kernel_name") or self.fn.__name__
             if not re.match(self.regex_filter, kernel_name):
                 return
             if len(self.launchers) != 1:
