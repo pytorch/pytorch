@@ -225,6 +225,20 @@ apply_gumbel_max_trick = (
 # dead code elimination
 dce = False
 
+# graph-level common subexpression elimination (memory-aware)
+# Folds identical computations (same op, same inputs) into a single node.
+inductor_cse = True
+
+# Maximum topological distance (in graph nodes) between the canonical node and
+# the furthest consumer of a duplicate node before CSE will refuse to fold.
+# When folding, the canonical node's output buffer must stay alive until all
+# consumers of all duplicates are finished. If a duplicate's consumer is far
+# away in the graph, this extends the buffer's lifetime and can increase peak
+# memory. This threshold caps the allowed extension.
+# Only applies to outputs larger than 1MB (small outputs are always folded).
+# Set to -1 to disable the lifetime check entirely (always fold).
+inductor_cse_max_lifetime_extension: int = 100
+
 # assume weight tensors are fixed size
 static_weight_shapes = True
 
