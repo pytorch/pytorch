@@ -1926,6 +1926,29 @@ class GraphModule(torch.nn.Module):
             out = torch.compile(fn, backend="eager", fullgraph=True)(x)
             out.backward()
 
+    def test_duplicate_nondifferentiable_input_no_graph_break(self):
+        class Bar(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, idx_a, idx_b):
+                ctx.save_for_backward(x)
+                return x[idx_a:idx_b]
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                grad = torch.zeros_like(x)
+                return grad, None, None
+
+        def fn(x, idx):
+            return Bar.apply(x, idx, idx).sum()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(10, requires_grad=True)
+        idx = torch.tensor(3)
+        out = torch.compile(fn, backend=cnt, fullgraph=True)(x, idx)
+        out.backward()
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_udf_output(self):
         class Foo:
             def __init__(self, a, b):

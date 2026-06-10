@@ -5268,15 +5268,22 @@ class AutogradFunctionApplyVariable(VariableTracker):
             if arg.is_tensor():
                 fake_tensor = _get_fake_value(arg)
                 if any(fake_tensor is seen for seen in tensor_args_seen):
-                    unimplemented(
-                        gb_type="autograd.Function.apply: duplicate tensor input",
-                        context="",
-                        explanation="Dynamo does not support tracing autograd.Function.apply "
-                        "when the same tensor is passed to multiple forward inputs.",
-                        hints=[
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
+                    # Only graph-break when the duplicate could affect gradient
+                    # correctness. The deduplication bug (lifting the same proxy
+                    # once and overwriting one backward slot) only matters when
+                    # both slots carry real gradients. Non-differentiable tensors
+                    # (integer dtype or requires_grad=False) always get None
+                    # gradients, so deduplication is harmless for them.
+                    if fake_tensor.requires_grad or fake_tensor.dtype.is_floating_point:
+                        unimplemented(
+                            gb_type="autograd.Function.apply: duplicate tensor input",
+                            context="",
+                            explanation="Dynamo does not support tracing autograd.Function.apply "
+                            "when the same tensor is passed to multiple forward inputs.",
+                            hints=[
+                                *graph_break_hints.SUPPORTABLE,
+                            ],
+                        )
                 tensor_args_seen.append(fake_tensor)
 
         # Find the mapping between orig_fwd_args and bwd_out
