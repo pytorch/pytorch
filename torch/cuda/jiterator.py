@@ -76,6 +76,13 @@ class _JittedFunction:
                 "Jiterator is only supported on CUDA and ROCm GPUs, none are available."
             )
 
+        for i, tensor in enumerate(tensors):
+            if not tensor.is_cuda:
+                raise RuntimeError(
+                    f"Jiterator is only supported on CUDA and ROCm GPUs, "
+                    f"but input tensor {i} is on device: {tensor.device}"
+                )
+
         if len(tensors) > 8:
             raise AssertionError(
                 f"jiterator only supports up to 8 tensor inputs, got {len(tensors)}"

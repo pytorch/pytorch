@@ -155,6 +155,20 @@ class TestPythonJiterator(TestCase):
         for i in range(num_outputs):
             self.assertEqual(expected[i], result[i])
 
+    def test_cpu_tensors_error(self, device):
+        a = torch.rand(3, device='cpu')
+        b = torch.rand(3, device='cpu')
+        with self.assertRaisesRegex(RuntimeError, "Jiterator is only supported on CUDA and ROCm GPUs"):
+            jitted_fn(a, b)
+
+    def test_cpu_tensors_error_multi_output(self, device):
+        code_string = "template <typename T> void my_kernel(T x, T y, T& out1, T& out2) { out1 = x + y; out2 = x * y; }"
+        multi_jitted_fn = create_multi_output_jit_fn(code_string, num_outputs=2)
+        a = torch.rand(3, device='cpu')
+        b = torch.rand(3, device='cpu')
+        with self.assertRaisesRegex(RuntimeError, "Jiterator is only supported on CUDA and ROCm GPUs"):
+            multi_jitted_fn(a, b)
+
     @parametrize("code_string", [
         "template <typename T> T my _kernel(T x) { return x; }",
         "template <typename T> Tmy_kernel(T x) { return x; }",
