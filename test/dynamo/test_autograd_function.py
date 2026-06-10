@@ -1796,6 +1796,45 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
 
+    def test_fused_fwd_bwd_inplace_regression(self):
+        class FusedFwdBwd(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, W, labels):
+                h = x @ W.T
+                loss = torch.zeros((), device=x.device, dtype=x.dtype)
+                dh = torch.empty_like(h)
+
+                loss += torch.nn.functional.cross_entropy(h, labels)
+                dh.copy_(torch.nn.functional.softmax(h, dim=-1))
+                dh[torch.arange(len(labels)), labels] -= 1
+                dh /= len(labels)
+
+                dx = dh @ W
+                dW = dh.T @ x
+                ctx.save_for_backward(x, W)
+                return dx, dW, loss
+
+            @staticmethod
+            def backward(ctx, grad_dx, grad_dW, grad_loss):
+                return None, None, None
+
+        def fn(x, W, labels):
+            dx, dW, loss = FusedFwdBwd.apply(x, W, labels)
+            return loss
+
+        x = torch.randn(4, 8, requires_grad=True)
+        W = torch.randn(16, 8, requires_grad=True)
+        labels = torch.randint(0, 16, (4,))
+
+        ref = fn(
+            x.clone().detach().requires_grad_(True),
+            W.clone().detach().requires_grad_(True),
+            labels,
+        )
+        opt_fn = torch.compile(fn, backend="eager")
+        res = opt_fn(x, W, labels)
+        self.assertEqual(ref, res)
+
     def test_rewired_bwd_output(self):
         class Add(torch.autograd.Function):
             @staticmethod
