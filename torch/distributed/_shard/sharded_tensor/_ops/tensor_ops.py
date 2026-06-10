@@ -51,7 +51,21 @@ def tensor_device(types, args=(), kwargs=None, pg=None):
     elif pg and pg._get_backend_name() == "gloo":
         dev = torch.device("cpu")
     else:
-        dev = torch.device(torch.cuda.current_device())
+        # Device-agnostic fallback that works on any accelerator
+        # backend (cuda / xpu / hpu / mps / ...). Mirrors what
+        # torch.distributed.checkpoint.planner_helpers._init_state_dict
+        # already does for plain tensors and DTensors. The previous
+        # `torch.cuda.current_device()` fallback raised
+        # `AssertionError: Torch not compiled with CUDA enabled` on
+        # any non-CUDA build (e.g. XPU), breaking FSDP checkpoint
+        # resume via HF Trainer's `_load_from_checkpoint` path.
+        from torch._utils import _get_device_module
+        from torch.distributed.distributed_c10d import (
+            _get_pg_default_device,
+        )
+
+        device_type = _get_pg_default_device(pg).type
+        dev = torch.device(_get_device_module(device_type).current_device())
     return dev
 
 
