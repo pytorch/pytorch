@@ -26,6 +26,7 @@ __all__ = [
     "filterfalse",
     "islice",
     "pairwise",
+    "permutations",
     "starmap",
     "takewhile",
     "tee",
@@ -235,6 +236,40 @@ def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
         else:
             yield a, b  # type: ignore[misc]
         a = b
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.permutations
+@substitute_in_graph(itertools.permutations, is_embedded_type=True)  # type: ignore[arg-type]
+def permutations(
+    iterable: Iterable[_T], r: int | None = None, /
+) -> Iterator[tuple[_T, ...]]:
+    pool = tuple(iterable)
+    n = len(pool)
+    r = n if r is None else r
+
+    def _permutations() -> Iterator[tuple[_T, ...]]:
+        if r > n:
+            return
+
+        indices = list(range(n))
+        cycles = list(range(n, n - r, -1))
+        yield tuple(pool[i] for i in indices[:r])
+
+        while n:
+            for i in reversed(range(r)):
+                cycles[i] -= 1
+                if cycles[i] == 0:
+                    indices[i:] = indices[i + 1 :] + indices[i : i + 1]
+                    cycles[i] = n - i
+                else:
+                    j = cycles[i]
+                    indices[i], indices[-j] = indices[-j], indices[i]
+                    yield tuple(pool[i] for i in indices[:r])
+                    break
+            else:
+                return
+
+    return _permutations()
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
