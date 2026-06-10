@@ -7437,10 +7437,32 @@ class Scheduler:
             assert len(node1.node.mutation_outputs) == 1
             written_buffer_name = node1.node.mutation_outputs[0].name
 
-            # The epilogue can only read from the output buffer.
-            # Any other tensor/s would require additional load expressions.
-            if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
-                why("epilogue reads from buffers other than the mutated output")
+            # The epilogue must be an in-place, unary pointwise operation.
+            # Any other tensor/s would require additional load expressions, and
+            # layout-changing index remaps would require rewriting the user
+            # kernel's store address.
+            epilogue_reads = list(node2.read_writes.reads)
+            epilogue_writes = list(node2.read_writes.writes)
+            if len(epilogue_reads) != 1 or len(epilogue_writes) != 1:
+                why("epilogue is not unary")
+                return False
+
+            read_dep = epilogue_reads[0]
+            write_dep = epilogue_writes[0]
+            if not (
+                isinstance(read_dep, MemoryDep)
+                and isinstance(write_dep, MemoryDep)
+                and read_dep.name == written_buffer_name
+            ):
+                why("epilogue is not a memory read of the mutated output")
+                return False
+
+            sizevars = V.graph.sizevars
+            if not (
+                sizevars.statically_known_equals(read_dep.index, write_dep.index)
+                and sizevars.statically_known_list_equals(read_dep.size, write_dep.size)
+            ):
+                why("epilogue's read and write indices differ")
                 return False
 
             # the epilogue depends on expressions which may not available in the user triton kernel
