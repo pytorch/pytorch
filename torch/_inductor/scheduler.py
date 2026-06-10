@@ -7001,7 +7001,12 @@ class Scheduler:
         groups. After reindexing, the shared reads have identical index
         expressions, enabling the codegen to CSE loads.
 
-        Returns True if reindexing was applied.
+        For the narrow shared-read transpose case, compatibility can fail
+        because the pointwise iterates the same input with the two dimensions
+        swapped. In that case apply_new_loop_order preserves the original
+        strided index expressions while aligning the loop ranges.
+
+        Returns True if reindexing or the narrow transpose reorder was applied.
         """
         from .codegen.simd import SIMDKernel
 
@@ -7036,11 +7041,20 @@ class Scheduler:
         ):
             return False
 
-        if not all(
+        # Check if the pointwise's iteration ranges are already compatible
+        # with the reduction's groups.
+        compatible = all(
             SIMDKernel.is_compatible((red_numel, red_rnumel), sn.get_ranges())
             for sn in snodes
-        ):
-            return False
+        )
+
+        reorder_perm: tuple[int, ...] | None = None
+        if not compatible:
+            reorder_perm = self._shared_read_transpose_reorder_for_reduction(
+                reduction_node, pw_node, snodes, red_numel, red_rnumel
+            )
+            if reorder_perm is None:
+                return False
 
         # Nothing to reindex if the pointwise already uses the reduction split.
         target_iter_sizes = (red_numel, red_rnumel)
@@ -7053,8 +7067,17 @@ class Scheduler:
         # fusion within the same can_fuse() call.
         rollback_snapshot = _LoopStateSnapshot.create((pw_node,))
 
-        for sn in snodes:
-            sn.apply_loop_reindexing([red_numel, red_rnumel])
+        if reorder_perm is not None:
+            # Use loop reordering: preserves original index expressions
+            for sn in snodes:
+                sn.apply_new_loop_order(list(reorder_perm))
+                # Update group to match reduction's groups
+                device = sn.group[0]
+                group_fn = self.get_backend(device).group_fn
+                sn.group = (device, group_fn(sn._sizes))
+        else:
+            for sn in snodes:
+                sn.apply_loop_reindexing([red_numel, red_rnumel])
 
         if isinstance(pw_node, FusedSchedulerNode):
             pw_node.group = snodes[0].group
@@ -7086,6 +7109,136 @@ class Scheduler:
                 refresh_group_node_dependencies(pw_node)
 
         return True
+
+    def _shared_read_transpose_reorder_for_reduction(
+        self,
+        reduction_node: BaseSchedulerNode,
+        pw_node: BaseSchedulerNode,
+        snodes: Sequence[SchedulerNode],
+        red_numel: sympy.Expr,
+        red_rnumel: sympy.Expr,
+    ) -> tuple[int, int] | None:
+        """Return the only non-compatible reorder supported by reindex fallback.
+
+        This is intentionally limited to a 2D pointwise over a shared input
+        whose read strides are the transpose of the reduction's read strides.
+        """
+        from .codegen.simd import SIMDKernel
+
+        if not snodes:
+            return None
+
+        sv = V.graph.sizevars
+        for sn in snodes:
+            iter_ranges, reduction_ranges = sn.get_ranges()
+            if len(iter_ranges) != 2 or reduction_ranges:
+                return None
+            if not (
+                sv.statically_known_equals(iter_ranges[0], red_rnumel)
+                and sv.statically_known_equals(iter_ranges[1], red_numel)
+            ):
+                return None
+            if not SIMDKernel.is_compatible(
+                (red_numel, red_rnumel),
+                ([iter_ranges[1], iter_ranges[0]], reduction_ranges),
+            ):
+                return None
+
+        if not self._has_2d_transposed_shared_read(
+            reduction_node, pw_node, red_numel, red_rnumel
+        ):
+            return None
+
+        return (1, 0)
+
+    @staticmethod
+    def _memory_reads_by_name(
+        node: BaseSchedulerNode,
+    ) -> dict[str, list[MemoryDep]]:
+        reads: dict[str, list[MemoryDep]] = defaultdict(list)
+        for dep in node.read_writes.reads:
+            if isinstance(dep, MemoryDep):
+                reads[dep.name].append(dep)
+        return reads
+
+    def _has_2d_transposed_shared_read(
+        self,
+        reduction_node: BaseSchedulerNode,
+        pw_node: BaseSchedulerNode,
+        red_numel: sympy.Expr,
+        red_rnumel: sympy.Expr,
+    ) -> bool:
+        reduction_reads = self._memory_reads_by_name(reduction_node)
+        pw_reads = self._memory_reads_by_name(pw_node)
+        written_names = OrderedSet(
+            dep.name
+            for dep in itertools.chain(
+                reduction_node.read_writes.writes, pw_node.read_writes.writes
+            )
+            if isinstance(dep, MemoryDep)
+        )
+
+        for name in (reduction_reads.keys() & pw_reads.keys()) - written_names:
+            if any(
+                self._is_2d_transposed_shared_read(
+                    reduction_dep, pw_dep, red_numel, red_rnumel
+                )
+                for reduction_dep in reduction_reads[name]
+                for pw_dep in pw_reads[name]
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _is_2d_transposed_shared_read(
+        reduction_dep: MemoryDep,
+        pw_dep: MemoryDep,
+        red_numel: sympy.Expr,
+        red_rnumel: sympy.Expr,
+    ) -> bool:
+        sv = V.graph.sizevars
+
+        def sizes_match(
+            sizes: Sequence[sympy.Expr], expected: tuple[sympy.Expr, sympy.Expr]
+        ) -> bool:
+            return len(sizes) == 2 and all(
+                sv.statically_known_equals(size, expected_size)
+                for size, expected_size in zip(sizes, expected)
+            )
+
+        if not (
+            reduction_dep.num_vars == 2
+            and pw_dep.num_vars == 2
+            and sizes_match(reduction_dep.size, (red_numel, red_rnumel))
+            and sizes_match(pw_dep.size, (red_rnumel, red_numel))
+        ):
+            return False
+
+        if any(
+            v not in reduction_dep.index.free_symbols for v in reduction_dep.var_names
+        ):
+            return False
+        if any(v not in pw_dep.index.free_symbols for v in pw_dep.var_names):
+            return False
+
+        if not sv.statically_known_equals(
+            reduction_dep.get_offset(), pw_dep.get_offset()
+        ):
+            return False
+
+        reduction_strides = sv.stride_vars(reduction_dep.index, reduction_dep.var_names)
+        pw_strides = sv.stride_vars(pw_dep.index, pw_dep.var_names)
+        if len(reduction_strides) != 2 or len(pw_strides) != 2:
+            return False
+        if any(
+            sv.statically_known_equals(stride, 0)
+            for stride in itertools.chain(reduction_strides, pw_strides)
+        ):
+            return False
+
+        return sv.statically_known_equals(
+            reduction_strides[0], pw_strides[1]
+        ) and sv.statically_known_equals(reduction_strides[1], pw_strides[0])
 
     def unfusable_node(self, node: BaseSchedulerNode) -> bool:
         """
