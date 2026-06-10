@@ -173,15 +173,20 @@ def _codegen_wrap_subclass(
             return f"({parts[0]},)"
         return f"({', '.join(parts)})"
 
+    def _consume_placeholders(placeholders: list[bool]) -> None:
+        out_idx_ref[0] += sum(placeholders)
+
     outer_size_from_attr = meta.outer_size_from_attr
     outer_stride_from_attr = meta.outer_stride_from_attr
     if outer_size_from_attr is not None:
         size_expr = f"{attr_exprs[outer_size_from_attr]}.size()"
+        _consume_placeholders(size_placeholders)
     else:
         size_expr = _build_tuple(meta.outer_size, size_placeholders)
 
     if outer_stride_from_attr is not None:
         stride_expr = f"{attr_exprs[outer_stride_from_attr]}.stride()"
+        _consume_placeholders(stride_placeholders)
     else:
         stride_expr = _build_tuple(meta.outer_stride, stride_placeholders)
 

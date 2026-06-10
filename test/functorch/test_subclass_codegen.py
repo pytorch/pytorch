@@ -252,6 +252,80 @@ def inner_fn(args):
         self.assertEqual(out.b, b)
         self.assertIs(saved_activation, activation)
 
+    def test_attr_derived_metadata_consumes_symints_between_outputs(self):
+        # Build SubclassCreationMeta manually to avoid __post_init__ fake tensor check
+        first_meta = _TestSubclassMeta(
+            flat_tensor_start_idx=0,
+            arg_count=5,
+            included_subclass_symints=True,
+            attrs={
+                "a": PlainTensorMeta(unwrapped_idx=0),
+                "b": PlainTensorMeta(unwrapped_idx=1),
+            },
+            outer_size=(None, None),
+            outer_stride=(None, 1),
+            meta=None,
+            original_subclass=None,
+            original_subclass_type=TwoTensor,
+            outer_size_from_attr="a",
+            outer_stride_from_attr="a",
+        )
+        second_meta = _TestSubclassMeta(
+            flat_tensor_start_idx=5,
+            arg_count=5,
+            included_subclass_symints=True,
+            attrs={
+                "a": PlainTensorMeta(unwrapped_idx=5),
+                "b": PlainTensorMeta(unwrapped_idx=6),
+            },
+            outer_size=(None, None),
+            outer_stride=(None, 1),
+            meta=None,
+            original_subclass=None,
+            original_subclass_type=TwoTensor,
+            outer_size_from_attr="a",
+            outer_stride_from_attr="a",
+        )
+
+        source, globals_dict = _codegen_subclass_wrapper_source(
+            inp_metas=[],
+            out_metas=[first_meta, second_meta],
+            num_fw_outs_saved_for_bw=None,
+        )
+
+        a0 = torch.randn(2, 3)
+        b0 = torch.randn(2, 3)
+        a1 = torch.randn(4, 5)
+        b1 = torch.randn(4, 5)
+
+        def mock_compiled_fn(args):
+            return [
+                a0,
+                b0,
+                a0.shape[0],
+                a0.shape[1],
+                a0.stride()[0],
+                a1,
+                b1,
+                a1.shape[0],
+                a1.shape[1],
+                a1.stride()[0],
+            ]
+
+        globals_dict["compiled_fn"] = mock_compiled_fn
+        local_dict = {}
+        exec(compile(source, "<test>", "exec"), globals_dict, local_dict)
+        wrapper = local_dict["inner_fn"]
+
+        first, second = wrapper([])
+
+        self.assertIsInstance(first, TwoTensor)
+        self.assertEqual(first.a, a0)
+        self.assertEqual(first.b, b0)
+        self.assertIsInstance(second, TwoTensor)
+        self.assertEqual(second.a, a1)
+        self.assertEqual(second.b, b1)
+
 
 if __name__ == "__main__":
     run_tests()
