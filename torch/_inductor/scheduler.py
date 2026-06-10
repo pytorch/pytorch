@@ -1896,7 +1896,18 @@ class BaseSchedulerNode:
         if ret is not None:
             return ret
 
+        # For matmul-like ops (e.g., aten._scaled_mm), the output dtype
+        # reflects accumulator precision (FP16/BF16), not the compute
+        # precision (FP8/FP4/etc.).  Inspect the IR node's input dtypes
+        # to detect reduced-precision compute: if both matrix operands
+        # share the same dtype, that is the actual compute dtype.
         dtype = buf.node.maybe_get_dtype()
+        ir_node = self.node
+        if hasattr(ir_node, "inputs") and len(ir_node.inputs) >= 2:
+            input0_dtype = ir_node.inputs[0].get_dtype()
+            input1_dtype = ir_node.inputs[1].get_dtype()
+            if input0_dtype == input1_dtype:
+                dtype = input0_dtype
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12

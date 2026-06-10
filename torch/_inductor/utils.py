@@ -3156,7 +3156,11 @@ def get_device_tflops(dtype: torch.dtype) -> float:
         0,
     )
 
-    assert dtype in (torch.float16, torch.bfloat16, torch.float32)
+    # Triton's estimation utilities only support FP16/BF16/FP32.  For other
+    # dtypes (e.g., FP8) that are not in the datasheet, fall back to FP16
+    # tensor-core TFLOPS as a conservative lower bound.
+    if dtype not in (torch.float16, torch.bfloat16, torch.float32):
+        dtype = torch.float16
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
         # Triton API change in https://github.com/triton-lang/triton/pull/2293
