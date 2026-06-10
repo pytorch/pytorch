@@ -7180,16 +7180,10 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
         keepdim=keepdim,
         return_mean=return_mean,
     )
-    output = (
-        var_mean_sum_(**kwargs)
-        if (
-            config.mtia.disable_welford_reduction
-            or use_two_step_variance(
-                x, axis=axis, keepdim=keepdim, input_dtype=out_dtype
-            )
-        )
-        else var_mean_welford_(**kwargs)
+    use_two_step = config.mtia.disable_welford_reduction or use_two_step_variance(
+        x, axis=axis, keepdim=keepdim, input_dtype=out_dtype
     )
+    output = var_mean_sum_(**kwargs) if use_two_step else var_mean_welford_(**kwargs)
     output = tuple(to_dtype(x, out_dtype, copy=False) for x in output)
     return output[0] if not return_mean else output
 
@@ -7203,6 +7197,17 @@ def var_(x, axis=None, *, correction=None, keepdim=False):
 
 @register_lowering(aten.var_mean)
 def var_mean(x, axis=None, *, correction=None, keepdim=False):
+    device = x.get_device()
+    if (
+        device is not None
+        and device.type == "cuda"
+        and x.get_dtype() in (torch.float16, torch.bfloat16)
+        and V.graph.current_node.target is aten.var_mean.correction
+    ):
+        return fallback_handler(aten.var_mean.correction, add_to_fallback_set=False)(
+            x, axis, correction=correction, keepdim=keepdim
+        )
+
     return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
     )
