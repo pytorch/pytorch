@@ -53,13 +53,6 @@ class GemmVariant(Enum):
             return "nv_universal_scaled_gemm"
         return "nv_universal_gemm"
 
-    @property
-    def arguments_class_name(self) -> str:
-        """Return the cutlass_api arguments class name."""
-        if self == GemmVariant.GROUPED_GEMM:
-            return "GroupedGemmArguments"
-        return "GemmArguments"
-
 
 class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     """Benchmark request for NVIDIA Universal GEMM kernels."""
