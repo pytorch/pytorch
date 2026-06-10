@@ -94,7 +94,8 @@ class PackedMaskInterval:
 
     def _render(self, expr: sympy.Expr) -> str:
         rendered = sympy_to_cute_index(expr, self.symbol_codes)
-        assert rendered is not None
+        if rendered is None:
+            raise AssertionError(f"failed to render expr to cute index: {expr}")
         return rendered
 
 

@@ -29,7 +29,8 @@
   "torch/_inductor/codecache.py": {
     "class CppPythonBindingsCodeCache": 191,
     "class HalideCodeCache": 358,
-    "class PyCodeCache": 101
+    "class PyCodeCache": 101,
+    "def CudaKernelParamCache.set()": 82
   },
   "torch/_inductor/codegen/common.py": {
     "class CSE": 173,
@@ -222,6 +223,6 @@
     "class SchedulerBuffer": 105
   },
   "torch/_inductor/utils.py": {
-    "class IndentedBuffer": 148
+    "class IndentedBuffer": 164
   }
 }
