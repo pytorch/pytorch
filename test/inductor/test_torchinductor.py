@@ -5910,6 +5910,7 @@ for dtype in (torch.int32, torch.int64):
         ),
     )
     @parametrize("nhwc", (False, True))
+    @parametrize("nhwc_input", (False, True))
     @with_tf32_off
     def test_conv2d_backward_parametrized(
         self,
@@ -5919,6 +5920,7 @@ for dtype in (torch.int32, torch.int64):
         padding: int,
         kernel: int,
         nhwc: bool,
+        nhwc_input: bool,
     ):
         in_channels = channels_groups[0]
         out_channels = channels_groups[1]
@@ -5967,11 +5969,14 @@ for dtype in (torch.int32, torch.int64):
         weight = torch.randn([out_channels, in_channels // groups, kernel, kernel])
         if nhwc:
             weight = weight.to(memory_format=torch.channels_last)
+        inp = torch.randn([2, in_channels, input_h, input_w])
+        if nhwc_input:
+            inp = inp.to(memory_format=torch.channels_last)
         self.common(
             fn,
             (
                 torch.randn([2, out_channels, output_h, output_w]),
-                torch.randn([2, in_channels, input_h, input_w]),
+                inp,
                 weight,
             ),
             atol=atol,
