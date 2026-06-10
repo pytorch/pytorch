@@ -1017,7 +1017,13 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
   // https://github.com/pytorch/pytorch/pull/93037#discussion_r1090112948
   int64_t chunk_size_per_thread = static_cast<int64_t>(
       std::min(1.0, 3200.0 / (matrix_rank * matrix_rank * matrix_rank)));
-  int64_t grain_size = chunk_size_per_thread * at::get_num_threads();
+  // When chunk_size_per_thread is 0 (large matrices), we must serialize to
+  // avoid concurrent LAPACK calls that trigger MKL thread-safety issues
+  // (e.g., DLASWP "Parameter 6 incorrect" errors). grain_size=0 would mean
+  // "always parallelize", so we use batch_size to force single-threaded.
+  int64_t grain_size = chunk_size_per_thread > 0
+      ? chunk_size_per_thread * at::get_num_threads()
+      : batch_size;
   at::parallel_for(0, batch_size, grain_size, loop);
 #endif
 }

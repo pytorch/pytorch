@@ -10683,6 +10683,35 @@ class TestLinalgCudaOnly(TestCase):
             self.assertEqual(ck_out, cpu_out)
 
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.float64)
+    def test_inverse_batched_multithread(self, device, dtype):
+        # Regression test: batched linalg.inv with large matrices and multiple
+        # threads used to trigger MKL DLASWP thread-safety errors because
+        # apply_lu_factor's grain_size heuristic produced grain_size=0 for
+        # large matrices, which at::parallel_for interprets as "always
+        # parallelize" instead of the intended "serialize".
+        num_threads = torch.get_num_threads()
+        try:
+            torch.set_num_threads(4)
+            n = 256
+            batch = 8
+            A = torch.randn(batch, n, n, dtype=dtype, device=device)
+            # Make matrices well-conditioned by adding n*I
+            A = A + n * torch.eye(n, dtype=dtype, device=device)
+            A_inv = torch.linalg.inv(A)
+            identity = torch.eye(n, dtype=dtype, device=device)
+            residual = A @ A_inv - identity.expand_as(A)
+            self.assertEqual(
+                residual,
+                torch.zeros_like(residual),
+                atol=1e-5,
+                rtol=1e-5,
+            )
+        finally:
+            torch.set_num_threads(num_threads)
+
 instantiate_device_type_tests(TestLinalg, globals())
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
 
