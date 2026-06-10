@@ -20,6 +20,23 @@ TRITON_MAX_BLOCK = {
     "R1_": 2048 * 16,  # * 16 is multi-kernel only
 }
 TRITON_MAX_RSPLIT = 64
+TRITON_MAX_TENSOR_NUMEL = 1 << 20
+TRITON_DOT_MIN_BLOCK = 16
+
+
+def native_matmul_block_numel(
+    kwargs: typing.Mapping[str, int], r0_block: int | None = None
+) -> int:
+    return (
+        kwargs.get("XBLOCK", 1)
+        * kwargs.get("YBLOCK", 1)
+        * kwargs.get("ZBLOCK", 1)
+        * (kwargs.get("R0_BLOCK", 1) if r0_block is None else r0_block)
+    )
+
+
+def native_matmul_persistent_rblock(r0_block: int) -> int:
+    return max(r0_block, TRITON_DOT_MIN_BLOCK)
 
 
 class ReductionHint(Enum):
@@ -114,9 +131,6 @@ else:
     )
 
 
-_NUM_THREADS_PER_WARP = 32
-
-
 class HeuristicType(Enum):
     PERSISTENT_REDUCTION = auto()
     POINTWISE = auto()
@@ -140,7 +154,7 @@ class AutotuneHint(Enum):
 class DeviceProperties(typing.NamedTuple):
     """Copy device properties into a data structure not requiring torch to be imported"""
 
-    type: str
+    type: str  # type: ignore[assignment]
     index: int  # type: ignore[assignment]
     multi_processor_count: int
     cc: int
@@ -149,6 +163,10 @@ class DeviceProperties(typing.NamedTuple):
     max_threads_per_multi_processor: int | None = None
     max_threads_per_block: int | None = None
     warp_size: int | None = None
+
+    @property
+    def warp_size_or_default(self) -> int:
+        return self.warp_size if self.warp_size is not None else 32
 
     @classmethod
     @functools.cache
@@ -185,6 +203,17 @@ class DeviceProperties(typing.NamedTuple):
             max_threads_per_block=getattr(props, "max_threads_per_block", 1024),
             warp_size=getattr(props, "warp_size", 32 if device_type != "cpu" else None),
         )
+
+
+def get_warp_size(device) -> int:
+    """Return the wave/warp size in threads for the given device.
+
+    Reads from torch.cuda.get_device_properties(device).warp_size via the
+    cached DeviceProperties.create(). Correct on both AMD (64 for CDNA/gfx9,
+    32 for RDNA/gfx10+) and NVIDIA (always 32). Falls back to 32 only when
+    the field is unavailable.
+    """
+    return DeviceProperties.create(device).warp_size_or_default
 
 
 class HalideInputSpec(typing.NamedTuple):

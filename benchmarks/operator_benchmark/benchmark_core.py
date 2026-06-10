@@ -117,6 +117,12 @@ def _build_test(
                     keep_config = False
                     break
 
+            # same for 'xpu': skip configs that target XPU on machines without XPU support
+            if "xpu" in attr.values():
+                if not torch.xpu.is_available():
+                    keep_config = False
+                    break
+
             test_attrs.update(attr)
 
         if not keep_config:
@@ -358,26 +364,26 @@ class BenchmarkRunner:
 
     def _launch_forward(self, test_case, iters, print_per_iter):
         """Use Python's timeit module to measure execution time (unit: second)."""
-        cuda_sync = "cuda" in test_case.test_config.test_name
+        test_name = test_case.test_config.test_name
+        gpu_sync = ("cuda" in test_name) or ("xpu" in test_name)
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
         if self.use_compile:
             func = test_case.run_compile_forward
 
-        if not cuda_sync:
+        if not gpu_sync:
             forward_time = timeit.timeit(
-                functools.partial(func, iters, print_per_iter, cuda_sync), number=1
+                functools.partial(func, iters, print_per_iter, gpu_sync), number=1
             )
             return forward_time
-        # Stable timing with Timer
         timer = Timer(
-            stmt="func(iters, print_per_iter, cuda_sync)",
+            stmt="func(iters, print_per_iter, gpu_sync)",
             globals={
                 "func": func,
                 "iters": iters,
                 "print_per_iter": print_per_iter,
-                "cuda_sync": cuda_sync,
+                "gpu_sync": gpu_sync,
             },
         )
         result = timer.adaptive_autorange(min_run_time=0.0001)
@@ -387,17 +393,18 @@ class BenchmarkRunner:
         """This function runs forward path of an op to get an output. Then the backward path is executed
         and the execution time is reported
         """
-        cuda_sync = "cuda" in test_case.test_config.test_name
-        test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=cuda_sync)
+        test_name = test_case.test_config.test_name
+        gpu_sync = ("cuda" in test_name) or ("xpu" in test_name)
+        test_case.run_forward(num_runs=1, print_per_iter=False, gpu_sync=gpu_sync)
         test_case._output_mean()
 
         timer = Timer(
-            stmt="test_case.run_backward(iters, print_per_iter, cuda_sync)",
+            stmt="test_case.run_backward(iters, print_per_iter, gpu_sync)",
             globals={
                 "test_case": test_case,
                 "iters": iters,
                 "print_per_iter": print_per_iter,
-                "cuda_sync": cuda_sync,
+                "gpu_sync": gpu_sync,
             },
         )
         result = timer.adaptive_autorange(min_run_time=0.0001)

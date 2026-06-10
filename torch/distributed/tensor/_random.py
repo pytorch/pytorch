@@ -216,7 +216,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
                     "DTensor is synchronizing RNG states of every rank with the state from rank 0. "
                     "This behavior is deprecated. "
                     "Please call `torch.manual_seed()` on every rank that participates in SPMD DTensor Operations with "
-                    "the same seed. If using Pipeline Parallelism, each pipeling state would use a different seed, "
+                    "the same seed. If using Pipeline Parallelism, each pipeline state would use a different seed, "
                     "but all ranks belonging to one pipeline stage would use the same seed."
                 )
             self._set_device_state(rng_state)
