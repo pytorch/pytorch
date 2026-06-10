@@ -1411,6 +1411,16 @@ strict_static_triton_launcher: bool = Config(
     alias="torch._inductor.config.strict_static_cuda_launcher"
 )
 
+# Retain raw cubin bytes on statically-launchable Triton kernels when caching
+# them, instead of dropping them and relying on the per-kernel cubin files left
+# in the local Triton cache dir. Makes a cached CachingAutotuner portable across
+# machines (e.g. a remote cache restored on a cold container), where
+# reload_cubin_path can rehydrate from the retained bytes instead of forcing a
+# recompile. Trades cache size for portability.
+keep_static_cubin_raw: bool = (
+    os.environ.get("TORCHINDUCTOR_KEEP_STATIC_CUBIN_RAW", "0") == "1"
+)
+
 # Use _FastCudaLauncher (vectorcall C extension) instead of
 # StaticallyLaunchedCudaKernel.run for the CachingAutotuner fast path.
 # Pre-binds kernel metadata at first launch and uses THPVariable_Unpack +
@@ -1689,6 +1699,12 @@ class cpp:
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
+    )
+
+    # Allow emitting KernelContextGuard metadata alongside kernel profiling.
+    # This switch only works when enable_kernel_profile is set to 1.
+    enable_kernel_context_guard = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_CONTEXT_GUARD", "0") == "1"
     )
 
     # enable weight prepacking to get a better performance; may lead to large memory footprint
