@@ -1356,9 +1356,8 @@ class _InProcessFxCompile(FxCompile):
                 # of autograd, so there should be no more autograd-related API's in the
                 # graph.
                 with torch.no_grad():
-                    # TODO(#<shallow_copy_data_ ProxyTensor>): same issue
-                    # as in graph_capture.py -- shallow_copy_data_ mutates
-                    # FakeTensor devices during FakeTensorProp; save/restore.
+                    # TODO(#186860): same save/restore workaround as
+                    # graph_capture.py for shallow_copy_data_ device mutation.
                     orig_input_devices = [
                         inp.fake_device if hasattr(inp, "fake_device") else None
                         for inp in example_inputs

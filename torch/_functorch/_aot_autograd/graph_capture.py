@@ -123,13 +123,8 @@ def _create_graph(
             _allow_token_discovery=True,
         )
 
-    # TODO(#<shallow_copy_data_ ProxyTensor>): The long-term fix is to
-    # handle shallow_copy_data_ correctly in ProxyTensor, following how
-    # t_() works: ProxyTensor snapshots placeholder meta["val"] via
-    # fast_detach so in-place metadata mutations don't corrupt them.
-    # The placeholder snapshots should already be protected, but the arg
-    # FakeTensors themselves get mutated and are used later, so we
-    # save/restore their devices here.
+    # TODO(#186860): Handle shallow_copy_data_ in ProxyTensor following
+    # how t_() works, instead of this save/restore workaround.
     original_fake_devices = {
         i: arg.fake_device
         for i, arg in enumerate(args)
