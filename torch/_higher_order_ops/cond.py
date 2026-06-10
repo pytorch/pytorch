@@ -17,6 +17,7 @@ from torch._C._functorch import (
     maybe_get_bdim,
 )
 from torch._functorch.utils import exposed_in
+from torch._guards import detect_fake_mode
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
@@ -38,6 +39,25 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 log = logging.getLogger(__name__)
 
+
+def _branch_refinement_context(pred, branch, shape_env=None):
+    if not isinstance(pred, torch.SymBool):
+        if shape_env is not None:
+            return shape_env.branch_local_shape_refinement(allow_eager_checks=False)
+        return contextlib.nullcontext()
+
+    @contextlib.contextmanager
+    def ctx():
+        import sympy
+
+        with pred.node.shape_env.branch_local_shape_refinement():
+            expr = pred.node.expr if branch else sympy.Not(pred.node.expr)
+            pred.node.shape_env._assume_branch_local_shape_expr(expr)
+            yield
+
+    return ctx()
+
+
 """
 We're going to define a `cond_op` operation.
 In order to do this, we need implementations for each of the dispatch keys.
@@ -58,8 +78,12 @@ class CondOp(HigherOrderOperator):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
 
-        then_gm: torch.fx.GraphModule = materialize_as_graph(true_fn, operands)
-        else_gm: torch.fx.GraphModule = materialize_as_graph(false_fn, operands)
+        fake_mode = detect_fake_mode(operands)
+        shape_env = fake_mode.shape_env if fake_mode is not None else None
+        with _branch_refinement_context(pred, True, shape_env):
+            then_gm: torch.fx.GraphModule = materialize_as_graph(true_fn, operands)
+        with _branch_refinement_context(pred, False, shape_env):
+            else_gm: torch.fx.GraphModule = materialize_as_graph(false_fn, operands)
         (
             _,
             _,
@@ -252,8 +276,12 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
             f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
         )
 
-    true_graph = reenter_make_fx(true_fn)(*operands)
-    false_graph = reenter_make_fx(false_fn)(*operands)
+    fake_mode = detect_fake_mode(operands)
+    shape_env = fake_mode.shape_env if fake_mode is not None else None
+    with _branch_refinement_context(pred, True, shape_env):
+        true_graph = reenter_make_fx(true_fn)(*operands)
+    with _branch_refinement_context(pred, False, shape_env):
+        false_graph = reenter_make_fx(false_fn)(*operands)
 
     true_outs = []
     false_outs = []
@@ -416,8 +444,10 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         ignore_fresh_unbacked = mode.shape_env.ignore_fresh_unbacked_symbols()
 
     with mode, ignore_fresh_unbacked:
-        flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
-        flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
+        with _branch_refinement_context(pred, True, mode.shape_env):
+            flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
+        with _branch_refinement_context(pred, False, mode.shape_env):
+            flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
         if true_out_spec != false_out_spec:
             raise RuntimeError(
                 "Unmatched output spec from torch.cond branches: "
@@ -471,6 +501,8 @@ def _merge_output(
                 s0.node.expr,
                 torch.utils._sympy.value_ranges.ValueRanges.unknown(),
             )
+            if r is None:
+                r = torch.utils._sympy.value_ranges.ValueRanges.unknown()
             return r.lower if lower_bound else r.upper
 
         return min(_bound(s0, True), _bound(s1, True)), max(
@@ -732,10 +764,16 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
         functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
-            _check_alias_and_mutation(
-                branch, unwrapped_inputs, branch_name, pre_dispatch
-            )
+        fake_mode = detect_fake_mode(unwrapped_inputs)
+        shape_env = fake_mode.shape_env if fake_mode is not None else None
+        for branch, branch_name, branch_pred in [
+            (true_fn, "cond_true", True),
+            (false_fn, "cond_false", False),
+        ]:
+            with _branch_refinement_context(pred, branch_pred, shape_env):
+                _check_alias_and_mutation(
+                    branch, unwrapped_inputs, branch_name, pre_dispatch
+                )
 
         cond_return = cond_op(
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs

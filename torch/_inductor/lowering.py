@@ -4119,11 +4119,83 @@ def _local_scalar_dense(data):
 
 @register_lowering(aten._assert_scalar)
 def _assert_scalar(data, msg):
-    # NB: These will be handled at codegen time
-    # Not sure if we are guaranteed to be able to serve out truth from the
-    # deferred_runtime_asserts, TODO: try this assert out
-    # See [NOTE] Codegen runtime asserts in Inductor
-    # assert bool(data.scalar), data
+    def _sympy_value_from_fx_arg(arg):
+        if isinstance(arg, torch.fx.Node):
+            val = arg.meta.get("val", arg.meta.get("example_value"))
+            if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                return val.node.expr
+            if isinstance(val, sympy.Expr):
+                return val
+        elif isinstance(arg, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            return arg.node.expr
+        elif isinstance(arg, (int, float, bool, sympy.Expr)):
+            return sympy.sympify(arg)
+        return None
+
+    def _comparison_expr_from_fx_node(node: torch.fx.Node):
+        if len(node.args) != 2:
+            return None
+        lhs = _sympy_value_from_fx_arg(node.args[0])
+        rhs = _sympy_value_from_fx_arg(node.args[1])
+        if lhs is None or rhs is None:
+            return None
+        target_name = getattr(node.target, "__name__", None)
+        if node.target is operator.eq or target_name == "eq":
+            return sympy.Eq(lhs, rhs, evaluate=False)
+        if node.target is operator.ne or target_name == "ne":
+            return sympy.Ne(lhs, rhs, evaluate=False)
+        if node.target is operator.lt or target_name == "lt":
+            return lhs < rhs
+        if node.target is operator.le or target_name == "le":
+            return lhs <= rhs
+        if node.target is operator.gt or target_name == "gt":
+            return lhs > rhs
+        if node.target is operator.ge or target_name == "ge":
+            return lhs >= rhs
+        return None
+
+    if V.graph.sizevars.shape_env._has_branch_local_shape_refinement():
+        branch_local_assert_expr = V.graph.current_node.meta.get(
+            "branch_local_assert_expr"
+        )
+        if branch_local_assert_expr is not None:
+            data = branch_local_assert_expr
+        else:
+            arg = V.graph.current_node.args[0]
+            if isinstance(arg, torch.fx.Node):
+                arg_assert_expr = arg.meta.get("branch_local_assert_expr")
+                if arg_assert_expr is not None:
+                    data = arg_assert_expr
+                else:
+                    comparison_expr = _comparison_expr_from_fx_node(arg)
+                    if comparison_expr is not None:
+                        data = comparison_expr
+                    else:
+                        val = arg.meta.get("val", arg.meta.get("example_value"))
+                        if isinstance(val, torch.SymBool):
+                            data = val.node.expr
+                        elif isinstance(val, (torch.SymInt, torch.SymFloat)):
+                            data = sympy.Ne(val.node.expr, 0)
+
+    if isinstance(data, torch.SymBool):
+        data = data.node.expr
+    elif isinstance(data, (torch.SymInt, torch.SymFloat)):
+        data = sympy.Ne(data.node.expr, 0)
+    elif isinstance(data, sympy.Expr):
+        data = sympy.Ne(data, 0)
+    elif isinstance(data, bool):
+        data = sympy.true if data else sympy.false
+    elif isinstance(data, (int, float)):
+        data = sympy.true if data != 0 else sympy.false
+
+    if isinstance(data, sympy.logic.boolalg.Boolean):
+        if data is sympy.true:
+            return None
+        if V.graph.sizevars.shape_env._has_branch_local_shape_refinement():
+            assert_op = ir.AssertScalar(data, msg)
+            V.graph.register_buffer(assert_op, set_name=True)
+            V.graph.register_operation(assert_op)
+            V.graph.sizevars.shape_env._assume_branch_local_shape_expr(data)
     return None
 
 

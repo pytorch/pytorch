@@ -2476,28 +2476,45 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         def speculate_branch(
             branch: bool,
         ) -> tuple[VariableTracker, OutputSpec, torch.fx.Graph, dict[Proxy, Proxy]]:
+            # Keep this local so importing higher_order_ops does not eagerly import sympy.
+            import sympy
+
             # NB: 0 is predicate
             ix = 1 if branch else 2
             if self._HOP_NAME is None:
                 raise AssertionError("_HOP_NAME must be set")
             # TODO: Support kwargs
-            (
-                (ret_val, ret_spec),
-                ret_graph,
-                ret_lifted_freevars,
-            ) = speculate_subgraph(
-                tx,
-                args[ix],
-                operands_seq,
-                {},
-                self._HOP_NAME,
-                source_target=self.value,
-                should_flatten_outputs=True,
-                # TODO - removing consts from control flow ops need more work
-                remove_consts_from_outputs=False,
-                supports_input_mutation=self.supports_input_mutation,
-                supports_aliasing=self.supports_aliasing,
-            )
+            with tx.output.shape_env.branch_local_shape_refinement(
+                allow_eager_checks=isinstance(pred, SymNodeVariable)
+            ):
+                if isinstance(pred, SymNodeVariable):
+                    pred_expr = pred.sym_num
+                    if not isinstance(pred_expr, torch.SymBool):
+                        pred_expr = pred_expr != 0
+                    branch_expr = (
+                        pred_expr.node.expr
+                        if branch
+                        else sympy.Not(pred_expr.node.expr)
+                    )
+                    tx.output.shape_env._assume_branch_local_shape_expr(branch_expr)
+
+                (
+                    (ret_val, ret_spec),
+                    ret_graph,
+                    ret_lifted_freevars,
+                ) = speculate_subgraph(
+                    tx,
+                    args[ix],
+                    operands_seq,
+                    {},
+                    self._HOP_NAME,
+                    source_target=self.value,
+                    should_flatten_outputs=True,
+                    # TODO - removing consts from control flow ops need more work
+                    remove_consts_from_outputs=False,
+                    supports_input_mutation=self.supports_input_mutation,
+                    supports_aliasing=self.supports_aliasing,
+                )
 
             # need to ensure we increase epoch so we don't memoize unbacked bindings
             # across different subgraphs which can interfere with runtime assertion

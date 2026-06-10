@@ -876,8 +876,32 @@ def generic_jump(
 
             if isinstance(value, SymNodeVariable):
                 # if the assertion is normal shape expression.
-                # just install guard and bail out.
+                # just install guard and bail out.  When tracing a HOP branch,
+                # emit a branch-local runtime assertion and use it as a
+                # temporary refinement for the rest of the branch.
+                assert_value = value
                 sym_expr = value.sym_num
+                if self.output.shape_env._has_branch_local_shape_refinement():
+                    if not isinstance(sym_expr, torch.SymBool):
+                        assert_value = cast(SymNodeVariable, value.bool_impl(self))
+                        sym_expr = assert_value.sym_num
+                    assert_proxy = self.output.create_proxy(
+                        "call_function",
+                        torch.ops.aten._assert_scalar.default,
+                        *proxy_args_kwargs((assert_value, error_msg), {}),
+                    )
+                    assert_proxy.node.meta["branch_local_assert_expr"] = (
+                        sym_expr.node.expr
+                    )
+                    assert_arg = assert_proxy.node.args[0]
+                    if isinstance(assert_arg, torch.fx.Node):
+                        assert_arg.meta["branch_local_assert_expr"] = sym_expr.node.expr
+                    self.output.shape_env._assume_branch_local_shape_expr(
+                        sym_expr.node.expr
+                    )
+                    self.jump(inst)
+                    return
+
                 if not isinstance(sym_expr, torch.SymBool):
                     sym_expr = sym_expr != 0
 
