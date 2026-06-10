@@ -344,16 +344,11 @@ class Autotuner:
     @staticmethod
     def _key_arg(value):
         if isinstance(value, Tensor):
-            value_key = None
-            if value.ndim == 1 and not value.dtype.is_floating_point:
-                value_bytes = value.detach().cpu().contiguous().numpy().tobytes()
-                value_key = hashlib.sha256(value_bytes).hexdigest()
             return (
                 "Tensor",
                 tuple(value.shape),
                 tuple(s if s in {0, 1} else 2 for s in value.stride()),
                 str(value.dtype),
-                value_key,
             )
         if isinstance(value, tuple):
             return tuple(Autotuner._key_arg(v) for v in value)
@@ -435,16 +430,21 @@ class Autotuner:
             stream.write(data)
             stream.flush()
 
-        serialized_args = [serialize_worker_value(arg) for arg in args]
+        tensor_meta = [serialize_worker_value(arg) for arg in args]
 
         fn_module = self.fn.__module__
         fn_qualname = self.fn.__qualname__
-        epilogue_fn = kwargs.get("tensor_epilogue_fn")
-        epilogue_source = kwargs.get("tensor_epilogue_source")
         worker_kwargs = serialize_worker_value(dict(kwargs))
-        if epilogue_source is not None and epilogue_fn is not None:
+        epilogue_fn = kwargs.get("tensor_epilogue_fn")
+        if (
+            "tensor_epilogue_source" in worker_kwargs
+            and worker_kwargs.get("tensor_epilogue_source") is not None
+            and epilogue_fn is not None
+        ):
             worker_kwargs["tensor_epilogue_fn"] = make_epilogue_source_marker(
-                epilogue_fn.__name__, epilogue_source
+                epilogue_fn.__name__,
+                worker_kwargs.get("tensor_epilogue_key"),
+                worker_kwargs["tensor_epilogue_source"],
             )
 
         # Restrict worker subprocesses to the parent's current CUDA device.
@@ -493,7 +493,7 @@ class Autotuner:
                     {
                         "fn_module": fn_module,
                         "fn_qualname": fn_qualname,
-                        "args": serialized_args,
+                        "tensor_meta": tensor_meta,
                         "kwargs": worker_kwargs,
                         "config_kwargs": config.all_kwargs(),
                     },
@@ -563,7 +563,7 @@ class Autotuner:
         if use_l2_cold:
             try:
                 bench_mode = os.getenv(
-                    f"{PACKAGE_NAME.upper()}_AUTOTUNE_BENCH_MODE", "l2_rotate"
+                    f"{PACKAGE_NAME.upper()}_AUTOTUNE_BENCH_MODE", "torch_cudagraph"
                 )
                 if bench_mode in ("torch_profile", "torch_cudagraph"):
                     num_iters = int(

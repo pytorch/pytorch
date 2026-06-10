@@ -107,6 +107,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         b = self.makeTensor(k, n)
         c = self.makeTensor(n, m).t()
 
+        out_buffer = torch.empty_strided((m, n), (1, m), device="cuda", dtype=a.dtype)
         out = gemm_epilogue(
             a,
             b,
@@ -115,7 +116,9 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             C=c,
             alpha=0.5,
             beta=1.25,
+            out=out_buffer,
         )
+        self.assertIs(out, out_buffer)
         low_precision_expected = (
             (0.5 * (a @ b).float() + 1.25 * c.float()).relu().to(out.dtype)
         )
@@ -249,6 +252,15 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
                 b,
                 self.row_scale_epilogue,
                 "test_flex_gemm_reject_bad_layout",
+            )
+        bad_out_layout = self.makeTensor(256, 128)[::2, ::2]
+        with self.assertRaisesRegex(NotImplementedError, "row- or column-major"):
+            gemm_epilogue(
+                a,
+                b,
+                self.row_scale_epilogue,
+                "test_flex_gemm_reject_bad_out_layout",
+                out=bad_out_layout,
             )
         with self.assertRaisesRegex(NotImplementedError, "tuned=True"):
             gemm_epilogue(
