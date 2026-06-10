@@ -527,6 +527,21 @@ class MetaStorageDesc:
     # serializable in JSON, you want to do something special here anyway
     data: torch.UntypedStorage | None
 
+    def __setstate__(self, state: object) -> None:
+        if isinstance(state, tuple):
+            _, slots_state = state
+            state_dict = slots_state or {}
+        else:
+            state_dict = state
+        for key, value in state_dict.items():
+            object.__setattr__(self, key, value)
+        for f in dataclasses.fields(self):
+            if f.name not in state_dict:
+                if f.default is not dataclasses.MISSING:
+                    object.__setattr__(self, f.name, f.default)
+                elif f.default_factory is not dataclasses.MISSING:
+                    object.__setattr__(self, f.name, f.default_factory())
+
     def as_json(self, describer_id: _DescriberId) -> dict[str, object]:
         return {
             "id": self.id,
@@ -736,6 +751,21 @@ class MetaTensorDesc(Generic[_TensorT]):
     # However, this use of functorch is very "non-lexical" so it's not
     # entirely clear how to make it all lexical again, so we haven't done
     # it for now.
+
+    def __setstate__(self, state: object) -> None:
+        if isinstance(state, tuple):
+            _, slots_state = state
+            state_dict = slots_state or {}
+        else:
+            state_dict = state
+        for key, value in state_dict.items():
+            object.__setattr__(self, key, value)
+        for f in dataclasses.fields(self):
+            if f.name not in state_dict:
+                if f.default is not dataclasses.MISSING:
+                    object.__setattr__(self, f.name, f.default)
+                elif f.default_factory is not dataclasses.MISSING:
+                    object.__setattr__(self, f.name, f.default_factory())
 
     # NB: This will reference numeric IDs, and it is assumed that you've
     # already serialized everything this recursively references
