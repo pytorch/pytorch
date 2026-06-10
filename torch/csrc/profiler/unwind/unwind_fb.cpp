@@ -2,7 +2,9 @@
     defined(FBCODE_CAFFE2)
 
 #include <c10/util/flat_hash_map.h>
+#include <dlfcn.h>
 #include <llvm/DebugInfo/Symbolize/Symbolize.h>
+#include <torch/csrc/profiler/unwind/sections.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 
 namespace torch::unwind {
@@ -17,7 +19,7 @@ std::vector<Frame> symbolize(const std::vector<void*>& frames, Mode mode) {
   results.reserve(frames.size());
   for (auto addr : frames) {
     if (!frame_map_.count(addr)) {
-      auto frame = Frame{"??", "<unwind unsupported>", 0};
+      auto frame = Frame{"??", "??", 0};
       auto maybe_library = libraryFor(addr);
       if (maybe_library) {
         auto libaddress = maybe_library->second - 1;
@@ -28,6 +30,12 @@ std::vector<Frame> symbolize(const std::vector<void*>& frames, Mode mode) {
           frame.filename = r->FileName;
           frame.funcname = r->FunctionName;
           frame.lineno = r->Line;
+        }
+      }
+      if (frame.funcname == "??") {
+        Dl_info dlinfo;
+        if (dladdr(addr, &dlinfo) && dlinfo.dli_sname) {
+          frame.funcname = demangle(dlinfo.dli_sname);
         }
       }
       frame_map_[addr] = std::move(frame);

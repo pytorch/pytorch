@@ -362,7 +362,7 @@ struct Symbolizer {
     }
     auto maybe_library = libraryFor(addr);
     if (!maybe_library) {
-      frame_map_[addr] = Frame{"??", "<unwind unsupported>", 0};
+      frame_map_[addr] = Frame{dladdr_lookup(addr), "??", 0};
       return;
     }
     has_pending_results_ = true;
@@ -581,12 +581,23 @@ static bool get_stack_bounds(uintptr_t& lo, uintptr_t& hi) {
   return true;
 }
 
+// Strip PAC (Pointer Authentication Code) signature bits from an address.
+// Uses raw instruction encoding because the build may target armv8-a which
+// lacks assembler support for XPACI, even though the instruction is a NOP
+// on hardware without PAC.
+static inline uintptr_t strip_pac(uintptr_t addr) {
+  // XPACI X16 = 0xDAC143F0
+  register uintptr_t x __asm__("x16") = addr;
+  __asm__ volatile(".inst 0xDAC143F0" : "+r"(x));
+  return x;
+}
+
 extern "C" C10_USED void unwind_c(
     std::vector<void*>* result,
     uintptr_t fp,
     uintptr_t lr) {
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  result->push_back((void*)lr);
+  result->push_back((void*)strip_pac(lr));
 
   uintptr_t stack_lo = 0, stack_hi = 0;
   if (!get_stack_bounds(stack_lo, stack_hi)) {
@@ -606,7 +617,7 @@ extern "C" C10_USED void unwind_c(
       break;
     }
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    result->push_back((void*)saved_lr);
+    result->push_back((void*)strip_pac(saved_lr));
     uintptr_t next_fp;
     std::memcpy(&next_fp, reinterpret_cast<const void*>(fp), sizeof(next_fp));
     if (next_fp <= fp) {
