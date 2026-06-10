@@ -1186,7 +1186,20 @@ def _linear_cross_entropy_batch_chunked_no_reduction_setup_context(ctx, inputs, 
         acc_policy,
         acc_dtype,
     ) = inputs
-    ctx.save_for_backward(input, linear_weight, target, linear_bias, weight)
+    # Detach before saving: the backward recomputes the grads analytically
+    # from these values (it does not differentiate through them), and saving
+    # ``linear_weight`` -- a differentiable ``reshape`` view of the
+    # ``nn.Linear`` weight -- would make its SavedVariable retain the base
+    # parameter, inflating its use_count past backward and breaking
+    # swap-based ``module.to()`` (the custom-op node keeps saved tensors
+    # alive while the loss output is still referenced).
+    ctx.save_for_backward(
+        input.detach(),
+        linear_weight.detach(),
+        target,
+        linear_bias.detach() if linear_bias is not None else None,
+        weight.detach() if weight is not None else None,
+    )
     ctx._ignore_index = ignore_index
     ctx._batch_chunk_size = batch_chunk_size
     ctx._acc_policy = acc_policy
