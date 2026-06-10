@@ -472,6 +472,7 @@ void logInvariantViolation(
 } // namespace profiler::impl::kineto
 
 namespace autograd::profiler {
+#ifdef USE_KINETO
 c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
   // PrivateUse1 kineto backend reuse some ActivityTypes,
   // If PrivateUse1 backend is enabled, this should return
@@ -525,6 +526,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     }
   }
 }
+#endif // USE_KINETO
 
 void addMetadataJson(const std::string& key, const std::string& value) {
 #ifdef USE_KINETO
