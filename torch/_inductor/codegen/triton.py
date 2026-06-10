@@ -7282,6 +7282,11 @@ class TritonScheduling(SIMDScheduling):
                 # distinguish kernel related symbols.
                 kernel_name = f"{config.aot_inductor.model_name_for_generated_files}_{kernel_name}"
 
+            # Kernel names starting with __ trigger Python name mangling when called
+            # from within a class method (e.g. Runner.call). Fix by escaping __ -> _U.
+            # See https://github.com/pytorch/pytorch/issues/170398
+            kernel_name = kernel_name.replace("__", "_U")
+
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
