@@ -10218,7 +10218,8 @@ class TestAOTModuleSimplified(AOTTestCase):
             shape_env.format_guards(),
             """\
  - Eq(s49, 20)
- - Eq(s70, 30)""",
+ - Eq(s70, 30)
+ - Eq(s26, s93)""",
         )
 
         if not torch.allclose(ref[0], res[0]):

@@ -14359,14 +14359,17 @@ graph():
             (torch.randn(4, 4),),
         ).run_decompositions({})
         # check correct lines are in stack trace
-        trace_mul = [node for node in ep.graph.nodes if node.name == "mul"][0].meta.get(
-            "stack_trace", ""
-        )
+        trace_mul = [
+            node for node in ep.graph.nodes if node.target == torch.ops.aten.mul.Tensor
+        ][0].meta.get("stack_trace", "")
         self.assertTrue(
             re.search(r"test_export.py.*in forward\n.*x \*= 2.0", trace_mul)
         )
         trace_addmm = [
-            node for node in ep.graph.nodes if node.name in ["addmm", "linear"]
+            node
+            for node in ep.graph.nodes
+            if node.target
+            in [torch.ops.aten.addmm.default, torch.ops.aten.linear.default]
         ][0].meta.get("stack_trace", "")
         self.assertTrue(
             re.search(

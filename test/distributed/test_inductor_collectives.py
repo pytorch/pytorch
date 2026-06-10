@@ -2828,7 +2828,9 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 valid_sizes = [
                     "torch.Size([16, 4])",
                     "torch.Size([2*s75, s75])",
+                    "torch.Size([2*s75, s96])",
                     "torch.Size([4*s75, s75])",
+                    "torch.Size([4*s75, s96])",
                 ]
                 if str(n.meta["val"].size()) not in valid_sizes:
                     raise AssertionError(
