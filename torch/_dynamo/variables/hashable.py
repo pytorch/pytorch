@@ -12,7 +12,7 @@ import torch
 
 from .. import variables
 from ..exc import raise_observed_exception
-from ..utils import specialize_symnode
+from ..utils import guard_if_dyn, specialize_symnode
 from .base import VariableTracker
 
 
@@ -203,10 +203,13 @@ class HashableTracker:
         if result.is_python_constant():
             return bool(result.as_python_constant())
 
-        # Non-constant comparison (e.g. tensor/symnode keys whose __eq__ is
-        # elementwise/symbolic). CPython never reaches such a key's __eq__: its
-        # hash is id-based, so only identical objects collide. Mirror that by
-        # comparing identity-based hashes, which equals object identity here.
+        if result.is_symnode_like():
+            return bool(guard_if_dyn(result))
+
+        # Non-constant comparison (e.g. tensor keys whose __eq__ is elementwise).
+        # CPython never reaches such a key's __eq__: its hash is id-based, so only
+        # identical objects collide. Mirror that by comparing identity-based
+        # hashes, which equals object identity here.
         return (
             self._hash_is_identity
             and other._hash_is_identity
