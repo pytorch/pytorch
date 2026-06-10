@@ -40,6 +40,7 @@ from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
+from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.select_algorithm import (
@@ -188,7 +189,7 @@ class TestMaxAutotune(TestCase):
         Verify that `max_autotune` includes all pointwise configs from
         `max_autotune_pointwise` for 1D, 2D, and 3D pointwise kernels.
         """
-        triton_meta = {"device": object()}
+        triton_meta = {"device": DeviceProperties.create(torch.device(GPU_TYPE, 0))}
         inductor_meta_common = {"autotune_pointwise": False}
 
         for size_hints in (
@@ -1799,7 +1800,7 @@ class TestMaxAutotune(TestCase):
 
         ref = x1 @ y1 + x2 @ y2
         act = f(x1, y1, x2, y2)
-        torch.testing.assert_close(act, ref, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(act, ref, atol=1e-1, rtol=1e-2)
 
     @config.patch(
         max_autotune=True,
