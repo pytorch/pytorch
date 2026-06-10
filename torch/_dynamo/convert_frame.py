@@ -232,6 +232,9 @@ def _dynamo_compile_context() -> Any:
                 yield
             return
 
+        # Preserve the ambient stack for Dynamo frontend tracing: fake tensor
+        # propagation and same-frame guard checks still need it. The stack is
+        # cleared later only around the user backend/compiler invocation.
         with (
             torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack()
         ) as functorch_dynamic_layer_stack:
