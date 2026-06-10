@@ -200,7 +200,6 @@ class TestStreamCodegen(InductorTestCase):
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
-    from torch._dynamo.variables.streams import _get_stream_by_index
     stream1 = _get_stream_by_index(3)
     with stream1:
 """,
@@ -212,7 +211,6 @@ with torch.cuda._DeviceGuard(0):
 with torch.xpu._DeviceGuard(0):
     torch.xpu.set_device(0)
     default_stream = torch.xpu.current_stream()
-    from torch._dynamo.variables.streams import _get_stream_by_index
     stream1 = _get_stream_by_index(3)
     with stream1:
 """,

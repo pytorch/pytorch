@@ -105,6 +105,15 @@ from .utils import (
 )
 
 
+def _snapshot_external_objects(ctx: Any) -> None:
+    """Snapshot the external object registry onto ctx for backward restore."""
+    ctx._external_objects = {
+        k: ref()
+        for k, ref in index_to_external_object_weakref.items()
+        if ref() is not None
+    }
+
+
 def _unwrap_tensor_subclasses_no_symints(
     args: list[Any],
 ) -> list[Any]:
@@ -2710,12 +2719,7 @@ class _AutogradForwardEpilogue:
         ]
         ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
         ctx._materialize_non_diff_grads = False
-
-        ctx._external_objects = {
-            k: ref()
-            for k, ref in index_to_external_object_weakref.items()
-            if ref() is not None
-        }
+        _snapshot_external_objects(ctx)
 
         return tuple(raw_returns)
 
@@ -3445,12 +3449,7 @@ class _AOTDispatchAutogradFunctionFactory:
                         )
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
             ctx._materialize_non_diff_grads = False
-
-            ctx._external_objects = {
-                k: ref()
-                for k, ref in index_to_external_object_weakref.items()
-                if ref() is not None
-            }
+            _snapshot_external_objects(ctx)
 
             return tuple(raw_returns)
 
@@ -3566,10 +3565,8 @@ class _AOTDispatchAutogradFunctionFactory:
                         ),
                     )
 
-                if hasattr(ctx, "_external_objects"):
-                    for idx, obj in ctx._external_objects.items():
-                        if obj is not None:
-                            set_external_object_by_index(idx, obj)
+                for idx, obj in getattr(ctx, "_external_objects", {}).items():
+                    set_external_object_by_index(idx, obj)
 
                 return call_func_at_runtime_with_args(
                     compiled_bw,
