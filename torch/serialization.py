@@ -42,6 +42,7 @@ __all__ = [
     "load",
     "StorageType",
     "LoadEndianness",
+    "StorageIO",
     "get_crc32_options",
     "set_crc32_options",
     "get_default_load_endianness",
@@ -96,12 +97,25 @@ def _default_to_weights_only(pickle_module):
 # (1) map_location (needed for wrapper subclasses/third party devices to torch._utils)
 # (2) skip_data (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
 # (3) materialize_fake_tensors (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
+# (4) storage_save_hook / storage_load_hook (for custom storage I/O, e.g. GDS)
 class _SerializationLocal(threading.local):
     def __init__(self):
         super().__init__()
         self.map_location: MAP_LOCATION | None = None
         self.skip_data: bool = False
         self.materialize_fake_tensors: bool = False
+        self.storage_save_hook: (
+            Callable[[torch._C.PyTorchFileWriter, str, torch.UntypedStorage, int], bool]
+            | None
+        ) = None
+        self.storage_load_hook: (
+            Callable[
+                [torch._C.PyTorchFileReader, str, int, str],
+                torch.UntypedStorage | None,
+            ]
+            | None
+        ) = None
+        self.storage_alignment: int | None = None
 
 
 _serialization_tls = _SerializationLocal()
@@ -133,6 +147,27 @@ class LoadEndianness(Enum):
     NATIVE = 1
     LITTLE = 2
     BIG = 3
+
+
+class StorageIO(str, Enum):
+    """Storage I/O backend for :func:`torch.save` and :func:`torch.load`.
+
+    .. attribute:: POSIX
+
+        Standard POSIX I/O. Tensor data is staged through CPU memory using
+        regular ``read``/``write`` system calls. This is the default behaviour
+        when no backend is specified.
+
+    .. attribute:: GDS
+
+        Use GPUDirect Storage to transfer CUDA tensor data directly between
+        GPU memory and NVMe storage via DMA, bypassing CPU and system memory.
+        Requires a GDS-compatible filesystem and ``cuFile`` driver.
+        See :func:`torch.cuda.gds.is_available`.
+    """
+
+    POSIX = "posix"
+    GDS = "gds"
 
 
 def get_default_load_endianness() -> LoadEndianness | None:
@@ -214,13 +249,15 @@ def get_default_mmap_options() -> int | None:
 
 def _get_storage_alignment() -> int:
     """
-    Gets alignment for storages in torch.save files/
+    Gets alignment for storages in torch.save files.
 
     Defaults to 64.
 
     Returns:
         storage_alignment: int
     """
+    if _serialization_tls.storage_alignment is not None:
+        return _serialization_tls.storage_alignment
     from torch.utils.serialization import config
 
     return config.save.storage_alignment
@@ -941,6 +978,52 @@ def _check_save_filelike(f):
         )
 
 
+def _try_gds_save(
+    obj: object,
+    f: FileLike,
+    pickle_module: Any,
+    pickle_protocol: int,
+    _use_new_zipfile_serialization: bool,
+    explicit: bool,
+) -> bool:
+    """Attempt GDS save. Returns True if handled, False to fall back.
+
+    Raises on incompatible args (e.g. non-path file, custom pickle_module)
+    when explicit=True (user passed storage_io=StorageIO.GDS). When
+    explicit=False (from config), returns False silently.
+
+    Runtime cuFile failures are always caught and fall back with a warning.
+    """
+    _can_handle = (
+        _is_path(f) and _use_new_zipfile_serialization and pickle_module is pickle
+    )
+    if not _can_handle:
+        if not explicit:
+            return False
+        if not _is_path(f):
+            raise ValueError("f must be a file path when using StorageIO.GDS")
+        if not _use_new_zipfile_serialization:
+            raise ValueError("StorageIO.GDS requires new zipfile serialization format")
+        raise ValueError("StorageIO.GDS does not support custom pickle_module")
+
+    import torch.cuda.gds as _gds
+
+    if not _gds.is_available():
+        if explicit:
+            warnings.warn(
+                "StorageIO.GDS was requested but GDS is not available "
+                "(CUDA or cuFile driver not found), falling back to POSIX IO."
+            )
+        return False
+
+    try:
+        _gds.save(obj, f, pickle_protocol=pickle_protocol)
+        return True
+    except RuntimeError as e:
+        warnings.warn(f"StorageIO.GDS save failed, falling back to POSIX IO: {e}")
+        return False
+
+
 def save(
     obj: object,
     f: FileLike,
@@ -948,13 +1031,15 @@ def save(
     pickle_protocol: int = DEFAULT_PROTOCOL,
     _use_new_zipfile_serialization: bool = True,
     _disable_byteorder_record: bool = False,
+    *,
+    storage_io: StorageIO | None = None,
 ) -> None:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
     # The first line of this docstring overrides the one Sphinx generates for the
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """save(obj, f, pickle_module=pickle, pickle_protocol=2, _use_new_zipfile_serialization=True)
+    """save(obj, f, pickle_module=pickle, pickle_protocol=2, _use_new_zipfile_serialization=True, *, storage_io=None)
 
     Saves an object to a disk file.
 
@@ -968,6 +1053,11 @@ def save(
            os.PathLike object containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
+        storage_io: Storage I/O backend for tensor data. Use
+            :attr:`StorageIO.GDS` for GPUDirect Storage.
+            Requires ``f`` to be a file path.
+            Defaults to ``torch.utils.serialization.config.save.storage_io``
+            when ``None``. See :class:`StorageIO`.
 
     .. note::
         A common PyTorch convention is to save tensors using .pt file extension.
@@ -994,6 +1084,24 @@ def save(
     torch._C._log_api_usage_once("torch.save")
     _check_dill_version(pickle_module)
     _check_save_filelike(f)
+
+    storage_io_explicit = storage_io is not None
+    if not storage_io_explicit:
+        from torch.utils.serialization import config
+
+        storage_io = (
+            StorageIO(config.save.storage_io) if config.save.storage_io else None
+        )
+
+    if storage_io == StorageIO.GDS and _try_gds_save(
+        obj,
+        f,
+        pickle_module,
+        pickle_protocol,
+        _use_new_zipfile_serialization,
+        storage_io_explicit,
+    ):
+        return
 
     if isinstance(f, (str, os.PathLike)):
         f = os.fspath(f)
@@ -1283,6 +1391,11 @@ def _save(
         global _serialization_tls
         if _serialization_tls.skip_data:
             zip_file.write_record_metadata(name, num_bytes)
+        elif (
+            _serialization_tls.storage_save_hook is not None
+            and _serialization_tls.storage_save_hook(zip_file, name, storage, num_bytes)
+        ):
+            pass
         else:
             # given that we copy things around anyway, we might use storage.cpu()
             # this means to that to get tensors serialized, you need to implement
@@ -1312,6 +1425,51 @@ def _save(
             zip_file.write_record(name, storage, num_bytes)
 
 
+def _try_gds_load(
+    f: FileLike,
+    map_location: MAP_LOCATION,
+    mmap: bool,
+    pickle_module: Any,
+    explicit: bool,
+    **kwargs: Any,
+) -> Any | None:
+    """Attempt GDS load. Returns loaded object, or None to fall back to normal load.
+
+    Raises on incompatible args (e.g. mmap, non-path file, custom pickle_module)
+    when explicit=True (user passed storage_io=StorageIO.GDS). When
+    explicit=False (from config), silently returns None.
+
+    Runtime cuFile failures are always caught and fall back with a warning.
+    Extra kwargs (e.g. weights_only, pickle_load_args) are forwarded to gds.load.
+    """
+    _can_handle = (
+        _is_path(f) and not mmap and (pickle_module is None or pickle_module is pickle)
+    )
+    if not _can_handle:
+        if not explicit:
+            return None
+        if mmap:
+            raise ValueError("StorageIO.GDS and mmap cannot both be True")
+        if not _is_path(f):
+            raise ValueError("f must be a file path when using StorageIO.GDS")
+        raise ValueError("StorageIO.GDS does not support custom pickle_module")
+
+    import torch.cuda.gds as _gds
+
+    if not _gds.is_available():
+        if explicit:
+            warnings.warn(
+                "StorageIO.GDS was requested but GDS is not available "
+                "(CUDA or cuFile driver not found), falling back to POSIX IO."
+            )
+        return None
+    try:
+        return _gds.load(f, map_location=map_location, **kwargs)
+    except RuntimeError as e:
+        warnings.warn(f"StorageIO.GDS load failed, falling back to POSIX IO: {e}")
+        return None
+
+
 def load(
     f: FileLike,
     map_location: MAP_LOCATION = None,
@@ -1319,6 +1477,7 @@ def load(
     *,
     weights_only: bool | None = None,
     mmap: bool | None = None,
+    storage_io: StorageIO | None = None,
     **pickle_load_args: Any,
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -1326,7 +1485,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, *, weights_only=True, mmap=None, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=True, mmap=None, storage_io=None, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -1383,6 +1542,11 @@ def load(
             second step is a no-op if the final location is CPU. When the ``mmap`` flag is set, instead of copying the
             tensor storages from disk to CPU memory in the first step, ``f`` is mapped, which means tensor storages
             will be lazily loaded when their data is accessed.
+        storage_io: Storage I/O backend for tensor data. Use
+            :attr:`StorageIO.GDS` for GPUDirect Storage.
+            Requires ``f`` to be a file path.
+            Defaults to ``torch.utils.serialization.config.load.storage_io``
+            when ``None``. See :class:`StorageIO`.
         pickle_load_args: optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`,
             only works if :attr:`weights_only=False`, e.g., :attr:`errors=...`.
@@ -1515,13 +1679,30 @@ def load(
     if pickle_load_args != {} and weights_only:
         warnings.warn("pickle_load_args only works if `weights_only=False`.")
 
-    # make flipping default BC-compatible
-    if mmap is None:
+    # None → resolve from config, so the default can be flipped globally.
+    storage_io_explicit = storage_io is not None
+    if mmap is None or storage_io is None:
         from torch.utils.serialization import config
 
-        mmap = config.load.mmap
+        if mmap is None:
+            mmap = config.load.mmap
+        if storage_io is None and config.load.storage_io:
+            storage_io = StorageIO(config.load.storage_io)
 
     _check_dill_version(pickle_module)
+
+    if storage_io == StorageIO.GDS:
+        gds_result = _try_gds_load(
+            f,
+            map_location,
+            mmap,
+            pickle_module,
+            storage_io_explicit,
+            weights_only=weights_only,
+            **pickle_load_args,
+        )
+        if gds_result is not None:
+            return gds_result
 
     if "encoding" not in pickle_load_args:
         pickle_load_args["encoding"] = "utf-8"
@@ -2100,6 +2281,16 @@ def _load(
                 storage._checkpoint_offset = zip_file.get_record_offset(name)
         elif _serialization_tls.skip_data:
             storage = torch.UntypedStorage(nbytes)
+        elif (
+            _serialization_tls.storage_load_hook is not None
+            and (
+                _hook_result := _serialization_tls.storage_load_hook(
+                    zip_file, name, nbytes, location
+                )
+            )
+            is not None
+        ):
+            storage = _hook_result
         elif overall_storage is not None:
             if can_calculate_storage_offsets and calculate_storage_offsets:
                 storage_offset = _get_offset(key, name, nbytes)
