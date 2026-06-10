@@ -30,6 +30,7 @@ from torch.distributed.tensor._collective_utils import (
     mesh_scatter,
     unpad_tensor,
 )
+from torch.distributed.tensor._utils import ExplicitRedistributionContext
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
@@ -1711,6 +1712,110 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             f"Fake-backend PG name '{fake_pg_name}' is a sequential integer; "
             f"expected a hash-based name for torchcomms compatibility.",
         )
+
+
+class LogicalMeshTest(TestCase):
+    """Tests for DeviceMesh.from_logical() — no distributed init required."""
+
+    def tearDown(self):
+        super().tearDown()
+        if is_initialized():
+            dist.destroy_process_group()
+
+    def test_from_logical_1d(self):
+        mesh = DeviceMesh.from_logical((4,), mesh_dim_names=("tp",))
+        self.assertEqual(mesh.size(0), 4)
+        self.assertEqual(mesh.ndim, 1)
+        self.assertEqual(mesh.shape, (4,))
+        self.assertEqual(mesh.device_type, "meta")
+        self.assertEqual(mesh.get_coordinate(), (0,))
+        self.assertTrue(mesh._is_current_rank_part_of_mesh())
+
+    def test_from_logical_2d(self):
+        mesh = DeviceMesh.from_logical((2, 4), mesh_dim_names=("dp", "tp"))
+        self.assertEqual(mesh.size(0), 2)
+        self.assertEqual(mesh.size(1), 4)
+        self.assertEqual(mesh.ndim, 2)
+        self.assertEqual(mesh.shape, (2, 4))
+        self.assertEqual(mesh.get_coordinate(), (0, 0))
+
+    def test_from_logical_has_fake_process_groups(self):
+        mesh = DeviceMesh.from_logical((4,))
+        # Fake PG provides process groups for redistribute support
+        pg = mesh.get_group()
+        self.assertIsNotNone(pg)
+
+    def test_propagation_elementwise(self):
+        mesh = DeviceMesh.from_logical((4,), mesh_dim_names=("tp",))
+        with ExplicitRedistributionContext(strict=True):
+            x = DTensor.from_local(torch.randn(2, 16, device="meta"), mesh, [Shard(0)])
+            y = x + x
+        self.assertEqual(y.placements, (Shard(0),))
+        self.assertEqual(y.shape, torch.Size([8, 16]))
+
+    def test_propagation_mm(self):
+        mesh = DeviceMesh.from_logical((4,), mesh_dim_names=("tp",))
+        with ExplicitRedistributionContext(strict=True):
+            a = DTensor.from_local(torch.randn(2, 16, device="meta"), mesh, [Shard(0)])
+            b = DTensor.from_local(
+                torch.randn(16, 8, device="meta"),
+                mesh,
+                [torch.distributed.tensor.Replicate()],
+            )
+            c = torch.mm(a, b)
+        self.assertEqual(c.placements, (Shard(0),))
+        self.assertEqual(c.shape, torch.Size([8, 8]))
+
+    def test_propagation_mm_partial(self):
+        mesh = DeviceMesh.from_logical((4,), mesh_dim_names=("tp",))
+        with ExplicitRedistributionContext(strict=True):
+            a = DTensor.from_local(torch.randn(8, 4, device="meta"), mesh, [Shard(1)])
+            b = DTensor.from_local(torch.randn(4, 8, device="meta"), mesh, [Shard(0)])
+            c = torch.mm(a, b)
+        self.assertEqual(c.placements[0].is_partial(), True)
+        self.assertEqual(c.shape, torch.Size([8, 8]))
+
+    def test_propagation_transpose(self):
+        mesh = DeviceMesh.from_logical((4,), mesh_dim_names=("tp",))
+        with ExplicitRedistributionContext(strict=True):
+            x = DTensor.from_local(torch.randn(2, 16, device="meta"), mesh, [Shard(0)])
+            y = x.t()
+        self.assertEqual(y.placements, (Shard(1),))
+        self.assertEqual(y.shape, torch.Size([16, 8]))
+
+    def test_propagation_2d_mesh(self):
+        mesh = DeviceMesh.from_logical((2, 4), mesh_dim_names=("dp", "tp"))
+        with ExplicitRedistributionContext(strict=True):
+            x = DTensor.from_local(
+                torch.randn(4, 4, device="meta"), mesh, [Shard(0), Shard(1)]
+            )
+            y = x + x
+        self.assertEqual(y.placements, (Shard(0), Shard(1)))
+        self.assertEqual(y.shape, torch.Size([8, 16]))
+
+    def test_implicit_redistribution_raises_on_logical_mesh(self):
+        mesh = DeviceMesh.from_logical((4,), mesh_dim_names=("tp",))
+        # Adding Shard(0) + Shard(1) requires redistributing one input,
+        # which is impossible on a logical mesh.
+        a = DTensor.from_local(torch.randn(2, 16, device="meta"), mesh, [Shard(0)])
+        b = DTensor.from_local(torch.randn(8, 4, device="meta"), mesh, [Shard(1)])
+        with self.assertRaisesRegex(RuntimeError, "logical mesh"):
+            a + b
+
+    def test_explicit_redistribute_on_logical_mesh(self):
+        mesh = DeviceMesh.from_logical((4,), mesh_dim_names=("tp",))
+        x = DTensor.from_local(torch.randn(2, 16, device="meta"), mesh, [Shard(0)])
+        # Shard(0) -> Replicate (simulated allgather)
+        y = x.redistribute(mesh, [torch.distributed.tensor.Replicate()])
+        self.assertEqual(y.placements, (torch.distributed.tensor.Replicate(),))
+        self.assertEqual(y.shape, torch.Size([8, 16]))
+        self.assertEqual(y._local_tensor.shape, torch.Size([8, 16]))
+
+        # Replicate -> Shard(1) (simulated local slice)
+        z = y.redistribute(mesh, [Shard(1)])
+        self.assertEqual(z.placements, (Shard(1),))
+        self.assertEqual(z.shape, torch.Size([8, 16]))
+        self.assertEqual(z._local_tensor.shape, torch.Size([8, 4]))
 
 
 class CuTeLayoutTest(TestCase):
