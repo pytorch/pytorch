@@ -630,6 +630,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     return
                 code.writeline(f"int64_t {sym_or_exp} = {name_fn(base_name)}[{dim}];")
                 bound_vars.add(sym_or_exp)
+                if symbol_is_type(sym_or_exp, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
+                    self.unbacked_symbol_decls.add(str(sym_or_exp))
                 maybe_emit_replacement_aliases(sym_or_exp)
             elif isinstance(sym_or_exp, sympy.Expr):
                 undefined_symbols = [
@@ -668,6 +670,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise AssertionError("Unexpected symbol type")
             code.writeline(f"{decl} {value} = {name};")
             bound_vars.add(value)
+            if symbol_is_type(value, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
+                self.unbacked_symbol_decls.add(str(value))
             maybe_emit_replacement_aliases(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
@@ -2166,6 +2170,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_devices.add(device_str)
         return f"cached_torch_device_type_{device_str}, {device.index if device.index else 0}"
 
+    def codegen_device_idx(self, device, device_id):
+        device_id = device_id.strip()
+        if not V.graph.aot_mode:
+            return device_id
+
+        if device.type == V.graph.device_type and device.index is not None:
+            # The primary compile-time device is relocatable via device_index at load.
+            # Other explicit device indices must stay intact for cross-device copies.
+            primary_device_idx = next(iter(V.graph.device_idxs), None)
+            if primary_device_idx is not None and device.index != primary_device_idx:
+                return device_id
+
+        return "this->device_idx_"
+
     def codegen_dtype(self, dtype):
         dtype_str = str(dtype).split(".")[-1]
         self.used_cached_dtypes.add(dtype_str)
@@ -2293,7 +2311,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             graph=self.get_codegened_graph(),
         )
         device_type, device_id = device_str.split(",")
-        device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
+        device_idx = self.codegen_device_idx(device, device_id)
 
         handle_name = f"{name}_handle"
         args = [
