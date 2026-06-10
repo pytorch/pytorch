@@ -5106,7 +5106,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q, k, v = (torch.randn(1, 8, 128, 64, device=device) for _ in range(3))
 
         expected_error_message = (
-            "ValueError: Q and KV block size must be divisible by BLOCK_M and BLOCK_N."
+            "Invalid FlexAttention forward kernel options: Q and KV block sizes "
+            "must be divisible by the selected tile sizes.*"
+            "SPARSE_Q_BLOCK_SIZE=96.*SPARSE_KV_BLOCK_SIZE=96.*"
+            "BLOCK_M=128.*BLOCK_N=32"
         )
         block_mask = create_block_mask(
             noop_mask, 1, 8, 128, 128, BLOCK_SIZE=96, device=device
