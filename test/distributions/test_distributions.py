@@ -3759,6 +3759,36 @@ class TestDistributions(DistributionsTestCase):
                 f"Kumaraswamy example {i + 1}/{len(cases)}, incorrect .variance",
             )
 
+    def test_kumaraswamy_mode(self):
+        # Cases where mode is undefined (a<1, b<1, or a=b=1) -> nan.
+        # Unsqueeze a to test all (a, b) combinations in the cartesian product.
+        torch.set_default_dtype(torch.float64)
+        a_nan = torch.tensor([0.5, 1.0]).unsqueeze(1)  # shape (2, 1)
+        b_nan = torch.tensor([0.5, 1.0])  # shape (2,)
+        mode_nan = Kumaraswamy(a_nan, b_nan).mode
+        self.assertTrue(mode_nan.isnan().all(), "expected nan for undefined modes")
+
+        # Cases where mode is well-defined: verify it is a local maximum of log-prob.
+        # If m is the mode, log_prob(m) >= log_prob(m +/- eps) for small eps.
+        # Unsqueeze a to test all (a, b) combinations in the cartesian product.
+        a_valid = torch.tensor([2.0, 3.0, 5.0]).unsqueeze(1)  # shape (3, 1)
+        b_valid = torch.tensor([2.0, 5.0, 100.0])  # shape (3,)
+        dist = Kumaraswamy(a_valid, b_valid)
+        mode = dist.mode
+        eps = 1e-5
+        lp_mode = dist.log_prob(mode)
+        lp_left = dist.log_prob((mode - eps).clamp(min=0.0))
+        lp_right = dist.log_prob((mode + eps).clamp(max=1.0))
+        self.assertTrue(
+            (lp_mode >= lp_left).all(),
+            "mode log_prob not >= left neighbor",
+        )
+        self.assertTrue(
+            (lp_mode >= lp_right).all(),
+            "mode log_prob not >= right neighbor",
+        )
+        torch.set_default_dtype(torch.float32)
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fishersnedecor(self):
         df1 = torch.randn(2, 3).abs().requires_grad_()
