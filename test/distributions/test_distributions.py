@@ -1540,6 +1540,22 @@ class TestDistributions(DistributionsTestCase):
 
         self._check_log_prob(Bernoulli(p), ref_log_prob)
         self._check_log_prob(Bernoulli(logits=p.log() - (-p).log1p()), ref_log_prob)
+        for dtype in (torch.float32, torch.float64):
+            value = torch.tensor([0.0, 1.0, 0.0, 1.0], dtype=dtype)
+            expected = torch.tensor([0.0, -inf, -inf, 0.0], dtype=dtype)
+
+            self.assertEqual(
+                Bernoulli(torch.tensor([0.0, 0.0, 1.0, 1.0], dtype=dtype)).log_prob(
+                    value
+                ),
+                expected,
+            )
+            self.assertEqual(
+                Bernoulli(
+                    logits=torch.tensor([-inf, -inf, inf, inf], dtype=dtype)
+                ).log_prob(value),
+                expected,
+            )
         self.assertRaises(NotImplementedError, Bernoulli(r).rsample)
 
         # check entropy computation
@@ -6133,9 +6149,7 @@ class TestNumericalStability(DistributionsTestCase):
                 dist_class=Bernoulli,
                 probs=tensor_type([0]),
                 x=tensor_type([1]),
-                expected_value=tensor_type(
-                    [torch.finfo(tensor_type([]).dtype).eps]
-                ).log(),
+                expected_value=tensor_type([-inf]),
                 expected_gradient=tensor_type([0]),
             )
 

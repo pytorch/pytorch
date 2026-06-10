@@ -122,7 +122,26 @@ class Bernoulli(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
-        return -binary_cross_entropy_with_logits(logits, value, reduction="none")
+        log_prob = -binary_cross_entropy_with_logits(logits, value, reduction="none")
+
+        boundary_param = self.__dict__.get("probs", logits)
+        boundary_param, value = broadcast_all(boundary_param, value)
+        if "probs" in self.__dict__:
+            probs_zero = boundary_param == 0
+            probs_one = boundary_param == 1
+        else:
+            probs_zero = boundary_param == -torch.inf
+            probs_one = boundary_param == torch.inf
+
+        return torch.where(
+            (probs_zero & (value == 1)) | (probs_one & (value == 0)),
+            -torch.inf,
+            torch.where(
+                (probs_zero & (value == 0)) | (probs_one & (value == 1)),
+                torch.zeros((), dtype=log_prob.dtype, device=log_prob.device),
+                log_prob,
+            ),
+        )
 
     def entropy(self):
         return binary_cross_entropy_with_logits(
