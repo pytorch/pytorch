@@ -58,6 +58,92 @@ void register_base_passes() {
         return rewriter.run(graph);
       });
 
+  // Addmm variants: PT2 export decomposes nn.Linear into aten.t + aten.addmm
+  // instead of aten.linear, so the Linear* passes above don't match.
+  GraphPassRegistry::add_pass(
+      "AddmmDynamicFp16UnpackedWeight", [](Graph* graph) {
+        std::string p = R"(
+    graph(%i, %w, %b):
+    %wt = torch.ops.aten.t.default(self=%w)
+    %out_0 = torch.ops.aten.addmm.default(self=%b, mat1=%i, mat2=%wt)
+    return (%out_0))";
+
+        std::string p_new = R"(
+    graph(%i, %w, %b):
+    %pw = torch.ops.quantized.linear_prepack_fp16.default(W=%w, B=%b)
+    %out_0 = torch.ops.quantized.linear_dynamic_fp16.default(X=%i, W_prepack=%pw)
+    return (%out_0))";
+
+        SubgraphRewriter rewriter("AddmmDynamicFp16UnpackedWeight");
+        rewriter.registerRewritePattern(p, p_new);
+        return rewriter.run(graph);
+      });
+
+  GraphPassRegistry::add_pass(
+      "AddmmReluDynamicFp16UnpackedWeight", [](Graph* graph) {
+        std::string p = R"(
+    graph(%i, %w, %b):
+    %wt = torch.ops.aten.t.default(self=%w)
+    %out_0 = torch.ops.aten.addmm.default(self=%b, mat1=%i, mat2=%wt)
+    %out_1 = torch.ops.aten.relu.default(self=%out_0)
+    return (%out_1))";
+
+        std::string p_new = R"(
+    graph(%i, %w, %b):
+    %pw = torch.ops.quantized.linear_prepack_fp16.default(W=%w, B=%b)
+    %out_0 = torch.ops.quantized.linear_relu_dynamic_fp16.default(X=%i, W_prepack=%pw)
+    return (%out_0))";
+
+        SubgraphRewriter rewriter("AddmmReluDynamicFp16UnpackedWeight");
+        rewriter.registerRewritePattern(p, p_new);
+        return rewriter.run(graph);
+      });
+
+  // Folded addmm variants: When export-time constant folding folds aten.t
+  // into the weight, the graph has bare aten.addmm without a preceding aten.t.
+  // The Addmm* passes above won't match. These passes handle that case by
+  // inserting aten.t in the replacement to un-transpose the weight before
+  // prepack. Both aten.t and linear_prepack_fp16 are const-foldable, so they
+  // run once at init, not per-inference.
+  GraphPassRegistry::add_pass(
+      "AddmmFoldedDynamicFp16UnpackedWeight", [](Graph* graph) {
+        std::string p = R"(
+    graph(%i, %w, %b):
+    %out_0 = torch.ops.aten.addmm.default(self=%b, mat1=%i, mat2=%w)
+    return (%out_0))";
+
+        std::string p_new = R"(
+    graph(%i, %w, %b):
+    %w_orig = torch.ops.aten.t.default(self=%w)
+    %pw = torch.ops.quantized.linear_prepack_fp16.default(W=%w_orig, B=%b)
+    %out_0 = torch.ops.quantized.linear_dynamic_fp16.default(X=%i, W_prepack=%pw)
+    return (%out_0))";
+
+        SubgraphRewriter rewriter("AddmmFoldedDynamicFp16UnpackedWeight");
+        rewriter.registerRewritePattern(p, p_new);
+        return rewriter.run(graph);
+      });
+
+  GraphPassRegistry::add_pass(
+      "AddmmFoldedReluDynamicFp16UnpackedWeight", [](Graph* graph) {
+        std::string p = R"(
+    graph(%i, %w, %b):
+    %out_0 = torch.ops.aten.addmm.default(self=%b, mat1=%i, mat2=%w)
+    %out_1 = torch.ops.aten.relu.default(self=%out_0)
+    return (%out_1))";
+
+        std::string p_new = R"(
+    graph(%i, %w, %b):
+    %w_orig = torch.ops.aten.t.default(self=%w)
+    %pw = torch.ops.quantized.linear_prepack_fp16.default(W=%w_orig, B=%b)
+    %out_0 = torch.ops.quantized.linear_relu_dynamic_fp16.default(X=%i, W_prepack=%pw)
+    return (%out_0))";
+
+        SubgraphRewriter rewriter("AddmmFoldedReluDynamicFp16UnpackedWeight");
+        rewriter.registerRewritePattern(p, p_new);
+        return rewriter.run(graph);
+      });
+
   GraphPassRegistry::add_pass("CleanUpDeadNodes", [](Graph* graph) {
     return graph->cleanupDeadNodes();
   });
