@@ -63,6 +63,8 @@ def make_pallas(cls):
     patches = [
         (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
+        (config, "test_configs.runtime_triton_dtype_assert", False),
+        (config, "test_configs.runtime_triton_shape_assert", False),
     ]
     cls_prefix = "Pallas"
     suffix = "_pallas"
@@ -2643,9 +2645,6 @@ if test_torchinductor.RUN_GPU and has_cuda_pallas():
     # make_pallas(test_torchinductor.GPUTests)
 
 if test_torchinductor.RUN_TPU and has_tpu_pallas():
-    from torch_tpu import api as tpu_api  # type: ignore[import-not-found]
-
-    tpu_api.tpu_device()  # initialize TPU runtime
 
     class PallasTestsTPU(PallasTestsMixin, TestCase):
         DEVICE = "tpu"

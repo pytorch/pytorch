@@ -90,6 +90,12 @@ class FSDPCommContext:
         # Reduce-scatter stream gives separate execution "thread" for post-
         # backward logic like pre/post-gradient division and reduce-scatter
         self.reduce_scatter_stream = self.device_handle.Stream(priority=high_priority)
+        # The most recent post-reduce event across all param groups, recorded
+        # on reduce_scatter_stream (FSDP) or all_reduce_stream (HSDP). Since
+        # later events subsume earlier ones on the same stream, a single wait
+        # on the last event recorded on each stream used in the post backward
+        # hook covers all groups.
+        self._last_post_reduce_events: dict[torch.Stream, torch.Event] = dict()
         # Run the HSDP all-reduces concurrently with all-gather/reduce-scatter
         # since collectives use different network resources and can overlap
         # in the typical intra-node sharding / inter-node replication case
@@ -99,6 +105,11 @@ class FSDPCommContext:
         # CUDA events for synchronization
         self.all_gather_state: AllGatherState | None = None
         self.reduce_scatter_states: list[ReduceScatterState] = []
+        # Effective cap on retained reduce_scatter_states, resolved from the
+        # per-group reduce_scatter_max_input_buffers in
+        # FSDPState._init_shared_state. It lives here, not per group, because
+        # reduce_scatter_states is a single shared list governed by one cap.
+        self.reduce_scatter_max_input_buffers: int = 1
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: list[FSDPParamGroup] = []  # will cause ref cycles
 
@@ -210,6 +221,12 @@ class FSDPParamGroup:
         # Whether to reshard parameters after backward (only useful for
         # gradient accumulation)
         self.reshard_after_backward: bool = True
+        # Per-group input for the reduce-scatter copy-in (chunk_cat) buffer
+        # cap-K, set via FSDPModule.set_reduce_scatter_max_input_buffers (see
+        # its docstring). FSDP keeps 1 by default. These per-group values are
+        # resolved into the single shared
+        # comm_ctx.reduce_scatter_max_input_buffers that post_backward reads.
+        self.reduce_scatter_max_input_buffers: int = 1
         # Optional custom factor for the gradient reduction op (e.g. to divide
         # by a factor other than the world size)
         self.gradient_divide_factor: float | None = None
@@ -290,6 +307,7 @@ class FSDPParamGroup:
             self._reset_sharded_params = True
         self._validate_no_meta_params()
         self._validate_cpu_offload_params()
+        self._validate_reduce_scatter_max_input_buffers()
         # Initialize mixed precision attributes lazily in case the user changes
         # the parameter dtypes after construction time but before forward
         self._init_mp_dtypes()
@@ -618,17 +636,26 @@ class FSDPParamGroup:
                     unsharded_grads.append(fsdp_param.unsharded_zero_grad_data)
             if self.reshard_after_backward:
                 self.reshard()
-        # Wait on prior module's RS states (assumes backward fires groups
-        # N-1 first; if not, overlap degrades but correctness is preserved).
+        # Recycle prior modules' reduce-scatter input buffers, keeping at most
+        # `max_input_buffers` in flight: reclaim the oldest (wait on its
+        # reduce-scatter, then drop the keepalive ref that was deferring the
+        # allocator's reuse of its memory) until fewer than that remain, before
+        # this module's reduce appends one more. See
+        # set_reduce_scatter_max_input_buffers for the memory/overlap tradeoff.
+        # (Assumes backward fires groups N-1 first; if not, overlap degrades but
+        # correctness is preserved.)
+        max_input_buffers = self.comm_ctx.reduce_scatter_max_input_buffers
+        states = self.comm_ctx.reduce_scatter_states
         if (
             self._param_group_index == self._num_param_groups - 1
-            and self.comm_ctx.reduce_scatter_states
+            and len(states) >= max_input_buffers
         ):
             with record_function(f"FSDP::post_backward_rs_wait ({self._module_fqn})"):
-                for rs_state in self.comm_ctx.reduce_scatter_states:
-                    if rs_state.event is not None:
-                        self.device_handle.current_stream().wait_event(rs_state.event)
-                self.comm_ctx.reduce_scatter_states.clear()
+                while len(states) >= max_input_buffers:
+                    oldest = states.pop(0)
+                    if oldest.event is not None:
+                        self.device_handle.current_stream().wait_event(oldest.event)
+                    del oldest
         if len(fsdp_params_with_grad) == 0:
             return
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
@@ -653,6 +680,7 @@ class FSDPParamGroup:
             (
                 reduce_scatter_input,
                 reduce_scatter_event,
+                post_reduce_stream,
                 self._post_reduce_event,
                 all_reduce_input,
                 all_reduce_event,
@@ -682,6 +710,9 @@ class FSDPParamGroup:
                 self._partial_reduce_output,
                 self._all_reduce_hook,
                 self.force_sum_reduction_for_comms,
+            )
+            self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
+                self._post_reduce_event
             )
             self.comm_ctx.reduce_scatter_states.append(
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
@@ -730,7 +761,11 @@ class FSDPParamGroup:
                 )
 
     def finalize_backward(self):
-        self._wait_for_post_backward()
+        for event in self.comm_ctx._last_post_reduce_events.values():
+            self.device_handle.current_stream().wait_event(event)
+        self.comm_ctx._last_post_reduce_events = dict()
+        self._post_reduce_event = None
+        self._all_reduce_state = None
         for fsdp_param in self.fsdp_params:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()
@@ -930,7 +965,46 @@ class FSDPParamGroup:
             raise AssertionError(
                 f"Expected mesh_info to be FSDPMeshInfo, got {type(self.mesh_info)}"
             )
-        return self.mesh_info.shard_process_group
+        # Falls back to the shard PG (shared with all-gather) unless
+        # set_separate_reduce_scatter_group opted in to a dedicated PG.
+        return (
+            self.mesh_info.reduce_scatter_process_group
+            or self.mesh_info.shard_process_group
+        )
+
+    def _set_separate_reduce_scatter_group(
+        self, enable: bool, new_groups: dict[tuple[int, ...], dist.ProcessGroup]
+    ) -> None:
+        # Give reduce-scatter its own process group (separate from the shared
+        # all-gather/shard PG) so the two can overlap in backward, or reset to
+        # the shared group. ``new_groups`` caches groups by shard ranks within
+        # one set_separate_reduce_scatter_group call so meshes sharding over the
+        # same ranks share one communicator (typically one total) rather than one
+        # per mesh. HSDP ranks may create only their local shard subgroup, so
+        # use local synchronization to avoid waiting for nonmember ranks in
+        # new_group's post-init barrier.
+        mesh_info = self.mesh_info
+        if not isinstance(mesh_info, FSDPMeshInfo):
+            raise AssertionError(
+                f"Expected mesh_info to be FSDPMeshInfo, got {type(mesh_info)}"
+            )
+        if not enable:
+            mesh_info.reduce_scatter_process_group = None
+            return
+        ranks = tuple(dist.get_process_group_ranks(mesh_info.shard_process_group))
+        if ranks not in new_groups:
+            # Reuse the mesh's existing group if already enabled (idempotent),
+            # else create one for this rank set.
+            existing = mesh_info.reduce_scatter_process_group
+            if existing is not None:
+                new_groups[ranks] = existing
+            else:
+                new_groups[ranks] = dist.new_group(
+                    list(ranks),
+                    use_local_synchronization=True,
+                    group_desc="fsdp_reduce_scatter",
+                )
+        mesh_info.reduce_scatter_process_group = new_groups[ranks]
 
     @property
     def _all_reduce_process_group(self) -> dist.ProcessGroup:
@@ -978,6 +1052,27 @@ class FSDPParamGroup:
                 'For example, load a CPU state dict or call module.to_empty(device="cpu"). '
                 "Found following parameters on non-CPU device: "
                 f"{[(fsdp_param._param_fqn, fsdp_param.sharded_param.device) for fsdp_param in fsdp_params_not_on_cpu]}\n"
+            )
+
+    def _validate_reduce_scatter_max_input_buffers(self):
+        # Reject max_input_buffers > 1 with the symmetric-memory reduce-scatter
+        # comm: retaining >1 input buffers relies on the allocator handing out a
+        # fresh buffer while prior ones are ref-held, but the symmetric-memory
+        # pool reuses a single buffer, so retaining K would force K symmetric
+        # segments and can exhaust symmetric memory. Read the per-group cap (set
+        # in __init__) so this is safe to call before the comm context is lazily
+        # initialized (e.g. unshard before the first forward).
+        if self.reduce_scatter_max_input_buffers > 1 and isinstance(
+            self._reduce_scatter_comm, SymmMemReduceScatter
+        ):
+            raise ValueError(
+                "set_reduce_scatter_max_input_buffers(>1) is not supported with "
+                "the symmetric-memory reduce-scatter comm, but got "
+                f"{self.reduce_scatter_max_input_buffers} for module "
+                f"'{self._module_fqn}' using "
+                f"{self._reduce_scatter_comm.__class__.__name__}. Keep "
+                "max_input_buffers=1 with symmetric memory, or use the default "
+                "reduce-scatter comm."
             )
 
 

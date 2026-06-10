@@ -201,7 +201,7 @@ class _PipelineStageBase(ABC):
         self.args_recv_info: dict[int, tuple[_RecvInfo, ...]] = {}
         self.act_send_info: dict[int, list] = {}
 
-        # Backward infra will created lazily
+        # Backward infra will be created lazily
         self.grad_recv_info: dict = {}
         self.grad_send_info: list | None = None
 
@@ -445,6 +445,8 @@ class _PipelineStageBase(ABC):
         recv_infos = self.grad_recv_info[mb_index]
         for info, tensor in zip(recv_infos, next_stage_bwd_outputs, strict=True):
             if tensor is None:
+                if info.buffer is not None:
+                    info.buffer.zero_()
                 continue
             if not isinstance(tensor, torch.Tensor):
                 raise AssertionError(
@@ -507,6 +509,23 @@ class _PipelineStageBase(ABC):
 
         return ops
 
+    def _get_grad_send_meta(self, input_idx: int) -> TensorMeta | None:
+        """Return gradient metadata for ``input_idx`` if a recv was allocated."""
+        input_grads = self._stage_meta.input_grads
+        if input_grads is not None and input_idx < len(input_grads):
+            return input_grads[input_idx]
+
+        inputs = self._stage_meta.inputs
+        if inputs is not None and input_idx < len(inputs):
+            meta = inputs[input_idx]
+            if meta is not None:
+                return _derive_grad_metas((meta,))[0]
+
+        raise PipeliningMetadataError(
+            f"Stage {self.stage_index}: backward produced gradient for input "
+            f"{input_idx}, but no metadata is available for the gradient send."
+        )
+
     def get_bwd_send_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
         """
         Get the gradient send ops for current stage's backward.
@@ -527,8 +546,34 @@ class _PipelineStageBase(ABC):
         ops: list[dist.P2POp] = []
         grads_input = self.bwd_cache.pop(bwd_chunk_id)
 
-        for grad, grad_recv_stage in zip(grads_input, self.grad_send_info, strict=True):
-            if isinstance(grad, torch.Tensor) and grad_recv_stage is not None:
+        for idx, (grad, grad_recv_stage) in enumerate(
+            zip(grads_input, self.grad_send_info, strict=True)
+        ):
+            if grad_recv_stage is None:
+                if grad is not None:
+                    raise PipeliningMetadataError(
+                        f"[{self.stage_index}] for chunk {bwd_chunk_id} has gradient {grad} "
+                        f"but no stage to send it to"
+                    )
+                continue
+
+            grad_meta = self._get_grad_send_meta(idx)
+            if grad_meta is None:
+                if grad is not None:
+                    raise PipeliningMetadataError(
+                        f"Stage {self.stage_index} chunk {bwd_chunk_id} input {idx}: "
+                        f"backward produced a {type(grad).__name__} gradient, but "
+                        "backward metadata for this grad slot is None, so the "
+                        "previous stage did not allocate a recv buffer. DTensor "
+                        "grad metadata cannot be derived from forward DTensor "
+                        "metadata because gradient placements may differ from "
+                        "activation placements. Provide static input_grads "
+                        "metadata or run metadata inference with a microbatch "
+                        "that produces this grad."
+                    )
+                continue
+
+            if isinstance(grad, torch.Tensor):
                 # Extract local tensor if DTensor
                 send_tensor = to_local_if_dtensor(grad)
                 logger.debug(
@@ -541,12 +586,19 @@ class _PipelineStageBase(ABC):
                 ops.append(
                     dist.P2POp(dist.isend, send_tensor, peer_global_rank, self.group)
                 )
-            else:
-                if grad is not None or grad_recv_stage is not None:
-                    raise PipeliningMetadataError(
-                        f"[{self.stage_index}] for chunk {bwd_chunk_id} has gradients {grad} "
-                        f"and is expecting to send gradients to stage {grad_recv_stage}"
-                    )
+            elif grad is None:
+                zero_grad = _make_tensor_from_meta(grad_meta, self.device).zero_()
+                send_tensor = to_local_if_dtensor(zero_grad)
+                logger.debug(
+                    "%s Sending zero gradient to Stage %s: %s",
+                    self.log_prefix,
+                    grad_recv_stage,
+                    send_tensor.size(),
+                )
+                peer_global_rank = self._resolve_peer_global_rank(grad_recv_stage)
+                ops.append(
+                    dist.P2POp(dist.isend, send_tensor, peer_global_rank, self.group)
+                )
         return ops
 
     def clear_runtime_states(self) -> None:
@@ -1546,6 +1598,8 @@ class _PipelineStage(_PipelineStageBase):
                 )
 
         self._stage_meta.output_grads = tuple(output_grads_metas)
+        if self._stage_meta.inputs is not None:
+            self._stage_meta.input_grads = _derive_grad_metas(self._stage_meta.inputs)
         logger.debug("%s Grad recv info: %s", self.log_prefix, grad_recv_infos)
         return tuple(grad_recv_infos)
 
@@ -1783,6 +1837,7 @@ class PipelineStage(_PipelineStageBase):
             outputs,
             all_fwd_inputs,
             grad_outputs,
+            allow_unused=True,
         )
 
     def _to_tensor(self, arg: torch.Tensor | TensorMeta) -> torch.Tensor:
@@ -2029,10 +2084,17 @@ class PipelineStage(_PipelineStageBase):
                 all_input_grads = tuple(None for _ in range(len(all_fwd_inputs)))
 
         input_grads = all_input_grads[: len(fwd_inputs)]
-        self._stage_meta.input_grads = tuple(
-            extract_tensor_meta(g) if isinstance(g, torch.Tensor) else None
-            for g in input_grads
-        )
+        processed_metas: list[TensorMeta | None] = []
+        for i, g in enumerate(input_grads):
+            if isinstance(g, torch.Tensor):
+                processed_metas.append(extract_tensor_meta(g))
+            elif fwd_inputs[i].requires_grad:
+                processed_metas.append(
+                    _derive_grad_metas((extract_tensor_meta(fwd_inputs[i]),))[0]
+                )
+            else:
+                processed_metas.append(None)
+        self._stage_meta.input_grads = tuple(processed_metas)
 
         # === SEND: Pass input grad metadata to previous stage ===
         bwd_meta = _StageBackwardMeta(backward_metas=self._stage_meta.input_grads)
