@@ -12997,6 +12997,46 @@ class TestAutogradDeviceType(TestCase):
             (min_val + max_val).backward()
             self.assertEqual(x.grad, torch.tensor([0.5, 0.5, 0.5, 0.5], device=device))
 
+    def test_clamp_saturation_boundary_subgradient(self, device):
+        # Scalar clamp / clamp_min / clamp_max are the same function as
+        # hardtanh / relu, so their gradients must agree.
+        # A value pinned to a clamp bound (e.g. an int4 quantization level)
+        # is then a fixed point of gradient descent and does not drift off.
+        # See pytorch#184572.
+        F = torch.nn.functional
+        qmin, qmax = -8.0, 7.0  # signed int4 range
+
+        xs = torch.tensor(
+            [qmin - 1, qmin, (qmin + qmax) / 2, qmax, qmax + 1], device=device
+        )
+        xc = xs.clone().requires_grad_(True)
+        torch.clamp(xc, qmin, qmax).sum().backward()
+        xh = xs.clone().requires_grad_(True)
+        F.hardtanh(xh, qmin, qmax).sum().backward()
+        self.assertEqual(xc.grad, xh.grad)
+        self.assertEqual(xc.grad[xs == qmin].item(), 0.0)  # saturated at the bounds
+        self.assertEqual(xc.grad[xs == qmax].item(), 0.0)
+
+        # one-sided forms agree with relu (== clamp_min(., 0)) at the bound
+        def grad_at(fn, val):
+            x = torch.tensor(val, device=device, requires_grad=True)
+            fn(x).backward()
+            return x.grad.item()
+
+        self.assertEqual(grad_at(lambda x: x.clamp_min(qmin), qmin), 0.0)
+        self.assertEqual(grad_at(lambda x: x.clamp_max(qmax), qmax), 0.0)
+        self.assertEqual(grad_at(torch.relu, 0.0), 0.0)
+
+        # a value sitting on a bound stays pinned under gradient descent
+        for bound in (qmin, qmax):
+            w = torch.tensor(bound, device=device, requires_grad=True)
+            for _ in range(3):
+                w.clamp(qmin, qmax).backward()
+                with torch.no_grad():
+                    w -= 0.1 * w.grad
+                w.grad = None
+            self.assertEqual(w.item(), bound)
+
     def test_scatter_index_reduce_amin_amax_aminmax_backprops_to_all_values(
         self, device
     ):
