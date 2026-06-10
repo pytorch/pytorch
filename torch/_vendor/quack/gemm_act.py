@@ -53,6 +53,9 @@ from .activation import act_fn_map, gate_fn_map
 from .rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_out_sr_seed
 
 
+_tensor_epilogue_fns: dict[str, Callable] = {}
+
+
 class GemmActMixin(ComposableEpiMixin):
     _epi_ops = (
         Scalar("alpha"),
@@ -405,7 +408,6 @@ def _compile_gemm_act(
     persistent,
     is_dynamic_persistent,
     activation,
-    tensor_epilogue_fn,
     tensor_epilogue_key,
     tensor_epilogue_uses_c,
     tensor_epilogue_arg_kinds,
@@ -494,6 +496,11 @@ def _compile_gemm_act(
         for dtype, ndim in zip(tensor_epilogue_colvec_dtypes, tensor_epilogue_colvec_ndims)
     ) or None
 
+    tensor_epilogue_fn = (
+        _tensor_epilogue_fns[tensor_epilogue_key]
+        if tensor_epilogue_key is not None and activation is None
+        else None
+    )
     act_fn = None if tensor_epilogue_fn is not None else (
         act_fn_map[activation] if gemm_cls_name == "act" else gate_fn_map[activation]
     )
@@ -587,6 +594,12 @@ def gemm_act(
 ) -> None:
     if tensor_epilogue_fn is not None:
         assert activation is None, "tensor_epilogue_fn and activation are mutually exclusive"
+        tensor_epilogue_key = (
+            tensor_epilogue_key
+            if tensor_epilogue_key is not None
+            else repr(tensor_epilogue_fn)
+        )
+        _tensor_epilogue_fns[tensor_epilogue_key] = tensor_epilogue_fn
         gemm_cls_name = "act"
     elif activation in gate_fn_map:
         gemm_cls_name = "gated"
@@ -691,8 +704,7 @@ def gemm_act(
         persistent,
         is_dynamic_persistent,
         activation,
-        tensor_epilogue_fn,
-        tensor_epilogue_key if tensor_epilogue_key is not None else repr(tensor_epilogue_fn),
+        tensor_epilogue_key,
         tensor_epilogue_uses_c,
         tensor_epilogue_arg_kind_codes,
         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_rowvec_biases),
