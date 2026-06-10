@@ -11,6 +11,7 @@ import cutlass.cute as cute
 
 from .compile_utils import make_fake_tensor as fake_tensor
 from .cute_dsl_utils import get_device_capacity, get_max_active_clusters
+from .gemm_act import GemmActSm100
 from .gemm_default_epi import GemmDefaultSm100
 from .gemm_tvm_ffi_utils import div_for_dtype, make_scheduler_args
 from .mx_utils import (
@@ -608,6 +609,8 @@ def compile_blockscaled_gemm_tvm_ffi(
     use_clc_persistence: bool = True,
     varlen_m: bool = False,
     varlen_k: bool = False,
+    tensor_epilogue_fn: Callable | None = None,
+    tensor_epilogue_key: str | None = None,
 ) -> Callable:
     """Compile the SM100 blockscaled GEMM.
 
@@ -621,12 +624,17 @@ def compile_blockscaled_gemm_tvm_ffi(
         raise RuntimeError("Blockscaled SM100 GEMM requires SM100/SM110")
     assert not (varlen_m and varlen_k), "Only one of varlen_m / varlen_k"
 
+    GemmCls = GemmActSm100 if tensor_epilogue_fn is not None else GemmDefaultSm100
     gemm = partial(
-        GemmDefaultSm100,
+        GemmCls,
         sf_vec_size=sf_vec_size,
         use_clc_persistence=use_clc_persistence,
     )(cutlass.Float32, ab_dtype, mma_tiler_mn, (*cluster_shape_mn, 1))
-    compile_epi_args = gemm.EpilogueArguments()
+    compile_epi_args = (
+        gemm.EpilogueArguments(mD, None, tensor_epilogue_fn)
+        if tensor_epilogue_fn is not None
+        else gemm.EpilogueArguments()
+    )
     scheduler_args = make_scheduler_args(
         get_max_active_clusters(cluster_shape_mn[0] * cluster_shape_mn[1]),
         max_swizzle_size=8,
@@ -709,7 +717,11 @@ def compile_blockscaled_gemm_tvm_ffi(
         varlen_args,
         stream,
     ):
-        gemm(a, b, d, None, compile_epi_args, scheduler_args, varlen_args, stream, sfa, sfb, None)
+        if cutlass.const_expr(tensor_epilogue_fn is not None):
+            epi_args = gemm.EpilogueArguments(d, None, tensor_epilogue_fn)
+            gemm(a, b, None, None, epi_args, scheduler_args, varlen_args, stream, sfa, sfb, None)
+        else:
+            gemm(a, b, d, None, compile_epi_args, scheduler_args, varlen_args, stream, sfa, sfb, None)
 
     compiled = cute.compile(
         runner,

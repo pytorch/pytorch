@@ -375,6 +375,8 @@ class GemmSm100(GemmTmaBase):
             if op.is_tile_load():
                 tile_load_tensor = getattr(epilogue_args, op.name, None)
                 if tile_load_tensor is not None:
+                    if isinstance(tile_load_tensor, tuple):
+                        tile_load_tensor = tile_load_tensor[0]
                     tile_load_layout = LayoutEnum.from_tensor(tile_load_tensor)
                     tile_load_dtype = tile_load_tensor.element_type
                     break
