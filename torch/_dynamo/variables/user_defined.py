@@ -771,7 +771,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             cls_attr
         ):
-            return super().getattro_impl(tx, name)
+            return variables.GetAttrVariable(self, name, source=source)
         if self.value is collections.OrderedDict:
             return variables.GetAttrVariable(self, name, py_type=type(cls_attr))
         return VariableTracker.build(tx, cls_attr, source)
