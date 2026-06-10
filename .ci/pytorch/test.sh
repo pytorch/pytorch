@@ -13,6 +13,8 @@ export TERM=vt100
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+# shellcheck source=./torch_trace.sh
+source "$(dirname "${BASH_SOURCE[0]}")/torch_trace.sh"
 
 # Only change workspace permissions if passwordless sudo is available
 # (e.g. ROCm and s390x CI jobs lack it, and changing permissions
@@ -1093,55 +1095,6 @@ test_inductor_triton_cpu() {
   assert_git_not_dirty
 }
 
-setup_torch_trace() {
-  if [[ "${ENABLE_TORCH_TRACE:-0}" != "1" ]]; then
-    return
-  fi
-  local trace_dir="${RUNNER_TEMP:-/tmp}/torch_traces"
-  mkdir -p "$trace_dir"
-  export TORCH_TRACE="$trace_dir"
-  echo "TORCH_TRACE enabled: writing structured trace logs to $trace_dir"
-}
-
-collect_tlparse_output() {
-  if [[ "${ENABLE_TORCH_TRACE:-0}" != "1" ]]; then
-    return
-  fi
-  local trace_dir="${RUNNER_TEMP:-/tmp}/torch_traces"
-  local test_reports_dir
-  test_reports_dir=$(pwd)/test/test-reports
-
-  if [[ ! -d "$trace_dir" ]] || [[ -z "$(ls -A "$trace_dir" 2>/dev/null)" ]]; then
-    echo "No torch trace files found in $trace_dir, skipping tlparse"
-    return
-  fi
-
-  echo "Collecting torch trace output from $trace_dir"
-
-  # Always preserve raw trace logs (gzipped) for downstream analysis
-  mkdir -p "$test_reports_dir/tlparse_output"
-  for f in "$trace_dir"/*.log; do
-    [ -f "$f" ] || continue
-    gzip -c "$f" > "$test_reports_dir/tlparse_output/$(basename "$f").gz"
-  done
-  echo "Raw trace logs saved to $test_reports_dir/tlparse_output/"
-
-  # Try to generate HTML report via tlparse (best-effort)
-  if ! command -v tlparse &>/dev/null; then
-    pip install tlparse 2>/dev/null || {
-      echo "Warning: failed to install tlparse, skipping HTML generation"
-      return
-    }
-  fi
-
-  for f in "$trace_dir"/*.log; do
-    [ -f "$f" ] || continue
-    tlparse -o "$test_reports_dir/tlparse_output/" --no-browser --overwrite "$f" 2>&1 || {
-      echo "Warning: tlparse failed on $(basename "$f")"
-    }
-  done
-}
-
 test_dynamo_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
@@ -2218,6 +2171,9 @@ elif [[ "$TEST_CONFIG" == *vllm* ]]; then
 
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "$TEST_CONFIG" == *torchtitan* ]]; then
+    if [[ "$TEST_CONFIG" == *torchtitan_models_integration* ]]; then
+      install_torchvision
+    fi
     (cd .ci/lumen_cli && python -m pip install -e .)
     python -m cli.run test external torchtitan --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
