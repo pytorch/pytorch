@@ -74,6 +74,24 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         aot_result = aot_mod(*args)
         self.assertTrue(torch._dynamo.testing.same(eager_result, aot_result))
 
+    def test_compile_module_forward_with_inference_mode(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.range = torch.arange(1, 5, dtype=torch.float32)
+
+            @torch.inference_mode()
+            def forward(self, start_pos: int):
+                return self.range[start_pos : start_pos + 3]
+
+        # with statement looks redundant next to @torch.inference_mode on forward,
+        # but scopes TLS so inference mode is always torn down if the test raises.
+        with torch.inference_mode():
+            m = Mod()
+            eager = m(1)
+            compiled = torch.compile(m, backend="aot_eager")
+            self.assertEqual(compiled(1), eager)
+
     def test_mutation(self):
         # https://github.com/pytorch/torchdynamo/issues/1301
         def fn(param, y):

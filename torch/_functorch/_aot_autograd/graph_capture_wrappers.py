@@ -1487,6 +1487,28 @@ def aot_dispatch_subclass(
     )
 
 
+class _PropagateUnbackedSymIntsForAOTMetadataReplay(PropagateUnbackedSymInts):
+    # During AOT metadata replay, disable inference mode around each FX dispatch
+    # so ops do not build inference views under functionalization.
+    def call_function(self, target, args, kwargs):
+        if torch.is_inference_mode_enabled():
+            with torch.inference_mode(False):
+                return super().call_function(target, args, kwargs)
+        return super().call_function(target, args, kwargs)
+
+    def call_method(self, target, args, kwargs):
+        if torch.is_inference_mode_enabled():
+            with torch.inference_mode(False):
+                return super().call_method(target, args, kwargs)
+        return super().call_method(target, args, kwargs)
+
+    def call_module(self, target, args, kwargs):
+        if torch.is_inference_mode_enabled():
+            with torch.inference_mode(False):
+                return super().call_module(target, args, kwargs)
+        return super().call_module(target, args, kwargs)
+
+
 def create_functional_call(
     mod: Any,
     params_spec: Any,
@@ -1531,7 +1553,9 @@ def create_functional_call(
                         if fake_mode is None:
                             raise AssertionError("fake_mode must not be None")
                         fake_mode.epoch += 1
-                        out = PropagateUnbackedSymInts(mod).run(*args)
+                        out = _PropagateUnbackedSymIntsForAOTMetadataReplay(mod).run(
+                            *args
+                        )
             else:
                 out = mod(*args[params_len:], **kwargs)
 
