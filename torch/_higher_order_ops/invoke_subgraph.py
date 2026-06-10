@@ -77,6 +77,10 @@ class NestedCompileRegionOptions:
     # Otherwise, the nested region will use this decompositions.
     decompositions: dict[str, Any] | None = None
 
+    # Inductor config patches to apply while compiling this nested region through
+    # Inductor's normal invoke_subgraph lowering path.
+    inductor_config_patches: dict[str, Any] | None = None
+
 
 def _extract_nested_region_config(fn):
     """
@@ -1357,4 +1361,5 @@ def get_invoke_subgraph_compile_options(
         bw_compiler=inductor_compile,
         partitioner=partitioner,
         decompositions=decompositions,
+        inductor_config_patches=inductor_config_patches,
     )

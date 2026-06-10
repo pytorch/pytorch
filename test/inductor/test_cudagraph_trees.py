@@ -19,6 +19,7 @@ import torch.nn as nn
 from torch._dynamo.backends.debugging import aot_eager_decomp_partition_with_mode
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+from torch._higher_order_ops.invoke_subgraph import get_invoke_subgraph_compile_options
 from torch._inductor import config
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
@@ -422,6 +423,61 @@ if HAS_CUDA_AND_TRITON:
                 FileCheck().check(
                     "skipping cudagraphs due to graph with symbolic shapes inputs"
                 ).run(utils_log_stream.getvalue())
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("force_disable_caches", True)
+        @config.patch("graph_partition", True)
+        @config.patch("triton.cudagraph_skip_dynamic_graphs", False)
+        def test_normal_inductor_hop_subgraph_uses_nested_cudagraph_skip_dynamic_config(
+            self,
+        ):
+            nested_config = get_invoke_subgraph_compile_options(
+                inductor_config_patches={
+                    "triton.cudagraph_skip_dynamic_graphs": True,
+                }
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y)
+
+            def fn(x, y):
+                dynamic, static = g(x, y)
+                return dynamic + static
+
+            opt_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn((), device="cuda")
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_static(x, 1)
+
+            result, codes = run_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            self.assertEqual(len(codes), 1)
+
+            code = codes[0]
+            self.assertIn("def repeated_subgraph0_partition_0(args):", code)
+            self.assertIn("def repeated_subgraph0(args):", code)
+            self.assertIn("def partition_0(args):", code)
+
+            inner_partition_code = code.split(
+                "def repeated_subgraph0_partition_0(args):", 1
+            )[1].split("def repeated_subgraph0(args):", 1)[0]
+            inner_launcher_code = code.split("def repeated_subgraph0(args):", 1)[
+                1
+            ].split("def partition_0(args):", 1)[0]
+
+            self.assertIn(
+                "empty_strided_cuda((), (), torch.float32)", inner_partition_code
+            )
+            self.assertNotIn("empty_strided_cuda((s", inner_partition_code)
+            self.assertIn("empty_strided_cuda((s", inner_launcher_code)
+            self.assertIn(
+                "repeated_subgraph0_partition_0(partition0_args)",
+                inner_launcher_code,
+            )
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
