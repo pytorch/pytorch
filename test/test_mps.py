@@ -8320,6 +8320,14 @@ class TestMPS(TestCaseMPS):
             helper(5, 2, 10, dtype)
             helper(2, 2, 0, dtype)
 
+    def test_linspace_integral_fractional_endpoints(self):
+        # Fractional start/end must be truncated to the integer type before computing,
+        # matching CPU behavior (https://github.com/pytorch/pytorch/issues/137635).
+        for dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
+            cpu = torch.linspace(4.6, -2, 20, dtype=dtype)
+            mps = torch.linspace(4.6, -2, 20, dtype=dtype, device='mps')
+            self.assertEqual(mps.cpu(), cpu)
+
     # Test argange
     def test_arange(self):
         self.assertEqual(np.arange(10), torch.arange(10, device='mps'))
