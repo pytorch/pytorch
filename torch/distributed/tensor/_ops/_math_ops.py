@@ -13,7 +13,6 @@ from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
     OpStrategy,
-    TupleStrategy,
     RuntimeSchemaInfo,
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
@@ -428,6 +427,7 @@ def linear_reduction_single_dim_strategy(
         reduction_op=reduction_op,
     )
 
+
 @register_single_dim_strategy(
     NON_LINEAR_BOOL_REDUCTION_OPS,
     schema_info=RuntimeSchemaInfo(1),
@@ -487,8 +487,8 @@ def _shard_non_reduction_dim(
             continue
         out_d = d if keep_dim or d < dim else d - 1
         strategies.append(
-            [_ShardingPlaceholder(out_d)]
-            * n_outputs  # pyrefly: ignore[bad-argument-type]
+            [_ShardingPlaceholder(out_d)]  # pyrefly: ignore[bad-argument-type]
+            * n_outputs
             + [_ShardingPlaceholder(d)]
         )
     return strategies
@@ -1381,7 +1381,9 @@ def _common_norm_forward_strategy(
             ),
         )
 
-        output_specs = (out_spec, stat_spec) if rms_norm else (out_spec, stat_spec, stat_spec)
+        output_specs = (
+            (out_spec, stat_spec) if rms_norm else (out_spec, stat_spec, stat_spec)
+        )
         output_strategy.strategies.append(
             OpSpec(
                 output_specs=output_specs,
