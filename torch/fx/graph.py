@@ -313,6 +313,10 @@ class _PyTreeInfo(NamedTuple):
     orig_args: list[str]
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec | None
+    # True when in_spec was produced from tree_flatten((args, kwargs)).  A
+    # genuine positional signature like f(tuple_arg, dict_arg) has the same
+    # top-level TreeSpec shape, so codegen must not infer this from in_spec.
+    is_args_kwargs: bool = False
 
 
 @dataclass(frozen=True)
@@ -1119,16 +1123,16 @@ class _PyTreeCodeGen(CodeGen):
         self, fn_args: list[str], free_vars: list[str], expanded_def: bool
     ) -> str:
         in_spec = self.pytree_info.in_spec
-        # when kwargs is present, in_spec is tuple(args, kwargs)
-        has_args_kwargs_tuple = (
-            in_spec.type is tuple
-            and in_spec.num_children == 2
-            and in_spec.child(0).type is tuple
-            and in_spec.child(1).type is dict
-        )
         fn_kwargs = "{}"
         fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
-        if has_args_kwargs_tuple:
+        if self.pytree_info.is_args_kwargs:
+            if not (
+                in_spec.type is tuple
+                and in_spec.num_children == 2
+                and in_spec.child(0).type is tuple
+                and in_spec.child(1).type is dict
+            ):
+                raise AssertionError(f"Expected args/kwargs input spec, got {in_spec}")
             count_args = in_spec.child(0).num_children
             fn_args = self.pytree_info.orig_args[:count_args]
             fn_kwargs = (

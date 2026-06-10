@@ -4435,6 +4435,24 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         # recorver mutable checking flag
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
+    def test_make_fx_tuple_dict_positional_codegen(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(a, x):
+            return a[0] + x["x"]
+
+        a = torch.randn(3)
+        x = torch.randn(3)
+        fx_fn = make_fx(fn)((a,), {"x": x})
+
+        self.assertIn("tree_flatten_spec([a, x], self._in_spec)", fx_fn.code)
+
+        new_a = torch.randn(3)
+        new_x = torch.randn(3)
+        self.assertEqual(
+            fx_fn((new_a,), {"x": new_x}), fn((new_a,), {"x": new_x})
+        )
+
     # This only fails on navi31
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)

@@ -1657,6 +1657,7 @@ def _strict_export(
             orig_arg_names,
             gm_torch_level._in_spec,
             out_spec,
+            gm_torch_level.graph._codegen.pytree_info.is_args_kwargs,
         )
     elif isinstance(
         gm_torch_level.graph._codegen,
