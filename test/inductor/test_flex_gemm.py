@@ -414,6 +414,31 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_epilogue_imports_generated_dependencies(self):
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+
+        def epilogue_fn(acc):
+            abs_acc = torch.abs(acc)
+            return torch.where(abs_acc > 0.1, acc, -acc)
+
+        actual = torch.compile(flex_gemm, backend="inductor", fullgraph=True)(
+            torch.mm,
+            (a, b),
+            epilogue_fn,
+            kernel_options={"backend": "QUACK"},
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            epilogue_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_addmm_compiled_matches_reference(self):
         bias = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)

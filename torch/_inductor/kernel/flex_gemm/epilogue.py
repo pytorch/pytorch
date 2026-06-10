@@ -200,7 +200,9 @@ def materialize_flex_gemm_epilogue(
     return (
         name,
         "import cutlass\n"
-        "import cutlass.cute as cute\n\n"
+        "import cutlass.cute as cute\n"
+        "import operator\n"
+        "from cutlass._mlir.dialects import math as mlir_math\n\n"
         f"@cute.jit\ndef {name}(acc):\n"
         f"{body}    return {_cute_arg(output, env)}\n",
     )
