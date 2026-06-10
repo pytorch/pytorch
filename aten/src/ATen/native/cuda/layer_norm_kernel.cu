@@ -54,6 +54,7 @@ bool can_vectorize(const T * ptr, int alignment) {
 
 template <typename T, typename T_ACC, bool rms_norm>
 __global__ void RowwiseMomentsCUDAKernel(
+    int64_t M,
     int64_t N,
     T_ACC eps,
     const T* X,
@@ -67,7 +68,12 @@ __global__ void RowwiseMomentsCUDAKernel(
       char val_shared[sizeof(WelfordType) * C10_WARP_SIZE_UPPER_BOUND];
   WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
 
+#if defined(USE_ROCM)
+  for (int64_t i = blockIdx.x; i < M; i += gridDim.x) {
+#else
+  (void)M;
   const int64_t i = blockIdx.x;
+#endif
   WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
   WelfordType val(0, 0, 0, 0);
 
@@ -91,10 +97,14 @@ __global__ void RowwiseMomentsCUDAKernel(
     }
 
   }
+#if defined(USE_ROCM)
+  }
+#endif
 }
 
 template <typename T, typename T_ACC, bool rms_norm>
 __global__ void LayerNormForwardCUDAKernel(
+    int64_t M,
     int64_t N,
     const T* X,
     const T_ACC* mean,
@@ -102,7 +112,12 @@ __global__ void LayerNormForwardCUDAKernel(
     const T* gamma,
     const T* beta,
     T* Y) {
+#if defined(USE_ROCM)
+  for (int64_t i = blockIdx.x; i < M; i += gridDim.x) {
+#else
+  (void)M;
   const int64_t i = blockIdx.x;
+#endif
   for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
     const int64_t index = i * N + j;
     const T_ACC gamma_v =
@@ -117,6 +132,9 @@ __global__ void LayerNormForwardCUDAKernel(
       Y[index] = (static_cast<T_ACC>(X[index])) * static_cast<T_ACC>(rstd[i]) * gamma_v;
     }
   }
+#if defined(USE_ROCM)
+  }
+#endif
 }
 
 struct WelfordDataLN{
@@ -1158,43 +1176,24 @@ void LayerNormKernelImplInternal(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
 #ifdef USE_ROCM
   // ROCm rejects launches where gridDim.x * blockDim.x exceeds uint32_t max.
-  // Chunk the non-vectorized fallback just like the vectorized path above.
+  // Bound the fallback launch and let each block stride over remaining rows.
   constexpr int64_t max_rowwise_blocks =
       std::numeric_limits<uint32_t>::max() / cuda_utils::kCUDABlockReduceNumThreads;
-
-  int64_t remaining = M;
-  const T* X_data_cur = X_data;
-  T* Y_data_cur = Y_data;
-  T_ACC* mean_data_cur = mean_data;
-  T_ACC* rstd_data_cur = rstd_data;
-
-  while (remaining > 0) {
-    const int64_t rows = remaining > max_rowwise_blocks ? max_rowwise_blocks : remaining;
-    const dim3 blocks(static_cast<uint32_t>(rows));
-
-    RowwiseMomentsCUDAKernel<T, T_ACC, rms_norm>
-        <<<blocks, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
-            N, eps, X_data_cur, mean_data_cur, rstd_data_cur);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-    LayerNormForwardCUDAKernel<T, T_ACC, rms_norm><<<blocks, kCUDANumThreads, 0, cuda_stream>>>(
-        N, X_data_cur, mean_data_cur, rstd_data_cur, gamma_data, beta_data, Y_data_cur);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-    X_data_cur += N * rows;
-    Y_data_cur += N * rows;
-    if constexpr (!rms_norm) {
-      mean_data_cur += rows;
-    }
-    rstd_data_cur += rows;
-    remaining -= rows;
-  }
+  const dim3 blocks(static_cast<uint32_t>(std::min(M, max_rowwise_blocks)));
+  RowwiseMomentsCUDAKernel<T, T_ACC, rms_norm>
+      <<<blocks, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
+          M, N, eps, X_data, mean_data, rstd_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  LayerNormForwardCUDAKernel<T, T_ACC, rms_norm><<<blocks, kCUDANumThreads, 0, cuda_stream>>>(
+      M, N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
   RowwiseMomentsCUDAKernel<T, T_ACC, rms_norm>
       <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
-          N, eps, X_data, mean_data, rstd_data);
+          M, N, eps, X_data, mean_data, rstd_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   LayerNormForwardCUDAKernel<T, T_ACC, rms_norm><<<M, kCUDANumThreads, 0, cuda_stream>>>(
-      N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
+      M, N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 #endif
   }
