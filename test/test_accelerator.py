@@ -306,20 +306,35 @@ class TestAccelerator(TestCase):
 
     def test_random_generator_state(self):
         for device_idx in range(torch.accelerator.device_count()):
+            initial_seed = torch.accelerator.initial_seed(device_idx)
+            self.assertIsInstance(initial_seed, int)
+            old_state = torch.accelerator.get_rng_state(device_idx)
+            self.assertIsInstance(old_state, torch.Tensor)
+            torch.accelerator.manual_seed(12345, device_idx)
+            new_state = torch.accelerator.get_rng_state(device_idx)
+            self.assertNotEqual(old_state, new_state)
+            self.assertEqual(12345, torch.accelerator.initial_seed(device_idx))
+            torch.accelerator.set_rng_state(old_state, device_idx)
+            self.assertEqual(old_state, torch.accelerator.get_rng_state(device_idx))
+            self.assertEqual(initial_seed, torch.accelerator.initial_seed(device_idx))
+            torch.accelerator.seed(device_idx)
+            self.assertNotEqual(old_state, torch.accelerator.get_rng_state(device_idx))
+        torch.accelerator.manual_seed_all(54321)
+        for device_idx in range(torch.accelerator.device_count()):
             with torch.accelerator.device_index(device_idx):
-                initial_seed = torch.accelerator.initial_seed()
-                self.assertIsInstance(initial_seed, int)
-                old_state = torch.accelerator.get_rng_state()
-                self.assertIsInstance(old_state, torch.Tensor)
-                self.assertEqual(old_state.dtype, torch.uint8)
-                torch.accelerator.manual_seed(12345)
-                new_state = torch.accelerator.get_rng_state()
-                self.assertNotEqual(old_state, new_state)
-                torch.accelerator.set_rng_state(old_state)
-                self.assertEqual(old_state, torch.accelerator.get_rng_state())
-                self.assertEqual(12345, torch.accelerator.initial_seed())
-                torch.accelerator.seed()
-                self.assertNotEqual(old_state, torch.accelerator.get_rng_state())
+                self.assertEqual(54321, torch.accelerator.initial_seed())
+                state = torch.accelerator.get_rng_state()
+                self.assertEqual(
+                    torch.accelerator.get_rng_state_all(),
+                    [state] * torch.accelerator.device_count(),
+                )
+        torch.accelerator.seed_all()
+        for device_idx in range(torch.accelerator.device_count()):
+            with torch.accelerator.device_index(device_idx):
+                self.assertNotEqual(54321, torch.accelerator.initial_seed())
+                torch.accelerator.set_rng_state(state)
+                self.assertEqual(state, torch.accelerator.get_rng_state())
+                self.assertEqual(54321, torch.accelerator.initial_seed())
 
 
 instantiate_device_type_tests(
