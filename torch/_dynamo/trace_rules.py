@@ -774,6 +774,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_nested_int",
         "torch._C._get_tensor_metadata",
         "torch._C._get_tracing_state",
+        "torch._C._is_tracing",
         "torch._C._get_upgrader_ranges",
         "torch._C._get_upgraders_entry_map",
         "torch._C._get_upgraders_map_size",

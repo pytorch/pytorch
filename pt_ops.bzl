@@ -586,6 +586,7 @@ PT_OPS_PRIM = [
     "aten::as_tensor.list",
     "aten::_pack_sequence",
     "aten::_get_tracing_state",
+    "aten::_is_tracing",
     "aten::is_scripting",
     "aten::_no_grad_uniform_",
     "aten::_no_grad_normal_",
