@@ -5748,6 +5748,30 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
                 "graph_capture_record_stream_reuse:False"
             )
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_free_parent_block_in_child_graph_errors(self):
+        g = torch.cuda.CUDAGraph()
+        pred = torch.tensor(True, device="cuda")
+        side_stream = torch.cuda.Stream()
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(side_stream):
+            g.capture_begin()
+            T = torch.ones(64, device="cuda")
+            cg = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+            cg.begin_capture_to_if_node(pred)
+            _ = T + 1
+            del T
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "parent CUDA graph capture.*conditional node",
+            ):
+                cg.end_capture_to_conditional_node()
+            g.capture_end()
+
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
         graphs = self._check_tracing(fn, inp)
