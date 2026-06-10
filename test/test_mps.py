@@ -1451,6 +1451,49 @@ class TestMPS(TestCaseMPS):
         result_contig = torch.nn.functional.linear(input_s, weight_contiguous_equiv)
         self.assertEqual(result_contig, result_sliced)
 
+    def test_linear_strided_contiguous_view(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181725:
+        # (1, L, D).transpose(0, 1) is is_contiguous()==True but has non-default
+        # strides, which used to force a redundant permuteNDArray per F.linear.
+        torch.manual_seed(0)
+        device = 'mps'
+        L, D, H = 32, 512, 8
+
+        # fp16 additionally covers the needs_nd_workaround flatten path on M5+.
+        for dtype in (torch.float32, torch.float16):
+            W = torch.randn(D, D, device=device, dtype=dtype)
+            b = torch.randn(D, device=device, dtype=dtype)
+            q = torch.randn(1, L, D, device=device, dtype=dtype)
+
+            x_view = q.transpose(0, 1)
+            x_ref = torch.empty_like(x_view, memory_format=torch.contiguous_format)
+            x_ref.copy_(x_view)
+            self.assertTrue(x_view.is_contiguous())
+            self.assertNotEqual(x_view.stride(), x_ref.stride())
+            self.assertTrue(torch.equal(F.linear(x_view, W, b), F.linear(x_ref, W, b)))
+
+        # nn.MultiheadAttention at B=1 vs the issue's hand-rolled SDPA reference.
+        mha = nn.MultiheadAttention(D, H, batch_first=True, device=device).eval()
+        x = torch.randn(1, L, D, device=device)
+        m = torch.randn(1, L, D, device=device)
+        with torch.no_grad():
+            Wq, Wk, Wv = (mha.in_proj_weight[:D],
+                          mha.in_proj_weight[D:2 * D],
+                          mha.in_proj_weight[2 * D:])
+            bq, bk, bv = (mha.in_proj_bias[:D],
+                          mha.in_proj_bias[D:2 * D],
+                          mha.in_proj_bias[2 * D:])
+            Wo, bo = mha.out_proj.weight, mha.out_proj.bias
+            hd = D // H
+
+            out_mha = mha(x, m, m, need_weights=False)[0]
+            Q = F.linear(x, Wq, bq).view(1, L, H, hd).transpose(1, 2)
+            K = F.linear(m, Wk, bk).view(1, L, H, hd).transpose(1, 2)
+            V = F.linear(m, Wv, bv).view(1, L, H, hd).transpose(1, 2)
+            attn = F.scaled_dot_product_attention(Q, K, V).transpose(1, 2).contiguous().view(1, L, D)
+            out_sdpa = F.linear(attn, Wo, bo)
+        self.assertTrue(torch.equal(out_mha, out_sdpa))
+
     def test_linear_backward_channels_last_grad(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178222
         # Linear backward crashed when grad_output had channels_last strides,
