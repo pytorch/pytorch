@@ -242,7 +242,7 @@ def _collect_accelerator_rng_states() -> dict[int, torch.Tensor]:
     if torch.accelerator.is_available():
         device_idx = torch.accelerator.current_device_index()
         with torch.accelerator.device_index(device_idx):
-            return {device_idx: torch.get_device_module().get_rng_state()}
+            return {device_idx: torch.accelerator.get_rng_state(device_idx)}
 
     return {}
 
@@ -260,7 +260,7 @@ def _set_accelerator_rng_states(rng_states: dict[int, torch.Tensor]) -> None:
     if torch.accelerator.is_available():
         for device_idx, device_rng_state in rng_states.items():
             with torch.accelerator.device_index(device_idx):
-                torch.get_device_module().set_rng_state(device_rng_state)
+                torch.accelerator.set_rng_state(device_rng_state)
 
 
 def _get_rng_state() -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
@@ -609,7 +609,7 @@ class _LocalDeviceHandle:
         """
         lm = enabled_local_tensor_mode()
         if not lm:
-            return self._device_handle.get_rng_state()
+            return torch.accelerator.get_rng_state()
 
         original_state = _get_rng_state()
         per_rank_states = {}
@@ -625,7 +625,7 @@ class _LocalDeviceHandle:
                 if rank in lm._per_rank_rng_states:
                     _set_rng_state(*lm._per_rank_rng_states[rank])
 
-                per_rank_states[rank] = self._device_handle.get_rng_state()
+                per_rank_states[rank] = torch.accelerator.get_rng_state()
         finally:
             _set_rng_state(*original_state)
 
@@ -651,10 +651,10 @@ class _LocalDeviceHandle:
             # So we set the device's state with the rank-specific tensor, then _get_rng_state()
             # captures both CPU and CUDA states into the tuple format that _per_rank_rng_states expects.
             for rank, rank_state in state._local_tensors.items():
-                self._device_handle.set_rng_state(rank_state.to("cpu"))
+                torch.accelerator.set_rng_state(rank_state.to("cpu"))
                 lm._per_rank_rng_states[rank] = _get_rng_state()
         else:
-            self._device_handle.set_rng_state(state.to("cpu"))
+            torch.accelerator.set_rng_state(state.to("cpu"))
 
     def __getattr__(self, name):
         """Delegate all other attributes to the underlying device module."""
@@ -787,7 +787,7 @@ class _LocalOffsetBasedRNGTracker:
             # pyrefly: ignore [bad-argument-type, bad-argument-count]
             base_state_tensor = LocalTensor(per_rank_states)
         else:
-            base_state_tensor = self._device_handle.get_rng_state()
+            base_state_tensor = torch.accelerator.get_rng_state()
 
         state = _LocalPhiloxState(base_state_tensor)
 
@@ -1887,9 +1887,7 @@ def get_generator_seed_for_device_type(device_type: str):
     """
     if lm := enabled_local_tensor_mode():
         if len(lm._per_rank_rng_states) == 0:
-            device_module = torch.get_device_module(device_type)
-            return device_module.get_rng_state()[:8].view(torch.int64).item()
-        device_module = torch.get_device_module(device_type)
+            return torch.accelerator.get_rng_state()[:8].view(torch.int64).item()
 
         original_state = _get_rng_state()
 
@@ -1898,7 +1896,7 @@ def get_generator_seed_for_device_type(device_type: str):
             for rank in sorted(lm.ranks):
                 _set_rng_state(*lm._per_rank_rng_states[rank])
                 rank_seeds[rank] = int(
-                    device_module.get_rng_state()[:8].view(torch.int64).item()
+                    torch.accelerator.get_rng_state()[:8].view(torch.int64).item()
                 )
         finally:
             # restore original state
@@ -1910,8 +1908,7 @@ def get_generator_seed_for_device_type(device_type: str):
         local_int_node = LocalIntNode(rank_seeds)
         return torch.SymInt(local_int_node)
     else:
-        device_module = torch.get_device_module(device_type)
-        return device_module.get_rng_state()[:8].view(torch.int64).item()
+        return torch.accelerator.get_rng_state()[:8].view(torch.int64).item()
 
 
 import threading
@@ -2169,4 +2166,4 @@ class _LocalPhiloxState:
             self._per_rank_states[rank][8:] = offset_tensor
 
         # pyrefly: ignore [bad-argument-type, bad-argument-count]
-        device_handle.set_rng_state(LocalTensor(self._per_rank_states))
+        torch.accelerator.set_rng_state(LocalTensor(self._per_rank_states))

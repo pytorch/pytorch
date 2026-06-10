@@ -566,7 +566,11 @@ def create_aot_state(
     with enable_python_dispatcher():
         # Patch set_rng_state as set_rng_state with fake tensors is
         # nonsensical. This does not affect the collection of metadata.
-        with patch("torch.cuda.set_rng_state", lambda *args: None):
+        with (
+            patch("torch.cuda.set_rng_state", lambda *args: None),
+            patch("torch.xpu.set_rng_state", lambda *args: None),
+            patch("torch.accelerator.set_rng_state", lambda *args: None),
+        ):
             mod = root_module_when_exporting_non_strict(flat_fn)
             if mod is not None:
                 ctx = _detect_attribute_assignment(mod)

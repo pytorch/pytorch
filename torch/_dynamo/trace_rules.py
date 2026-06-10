@@ -2957,7 +2957,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.nn.parameter.is_lazy",
         "torch.norm",
         "torch.quantization.default_eval_fn",
-        "torch.random._seed_custom_device",
         "torch.random.fork_rng",
         "torch.random.initial_seed",
         "torch.random.seed",
