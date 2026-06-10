@@ -119,6 +119,10 @@ def cuda_build_env(cuda_version: str, arch: str) -> dict[str, str]:
         **CUDA_BUILD_ENV_STATIC,
         "TORCH_NVCC_FLAGS": nvcc_flags,
         "TORCH_CUDA_ARCH_LIST": torch_cuda_arch_list(cuda_version, arch),
+        # Bundle ptxas into torch/bin (consumed by
+        # torch._inductor.runtime.compile_tasks._set_triton_ptxas_path) so
+        # Triton uses a known-good assembler on CUDA 13.0.
+        **({"BUILD_BUNDLE_PTXAS": "1"} if cuda_version == "13.0" else {}),
     }
     if arch == "aarch64":
         # Pre-built MAGMA tarballs are x86-only.
