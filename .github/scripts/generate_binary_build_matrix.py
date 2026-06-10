@@ -308,9 +308,11 @@ WHEEL_CONTAINER_IMAGES = {
 # uses a reproducible toolchain instead of main's floating tags. The suffix is
 # the .ci/docker tree hash (`git rev-parse HEAD:.ci/docker`), i.e. the same tag
 # .github/actions/binary-docker-build publishes. Only linux manywheel builds run
-# inside these containers, so only those images are pinned.
+# inside these containers, so only those images are pinned. s390x is excluded:
+# its builder images are built locally on self-hosted runners and never published
+# to docker.io under the pinned tag, so pinning it breaks the image pull.
 DOCKER_IMAGE_PIN = "f38ba0b10220982e39441d29d203d803a2b56c92"
-MANYWHEEL_OSES = ("linux", "linux-aarch64", "linux-s390x")
+MANYWHEEL_OSES = ("linux", "linux-aarch64")
 
 
 def wheel_container_image_tag_prefix(arch_version: str, os: str) -> str:
