@@ -328,6 +328,47 @@ def default_decompositions() -> "CustomDecompTable":
     return CustomDecompTable()
 
 
+def _parametrized_target_to_original_target(target: str) -> str | None:
+    parametrizations_prefix = "parametrizations."
+    marker = f".{parametrizations_prefix}"
+    if target.startswith(parametrizations_prefix):
+        prefix = ""
+        rest = target[len(parametrizations_prefix) :]
+    elif marker in target:
+        prefix, rest = target.split(marker, 1)
+    else:
+        return None
+
+    original_name, _, parametrization_name = rest.rpartition(".")
+    if parametrization_name != "original" and not (
+        parametrization_name.startswith("original")
+        and parametrization_name[len("original") :].isdigit()
+    ):
+        return None
+    return f"{prefix}.{original_name}" if prefix else original_name
+
+
+def _remap_unwrapped_subclass_state_fqns(
+    graph_signature: ExportGraphSignature,
+    constants: dict[str, Any],
+    fqn_map: dict[str, str],
+    non_persistent_buffers: set[str],
+) -> None:
+    for spec in [*graph_signature.input_specs, *graph_signature.output_specs]:
+        if spec.target in fqn_map:
+            original_target = _parametrized_target_to_original_target(spec.target)
+            spec.target = fqn_map[spec.target]
+            if (
+                spec.kind == InputKind.BUFFER
+                and original_target in non_persistent_buffers
+            ):
+                spec.persistent = False
+
+    for old_fqn, new_fqn in fqn_map.items():
+        if old_fqn in constants:
+            constants[new_fqn] = constants.pop(old_fqn)
+
+
 def _decompose_and_get_gm_with_new_signature_constants(
     ep: "ExportedProgram",
     *,
@@ -361,9 +402,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
             **dict(mod.named_parameters(remove_duplicate=False)),
             **dict(mod.named_buffers(remove_duplicate=False)),
         }
+        non_persistent_buffers = set(ep.graph_signature.non_persistent_buffers)
 
         from torch._functorch._aot_autograd.subclass_parametrization import (
-            unwrap_tensor_subclass_parameters,
+            _unwrap_tensor_subclass_parameters_with_state_dict_fqn_map,
         )
 
         # [NOTE] Unwrapping subclasses AOT
@@ -374,7 +416,16 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # could have subclass weights while ExportedProgram will have desugared versions.
         # This is fine because run_decompositions is supposed to specialize to post-autograd
         # graph where the subclass desugaring is supposed to happen.
-        unwrap_tensor_subclass_parameters(mod)
+        reserved_state_fqns = {
+            *ep.constants.keys(),
+            *ep.graph_signature.lifted_tensor_constants,
+        }
+        (
+            _,
+            unwrapped_param_buffer_fqn_map,
+        ) = _unwrap_tensor_subclass_parameters_with_state_dict_fqn_map(
+            mod, reserved_state_fqns
+        )
         unwrapped_params_buffers = {
             **dict(mod.named_parameters(remove_duplicate=False)),
             **dict(mod.named_buffers(remove_duplicate=False)),
@@ -525,6 +576,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     gm, new_graph_signature, new_fake_constant_attrs
                 )
 
+                _remap_unwrapped_subclass_state_fqns(
+                    new_graph_signature,
+                    constants,
+                    unwrapped_param_buffer_fqn_map,
+                    non_persistent_buffers,
+                )
+
                 placeholder_naming_pass(
                     gm,
                     new_graph_signature,
@@ -550,14 +608,35 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # the state dict of ep.module but ep.module only stores params
         # buffers that participate in forward. If we undo this behavior,
         # it would break some downstream users.
+        unwrapped_non_persistent_buffers: set[str] = set()
+        unwrapped_non_persistent_constants: dict[str, Any] = {}
+        for name, p in unwrapped_params_buffers.items():
+            original_target = _parametrized_target_to_original_target(name)
+            if (
+                original_target is not None
+                and original_target in non_persistent_buffers
+            ):
+                unwrapped_non_persistent_buffers.add(original_target)
+                unwrapped_non_persistent_constants[
+                    unwrapped_param_buffer_fqn_map.get(name, name)
+                ] = p
+
         new_state_dict = {
             **ep.state_dict,
             **{
-                name: p
+                unwrapped_param_buffer_fqn_map.get(name, name): p
                 for name, p in unwrapped_params_buffers.items()
                 if name not in wrapped_params_buffers
+                and _parametrized_target_to_original_target(name)
+                not in non_persistent_buffers
             },
         }
+        new_constants = {
+            name: value
+            for name, value in ep.constants.items()
+            if name not in unwrapped_non_persistent_buffers
+        }
+        new_constants.update(unwrapped_non_persistent_constants)
 
         for name, p in wrapped_params_buffers.items():
             # Buffers can be persistent/non-persistent
@@ -571,7 +650,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 if name not in unwrapped_params_buffers:
                     new_state_dict.pop(name)
 
-        return gm, new_graph_signature, new_state_dict
+        return (
+            gm,
+            new_graph_signature,
+            new_state_dict,
+            new_constants,
+            unwrapped_param_buffer_fqn_map,
+        )
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -810,7 +895,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
-    return gm, new_graph_signature, ep.state_dict
+    return gm, new_graph_signature, ep.state_dict, ep.constants, {}
 
 
 def _remove_unnecessary_copy_op_pass(
@@ -873,8 +958,15 @@ def _get_updated_module_call_graph(
     gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
     old_module_call_graph: list[ModuleCallEntry],
+    unwrapped_param_buffer_fqn_map: dict[str, str] | None = None,
 ):
     new_module_call_graph = copy.deepcopy(old_module_call_graph)
+    normalized_to_internal_fqn = {
+        normalized_fqn: internal_fqn
+        for internal_fqn, normalized_fqn in (
+            unwrapped_param_buffer_fqn_map or {}
+        ).items()
+    }
 
     old_nodes = {node.name: node for node in old_gm.graph.nodes}
 
@@ -946,14 +1038,20 @@ def _get_updated_module_call_graph(
     # are, we log them and error later
     old_param_to_desugared = defaultdict(list)
     for name, target in new_graph_params_buffers.items():
+        internal_target = normalized_to_internal_fqn.get(target, target)
+        old_target = _parametrized_target_to_original_target(internal_target)
         # if the parameters are not parametrized, the naming won't change.
-        if not target.startswith("parametrizations."):
+        if old_target is None:
             # If we are in strict mode, we can't just reuse the param names
             if name in old_graph_params_buffers:
                 provenance[name] = name
         else:
-            old_target = ".".join(target.split(".")[1:-1])
             old_param_to_desugared[old_target].append(name)
+    old_param_input_to_desugared = {
+        old_input: old_param_to_desugared[old_target]
+        for old_input, old_target in old_graph_params_buffers.items()
+        if old_target in old_param_to_desugared
+    }
 
     # map old names to new names in module call signatures
     for entry in new_module_call_graph:
@@ -963,7 +1061,7 @@ def _get_updated_module_call_graph(
         for x in [*signature.inputs, *signature.outputs]:
             # We noticed that submodule is taking subclass as input. we can't
             # preserve signature here.
-            if x.name in old_param_to_desugared:
+            if x.name in old_param_input_to_desugared:
                 raise ValueError(
                     f"It looks like {x.name} is a tensor subclass. "
                     f"Preserving submodule that takes subclass parameter is not supported"
@@ -1012,6 +1110,8 @@ def _decompose_exported_program(
         gm,
         new_graph_signature,
         state_dict,
+        constants,
+        unwrapped_param_buffer_fqn_map,
     ) = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         cia_to_decomp=cia_to_decomp,
@@ -1030,6 +1130,7 @@ def _decompose_exported_program(
         gm,
         new_graph_signature,
         ep.module_call_graph,
+        unwrapped_param_buffer_fqn_map,
     )
 
     # TODO unfortunately preserving graph-level metadata is not
@@ -1050,7 +1151,7 @@ def _decompose_exported_program(
         range_constraints=new_range_constraints,
         module_call_graph=new_module_call_graph,
         example_inputs=ep.example_inputs,
-        constants=ep.constants,
+        constants=constants,
     )
     return exported_program
 

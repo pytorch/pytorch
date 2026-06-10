@@ -59,12 +59,12 @@ class UnwrapTensorSubclass(torch.nn.Module):
         return _unwrap_tensor_subclasses(self.subclass_meta, todo, 0)[0]
 
     def right_inverse(self, tensor: torch.Tensor) -> list[torch.Tensor | OpaqueBase]:
-        if type(tensor) is torch.Tensor:
-            raise AssertionError("tensor must be a subclass, not torch.Tensor")
+        if not is_traceable_wrapper_subclass(tensor):
+            raise AssertionError("tensor must be a traceable wrapper subclass")
         plain_tensors: list[torch.Tensor | OpaqueBase] = []
 
         def _create_subclass_meta(tensor, idx, plain_tensor_container):  # type: ignore[no-untyped-def]
-            if type(tensor) is torch.Tensor:
+            if not is_traceable_wrapper_subclass(tensor):
                 plain_tensor_container.append(tensor)
                 return None, idx + 1
             inner_tensors_attrnames, metadata = tensor.__tensor_flatten__()  # type: ignore[attr-defined]
@@ -110,6 +110,137 @@ class UnwrapTensorSubclass(torch.nn.Module):
         return plain_tensors
 
 
+def _join_fqn(prefix: str, name: str) -> str:
+    return f"{prefix}.{name}" if prefix else name
+
+
+def _flattened_tensor_attr_paths(
+    tensor: torch.Tensor | OpaqueBase,
+) -> list[tuple[str, ...]]:
+    flattened_paths: list[tuple[str, ...]] = []
+
+    def _collect_attr_paths(
+        tensor: torch.Tensor | OpaqueBase, attr_path: tuple[str, ...]
+    ) -> None:
+        if not is_traceable_wrapper_subclass(tensor):
+            flattened_paths.append(attr_path)
+            return
+
+        inner_tensors_attrnames, _ = tensor.__tensor_flatten__()  # type: ignore[attr-defined]
+        for attr in inner_tensors_attrnames:
+            _collect_attr_paths(getattr(tensor, attr), (*attr_path, attr))
+
+    _collect_attr_paths(tensor, ())
+    return flattened_paths
+
+
+def _flattened_state_dict_name(original_fqn: str, attr_path: tuple[str, ...]) -> str:
+    if not attr_path:
+        return original_fqn
+    attr_suffix = "_".join(attr.replace(".", "_") for attr in attr_path)
+
+    parent, sep, leaf = original_fqn.rpartition(".")
+    flattened_leaf = f"{leaf}_{attr_suffix}"
+    return f"{parent}{sep}{flattened_leaf}"
+
+
+def _make_unique_state_dict_name(name: str, used_names: set[str]) -> str:
+    if name not in used_names:
+        return name
+
+    idx = 1
+    while (uniq := f"{name}_{idx}") in used_names:
+        idx += 1
+    return uniq
+
+
+def _collect_tensor_subclass_state_fqns(
+    module: torch.nn.Module,
+) -> tuple[set[str], set[str]]:
+    all_state_fqns: set[str] = set()
+    subclass_state_fqns: set[str] = set()
+
+    for name, tensor in itertools.chain(
+        module.named_parameters(recurse=True, remove_duplicate=False),
+        module.named_buffers(recurse=True, remove_duplicate=False),
+    ):
+        all_state_fqns.add(name)
+        if is_traceable_wrapper_subclass(tensor):
+            subclass_state_fqns.add(name)
+
+    return all_state_fqns, subclass_state_fqns
+
+
+def _unwrap_tensor_subclass_parameters(
+    module: torch.nn.Module,
+    fqn_map: dict[str, str] | None = None,
+    used_state_fqns: set[str] | None = None,
+    prefix: str = "",
+) -> torch.nn.Module:
+    if fqn_map is not None and used_state_fqns is None:
+        raise AssertionError("used_state_fqns must be provided with fqn_map")
+
+    for name, tensor in itertools.chain(
+        list(module.named_parameters(recurse=False)),
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
+        list(module.named_buffers(recurse=False)),
+    ):
+        if is_traceable_wrapper_subclass(tensor):
+            original_fqn = _join_fqn(prefix, name)
+            flattened_paths: list[tuple[str, ...]]
+            flattened_paths = (
+                _flattened_tensor_attr_paths(tensor) if fqn_map is not None else []
+            )
+
+            torch.nn.utils.parametrize.register_parametrization(
+                module, name, UnwrapTensorSubclass()
+            )
+
+            if fqn_map is not None:
+                if used_state_fqns is None:
+                    raise AssertionError("used_state_fqns must not be None")
+                for i, attr_path in enumerate(flattened_paths):
+                    internal_fqn = _join_fqn(
+                        prefix, f"parametrizations.{name}.original{i}"
+                    )
+                    flattened_fqn = _flattened_state_dict_name(original_fqn, attr_path)
+                    flattened_fqn = _make_unique_state_dict_name(
+                        flattened_fqn, used_state_fqns
+                    )
+                    used_state_fqns.add(flattened_fqn)
+                    fqn_map[internal_fqn] = flattened_fqn
+
+    for child_name, child in module.named_children():
+        if (
+            child_name == "parametrizations"
+            and torch.nn.utils.parametrize.is_parametrized(module)
+        ):
+            continue
+        _unwrap_tensor_subclass_parameters(
+            child,
+            fqn_map,
+            used_state_fqns,
+            _join_fqn(prefix, child_name),
+        )
+
+    return module
+
+
+def _unwrap_tensor_subclass_parameters_with_state_dict_fqn_map(
+    module: torch.nn.Module,
+    reserved_state_fqns: set[str] | None = None,
+) -> tuple[torch.nn.Module, dict[str, str]]:
+    all_state_fqns, subclass_state_fqns = _collect_tensor_subclass_state_fqns(module)
+    used_state_fqns = all_state_fqns - subclass_state_fqns
+    if reserved_state_fqns is not None:
+        used_state_fqns.update(reserved_state_fqns)
+    fqn_map: dict[str, str] = {}
+    return (
+        _unwrap_tensor_subclass_parameters(module, fqn_map, used_state_fqns),
+        fqn_map,
+    )
+
+
 def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Module:
     """
     Model transformation that replaces all the parameters that are subclasses to plain tensors.
@@ -122,17 +253,4 @@ def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Modul
     becomes: {"parametrizations.p2.original0": torch.Tensor, "parametrizations.p2.original1": torch.Tensor}
 
     """
-    for name, tensor in itertools.chain(
-        list(module.named_parameters(recurse=False)),
-        # pyrefly: ignore [bad-argument-type, no-matching-overload]
-        list(module.named_buffers(recurse=False)),
-    ):
-        if is_traceable_wrapper_subclass(tensor):
-            torch.nn.utils.parametrize.register_parametrization(
-                module, name, UnwrapTensorSubclass()
-            )
-
-    for child in module.children():
-        unwrap_tensor_subclass_parameters(child)
-
-    return module
+    return _unwrap_tensor_subclass_parameters(module)

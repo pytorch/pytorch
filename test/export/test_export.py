@@ -4004,17 +4004,18 @@ graph():
         )
 
         ep = export(m, (ref_x,)).run_decompositions({})
+        self.assertEqual(list(ep.state_dict.keys()), ["p1", "p2_elem1", "p2_elem2"])
         self.assertExpectedInline(
             str(ep.graph).strip(),
             """\
 graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
-    %p_parametrizations_p2_original0 : [num_users=1] = placeholder[target=p_parametrizations_p2_original0]
-    %p_parametrizations_p2_original1 : [num_users=1] = placeholder[target=p_parametrizations_p2_original1]
+    %p_p2_elem1 : [num_users=1] = placeholder[target=p_p2_elem1]
+    %p_p2_elem2 : [num_users=1] = placeholder[target=p_p2_elem2]
     %x : [num_users=1] = placeholder[target=x]
     %mul : [num_users=2] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_parametrizations_p2_original0), kwargs = {})
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_parametrizations_p2_original1), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2_elem1), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2_elem2), kwargs = {})
     %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %add_1), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_2,), kwargs = {})
     %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_1), kwargs = {})
@@ -4023,6 +4024,253 @@ graph():
         res = ep.module()(ref_x)
 
         self.assertEqual(res, ref_out)
+
+    def test_subclasses_non_persistent_buffer_run_decompositions(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "buf",
+                    CustomTensorPlainOut(torch.ones(3, 4), 2 * torch.ones(3, 4)),
+                    persistent=False,
+                )
+
+            def forward(self, x):
+                return x + self.buf.sum()
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+
+        ep_training = torch.export.export(m, (ref_x,))
+        self.assertEqual(list(m.state_dict().keys()), [])
+        self.assertEqual(list(ep_training.state_dict.keys()), [])
+        self.assertEqual(
+            list(ep_training.graph_signature.non_persistent_buffers), ["buf"]
+        )
+
+        ep = ep_training.run_decompositions({})
+        self.assertEqual(list(ep.state_dict.keys()), [])
+        self.assertEqual(
+            list(ep.graph_signature.non_persistent_buffers),
+            ["buf_elem1", "buf_elem2"],
+        )
+        self.assertEqual(set(ep.constants.keys()), {"buf_elem1", "buf_elem2"})
+        self.assertEqual(ep.constants["buf_elem1"], m.buf.elem1)
+        self.assertEqual(ep.constants["buf_elem2"], m.buf.elem2)
+
+        buffer_specs = [
+            spec
+            for spec in ep.graph_signature.input_specs
+            if spec.kind == InputKind.BUFFER
+        ]
+        self.assertEqual(
+            [(spec.target, spec.persistent) for spec in buffer_specs],
+            [("buf_elem1", False), ("buf_elem2", False)],
+        )
+        self.assertEqual(ep.module()(ref_x), ref_out)
+
+    def test_subclasses_parameter_constant_name_collision_run_decompositions(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(
+                    CustomTensorPlainOut(torch.ones(3, 4), 2 * torch.ones(3, 4))
+                )
+                self.p_elem1 = 3 * torch.ones(3, 4)
+
+            def forward(self, x):
+                return x + (self.p + self.p_elem1).sum()
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+
+        ep = torch.export.export(m, (ref_x,)).run_decompositions({})
+        self.assertEqual(list(ep.state_dict.keys()), ["p_elem1_1", "p_elem2"])
+        self.assertEqual(set(ep.constants.keys()), {"p_elem1"})
+        self.assertEqual(ep.constants["p_elem1"], m.p_elem1)
+
+        self.assertEqual(
+            [
+                (spec.kind, spec.target)
+                for spec in ep.graph_signature.input_specs
+                if spec.kind != InputKind.USER_INPUT
+            ],
+            [
+                (InputKind.PARAMETER, "p_elem1_1"),
+                (InputKind.PARAMETER, "p_elem2"),
+                (InputKind.CONSTANT_TENSOR, "p_elem1"),
+            ],
+        )
+        self.assertEqual(ep.module()(ref_x), ref_out)
+
+    def test_subclasses_non_persistent_buffer_constant_name_collision(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "buf",
+                    CustomTensorPlainOut(torch.ones(3, 4), 2 * torch.ones(3, 4)),
+                    persistent=False,
+                )
+                self.buf_elem1 = 3 * torch.ones(3, 4)
+
+            def forward(self, x):
+                return x + (self.buf + self.buf_elem1).sum()
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+
+        ep = torch.export.export(m, (ref_x,)).run_decompositions({})
+        self.assertEqual(list(ep.state_dict.keys()), [])
+        self.assertEqual(
+            set(ep.constants.keys()), {"buf_elem1", "buf_elem1_1", "buf_elem2"}
+        )
+        self.assertEqual(ep.constants["buf_elem1"], m.buf_elem1)
+        self.assertEqual(ep.constants["buf_elem1_1"], m.buf.elem1)
+        self.assertEqual(ep.constants["buf_elem2"], m.buf.elem2)
+        self.assertEqual(
+            list(ep.graph_signature.non_persistent_buffers),
+            ["buf_elem1_1", "buf_elem2"],
+        )
+
+        self.assertEqual(
+            [
+                (spec.kind, spec.target, spec.persistent)
+                for spec in ep.graph_signature.input_specs
+                if spec.kind != InputKind.USER_INPUT
+            ],
+            [
+                (InputKind.CONSTANT_TENSOR, "buf_elem1", None),
+                (InputKind.BUFFER, "buf_elem1_1", False),
+                (InputKind.BUFFER, "buf_elem2", False),
+            ],
+        )
+        self.assertEqual(ep.module()(ref_x), ref_out)
+
+    def test_subclasses_preserve_module_call_signature_param_error(self):
+        class Child(torch.nn.Module):
+            def forward(self, x, p):
+                return x + p
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+                self.p = torch.nn.Parameter(
+                    CustomTensorPlainOut(torch.ones(3, 4), torch.ones(3, 4))
+                )
+
+            def forward(self, x):
+                return self.child(x, self.p)
+
+        ep = torch.export.export(
+            Foo(),
+            (torch.randn(3, 4),),
+            preserve_module_call_signature=("child",),
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "Preserving submodule that takes subclass parameter is not supported",
+        ):
+            ep.run_decompositions({})
+
+    def test_subclasses_preserve_module_call_signature_user_input_name_collision(self):
+        class Child(torch.nn.Module):
+            def forward(self, w):
+                return w * 2
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+                self.w = torch.nn.Parameter(
+                    CustomTensorPlainOut(torch.ones(3, 4), torch.ones(3, 4))
+                )
+
+            def forward(self, w):
+                return self.child(w) + self.w.sum()
+
+        m = Foo()
+        ref_w = torch.randn(3, 4)
+        ref_out = m(ref_w)
+
+        ep = torch.export.export(
+            m,
+            (ref_w,),
+            preserve_module_call_signature=("child",),
+        ).run_decompositions({})
+        self.assertEqual(list(ep.state_dict.keys()), ["w_elem1", "w_elem2"])
+        self.assertEqual(ep.module()(ref_w), ref_out)
+
+        child_signature = [
+            entry.signature for entry in ep.module_call_graph if entry.fqn == "child"
+        ][0]
+        self.assertIsNotNone(child_signature)
+        self.assertEqual([arg.name for arg in child_signature.inputs], ["w"])
+
+    def test_subclasses_non_traceable_subclass_leaf(self):
+        class NonTraceable(torch.Tensor):
+            pass
+
+        class Outer(torch.Tensor):
+            @staticmethod
+            def __new__(cls, inner):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    inner.shape,
+                    dtype=inner.dtype,
+                    device=inner.device,
+                    requires_grad=inner.requires_grad,
+                )
+
+            def __init__(self, inner):
+                self.inner = inner
+
+            def __tensor_flatten__(self):
+                return ["inner"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+                return Outer(inner_tensors["inner"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+
+                def unwrap(t):
+                    return t.inner if isinstance(t, Outer) else t
+
+                def wrap(t):
+                    if isinstance(t, torch.Tensor) and not isinstance(t, Outer):
+                        return Outer(t)
+                    return t
+
+                return pytree.tree_map(
+                    wrap,
+                    func(
+                        *pytree.tree_map(unwrap, args),
+                        **pytree.tree_map(unwrap, kwargs),
+                    ),
+                )
+
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            _flattened_tensor_attr_paths,
+            UnwrapTensorSubclass,
+        )
+
+        inner = torch.ones(3, 4).as_subclass(NonTraceable)
+        outer = Outer(inner)
+
+        self.assertEqual(_flattened_tensor_attr_paths(outer), [("inner",)])
+
+        parametrization = UnwrapTensorSubclass()
+        plain_tensors = parametrization.right_inverse(outer)
+        self.assertEqual(len(plain_tensors), 1)
+        self.assertIs(plain_tensors[0], inner)
+        self.assertIs(parametrization(*plain_tensors).inner, inner)
 
     @testing.expectedFailureCppRuntimeNonStrict
     def test_subclasses_parameterization_nested(self):
@@ -4070,23 +4318,33 @@ graph():
 
         ep = export(m, (ref_x,))
         ep = ep.run_decompositions({})
+        self.assertEqual(
+            list(ep.state_dict.keys()),
+            [
+                "p1",
+                "p2_elem1_elem1",
+                "p2_elem1_elem2",
+                "p2_elem2_elem1",
+                "p2_elem2_elem2",
+            ],
+        )
         self.assertExpectedInline(
             str(ep.graph).strip(),
             """\
 graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
-    %p_parametrizations_p2_original0 : [num_users=1] = placeholder[target=p_parametrizations_p2_original0]
-    %p_parametrizations_p2_original1 : [num_users=1] = placeholder[target=p_parametrizations_p2_original1]
-    %p_parametrizations_p2_original2 : [num_users=1] = placeholder[target=p_parametrizations_p2_original2]
-    %p_parametrizations_p2_original3 : [num_users=1] = placeholder[target=p_parametrizations_p2_original3]
+    %p_p2_elem1_elem1 : [num_users=1] = placeholder[target=p_p2_elem1_elem1]
+    %p_p2_elem1_elem2 : [num_users=1] = placeholder[target=p_p2_elem1_elem2]
+    %p_p2_elem2_elem1 : [num_users=1] = placeholder[target=p_p2_elem2_elem1]
+    %p_p2_elem2_elem2 : [num_users=1] = placeholder[target=p_p2_elem2_elem2]
     %x : [num_users=2] = placeholder[target=x]
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=4] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original0), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original1), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2_elem1_elem1), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2_elem1_elem2), kwargs = {})
     %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_1, %add_2), kwargs = {})
-    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original2), kwargs = {})
-    %add_5 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original3), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2_elem2_elem1), kwargs = {})
+    %add_5 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2_elem2_elem2), kwargs = {})
     %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_4, %add_5), kwargs = {})
     %add_7 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_3, %add_6), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_7,), kwargs = {})
@@ -16293,14 +16551,15 @@ graph():
             ep = ep.run_decompositions({})
 
         # There should be no subclases
+        self.assertEqual(list(ep.state_dict.keys()), ["buffer_a", "buffer_b"])
         self.assertExpectedInline(
             str(ep.graph).strip(),
             """\
 graph():
-    %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
-    %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
+    %b_buffer_a : [num_users=0] = placeholder[target=b_buffer_a]
+    %b_buffer_b : [num_users=1] = placeholder[target=b_buffer_b]
     %x : [num_users=2] = placeholder[target=x]
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_buffer_b), kwargs = {})
     %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add_1), kwargs = {})
     return (add_4,)""",
         )
@@ -16311,15 +16570,16 @@ graph():
         ep = export(mod, (torch.randn(4, 4),)).run_decompositions({})
 
         self.assertEqual(ep.module()(inp), mod(inp))
+        self.assertEqual(list(ep.state_dict.keys()), ["buffer_a", "buffer_b"])
         if is_training_ir_test(self._testMethodName):
             self.assertExpectedInline(
                 str(ep.graph).strip(),
                 """\
 graph():
-    %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
-    %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
+    %b_buffer_a : [num_users=0] = placeholder[target=b_buffer_a]
+    %b_buffer_b : [num_users=1] = placeholder[target=b_buffer_b]
     %x : [num_users=2] = placeholder[target=x]
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_buffer_b), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add), kwargs = {})
     return (add_1,)""",
             )
@@ -16328,10 +16588,10 @@ graph():
                 str(ep.graph).strip(),
                 """\
 graph():
-    %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
-    %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
+    %b_buffer_a : [num_users=0] = placeholder[target=b_buffer_a]
+    %b_buffer_b : [num_users=1] = placeholder[target=b_buffer_b]
     %x : [num_users=2] = placeholder[target=x]
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_buffer_b), kwargs = {})
     %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add_1), kwargs = {})
     return (add_4,)""",
             )
