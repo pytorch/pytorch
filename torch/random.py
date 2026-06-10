@@ -3,7 +3,6 @@ import contextlib
 import warnings
 from collections.abc import Generator
 from typing import TYPE_CHECKING
-from typing_extensions import deprecated
 
 import torch
 
@@ -62,18 +61,17 @@ def manual_seed(seed: int) -> torch._C.Generator:
         For CPU only, use ``torch.default_generator.manual_seed(seed)``.
         For the accelerator only, use :func:`torch.accelerator.manual_seed_all`.
     """
+    return _manual_seed_impl(seed)
+
+
+def _manual_seed_impl(seed: int) -> torch._C.Generator:
+    seed = int(seed)
     import torch.accelerator
 
     if not torch._C._accelerator_isInBadFork():
         torch.accelerator.manual_seed_all(seed)
 
     return default_generator.manual_seed(seed)
-
-
-_manual_seed_impl = deprecated(
-    "Use `manual_seed` instead.",
-    category=FutureWarning,
-)(manual_seed)
 
 
 def seed() -> int:
