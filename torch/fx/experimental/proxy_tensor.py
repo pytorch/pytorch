@@ -3136,12 +3136,11 @@ def make_fx(
           controls which dims become unbacked symbolic sizes — everything
           not declared by the spec stays static.
         - ``"symbolic"``: tensors become FakeTensors and **every dim becomes a
-          backed symbolic size** (``s0``, ``s1``, ...) via the auto-dynamic
-          path. NOTE: using backed symbols this way is generally **not
-          recommended and not sound** — backed symbols come with assumptions
-          (e.g. ``size >= 2`` 0/1 specialization) that may be violated. Kept
-          for backward compatibility. Prefer ``"fake"`` + ``_dynamic_spec``
-          to declare dynamism explicitly with unbacked symbols.
+          backed symbolic size**. NOTE: using backed symbols this way is generally 
+          **not recommended and not sound** — backed symbols come with assumptions
+          and can be constrained by guards silently. Kept for backward compatibility. 
+          Prefer ``"fake"`` + ``_dynamic_spec`` to declare dynamism explicitly with 
+          unbacked symbols.
     """
 
     if tracing_mode not in ["real", "fake", "symbolic"]:

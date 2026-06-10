@@ -9024,10 +9024,6 @@ def _symbolic_context_from_shapes_spec(
 def _wire_tensor_spec_dims(tensor_spec: TensorSpec, fake_tensor: torch.Tensor) -> None:
     """Wire each ``ShapeVar``/``IntVar`` dim of ``tensor_spec`` to the
     corresponding fake-tensor symbolic size via ``_wire_spec_slot``.
-
-    Skips dims with no spec (``None``) and static int dims (already
-    validated upstream by the symbolic-context builder). Also skips
-    dims that didn't get a SymInt size (e.g. were forced static).
     """
     for dim_i in range(fake_tensor.dim()):
         dim_spec = tensor_spec[dim_i]
@@ -9098,7 +9094,7 @@ def _wire_spec_slot(
         free = spec_expr.free_symbols
         deferred_bool = sympy.Eq(size_sym.node.expr, spec_expr)
         if free.issubset(shape_env._spec_symbol_to_compile_symbol):
-            _emit_pending_bool(shape_env, deferred_bool)
+            _emit_pending_spec_assumption(shape_env, deferred_bool)
         else:
             shape_env._shape_spec_pending_assumptions.append((free, deferred_bool))
     else:
@@ -9107,7 +9103,7 @@ def _wire_spec_slot(
         )
 
 
-def _emit_pending_bool(shape_env: ShapeEnv, bool_expr: sympy.Expr) -> None:
+def _emit_pending_spec_assumption(shape_env: ShapeEnv, bool_expr: sympy.Expr) -> None:
     """Substitute spec symbols and defer the resulting boolean as a runtime
     assert. ``bool_expr`` is a sympy boolean (e.g. ``Eq``, ``Gt``) whose free
     spec symbols must already be present in ``_spec_symbol_to_compile_symbol``."""
@@ -9130,7 +9126,7 @@ def _drain_shape_spec_pending_assumptions(shape_env: ShapeEnv) -> None:
     keep = []
     for free, bool_expr in pending:
         if free.issubset(subst_keys):
-            _emit_pending_bool(shape_env, bool_expr)
+            _emit_pending_spec_assumption(shape_env, bool_expr)
         else:
             keep.append((free, bool_expr))
     shape_env._shape_spec_pending_assumptions[:] = keep
