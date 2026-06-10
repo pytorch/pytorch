@@ -34,6 +34,7 @@ import sympy
 from sympy import Expr, Integer, Symbol
 
 import torch._export.serde.schema as export_schema
+import torch._library.custom_ops as custom_ops
 import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
@@ -822,8 +823,15 @@ class IRNode:
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
         return False
 
-    def mark_reuse(self, users: int) -> None:
-        pass
+    def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:
+        """
+        Hint that this node's value will be reused.
+
+        `users` estimates the reuse count. When `graph_reuse` is true, this
+        represents graph fanout and can trigger fanout-based realization
+        heuristics. When false, the reuse comes from loop-level indexing, such
+        as a broadcast expand, and should not be treated as graph fanout.
+        """
 
     def realize_hint(self) -> None:
         pass
@@ -3309,8 +3317,8 @@ class BaseView(IRNode):
     def get_pointwise_size(self) -> Sequence[Expr]:
         return self.get_size()
 
-    def mark_reuse(self, users: int) -> None:
-        return self.data.mark_reuse(users)
+    def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:
+        return self.data.mark_reuse(users, graph_reuse=graph_reuse)
 
     def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
@@ -8041,7 +8049,17 @@ class UserDefinedTritonKernel(ExternKernel):
             reset_to_zero_args,
         ) = self.get_kernel_and_metadata()
 
-        # Definition of kernel
+        # For an epilogue containing a cast, the output arg in kwargs must point to the
+        # epilogue's output so that the compiled signature uses the correct dtype.
+        kernel_kwargs = self.kwargs
+        epilogue_out_override: dict[str, Any] = {}
+        if epilogue_fusion:
+            assert len(self.arg_accesses.read_writes.writes) == 1
+            mutable_arg_name = next(iter(self.arg_accesses.read_writes.writes)).name
+            epilogue_computed_buffer, _ = epilogue_fusion
+            kernel_kwargs = {**self.kwargs, mutable_arg_name: epilogue_computed_buffer}
+            epilogue_out_override = {mutable_arg_name: epilogue_computed_buffer}
+
         (
             new_name,
             triton_meta,
@@ -8050,7 +8068,7 @@ class UserDefinedTritonKernel(ExternKernel):
         ) = wrapper.define_user_defined_triton_kernel(
             kernel,
             configs,
-            self.kwargs,
+            kernel_kwargs,
             restore_value_args,
             reset_to_zero_args,
             self.grid,
@@ -8059,13 +8077,7 @@ class UserDefinedTritonKernel(ExternKernel):
         named_args = {
             k: self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         }
-
-        if epilogue_fusion:
-            assert len(self.arg_accesses.read_writes.writes) == 1
-            mutable_arg_name = next(iter(self.arg_accesses.read_writes.writes)).name
-            assert mutable_arg_name in named_args
-            epilogue_computed_buffer, _ = epilogue_fusion
-            named_args[mutable_arg_name] = epilogue_computed_buffer
+        named_args.update(epilogue_out_override)
 
         arg_names = [p.name for p in kernel.params]  # type: ignore[attr-defined]
         constexprs = [p.num for p in kernel.params if p.is_constexpr]  # type: ignore[attr-defined]
@@ -9127,13 +9139,20 @@ class FallbackKernel(ExternKernelAlloc):
             ]
 
         assert self.op_overload is not None
+        metadata = {}
+        if (
+            isinstance(self.op_overload, torch._ops.OpOverload)
+            and custom_ops._maybe_get_opdef(self.op_overload) is not None
+        ):
+            metadata["torch_library_custom_op"] = "1"
+
         node = ExternKernelNode(
             name=self.get_name(),
             node=export_schema.Node(
                 target=self.op_overload.name(),
                 inputs=named_arguments,
                 outputs=output_arguments,
-                metadata={},
+                metadata=metadata,
             ),
         )
 
@@ -9800,8 +9819,8 @@ class MutableBox(IRNode):
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
         return self.data.has_large_inner_fn(threshold)
 
-    def mark_reuse(self, users: int) -> None:
-        return self.data.mark_reuse(users)
+    def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:
+        return self.data.mark_reuse(users, graph_reuse=graph_reuse)
 
     def realize_hint(self) -> None:
         return self.data.realize_hint()
@@ -10035,7 +10054,7 @@ class StorageBox(MutableBox):
             )
         )
 
-    def should_realize_on_reuse(self, users: int) -> bool:
+    def should_realize_on_reuse(self, users: int, *, graph_reuse: bool = True) -> bool:
         """
         A heuristic to decide if we should realize a tensor
         that is used multiple times.
@@ -10055,14 +10074,13 @@ class StorageBox(MutableBox):
                 ]
                 if any(x in opcount.used_ops for x in heavy_ops):
                     return True
-            return (
-                self.num_reads() > config.realize_reads_threshold
-                or self.has_large_inner_fn()
-            )
+            if self.has_large_inner_fn():
+                return True
+            return graph_reuse and self.num_reads() > config.realize_reads_threshold
         return False
 
-    def mark_reuse(self, users: int) -> None:
-        if self.should_realize_on_reuse(users):
+    def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:
+        if self.should_realize_on_reuse(users, graph_reuse=graph_reuse):
             self.realize()
 
     def num_reads(self) -> int:
