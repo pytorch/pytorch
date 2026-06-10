@@ -255,11 +255,18 @@ def _format_target(base: str, target: str) -> str:
     elems = target.split(".")
     r = base
     for e in elems:
-        if not e.isidentifier():
+        if not e.isidentifier() or keyword.iskeyword(e):
             r = f'getattr({r}, "{e}")'
         else:
             r = f"{r}.{e}"
     return r
+
+
+def _format_qualified_name(qualified_name: str) -> str:
+    base, *elems = qualified_name.split(".")
+    if not elems:
+        return base
+    return _format_target(base, ".".join(elems))
 
 
 class _InsertPoint:
@@ -534,7 +541,7 @@ class CodeGen:
                 # HACK: workaround for how torch custom ops are registered. We
                 # can't import them like normal modules so they must retain their
                 # fully qualified name.
-                return _get_qualified_name(obj)
+                return _format_qualified_name(_get_qualified_name(obj))
 
             # normalize the name hint to get a proper identifier
             global_name = namespace.create_name(name_hint, obj)
@@ -641,7 +648,11 @@ class CodeGen:
             args: tuple[Argument, ...], kwargs: dict[str, Argument]
         ) -> str:
             res = [_get_repr(a) for a in args]
-            res.extend([f"{k} = {_get_repr(v)}" for k, v in kwargs.items()])
+            for k, v in kwargs.items():
+                if k.isidentifier() and not keyword.iskeyword(k):
+                    res.append(f"{k} = {_get_repr(v)}")
+                else:
+                    res.append(f"**{{{k!r}: {_get_repr(v)}}}")
             return ", ".join(res)
 
         # Run through reverse nodes and record the first instance of a use

@@ -6047,12 +6047,13 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         m()
 
     # https://github.com/pytorch/pytorch/issues/121621
+    # https://github.com/pytorch/pytorch/issues/156614
     def test_tensor_random(self):
         def random_op(tensor, args, kwargs):
             res = tensor.random_(*args, **kwargs)
             return res
 
-        random_op = torch.compile(random_op, backend="eager")
+        random_op = torch.compile(random_op, backend="eager", fullgraph=True)
         tensor = torch.randn([2, 3])
         random_op(tensor, [], {"from": -10, "to": 10})
         random_op(tensor, [-10], {"to": 10})
@@ -6064,7 +6065,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             res = tensor.uniform_(*args, **kwargs)
             return res
 
-        uniform_op = torch.compile(uniform_op, backend="eager")
+        uniform_op = torch.compile(uniform_op, backend="eager", fullgraph=True)
         tensor = torch.randn([2, 3])
         uniform_op(tensor, [], {"from": -10, "to": 10})
         uniform_op(tensor, [-10], {"to": 10})
