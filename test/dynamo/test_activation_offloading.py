@@ -356,12 +356,23 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
             self.assertEqual(cpu_result.device.type, "cpu")
             self.assertEqual(cpu_result.dtype, x_gpu.dtype)
 
-            # reload fake: CPU -> GPU with same shape/dtype
+            # reload fake: CPU -> GPU with original strides
             x_cpu = torch.randn(4, 8)
-            gpu_result = torch.ops.ao.reload.default(x_cpu, torch.device(GPU_TYPE))
+            gpu_result = torch.ops.ao.reload.default(
+                x_cpu, torch.device(GPU_TYPE), [4, 8], [8, 1]
+            )
             self.assertEqual(gpu_result.shape, (4, 8))
+            self.assertEqual(gpu_result.stride(), (8, 1))
             self.assertEqual(gpu_result.device.type, GPU_TYPE)
             self.assertEqual(gpu_result.dtype, x_cpu.dtype)
+
+            # reload fake: CPU -> GPU with non-contiguous strides (e.g. transpose)
+            gpu_result_t = torch.ops.ao.reload.default(
+                x_cpu, torch.device(GPU_TYPE), [8, 4], [1, 8]
+            )
+            self.assertEqual(gpu_result_t.shape, (8, 4))
+            self.assertEqual(gpu_result_t.stride(), (1, 8))
+            self.assertEqual(gpu_result_t.device.type, GPU_TYPE)
 
             # wait_tensor fake: returns same tensor (aliasing)
             wait_result = torch.ops.ao.wait_tensor.default(x_gpu)
@@ -585,7 +596,9 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
             # Step 1: cold — allocates new pinned buffer
             cpu = torch.ops.ao.offload.default(x)
             cpu = torch.ops.ao.wait_tensor.default(cpu, x)
-            gpu = torch.ops.ao.reload.default(cpu, torch.device(GPU_TYPE))
+            gpu = torch.ops.ao.reload.default(
+                cpu, torch.device(GPU_TYPE), [64, 64], [64, 1]
+            )
             gpu = torch.ops.ao.wait_tensor.default(gpu, cpu)
             torch.testing.assert_close(gpu.cpu(), x_ref)
 
@@ -600,7 +613,9 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
             self.assertEqual(pool_count_during, 0, "Buffer taken from pool")
 
             cpu2 = torch.ops.ao.wait_tensor.default(cpu2, x2)
-            gpu2 = torch.ops.ao.reload.default(cpu2, torch.device(GPU_TYPE))
+            gpu2 = torch.ops.ao.reload.default(
+                cpu2, torch.device(GPU_TYPE), [64, 64], [64, 1]
+            )
             gpu2 = torch.ops.ao.wait_tensor.default(gpu2, cpu2)
 
             pool_count_after = sum(len(v) for v in _pinned_pool.values())
