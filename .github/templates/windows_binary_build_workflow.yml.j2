@@ -106,6 +106,8 @@ jobs:
             {%- if config['libtorch_variant'] is defined %}
             libtorch_config: "!{{ config['libtorch_config'] }}"
             libtorch_variant: "!{{ config['libtorch_variant'] }}"
+            {%- elif config['libtorch_config'] is defined %}
+            libtorch_config: "!{{ config['libtorch_config'] }}"
             {%- endif %}
         {%- endfor %}
     env:
@@ -120,6 +122,8 @@ jobs:
       {%- if first['package_type'] == 'libtorch' %}
       LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
       LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+      {%- elif first['libtorch_config'] is defined %}
+      LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
       {%- endif %}
     steps:
 {%- if os == "windows-arm64" %}
@@ -187,6 +191,7 @@ jobs:
       !{{ common.wait_and_kill_ssh_windows() }}
 {% endif %}
 
+{%- if not build_only %}
   wheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -226,6 +231,8 @@ jobs:
             {%- if config['libtorch_variant'] is defined %}
             libtorch_config: "!{{ config['libtorch_config'] }}"
             libtorch_variant: "!{{ config['libtorch_variant'] }}"
+            {%- elif config['libtorch_config'] is defined %}
+            libtorch_config: "!{{ config['libtorch_config'] }}"
             {%- endif %}
         {%- endfor %}
     env:
@@ -239,6 +246,8 @@ jobs:
       {%- if first['package_type'] == 'libtorch' %}
       LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
       LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+      {%- elif first['libtorch_config'] is defined %}
+      LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
       {%- endif %}
     steps:
 {%- if os == "windows-arm64" %}
@@ -290,8 +299,9 @@ jobs:
 {%- if os != "windows-arm64" %}
       !{{ common.wait_and_kill_ssh_windows() }}
 {%- endif %}
+{%- endif %}
 
-{%- if branches == "nightly" %}
+{%- if branches == "nightly" and not build_only %}
 
   wheel-upload:
     name: ${{ matrix.build_name }}-upload
@@ -314,6 +324,8 @@ jobs:
             {%- if config['libtorch_variant'] is defined %}
             libtorch_config: "!{{ config['libtorch_config'] }}"
             libtorch_variant: "!{{ config['libtorch_variant'] }}"
+            {%- elif config['libtorch_config'] is defined %}
+            libtorch_config: "!{{ config['libtorch_config'] }}"
             {%- endif %}
         {%- endfor %}
     with:
@@ -328,6 +340,8 @@ jobs:
       {%- if first['package_type'] == 'libtorch' %}
       LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
       LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+      {%- elif first['libtorch_config'] is defined %}
+      LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
       {%- endif %}
       build_name: ${{ matrix.build_name }}
     secrets:

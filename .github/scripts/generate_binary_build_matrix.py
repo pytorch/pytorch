@@ -382,7 +382,13 @@ def generate_wheels_matrix(
     os: str,
     arches: list[str] | None = None,
     python_versions: list[str] | None = None,
+    debug: bool = False,
 ) -> list[dict[str, str]]:
+    # When debug=True the produced wheel is a build-time intermediate
+    # consumed by the libtorch-debug extraction step (not a PyPI artifact).
+    # We just stamp libtorch_config=debug and a "-debug" suffix on the build
+    # name; binary_windows_build.sh reads LIBTORCH_CONFIG and routes the
+    # value into build_env_setup.py (DEBUG=1, CMAKE_BUILD_TYPE=Debug).
     package_type = "wheel"
     if os == "linux" or os == "linux-aarch64" or os == "linux-s390x":
         # NOTE: We only build manywheel packages for x86_64 and aarch64 and s390x linux
@@ -502,20 +508,31 @@ def generate_wheels_matrix(
                     }
                 )
 
+    if debug:
+        for entry in ret:
+            entry["libtorch_config"] = DEBUG
+            entry["build_name"] = entry["build_name"] + "-debug"
+
     return ret
 
 
 def generate_libtorch_extraction_configs(
     os: str,
     wheel_configs: list[dict[str, str]],
+    debug: bool = False,
 ) -> list[dict[str, str]]:
     """Generate libtorch extraction configs from existing wheel build configs.
 
     For each unique arch variant in wheel_configs, find the py3.10 config
     (py3.11 for windows-arm64) and produce a config that the CI template
     uses to add an extraction job that depends on that wheel's build job.
+
+    When debug=True, the source wheel_configs are expected to be debug
+    wheels and the extracted libtorch zip is named ...-debug-... rather
+    than ...-release-...
     """
     preferred_python = "3.11" if os == "windows-arm64" else "3.10"
+    release_type = DEBUG if debug else RELEASE
 
     # Group wheel configs by (gpu_arch_type, gpu_arch_version)
     arch_to_config: dict[tuple[str, str], dict[str, str]] = {}
@@ -532,7 +549,7 @@ def generate_libtorch_extraction_configs(
 
         desired_cuda = source_config["desired_cuda"]
         libtorch_variant = "shared-with-deps"
-        build_name = f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release".replace(
+        build_name = f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{release_type}".replace(
             ".", "_"
         )
 
@@ -542,7 +559,7 @@ def generate_libtorch_extraction_configs(
                 "build_name": build_name,
                 "package_type": "libtorch",
                 "libtorch_variant": libtorch_variant,
-                "libtorch_config": RELEASE,
+                "libtorch_config": release_type,
                 "desired_cuda": desired_cuda,
                 "gpu_arch_type": gpu_arch_type,
                 "gpu_arch_version": gpu_arch_version,

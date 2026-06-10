@@ -333,7 +333,6 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
 
-
   wheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1035,6 +1034,249 @@ jobs:
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cuda13_2-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cpu-shared-with-deps-debug-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: cpu
+      LIBTORCH_VARIANT: shared-with-deps
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: wheel-py3_10-cpu-debug
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cpu-shared-with-deps-debug
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  libtorch-cpu-shared-with-deps-debug-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cpu-shared-with-deps-debug-extract
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      LIBTORCH_CONFIG: debug
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cpu-shared-with-deps-debug
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda12_6-shared-with-deps-debug-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: cu126
+      LIBTORCH_VARIANT: shared-with-deps
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: wheel-py3_10-cuda12_6-debug
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cuda12_6-shared-with-deps-debug
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  libtorch-cuda12_6-shared-with-deps-debug-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda12_6-shared-with-deps-debug-extract
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: "12.6"
+      GPU_ARCH_TYPE: cuda
+      LIBTORCH_CONFIG: debug
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda12_6-shared-with-deps-debug
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda13_0-shared-with-deps-debug-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: cu130
+      LIBTORCH_VARIANT: shared-with-deps
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: wheel-py3_10-cuda13_0-debug
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cuda13_0-shared-with-deps-debug
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  libtorch-cuda13_0-shared-with-deps-debug-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda13_0-shared-with-deps-debug-extract
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
+      GPU_ARCH_TYPE: cuda
+      LIBTORCH_CONFIG: debug
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda13_0-shared-with-deps-debug
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda13_2-shared-with-deps-debug-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: cu132
+      LIBTORCH_VARIANT: shared-with-deps
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: wheel-py3_10-cuda13_2-debug
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cuda13_2-shared-with-deps-debug
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  libtorch-cuda13_2-shared-with-deps-debug-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda13_2-shared-with-deps-debug-extract
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: cu132
+      GPU_ARCH_VERSION: "13.2"
+      GPU_ARCH_TYPE: cuda
+      LIBTORCH_CONFIG: debug
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda13_2-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}

@@ -62,6 +62,10 @@ class BinaryBuildWorkflow:
     macos_runner: str = "macos-14-xlarge"
     # Mainly used for libtorch builds
     build_variant: str = ""
+    # Build-only workflow: emit just the build job, no test/upload. Used for
+    # debug wheels, which are extraction intermediates -- not published, and
+    # not importable (a /MDd wheel only loads under a debug interpreter).
+    build_only: bool = False
     # Libtorch extraction configs: lightweight jobs that extract libtorch
     # from a wheel build instead of building libtorch from scratch
     libtorch_extraction_configs: list[dict[str, str]] = field(default_factory=list)
@@ -136,6 +140,34 @@ _WINDOWS_ARM64_WHEEL_CONFIGS = generate_binary_build_matrix.generate_wheels_matr
     python_versions=["3.11", "3.12", "3.13"],
 )
 
+# Debug wheel configs feed the libtorch-debug extraction. Only one Python
+# (py3.10 / py3.11 on arm64) is built per arch since the debug wheel is
+# not published to PyPI -- it is a build-time intermediate consumed by
+# extract_libtorch_from_wheel.py to produce the debug libtorch zips.
+# Matches the CUDA matrix the legacy debug-libtorch nightly published
+# (cpu + each CUDA arch); shared-with-deps only.
+_WINDOWS_WHEEL_DEBUG_CONFIGS = [
+    config
+    for config in generate_binary_build_matrix.generate_wheels_matrix(
+        OperatingSystem.WINDOWS,
+        python_versions=["3.10"],
+        debug=True,
+    )
+    # Exclude XPU: torch_xpu_ops PUBLIC-links torch_xpu unconditionally on
+    # Windows, forming a SHARED<->STATIC target cycle that CMake's generate step
+    # rejects under Debug (release XPU is unaffected). The legacy libtorch-debug
+    # nightly never shipped XPU either.
+    if config["gpu_arch_type"] != "xpu"
+]
+_WINDOWS_ARM64_WHEEL_DEBUG_CONFIGS = (
+    generate_binary_build_matrix.generate_wheels_matrix(
+        OperatingSystem.WINDOWS_ARM64,
+        arches=["cpu"],
+        python_versions=["3.11"],
+        debug=True,
+    )
+)
+
 WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
@@ -149,20 +181,30 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
             },
             isolated_workflow=True,
         ),
-        libtorch_extraction_configs=generate_binary_build_matrix.generate_libtorch_extraction_configs(
-            OperatingSystem.WINDOWS,
-            _WINDOWS_WHEEL_CONFIGS,
+        libtorch_extraction_configs=(
+            generate_binary_build_matrix.generate_libtorch_extraction_configs(
+                OperatingSystem.WINDOWS,
+                _WINDOWS_WHEEL_CONFIGS,
+            )
+            + generate_binary_build_matrix.generate_libtorch_extraction_configs(
+                OperatingSystem.WINDOWS,
+                _WINDOWS_WHEEL_DEBUG_CONFIGS,
+                debug=True,
+            )
         ),
     ),
+    # NOTE: separate debug-wheel build workflow whose only consumer is
+    # the libtorch-debug extraction above. We treat it as a sibling of
+    # the release wheel build rather than reusing the same workflow so
+    # debug + release run in parallel and a debug regression doesn't
+    # block release wheel publishing. The build job emits a *.whl that
+    # extract_libtorch_from_wheel.py consumes; no PyPI upload.
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
-        package_type="libtorch",
+        package_type="wheel",
         build_variant=generate_binary_build_matrix.DEBUG,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS,
-            generate_binary_build_matrix.DEBUG,
-            libtorch_variants=["shared-with-deps"],
-        ),
+        build_only=True,
+        build_configs=_WINDOWS_WHEEL_DEBUG_CONFIGS,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
@@ -180,21 +222,24 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
             },
             isolated_workflow=True,
         ),
-        libtorch_extraction_configs=generate_binary_build_matrix.generate_libtorch_extraction_configs(
-            OperatingSystem.WINDOWS_ARM64,
-            _WINDOWS_ARM64_WHEEL_CONFIGS,
+        libtorch_extraction_configs=(
+            generate_binary_build_matrix.generate_libtorch_extraction_configs(
+                OperatingSystem.WINDOWS_ARM64,
+                _WINDOWS_ARM64_WHEEL_CONFIGS,
+            )
+            + generate_binary_build_matrix.generate_libtorch_extraction_configs(
+                OperatingSystem.WINDOWS_ARM64,
+                _WINDOWS_ARM64_WHEEL_DEBUG_CONFIGS,
+                debug=True,
+            )
         ),
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS_ARM64,
-        package_type="libtorch",
+        package_type="wheel",
         build_variant=generate_binary_build_matrix.DEBUG,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS_ARM64,
-            generate_binary_build_matrix.DEBUG,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
+        build_only=True,
+        build_configs=_WINDOWS_ARM64_WHEEL_DEBUG_CONFIGS,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
