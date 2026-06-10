@@ -128,22 +128,25 @@ def get_source_partitions(
                 add_to_partition(source_fn[1], source_fn[0], node)
 
     def make_partition(nodes: list[Node], module_type: type) -> SourcePartition:
-        input_nodes = set()
-        output_nodes = set()
-        params = set()
+        # Use dicts to preserve insertion order (graph traversal order) while
+        # deduplicating, so that input_nodes/output_nodes/params ordering is
+        # deterministic across runs. See https://github.com/pytorch/pytorch/issues/147170
+        input_nodes: dict[Node, None] = {}
+        output_nodes: dict[Node, None] = {}
+        params: dict[Node, None] = {}
         for node in nodes:
             for arg in node.args:
                 if isinstance(arg, Node) and arg not in nodes and arg.op != "get_attr":
-                    input_nodes.add(arg)
+                    input_nodes[arg] = None
 
             if node.op == "get_attr":
-                params.add(node)
+                params[node] = None
                 # get_attr nodes won't be output nodes
                 continue
 
             for user in node.users:
                 if user not in nodes:
-                    output_nodes.add(node)
+                    output_nodes[node] = None
 
         return SourcePartition(
             nodes,

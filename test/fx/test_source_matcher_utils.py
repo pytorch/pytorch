@@ -531,6 +531,44 @@ class TestSourceMatcher(JitTestCase):
         )
 
 
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    def test_source_partition_input_nodes_deterministic_order(self):
+        """input_nodes ordering should be deterministic (graph traversal order)."""
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x, y):
+                # linear uses both x and the module's weight/bias,
+                # then add brings in y as a second external input
+                return self.linear(x) + y
+
+        inputs = (torch.randn(3, 3), torch.randn(3, 3))
+        gm, _ = torch._dynamo.export(M(), aten_graph=True)(*inputs)
+        gm.graph.eliminate_dead_code()
+
+        module_partitions = get_source_partitions(gm.graph, [torch.nn.Linear])
+        self.assertEqual(len(module_partitions[torch.nn.Linear]), 1)
+        partition = module_partitions[torch.nn.Linear][0]
+
+        # Run the same partitioning many times and verify the ordering is stable
+        expected_input_names = [n.name for n in partition.input_nodes]
+        expected_output_names = [n.name for n in partition.output_nodes]
+        for _ in range(50):
+            partitions = get_source_partitions(gm.graph, [torch.nn.Linear])
+            p = partitions[torch.nn.Linear][0]
+            self.assertEqual(
+                [n.name for n in p.input_nodes],
+                expected_input_names,
+            )
+            self.assertEqual(
+                [n.name for n in p.output_nodes],
+                expected_output_names,
+            )
+
+
 instantiate_parametrized_tests(TestSourceMatcher)
 
 if __name__ == "__main__":
