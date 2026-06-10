@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import copy
 import dataclasses
 import inspect
 import logging
@@ -930,6 +931,21 @@ class AdditionalInputs:
             torch.export._unlift._check_input_constraints_for_module(
                 epm, args, kwargs or {}
             )
+            epm_copy = copy.deepcopy(epm)
+            args_copy = tree_map(
+                lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args
+            )
+            kwargs_copy = tree_map(
+                lambda x: x.clone() if isinstance(x, torch.Tensor) else x,
+                kwargs or {},
+            )
+            try:
+                epm_copy(*args_copy, **kwargs_copy)
+            except AssertionError as e:
+                raise RuntimeError(
+                    "Expected additional input to satisfy the exported program, "
+                    f"but got runtime assertion error: {e}"
+                ) from e
 
 
 def _warn_on_None_dynamic_shape_dimension():

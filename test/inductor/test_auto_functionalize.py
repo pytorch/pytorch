@@ -1435,13 +1435,18 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                         graph_aot,
                         """\
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, s77][s77, 1]cpu"):
+        slice_2: "f32[s77, Max(0, -Min(3, s77) + Min(4, s77))][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4)
+        sym_size_int_2: "Sym(Max(0, -Min(3, s77) + Min(4, s77)))" = torch.ops.aten.sym_size.int(slice_2, 1)
+        sym_storage_offset_default: "Sym(Min(3, s77))" = torch.ops.aten.sym_storage_offset.default(slice_2);  slice_2 = None
         floordiv: "Sym(0)" = 0 // arg0_1;  arg0_1 = None
         add_6: "Sym(2)" = floordiv + 2
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 0, _x_slice_start = floordiv, _x_slice_end = add_6, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 3, _y_slice_end = 4, _all_bases = [arg1_1]);  floordiv = add_6 = None
+        floordiv_1: "Sym(Min(3, s77))" = sym_storage_offset_default // 1;  sym_storage_offset_default = None
+        add_7: "Sym(Max(0, -Min(3, s77) + Min(4, s77)) + Min(3, s77))" = floordiv_1 + sym_size_int_2;  sym_size_int_2 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 0, _x_slice_start = floordiv, _x_slice_end = add_6, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = floordiv_1, _y_slice_end = add_7, _all_bases = [arg1_1]);  floordiv = add_6 = floordiv_1 = add_7 = None
         getitem_1: "f32[s77, s77][s77, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
         copy_: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = copy_ = None
         slice_3: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 0, 0, 2)
-        slice_4: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 1, 3, 4);  getitem_1 = None
+        slice_4: "f32[s77, Max(0, -Min(3, s77) + Min(4, s77))][s77, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 1, 3, 4);  getitem_1 = None
         return (slice_3, slice_4)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
@@ -1470,12 +1475,17 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, s77][s77, 1]cpu"):
         floordiv: "Sym(0)" = 0 // arg0_1;  arg0_1 = None
         add_6: "Sym(2)" = floordiv + 2;  floordiv = add_6 = None
+        slice_2: "f32[s77, Max(0, -Min(3, s77) + Min(4, s77))][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4)
+        sym_storage_offset_default: "Sym(Min(3, s77))" = torch.ops.aten.sym_storage_offset.default(slice_2)
+        floordiv_1: "Sym(Min(3, s77))" = sym_storage_offset_default // 1;  sym_storage_offset_default = None
+        sym_size_int_2: "Sym(Max(0, -Min(3, s77) + Min(4, s77)))" = torch.ops.aten.sym_size.int(slice_2, 1);  slice_2 = None
+        add_7: "Sym(Max(0, -Min(3, s77) + Min(4, s77)) + Min(3, s77))" = floordiv_1 + sym_size_int_2;  sym_size_int_2 = None
         slice_tensor: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, 0, 2)
-        slice_tensor_1: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4)
+        slice_tensor_1: "f32[s77, Max(0, -Min(3, s77) + Min(4, s77))][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, floordiv_1, add_7);  floordiv_1 = add_7 = None
         foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
         copy_: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  copy_ = None
         slice_3: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, 0, 2)
-        slice_4: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4);  arg1_1 = None
+        slice_4: "f32[s77, Max(0, -Min(3, s77) + Min(4, s77))][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4);  arg1_1 = None
         return (slice_3, slice_4)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
