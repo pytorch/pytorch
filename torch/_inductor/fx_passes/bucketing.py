@@ -1,9 +1,12 @@
 import collections
+import contextlib
 import logging
 import operator
 from collections import defaultdict
 from collections.abc import Callable
 from typing import Any, Literal, TYPE_CHECKING, TypeAlias
+
+import sympy
 
 import torch
 import torch.distributed as dist
@@ -96,13 +99,14 @@ def _compute_foreach_groups(
     Returns a flat list with -1 as group delimiter, or None if only one group exists.
     For example, groups [[0, 2], [1]] would be encoded as [0, 2, -1, 1].
     """
-    from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
-
     groups: defaultdict[tuple[torch.dtype, torch.dtype, tuple[int, ...]], list[int]] = (
         defaultdict(list)
     )
     for i, (ag_in, out_dtype) in enumerate(zip(ag_ins, out_dtypes)):
-        shape = tuple(guarding_hint_or_throw(s) for s in ag_in.shape)
+        shape = tuple(
+            _hint_int_or_raise(s, context="all-gather foreach grouping")
+            for s in ag_in.shape
+        )
         key = (ag_in.dtype, out_dtype, shape)
         groups[key].append(i)
 
@@ -117,6 +121,64 @@ def _compute_foreach_groups(
             result.append(-1)
 
     return result
+
+
+# Bucketing has two separate shape contracts:
+#
+# 1. Semantic tensor shapes stay symbolic.  The traced bucket merge graph must
+#    preserve runtime tensor expressions such as numel(), split sizes,
+#    torch.empty extents, narrow offsets/lengths, and reshape shapes.  Those
+#    values describe actual tensor semantics and must not be specialized from
+#    optimization hints.
+#
+# 2. Optimization-policy choices may use hints.  Bucket byte accounting and
+#    foreach grouping need Python integers to decide how to group collectives.
+#    For those policy-only decisions, concrete ints, backed SymInts, hinted
+#    unbacked SymInts, and derived expressions from hinted symbols are valid.
+#    Unhinted symbolic values fail fast instead of forcing guards or guessing.
+#
+# In short: hints may decide which bucket/group we choose, but they must never
+# replace symbolic sizes in the graph we trace for the bucketed collective.
+def _hint_int_or_raise(value: object, *, context: str) -> int:
+    if type(value) is int:
+        return value
+
+    if not isinstance(value, torch.SymInt):
+        raise AssertionError(f"Expected int or SymInt for {context}, got {type(value)}")
+
+    node = value.node
+    if node._hint is not None:
+        return int(node._hint)
+    shape_env = node.shape_env
+    if shape_env is None:
+        raise AssertionError(f"ShapeEnv is required to hint {context}: {value}")
+
+    expr = sympy.sympify(node.expr).xreplace(shape_env.replacements)
+    expr = expr.xreplace(shape_env.backed_var_to_val)
+    expr = expr.xreplace(shape_env.var_to_hint_override)
+    if isinstance(expr, sympy.Expr):
+        expr = expr.expand(identity=True)
+    if getattr(expr, "free_symbols", None):
+        raise RuntimeError(
+            f"Could not extract optimization hint for {context}: {value}. "
+            "Collective bucketing requires hinted symbolic sizes for policy "
+            "decisions."
+        )
+    return int(expr)
+
+
+def _numel_hint_or_raise(tensor: torch.Tensor, *, context: str) -> int:
+    return _hint_int_or_raise(tensor.numel(), context=context)
+
+
+def _size_bytes_hint_or_raise(
+    tensor: torch.Tensor,
+    *,
+    dtype: torch.dtype | None = None,
+    context: str,
+) -> int:
+    element_size = tensor.element_size() if dtype is None else dtype.itemsize
+    return _numel_hint_or_raise(tensor, context=context) * element_size
 
 
 def _get_collective_node_from_wait(node: torch.fx.Node) -> torch.fx.Node | None:
@@ -158,7 +220,7 @@ def _populate_node_meta(
         for n in new_nodes:
             # For the following keys, we only store the information of the first node so
             # gm.print_readable shows some information
-            # Full information are stored in "bucketing_{key}_sources"
+            # Full information is stored in "bucketing_{key}_sources"
             for key, default in [
                 ("nn_module_stack", ""),
                 ("fwd_nn_module_stack", ""),
@@ -196,6 +258,98 @@ def _populate_node_meta(
                 )
                 for original_node in bucket_nodes
             ]
+
+
+def _meta_arg(arg: object) -> object:
+    if isinstance(arg, torch.fx.Node):
+        return arg.meta.get("val", arg)
+    return arg
+
+
+def _same_tensor_metadata(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    def same_dim(lhs_dim: object, rhs_dim: object) -> bool:
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+        try:
+            return statically_known_true(lhs_dim == rhs_dim)
+        except Exception:
+            return lhs_dim == rhs_dim
+
+    def same_dims(lhs_dims: tuple[object, ...], rhs_dims: tuple[object, ...]) -> bool:
+        return len(lhs_dims) == len(rhs_dims) and all(
+            same_dim(lhs_dim, rhs_dim) for lhs_dim, rhs_dim in zip(lhs_dims, rhs_dims)
+        )
+
+    return (
+        lhs.dtype == rhs.dtype
+        and lhs.device == rhs.device
+        and lhs.layout == rhs.layout
+        and same_dims(tuple(lhs.shape), tuple(rhs.shape))
+        and same_dims(tuple(lhs.stride()), tuple(rhs.stride()))
+        and same_dim(lhs.storage_offset(), rhs.storage_offset())
+    )
+
+
+def _same_metadata(lhs: object, rhs: object) -> bool:
+    lhs_leaves, lhs_spec = pytree.tree_flatten(lhs)
+    rhs_leaves, rhs_spec = pytree.tree_flatten(rhs)
+    if lhs_spec != rhs_spec or len(lhs_leaves) != len(rhs_leaves):
+        return False
+    for lhs_leaf, rhs_leaf in zip(lhs_leaves, rhs_leaves):
+        if isinstance(lhs_leaf, torch.Tensor) or isinstance(rhs_leaf, torch.Tensor):
+            if not isinstance(lhs_leaf, torch.Tensor) or not isinstance(
+                rhs_leaf, torch.Tensor
+            ):
+                return False
+            if not _same_tensor_metadata(lhs_leaf, rhs_leaf):
+                return False
+    return True
+
+
+def _recompute_changed_user_metadata(start_users: list[torch.fx.Node]) -> None:
+    """
+    Repair fake metadata after bucketing replaces a value with a layout-different
+    equivalent. The replacement is semantically valid, but downstream stride
+    metadata is no longer valid until consumers are re-run from metadata.
+    """
+    worklist = collections.deque(start_users)
+    queued: OrderedSet[torch.fx.Node] = OrderedSet(start_users)
+    while worklist:
+        node = worklist.popleft()
+        queued.discard(node)
+        if node.op != "call_function" or not callable(node.target):
+            continue
+        if "val" not in node.meta:
+            continue
+
+        args = pytree.tree_map(_meta_arg, node.args)
+        kwargs = pytree.tree_map(_meta_arg, node.kwargs)
+        if any(
+            isinstance(leaf, torch.fx.Node)
+            for leaf in pytree.tree_leaves((args, kwargs))
+        ):
+            continue
+
+        fake_mode = detect_fake_mode((node.meta.get("val"), args, kwargs))
+        try:
+            with fake_mode if fake_mode is not None else contextlib.nullcontext():
+                new_val = node.target(*args, **kwargs)
+        except Exception:
+            logger.debug(
+                "Skipping metadata repair for bucketing user %s",
+                node.name,
+                exc_info=True,
+            )
+            continue
+
+        if _same_metadata(node.meta["val"], new_val):
+            continue
+
+        node.meta["val"] = new_val
+        for user in node.users:
+            if user not in queued:
+                queued.add(user)
+                worklist.append(user)
 
 
 def bucket_key(node: torch.fx.Node, mode: BucketMode | None = None) -> object | None:
@@ -483,9 +637,13 @@ def greedy_bucket_collective_by_mb(
                 continue
             assert "val" in node.meta
             n_val = node.meta["val"]
-            out_size_bytes = n_val.numel() * n_val.element_size()
+            out_size_bytes = _size_bytes_hint_or_raise(
+                n_val, context="collective bucket output size"
+            )
             n_input_val = node.all_input_nodes[0].meta["val"]
-            in_size_bytes = n_input_val.numel() * n_input_val.element_size()
+            in_size_bytes = _size_bytes_hint_or_raise(
+                n_input_val, context="collective bucket input size"
+            )
             size_bytes = max(out_size_bytes, in_size_bytes)
             if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
                 # Current bucket is full, create new bucket
@@ -1039,8 +1197,11 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
         replacements = {  # noqa: C416
             orig_out: new_out for orig_out, new_out in zip(g_fn_outs, g_fn_new_outs)
         }
+        replaced_users = []
         for orig_out, new_out in zip(g_fn_outs, g_fn_new_outs):
+            replaced_users.extend(orig_out.users)
             orig_out.replace_all_uses_with(new_out)
+        _recompute_changed_user_metadata(replaced_users)
 
         return replacements, new_nodes
 

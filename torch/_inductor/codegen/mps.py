@@ -221,6 +221,12 @@ class MetalOverrides(OpOverrides):
         return ops.to_dtype(var, dtype)
 
     @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        # Metal index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
+        return MetalOverrides.index_expr(expr, dtype)
+
+    @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
         # TODO: Type annotation for other is wrong, it's often float or int
         # TODO: Should it be converted to lambda on MacOS-15+?
@@ -431,17 +437,9 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::rand({seed}, {offset})"
 
     @staticmethod
-    def rand4x(seed: CSEVariable, offset: CSEVariable) -> str:
-        return MetalOverrides.rand(seed, offset)
-
-    @staticmethod
     def randn(seed: CSEVariable, offset: CSEVariable) -> str:
         V.kernel.headers.add("random")
         return f"c10::metal::randn({seed}, {offset})"
-
-    @staticmethod
-    def randn4x(seed: CSEVariable, offset: CSEVariable) -> str:
-        return MetalOverrides.randn(seed, offset)
 
     @staticmethod
     def randint64(

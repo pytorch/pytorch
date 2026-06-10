@@ -19,12 +19,11 @@ import sympy
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._C import DispatchKey
+from torch._C import _dispatch_keys, DispatchKey
 from torch._higher_order_ops.auto_functionalize import _clone_tensors
-from torch._higher_order_ops.utils import redirect_to_mode
+from torch._higher_order_ops.utils import redirect_to_mode, register_fake
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -42,7 +41,7 @@ if TYPE_CHECKING:
         operation as TritonIROperation,
     )
 
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
     from torch._dynamo.variables.functions import TritonKernelVariable
     from torch._guards import Source
@@ -1247,8 +1246,23 @@ def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
 # Triton Kernel Wrappers
 
 
+class _TritonKernelWrapper(HigherOrderOperator):
+    def _get_overloaded_args(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[Tensor, ...]:
+        overloaded_args = list(super()._get_overloaded_args(args, kwargs))
+        triton_kwargs = kwargs.get("kwargs")
+        if isinstance(triton_kwargs, dict):
+            overloaded_args.extend(
+                arg
+                for arg in triton_kwargs.values()
+                if isinstance(arg, Tensor) and _dispatch_keys(arg).has("Python")
+            )
+        return tuple(overloaded_args)
+
+
 # Used for wrapping a Triton Kernel
-class TritonKernelWrapperMutation(HigherOrderOperator):
+class TritonKernelWrapperMutation(_TritonKernelWrapper):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_mutation", cacheable=True)
 
@@ -1274,7 +1288,7 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
 
 # Used for wrapping a Triton Kernel in a functional manner
-class TritonKernelWrapperFunctional(HigherOrderOperator):
+class TritonKernelWrapperFunctional(_TritonKernelWrapper):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_functional", cacheable=True)
 
@@ -1393,9 +1407,8 @@ def triton_kernel_wrapper_mutation_dense(
     kernel[grid_fn](*args, **kwargs, **constant_args)
 
 
-@triton_kernel_wrapper_mutation.py_impl(FakeTensorMode)
+@register_fake(triton_kernel_wrapper_mutation, skip_cache=True)
 def triton_kernel_wrapper_mutation_fake_tensor_mode(
-    mode: FakeTensorMode,
     *,
     kernel_idx: int,
     constant_args_idx: int,
@@ -1403,8 +1416,7 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
 ) -> None:
-    with mode:
-        return None
+    return None
 
 
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.Meta)
@@ -1561,9 +1573,8 @@ def triton_kernel_wrapper_functional_dense(
     return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
 
 
-@triton_kernel_wrapper_functional.py_impl(FakeTensorMode)
+@register_fake(triton_kernel_wrapper_functional, skip_cache=True)
 def triton_kernel_wrapper_functional_fake_tensor_mode(
-    mode: FakeTensorMode,
     *,
     kernel_idx: int,
     constant_args_idx: int,
@@ -1576,12 +1587,11 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     # `clone_preserve_strides` calls are never executed at runtime
     # (inductor should always optimize them away).
     # Requires https://github.com/pytorch/pytorch/issues/109240
-    with mode:
-        return {
-            key: clone_preserve_strides(val)
-            for key, val in kwargs.items()
-            if key in tensors_to_clone
-        }
+    return {
+        key: clone_preserve_strides(val)
+        for key, val in kwargs.items()
+        if key in tensors_to_clone
+    }
 
 
 @triton_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
@@ -1703,7 +1713,7 @@ class TritonHOPifier:
     def wrap_user_defined_obj(
         self,
         user_obj: Any,
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
         name: str,
     ) -> Any:
@@ -1714,13 +1724,13 @@ class TritonHOPifier:
         user_fn: Callable[..., Any],
         args: list,
         kwargs: dict,
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
     ) -> Any:
         raise NotImplementedError("abstract method")
 
     def maybe_unpack_configs(
-        self, configs: list["TritonConfig"], tx: Optional["InstructionTranslator"]
+        self, configs: list["TritonConfig"], tx: Optional["InstructionTranslatorBase"]
     ) -> list["TritonConfig"]:
         raise NotImplementedError("abstract method")
 
@@ -1913,7 +1923,7 @@ class TritonHOPifier:
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
         args: Sequence[Any],
         kwargs: dict[str, Any],
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
     ) -> Optional["ConstantVariable"]:
         if "grid" not in kwargs:
             self.raise_unsupported("Triton kernel requires to be called with a grid")
@@ -1937,7 +1947,7 @@ class TritonHOPifier:
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
         args: Sequence[Any],
         kwargs: dict[str, Any],
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
     ) -> Optional["ConstantVariable"]:
         from triton import JITFunction
         from triton.runtime.autotuner import autotune, Autotuner, Config, Heuristics
@@ -2299,7 +2309,7 @@ class TracingTritonHOPifier(TritonHOPifier):
     def wrap_user_defined_obj(
         self,
         user_obj: Any,
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
         name: str,
     ) -> Any:
@@ -2312,7 +2322,7 @@ class TracingTritonHOPifier(TritonHOPifier):
         user_fn: Callable[..., Any],
         args: list,
         kwargs: dict,
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
     ) -> Any:
         if not isinstance(args, list):
@@ -2324,7 +2334,7 @@ class TracingTritonHOPifier(TritonHOPifier):
         return user_fn(*args, **kwargs)
 
     def maybe_unpack_configs(
-        self, configs: list["TritonConfig"], tx: Optional["InstructionTranslator"]
+        self, configs: list["TritonConfig"], tx: Optional["InstructionTranslatorBase"]
     ) -> list["TritonConfig"]:
         if not isinstance(configs, list):
             raise AssertionError(f"configs must be a list, got {type(configs)}")
