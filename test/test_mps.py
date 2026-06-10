@@ -2170,6 +2170,48 @@ class TestMPS(TestCaseMPS):
         y_mps.sum().backward()
         self.assertIsNotNone(x.grad)
 
+    def test_batch_norm_backward_channels_last(self):
+        # Regression for https://github.com/pytorch/pytorch/issues/175189.
+        # Forward was correct on channels_last inputs, but backward either
+        # raised RuntimeError about view incompatibility (macOS 15+) or silently
+        # produced weight gradients off by roughly seven orders of magnitude
+        # (macOS 14), because the backward did not pass the raw NHWC buffer the
+        # way the forward does.
+        def helper(shape, dtype, affine, training):
+            torch.manual_seed(42)
+            N, C, H, W = shape
+            bn_cpu = nn.BatchNorm2d(C, affine=affine).train(training)
+            # Match dtype between the MPS module and input to sidestep the
+            # unrelated mixed-dtype eval-mode broadcast issue in MPSGraph
+            # normalization (fp16 input vs fp32 running stats). Default init
+            # (weight=1, bias=0) is exact in every dtype so no cast-loss here.
+            bn_mps = nn.BatchNorm2d(C, affine=affine).to(device="mps", dtype=dtype).train(training)
+
+            base = torch.randn(N, C, H, W)
+            x_cpu = base.clone().to(memory_format=torch.channels_last).requires_grad_(True)
+            x_mps = (base.to(device="mps", dtype=dtype).clone()
+                     .to(memory_format=torch.channels_last).requires_grad_(True))
+
+            bn_cpu(x_cpu).sum().backward()
+            bn_mps(x_mps).sum().backward()
+
+            atol, rtol = (1e-5, 1e-5) if dtype == torch.float32 else (5e-2, 5e-2)
+            self.assertEqual(x_cpu.grad, x_mps.grad.cpu(), atol=atol, rtol=rtol, exact_dtype=False)
+            if affine:
+                self.assertEqual(
+                    bn_cpu.weight.grad, bn_mps.weight.grad.cpu(), atol=atol, rtol=rtol, exact_dtype=False)
+                self.assertEqual(
+                    bn_cpu.bias.grad, bn_mps.bias.grad.cpu(), atol=atol, rtol=rtol, exact_dtype=False)
+
+        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            for affine in [True, False]:
+                for training in [True, False]:
+                    helper((4, 3, 8, 8), dtype, affine, training)
+        # single-channel edge case
+        helper((2, 1, 5, 5), torch.float32, affine=True, training=True)
+        # batch-size-1 eval (N=1 training would reduce over zero variance)
+        helper((1, 4, 6, 6), torch.float32, affine=True, training=False)
+
     def test_layer_norm_backward(self):
         inputs = torch.rand(4, 4, device="mps", requires_grad=True)
         x = torch.nn.LayerNorm(4).to("mps")

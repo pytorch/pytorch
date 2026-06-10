@@ -873,8 +873,18 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
       newCachedGraph->gradBiasTensor_ = gradBiasTensor;
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input, input_shape);
-    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_out, input_shape_readonly);
+    // For channels_last, pass the raw NHWC buffer directly (matching the forward
+    // path): the default gather path either rejects the NHWC strides via .view()
+    // on macOS >= 15 or silently copies into NCHW layout while the graph expects
+    // NHWC on macOS < 15. contiguous(memory_format) handles non-packed views
+    // from autograd.
+    const bool is_channels_last = (memory_format == MemoryFormat::ChannelsLast);
+    const auto& input_cl = input.contiguous(memory_format);
+    const auto& grad_out_cl = grad_out.contiguous(memory_format);
+
+    auto inputPlaceholder = Placeholder(
+        cachedGraph->inputTensor_, input_cl, input_shape, !is_channels_last, MPSDataTypeInvalid, !is_channels_last);
+    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_out_cl, input_shape_readonly);
     auto weightPlaceholder = Placeholder();
     if (has_weight)
       weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_opt.value(), new_mean_shape);
@@ -893,7 +903,12 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 
     auto gradInputPlaceholder = Placeholder();
     if (grad_input_mask[0])
-      gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input, input_shape);
+      gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_,
+                                         grad_input,
+                                         input_shape,
+                                         !is_channels_last,
+                                         MPSDataTypeInvalid,
+                                         !is_channels_last);
     auto gradWeightPlaceholder = Placeholder();
     if (grad_input_mask[1])
       gradWeightPlaceholder = Placeholder(cachedGraph->gradWeightTensor_, grad_weight);
