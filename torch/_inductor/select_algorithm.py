@@ -21,7 +21,7 @@ from io import StringIO
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING
-from typing_extensions import Self
+from typing_extensions import NotRequired, Self, TypedDict
 from unittest.mock import patch
 
 import sympy
@@ -103,7 +103,8 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 # correctness checks struggle with fp16/tf32
-VERIFY: dict[str, Any] = {}
+VerifyOptions = dict[str, object]
+VERIFY: VerifyOptions = {}
 PRINT_AUTOTUNE = True
 DEBUG = False
 
@@ -115,6 +116,78 @@ if TYPE_CHECKING:
     from torch._inductor.codegen.simd import IterationRangesEntry, IterationRangesRoot
 
     from .codegen.common import CSE
+
+
+class TritonMeta(TypedDict, total=False):
+    signature: dict[str, str]
+    device: DeviceProperties
+    constants: dict[str, int]
+    configs: list[object]
+    num_warps: int
+    num_stages: int
+    enable_fp_fusion: bool
+    launch_pdl: bool
+    disable_ftz: bool
+    matrix_instr_nonkdim: object
+    waves_per_eu: object
+    kpack: object
+
+
+class InductorMeta(TypedDict, total=False):
+    kernel_name: str
+    backend_hash: object
+    assert_indirect_indexing: bool
+    autotune_local_cache: bool
+    autotune_pointwise: bool
+    autotune_remote_cache: object
+    force_disable_caches: bool
+    dynamic_scale_rblock: bool
+    incremental_autotune: bool
+    max_autotune: bool
+    max_autotune_pointwise: bool
+    min_split_scan_rblock: int
+    spill_threshold: int
+    store_cubin: bool
+    deterministic: bool
+    batch_invariant: bool
+    force_filter_reduction_configs: bool
+    mix_order_reduction_allow_multi_stages: bool
+    dynamic_disable_pipelining: bool
+    are_deterministic_algorithms_enabled: bool
+    is_hip: bool
+    is_fbcode: bool
+    profile_bandwidth: bool
+    profile_bandwidth_regex: str
+    profile_bandwidth_output: str | None
+    profile_bandwidth_with_do_bench_using_profiling: bool
+    coordinate_descent_tuning: bool
+    coordinate_descent_search_radius: int
+    coordinate_descent_check_all_directions: bool
+    grid_type: str
+    fixed_grid: list[str]
+    extra_launcher_args: list[str]
+    config_args: object
+    kernel_num_gb: float
+    kernel_flop: int
+
+
+class TritonTemplateKernelOptions(TypedDict):
+    input_nodes: tuple[ir.IRNode, ...]
+    defines: str
+    num_stages: int
+    num_warps: int
+    grid_fn: Callable[..., object]
+    meta: dict[str, object]
+    call_sizes: Sequence[sympy.core.symbol.Symbol]
+    prefix_args: int
+    suffix_args: int
+    epilogue_fn: Callable[..., object] | None
+    subgraphs: list[ir.Buffer] | None
+    prologue_loads_all_inputs: bool
+    always_freeze_layout: bool
+    index_dtype_override: str
+    num_consumer_groups: NotRequired[int]
+    num_buffers_warp_spec: NotRequired[int]
 
 
 class KernelNamespace:
@@ -514,7 +587,16 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 
 
 # Function name, followed by args and kwargs.
-RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
+class RecordedEvent(NamedTuple):
+    name: str
+    args: list[object]
+    kwargs: dict[str, object]
+
+    def __repr__(self) -> str:
+        return repr((self.name, self.args, self.kwargs))
+
+
+RecordedEventsType = list[RecordedEvent]
 
 
 class TritonTemplateKernel(TritonKernel):
@@ -551,7 +633,7 @@ class TritonTemplateKernel(TritonKernel):
         workspace_arg: WorkspaceArg | None = None,
         prologue_loads_all_inputs=False,
         hint_override: int | None = None,
-        triton_meta: dict[str, object] | None = None,
+        triton_meta: TritonMeta | None = None,
         always_freeze_layout: bool = False,
         index_dtype_override: str | None = None,
     ) -> None:
@@ -625,7 +707,9 @@ class TritonTemplateKernel(TritonKernel):
         # pyrefly: ignore [invalid-type-var]
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
-        self.triton_meta: dict[str, object] | None = triton_meta
+        self.triton_meta: dict[str, Any] | None = cast(
+            dict[str, Any] | None, triton_meta
+        )
         self._index_dtype_override = index_dtype_override
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: list[ir.ComputedBuffer] | None = subgraphs
@@ -721,7 +805,9 @@ class TritonTemplateKernel(TritonKernel):
                 post_state = self.input_dependent_preserved_state()
                 if pre_state != post_state:
                     assert self.cached_replay_events is not None
-                    self.cached_replay_events.append((fn.__name__, [*args], {**kwargs}))
+                    self.cached_replay_events.append(
+                        RecordedEvent(fn.__name__, [*args], {**kwargs})
+                    )
                 return result
 
             return wrapper
@@ -729,8 +815,8 @@ class TritonTemplateKernel(TritonKernel):
         return decorator
 
     def replay_cached_events(self, events: RecordedEventsType) -> None:
-        for f, args, kwargs in events:
-            getattr(self, f)(*args, **kwargs)
+        for event in events:
+            getattr(self, event.name)(*event.args, **event.kwargs)
 
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
@@ -878,7 +964,7 @@ class TritonTemplateKernel(TritonKernel):
             return "@triton.jit"
 
         argdefs, _, signature, _ = self.args.python_argdefs()
-        triton_meta: dict[str, Any] = {
+        triton_meta: TritonMeta = {
             "signature": signature_to_meta(
                 signature,
                 size_dtype=self.index_dtype,
@@ -903,18 +989,18 @@ class TritonTemplateKernel(TritonKernel):
 
         for k in tlx_only_cuda_options():
             if v := self.meta.get(k, None):
-                triton_meta[k] = v
+                cast(dict[str, object], triton_meta)[k] = v
 
         if self.triton_meta is None:
-            self.triton_meta = triton_meta
+            self.triton_meta = cast(dict[str, Any], triton_meta)
         else:
             self.triton_meta.update(triton_meta)
 
-        inductor_meta = {
+        inductor_meta: InductorMeta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
-            **self.inductor_meta_common(),
-            **FixedGrid.setup_grid_as_args(),
         }
+        inductor_meta.update(cast(InductorMeta, self.inductor_meta_common()))
+        inductor_meta.update(cast(InductorMeta, FixedGrid.setup_grid_as_args()))
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
@@ -942,7 +1028,7 @@ class TritonTemplateKernel(TritonKernel):
                 template_args += f"""
                     {k}={v},
                 """
-                self.triton_meta[k] = v
+                cast(dict[str, object], self.triton_meta)[k] = v
 
         return f"""
             @triton_heuristics.template(
@@ -2414,13 +2500,13 @@ class GenerateAndLoadResult(NamedTuple):
     input_call_args: tuple[str, ...]
     prologue_supported_inputs: OrderedSet[str]
     kernel_args_sizevars_keys: tuple[sympy.Expr, ...]
-    kernel_options: dict[str, Any]
+    kernel_options: TritonTemplateKernelOptions
 
 
 class GeneratedCodeCacheEntry(NamedTuple):
     code: str
     extra: str
-    events: list[Any]
+    events: RecordedEventsType
 
 
 class GeneratedCodeCache:
@@ -2459,7 +2545,7 @@ class GeneratedCodeCache:
         num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
         hint_override: int | None = None,
-        triton_meta: dict[str, Any] | None = None,
+        triton_meta: TritonMeta | None = None,
     ) -> str | None:
         def layout_key(layout: ir.Layout) -> str:
             assert not isinstance(layout, ir.FlexibleLayout)
@@ -2534,7 +2620,7 @@ class GeneratedCodeCache:
         cache_key: str | None,
         code: str,
         extra: str,
-        events: list[Any],
+        events: RecordedEventsType,
     ) -> None:
         if cache_key is None:
             return
@@ -2635,7 +2721,7 @@ class TritonTemplate(KernelTemplate):
         tma_store: bool = False,
         tma_load_for_template_epilogue: bool = False,
         transpose_discontiguous_tensor_descriptors_override: bool | None = None,
-        triton_meta: dict[str, Any] | None = None,
+        triton_meta: TritonMeta | None = None,
     ) -> GenerateAndLoadResult | None:
         """Generate the python code and load it into the current process"""
         caching_enabled = (
@@ -2688,7 +2774,7 @@ class TritonTemplate(KernelTemplate):
         defines.write(f"INDEX_DTYPE : tl.constexpr = {index_dtype}\n")
         defines = defines.getvalue()
 
-        kernel_options = {
+        kernel_options: TritonTemplateKernelOptions = {
             "input_nodes": input_nodes,
             "defines": defines,
             "num_stages": num_stages,
@@ -2846,7 +2932,7 @@ class TritonTemplate(KernelTemplate):
         tma_store: bool = False,
         tma_load_for_template_epilogue: bool = False,
         transpose_discontiguous_tensor_descriptors_override: bool | None = None,
-        triton_meta: dict[str, Any] | None = None,
+        triton_meta: TritonMeta | None = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
