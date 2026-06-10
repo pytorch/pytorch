@@ -1310,7 +1310,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
                 if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
-                    if self.source:
+                    if (
+                        self.source
+                        and not torch._dynamo.config.skip_nnmodule_hook_guards
+                    ):
                         hooks_source = AttrSource(self.source, name)
                         install_guard(
                             hooks_source.make_guard(

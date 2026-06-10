@@ -1213,6 +1213,43 @@ class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
         with install_guard_manager_testing_hook(hook):
             opt_fn(torch.randn(4, 4))
 
+    def test_skips_empty_nn_module_hook_guards_during_build(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class Nested(torch.nn.Module):
+            def __init__(self, depth):
+                super().__init__()
+                self.child = Nested(depth - 1) if depth else Leaf()
+
+            def forward(self, x):
+                return self.child(x)
+
+        empty_hook_guard_calls = 0
+        orig_empty_hook_guard = (
+            torch._dynamo.guards.GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
+        )
+
+        def counted_empty_hook_guard(builder, guard):
+            nonlocal empty_hook_guard_calls
+            empty_hook_guard_calls += 1
+            return orig_empty_hook_guard(builder, guard)
+
+        with (
+            torch._dynamo.config.patch(skip_nnmodule_hook_guards=True),
+            mock.patch.object(
+                torch._dynamo.guards.GuardBuilder,
+                "EMPTY_NN_MODULE_HOOKS_DICT",
+                counted_empty_hook_guard,
+            ),
+        ):
+            mod = Nested(4)
+            opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+            opt_mod(torch.randn(4, 4))
+
+        self.assertEqual(empty_hook_guard_calls, 0)
+
 
 class RecursiveDictTagTests(torch._dynamo.test_case.TestCase):
     def setUp(self):

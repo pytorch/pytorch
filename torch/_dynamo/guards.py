@@ -4760,6 +4760,12 @@ class CheckFunctionManager:
 
         for guard in sorted_guards:
             if (
+                config.skip_nnmodule_hook_guards
+                and guard.inner_create_fn() is GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
+            ):
+                continue
+
+            if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
                 # Default func args must be guarded on.
