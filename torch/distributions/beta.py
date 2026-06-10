@@ -28,6 +28,7 @@ class Beta(ExponentialFamily):
             (often referred to as alpha)
         concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
+        generator (torch.Generator, optional): a pseudorandom number generator for sampling
     """
 
     # pyrefly: ignore [bad-override]
@@ -43,6 +44,7 @@ class Beta(ExponentialFamily):
         concentration1: Tensor | float,
         concentration0: Tensor | float,
         validate_args: bool | None = None,
+        generator: torch.Generator | None = None,
     ) -> None:
         if isinstance(concentration1, _Number) and isinstance(concentration0, _Number):
             concentration1_concentration0 = torch.tensor(
@@ -56,7 +58,9 @@ class Beta(ExponentialFamily):
                 [concentration1, concentration0], -1
             )
         self._dirichlet = Dirichlet(
-            concentration1_concentration0, validate_args=validate_args
+            concentration1_concentration0,
+            validate_args=validate_args,
+            generator=generator,
         )
         super().__init__(self._dirichlet._batch_shape, validate_args=validate_args)
 

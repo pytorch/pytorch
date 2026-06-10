@@ -22,8 +22,8 @@ def _Dirichlet_backward(x, concentration, grad_output):
 class _Dirichlet(Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def forward(ctx, concentration):
-        x = torch._sample_dirichlet(concentration)
+    def forward(ctx, concentration, generator=None):
+        x = torch._sample_dirichlet(concentration, generator)
         ctx.save_for_backward(x, concentration)
         return x
 
@@ -32,7 +32,7 @@ class _Dirichlet(Function):
     # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         x, concentration = ctx.saved_tensors
-        return _Dirichlet_backward(x, concentration, grad_output)
+        return _Dirichlet_backward(x, concentration, grad_output), None
 
 
 class Dirichlet(ExponentialFamily):
@@ -49,6 +49,7 @@ class Dirichlet(ExponentialFamily):
     Args:
         concentration (Tensor): concentration parameter of the distribution
             (often referred to as alpha)
+        generator (torch.Generator, optional): a pseudorandom number generator for sampling
     """
 
     # pyrefly: ignore [bad-override]
@@ -62,12 +63,14 @@ class Dirichlet(ExponentialFamily):
         self,
         concentration: Tensor,
         validate_args: bool | None = None,
+        generator: torch.Generator | None = None,
     ) -> None:
         if concentration.dim() < 1:
             raise ValueError(
                 "`concentration` parameter must be at least one-dimensional."
             )
         self.concentration = concentration
+        self.generator = generator
         batch_shape, event_shape = concentration.shape[:-1], concentration.shape[-1:]
         # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
@@ -76,6 +79,7 @@ class Dirichlet(ExponentialFamily):
         new = self._get_checked_instance(Dirichlet, _instance)
         batch_shape = torch.Size(batch_shape)
         new.concentration = self.concentration.expand(batch_shape + self.event_shape)
+        new.generator = self.generator
         super(Dirichlet, new).__init__(
             batch_shape, self.event_shape, validate_args=False
         )
@@ -85,7 +89,7 @@ class Dirichlet(ExponentialFamily):
     def rsample(self, sample_shape: _size = ()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         concentration = self.concentration.expand(shape)
-        return _Dirichlet.apply(concentration)
+        return _Dirichlet.apply(concentration, self.generator)
 
     def log_prob(self, value):
         if self._validate_args:
