@@ -2779,14 +2779,15 @@ def compile_fx(
                     compile_region_name=compile_region_name,
                 )
 
-    return _maybe_wrap_and_compile_fx_main(
-        model_,
-        example_inputs_,
-        inner_compile,
-        ignore_shape_env,
-        get_decomp_fn=get_decomp_fn,
-        compile_region_name=compile_region_name,
-    )
+    with V.set_real_inputs(example_inputs_):
+        return _maybe_wrap_and_compile_fx_main(
+            model_,
+            example_inputs_,
+            inner_compile,
+            ignore_shape_env,
+            get_decomp_fn=get_decomp_fn,
+            compile_region_name=compile_region_name,
+        )
 
 
 def _extract_inputs_from_exported_gm(

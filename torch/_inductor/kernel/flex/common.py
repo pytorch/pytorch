@@ -11,6 +11,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map, tree_map_only
 
@@ -355,17 +356,53 @@ def create_num_blocks_fake_generator(sparse_indices):
     that we are computing 0 blocks for each row, which would provide bogus
     autotuning results.
 
-    In this case, we choose to use min(16, max_block) blocks, because I
-    (Horace) think it'll probably result in pretty representative performance.
-    If it's too short then prefetching won't help. If it's too long then
-    autotuning will take longer for no good reason.
+    When the real BlockMask counts are available, use them for autotuning so
+    partial and full block counts keep their runtime distribution. Otherwise,
+    use the index tensor width as a conservative fallback so benchmarking still
+    does work.
     """
+
+    def get_real_num_blocks(x) -> torch.Tensor | None:
+        name = x.get_name()
+        if name in V.graph.constants and not isinstance(
+            V.graph.constants[name], FakeTensor
+        ):
+            return V.graph.constants[name]
+
+        graph_input_names = V.graph.graph_input_names
+        if name not in graph_input_names:
+            return None
+
+        idx = list(graph_input_names).index(name)
+        input_sources: tuple[Any, ...] = (
+            V.real_inputs,
+            V.graph.example_inputs,
+        )
+        for input_source in input_sources:
+            if not isinstance(input_source, Sequence):
+                continue
+            if (
+                idx < len(input_source)
+                and isinstance(input_source[idx], torch.Tensor)
+                and not isinstance(input_source[idx], FakeTensor)
+            ):
+                return input_source[idx]
+        return None
 
     def create_num_blocks_fake(x) -> torch.Tensor:
         num_blocks_for_autotuning = V.graph.sizevars.optimization_hint(
             sparse_indices.shape[-1]
         )
         size = V.graph.sizevars.optimization_hints(x.get_size())
+        real_num_blocks = get_real_num_blocks(x)
+        if real_num_blocks is not None:
+            return (
+                real_num_blocks.detach()
+                .to(device=x.get_device(), dtype=x.get_dtype())
+                .clamp(max=num_blocks_for_autotuning)
+                .contiguous()
+            )
+
         return torch.full(
             size,
             num_blocks_for_autotuning,

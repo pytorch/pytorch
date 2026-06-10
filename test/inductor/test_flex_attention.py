@@ -3614,6 +3614,130 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @skip_on_mps
+    def test_num_blocks_fake_generator_uses_real_block_mask_counts(self, device):
+        from torch._inductor.kernel.flex.common import create_num_blocks_fake_generator
+
+        def create_mock_node(name, shape):
+            node = mock.MagicMock()
+            node.get_name.return_value = name
+            node.get_size.return_value = list(shape)
+            node.get_dtype.return_value = torch.int32
+            node.get_device.return_value = torch.device(device)
+            return node
+
+        Q_LEN = 512
+        KV_LEN = 1664
+        offset = KV_LEN - Q_LEN
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= (kv_idx - offset)
+
+        block_mask = create_block_mask(causal_mask, 1, 1, Q_LEN, KV_LEN, device=device)
+
+        with patch("torch._inductor.kernel.flex.common.V") as mock_V:
+            mock_V.graph.sizevars.optimization_hint.side_effect = lambda x: int(x)
+            mock_V.graph.sizevars.optimization_hints.side_effect = lambda xs: [
+                int(x) for x in xs
+            ]
+            mock_V.graph.constants = {}
+            mock_V.graph.graph_input_names = [
+                "kv_num_blocks",
+                "full_kv_num_blocks",
+            ]
+            mock_V.graph.example_inputs = [
+                block_mask.kv_num_blocks,
+                block_mask.full_kv_num_blocks,
+            ]
+            mock_V.real_inputs = ()
+
+            fake_partial = create_num_blocks_fake_generator(block_mask.kv_indices)(
+                create_mock_node("kv_num_blocks", block_mask.kv_num_blocks.shape)
+            )
+            fake_full = create_num_blocks_fake_generator(block_mask.full_kv_indices)(
+                create_mock_node(
+                    "full_kv_num_blocks", block_mask.full_kv_num_blocks.shape
+                )
+            )
+
+        expected_partial = block_mask.kv_num_blocks.cpu()
+        expected_full = block_mask.full_kv_num_blocks.cpu()
+        self.assertEqual(fake_partial.cpu(), expected_partial)
+        self.assertEqual(fake_full.cpu(), expected_full)
+        self.assertEqual(
+            (fake_partial + fake_full).cpu(), expected_partial + expected_full
+        )
+        self.assertNotEqual(
+            int((fake_partial + fake_full).max().item()),
+            block_mask.kv_indices.shape[-1] + block_mask.full_kv_indices.shape[-1],
+        )
+
+    @supported_platform
+    @skip_on_mps
+    def test_num_blocks_fake_generator_preserves_non_causal_counts(self, device):
+        from torch._inductor.kernel.flex.common import create_num_blocks_fake_generator
+
+        sparse_indices = torch.empty(
+            (1, 1, 4, 4), dtype=torch.int32, device=torch.device(device)
+        )
+        real_counts = torch.tensor([[[0, 2, 2, 4]]], dtype=torch.int32, device=device)
+        mock_node = mock.MagicMock()
+        mock_node.get_name.return_value = "kv_num_blocks"
+        mock_node.get_size.return_value = [1, 1, 4]
+        mock_node.get_dtype.return_value = torch.int32
+        mock_node.get_device.return_value = torch.device(device)
+
+        with patch("torch._inductor.kernel.flex.common.V") as mock_V:
+            mock_V.graph.sizevars.optimization_hint.side_effect = lambda x: int(x)
+            mock_V.graph.sizevars.optimization_hints.side_effect = lambda xs: [
+                int(x) for x in xs
+            ]
+            mock_V.graph.constants = {}
+            mock_V.graph.graph_input_names = ["kv_num_blocks"]
+            mock_V.graph.example_inputs = [real_counts]
+            mock_V.real_inputs = ()
+
+            fake_counts = create_num_blocks_fake_generator(sparse_indices)(mock_node)
+
+        self.assertEqual(fake_counts.cpu(), real_counts.cpu())
+        self.assertGreater(int(fake_counts.max().item()), 1)
+
+    @supported_platform
+    @skip_on_mps
+    def test_num_blocks_fake_generator_skips_fake_example_inputs(self, device):
+        from torch._inductor.kernel.flex.common import create_num_blocks_fake_generator
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        sparse_indices = torch.empty(
+            (1, 1, 4, 4), dtype=torch.int32, device=torch.device(device)
+        )
+        real_counts = torch.tensor([[[0, 2, 2, 4]]], dtype=torch.int32, device=device)
+        mock_node = mock.MagicMock()
+        mock_node.get_name.return_value = "kv_num_blocks"
+        mock_node.get_size.return_value = [1, 1, 4]
+        mock_node.get_dtype.return_value = torch.int32
+        mock_node.get_device.return_value = torch.device(device)
+
+        fake_mode = FakeTensorMode()
+        fake_counts = fake_mode.from_tensor(real_counts)
+
+        with patch("torch._inductor.kernel.flex.common.V") as mock_V:
+            mock_V.graph.sizevars.optimization_hint.side_effect = lambda x: int(x)
+            mock_V.graph.sizevars.optimization_hints.side_effect = lambda xs: [
+                int(x) for x in xs
+            ]
+            mock_V.graph.constants = {}
+            mock_V.graph.graph_input_names = ["kv_num_blocks"]
+            mock_V.graph.example_inputs = [fake_counts]
+            mock_V.real_inputs = ()
+
+            generated_counts = create_num_blocks_fake_generator(sparse_indices)(
+                mock_node
+            )
+
+        self.assertEqual(generated_counts, torch.full_like(real_counts, 4))
+
+    @supported_platform
     @skip("TODO: Figure out why this is erroring")
     @patch.object(torch._inductor.config, "max_autotune", True)
     @skip_on_mps  # uses Triton max_autotune
