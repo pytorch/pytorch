@@ -1112,6 +1112,31 @@ class GraphModule(torch.nn.Module):
         )
 
     @skipIfCrossRef
+    def test_tensor_backward_preserves_existing_grad_reference(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            loss = mod(x).sum()
+            loss.backward(inputs=[mod.weight])
+            return loss.detach()
+
+        mod.weight.grad = torch.ones_like(mod.weight)
+        saved_grad = mod.weight.grad
+        eager_result = fn(x)
+        eager_grad = mod.weight.grad.clone()
+        self.assertIs(mod.weight.grad, saved_grad)
+
+        mod.weight.grad = torch.ones_like(mod.weight)
+        saved_grad = mod.weight.grad
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_result = compiled_fn(x)
+
+        self.assertEqual(eager_result, compiled_result)
+        self.assertEqual(mod.weight.grad, eager_grad)
+        self.assertIs(mod.weight.grad, saved_grad)
+
+    @skipIfCrossRef
     def test_backward_on_no_grad_tensor(self):
         """Test that backward on tensor without requires_grad raises error."""
         x = torch.ones(5, 5, requires_grad=True)

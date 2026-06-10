@@ -1,9 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/Config.h>
 
 #include <ATen/native/mkldnn/Matmul.h>
@@ -152,7 +150,7 @@ void invalid_scaling_config(
     exception_ss << " and scale_b=None";
   }
 
-  TORCH_CHECK_VALUE(false, exception_ss.str());
+  TORCH_CHECK_VALUE(false, std::move(exception_ss).str());
 }
 
 /*
