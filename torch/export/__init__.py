@@ -133,7 +133,13 @@ def export(
          shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`).
          This is a newer unbacked unified API across compile, pre-compile,
          export, etc., and is the recommended way to specify dynamic
-         shapes for export going forward.
+         shapes for export going forward. It is the same spec API exposed
+         via ``shapes_spec=`` in :func:`torch.compile`.
+
+         The keys of ``ParamsSpec`` are **parameter names of the callable
+         being traced** (for an ``nn.Module``, the parameters of
+         ``forward``); keyword and ``**kwargs`` arguments are addressed by
+         name too.
 
          Key properties (see :mod:`torch.fx.experimental.dynamic_spec` for
          full details):
@@ -141,8 +147,10 @@ def export(
          * **Unbacked-only.** Dims / scalars marked dynamic become unbacked
            SymInts (``u`` symbols) and are never specialized (including no
            0/1 specialization).
-         * **Assumptions and derived expressions.** You may attach
-           assumptions and expressions derived from the spec's symbols.
+         * **Assumptions and derived expressions.** A dim can be an
+           expression over the spec's symbols (e.g. ``TensorSpec([B * 2,
+           ...])``), and you can pass relational ``assumptions`` between
+           symbols (e.g. ``[B % 2 == 0]``) that export validates.
          * **Export-time soundness.** The exported graph is guaranteed valid
            for every assumption provided, otherwise export fails. (The legacy
            ``Dim.DYNAMIC`` / ``Dim.AUTO`` mode may silently specialize a

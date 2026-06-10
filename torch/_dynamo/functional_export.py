@@ -990,14 +990,17 @@ def _flatten_shapes_spec(
     #                                 (params_spec_varkw[name])
     # Python guarantees the call layout is [positionals][kwargs], so we
     # walk `args` first (regions 1 + 2), then `kwargs.items()` (regions
-    # 3 + 4, same loop). `varargs_idx` is the index of `*args` in the
-    # signature (or len(pos_params) if none); it splits args[:varargs_idx]
-    # (named) from args[varargs_idx:] (varargs).
+    # 3 + 4, same loop).
     #
     # Example: `def forward(self, x, y, *args, **kwargs)` called as
     # `mod(T1, T2, T3, T4, foo=T5, bar=T6)` → varargs_idx=2;
     # args[:2]=(T1,T2) named; args[2:]=(T3,T4) varargs; kwargs={foo,bar}.
-    varargs_idx = len(pos_params)  # default: no `*args` in the signature
+
+    # `varargs_idx` is how many positional params come before `*args` in the
+    # signature: the first `varargs_idx` of the caller's positional `args`
+    # bind to those named params, and any extras spill into `*args`. It is
+    # len(pos_params) when there is no `*args`.
+    varargs_idx = len(pos_params)
     for i, p in enumerate(pos_params):
         if p.kind is inspect.Parameter.VAR_POSITIONAL:
             varargs_idx = i
