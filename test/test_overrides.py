@@ -15,7 +15,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     TEST_WITH_CROSSREF,
-    TEST_WITH_TORCHDYNAMO,
     skipIfTorchDynamo,
 )
 from torch.testing._internal.common_subclass import RedispatchTensor
@@ -1817,7 +1816,6 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertFalse(called)
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/182318")
     def test_disable_enable_subclass(self):
         class A(torch.Tensor):
             pass

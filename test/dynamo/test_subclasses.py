@@ -696,6 +696,20 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         res, _ = fn(input)
         self.assertFalse(res)
 
+    def test_enable_torch_function_no_tls_leak(self):
+        @torch.compile(backend="eager")
+        def fn():
+            with torch._C.DisableTorchFunctionSubclass():
+                g = torch._C._EnableTorchFunction()
+                del g
+
+        fn()
+        self.assertTrue(torch._C._is_torch_function_enabled())
+        self.assertEqual(
+            torch._C._get_torch_function_state(),
+            torch._C._TorchFunctionState.ENABLED,
+        )
+
     def test_disable_all_torch_function(self):
         @torch.compile(backend="eager")
         def fn(x):

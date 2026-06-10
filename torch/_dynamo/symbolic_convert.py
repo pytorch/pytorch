@@ -1144,10 +1144,34 @@ def break_graph_if_unsupported(
             if self.parent is not None:
                 self._maybe_replace_warnings_warn_on_stack(inst)
 
+            resume_at_call = False
+            if inst.opname in ("CALL", "CALL_FUNCTION") and inst.arg == 0:
+                callable_depth = get_call_callable_depth(inst.opname, 0)
+                resume_at_call = (
+                    len(self.stack) >= callable_depth
+                    and getattr(self.stack[-callable_depth], "value", None)
+                    is torch._C._EnableTorchFunction
+                )
+
             log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
-                self, reason=reason, stack_pops=int(push) - stack_effect
+                self,
+                reason=reason,
+                # _EnableTorchFunction is an RAII guard: constructing it in
+                # the outer generated frame gives it the wrong lifetime. Keep
+                # the callable as a resume input and let the resume bytecode
+                # execute CALL with its normal local lifetime.
+                stack_pops=0 if resume_at_call else int(push) - stack_effect,
             )
+            if resume_at_call:
+                self.output.add_output_instructions(
+                    self.create_call_resume_at(
+                        inst,
+                        all_stack_locals_metadata,
+                        skip_leaf_resume=True,
+                    )
+                )
+                return
             cg = PyCodegen(self.output.root_tx)
             cleanup: list[Instruction] = []
             _reconstruct_block_stack(self, cg, cleanup)
@@ -3467,11 +3491,15 @@ class InstructionTranslatorBase(
         self,
         inst: Instruction,
         all_stack_locals_metadata: list[StackLocalsMetadata],
+        *,
+        skip_leaf_resume: bool = False,
     ) -> list[Instruction]:
         """
         Codegen all resume function(s) from the frame stack starting at `self`, call them,
         and return the result.
-        Assumes that the unsupported instruction has already been run.
+        By default, assumes that the unsupported instruction has already been run.
+        If skip_leaf_resume is true, the leaf resume function starts at `inst` and
+        is marked eager-only.
 
         Expects the TOS to be:
             [
@@ -3488,6 +3516,9 @@ class InstructionTranslatorBase(
             - inst: the instruction of the current (deepest) frame to resume at
             - all_stack_locals_metadata: metadata returned from OutputGraph.compile_subgraph - contains
                 metadata such as local names, NULL positions, stack length, etc.
+            - skip_leaf_resume: mark the deepest generated resume function as
+                eager-only, for graph breaks that must execute the unsupported
+                instruction in the resume frame itself.
         """
 
         self.instruction_pointer = None
@@ -3625,6 +3656,10 @@ class InstructionTranslatorBase(
                 cur_tx is self,
                 True,
             )
+            if skip_leaf_resume and i == 0:
+                from .eval_frame import skip_code
+
+                skip_code(resume_code)
             resume_codes.append(resume_code)
             resume_names.append(resume_name)
 
@@ -6141,9 +6176,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self,
         inst: Instruction,
         all_stack_locals_metadata: list[StackLocalsMetadata],
+        *,
+        skip_leaf_resume: bool = False,
     ) -> list[Instruction]:
         if config.nested_graph_breaks:
-            return super().create_call_resume_at(inst, all_stack_locals_metadata)
+            return super().create_call_resume_at(
+                inst,
+                all_stack_locals_metadata,
+                skip_leaf_resume=skip_leaf_resume,
+            )
         unimplemented(
             gb_type="Graph break in inlined function",
             context="",
