@@ -5069,9 +5069,6 @@ class TestCudaAllocator(TestCase):
         self.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
 
     @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179745"
-    )
-    @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     def test_memory_snapshot(self):
@@ -5286,9 +5283,6 @@ class TestCudaAllocator(TestCase):
             disarm()
 
     @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179744"
-    )
-    @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     @requiresCppContext
@@ -5413,6 +5407,9 @@ class TestCudaAllocator(TestCase):
             pass
         finally:
             torch.cuda.memory._record_memory_history(None)
+            # This test requires to run gc.collec() to fix other memory tests
+            torch.cuda.synchronize()
+            gc.collect()
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
@@ -5452,9 +5449,6 @@ class TestCudaAllocator(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179798"
-    )
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
