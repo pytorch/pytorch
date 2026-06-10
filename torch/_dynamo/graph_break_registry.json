@@ -4762,6 +4762,16 @@
       ]
     }
   ],
+  "GB4399": [
+    {
+      "Gb_type": "untraceable user-defined __str__",
+      "Context": "Could not trace __str__ override for {type(self.value).__name__}",
+      "Explanation": "Dynamo could not safely trace this user-defined __str__ override.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB1297": [
     {
       "Gb_type": "Reconstruction failure (self-referential)",

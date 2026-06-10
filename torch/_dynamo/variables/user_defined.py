@@ -1874,6 +1874,69 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 skip_frame=True,
             )
 
+    def str_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+    ) -> VariableTracker:
+        from .object_protocol import generic_repr
+
+        type_attr = self.lookup_class_mro_attr("__str__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            return super().str_impl(tx)
+        if type_attr is None:
+            raise_type_error(tx, "'NoneType' object is not callable")
+
+        method = self._maybe_get_baseclass_method("__str__")
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.str_impl(tx)
+
+        if type(self.value).__str__ is object.__str__:
+            return generic_repr(tx, self)
+
+        if (
+            is_wrapper_or_member_descriptor(type_attr)
+            or torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
+            or is_cython_function(type_attr)
+        ):
+            try:
+                inspect.getattr_static(type(type_attr), "__get__")(
+                    type_attr, self.value, type(self.value)
+                )
+            except (AttributeError, TypeError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            else:
+                unimplemented(
+                    gb_type="untraceable user-defined __str__",
+                    context=f"Could not trace __str__ override for {type(self.value).__name__}",
+                    explanation="Dynamo could not safely trace this user-defined __str__ override.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                )
+
+        source = self.source and self.get_source_by_walking_mro(tx, "__str__")
+        method_var = self.resolve_type_attr(tx, "__str__", type_attr, source)
+        if not isinstance(method_var, variables.GetAttrVariable):
+            return method_var.call_function(tx, [], {})
+
+        try:
+            inspect.getattr_static(type(type_attr), "__get__")(
+                type_attr, self.value, type(self.value)
+            )
+        except (AttributeError, TypeError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        else:
+            unimplemented(
+                gb_type="untraceable user-defined __str__",
+                context=f"Could not trace __str__ override for {type(self.value).__name__}",
+                explanation="Dynamo could not safely trace this user-defined __str__ override.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+            )
+
     def nb_index_impl(
         self,
         tx: "InstructionTranslatorBase",
