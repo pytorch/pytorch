@@ -141,6 +141,145 @@ def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
     preserve_node_ordering(graph, additional_deps_map)
 
 
+def _normalize_dim(dim: int, ndim: int) -> int | None:
+    if dim < 0:
+        dim += ndim
+    if not 0 <= dim < ndim:
+        return None
+    return dim
+
+
+def _dtype_kwargs(dtype: Any | None) -> dict[str, Any]:
+    return {} if dtype is None else {"dtype": dtype}
+
+
+def _reassociate_cat_under_reduction(
+    graph: torch.fx.Graph,
+    reduction_op: torch._ops.OpOverload,
+    counter_name: str,
+) -> None:
+    """
+    Rewrite reduction(cat(xs, dim=C), dims) into
+    cat(reduction(x, dims), dim=C) when C is not reduced.  This lets lowering
+    avoid a masked reduction over cat arms.
+    """
+    for reduction_node in list(
+        graph.find_nodes(op="call_function", target=reduction_op)
+    ):
+        cat_node = get_arg_value(reduction_node, 0, "input")
+        if not (
+            isinstance(cat_node, torch.fx.Node)
+            and cat_node.op == "call_function"
+            and cat_node.target is aten.cat.default
+            and len(cat_node.users) == 1
+        ):
+            continue
+
+        tensors = get_arg_value(cat_node, 0, "tensors")
+        cat_dim = get_arg_value(cat_node, 1, "dim")
+        reduce_dims = get_arg_value(reduction_node, 1, "dim")
+        keepdim = get_arg_value(reduction_node, 2, "keepdim")
+        dtype = get_arg_value(reduction_node, 3, "dtype")
+
+        if cat_dim is None:
+            cat_dim = 0
+        if keepdim is None:
+            keepdim = False
+        if not (
+            isinstance(tensors, (list, tuple))
+            and len(tensors) > 1
+            and isinstance(cat_dim, int)
+            and isinstance(reduce_dims, (list, tuple))
+            and len(reduce_dims) > 0
+            and all(isinstance(dim, int) for dim in reduce_dims)
+            and isinstance(keepdim, bool)
+            and (dtype is None or isinstance(dtype, torch.dtype))
+        ):
+            continue
+        if not all(isinstance(tensor, torch.fx.Node) for tensor in tensors):
+            continue
+
+        cat_val = cat_node.meta.get("val")
+        reduction_val = reduction_node.meta.get("val")
+        if not isinstance(cat_val, torch.Tensor) or not isinstance(
+            reduction_val, torch.Tensor
+        ):
+            continue
+        if not is_gpu(cat_val.device.type):
+            continue
+
+        ndim = cat_val.dim()
+        normalized_cat_dim = _normalize_dim(cat_dim, ndim)
+        normalized_reduce_dims = [_normalize_dim(dim, ndim) for dim in reduce_dims]
+        if (
+            normalized_cat_dim is None
+            or any(dim is None for dim in normalized_reduce_dims)
+            or len(OrderedSet(normalized_reduce_dims)) != len(normalized_reduce_dims)
+            or normalized_cat_dim in normalized_reduce_dims
+        ):
+            continue
+        normalized_reduce_dims = [
+            dim for dim in normalized_reduce_dims if dim is not None
+        ]
+
+        if not keepdim:
+            new_cat_dim = normalized_cat_dim - sum(
+                dim < normalized_cat_dim for dim in normalized_reduce_dims
+            )
+        else:
+            new_cat_dim = normalized_cat_dim
+
+        tensor_vals = []
+        for tensor in tensors:
+            tensor_val = tensor.meta.get("val")
+            if not isinstance(tensor_val, torch.Tensor) or tensor_val.dim() != ndim:
+                break
+            if any(statically_known_true(size == 0) for size in tensor_val.shape):
+                break
+            tensor_vals.append(tensor_val)
+        if len(tensor_vals) != len(tensors):
+            continue
+
+        new_reduction_nodes = []
+        with graph.inserting_before(reduction_node):
+            for tensor, tensor_val in zip(tensors, tensor_vals):
+                new_reduction = graph.call_function(
+                    reduction_op,
+                    args=(tensor, normalized_reduce_dims, keepdim),
+                    kwargs=_dtype_kwargs(dtype),
+                )
+                new_reduction.meta["val"] = reduction_op(
+                    tensor_val,
+                    normalized_reduce_dims,
+                    keepdim,
+                    **_dtype_kwargs(dtype),
+                )
+                new_reduction_nodes.append(new_reduction)
+            new_cat = graph.call_function(
+                aten.cat.default,
+                args=(new_reduction_nodes,),
+                kwargs={"dim": new_cat_dim},
+            )
+            new_cat.meta.update(reduction_node.meta)
+            reduction_node.replace_all_uses_with(new_cat)
+            graph.erase_node(reduction_node)
+            if len(cat_node.users) == 0:
+                graph.erase_node(cat_node)
+            counters["inductor"][counter_name] += 1
+
+
+def _reassociate_cat_under_sum(graph: torch.fx.Graph) -> None:
+    _reassociate_cat_under_reduction(
+        graph, aten.sum.dim_IntList, "cat_under_sum_reassociation"
+    )
+
+
+def _reassociate_cat_under_mean(graph: torch.fx.Graph) -> None:
+    _reassociate_cat_under_reduction(
+        graph, aten.mean.dim, "cat_under_mean_reassociation"
+    )
+
+
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
@@ -204,6 +343,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
         GraphTransformObserver(gm, "remove_assert_ops").apply_graph_pass(
             remove_assert_ops
+        )
+        GraphTransformObserver(gm, "reassociate_cat_under_sum").apply_graph_pass(
+            _reassociate_cat_under_sum
+        )
+        GraphTransformObserver(gm, "reassociate_cat_under_mean").apply_graph_pass(
+            _reassociate_cat_under_mean
         )
         for i, patterns in enumerate(pass_patterns):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(

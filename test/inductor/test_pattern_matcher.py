@@ -568,6 +568,97 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(compiled_fn(x), test_fn(x))
         self.assertEqual(counters["inductor"]["partial_reduction_reuse"], 1)
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
+    def test_cat_under_sum_reassociation(self):
+        def rewritten(a, b):
+            s = torch.sigmoid(a[:, 2:, :])
+            return torch.cat([s * b, (1.0 - s) * s * a[:, :2, :] * b], dim=1).sum(
+                dim=(0, 2)
+            )
+
+        def rewritten_keepdim_dtype(a, b, c):
+            s = torch.sigmoid(a[:, 2:, :])
+            return torch.cat([s * b, c, (1.0 - s) * s * a[:, :2, :] * b], dim=-2).sum(
+                dim=(-3, -1), keepdim=True, dtype=torch.float64
+            )
+
+        def guarded(a, b):
+            return torch.cat([a, b], dim=1).sum(dim=(1, 2))
+
+        a = torch.randn(3, 4, 5, device=GPU_TYPE)
+        b = torch.randn(3, 2, 5, device=GPU_TYPE)
+        c = torch.randn(3, 1, 5, device=GPU_TYPE)
+
+        counters.clear()
+        actual, _ = run_and_get_code(torch.compile(rewritten), a, b)
+        torch.testing.assert_close(actual, rewritten(a, b))
+        self.assertEqual(counters["inductor"]["cat_under_sum_reassociation"], 1)
+
+        counters.clear()
+        actual, _ = run_and_get_code(torch.compile(rewritten_keepdim_dtype), a, b, c)
+        torch.testing.assert_close(
+            actual, rewritten_keepdim_dtype(a, b, c), rtol=1e-6, atol=1e-6
+        )
+        self.assertEqual(counters["inductor"]["cat_under_sum_reassociation"], 1)
+
+        counters.clear()
+        actual, _ = run_and_get_code(torch.compile(guarded), a, b)
+        torch.testing.assert_close(actual, guarded(a, b))
+        self.assertEqual(counters["inductor"]["cat_under_sum_reassociation"], 0)
+
+    @inductor_config.patch(fx_graph_remote_cache=False)
+    def test_cat_under_mean_reassociation(self):
+        def rewritten(a, b):
+            s = torch.sigmoid(a[:, 2:, :])
+            return torch.cat([s * b, (1.0 - s) * s * a[:, :2, :] * b], dim=1).mean(
+                dim=(0, 2)
+            )
+
+        def rewritten_keepdim_dtype(a, b, c):
+            s = torch.sigmoid(a[:, 2:, :])
+            return torch.cat([s * b, c, (1.0 - s) * s * a[:, :2, :] * b], dim=-2).mean(
+                dim=(-3, -1), keepdim=True, dtype=torch.float64
+            )
+
+        def guarded(a, b):
+            return torch.cat([a, b], dim=1).mean(dim=(1, 2))
+
+        a = torch.randn(3, 4, 5, device=GPU_TYPE)
+        b = torch.randn(3, 2, 5, device=GPU_TYPE)
+        c = torch.randn(3, 1, 5, device=GPU_TYPE)
+
+        counters.clear()
+        actual, _ = run_and_get_code(torch.compile(rewritten), a, b)
+        torch.testing.assert_close(actual, rewritten(a, b))
+        self.assertEqual(counters["inductor"]["cat_under_mean_reassociation"], 1)
+
+        counters.clear()
+        actual, _ = run_and_get_code(torch.compile(rewritten_keepdim_dtype), a, b, c)
+        torch.testing.assert_close(
+            actual, rewritten_keepdim_dtype(a, b, c), rtol=1e-6, atol=1e-6
+        )
+        self.assertEqual(counters["inductor"]["cat_under_mean_reassociation"], 1)
+
+        counters.clear()
+        actual, _ = run_and_get_code(torch.compile(guarded), a, b)
+        torch.testing.assert_close(actual, guarded(a, b))
+        self.assertEqual(counters["inductor"]["cat_under_mean_reassociation"], 0)
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        cat = graph.call_function(aten.cat.default, args=([x, y],), kwargs={"dim": 1})
+        mean = graph.call_function(aten.mean.dim, args=(cat, [0, -3], False))
+        graph.output(mean)
+        x.meta["val"] = a
+        y.meta["val"] = b
+        cat.meta["val"] = torch.cat([a, b], dim=1)
+        mean.meta["val"] = torch.empty(4, device=GPU_TYPE)
+
+        counters.clear()
+        torch._inductor.fx_passes.post_grad._reassociate_cat_under_mean(graph)
+        self.assertEqual(counters["inductor"]["cat_under_mean_reassociation"], 0)
+
     def test_addmm(self):
         def fn(a, b, c):
             return torch.add(a, torch.mm(b, c)), torch.mm(b, c) + a
