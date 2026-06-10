@@ -38,7 +38,6 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -1006,7 +1005,7 @@ def scan_proxy_mode(
     )
 
 
-@scan_op.py_impl(FakeTensorMode)
+@register_fake(scan_op, skip_cache=True)
 def scan_fake_tensor_mode(
     mode, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
 ):
