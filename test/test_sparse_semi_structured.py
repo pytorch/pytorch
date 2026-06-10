@@ -1669,6 +1669,129 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         sparse_result = torch.mm(A_sparse, B).to(torch.float16)
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
+    # ---- Plan cache tests ----
+    #
+    # These tests verify that cached plans produce bit-identical results
+    # to fresh plans. We compare sparse_mm outputs against each other
+
+    @training_dtypes
+    def test_cslt_plan_cache_repeated_calls_correctness(self, dtype, device):
+        """Repeated calls with the same shape must produce bit-identical
+        results (cache hit must match cache miss exactly)."""
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
+        A_compressed = torch._cslt_compress(A)
+        B = torch.rand((128, 128), device=device).to(dtype)
+
+        # First call — cache miss
+        ref = torch._cslt_sparse_mm(A_compressed, B)
+
+        # Subsequent calls — cache hits, must be identical
+        for _ in range(5):
+            result = torch._cslt_sparse_mm(A_compressed, B)
+            self.assertTrue(
+                torch.equal(result, ref),
+                "Cache hit produced different result than cache miss",
+            )
+
+    @training_dtypes
+    def test_cslt_plan_cache_different_shapes(self, dtype, device):
+        """Multiple distinct shapes should each cache independently.
+        For each shape, cache hit must match cache miss exactly."""
+        shapes = [(128, 128, 64), (256, 128, 128), (512, 256, 128)]
+        for m, k, n in shapes:
+            A = rand_sparse_semi_structured_mask(m, k, dtype=dtype)
+            A_compressed = torch._cslt_compress(A)
+            B = torch.rand((k, n), device=device).to(dtype)
+
+            # First call (cache miss) → reference
+            ref = torch._cslt_sparse_mm(A_compressed, B)
+            # Second call (cache hit) → must be identical
+            result = torch._cslt_sparse_mm(A_compressed, B)
+            self.assertTrue(
+                torch.equal(result, ref),
+                f"Cache hit differs from miss for shape ({m},{k},{n})",
+            )
+
+    @training_dtypes
+    def test_cslt_plan_cache_interleaved_shapes(self, dtype, device):
+        """Interleave calls across two shapes; every cache hit must
+        return the same result as its corresponding cache miss."""
+        shapes_data = []
+        for m, k, n in [(256, 128, 64), (512, 256, 128)]:
+            A = rand_sparse_semi_structured_mask(m, k, dtype=dtype)
+            A_compressed = torch._cslt_compress(A)
+            B = torch.rand((k, n), device=device).to(dtype)
+            # First call (cache miss) → reference
+            ref = torch._cslt_sparse_mm(A_compressed, B)
+            shapes_data.append((A_compressed, B, ref))
+
+        # Interleave: all subsequent calls are cache hits
+        for _ in range(5):
+            for A_compressed, B, ref in shapes_data:
+                result = torch._cslt_sparse_mm(A_compressed, B)
+                self.assertTrue(
+                    torch.equal(result, ref),
+                    "Interleaved cache hit differs from miss",
+                )
+
+    @training_dtypes
+    def test_cslt_plan_cache_with_bias(self, dtype, device):
+        """has_bias differentiates cache keys. Both with-bias and
+        without-bias cache hits must match their respective misses."""
+        A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
+        A_compressed = torch._cslt_compress(A)
+        B = torch.rand((128, 128), device=device).to(dtype)
+        bias = torch.rand(128, device=device).to(dtype)
+
+        # Cache miss for no-bias and with-bias entries
+        ref_no_bias = torch._cslt_sparse_mm(A_compressed, B)
+        ref_bias = torch._cslt_sparse_mm(A_compressed, B, bias=bias)
+
+        # They should differ (bias changes the result)
+        self.assertFalse(
+            torch.equal(ref_no_bias, ref_bias),
+            "With-bias and no-bias results should differ",
+        )
+
+        # Cache hits must match their respective misses exactly
+        r1 = torch._cslt_sparse_mm(A_compressed, B)
+        self.assertTrue(torch.equal(r1, ref_no_bias))
+
+        r2 = torch._cslt_sparse_mm(A_compressed, B, bias=bias)
+        self.assertTrue(torch.equal(r2, ref_bias))
+
+    def test_cslt_plan_cache_hit_message(self, device):
+        """Subsequent calls with the same shape must trigger a cache hit.
+        We capture the TORCH_WARN messages emitted by the C++ plan cache
+        and verify that a CACHE HIT is reported on the second call."""
+        import warnings
+
+        dtype = torch.float16
+        # Use a shape unlikely to collide with other tests in this suite.
+        A = rand_sparse_semi_structured_mask(256, 256, dtype=dtype)
+        A_compressed = torch._cslt_compress(A)
+        B = torch.randn((256, 128), device=device, dtype=dtype)
+
+        # First call — cache miss (primes the cache)
+        torch._cslt_sparse_mm(A_compressed, B)
+
+        # Second call — should be a cache hit; capture the warning
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            torch._cslt_sparse_mm(A_compressed, B)
+
+        cache_hit_msgs = [
+            str(w.message)
+            for w in caught
+            if "cuSPARSELt CACHE HIT" in str(w.message)
+        ]
+        self.assertGreater(
+            len(cache_hit_msgs),
+            0,
+            "Expected a '[cuSPARSELt CACHE HIT]' warning on the second call, "
+            f"but only got: {[str(w.message) for w in caught]}",
+        )
+
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8_SPARSE,
