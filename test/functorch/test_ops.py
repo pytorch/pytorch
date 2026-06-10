@@ -2378,6 +2378,7 @@ class TestOperators(TestCase):
             ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
+            tol1("native_group_norm", {torch.float32: tol(atol=5e-5, rtol=5e-6)}),
         ),
     )
     def test_vmap_autograd_grad(self, device, dtype, op):
