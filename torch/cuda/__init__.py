@@ -1368,7 +1368,10 @@ _ClearCublasWorkspaces = None
 
 
 def _clear_cublas_workspaces(device: Device = None) -> None:
-    r"""Clear cuBLAS workspaces on this thread and CUDA autograd worker threads."""
+    r"""Clear cuBLAS workspaces on this thread and CUDA autograd worker threads.
+        Note that this enables multithreaded autograd during cleanup to reach
+        worker threads.
+    """
     if not hasattr(torch._C, "_cuda_clearCublasWorkspaces"):
         return
 
@@ -1401,7 +1404,7 @@ def _clear_cublas_workspaces(device: Device = None) -> None:
         _ClearCublasWorkspaces = ClearCublasWorkspaces
 
     # This synthetic backward is internal cleanup; keep it out of compiled
-    # autograd while still routing through autograd worker threads.
+    # autograd to avoid tracing it while still routing through autograd worker threads.
     compiled_autograd = getattr(
         getattr(torch._C, "_dynamo", None), "compiled_autograd", None
     )
@@ -1421,7 +1424,7 @@ def _clear_cublas_workspaces(device: Device = None) -> None:
                 torch.autograd.set_multithreading_enabled(True),
                 torch.inference_mode(False),
                 torch.enable_grad(),
-            ):
+            ):  # Just so we have something to call backward on
                 dummy = torch.empty(
                     (), device=f"cuda:{device_index}", requires_grad=True
                 )
