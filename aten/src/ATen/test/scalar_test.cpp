@@ -191,3 +191,19 @@ TEST(TestScalar, TestFormatting) {
   ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<float>(2.0, 3.1))));
   ASSERT_EQ("4", format(Scalar(Scalar(4).toSymInt())));
 }
+
+TEST(TestScalar, TestLog) {
+  const Scalar int_scalar = 2;
+  const Scalar float_scalar = 3.0;
+  const Scalar true_scalar = true;
+  const Scalar false_scalar = false;
+  const Scalar complex_scalar = c10::complex<double>(2.3, 3.5);
+
+  ASSERT_DOUBLE_EQ(int_scalar.log().toDouble(), std::log(2.0));
+  ASSERT_DOUBLE_EQ(float_scalar.log().toDouble(), std::log(3.0));
+  ASSERT_DOUBLE_EQ(true_scalar.log().toDouble(), std::log(1.0));
+  ASSERT_TRUE(std::isinf(false_scalar.log().toDouble()));
+  ASSERT_EQ(
+      complex_scalar.log().toComplexDouble(),
+      std::log(c10::complex<double>(2.3, 3.5)));
+}
