@@ -14518,6 +14518,16 @@ if __name__ == '__main__':
             self.assertEqual(len(w), 1)
             self.assertEqual(str(w[0].message), "`parameters` is an empty generator, no gradient clipping will occur.")
 
+    # issue #133586: skip no-op .to(first_device) in _get_total_norm
+    @onlyCPU
+    @parametrize_test('norm_type', (1.0, 2.0, float('inf')))
+    def test_clip_grad_norm_skip_to_single_device(self, norm_type, device):
+        # skip-no-op-.to(): large tensors all on same device should still be correct
+        tensors = [torch.randn(4096, device=device) for _ in range(200)]
+        result = get_total_norm(tensors, norm_type=norm_type, foreach=None)
+        reference = get_total_norm(tensors, norm_type=norm_type, foreach=True)
+        self.assertEqual(result, reference, atol=1e-5, rtol=1e-5)
+
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA
     @largeTensorTest("42GB", "cuda")
