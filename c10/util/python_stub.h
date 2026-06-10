@@ -1,4 +1,2 @@
 #pragma once
-
-struct _object;
-using PyObject = _object;
+#include <torch/headeronly/util/python_stub.h>
