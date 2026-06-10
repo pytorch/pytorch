@@ -49,40 +49,6 @@ from ...utils import load_template
 SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
 
 
-def flex_kernel_options_example(kind: str) -> str:
-    match kind:
-        case "backward":
-            return (
-                "kernel_options={'bwd_BLOCK_M1': 32, 'bwd_BLOCK_N1': 32, "
-                "'bwd_BLOCK_M2': 32, 'bwd_BLOCK_N2': 32, "
-                "'bwd_num_stages': 1, 'bwd_num_warps': 4}"
-            )
-        case _:
-            return (
-                "kernel_options={'fwd_BLOCK_M': 32, 'fwd_BLOCK_N': 64, "
-                "'fwd_num_stages': 1, 'fwd_num_warps': 4}"
-            )
-
-
-def flex_kernel_tuning_options(kind: str) -> str:
-    match kind:
-        case "backward":
-            return (
-                "BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2, num_warps, and "
-                "num_stages; use the bwd_ prefix to set backward-only options"
-            )
-        case "decode":
-            return (
-                "BLOCK_M, BLOCK_N, num_warps, and num_stages; use the fwd_ "
-                "prefix to set decode-only options"
-            )
-        case _:
-            return (
-                "BLOCK_M, BLOCK_N, num_warps, and num_stages; use the fwd_ "
-                "prefix to set forward-only options"
-            )
-
-
 def zeros_and_scatter_lowering(shape: list[int], indices, values):
     """To support backwards on captured buffers we register a specific lowering for our specific custom up"""
     # Always accumulate into fp32 then cast

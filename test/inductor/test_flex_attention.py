@@ -4575,6 +4575,51 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @skip_on_mps
     @skip_on_xpu
+    def test_shared_memory_error_hint(self, device):
+        from torch._inductor.runtime import triton_heuristics
+
+        config = types.SimpleNamespace(num_stages=5, num_warps=8)
+        exc = triton_heuristics.OutOfResources(266240, 232448, "shared memory")
+        cases = (
+            (
+                "forward",
+                {
+                    "SPARSE_Q_BLOCK_SIZE": 128,
+                    "SPARSE_KV_BLOCK_SIZE": 128,
+                    "BLOCK_M": 128,
+                    "BLOCK_N": 128,
+                },
+                "fwd_BLOCK_M",
+            ),
+            (
+                "backward",
+                {
+                    "SPARSE_Q_BLOCK_SIZE": 128,
+                    "SPARSE_KV_BLOCK_SIZE": 128,
+                    "BLOCK_M1": 64,
+                    "BLOCK_N1": 128,
+                    "BLOCK_M2": 128,
+                    "BLOCK_N2": 64,
+                },
+                "bwd_BLOCK_M1",
+            ),
+        )
+
+        for kind, config_args, option_name in cases:
+            with self.subTest(kind=kind):
+                msg = triton_heuristics._no_valid_triton_configs_message(
+                    exc,
+                    {"config_args": config_args},
+                    config,
+                )
+                self.assertIn(f"FlexAttention {kind} selected options", msg)
+                self.assertIn(option_name, msg)
+                self.assertIn("max-autotune-no-cudagraphs", msg)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
     def test_invalid_decode_kernel_options_error(self, device):
         def mask_mod(b, h, q, kv):
             return q >= kv

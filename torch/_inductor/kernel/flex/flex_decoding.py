@@ -8,6 +8,7 @@ from typing import Any
 import sympy
 
 import torch
+from torch._inductor.flex_attention_config import flex_kernel_tuning_options
 from torch._inductor.virtualized import V
 from torch.utils._sympy.functions import FloorDiv, Mod
 
@@ -24,7 +25,6 @@ from ...utils import can_use_tma
 from .common import (
     create_indices_fake,
     create_num_blocks_fake_generator,
-    flex_kernel_tuning_options,
     freeze_irnodes,
     get_fwd_subgraph_outputs,
     load_flex_template,

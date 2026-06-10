@@ -12,6 +12,10 @@ from typing import Any, cast, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._inductor.flex_attention_config import (
+    flex_kernel_options_example,
+    flex_kernel_tuning_options,
+)
 from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv, Mod
@@ -29,8 +33,6 @@ from .common import (
     create_indices_fake,
     create_num_blocks_fake_generator,
     create_placeholder,
-    flex_kernel_options_example,
-    flex_kernel_tuning_options,
     freeze_irnodes,
     get_fwd_subgraph_outputs,
     infer_dense_strides,
