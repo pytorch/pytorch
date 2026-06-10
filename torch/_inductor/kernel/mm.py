@@ -940,12 +940,8 @@ def tuned_scaled_mm_v2(
 
     is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
 
-    # Swizzling is not yet wired into any template here; reject anything other
-    # than NO_SWIZZLE (=0) so we don't silently produce wrong results once a
-    # caller starts passing real swizzle patterns.
-    assert all(s == 0 for s in swizzle_a) and all(s == 0 for s in swizzle_b), (
-        "Inductor _scaled_mm_v2 lowering does not yet support non-trivial "
-        f"swizzles (got swizzle_a={list(swizzle_a)}, swizzle_b={list(swizzle_b)})"
+    has_swizzle = not (
+        all(s == 0 for s in swizzle_a) and all(s == 0 for s in swizzle_b)
     )
 
     def check_supported_recipe(recipe: list[int]) -> bool:
@@ -987,9 +983,10 @@ def tuned_scaled_mm_v2(
     _, is_nonzero = _is_static_problem(layout)
 
     if (
-        # We dont have triton lowerings for the MX variants yet
+        # We dont have triton lowerings for the MX/swizzled variants yet
         is_single_level_scale
         and supported_recipe
+        and not has_swizzle
         and scale_a[0].dtype == torch.float32
         and is_nonzero
         and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
@@ -1073,11 +1070,12 @@ def tuned_scaled_mm_v2(
             kernel_inputs=kernel_inputs,
         )
 
-    # Early return for MX variants
+    # Early return for MX/swizzled variants
     if (
         scale_a[0].dtype != torch.float32
         or (not supported_recipe)
         or (not is_single_level_scale)
+        or has_swizzle
     ):
         node, _ = autotune_select_algorithm(name, choices, input_nodes, layout)
         return node
