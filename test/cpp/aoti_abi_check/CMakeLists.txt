@@ -10,7 +10,9 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/main.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_accessor.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_alignment.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_array.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_bfloat16math.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_bitset.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_callonce.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_cast.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_compiletimefunctionpointer.cpp
@@ -23,6 +25,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dtype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_enumerate.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_exception.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_fbcodemaps.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_functionref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_headeronlyarrayref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_idwrapper.cpp
@@ -34,6 +37,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_metaprogramming.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_overloaded.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scopeexit.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_smallbuffer.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_synchronized.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_rand.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scalartype.cpp
