@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
+    dtypesIfMPS,
     dtypesIfXPU,
     expectedFailureMeta,
     instantiate_device_type_tests,
@@ -1763,6 +1764,36 @@ class TestBinaryUfuncsDevice(TestCase):
         for base, exponent in test_inputs:
             regex = "doesn't match the broadcast shape"
             self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent)
+
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @dtypesIfMPS(torch.float32, torch.float16, torch.bfloat16)
+    def test_pow_neg_zero(self, device, dtype):
+        neg_zero = torch.tensor([0.0, -0.0], dtype=dtype, device=device)
+
+        res_half = torch.pow(neg_zero, 0.5)
+        self.assertEqual(res_half.tolist(), [0.0, 0.0])
+        self.assertFalse(torch.signbit(res_half).any().item())
+
+        res_neg_half = torch.pow(neg_zero, -0.5)
+        self.assertEqual(res_neg_half.tolist(), [inf, inf])
+        self.assertFalse(torch.signbit(res_neg_half).any().item())
+
+        positive = torch.tensor([1.0, 4.0, 9.0, 16.0], dtype=dtype, device=device)
+        self.assertEqual(torch.pow(positive, 0.5), torch.sqrt(positive))
+        self.assertEqual(torch.pow(positive, -0.5), torch.rsqrt(positive))
+
+        nan_t = torch.tensor([nan], dtype=dtype, device=device)
+        self.assertTrue(torch.isnan(torch.pow(nan_t, 0.5)).item())
+        self.assertTrue(torch.isnan(torch.pow(nan_t, -0.5)).item())
+
+        pos_inf = torch.tensor([inf], dtype=dtype, device=device)
+        self.assertEqual(torch.pow(pos_inf, 0.5).item(), inf)
+        self.assertEqual(torch.pow(pos_inf, -0.5).item(), 0.0)
+        self.assertFalse(torch.signbit(torch.pow(pos_inf, -0.5)).item())
+
+        neg_finite = torch.tensor([-2.0], dtype=dtype, device=device)
+        self.assertTrue(torch.isnan(torch.pow(neg_finite, 0.5)).item())
+        self.assertTrue(torch.isnan(torch.pow(neg_finite, -0.5)).item())
 
     def test_int_tensor_pow_neg_ints(self, device):
         ints = [

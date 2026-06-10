@@ -1344,7 +1344,8 @@ def pow(
         elif statically_known_true(b == 2.0):
             return a * a  # type: ignore[return-value]
         elif statically_known_true(b == 0.5):
-            return torch.sqrt(a)  # type: ignore[arg-type]
+            # Cancel the sign of -0.0 so pow(-0.0, 0.5) is +0.0.
+            return torch.sqrt(a + 0)  # type: ignore[arg-type,operator]
     elif isinstance(a, Number):
         if statically_known_true(a == 1.0):
             return torch.fill(b, True)

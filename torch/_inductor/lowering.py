@@ -7242,7 +7242,8 @@ def pow(a, b):
     if isinstance(b, float) and b.is_integer():
         return pow(a, int(b))
     elif isinstance(b, float) and b == 0.5:
-        return sqrt(a)
+        # Cancel the sign of -0.0 so pow(-0.0, 0.5) is +0.0.
+        return sqrt(add(a, 0.0))
     elif isinstance(b, int) and b == 1:
         return clone(a)
 

@@ -36,11 +36,19 @@ static void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp
   if (!exp_scalar.isComplex() && exp_scalar.to<float>() == -1.0) {
     return lib.exec_unary_kernel(iter, "reciprocal");
   }
+  // Route +/-0.5 through pow_half / pow_neg_half so pow(-0.0, +/-0.5)
+  // returns a positive result.
   if (!exp_scalar.isComplex() && exp_scalar.to<float>() == -.5) {
-    return lib.exec_unary_kernel(iter, "rsqrt");
+    if (c10::isComplexType(iter.common_dtype())) {
+      return lib.exec_unary_kernel(iter, "rsqrt");
+    }
+    return lib.exec_unary_kernel(iter, "pow_neg_half");
   }
   if (!exp_scalar.isComplex() && exp_scalar.to<float>() == .5) {
-    return lib.exec_unary_kernel(iter, "sqrt");
+    if (c10::isComplexType(iter.common_dtype())) {
+      return lib.exec_unary_kernel(iter, "sqrt");
+    }
+    return lib.exec_unary_kernel(iter, "pow_half");
   }
   if (exp_scalar.isComplex() || c10::isComplexType(iter.common_dtype())) {
     return lib.exec_unary_kernel(iter, "pow_scalar", exp_scalar, ScalarType::ComplexFloat);
