@@ -9,12 +9,13 @@ from typing import Any
 from torch.utils._exposed_in import exposed_in
 
 from .custom_ops import custom_op, CustomOpDef
+from .global_state import library_state
 from .infer_schema import infer_schema
 
 
 logger = logging.getLogger(__name__)
 
-triton_ops_to_kernels: dict[str, list[object]] = {}
+triton_ops_to_kernels: dict[str, list[object]] = library_state.triton_ops_to_kernels
 
 
 def get_triton_kernels_for_op(name: str) -> list[object]:

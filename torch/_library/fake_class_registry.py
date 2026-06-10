@@ -4,6 +4,7 @@ import logging
 from typing import Any, Protocol
 
 import torch
+from torch._library.global_state import library_state
 from torch._library.utils import parse_namespace
 from torch.utils._python_dispatch import _disable_current_modes
 
@@ -199,7 +200,9 @@ class FakeClassRegistry:
             )
 
 
-global_fake_class_registry = FakeClassRegistry()
+global_fake_class_registry: FakeClassRegistry = (
+    library_state.get_or_create_fake_class_registry(FakeClassRegistry)
+)
 
 
 # TODO: add this check at compile time for __obj_flatten__.

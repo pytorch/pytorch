@@ -5,6 +5,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .effects import EffectHolder
 from .fake_impl import FakeImplHolder
+from .global_state import library_state
 from .utils import RegistrationHandle
 
 
@@ -45,7 +46,9 @@ class SimpleLibraryRegistry:
         return self._data.get(qualname, None)
 
 
-singleton: SimpleLibraryRegistry = SimpleLibraryRegistry()
+singleton: SimpleLibraryRegistry = library_state.get_or_create_simple_registry(
+    SimpleLibraryRegistry
+)
 
 
 class SimpleOperatorEntry:

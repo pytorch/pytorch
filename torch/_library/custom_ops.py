@@ -15,6 +15,7 @@ from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
 from .effects import EffectType
+from .global_state import library_state
 
 
 device_types_t: TypeAlias = str | Sequence[str] | None  # noqa: PYI042
@@ -1088,8 +1089,8 @@ def increment_version(val: Any) -> None:
 # decorator.
 
 
-OPDEF_TO_LIB: dict[str, "torch.library.Library"] = {}
-OPDEFS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+OPDEF_TO_LIB: dict[str, "torch.library.Library"] = library_state.custom_opdef_to_lib
+OPDEFS: weakref.WeakValueDictionary = library_state.custom_opdefs
 
 
 def get_library_allowing_overwrite(

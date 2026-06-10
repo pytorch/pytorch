@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing_extensions import deprecated
 
 import torch
+from torch._library.global_state import library_state
 from torch._library.utils import Kernel, RegistrationHandle
 
 
@@ -125,22 +126,18 @@ def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Ca
     return meta_kernel
 
 
-def get_none():
-    return None
-
-
-global_ctx_getter: Callable = get_none
+def global_ctx_getter():
+    return library_state.global_ctx_getter()
 
 
 @contextlib.contextmanager
 def set_ctx_getter(ctx_getter):
-    global global_ctx_getter
-    prev = global_ctx_getter
+    prev = library_state.global_ctx_getter
     try:
-        global_ctx_getter = ctx_getter
+        library_state.global_ctx_getter = ctx_getter
         yield
     finally:
-        global_ctx_getter = prev
+        library_state.global_ctx_getter = prev
 
 
 class FakeImplCtx:

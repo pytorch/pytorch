@@ -19,6 +19,7 @@ from torch._library.custom_ops import (
     device_types_t,
 )
 from torch._library.effects import EffectType
+from torch._library.global_state import library_state
 from torch._library.infer_schema import infer_schema
 from torch._library.triton import triton_op, wrap_triton
 from torch._ops import OpOverload
@@ -50,8 +51,8 @@ _P = ParamSpec("_P")
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
 # This set is maintained to ensure that two libraries don't try to override the exact same functionality to avoid
 # libraries calling into kernels not intended to be called.
-_impls: set[str] = set()
-_defs: set[str] = set()
+_impls: set[str] = library_state.impls
+_defs: set[str] = library_state.defs
 
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ["prim"]
@@ -605,6 +606,8 @@ class Library:
         for handle in self._registration_handles:
             handle.destroy()
         self._registration_handles.clear()
+        # Mutate the shared impl registry in-place so its global_state alias
+        # stays synchronized.
         global _impls
         _impls -= self._op_impls
         _clear_torch_ops_cache(self._op_defs)
@@ -656,6 +659,8 @@ def _del_library(
         ) in schema_to_signature_cache:
             del schema_to_signature_cache[(name, overload_name)]
 
+    # Mutate the captured shared registries in-place so their global_state aliases
+    # stay synchronized.
     captured_impls -= op_impls
     captured_defs -= op_defs
     for handle in registration_handles:
@@ -676,7 +681,7 @@ def _scoped_library(*args, **kwargs):
         lib._destroy()
 
 
-_keep_alive: list[Library] = []
+_keep_alive: list[Library] = library_state.keep_alive
 
 
 NAMELESS_SCHEMA = re.compile(r"\(.*\) -> .*")

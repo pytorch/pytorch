@@ -122,6 +122,43 @@ class CustomOpTestCaseBase(TestCase):
         return torch._custom_op.impl.get_op(qualname)
 
 
+class TestLibraryGlobalState(TestCase):
+    def test_global_state_aliases(self):
+        import torch._custom_op.impl as legacy_custom_op
+        import torch._library.custom_ops as custom_ops_impl
+        import torch._library.fake_class_registry as fake_class_registry
+        import torch._library.fake_impl as fake_impl
+        import torch._library.opaque_object as opaque_object
+        import torch._library.simple_registry as simple_registry
+        import torch._library.triton as triton
+        from torch._library.global_state import library_state
+
+        self.assertIs(torch.library._impls, library_state.impls)
+        self.assertIs(torch.library._defs, library_state.defs)
+        self.assertIs(torch.library._keep_alive, library_state.keep_alive)
+        self.assertIs(simple_registry.singleton, library_state.simple_registry)
+        self.assertIs(custom_ops_impl.OPDEFS, library_state.custom_opdefs)
+        self.assertIs(custom_ops_impl.OPDEF_TO_LIB, library_state.custom_opdef_to_lib)
+        self.assertIs(
+            legacy_custom_op.global_registry, library_state.legacy_custom_op_registry
+        )
+        self.assertIs(
+            fake_class_registry.global_fake_class_registry,
+            library_state.fake_class_registry,
+        )
+        self.assertIs(triton.triton_ops_to_kernels, library_state.triton_ops_to_kernels)
+        self.assertIs(opaque_object._OPAQUE_TYPES, library_state.opaque_types)
+        self.assertIs(
+            opaque_object._OPAQUE_TYPES_BY_NAME, library_state.opaque_types_by_name
+        )
+
+        prev_ctx_getter = library_state.global_ctx_getter
+        with fake_impl.set_ctx_getter(lambda: "ctx"):
+            self.assertEqual(fake_impl.global_ctx_getter(), "ctx")
+            self.assertEqual(library_state.global_ctx_getter(), "ctx")
+        self.assertIs(library_state.global_ctx_getter, prev_ctx_getter)
+
+
 @requires_compile
 class TestCustomOpTesting(CustomOpTestCaseBase):
     @parametrize("check_gradients", (False, "auto"))

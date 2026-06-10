@@ -11,6 +11,7 @@ import torch
 import torch._C as _C
 import torch._library.infer_schema
 import torch.library as library
+from torch._library.global_state import library_state
 from torch._library.infer_schema import infer_schema
 from torch.library import get_ctx
 from torchgen.model import (
@@ -123,7 +124,7 @@ def custom_op(qualname: str, manual_schema: str | None = None) -> typing.Callabl
 # An example usage is FakeTensor: FakeTensor checks if a specific operator
 # has an implementation registered via the CustomOp API.
 # Indexed by qualname (e.g. aten::foo)
-global_registry: dict[str, "CustomOp"] = {}
+global_registry: dict[str, "CustomOp"] = library_state.legacy_custom_op_registry
 
 
 class CustomOp:

@@ -39,11 +39,12 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal, NewType, TYPE_CHECKING, TypeAlias
+from typing import Any, cast, Literal, NewType, TYPE_CHECKING, TypeAlias
 from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
 import torch
+from torch._library.global_state import library_state
 from torch._opaque_base import OpaqueBase, OpaqueBaseMeta
 
 
@@ -109,9 +110,13 @@ class _OpaqueTypeInfo:
 
 
 # Mapping of type -> (string name, reference/value type)
-_OPAQUE_TYPES: WeakKeyDictionary[Any, _OpaqueTypeInfo] = WeakKeyDictionary()
+_OPAQUE_TYPES: WeakKeyDictionary[Any, _OpaqueTypeInfo] = cast(
+    WeakKeyDictionary[Any, _OpaqueTypeInfo], library_state.opaque_types
+)
 # Mapping of class_name -> (type, reference/value type)
-_OPAQUE_TYPES_BY_NAME: dict[str, _OpaqueTypeInfo] = {}
+_OPAQUE_TYPES_BY_NAME: dict[str, _OpaqueTypeInfo] = cast(
+    dict[str, _OpaqueTypeInfo], library_state.opaque_types_by_name
+)
 
 
 def _resolve_opaque_type_info(cls: Any) -> _OpaqueTypeInfo | None:
