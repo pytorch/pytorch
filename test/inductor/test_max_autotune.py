@@ -1216,12 +1216,15 @@ class TestMaxAutotune(TestCase):
             .to(GPU_TYPE)
         )
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-                "max_autotune_gemm_search_space": search_space,
-            }
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "max_autotune_gemm_search_space": search_space,
+                }
+            ),
+            patch("torch._inductor.utils.is_big_gpu", return_value=True),
         ):
 
             @torch.compile()
@@ -1233,6 +1236,160 @@ class TestMaxAutotune(TestCase):
 
             FileCheck().check_not("extern_kernels.convolution").run(code[0])
             self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
+
+    @unittest.skipIf(config.cpp_wrapper, "Python wrapper code check")
+    def test_autotune_conv1x1_uses_convolution_without_gemm_templates(self):
+        conv1x1 = (
+            nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
+            .to(memory_format=torch.channels_last)
+            .to(GPU_TYPE)
+        )
+        input_tensor = (
+            torch.randn(4, 3, 32, 32)
+            .contiguous(memory_format=torch.channels_last)
+            .to(GPU_TYPE)
+        )
+
+        with (
+            config.patch({"max_autotune": True}),
+            patch("torch._inductor.utils.is_big_gpu", return_value=False),
+        ):
+
+            @torch.compile()
+            def foo(mod, x):
+                return mod(x)
+
+            with torch.no_grad():
+                out, code = run_and_get_code(foo, conv1x1, input_tensor)
+
+        generated_code = "\n".join(code)
+        FileCheck().check("extern_kernels.convolution").run(generated_code)
+        FileCheck().check_not("extern_kernels.addmm").check_not(
+            "extern_kernels.mm"
+        ).run(generated_code)
+        self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
+
+    @unittest.skipIf(config.cpp_wrapper, "Python wrapper code check")
+    def test_autotune_conv1x1_uses_convolution_without_addmm_template(self):
+        conv1x1 = (
+            nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
+            .to(memory_format=torch.channels_last)
+            .to(GPU_TYPE)
+        )
+        input_tensor = (
+            torch.randn(4, 3, 32, 32)
+            .contiguous(memory_format=torch.channels_last)
+            .to(GPU_TYPE)
+        )
+
+        def check_uses_convolution():
+            reset()
+
+            @torch.compile()
+            def foo(mod, x):
+                return mod(x)
+
+            with torch.no_grad():
+                out, code = run_and_get_code(foo, conv1x1, input_tensor)
+
+            generated_code = "\n".join(code)
+            FileCheck().check("extern_kernels.convolution").run(generated_code)
+            FileCheck().check_not("extern_kernels.addmm").check_not(
+                "extern_kernels.mm"
+            ).run(generated_code)
+            self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
+
+        with self.subTest("nvgemm_not_available_for_addmm"):
+            with (
+                config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_conv_backends": "ATEN",
+                        "max_autotune_gemm_backends": "ATEN,NVGEMM",
+                    }
+                ),
+                patch(
+                    "torch._inductor.kernel.conv.use_nv_universal_gemm_template",
+                    return_value=True,
+                ),
+            ):
+                check_uses_convolution()
+
+        with self.subTest("cutlass_disabled_for_addmm"):
+            with (
+                config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_conv_backends": "ATEN",
+                        "max_autotune_gemm_backends": "ATEN,CUTLASS",
+                    }
+                ),
+                patch(
+                    "torch._inductor.kernel.conv.use_cutlass_template",
+                    return_value=True,
+                ),
+                patch(
+                    "torch._inductor.kernel.conv._use_cutlass_for_op",
+                    return_value=False,
+                ),
+            ):
+                check_uses_convolution()
+
+        with self.subTest("cutlass_filters_remove_all_addmm_choices"):
+            with (
+                config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_conv_backends": "ATEN",
+                        "max_autotune_gemm_backends": "ATEN,CUTLASS",
+                    }
+                ),
+                patch(
+                    "torch._inductor.kernel.conv.use_cutlass_template",
+                    return_value=True,
+                ),
+                patch(
+                    "torch._inductor.kernel.conv._use_cutlass_for_op",
+                    return_value=True,
+                ),
+                patch(
+                    "torch._inductor.kernel.conv.CUTLASS3xGemmTemplate."
+                    "add_cutlass_gemm_choices",
+                    return_value=None,
+                ),
+            ):
+                check_uses_convolution()
+
+    @unittest.skipIf(config.cpp_wrapper, "Python wrapper code check")
+    def test_autotune_conv1x1_layout_ineligible_still_peels_bias(self):
+        conv1x1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1).to(GPU_TYPE)
+        input_tensor = torch.randn(4, 3, 32, 32, device=GPU_TYPE)
+        reset()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "layout_optimization": False,
+                "max_autotune_conv_backends": "ATEN",
+                "max_autotune_gemm_backends": "ATEN,NVGEMM",
+            }
+        ):
+
+            @torch.compile()
+            def foo(mod, x):
+                return mod(x)
+
+            with torch.no_grad():
+                out, code = run_and_get_code(foo, conv1x1, input_tensor)
+
+        generated_code = "\n".join(code)
+        FileCheck().check("extern_kernels.convolution").check("bias=None").run(
+            generated_code
+        )
+        FileCheck().check_not("extern_kernels.addmm").check_not(
+            "extern_kernels.mm"
+        ).run(generated_code)
+        self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
 
     @fresh_cache()
     @config.patch(max_autotune=True, max_fusion_size=2)

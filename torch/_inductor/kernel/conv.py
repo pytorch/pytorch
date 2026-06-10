@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING, TypedDict
 
 import torch
+from torch._inductor.codegen.cutlass.gemm_template import CUTLASS3xGemmTemplate
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
@@ -22,11 +23,16 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    _use_cutlass_for_op,
     is_ones,
     is_zeros,
     pad_listlike,
     sympy_product,
     use_ck_conv_template,
+    use_ck_gemm_template,
+    use_ck_tile_gemm_template,
+    use_cutlass_template,
+    use_nv_universal_gemm_template,
     use_triton_template,
 )
 from ..virtualized import V
@@ -524,11 +530,12 @@ def convolution(
     dilation = pad_listlike(dilation, ndim)
     output_padding = pad_listlike(output_padding, ndim)
 
-    def channels_last_conv():
+    def channels_last_conv(layout: ir.Layout | None = None):
         if V.graph.layout_opt and ndim == 2:
             return True
 
-        layout = conv_layout(x, weight, None, **kwargs)
+        if layout is None:
+            layout = conv_layout(x, weight, None, **kwargs)
         # TODO: This does not guard on the stride order decision,
         # shall we use optimization_hint to handle unbacked?
         req_stride_order = ir.get_stride_order(
@@ -538,9 +545,78 @@ def convolution(
 
     autotuning_gemm = config.max_autotune or config.max_autotune_gemm
 
-    if (
-        (config.conv_1x1_as_mm or (autotuning_gemm and channels_last_conv()))
-        and is_ones(kernel_shape)
+    def autotune_1x1_conv_layout_eligible():
+        if not autotuning_gemm:
+            return False
+        conv_output_layout = conv_layout(x, weight, None, **kwargs)
+        if not channels_last_conv(conv_output_layout):
+            return False
+        if device_type == "cpu":
+            return False
+        return True
+
+    def autotune_1x1_conv_has_template():
+        batch, _, *spatial = x.get_size()
+        m = sympy_product([batch, *spatial])
+        n = out_chan
+        k = in_chan
+        mm_layout = ir.FixedLayout(x.get_device_or_error(), x.get_dtype(), [m, n])
+        cutlass_op_name = "addmm" if bias is not None else "mm"
+        cutlass_has_template = False
+        if use_cutlass_template(mm_layout, m, n, k) and _use_cutlass_for_op(
+            cutlass_op_name
+        ):
+            mat1 = ir.InputBuffer(
+                name="_conv1x1_mm_mat1",
+                layout=ir.FixedLayout(
+                    x.get_device_or_error(), x.get_dtype(), [m, k], [k, 1]
+                ),
+            )
+            mat2 = ir.InputBuffer(
+                name="_conv1x1_mm_mat2",
+                layout=ir.FixedLayout(
+                    weight.get_device_or_error(), weight.get_dtype(), [k, n], [1, k]
+                ),
+            )
+            cutlass_choices = []
+            if bias is not None:
+                bias_expanded = ir.InputBuffer(
+                    name="_conv1x1_mm_bias",
+                    layout=ir.FixedLayout(
+                        bias.get_device_or_error(), bias.get_dtype(), [m, n], [0, 1]
+                    ),
+                )
+                CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+                    cutlass_choices,
+                    mm_layout,
+                    [mat1, mat2, bias_expanded],
+                    alpha=1,
+                    beta=1,
+                    input_reorder=[2, 0, 1],
+                )
+            else:
+                CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+                    cutlass_choices, mm_layout, [mat1, mat2]
+                )
+            cutlass_has_template = len(cutlass_choices) > 0
+
+        if bias is not None:
+            return (
+                use_triton_template(mm_layout, check_max_autotune=False)
+                or cutlass_has_template
+                or use_ck_gemm_template(mm_layout, m, n, k)
+            )
+
+        return (
+            use_triton_template(mm_layout)
+            or cutlass_has_template
+            or use_ck_gemm_template(mm_layout, m, n, k)
+            or use_ck_tile_gemm_template(mm_layout, m, n, k)
+            or use_nv_universal_gemm_template(mm_layout, m, n, k, x, weight)
+        )
+
+    is_1x1_conv = (
+        is_ones(kernel_shape)
         and is_ones(stride)
         and is_zeros(padding)
         and is_ones(dilation)
@@ -548,10 +624,33 @@ def convolution(
         and is_zeros(output_padding)
         and groups == 1
         and V.graph.sizevars.statically_known_gt(sympy_product(x.get_size()), 0)
-    ):
+    )
+    autotune_1x1_layout_eligible = (
+        is_1x1_conv
+        and not config.conv_1x1_as_mm
+        and autotune_1x1_conv_layout_eligible()
+    )
+    autotune_1x1_as_mm = (
+        autotune_1x1_layout_eligible and autotune_1x1_conv_has_template()
+    )
+
+    if is_1x1_conv and (config.conv_1x1_as_mm or autotune_1x1_as_mm):
         return convert_1x1_conv_to_mm(x, weight, bias)
 
-    if bias is not None and device_type != "cpu":
+    peel_conv_bias = bias is not None and device_type != "cpu"
+    if (
+        peel_conv_bias
+        and is_1x1_conv
+        and autotuning_gemm
+        and not config.conv_1x1_as_mm
+        and autotune_1x1_layout_eligible
+        and not autotune_1x1_as_mm
+    ):
+        # Avoid re-entering this lowering as an unbiased 1x1 conv and selecting
+        # an mm template when the original biased op cannot use addmm templates.
+        peel_conv_bias = False
+
+    if peel_conv_bias:
         # peel off the bias, cudnn is slower with it
         result = convolution(x, weight, None, **kwargs)
         if V.graph.sizevars.statically_known_equals(result.get_size()[1], 0):
