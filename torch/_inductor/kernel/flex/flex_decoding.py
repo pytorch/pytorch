@@ -2,7 +2,6 @@
 """Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
 
 import logging
-from collections.abc import Sequence
 from typing import Any
 
 import sympy
@@ -42,21 +41,20 @@ prims = torch.ops.prims
 log = logging.getLogger(__name__)
 
 
-def _format_kernel_options(kernel_options: dict[str, Any], names: Sequence[str]) -> str:
-    return ", ".join(f"{name}={kernel_options[name]}" for name in names)
-
-
-def _raise_flex_decoding_kernel_options_error(
+def raise_flex_decoding_kernel_options_error(
     kernel_options: dict[str, Any],
     sparse_q_block_size: int,
     sparse_kv_block_size: int,
 ) -> None:
+    formated_kernel_options = ", ".join(
+        f"{name}={kernel_options[name]}" for name in ("BLOCK_M", "BLOCK_N")
+    )
     raise ValueError(
         "Invalid FlexAttention decode kernel options: Q and KV block sizes must "
         "be divisible by the selected tile sizes. Got "
         f"SPARSE_Q_BLOCK_SIZE={sparse_q_block_size}, "
         f"SPARSE_KV_BLOCK_SIZE={sparse_kv_block_size}, and "
-        f"{_format_kernel_options(kernel_options, ('BLOCK_M', 'BLOCK_N'))}. "
+        f"{formated_kernel_options}. "
         "Pass compatible values with kernel_options. Available decode tuning "
         f"options are {flex_kernel_tuning_options('decode')}. For example: "
         f"{flex_kernel_options_example('decode')}. If you did not pin "
@@ -379,7 +377,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         ):
             invalid_block_options = cur_kernel_options
             if len(configs) == 1:
-                _raise_flex_decoding_kernel_options_error(
+                raise_flex_decoding_kernel_options_error(
                     cur_kernel_options,
                     SPARSE_Q_BLOCK_SIZE,
                     SPARSE_KV_BLOCK_SIZE,
@@ -427,7 +425,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         )
 
     if not choices and invalid_block_options is not None:
-        _raise_flex_decoding_kernel_options_error(
+        raise_flex_decoding_kernel_options_error(
             invalid_block_options,
             SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE,
