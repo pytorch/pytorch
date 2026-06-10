@@ -600,8 +600,9 @@ Tensor pow_backward_exponent(
     return (a * b.log()).conj();
   };
   auto promoted_dtype = at::result_type(base, exponent);
-  auto base_ = at::isComplexType(promoted_dtype) ? Scalar(base.toComplexDouble())
-                                                  : Scalar(base.toDouble());
+  auto base_ = at::isComplexType(promoted_dtype)
+      ? Scalar(base.toComplexDouble())
+      : Scalar(base.toDouble());
   if (base.equal(0.0)) {
     auto cond = [](const auto& exp) {
       if (exp.is_complex()) {
