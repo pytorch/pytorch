@@ -9,7 +9,7 @@ set -eou pipefail
 cuda_version_nodot=${1/./}
 anaconda_dir=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
-MAGMA_VERSION="2.6.1"
+MAGMA_VERSION="2.10.0"
 magma_archive="magma-cuda${cuda_version_nodot}-${MAGMA_VERSION}-1.tar.bz2"
 (
     set -x
