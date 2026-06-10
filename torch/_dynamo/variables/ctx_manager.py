@@ -250,8 +250,10 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         with torch._dynamo.variables.higher_order_ops.dynamo_allow_side_effects_in_hop(
             tx
         ):
-            self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
-            self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
+            self.old_parameters_var = self.mod.getattro_impl(
+                tx, "_parameters"
+            ).realize()
+            self.old_buffer_var = self.mod.getattro_impl(tx, "_buffers").realize()
             tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
             tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
             return self.cm_vt.enter(tx)
@@ -1337,7 +1339,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     ) -> "PreserveVersionContextVariable":
         if tensors.is_tensor():
             versions = variables.TupleVariable(
-                [x.var_getattr(tx, "_version") for x in [tensors]]
+                [x.getattro_impl(tx, "_version") for x in [tensors]]
             )
             tensors_tuple = variables.TupleVariable([tensors])
         else:
@@ -1346,7 +1348,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
                     f"tensors must be a TupleVariable, got {type(tensors)}"
                 )
             versions = variables.TupleVariable(
-                [x.var_getattr(tx, "_version") for x in tensors.items]
+                [x.getattro_impl(tx, "_version") for x in tensors.items]
             )
             tensors_tuple = tensors
         return PreserveVersionContextVariable(tensors_tuple, versions)
