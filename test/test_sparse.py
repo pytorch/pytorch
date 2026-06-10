@@ -4346,6 +4346,42 @@ class TestSparse(TestSparseBase):
         for case, error_regex in invalid_cases():
             check_invalid(case, error_regex)
 
+    @onlyCPU
+    @dtypes(torch.float32, torch.float16)
+    def test_sparse_spdiags_out_of_range_offsets(self, device, dtype):
+        # Regression test for gh-178089: offsets far outside the valid range
+        # (|k| > max matrix dim) used to produce a negative internal nnz count
+        # and a negative buffer offset, causing an out-of-bounds write and a
+        # bad-free at tensor destruction. They should now be accepted as
+        # empty diagonals, matching the existing boundary semantics.
+        make_diags = functools.partial(make_tensor, dtype=dtype, device=device)
+        make_offsets = functools.partial(torch.tensor, dtype=torch.long, device=device)
+
+        # Original reproducer from the issue.
+        diags = make_diags((2, 54))
+        out = torch.sparse.spdiags(
+            diags,
+            make_offsets([-65, 10]),
+            (54, 63),
+        )
+        # k=-65 is dropped as empty; k=10 skips the first 10 entries of
+        # diags[1] and places the remaining 44 values on the k=10 diagonal.
+        expected = torch.zeros((54, 63), dtype=dtype, device=device)
+        expected.diagonal(offset=10)[:44] = diags[1, 10:]
+        self.assertEqual(out.shape, (54, 63))
+        self.assertEqual(out._nnz(), 44)
+        self.assertEqual(out.to_dense(), expected)
+
+        # Far out-of-range in both directions collapses to an empty matrix.
+        out = torch.sparse.spdiags(
+            make_diags((2, 4)),
+            make_offsets([-100, 100]),
+            (5, 5),
+        )
+        self.assertEqual(out.shape, (5, 5))
+        self.assertEqual(out._nnz(), 0)
+        self.assertEqual(out.to_dense(), torch.zeros((5, 5), dtype=dtype, device=device))
+
     def test_small_nnz_coalesced(self):
         # creating a coo tensor with nnz == 0 is always coalesced
         self.assertTrue(torch.sparse_coo_tensor([[], []], [], (2, 2)).is_coalesced())
