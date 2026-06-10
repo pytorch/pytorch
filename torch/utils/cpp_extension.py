@@ -12,11 +12,13 @@ import setuptools
 import subprocess
 import sys
 import sysconfig
+import threading
 import types
 import collections
 from pathlib import Path
 import errno
 import logging
+from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +29,6 @@ from ._cpp_extension_versioner import ExtensionVersioner
 from typing_extensions import deprecated
 from torch.torch_version import TorchVersion, Version
 
-
-from setuptools.command.build_ext import build_ext
 
 IS_WINDOWS = sys.platform == 'win32'
 IS_MACOS = sys.platform.startswith('darwin')
@@ -99,9 +99,46 @@ CUDA_CLANG_VERSIONS: VersionMap = {
     '13.0': ((7, 0), (21, 0)),
 }
 
-__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
+__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",  # noqa: F822, RUF100
            "CppExtension", "CUDAExtension", "SyclExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
            "verify_ninja_availability", "remove_extension_h_precompiler_headers", "get_cxx_compiler", "check_compiler_is_gcc"]
+
+# setuptools.command.build_ext imports Cython when available, so keep it off the
+# cpp_extension import path until BuildExtension is explicitly requested.
+_BUILD_EXTENSION_CLASS = None
+_BUILD_EXTENSION_BASE_INITIALIZED = False
+_BUILD_EXTENSION_LOCK = threading.Lock()
+
+
+if TYPE_CHECKING:
+    from setuptools.command.build_ext import build_ext as _LazyBuildExt
+else:
+    class _LazyBuildExt(setuptools.Command):
+        pass
+
+
+def _get_build_extension():
+    global _BUILD_EXTENSION_BASE_INITIALIZED
+    build_extension = _BUILD_EXTENSION_CLASS
+    if build_extension is None:
+        raise RuntimeError("BuildExtension class is not initialized")
+    if not _BUILD_EXTENSION_BASE_INITIALIZED:
+        with _BUILD_EXTENSION_LOCK:
+            if not _BUILD_EXTENSION_BASE_INITIALIZED:
+                from setuptools.command.build_ext import build_ext
+
+                build_extension.__bases__ = (build_ext,)
+                globals()["BuildExtension"] = build_extension
+                _BUILD_EXTENSION_BASE_INITIALIZED = True
+    return build_extension
+
+
+def __getattr__(name):
+    if name == "BuildExtension":
+        return _get_build_extension()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
 def _nt_quote_args(args: list[str] | None) -> list[str]:
@@ -694,7 +731,7 @@ def _wrap_sycl_host_flags(cflags):
     return wrapped_host_cflags
 
 
-class BuildExtension(build_ext):
+class BuildExtension(_LazyBuildExt):
     """
     A custom :mod:`setuptools` build extension .
 
@@ -1249,7 +1286,7 @@ class BuildExtension(build_ext):
             else:
                 self.compiler._compile = unix_wrap_single_compile
 
-        build_ext.build_extensions(self)
+        super().build_extensions()
 
     def get_ext_filename(self, ext_name):
         # Get the original shared library name. For Python 3, this name will be
@@ -1332,6 +1369,10 @@ class BuildExtension(build_ext):
         name = names[-1]
         define = f'-DTORCH_EXTENSION_NAME={name}'
         self._add_compile_flag(extension, define)
+
+
+_BUILD_EXTENSION_CLASS = BuildExtension
+del BuildExtension
 
 
 def CppExtension(name, sources, *args, **kwargs):
