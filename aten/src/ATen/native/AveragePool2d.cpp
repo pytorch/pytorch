@@ -42,8 +42,8 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
   const int padH = c10::checked_convert<int>(padding[0], "int");
   const int padW = padding.size() == 1 ? padH : c10::checked_convert<int>(padding[1], "int");
 
-  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
-    "divisor must be not zero");
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() > 0,
+    "divisor must be greater than zero");
 
   const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
   const int64_t nInputPlane = input.size(-3);
@@ -127,7 +127,7 @@ TORCH_META_FUNC(avg_pool2d_backward) (
   const int padH = c10::checked_convert<int>(padding[0], "int");
   const int padW = padding.size() == 1 ? padH : c10::checked_convert<int>(padding[1], "int");
 
-  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() > 0, "divisor must be greater than zero");
 
   /* sizes */
   const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
@@ -203,7 +203,7 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cpu) (
   const int padH = c10::checked_convert<int>(padding[0], "int");
   const int padW = padding.size() == 1 ? padH : c10::checked_convert<int>(padding[1], "int");
 
-  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() > 0, "divisor must be greater than zero");
 
   TORCH_CHECK(input.dtype() == gradOutput.dtype(),
     "expected dtype ", input.dtype(), " for `gradOutput` but got dtype ", gradOutput.dtype());

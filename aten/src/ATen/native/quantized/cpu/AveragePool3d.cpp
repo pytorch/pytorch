@@ -111,8 +111,8 @@ Tensor q_avg_pool3d(
   const int64_t inputWidth = input.size(-1);
 
   TORCH_CHECK(
-      !divisor_override.has_value() || divisor_override.value() != 0,
-      "divisor must be not zero");
+      !divisor_override.has_value() || divisor_override.value() > 0,
+      "divisor must be greater than zero");
 
   auto output_shape =
       get_output_shape(input, kW, kH, kD, dW, dH, dD, padW, padH, padD, ceil_mode);

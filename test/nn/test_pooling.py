@@ -187,6 +187,21 @@ class TestAvgPool(TestCase):
             )
             self.assertTrue(not torch.isnan(y).any())
 
+    def test_avg_pool2d_with_negative_divisor(self):
+        self.assertRaisesRegex(
+            RuntimeError,
+            "divisor must be greater than zero",
+            lambda: F.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=-1),
+        )
+
+    def test_avg_pool3d_with_negative_divisor(self):
+        x = torch.rand([1, 1, 16, 8, 8], dtype=torch.float32)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "divisor must be greater than zero",
+            lambda: F.avg_pool3d(x, [1, 1, 1], divisor_override=-1),
+        )
+
 
 class TestPoolingNN(NNTestCase):
     _do_cuda_memory_leak_check = True
