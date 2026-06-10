@@ -22,6 +22,7 @@ from .memory import (
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
 )
+from .random import get_rng_state, get_rng_state_all, initial_seed
 
 
 __all__ = [
@@ -36,6 +37,9 @@ __all__ = [
     "empty_cache",
     "empty_host_cache",
     "get_memory_info",
+    "get_rng_state",
+    "get_rng_state_all",
+    "initial_seed",
     "is_available",
     "max_memory_allocated",
     "max_memory_reserved",
