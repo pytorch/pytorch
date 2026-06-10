@@ -118,8 +118,8 @@ void init_elementwise_launch_config(
     num_threads = at::ceil_div(numel_per_split, numel_per_thread);
     // `sync_remote_blocks` maps threads to peers, so we need to make sure there
     // are enough threads
-    num_threads = max(num_threads, world_size);
-    num_threads = at::round_up(num_threads, at::cuda::warp_size());
+    num_threads = std::max(num_threads, world_size);
+    num_threads = at::round_up(num_threads, (int)at::cuda::warp_size());
   } else {
     num_blocks = std::min(
         at::ceil_div(numel_per_split, max_num_threads * numel_per_thread),
