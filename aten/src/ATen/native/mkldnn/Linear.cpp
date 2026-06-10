@@ -19,6 +19,7 @@
 #include <ATen/ops/mkldnn_linear_backward_weights.h>
 #include <ATen/ops/mkldnn_linear_backward_weights_native.h>
 #include <ATen/ops/mkldnn_linear_native.h>
+#include <ATen/ops/ones.h>
 #endif
 
 #if !AT_MKLDNN_ENABLED()
@@ -111,14 +112,14 @@ Tensor mkldnn_linear(
   const ideep::tensor x = itensor_from_mkldnn(self_reshaped);
   // weight_t can be a mkldnn tensor or dense tensor.
   const Tensor weight = (weight_t.is_mkldnn() || weight_t.is_contiguous()) ? weight_t : weight_t.contiguous();
-  const ideep::tensor w = itensor_from_tensor(weight);
+  const ideep::tensor w = itensor_from_tensor(weight.t());
 
   ideep::tensor y;
   if (bias.defined()) {
-    const ideep::tensor b = itensor_from_tensor(bias);
-    ideep::inner_product_forward::compute(x, w, b, y);
+    const ideep::tensor b = itensor_from_tensor(bias.reshape({1, weight_t.size(0)}));
+    ideep::matmul_forward::compute(x, w, b, y);
   } else {
-    ideep::inner_product_forward::compute(x, w, y);
+    ideep::matmul_forward::compute(x, w, y);
   }
 
   auto input_size = self.sizes();
@@ -153,8 +154,7 @@ Tensor mkldnn_linear_backward_input(
   input_reshaped_size.push_back(weight.size(1));
 
   ideep::tensor gradx;
-  ideep::inner_product_backward_data::compute(
-    grady, w, {input_reshaped_size.begin(), input_reshaped_size.end()}, gradx);
+  ideep::matmul_forward::compute(grady, w, gradx);
 
   if (input_size.size() > 2) {
     return new_with_itensor_mkldnn(std::move(gradx), optTypeMetaToScalarType(grad_output.options().dtype_opt()),
@@ -176,21 +176,29 @@ std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
   auto input_reshaped = input.dim() > 2 ? input.reshape({-1, input.size(input.dim() - 1)}) : input;
 
   ideep::tensor& grady = itensor_from_mkldnn(grad_output_reshaped);
-  ideep::tensor& x = itensor_from_mkldnn(input_reshaped);
+  ideep::tensor x = itensor_from_mkldnn(input_reshaped.t());
   ideep::tensor gradw, gradb;
   if (bias_defined) {
-    ideep::inner_product_backward_weights::compute(x, grady, gradw, gradb);
+    auto ones_tensor = at::ones({1, input_reshaped.size(0)});
+    ideep::tensor ones = itensor_from_tensor(ones_tensor);
+    ideep::matmul_forward::compute(ones, grady, gradb);
+    ideep::matmul_forward::compute(x, grady, gradw);
+    return std::tuple<Tensor, Tensor>{
+      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw),
+                      optTypeMetaToScalarType(weight.options().dtype_opt()),
+                      weight.options().device_opt())).t(),
+      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb),
+                      optTypeMetaToScalarType(weight.options().dtype_opt()),
+                      weight.options().device_opt())).reshape({weight.size(0)})};
   } else {
-    ideep::inner_product_backward_weights::compute(x, grady, gradw);
+    ideep::matmul_forward::compute(x, grady, gradw);
+    return std::tuple<Tensor, Tensor>{
+      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw),
+                      optTypeMetaToScalarType(weight.options().dtype_opt()),
+                      weight.options().device_opt())).t(),
+      Tensor()};
   }
 
-  return std::tuple<Tensor, Tensor>{
-    mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw),
-                    optTypeMetaToScalarType(weight.options().dtype_opt()),
-                    weight.options().device_opt())),
-    mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb),
-                    optTypeMetaToScalarType(weight.options().dtype_opt()),
-                    weight.options().device_opt()))};
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
@@ -213,14 +221,6 @@ Tensor mkldnn_linear_pointwise(
     std::string_view attr,
     c10::List<std::optional<at::Scalar>> scalars,
     std::optional<std::string_view> algorithm) {
-  auto aprop_kind = ideep::prop_kind::forward;
-  bool maybe_backward = GradMode::is_enabled() &&
-      (input_t.requires_grad() || weight_t.requires_grad() ||
-       (bias_opt.has_value() && bias_opt->defined() &&
-        bias_opt->requires_grad()));
-  if (!maybe_backward) {
-    aprop_kind = ideep::prop_kind::forward_inference;
-  }
   auto input = input_t.contiguous();
   auto input_size = input.sizes();
 
@@ -232,14 +232,14 @@ Tensor mkldnn_linear_pointwise(
       dim == 2 ? input : input.reshape({-1, input.size(input.dim() - 1)});
 
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
-  output_size.push_back(weight_t.size(0));
+  output_size.push_back(weight_t.size(1));
   auto output = at::empty(output_size, input.options());
   if (output.sym_numel() == 0) {
     return output;
   }
   if (dim != 2) {
     std::vector<int64_t> output_size_reshaped = {input_reshaped.size(0),
-                                                 weight_t.size(0)};
+                                                 weight_t.size(1)};
     output = output.reshape(output_size_reshaped);
   }
 
@@ -254,7 +254,7 @@ Tensor mkldnn_linear_pointwise(
 
   std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_tensor(bias);
+    mkldnn_bias = itensor_from_tensor(bias.reshape({1, weight_t.size(1)}));
   }
   const ideep::tensor w = itensor_from_tensor(weight_t);
 
@@ -272,20 +272,22 @@ Tensor mkldnn_linear_pointwise(
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
   if (mkldnn_bias.has_value()) {
-    ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
+    ideep::matmul_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         w,
         mkldnn_bias.value(),
         mkldnn_output,
-        op_attr,
-        aprop_kind);
+        1.0f,
+        1.0f,
+        op_attr);
   } else {
-    ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
+    ideep::matmul_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         w,
         mkldnn_output,
-        op_attr,
-        aprop_kind);
+        1.0f,
+        1.0f,
+        op_attr);
   }
 
   if (dim != 2) {
@@ -323,7 +325,7 @@ Tensor mkldnn_linear_pointwise_binary(
       dim == 2 ? input : input.reshape({-1, input.size(input.dim() - 1)});
 
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
-  output_size.push_back(weight_t.size(0));
+  output_size.push_back(weight_t.size(1));
   auto output = at::empty(output_size, input.options());
   if (output.sym_numel() == 0) {
     return output;
@@ -333,7 +335,7 @@ Tensor mkldnn_linear_pointwise_binary(
 
   if (dim != 2) {
     std::vector<int64_t> output_size_reshaped = {
-        input_reshaped.size(0), weight_t.size(0)};
+        input_reshaped.size(0), weight_t.size(1)};
     output = output.reshape(output_size_reshaped);
     other_reshaped = other_reshaped.reshape(output_size_reshaped);
     TORCH_CHECK(
@@ -352,13 +354,12 @@ Tensor mkldnn_linear_pointwise_binary(
 
   std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_tensor(bias);
+    mkldnn_bias = itensor_from_tensor(bias.reshape({1, weight_t.size(1)}));
   }
   const ideep::tensor w = itensor_from_tensor(weight_t);
 
   auto other_desc = mkldnn_other.get_desc();
   auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
-  auto aprop_kind = ideep::prop_kind::forward_inference;
 
   if (use_mkldnn_bf32_linear() && input_t.scalar_type() == at::kFloat){
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
@@ -369,17 +370,17 @@ Tensor mkldnn_linear_pointwise_binary(
   }
 
   if (mkldnn_bias.has_value()) {
-    ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
+    ideep::matmul_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         mkldnn_other,
         w,
         mkldnn_bias.value(),
         mkldnn_output,
-        op_attr,
-        aprop_kind);
+        1.0f,
+        op_attr);
   } else {
-    ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
-        mkldnn_input, mkldnn_other, w, mkldnn_output, op_attr, aprop_kind);
+    ideep::matmul_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
+        mkldnn_input, mkldnn_other, w, mkldnn_output, 1.0f, op_attr);
   }
 
   if (dim != 2) {
