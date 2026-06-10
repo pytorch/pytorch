@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 import torch
 from torch._library.opaque_object import is_opaque_reference_type
@@ -14,6 +14,9 @@ from .schemas import OpaqueMeta
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+
+TensorOrOpaque: TypeAlias = torch.Tensor | OpaqueBase
 
 
 # This is technically very similar to SubclassCreatingMeta
@@ -32,13 +35,19 @@ class SubclassCreationMeta:
 
 
 class UnwrapTensorSubclass(torch.nn.Module):
-    def forward(self, *tensors) -> torch.Tensor:  # type: ignore[no-untyped-def]
-        todo: list[torch.Tensor | OpaqueBase] = list(tensors)
+    subclass_meta: SubclassCreationMeta | None = None
 
-        def _unwrap_tensor_subclasses(subclass_meta, tensors, offset):  # type: ignore[no-untyped-def]
+    def forward(self, *tensors: TensorOrOpaque) -> torch.Tensor:
+        todo: list[TensorOrOpaque] = list(tensors)
+
+        def _unwrap_tensor_subclasses(
+            subclass_meta: SubclassCreationMeta | None,
+            tensors: list[TensorOrOpaque],
+            offset: int,
+        ) -> tuple[TensorOrOpaque, int]:
             if subclass_meta is None:
                 return tensors[offset], offset + 1
-            inner_tensors = {}
+            inner_tensors: dict[str, TensorOrOpaque] = {}
             for attr, meta in subclass_meta.attrs.items():
                 if isinstance(meta, OpaqueMeta):
                     inner_tensors[attr] = tensors[offset]
@@ -56,14 +65,19 @@ class UnwrapTensorSubclass(torch.nn.Module):
             )
             return rebuilt, offset
 
-        return _unwrap_tensor_subclasses(self.subclass_meta, todo, 0)[0]
+        out, _ = _unwrap_tensor_subclasses(self.subclass_meta, todo, 0)
+        return cast(torch.Tensor, out)
 
-    def right_inverse(self, tensor: torch.Tensor) -> list[torch.Tensor | OpaqueBase]:
+    def right_inverse(self, tensor: torch.Tensor) -> list[TensorOrOpaque]:
         if type(tensor) is torch.Tensor:
             raise AssertionError("tensor must be a subclass, not torch.Tensor")
-        plain_tensors: list[torch.Tensor | OpaqueBase] = []
+        plain_tensors: list[TensorOrOpaque] = []
 
-        def _create_subclass_meta(tensor, idx, plain_tensor_container):  # type: ignore[no-untyped-def]
+        def _create_subclass_meta(
+            tensor: torch.Tensor,
+            idx: int,
+            plain_tensor_container: list[TensorOrOpaque],
+        ) -> tuple[SubclassCreationMeta | None, int]:
             if type(tensor) is torch.Tensor:
                 plain_tensor_container.append(tensor)
                 return None, idx + 1

@@ -15,7 +15,7 @@ import warnings
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, Literal, overload, TypeVar
 from unittest.mock import patch
 
 import torch
@@ -74,8 +74,10 @@ from .functional_utils import (
 from .logging_utils import setup_stacktrace_preservation_hooks
 from .schemas import (
     AOTConfig,
+    FlatSubclassTracingInfo,
     FxValue,
     InputAliasInfo,
+    JointSubclassTracingInfo,
     JointTraceFn,
     MutationType,
     OutputType,
@@ -1181,14 +1183,44 @@ def create_functionalized_fn(
     return helper, args, args_descs
 
 
+@overload
 def handle_effect_tokens_fn(
     fn: Callable[..., Any],
-    args: Any,
+    args: list[FxValue],
     args_descs: list[AOTInput],
     *,
     meta: ViewAndMutationMeta,
+    trace_joint: Literal[False],
+) -> tuple[Callable[..., Any], list[FxValue], list[AOTInput]]: ...
+
+
+@overload
+def handle_effect_tokens_fn(
+    fn: Callable[..., Any],
+    args: tuple[list[FxValue], list[FxValue]],
+    args_descs: tuple[list[AOTInput], list[AOTInput]],
+    *,
+    meta: ViewAndMutationMeta,
+    trace_joint: Literal[True],
+) -> tuple[
+    Callable[..., Any],
+    tuple[list[FxValue], list[FxValue]],
+    tuple[list[AOTInput], list[AOTInput]],
+]: ...
+
+
+def handle_effect_tokens_fn(
+    fn: Callable[..., Any],
+    args: list[FxValue] | tuple[list[FxValue], list[FxValue]],
+    args_descs: list[AOTInput] | tuple[list[AOTInput], list[AOTInput]],
+    *,
+    meta: ViewAndMutationMeta,
     trace_joint: bool,
-) -> Any:
+) -> tuple[
+    Callable[..., Any],
+    list[FxValue] | tuple[list[FxValue], list[FxValue]],
+    list[AOTInput] | tuple[list[AOTInput], list[AOTInput]],
+]:
     num_tokens = len(meta.tokens)
 
     @simple_wraps(fn)
@@ -1278,14 +1310,23 @@ def handle_effect_tokens_fn(
     ]
 
     if trace_joint:
-        args = ([*additional_fwd_token_inputs, *args[0]], *args[1:])
-        args_descs = (  # type: ignore[assignment]
-            [*additional_fwd_token_inputs_descs, *args_descs[0]],  # type: ignore[misc]
-            *args_descs[1:],
+        joint_args = typing.cast(tuple[list[FxValue], list[FxValue]], args)
+        joint_args_descs = typing.cast(
+            tuple[list[AOTInput], list[AOTInput]], args_descs
+        )
+        args = (
+            [*additional_fwd_token_inputs, *joint_args[0]],
+            joint_args[1],
+        )
+        args_descs = (
+            [*additional_fwd_token_inputs_descs, *joint_args_descs[0]],
+            joint_args_descs[1],
         )
     else:
-        args = [*additional_fwd_token_inputs, *args]
-        args_descs = [*additional_fwd_token_inputs_descs, *args_descs]
+        flat_args = typing.cast(list[FxValue], args)
+        flat_args_descs = typing.cast(list[AOTInput], args_descs)
+        args = [*additional_fwd_token_inputs, *flat_args]
+        args_descs = [*additional_fwd_token_inputs_descs, *flat_args_descs]
 
         if num_tokens > 0:
             meta.static_input_indices = [
@@ -1304,26 +1345,65 @@ def handle_effect_tokens_fn(
 # - fw_only: this is *always* the forward-only function.
 #   Why do we need this? We need to collect updated ViewAndMutationMeta on our new dense -> dense functions.
 #   In particular, we need this to tell the partitioner how many dense forward outputs there are.
+@overload
 def aot_dispatch_subclass(
-    flat_fn_maybe_joint: JointTraceFn | TraceFn,
+    flat_fn_maybe_joint: TraceFn,
+    args: list[FxValue],
+    args_descs: list[AOTInput],
+    *,
+    is_joint_structure: Literal[False],
+    meta: ViewAndMutationMeta,
+    fw_only: Callable[..., Any] | None,
+) -> FlatSubclassTracingInfo: ...
+
+
+@overload
+def aot_dispatch_subclass(
+    flat_fn_maybe_joint: JointTraceFn | Callable[..., Any],
+    args: tuple[list[FxValue], list[FxValue]],
+    args_descs: tuple[list[AOTInput], list[AOTInput]],
+    *,
+    is_joint_structure: Literal[True],
+    meta: ViewAndMutationMeta,
+    fw_only: Callable[..., Any] | None,
+) -> JointSubclassTracingInfo: ...
+
+
+def aot_dispatch_subclass(
+    flat_fn_maybe_joint: TraceFn | JointTraceFn | Callable[..., Any],
     args: list[FxValue] | tuple[list[FxValue], list[FxValue]],
     args_descs: list[AOTInput] | tuple[list[AOTInput], list[AOTInput]],
     *,
     is_joint_structure: bool,
     meta: ViewAndMutationMeta,
-    fw_only: Callable[..., Any],
+    fw_only: Callable[..., Any] | None,
 ) -> SubclassTracingInfo:
     # Skip logic if we don't need to trace through any subclasses
     req_subclass_dispatch = requires_subclass_dispatch(args, meta)  # type: ignore[arg-type]
     if not req_subclass_dispatch:
-        return SubclassTracingInfo(
-            plain_tensor_trace_fn=flat_fn_maybe_joint,
-            plain_tensor_args=args,
-            plain_tensor_args_descs=args_descs,
+        if is_joint_structure:
+            return JointSubclassTracingInfo(
+                plain_tensor_trace_fn=flat_fn_maybe_joint,
+                plain_tensor_args=typing.cast(
+                    tuple[list[FxValue], list[FxValue]], args
+                ),
+                plain_tensor_args_descs=typing.cast(
+                    tuple[list[AOTInput], list[AOTInput]], args_descs
+                ),
+                maybe_subclass_meta=None,
+            )
+        return FlatSubclassTracingInfo(
+            plain_tensor_trace_fn=typing.cast(TraceFn, flat_fn_maybe_joint),
+            plain_tensor_args=typing.cast(list[FxValue], args),
+            plain_tensor_args_descs=typing.cast(list[AOTInput], args_descs),
             maybe_subclass_meta=None,
         )
 
     # TODO: add subclass guards (later PR).
+    if fw_only is None:
+        raise AssertionError(
+            "fw_only must not be None when subclass dispatch is required"
+        )
 
     # What's going on here? We need to compute subclass metadata about the outputs of the joint (grad_inputs).
     # Annoying: we don't know the grad input metas until we're in the middle of tracing the joint,
@@ -1331,6 +1411,7 @@ def aot_dispatch_subclass(
     # Another option would be to run our run_functionalized_fw_and_collect_metadata() function
     # directly on the joint, but this would hurt compile time (adding yet another pass through the joint).
     subclass_meta = SubclassMeta()
+    fw_only_fn = fw_only
 
     # NB: doesn't take descs, this is going from the NEW flat_args to the
     # subclasses, we don't need to do bookkeeping here
@@ -1393,9 +1474,9 @@ def aot_dispatch_subclass(
             return inner_fn(flat_fn_maybe_joint, primals, use_trace_joint=False)
 
     def metadata_fn(*primals: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
-        @simple_wraps(fw_only)
+        @simple_wraps(fw_only_fn)
         def inner_fw_only(*args: Any) -> Any:
-            return call_and_expect_output_descs(fw_only, args)
+            return call_and_expect_output_descs(fw_only_fn, args)
 
         return inner_fn(inner_fw_only, primals, use_trace_joint=False)
 
@@ -1479,10 +1560,21 @@ def aot_dispatch_subclass(
 
     subclass_meta.fw_metadata = meta_updated
 
-    return SubclassTracingInfo(
-        plain_tensor_trace_fn=fn_to_trace,
-        plain_tensor_args=args_unwrapped,
-        plain_tensor_args_descs=args_descs_unwrapped,
+    if is_joint_structure:
+        return JointSubclassTracingInfo(
+            plain_tensor_trace_fn=fn_to_trace,
+            plain_tensor_args=typing.cast(
+                tuple[list[FxValue], list[FxValue]], args_unwrapped
+            ),
+            plain_tensor_args_descs=typing.cast(
+                tuple[list[AOTInput], list[AOTInput]], args_descs_unwrapped
+            ),
+            maybe_subclass_meta=subclass_meta,
+        )
+    return FlatSubclassTracingInfo(
+        plain_tensor_trace_fn=typing.cast(TraceFn, fn_to_trace),
+        plain_tensor_args=typing.cast(list[FxValue], args_unwrapped),
+        plain_tensor_args_descs=typing.cast(list[AOTInput], args_descs_unwrapped),
         maybe_subclass_meta=subclass_meta,
     )
 

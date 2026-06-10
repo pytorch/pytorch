@@ -1372,15 +1372,21 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         *,
         fw_metadata: ViewAndMutationMeta,
     ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
-        (new_flat_fn, new_flat_args, new_flat_args_descs, subclass_meta) = (
-            aot_dispatch_subclass(
-                flat_fn,
-                flat_args,
-                flat_args_descs,
-                is_joint_structure=self.trace_joint,
-                meta=fw_metadata,
-                fw_only=self.fw_only,  # type: ignore[arg-type]
+        if self.trace_joint:
+            raise AssertionError(
+                "AOTDispatchSubclassWrapper.pre_compile only runs on the forward path"
             )
+
+        subclass_tracing_info = aot_dispatch_subclass(
+            flat_fn,
+            flat_args,
+            flat_args_descs,
+            is_joint_structure=False,
+            meta=fw_metadata,
+            fw_only=self.fw_only,
+        )
+        (new_flat_fn, new_flat_args, new_flat_args_descs, subclass_meta) = (
+            subclass_tracing_info
         )
         self.maybe_subclass_meta = subclass_meta
         return new_flat_fn, new_flat_args, new_flat_args_descs, fw_metadata

@@ -91,8 +91,9 @@ def _extract_tangent_source_stack_traces(
 
 def _create_graph(
     f: Callable[..., Any],
-    args: list[torch.Tensor],
+    args: list[FxValue] | tuple[list[FxValue], list[FxValue]],
     args_descs: list[AOTInput]
+    | tuple[list[AOTInput], list[AOTInput]]
     | None = None,  # keep compat with old clients; maybe we should split into two impls
     *,
     aot_config: AOTConfig,

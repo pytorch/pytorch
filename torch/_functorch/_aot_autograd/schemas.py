@@ -5,11 +5,10 @@ input/output types, metadata, config, function signatures etc.
 
 from __future__ import annotations
 
-import collections
 import functools
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeVar
+from typing import Any, NamedTuple, NewType, Protocol, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -1188,21 +1187,6 @@ class AOTConfig:
                 raise AssertionError("Can only have pre_dispatch IR for export.")
 
 
-# TODO: types here
-# plain_tensor_trace_fn, when it is joint, has tuple structure on the trace
-# info too!
-# TODO: this needs to be generic, parameterized on AOTDescriptor
-SubclassTracingInfo = collections.namedtuple(
-    "SubclassTracingInfo",
-    [
-        "plain_tensor_trace_fn",
-        "plain_tensor_args",
-        "plain_tensor_args_descs",
-        "maybe_subclass_meta",
-    ],
-)
-
-
 @dataclass
 class AOTState:
     """
@@ -1497,6 +1481,23 @@ class JointTraceFn(Protocol):
         tuple[list[FxValue], list[Tensor | None]],
         tuple[list[AOTOutput], list[AOTOutput | None]],
     ]: ...
+
+
+class FlatSubclassTracingInfo(NamedTuple):
+    plain_tensor_trace_fn: TraceFn
+    plain_tensor_args: list[FxValue]
+    plain_tensor_args_descs: list[AOTInput]
+    maybe_subclass_meta: SubclassMeta | None
+
+
+class JointSubclassTracingInfo(NamedTuple):
+    plain_tensor_trace_fn: Callable[..., Any]
+    plain_tensor_args: tuple[list[FxValue], list[FxValue]]
+    plain_tensor_args_descs: tuple[list[AOTInput], list[AOTInput]]
+    maybe_subclass_meta: SubclassMeta | None
+
+
+SubclassTracingInfo: TypeAlias = FlatSubclassTracingInfo | JointSubclassTracingInfo
 
 
 @dataclass

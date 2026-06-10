@@ -896,14 +896,14 @@ def aot_module(mod: nn.Module, *args: Any, **kwargs: Any) -> nn.Module:
 
 
 def autograd_cache_key(
-    graph,
-    example_inputs,
+    graph: torch.fx.GraphModule,
+    example_inputs: Sequence[InputType],
     ignore_shape_env: bool,
-    decompositions,
-    compiler_config_extra: CompilerConfigExtra,
+    decompositions: dict[Any, Callable[..., Any]] | None,
+    compiler_config_extra: CompilerConfigExtra | None,
     keep_inference_input_mutations: bool = False,
     disable_functionalization: bool = False,
-):
+) -> tuple[str, list[str]]:
     (
         _params_buffers_flat,
         _params_spec,
@@ -914,7 +914,7 @@ def autograd_cache_key(
     ) = prepare_aot_config(
         graph,
         example_inputs,
-        decompositions,
+        cast("dict[OpOverload, Callable[..., Any]] | None", decompositions),
         keep_inference_input_mutations,
         ignore_shape_env,
         force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
