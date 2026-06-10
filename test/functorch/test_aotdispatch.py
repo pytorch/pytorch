@@ -3009,6 +3009,51 @@ def forward(self, add, tangents_1):
             torch.autograd.grad(loss, inp_x, create_graph=True)
         # Not checking equality of ref and x as Exception is expected
 
+    def test_backward_mutation_forward_inputs_leaf_requires_grad(self):
+        # Test that leaf tensors with requires_grad=True (e.g. nn.Parameters)
+        # work correctly when mutated during the backward pass under no_grad.
+        # Previously, _functionalized_f_helper would call before.copy_(after)
+        # without no_grad, raising "leaf Variable that requires grad is being
+        # used in an in-place operation".
+        @torch.library.custom_op(
+            "_test::_clone_leaf_grad", mutates_args={}
+        )
+        def f(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        def f_fake(x, x1):
+            return torch.empty_like(x)
+
+        def backward(ctx, grad):
+            with torch.no_grad():
+                ctx.x1.zero_()
+            return grad * 2, None
+
+        def setup_context(ctx, inputs, output):
+            (x, x1) = inputs
+            ctx.x1 = x1
+
+        f.register_fake(f_fake)
+        f.register_autograd(backward, setup_context=setup_context)
+
+        def fn(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
+            return torch.ops._test._clone_leaf_grad(x, x1)
+
+        # Both inputs are leaf tensors with requires_grad=True.
+        # Do NOT clone — passing leaves directly is the point of this test.
+        x = torch.randn(3, requires_grad=True)
+        x1 = torch.randn(3, requires_grad=True)
+
+        compiled_f = aot_function(fn, nop)
+        y = compiled_f(x, x1)
+        self.assertEqual(y.shape, torch.Size([3]))
+
+        loss = y.sum()
+        loss.backward()
+
+        # x1 should have been zeroed by the backward mutation
+        self.assertEqual(x1, torch.zeros(3))
+
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
     def test_input_mutation_false_aliasing(self):
         def f(a, b):
