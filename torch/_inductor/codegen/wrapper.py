@@ -808,9 +808,6 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
                 )
 
                 if self.num_streams > 1:
-                    code.writeline(
-                        "from torch._dynamo.variables.streams import _get_stream_by_index"
-                    )
                     for i in range(1, self.num_streams):
                         user_obj_idx = self.stream_idx_to_user_obj_idx[i]
                         code.writeline(
@@ -1271,7 +1268,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def __init__(self):
         super().__init__()
-        self._stream_cache_setup_devices: OrderedSet[int] = OrderedSet()
+        self._last_stream_cache_device: int | None = None
         self._graph_return_counter: int = 0
         self._pending_input_asserts: dict[str, tuple[str, str]] = {}
         self._pending_alignment_copies: OrderedSet[str] = OrderedSet()
@@ -1846,8 +1843,13 @@ class PythonWrapperCodegen(CodeGen):
     ) -> None:
         if num_streams > 1:
             assert stream_idx_to_user_obj_idx is not None
-            setup_stream_cache = device_idx not in self._stream_cache_setup_devices
-            self._stream_cache_setup_devices.add(device_idx)
+            import_line = (
+                "from torch._dynamo.variables.streams import _get_stream_by_index"
+            )
+            if not self.imports.contains(import_line):
+                self.imports.writeline(import_line)
+            setup_stream_cache = self._last_stream_cache_device != device_idx
+            self._last_stream_cache_device = device_idx
             self.writeline(
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
@@ -1932,18 +1934,10 @@ class PythonWrapperCodegen(CodeGen):
                 self.wrapper_call.writeline("assert not var.isinf().any().item()")
                 self.wrapper_call.do_unindent(2)
 
-            if V.graph.device_type in ("cuda", "xpu"):
-                all_indices = "none"
-                sync_env = f"_sync_env_{graph_idx}"
-                self.wrapper_call.writeline(
-                    f'{sync_env} = __import__("os").environ.get("INDUCTOR_SYNC_GRAPHS", "{all_indices}")'
-                )
-                self.wrapper_call.writeline(
-                    f'if {sync_env} != "none" and "{graph_idx}" in {sync_env}.split(","):'
-                )
-                self.wrapper_call.do_indent()
-                self.wrapper_call.writeline(V.graph.device_ops.synchronize())
-                self.wrapper_call.do_unindent()
+            sync_indices = config.triton.sync_graph_indices
+            if sync_indices is not None and V.graph.device_type in ("cuda", "xpu"):
+                if graph_idx in sync_indices:
+                    self.wrapper_call.writeline(V.graph.device_ops.synchronize())
 
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:
