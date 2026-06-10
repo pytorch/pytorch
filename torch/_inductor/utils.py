@@ -1828,11 +1828,14 @@ class AotOnlyBuffer(IndentedBuffer):
 def make_codegen_buffer() -> IndentedBuffer:
     """Construct the IndentedBuffer subclass matching the current codegen mode.
 
+    Dual-wrapper mode -> DualIndentedBuffer (JIT and AOTI both active).
     Pure AOTI -> AotOnlyBuffer (writeline_aot writes; writeline_jit drops).
     Pure JIT  -> IndentedBuffer  (writeline_jit writes; writeline_aot drops).
     """
     from .virtualized import V
 
+    if V.graph.is_dual_wrapper_mode:
+        return DualIndentedBuffer()
     if V.graph.aot_mode:
         return AotOnlyBuffer()
     return IndentedBuffer()
