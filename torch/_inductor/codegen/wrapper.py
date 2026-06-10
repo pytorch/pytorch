@@ -788,11 +788,12 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
     Attributes:
         num_streams: Number of streams (determined by user annotations on nodes).
         stream_idx_to_user_obj_idx: Maps stream_idx → user_object_index for
-            retrieving user stream objects via get_external_object_by_index.
+            retrieving user stream objects via _get_stream_by_index.
     """
 
     num_streams: int = 1
     stream_idx_to_user_obj_idx: dict[int, int] = dataclasses.field(default_factory=dict)
+    setup_stream_cache: bool = True
 
     def codegen(self, code: IndentedBuffer) -> None:
         """Generate context switching and stream retrieval code."""
@@ -800,15 +801,19 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
             super().codegen(code)
         else:
             super().codegen(code)
-            code.writeline(f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}")
 
-            if self.num_streams > 1:
-                for i in range(1, self.num_streams):
-                    user_obj_idx = self.stream_idx_to_user_obj_idx[i]
-                    code.writeline(
-                        f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
-                        f"= get_external_object_by_index({user_obj_idx})",
-                    )
+            if self.setup_stream_cache:
+                code.writeline(
+                    f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}"
+                )
+
+                if self.num_streams > 1:
+                    for i in range(1, self.num_streams):
+                        user_obj_idx = self.stream_idx_to_user_obj_idx[i]
+                        code.writeline(
+                            f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
+                            f"= _get_stream_by_index({user_obj_idx})",
+                        )
 
 
 @dataclasses.dataclass
@@ -1263,6 +1268,8 @@ class PythonWrapperCodegen(CodeGen):
 
     def __init__(self):
         super().__init__()
+        self._last_stream_cache_key: tuple[int, int, tuple[tuple[int, int], ...]] | None = None
+        self._graph_return_counter: int = 0
         self._pending_input_asserts: dict[str, tuple[str, str]] = {}
         self._pending_alignment_copies: OrderedSet[str] = OrderedSet()
         self._names_iter: Iterator[int] = count()
@@ -1837,17 +1844,20 @@ class PythonWrapperCodegen(CodeGen):
         if num_streams > 1:
             assert stream_idx_to_user_obj_idx is not None
             import_line = (
-                "from torch._dynamo.graph_bytecode_inputs import "
-                "get_external_object_by_index"
+                "from torch._dynamo.variables.streams import _get_stream_by_index"
             )
             if not self.imports.contains(import_line):
                 self.imports.writeline(import_line)
+            cache_key = (device_idx, num_streams, tuple(sorted(stream_idx_to_user_obj_idx.items())))
+            setup_stream_cache = self._last_stream_cache_key != cache_key
+            self._last_stream_cache_key = cache_key
             self.writeline(
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
                     self.last_seen_device_guard_index,
                     num_streams,
                     stream_idx_to_user_obj_idx,
+                    setup_stream_cache=setup_stream_cache,
                 ),
             )
         else:
@@ -1910,6 +1920,9 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
+            graph_idx = self._graph_return_counter
+            self._graph_return_counter += 1
+
             if config.nan_asserts:
                 self.wrapper_call.writeline(
                     "return_vars = (" + ", ".join(output_refs) + ", )"
@@ -1921,6 +1934,11 @@ class PythonWrapperCodegen(CodeGen):
                 self.wrapper_call.writeline("assert not var.isnan().any().item()")
                 self.wrapper_call.writeline("assert not var.isinf().any().item()")
                 self.wrapper_call.do_unindent(2)
+
+            sync_indices = config.triton.sync_graph_indices
+            if sync_indices is not None and V.graph.device_type in ("cuda", "xpu"):
+                if graph_idx in sync_indices:
+                    self.wrapper_call.writeline(V.graph.device_ops.synchronize())
 
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:
