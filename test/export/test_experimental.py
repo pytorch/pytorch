@@ -706,6 +706,57 @@ def forward(self, args_0):
             OutputKind.LOSS_OUTPUT,
         )
 
+    def test_joint_parameter_mutation_error(self):
+        class MutatesParam(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(4), requires_grad=False)
+
+            def forward(self, x):
+                self.p.add_(1)
+                return ((x * self.p).sum(),)
+
+        error_msg = (
+            "Mutating module parameters while exporting a joint "
+            "forward/backward graph is not supported.*Only buffers can be mutated"
+        )
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            aot_export_module(
+                MutatesParam(),
+                (torch.randn(4, requires_grad=True),),
+                trace_joint=True,
+                output_loss_index=0,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            ep = export(MutatesParam(), (torch.randn(4, requires_grad=True),))
+            _export_forward_backward(ep)
+
+    def test_joint_buffer_mutation_still_allowed(self):
+        class MutatesBuffer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return ((x * self.buf).sum(),)
+
+        _, signature = aot_export_module(
+            MutatesBuffer(),
+            (torch.randn(4, requires_grad=True),),
+            trace_joint=True,
+            output_loss_index=0,
+        )
+        self.assertEqual(list(signature.buffers_to_mutate.values()), ["buf"])
+
+        ep = export(MutatesBuffer(), (torch.randn(4, requires_grad=True),))
+        ep_joint = _export_forward_backward(ep)
+        self.assertEqual(
+            list(ep_joint.graph_signature.buffers_to_mutate.values()), ["buf"]
+        )
+
     def test_sticky_export(self):
         class Model(torch.nn.Module):
             def __init__(self):
