@@ -37,13 +37,6 @@ static inline MetalDeviceInfo createDeviceInfo(id<MTLDevice> device) {
   } else if (@available(macOS 10.11, iOS 9.0, *)) {
     device_info.languageVersion = MTLLanguageVersion1_1;
   }
-#if (                                                    \
-    defined(__IPHONE_9_0) &&                             \
-    __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_9_0) || \
-    (defined(__MAC_10_11) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_11)
-#else
-#error "Metal is not available on the current platform."
-#endif
   return device_info;
 }
 
