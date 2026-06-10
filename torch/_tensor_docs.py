@@ -5119,9 +5119,14 @@ In-place version of :meth:`~Tensor.t`
 add_docstr_all(
     "tile",
     r"""
-tile(dims) -> Tensor
+tile(*dims) -> Tensor
 
-See :func:`torch.tile`
+Constructs a tensor by repeating the elements of this tensor.
+
+The :attr:`dims` argument may be specified as a :class:`torch.Size`,
+a tuple or list of integers, or one or more integers.
+
+See :func:`torch.tile` for details.
 """,
 )
 
