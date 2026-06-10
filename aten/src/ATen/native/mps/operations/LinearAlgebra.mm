@@ -300,7 +300,6 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
   constexpr auto max_stride_size = 32768;
   constexpr auto max_complex_inner_size = 2048;
-  static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
   if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
     return true;
   }
@@ -323,7 +322,11 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
     }
   }
 
-  return !is_macos_14_4_or_newer &&
+  // (M1/M2) MPSGraph has multiple matmul kernels that silently produce
+  // wrong results when an operand size or stride exceeds 2^15
+  // Apple9+ (M3+) handles it correctly
+  static const bool needs_k_overflow_fallback = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
+  return needs_k_overflow_fallback &&
       (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
        self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
        other.size(0) > max_stride_size || other.size(1) > max_stride_size);
