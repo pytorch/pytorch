@@ -541,20 +541,8 @@ def patch_torch_manual_seed():
     """Make torch manual seed deterministic. Helps with accuracy testing."""
 
     def deterministic_torch_manual_seed(*args, **kwargs):
-        from torch._C import default_generator
-
         seed = 1337
-        if HAS_CUDA:
-            import torch.cuda
-
-            if not torch.cuda._is_in_bad_fork():
-                torch.cuda.manual_seed_all(seed)
-        if HAS_XPU:
-            import torch.xpu
-
-            if not torch.xpu._is_in_bad_fork():
-                torch.xpu.manual_seed_all(seed)
-        return default_generator.manual_seed(seed)
+        return torch.manual_seed(seed)
 
     torch.manual_seed = deterministic_torch_manual_seed
 
