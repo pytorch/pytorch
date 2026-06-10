@@ -11698,6 +11698,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA, MPS: elu_out
+    MTIA: elu_out_mtia
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   structured_delegate: elu.out
