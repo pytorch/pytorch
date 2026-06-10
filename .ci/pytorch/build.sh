@@ -289,8 +289,8 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && grep -q "csrc/Module.cpp" build/compile_commands.json; then
     debinfo_plan="$(python tools/build_with_debinfo.py --dry-run torch/csrc/Module.cpp)"
     echo "${debinfo_plan}"
-    echo "${debinfo_plan}" | grep -qE ' -g( |$)' || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
-    echo "${debinfo_plan}" | grep -q 'libtorch_python' || { echo "ERROR: build_with_debinfo --dry-run emitted no libtorch_python link command"; exit 1; }
+    grep -qE ' -g( |$)' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
+    grep -q 'libtorch_python' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no libtorch_python link command"; exit 1; }
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
