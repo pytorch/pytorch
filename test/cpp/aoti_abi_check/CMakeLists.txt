@@ -12,18 +12,23 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_alignment.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_cast.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_compiletimefunctionpointer.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_constexprcrc.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_devicecapability.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_devicetype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dispatch.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dispatch_v2.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dtype.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_enumerate.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_exception.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_functionref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_headeronlyarrayref.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_idwrapper.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_layout.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_macros.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_math.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_memoryformat.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_metaprogramming.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_overloaded.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_rand.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scalartype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_typelist.cpp
