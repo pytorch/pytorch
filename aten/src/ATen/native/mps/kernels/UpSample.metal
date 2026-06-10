@@ -502,6 +502,276 @@ kernel void upsample_bilinear2d(
   }
 }
 
+// Nearest source index: floor(scale * dst) for nearest, floor(scale * (dst +
+// 0.5)) for nearest-exact. scale here is the input/output ratio, so truncation
+// (== floor for the non-negative product) matches the CPU reference.
+template <bool exact>
+inline long nearest_src_index(float scale, uint dst) {
+  return static_cast<long>(exact ? scale * (dst + 0.5f) : scale * dst);
+}
+
+template <typename T, bool exact>
+kernel void upsample_nearest1d(
+    constant T* inputData [[buffer(0)]],
+    device T* outputData [[buffer(1)]],
+    constant ulong3& input_strides [[buffer(2)]],
+    constant ulong3& output_strides [[buffer(3)]],
+    constant long3& input_sizes [[buffer(4)]],
+    constant long3& output_sizes [[buffer(5)]],
+    constant float2& scales [[buffer(6)]],
+    constant bool& align_corners [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  (void)align_corners; // nearest never uses align_corners
+  const auto output_x = thread_index;
+  const auto src_x = nearest_src_index<exact>(scales.x, output_x);
+  for (int n = 0; n < output_sizes.x; n++) {
+    for (int c = 0; c < output_sizes.y; c++) {
+      outputData
+          [n * output_strides.x + c * output_strides.y +
+           output_x * output_strides.z] =
+              upsample_get_value_bounded<T>(
+                  inputData, input_sizes.z, input_strides, n, c, src_x);
+    }
+  }
+}
+
+template <typename T, bool exact>
+kernel void upsample_nearest2d(
+    constant T* inputData [[buffer(0)]],
+    device T* outputData [[buffer(1)]],
+    constant ulong4& input_strides [[buffer(2)]],
+    constant ulong4& output_strides [[buffer(3)]],
+    constant long4& input_sizes [[buffer(4)]],
+    constant long4& output_sizes [[buffer(5)]],
+    constant float2& scales [[buffer(6)]],
+    constant bool& align_corners [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  (void)align_corners; // nearest never uses align_corners
+  const auto output_x = thread_index % static_cast<uint>(output_sizes.w);
+  const auto output_y = thread_index / static_cast<uint>(output_sizes.w);
+  const auto src_x = nearest_src_index<exact>(scales.x, output_x);
+  const auto src_y = nearest_src_index<exact>(scales.y, output_y);
+  for (int n = 0; n < output_sizes.x; n++) {
+    for (int c = 0; c < output_sizes.y; c++) {
+      outputData
+          [n * output_strides.x + c * output_strides.y +
+           output_y * output_strides.z + output_x * output_strides.w] =
+              upsample_get_value_bounded<T>(
+                  inputData, input_sizes.wz, input_strides, n, c, src_y, src_x);
+    }
+  }
+}
+
+// Backward is computed as a gather: one thread per input pixel sums the
+// contributions from every output pixel that read it, accumulating in fp32 and
+// writing once. This is deterministic and atomic-free, and keeps fp16/bf16
+// gradients accurate (cf. the CUDA upsample backward kernels).
+template <typename T, bool exact>
+kernel void upsample_nearest1d_backward(
+    device T* gradInputData [[buffer(0)]],
+    constant T* gradOutputData [[buffer(1)]],
+    constant ulong3& input_strides [[buffer(2)]],
+    constant ulong3& output_strides [[buffer(3)]],
+    constant long3& input_sizes [[buffer(4)]],
+    constant long3& output_sizes [[buffer(5)]],
+    constant float2& scales [[buffer(6)]],
+    constant bool& align_corners [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  (void)align_corners; // nearest never uses align_corners
+  const long in_w = input_sizes.z;
+  const long out_w = output_sizes.z;
+  const long input_x = thread_index;
+  const long ox_lo = max(0L, long(input_x / scales.x) - 1);
+  const long ox_hi = min(out_w - 1, long((input_x + 1) / scales.x) + 1);
+  for (int n = 0; n < output_sizes.x; n++) {
+    for (int c = 0; c < output_sizes.y; c++) {
+      float acc = 0;
+      for (long ox = ox_lo; ox <= ox_hi; ox++) {
+        if (min(max(nearest_src_index<exact>(scales.x, uint(ox)), 0L), in_w - 1) != input_x) {
+          continue;
+        }
+        acc += static_cast<float>(gradOutputData
+            [n * output_strides.x + c * output_strides.y + ox * output_strides.z]);
+      }
+      gradInputData
+          [n * input_strides.x + c * input_strides.y + input_x * input_strides.z] =
+          static_cast<T>(acc);
+    }
+  }
+}
+
+template <typename T, bool exact>
+kernel void upsample_nearest2d_backward(
+    device T* gradInputData [[buffer(0)]],
+    constant T* gradOutputData [[buffer(1)]],
+    constant ulong4& input_strides [[buffer(2)]],
+    constant ulong4& output_strides [[buffer(3)]],
+    constant long4& input_sizes [[buffer(4)]],
+    constant long4& output_sizes [[buffer(5)]],
+    constant float2& scales [[buffer(6)]],
+    constant bool& align_corners [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  (void)align_corners; // nearest never uses align_corners
+  const long in_w = input_sizes.w, in_h = input_sizes.z;
+  const long out_w = output_sizes.w, out_h = output_sizes.z;
+  const long input_x = thread_index % static_cast<uint>(in_w);
+  const long input_y = thread_index / static_cast<uint>(in_w);
+  const long ox_lo = max(0L, long(input_x / scales.x) - 1);
+  const long ox_hi = min(out_w - 1, long((input_x + 1) / scales.x) + 1);
+  const long oy_lo = max(0L, long(input_y / scales.y) - 1);
+  const long oy_hi = min(out_h - 1, long((input_y + 1) / scales.y) + 1);
+  for (int n = 0; n < output_sizes.x; n++) {
+    for (int c = 0; c < output_sizes.y; c++) {
+      float acc = 0;
+      for (long oy = oy_lo; oy <= oy_hi; oy++) {
+        if (min(max(nearest_src_index<exact>(scales.y, uint(oy)), 0L), in_h - 1) != input_y) {
+          continue;
+        }
+        for (long ox = ox_lo; ox <= ox_hi; ox++) {
+          if (min(max(nearest_src_index<exact>(scales.x, uint(ox)), 0L), in_w - 1) != input_x) {
+            continue;
+          }
+          acc += static_cast<float>(gradOutputData
+              [n * output_strides.x + c * output_strides.y + oy * output_strides.z +
+               ox * output_strides.w]);
+        }
+      }
+      gradInputData
+          [n * input_strides.x + c * input_strides.y + input_y * input_strides.z +
+           input_x * input_strides.w] = static_cast<T>(acc);
+    }
+  }
+}
+
+// Inclusive range of output positions whose linear stencil reads input_pos.
+// Inverse of area_pixel_compute_source_index; mirrors the CUDA helper.
+inline void compute_output_range(
+    long input_pos,
+    float scale,
+    long output_size,
+    bool align_corners,
+    thread long& min_output,
+    thread long& max_output) {
+  float lo, hi;
+  if (align_corners) {
+    lo = static_cast<float>(input_pos - 1) / scale;
+    hi = static_cast<float>(input_pos + 1) / scale;
+  } else {
+    lo = (input_pos - 0.5f) / scale - 0.5f;
+    hi = (input_pos + 1.5f) / scale - 0.5f;
+  }
+  min_output = max(0L, static_cast<long>(ceil(lo)));
+  max_output = min(output_size - 1, static_cast<long>(floor(hi)));
+}
+
+template <typename T>
+kernel void upsample_linear1d_backward(
+    device T* gradInputData [[buffer(0)]],
+    constant T* gradOutputData [[buffer(1)]],
+    constant ulong3& input_strides [[buffer(2)]],
+    constant ulong3& output_strides [[buffer(3)]],
+    constant long3& input_sizes [[buffer(4)]],
+    constant long3& output_sizes [[buffer(5)]],
+    constant float2& scales [[buffer(6)]],
+    constant bool& align_corners [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const long in_w = input_sizes.z;
+  const long input_x = thread_index;
+  long w2_min, w2_max;
+  compute_output_range(input_x, scales.x, output_sizes.z, align_corners, w2_min, w2_max);
+  for (int n = 0; n < output_sizes.x; n++) {
+    for (int c = 0; c < output_sizes.y; c++) {
+      float acc = 0;
+      for (long w2 = w2_min; w2 <= w2_max; w2++) {
+        const float w1r =
+            area_pixel_compute_source_index(scales.x, w2, align_corners, /*cubic=*/false);
+        const long w1_base = static_cast<long>(w1r);
+        const long w1p = (w1_base < in_w - 1) ? 1 : 0;
+        const float w1lambda = w1r - w1_base;
+        float weight = 0;
+        if (input_x == w1_base) {
+          weight += 1.0f - w1lambda;
+        }
+        if (input_x == w1_base + w1p) {
+          weight += w1lambda;
+        }
+        if (weight > 0) {
+          acc += weight *
+              static_cast<float>(gradOutputData
+                  [n * output_strides.x + c * output_strides.y + w2 * output_strides.z]);
+        }
+      }
+      gradInputData
+          [n * input_strides.x + c * input_strides.y + input_x * input_strides.z] =
+          static_cast<T>(acc);
+    }
+  }
+}
+
+template <typename T>
+kernel void upsample_bilinear2d_backward(
+    device T* gradInputData [[buffer(0)]],
+    constant T* gradOutputData [[buffer(1)]],
+    constant ulong4& input_strides [[buffer(2)]],
+    constant ulong4& output_strides [[buffer(3)]],
+    constant long4& input_sizes [[buffer(4)]],
+    constant long4& output_sizes [[buffer(5)]],
+    constant float2& scales [[buffer(6)]],
+    constant bool& align_corners [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const long in_w = input_sizes.w, in_h = input_sizes.z;
+  const long input_x = thread_index % static_cast<uint>(in_w);
+  const long input_y = thread_index / static_cast<uint>(in_w);
+  long h2_min, h2_max, w2_min, w2_max;
+  compute_output_range(input_y, scales.y, output_sizes.z, align_corners, h2_min, h2_max);
+  compute_output_range(input_x, scales.x, output_sizes.w, align_corners, w2_min, w2_max);
+  for (int n = 0; n < output_sizes.x; n++) {
+    for (int c = 0; c < output_sizes.y; c++) {
+      float acc = 0;
+      for (long h2 = h2_min; h2 <= h2_max; h2++) {
+        const float h1r =
+            area_pixel_compute_source_index(scales.y, h2, align_corners, /*cubic=*/false);
+        const long h1_base = static_cast<long>(h1r);
+        const long h1p = (h1_base < in_h - 1) ? 1 : 0;
+        const float h1lambda = h1r - h1_base;
+        const float h0lambda = 1.0f - h1lambda;
+        for (long w2 = w2_min; w2 <= w2_max; w2++) {
+          const float w1r =
+              area_pixel_compute_source_index(scales.x, w2, align_corners, /*cubic=*/false);
+          const long w1_base = static_cast<long>(w1r);
+          const long w1p = (w1_base < in_w - 1) ? 1 : 0;
+          const float w1lambda = w1r - w1_base;
+          const float w0lambda = 1.0f - w1lambda;
+          // Accumulate weights from all four taps, handling boundary collapse
+          // (h1p/w1p == 0 makes taps coincide).
+          float weight = 0;
+          if (input_y == h1_base && input_x == w1_base) {
+            weight += h0lambda * w0lambda;
+          }
+          if (input_y == h1_base && input_x == w1_base + w1p) {
+            weight += h0lambda * w1lambda;
+          }
+          if (input_y == h1_base + h1p && input_x == w1_base) {
+            weight += h1lambda * w0lambda;
+          }
+          if (input_y == h1_base + h1p && input_x == w1_base + w1p) {
+            weight += h1lambda * w1lambda;
+          }
+          if (weight > 0) {
+            acc += weight *
+                static_cast<float>(gradOutputData
+                    [n * output_strides.x + c * output_strides.y + h2 * output_strides.z +
+                     w2 * output_strides.w]);
+          }
+        }
+      }
+      gradInputData
+          [n * input_strides.x + c * input_strides.y + input_y * input_strides.z +
+           input_x * input_strides.w] = static_cast<T>(acc);
+    }
+  }
+}
+
 struct BilinearFunctor {
   inline float operator()(float x) {
     x = abs(x);
@@ -759,6 +1029,97 @@ kernel void upsample_bicubic2d_backward(
       constant bool& align_corners [[buffer(7)]],                 \
       uint thread_index [[thread_position_in_grid]])
 
+#define INSTANTIATE_UPSAMPLE_NEAREST_1D(NAME, EXACT, DTYPE)        \
+  template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
+  upsample_nearest1d<DTYPE, EXACT>(                                \
+      constant DTYPE * inputData [[buffer(0)]],                    \
+      device DTYPE * outputData [[buffer(1)]],                     \
+      constant ulong3 & input_strides [[buffer(2)]],               \
+      constant ulong3 & output_strides [[buffer(3)]],              \
+      constant long3 & input_sizes [[buffer(4)]],                  \
+      constant long3 & output_sizes [[buffer(5)]],                 \
+      constant float2 & scales [[buffer(6)]],                      \
+      constant bool& align_corners [[buffer(7)]],                  \
+      uint thread_index [[thread_position_in_grid]])
+
+#define INSTANTIATE_UPSAMPLE_NEAREST_2D(NAME, EXACT, DTYPE)        \
+  template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
+  upsample_nearest2d<DTYPE, EXACT>(                                \
+      constant DTYPE * inputData [[buffer(0)]],                    \
+      device DTYPE * outputData [[buffer(1)]],                     \
+      constant ulong4 & input_strides [[buffer(2)]],               \
+      constant ulong4 & output_strides [[buffer(3)]],              \
+      constant long4 & input_sizes [[buffer(4)]],                  \
+      constant long4 & output_sizes [[buffer(5)]],                 \
+      constant float2 & scales [[buffer(6)]],                      \
+      constant bool& align_corners [[buffer(7)]],                  \
+      uint thread_index [[thread_position_in_grid]])
+
+#define INSTANTIATE_UPSAMPLE_NEAREST(DTYPE)                      \
+  INSTANTIATE_UPSAMPLE_NEAREST_1D(nearest1d, false, DTYPE);      \
+  INSTANTIATE_UPSAMPLE_NEAREST_1D(nearest_exact1d, true, DTYPE); \
+  INSTANTIATE_UPSAMPLE_NEAREST_2D(nearest2d, false, DTYPE);      \
+  INSTANTIATE_UPSAMPLE_NEAREST_2D(nearest_exact2d, true, DTYPE)
+
+// Gather backward kernels write grad_input directly (no atomics).
+#define INSTANTIATE_UPSAMPLE_LINEAR_BACKWARD(DTYPE)                        \
+  template [[host_name("upsample_linear1d_backward_" #DTYPE)]] kernel void \
+  upsample_linear1d_backward<DTYPE>(                                       \
+      device DTYPE * gradInputData [[buffer(0)]],                          \
+      constant DTYPE * gradOutputData [[buffer(1)]],                       \
+      constant ulong3 & input_strides [[buffer(2)]],                      \
+      constant ulong3 & output_strides [[buffer(3)]],                     \
+      constant long3 & input_sizes [[buffer(4)]],                         \
+      constant long3 & output_sizes [[buffer(5)]],                        \
+      constant float2 & scales [[buffer(6)]],                             \
+      constant bool& align_corners [[buffer(7)]],                         \
+      uint thread_index [[thread_position_in_grid]])
+
+#define INSTANTIATE_UPSAMPLE_BILINEAR_BACKWARD(DTYPE)                        \
+  template [[host_name("upsample_bilinear2d_backward_" #DTYPE)]] kernel void \
+  upsample_bilinear2d_backward<DTYPE>(                                       \
+      device DTYPE * gradInputData [[buffer(0)]],                            \
+      constant DTYPE * gradOutputData [[buffer(1)]],                         \
+      constant ulong4 & input_strides [[buffer(2)]],                        \
+      constant ulong4 & output_strides [[buffer(3)]],                       \
+      constant long4 & input_sizes [[buffer(4)]],                           \
+      constant long4 & output_sizes [[buffer(5)]],                          \
+      constant float2 & scales [[buffer(6)]],                               \
+      constant bool& align_corners [[buffer(7)]],                           \
+      uint thread_index [[thread_position_in_grid]])
+
+#define INSTANTIATE_UPSAMPLE_NEAREST_1D_BACKWARD(NAME, EXACT, DTYPE)        \
+  template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
+  upsample_nearest1d_backward<DTYPE, EXACT>(                                \
+      device DTYPE * gradInputData [[buffer(0)]],                           \
+      constant DTYPE * gradOutputData [[buffer(1)]],                        \
+      constant ulong3 & input_strides [[buffer(2)]],                       \
+      constant ulong3 & output_strides [[buffer(3)]],                      \
+      constant long3 & input_sizes [[buffer(4)]],                          \
+      constant long3 & output_sizes [[buffer(5)]],                         \
+      constant float2 & scales [[buffer(6)]],                              \
+      constant bool& align_corners [[buffer(7)]],                          \
+      uint thread_index [[thread_position_in_grid]])
+
+#define INSTANTIATE_UPSAMPLE_NEAREST_2D_BACKWARD(NAME, EXACT, DTYPE)        \
+  template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
+  upsample_nearest2d_backward<DTYPE, EXACT>(                                \
+      device DTYPE * gradInputData [[buffer(0)]],                           \
+      constant DTYPE * gradOutputData [[buffer(1)]],                        \
+      constant ulong4 & input_strides [[buffer(2)]],                       \
+      constant ulong4 & output_strides [[buffer(3)]],                      \
+      constant long4 & input_sizes [[buffer(4)]],                          \
+      constant long4 & output_sizes [[buffer(5)]],                         \
+      constant float2 & scales [[buffer(6)]],                              \
+      constant bool& align_corners [[buffer(7)]],                          \
+      uint thread_index [[thread_position_in_grid]])
+
+#define INSTANTIATE_UPSAMPLE_NEAREST_BACKWARD(DTYPE)                      \
+  INSTANTIATE_UPSAMPLE_NEAREST_1D_BACKWARD(nearest1d, false, DTYPE);      \
+  INSTANTIATE_UPSAMPLE_NEAREST_1D_BACKWARD(nearest_exact1d, true, DTYPE); \
+  INSTANTIATE_UPSAMPLE_NEAREST_2D_BACKWARD(nearest2d, false, DTYPE);      \
+  INSTANTIATE_UPSAMPLE_NEAREST_2D_BACKWARD(nearest_exact2d, true, DTYPE)
+
 #define INSTANTIATE_UPSAMPLE_3D(DTYPE)                                    \
   template [[host_name("upsample_nearest_3d_" #DTYPE)]] kernel void       \
   upsample_nearest_3d<DTYPE>(                                             \
@@ -806,7 +1167,10 @@ kernel void upsample_bicubic2d_backward(
   INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE);                \
   INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);                        \
   INSTANTIATE_UPSAMPLE_2D_AA(bilinear2d_aa, BilinearFunctor, DTYPE); \
+  INSTANTIATE_UPSAMPLE_BILINEAR_BACKWARD(DTYPE);                    \
   INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);                                \
+  INSTANTIATE_UPSAMPLE_LINEAR_BACKWARD(DTYPE);                      \
+  INSTANTIATE_UPSAMPLE_NEAREST_BACKWARD(DTYPE);                     \
   INSTANTIATE_UPSAMPLE_3D_BACKWARD(DTYPE);                           \
   INSTANTIATE_UPSAMPLE_3D(DTYPE)
 
@@ -815,3 +1179,15 @@ INSTANTIATE_UPSAMPLE_3D(uchar);
 INSTANTIATE_UPSAMPLE_ALL(float);
 INSTANTIATE_UPSAMPLE_ALL(half);
 INSTANTIATE_UPSAMPLE_ALL(bfloat);
+
+// Nearest 1d/2d is a pure gather, so cover every dtype the MPSGraph path used
+// to support to avoid a coverage regression.
+INSTANTIATE_UPSAMPLE_NEAREST(float);
+INSTANTIATE_UPSAMPLE_NEAREST(half);
+INSTANTIATE_UPSAMPLE_NEAREST(bfloat);
+INSTANTIATE_UPSAMPLE_NEAREST(uchar);
+INSTANTIATE_UPSAMPLE_NEAREST(char);
+INSTANTIATE_UPSAMPLE_NEAREST(short);
+INSTANTIATE_UPSAMPLE_NEAREST(int);
+INSTANTIATE_UPSAMPLE_NEAREST(long);
+INSTANTIATE_UPSAMPLE_NEAREST(bool);
