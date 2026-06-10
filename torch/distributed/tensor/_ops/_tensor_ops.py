@@ -164,6 +164,10 @@ def create_like_single_dim_strategy(
             [placement, placement]
             + [placement if name == "out" else Replicate() for name in kw_names]
         )
+    for reduce_op in Partial.ALL_REDUCE_OPS:
+        strategies.append(
+            [Replicate(), Partial(reduce_op)] + [Replicate() for _ in kw_names]
+        )
     return strategies
 
 
@@ -627,25 +631,41 @@ def cat_single_dim_strategy(
     if isinstance(input_list, list):
         input_list = tuple(input_list)
 
+    def is_legacy_cat_empty(meta: TensorMeta) -> bool:
+        return len(meta.shape) == 1 and statically_known_true(meta.shape[0] == 0)
+
     num_inputs = len(input_list)
-    ndim_set = {len(meta.shape) for meta in input_list}
-    if len(ndim_set) not in (1, 2):
-        raise AssertionError(
-            "Expected all cat inputs to be the same ndim, except empty tensors"
-        )
-    if len(ndim_set) == 2:
-        if 0 not in ndim_set:
-            raise AssertionError
-    common_ndim = max(ndim_set)
+    if num_inputs == 0:
+        raise AssertionError("Expected cat inputs to be non-empty list of tensors")
+    legacy_empty_inputs = tuple(is_legacy_cat_empty(meta) for meta in input_list)
+    real_ndim_set = {
+        len(meta.shape)
+        for meta, legacy_empty in zip(input_list, legacy_empty_inputs, strict=True)
+        if not legacy_empty
+    }
+    if len(real_ndim_set) > 1:
+        raise AssertionError("Expected all non-empty cat inputs to be the same ndim")
+    common_ndim = next(iter(real_ndim_set), 1)
     cat_dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
     cat_dim = normalize_dim(cat_dim, common_ndim)
     single_dim_strategies = []
     for i in range(common_ndim):
         if i != cat_dim:
-            single_dim_strategies.append([_ShardingPlaceholder(i)] * (1 + num_inputs))
+            single_dim_strategies.append(
+                [_ShardingPlaceholder(i)]
+                + [
+                    Replicate() if legacy_empty else _ShardingPlaceholder(i)
+                    for legacy_empty in legacy_empty_inputs
+                ]
+            )
     for reduce_op in _PARTIAL_PASS_THROUGH_REDUCE_OPS:
-        # pyrefly: ignore [bad-argument-type]
-        single_dim_strategies.append([Partial(reduce_op)] * (1 + num_inputs))
+        single_dim_strategies.append(
+            [Partial(reduce_op)]  # pyrefly: ignore [bad-argument-type]
+            + [
+                Replicate() if legacy_empty else Partial(reduce_op)
+                for legacy_empty in legacy_empty_inputs
+            ]
+        )
     # pyrefly: ignore [bad-return]
     return single_dim_strategies
 
