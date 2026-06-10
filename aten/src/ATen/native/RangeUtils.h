@@ -22,9 +22,6 @@ inline void arange_check_bounds(
       dstart,
       " -> ",
       dend);
-  TORCH_CHECK(
-      ((dstep > 0) && (dend >= dstart)) || ((dstep < 0) && (dend <= dstart)),
-      "upper bound and lower bound inconsistent with step sign");
 }
 
 template <typename scalar_t>
@@ -51,6 +48,7 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
     size_d = std::ceil((end.to<double>() - start.to<double>())
                         / step.to<double>());
   }
+  size_d = std::max(size_d, 0.0);
 
   TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
             "invalid size, possible overflow?");

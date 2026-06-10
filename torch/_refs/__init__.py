@@ -5348,16 +5348,6 @@ def arange(
         end = start
         start = 0
     torch._check(step != 0, lambda: "step must be nonzero")
-    if step > 0:
-        torch._check(
-            end >= start,
-            lambda: "upper bound and lower bound inconsistent with step sign",
-        )
-    elif step < 0:
-        torch._check(
-            end <= start,
-            lambda: "upper bound and lower bound inconsistent with step sign",
-        )
 
     def is_finite(x):
         return not isinstance(x, FloatWithoutSymFloat) or math.isfinite(x)
@@ -5392,6 +5382,7 @@ def arange(
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
     else:
         length = math.ceil((end - start) / step)
+    length = builtins.max(length, 0)
 
     if is_integer:
         return prims.iota(
