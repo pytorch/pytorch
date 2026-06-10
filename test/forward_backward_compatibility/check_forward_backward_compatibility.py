@@ -71,6 +71,8 @@ ALLOW_LIST = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("aten::cholesky", datetime.date(9999, 1, 1), None, True),
+    ("aten::cholesky.out", datetime.date(9999, 1, 1), None, True),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_cslt_sparse_mm", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
@@ -104,8 +106,8 @@ ALLOW_LIST = [
     ("aten::miopen_depthwise_convolution_backward_input", datetime.date(9999, 1, 1)),
     ("aten::miopen_depthwise_convolution_backward_weight", datetime.date(9999, 1, 1)),
     ("aten::_nested_tensor", datetime.date(9999, 1, 1)),
-    ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
-    ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
+    ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1), None, True),
+    ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1), None, True),
     ("aten::_symeig_helper", datetime.date(9999, 1, 1)),
     ("aten::symeig", datetime.date(9999, 1, 1)),
     ("aten::symeig.e", datetime.date(9999, 1, 1)),
@@ -184,6 +186,7 @@ dont_parse_list = [
     ("test_backend", datetime.date(2099, 9, 17)),
     ("dist_c10d", datetime.date(2099, 9, 17)),
     ("__backends__.nnc", datetime.date(2099, 9, 17)),
+    ("xnnpack", datetime.date(2099, 9, 17)),
 ]
 
 

@@ -204,6 +204,25 @@ template <typename T, typename Trampoline>
 using intrusive_ptr_no_gil_destructor_trampoline_class_ =
     py::class_<T, IntrusivePtrNoGilDestructor<T>, Trampoline>;
 
+// pybind11 init factory that releases the GIL during construction and routes
+// Python subclasses through the Trampoline so overridden methods dispatch back
+// into Python. It uses the two-callback factory form: the first callback builds
+// a plain T, the second builds the Trampoline (needed when a Python subclass is
+// constructed). A local gil_scoped_release is used rather than a call_guard,
+// which is not safe in init. https://github.com/pybind/pybind11/issues/5473
+template <typename T, typename Trampoline, typename... Args>
+auto init_nogil() {
+  return py::init(
+      [](Args... args) {
+        py::gil_scoped_release nogil{};
+        return c10::make_intrusive<T>(std::forward<Args>(args)...);
+      },
+      [](Args... args) -> c10::intrusive_ptr<T> {
+        py::gil_scoped_release nogil{};
+        return c10::make_intrusive<Trampoline>(std::forward<Args>(args)...);
+      });
+}
+
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
 class PythonStore : public ::c10d::Store {
@@ -2216,22 +2235,21 @@ communication mechanism.
           ProcessGroups. It is not meant to be used directly, but rather
           extended by subclasses.)")
           .def(
-              py::init<int, int>(),
+              init_nogil<
+                  ::c10d::ProcessGroup,
+                  ::c10d::PyProcessGroup,
+                  int,
+                  int>(),
               py::arg("rank"),
               py::arg("size"),
               R"(Create a new ProcessGroup instance.)")
           .def(
-              py::init([](
-                const c10::intrusive_ptr<::c10d::Store>& store,
-                int rank,
-                int size) {
-                // gil_scoped_release is not safe as a call_guard in init.
-                // https://github.com/pybind/pybind11/issues/5473
-                py::gil_scoped_release nogil{};
-
-                return c10::make_intrusive<::c10d::ProcessGroup>(
-                    store, rank, size);
-              }),
+              init_nogil<
+                  ::c10d::ProcessGroup,
+                  ::c10d::PyProcessGroup,
+                  const c10::intrusive_ptr<::c10d::Store>&,
+                  int,
+                  int>(),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
@@ -2432,8 +2450,18 @@ communication mechanism.
 
               See :func:`torch.distributed.all_gather` for more details.)")
           .def(
+              "all_gather_single",
+              &::c10d::ProcessGroup::all_gather_single,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          // Deprecated alias of all_gather_single, kept for backward
+          // compatibility. Bound to all_gather_single to avoid referencing the
+          // deprecated C++ method.
+          .def(
               "_allgather_base",
-              &::c10d::ProcessGroup::_allgather_base,
+              &::c10d::ProcessGroup::all_gather_single,
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -2449,8 +2477,21 @@ communication mechanism.
 
               See :func:`torch.distributed.all_gather` for more details.)")
           .def(
+              "all_gather_single_coalesced",
+              &::c10d::ProcessGroup::all_gather_single_coalesced,
+              py::arg("outputs"),
+              py::arg("inputs"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Allgathers the input tensors from all processes across the process group.
+
+              See :func:`torch.distributed.all_gather` for more details.)")
+          // Deprecated alias of all_gather_single_coalesced, kept for backward
+          // compatibility. Bound to the new method to avoid referencing the
+          // deprecated C++ method.
+          .def(
               "allgather_into_tensor_coalesced",
-              &::c10d::ProcessGroup::allgather_into_tensor_coalesced,
+              &::c10d::ProcessGroup::all_gather_single_coalesced,
               py::arg("outputs"),
               py::arg("inputs"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -2562,15 +2603,38 @@ communication mechanism.
 
               See :func:`torch.distributed.reduce_scatter` for more details.)")
           .def(
+              "reduce_scatter_single",
+              &::c10d::ProcessGroup::reduce_scatter_single,
+              py::arg("outputTensor"),
+              py::arg("inputTensor"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          // Deprecated alias of reduce_scatter_single, kept for backward
+          // compatibility. Bound to reduce_scatter_single to avoid referencing
+          // the deprecated C++ method.
+          .def(
               "_reduce_scatter_base",
-              &::c10d::ProcessGroup::_reduce_scatter_base,
+              &::c10d::ProcessGroup::reduce_scatter_single,
               py::arg("outputTensor"),
               py::arg("inputTensor"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "reduce_scatter_single_coalesced",
+              &::c10d::ProcessGroup::reduce_scatter_single_coalesced,
+              py::arg("outputs"),
+              py::arg("inputs"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Reduces and scatters the input tensors from all processes across the process group.
+
+              See :func:`torch.distributed.reduce_scatter` for more details.)")
+          // Deprecated alias of reduce_scatter_single_coalesced, kept for
+          // backward compatibility. Bound to the new method to avoid
+          // referencing the deprecated C++ method.
+          .def(
               "reduce_scatter_tensor_coalesced",
-              &::c10d::ProcessGroup::reduce_scatter_tensor_coalesced,
+              &::c10d::ProcessGroup::reduce_scatter_single_coalesced,
               py::arg("outputs"),
               py::arg("inputs"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
@@ -2579,8 +2643,45 @@ communication mechanism.
 
               See :func:`torch.distributed.reduce_scatter` for more details.)")
           .def(
+              "all_to_all_single",
+              &::c10d::ProcessGroup::all_to_all_single,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("output_split_sizes"),
+              py::arg("input_split_sizes"),
+              py::arg("opts") = ::c10d::AllToAllOptions(),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Alltoalls the input tensors from all processes across the process group.
+
+              See :func:`torch.distributed.all_to_all_single` for more details.)")
+          .def(
+              "all_to_all_single",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 at::Tensor& output,
+                 at::Tensor& input,
+                 std::vector<int64_t>& outputSplitSizes,
+                 std::vector<int64_t>& inputSplitSizes,
+                 std::optional<std::chrono::milliseconds> timeout) {
+                ::c10d::AllToAllOptions opts;
+                opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
+                return self->all_to_all_single(
+                    output, input, outputSplitSizes, inputSplitSizes, opts);
+              },
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("output_split_sizes"),
+              py::arg("input_split_sizes"),
+              py::arg("timeout") = std::nullopt,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Alltoalls the input tensors from all processes across the process group.
+
+              See :func:`torch.distributed.all_to_all_single` for more details.)")
+          // Deprecated alias of all_to_all_single, kept for backward
+          // compatibility. Bound to all_to_all_single to avoid referencing the
+          // deprecated C++ method.
+          .def(
               "alltoall_base",
-              &::c10d::ProcessGroup::alltoall_base,
+              &::c10d::ProcessGroup::all_to_all_single,
               py::arg("output"),
               py::arg("input"),
               py::arg("output_split_sizes"),
@@ -2600,7 +2701,7 @@ communication mechanism.
                 std::optional<std::chrono::milliseconds> timeout) {
                 ::c10d::AllToAllOptions opts;
                 opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                return self->alltoall_base(output, input, outputSplitSizes, inputSplitSizes, opts);
+                return self->all_to_all_single(output, input, outputSplitSizes, inputSplitSizes, opts);
               },
               py::arg("output"),
               py::arg("input"),
@@ -3580,7 +3681,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       "_get_intra_node_comm_usage_counter",
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
 
-#ifdef NCCL_HAS_CONFIG
   py::class_<ncclConfig_t>(
       processGroupNCCL,
       "NCCLConfig",
@@ -3597,9 +3697,7 @@ for details.
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
-#ifdef NCCL_HAS_COMM_SPLIT
       .def_readwrite("split_share", &ncclConfig_t::splitShare)
-#endif
 #ifdef NCCL_HAS_QOS
       .def_readwrite("traffic_class", &ncclConfig_t::trafficClass)
 #endif
@@ -3638,7 +3736,6 @@ for details.
             return ncclConfig_t(self);
           },
           py::arg("memo"));
-#endif // NCCL_HAS_CONFIG
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL,
@@ -3674,9 +3771,7 @@ Example::
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
-#ifdef NCCL_HAS_CONFIG
       .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config)
-#endif
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
