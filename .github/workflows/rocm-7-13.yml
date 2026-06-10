@@ -1,0 +1,56 @@
+name: rocm-7-13
+
+on:
+  push:
+    tags:
+      - ciflow/rocm-nightly/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-noble-rocm-7_13-py3_12-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    name: linux-noble-rocm-7.13-py3.12-gfx90a-gfx942-gfx950
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-noble-rocm-7.13-py3.12-gfx90a-gfx942-gfx950
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-7-13-py3
+    secrets: inherit
+
+  opmicrobenchmark-test-rocm-7_13:
+    permissions:
+      id-token: write
+      contents: read
+    name: opmicrobenchmark-test-rocm-7.13
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-noble-rocm-7_13-py3_12-build
+    with:
+      timeout-minutes: 900
+      build-environment: ${{ needs.linux-noble-rocm-7_13-py3_12-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-rocm-7_13-py3_12-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+        ]}
+    secrets: inherit

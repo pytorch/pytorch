@@ -78,10 +78,10 @@ EOF
   chmod a+x "/opt/cache/bin/$1"
 }
 
-# Skip all sccache wrapping for theRock nightly: sccache PATH wrappers
-# intercept assembly (.s) compilation and fail because the assembler does not
-# produce the .d dependency file that sccache expects.
-if [ "$ROCM_VERSION" != "nightly" ]; then
+# Skip all sccache wrapping for Python-wheel ROCm installs: sccache PATH
+# wrappers intercept assembly (.s) compilation and fail because the assembler
+# does not produce the .d dependency file that sccache expects.
+if [[ "$ROCM_VERSION" != "nightly" && "$ROCM_VERSION" != 7.13* ]]; then
   write_sccache_stub cc
   write_sccache_stub c++
   write_sccache_stub gcc
@@ -106,10 +106,10 @@ if [ -n "$CUDA_VERSION" ]; then
 fi
 
 if [ -n "$ROCM_VERSION" ]; then
-  # Skip sccache wrapping for theRock nightly - sccache has issues parsing
-  # theRock's complex include paths and causes hipconfig to fail
-  if [ "$ROCM_VERSION" = "nightly" ]; then
-    echo "Skipping sccache wrapping for theRock nightly ROCm"
+  # Skip sccache wrapping for Python-wheel ROCm installs. These installs use
+  # an LLVM layout that does not match the traditional /opt/rocm symlink chain.
+  if [[ "$ROCM_VERSION" = "nightly" || "$ROCM_VERSION" = 7.13* ]]; then
+    echo "Skipping sccache wrapping for ROCm ${ROCM_VERSION}"
   else
     source /etc/rocm_env.sh
 
