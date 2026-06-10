@@ -2571,6 +2571,10 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
                 layout=x.layout,
             )
         elif is_traceable_wrapper_subclass(x):
+            if not x.requires_grad:
+                # Frozen weights (e.g., quantized) are never mutated.
+                # Cloning them through __torch_dispatch__ is slow.
+                return x
             # Questionable - but this is required to not fail executorch related
             # torchao tests.
             return torch_clone(x)
