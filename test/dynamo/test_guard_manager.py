@@ -2371,6 +2371,21 @@ print(json.dumps({
     "partial_residual_fail": stats[
         "guard_last_success_actual_partial_residual_fail"
     ],
+    "partial_shadow_full_pass": stats[
+        "guard_last_success_actual_partial_shadow_full_pass"
+    ],
+    "partial_shadow_full_fail": stats[
+        "guard_last_success_actual_partial_shadow_full_fail"
+    ],
+    "partial_shadow_full_ns": stats[
+        "guard_last_success_actual_partial_shadow_full_ns"
+    ],
+    "partial_shadow_fail_reasons": stats[
+        "guard_last_success_actual_partial_shadow_fail_reasons"
+    ],
+    "partial_shadow_fail_top_paths": stats[
+        "guard_last_success_actual_partial_shadow_fail_top_paths"
+    ],
     "mismatch_top_paths": stats["guard_last_success_mismatch_top_paths"],
 }))
 """
@@ -2391,6 +2406,15 @@ print(json.dumps({
         self.assertEqual(stats["partial_miss"], 0)
         self.assertEqual(stats["partial_disabled"], 0)
         self.assertEqual(stats["partial_residual_fail"], 0)
+        self.assertGreater(stats["partial_shadow_full_pass"], 0)
+        self.assertEqual(stats["partial_shadow_full_fail"], 0)
+        self.assertEqual(
+            stats["partial_shadow_full_pass"] + stats["partial_shadow_full_fail"],
+            stats["partial_hit"],
+        )
+        self.assertGreaterEqual(stats["partial_shadow_full_ns"], 0)
+        self.assertIsInstance(stats["partial_shadow_fail_reasons"], dict)
+        self.assertIsInstance(stats["partial_shadow_fail_top_paths"], dict)
         self.assertGreater(stats["partial_hot_tokens"], 0)
         self.assertGreater(stats["partial_hot_token_unique"], 0)
         self.assertLessEqual(

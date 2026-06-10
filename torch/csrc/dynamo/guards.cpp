@@ -292,6 +292,9 @@ struct GuardLastSuccessStats {
   std::atomic<uint64_t> actual_partial_hot_token_duplicate_frame_globals{0};
   std::atomic<uint64_t> actual_partial_token_check_ns{0};
   std::atomic<uint64_t> actual_partial_residual_ns{0};
+  std::atomic<uint64_t> actual_partial_shadow_full_pass{0};
+  std::atomic<uint64_t> actual_partial_shadow_full_fail{0};
+  std::atomic<uint64_t> actual_partial_shadow_full_ns{0};
   std::atomic<uint64_t> actual_partial_train_ns{0};
 };
 
@@ -516,6 +519,23 @@ guard_last_success_mismatch_path_stats() {
   return stats;
 }
 
+std::mutex& guard_last_success_partial_shadow_stats_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::unordered_map<std::string, uint64_t>&
+guard_last_success_partial_shadow_fail_reason_stats() {
+  static std::unordered_map<std::string, uint64_t> stats;
+  return stats;
+}
+
+std::unordered_map<std::string, GuardFastPlanDisabledPathStats>&
+guard_last_success_partial_shadow_fail_path_stats() {
+  static std::unordered_map<std::string, GuardFastPlanDisabledPathStats> stats;
+  return stats;
+}
+
 } // namespace
 
 bool guard_lookup_stats_enabled() {
@@ -727,6 +747,9 @@ void reset_guard_lookup_stats() {
   store_zero(last_success_stats.actual_partial_hot_token_duplicate_frame_globals);
   store_zero(last_success_stats.actual_partial_token_check_ns);
   store_zero(last_success_stats.actual_partial_residual_ns);
+  store_zero(last_success_stats.actual_partial_shadow_full_pass);
+  store_zero(last_success_stats.actual_partial_shadow_full_fail);
+  store_zero(last_success_stats.actual_partial_shadow_full_ns);
   store_zero(last_success_stats.actual_partial_train_ns);
   {
     std::lock_guard<std::mutex> lock(guard_accessor_type_stats_mutex());
@@ -757,6 +780,12 @@ void reset_guard_lookup_stats() {
     guard_last_success_mismatch_reason_stats().clear();
     guard_last_success_mismatch_kind_stats().clear();
     guard_last_success_mismatch_path_stats().clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(
+        guard_last_success_partial_shadow_stats_mutex());
+    guard_last_success_partial_shadow_fail_reason_stats().clear();
+    guard_last_success_partial_shadow_fail_path_stats().clear();
   }
   guard_lookup_stats_force_enabled().store(true, std::memory_order_relaxed);
 }
@@ -1048,6 +1077,52 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(last_success_stats.actual_partial_token_check_ns);
   result["guard_last_success_actual_partial_residual_ns"] =
       load_relaxed(last_success_stats.actual_partial_residual_ns);
+  result["guard_last_success_actual_partial_shadow_full_pass"] =
+      load_relaxed(last_success_stats.actual_partial_shadow_full_pass);
+  result["guard_last_success_actual_partial_shadow_full_fail"] =
+      load_relaxed(last_success_stats.actual_partial_shadow_full_fail);
+  result["guard_last_success_actual_partial_shadow_full_ns"] =
+      load_relaxed(last_success_stats.actual_partial_shadow_full_ns);
+  py::dict last_success_partial_shadow_fail_reasons;
+  py::dict last_success_partial_shadow_fail_top_paths;
+  {
+    std::vector<std::pair<std::string, GuardFastPlanDisabledPathStats>>
+        path_items;
+    {
+      std::lock_guard<std::mutex> lock(
+          guard_last_success_partial_shadow_stats_mutex());
+      for (const auto& item :
+           guard_last_success_partial_shadow_fail_reason_stats()) {
+        last_success_partial_shadow_fail_reasons[py::str(item.first)] =
+            item.second;
+      }
+      path_items.reserve(
+          guard_last_success_partial_shadow_fail_path_stats().size());
+      for (const auto& item :
+           guard_last_success_partial_shadow_fail_path_stats()) {
+        path_items.emplace_back(item.first, item.second);
+      }
+    }
+    std::sort(
+        path_items.begin(),
+        path_items.end(),
+        [](const auto& a, const auto& b) {
+          return a.second.count > b.second.count;
+        });
+    const size_t limit =
+        std::min(path_items.size(), kGuardFastPlanDisabledTopK);
+    for (size_t i = 0; i < limit; ++i) {
+      py::dict item_stats;
+      item_stats["count"] = path_items[i].second.count;
+      item_stats["reason"] = path_items[i].second.reason;
+      last_success_partial_shadow_fail_top_paths[py::str(path_items[i].first)] =
+          item_stats;
+    }
+  }
+  result["guard_last_success_actual_partial_shadow_fail_reasons"] =
+      last_success_partial_shadow_fail_reasons;
+  result["guard_last_success_actual_partial_shadow_fail_top_paths"] =
+      last_success_partial_shadow_fail_top_paths;
   result["guard_last_success_actual_partial_train_ns"] =
       load_relaxed(last_success_stats.actual_partial_train_ns);
   py::dict last_success_disabled_reasons;
@@ -4585,6 +4660,52 @@ class GuardDebugInfo {
   // shuffling is working.
   int num_guards_executed;
 };
+
+static std::string guard_debug_info_first_reason(
+    const GuardDebugInfo& debug_info) {
+  Py_ssize_t size = PyList_Size(debug_info.verbose_code_parts.ptr());
+  if (size <= 0) {
+    PyErr_Clear();
+    return "unknown_guard_failure";
+  }
+  PyObject* item = PyList_GetItem(debug_info.verbose_code_parts.ptr(), 0);
+  if (item == nullptr) {
+    PyErr_Clear();
+    return "unknown_guard_failure";
+  }
+  try {
+    return py::str(py::handle(item)).cast<std::string>();
+  } catch (py::error_already_set& e) {
+    e.clear();
+    return "unknown_guard_failure";
+  }
+}
+
+static void record_guard_last_success_actual_partial_shadow_full(
+    bool shadow_result,
+    uint64_t shadow_ns,
+    const std::string& failure_reason = "") {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  auto& stats = guard_last_success_stats();
+  add_relaxed(stats.actual_partial_shadow_full_ns, shadow_ns);
+  if (shadow_result) {
+    add_relaxed(stats.actual_partial_shadow_full_pass, 1);
+    return;
+  }
+  add_relaxed(stats.actual_partial_shadow_full_fail, 1);
+  const std::string reason =
+      failure_reason.empty() ? "unknown_guard_failure" : failure_reason;
+  std::lock_guard<std::mutex> lock(
+      guard_last_success_partial_shadow_stats_mutex());
+  guard_last_success_partial_shadow_fail_reason_stats()[reason] += 1;
+  auto& path_stats = guard_last_success_partial_shadow_fail_path_stats()[reason];
+  path_stats.count += 1;
+  if (path_stats.reason.empty()) {
+    path_stats.reason = reason;
+  }
+}
 
 class GuardManager;
 class RootGuardManager;
@@ -9726,6 +9847,32 @@ bool run_root_guard_manager_with_last_success_receipt(
       } else {
         record_guard_last_success_actual_partial_residual_fail(
             token_check_ns, residual_ns);
+      }
+      if (residual_result && C10_UNLIKELY(guard_lookup_stats_enabled())) {
+        const uint64_t shadow_full_start_ns = guard_lookup_time_ns();
+        bool shadow_full_result = false;
+        {
+          std::vector<GuardSubtreeEntryToken> shadow_full_tokens;
+          GuardSubtreeMemoRecorderScope shadow_full_recorder(
+              &shadow_full_tokens);
+          shadow_full_result = run_root_guard_manager(root, f_locals);
+        }
+        const uint64_t shadow_full_ns =
+            guard_lookup_time_ns() - shadow_full_start_ns;
+        if (shadow_full_result) {
+          record_guard_last_success_actual_partial_shadow_full(
+              true, shadow_full_ns);
+        } else {
+          std::string failure_reason = "unknown_guard_failure";
+          py::handle f_locals_dict = (PyObject*)f_locals->to_dict();
+          GuardDebugInfo debug_info =
+              root_mgr->check_verbose_nopybind(f_locals_dict.ptr());
+          if (!debug_info.result) {
+            failure_reason = guard_debug_info_first_reason(debug_info);
+          }
+          record_guard_last_success_actual_partial_shadow_full(
+              false, shadow_full_ns, failure_reason);
+        }
       }
       return residual_result;
     }
