@@ -1435,9 +1435,18 @@ class TestTransformers(NNTestCase):
 
         attn_out, _ = mha(t_qvk, t_qvk, t_qvk, attn_mask=mask, is_causal=True)
 
-        # Can't give only is_causal
+        # is_causal=True without attn_mask is allowed when there's no
+        # key_padding_mask and need_weights=False.
+        attn_out_no_mask, _ = mha(
+            t_qvk, t_qvk, t_qvk, is_causal=True, need_weights=False
+        )
+
+        # Still need attn_mask when key_padding_mask is provided.
+        # t_qvk is (S, L, E) with batch_first=False, so MHA reads it as
+        # (seq=S, batch=L, embed=E); key_padding_mask must be (batch, src_seq).
+        kpm = torch.zeros(L, S, device=device, dtype=torch.bool)
         with self.assertRaises(RuntimeError):
-            mha(t_qvk, t_qvk, t_qvk, is_causal=True)
+            mha(t_qvk, t_qvk, t_qvk, key_padding_mask=kpm, is_causal=True)
 
         # # Passing a causal mask sets is_causal to 1
         causal_mask = torch.triu(
