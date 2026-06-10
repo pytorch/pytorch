@@ -807,9 +807,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def floordiv(a, b):
         # a and b are integer type
-        quot = f"{a} / {b}"
-        rem = f"{a} % {b}"
-        return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
+        return f"floor_divide_integral({a}, {b})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -1599,22 +1597,15 @@ class CppVecOverrides(CppOverrides):
         else:
             assert all(is_integer_dtype(item.dtype) for item in [a, b])
             # a and b are integer type
-            _t = f"decltype({a})"
-            if V.kernel._get_raw_num_vectors(b.dtype) < 1:
-                # Doing blend to set the remaining bits of b to non-zero
-                b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
-            quot = f"{a} / {b}"
-            has_rem = f"({a} % {b} != {_t}(0))"
-            is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
-            return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
+            _t = f"decltype({b})"
+            b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
+            return f"floor_divide_integral({a}, {b})"
 
     @staticmethod
     def truncdiv(a, b):
         # a and b are integer type
-        if V.kernel._get_raw_num_vectors(b.dtype) < 1:
-            # Doing blend to set the remaining bits of b to non-zero
-            _t = f"decltype({b})"
-            b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+        _t = f"decltype({b})"
+        b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
         return f"{a} / {b}"
 
     @staticmethod
@@ -5719,6 +5710,10 @@ class CppScheduling(BaseScheduling):
             self.codegen_comment(self.kernel_group.scheduled_nodes, kernel_name)
             if config.cpp.enable_kernel_profile:
                 V.graph.wrapper_code.write_kernel_context_guard_begin()
+            if (
+                config.cpp.enable_kernel_profile
+                and config.cpp.enable_kernel_context_guard
+            ):
                 V.graph.wrapper_code.write_kernel_context_guard(
                     kernel_name,
                     self.kernel_group.scheduled_nodes,  # type: ignore[arg-type]
