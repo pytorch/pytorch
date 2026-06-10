@@ -5123,6 +5123,140 @@ class TestCudaAllocator(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
+    @contextlib.contextmanager
+    def _snapshot_sqlite_context(self, history_mode="all"):
+        """Helper context manager for _dump_snapshot_sqlite tests."""
+        import sqlite3
+
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(history_mode, stacks="python")
+
+            with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+                db_path = f.name
+
+            def dump_and_connect(augment_with_fx_traces=False):
+                torch.cuda.memory._dump_snapshot_sqlite(
+                    db_path, augment_with_fx_traces=augment_with_fx_traces
+                )
+                return sqlite3.connect(db_path)
+
+            yield db_path, dump_and_connect
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_dump_snapshot_sqlite(self):
+        """Test that _dump_snapshot_sqlite creates a valid SQLite database."""
+        with self._snapshot_sqlite_context("state") as (db_path, dump_and_connect):
+            x = torch.rand(311, 411, device="cuda")
+            y = torch.rand(128, device="cuda")
+
+            conn = dump_and_connect()
+            cursor = conn.cursor()
+
+            # Verify data exists in all 3 tables
+            for table in ["device_traces", "blocks", "segments"]:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                self.assertGreater(cursor.fetchone()[0], 0)
+
+            conn.close()
+            del x, y
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_dump_snapshot_sqlite_trace_block_correlation(self):
+        """Test that device_traces.addr can be JOINed with blocks.addr."""
+        with self._snapshot_sqlite_context() as (db_path, dump_and_connect):
+            x = torch.rand(311, 411, device="cuda")
+            x_addr = x.untyped_storage().data_ptr()
+
+            conn = dump_and_connect()
+            cursor = conn.cursor()
+
+            # Find the allocation trace for our tensor
+            cursor.execute(
+                "SELECT id, size FROM device_traces WHERE action = 'alloc' AND addr = ?",
+                (x_addr,),
+            )
+            trace_row = cursor.fetchone()
+            self.assertIsNotNone(trace_row, "Should find alloc trace for tensor")
+            trace_id, trace_size = trace_row
+            self.assertEqual(trace_size, 311 * 411 * 4)  # 311*411 floats * 4 bytes
+
+            # Execute join by finding corresponding block
+            cursor.execute(
+                """SELECT b.addr, b.state FROM blocks b
+                   JOIN device_traces t ON t.addr = b.addr
+                   WHERE t.id = ?""",
+                (trace_id,),
+            )
+            block_row = cursor.fetchone()
+            self.assertIsNotNone(block_row, "Should find block via JOIN")
+            self.assertEqual(block_row[0], x_addr)
+            self.assertEqual(block_row[1], "active_allocated")
+
+            conn.close()
+            del x
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    def test_dump_snapshot_sqlite_augment_with_fx_traces(self):
+        """Test that augment_with_fx_traces captures FX debug info with torch.compile."""
+
+        class SimpleModule(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10, device=device)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                a = self.linear(x)
+                b = self.relu(a)
+                return b
+
+        with self._snapshot_sqlite_context() as (db_path, dump_and_connect):
+            device = "cuda"
+            mod = SimpleModule(device)
+            compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
+            _ = compiled(torch.randn(10, 10, device=device))
+
+            conn = dump_and_connect(augment_with_fx_traces=True)
+            cursor = conn.cursor()
+
+            # Verify tables exist and have data
+            for table in ["device_traces", "blocks", "segments"]:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                self.assertGreater(cursor.fetchone()[0], 0)
+
+            # Collect all frames and check for FX debug fields
+            cursor.execute("SELECT frames FROM device_traces WHERE action = 'alloc'")
+            fx_frames_found = []
+            for row in cursor.fetchall():
+                frames = json.loads(row[0])
+                for frame in frames:
+                    if "fx_node_op" in frame or "fx_node_name" in frame:
+                        fx_frames_found.append(frame)
+
+            # Should have FX-augmented frames from torch.compile
+            self.assertGreater(len(fx_frames_found), 0)
+
+            # Verify FX fields are present in augmented frames
+            for frame in fx_frames_found:
+                self.assertIn("fx_node_op", frame)
+                self.assertIn("fx_node_name", frame)
+                self.assertIn("fx_node_target", frame)
+                self.assertIn("fx_original_trace", frame)
+
+            conn.close()
+
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )

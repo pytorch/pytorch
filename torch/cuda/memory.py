@@ -1148,6 +1148,131 @@ def _dump_snapshot(filename="dump_snapshot.pickle", augment_with_fx_traces=False
         pickle.dump(s, f)
 
 
+def _dump_snapshot_sqlite(filename="dump_snapshot.db", augment_with_fx_traces=False):
+    """
+    Save a CUDA memory snapshot to a SQLite database file.
+
+    This format allows efficient querying of plot data (timestamps, sizes, actions)
+    without loading the entire snapshot into memory. Stack traces are stored as JSON
+    and can be loaded on demand. The schema is 1:1 with the pickle format.
+
+    The database contains the following tables:
+        - device_traces: Allocation events with plot data (time_us, size, action, addr)
+          and frames as JSON array.
+        - blocks: Current memory block state with frames as JSON array.
+        - segments: Memory segments stored as JSON blobs
+
+    Example queries:
+        -- Get plot data (no frame parsing needed)
+        SELECT time_us, size, action FROM device_traces WHERE action = 'alloc';
+
+        -- Correlate trace to block
+        SELECT b.* FROM blocks b
+        JOIN device_traces t ON t.addr = b.addr
+        WHERE t.id = ?;
+
+        -- Load stack trace for a specific allocation
+        SELECT frames FROM device_traces WHERE id = ?;
+
+    Args:
+        filename (str, optional): Name of the database file. Defaults to "dump_snapshot.db".
+        augment_with_fx_traces (bool, optional): If True, augment frames with FX debug
+            information that maps generated FX code back to original model source.
+            Defaults to False.
+    """
+    import json
+    import os
+    import sqlite3
+
+    s = _snapshot(augment_with_fx_traces=augment_with_fx_traces)
+
+    if os.path.exists(filename):
+        os.remove(filename)
+
+    conn = sqlite3.connect(filename)
+    cursor = conn.cursor()
+
+    cursor.executescript("""
+        CREATE TABLE device_traces (
+            id INTEGER PRIMARY KEY,
+            time_us INTEGER,
+            size INTEGER,
+            action TEXT,
+            addr INTEGER,
+            frames TEXT
+        );
+
+        CREATE TABLE blocks (
+            id INTEGER PRIMARY KEY,
+            segment_id INTEGER,
+            addr INTEGER,
+            size INTEGER,
+            requested_size INTEGER,
+            state TEXT,
+            frames TEXT
+        );
+
+        CREATE TABLE segments (
+            segment_id INTEGER PRIMARY KEY,
+            data TEXT
+        );
+
+        CREATE INDEX idx_traces_time ON device_traces(time_us);
+        CREATE INDEX idx_traces_action ON device_traces(action);
+        CREATE INDEX idx_traces_addr ON device_traces(addr);
+        CREATE INDEX idx_blocks_addr ON blocks(addr);
+    """)
+
+    # Insert device traces (frames used in "Allocator State History" tab)
+    trace_id = 0
+    for traces in s.get("device_traces", []):
+        for trace in traces:
+            cursor.execute(
+                "INSERT INTO device_traces (id, time_us, size, action, addr, frames) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    trace_id,
+                    trace.get("time_us", 0),
+                    trace.get("size", 0),
+                    trace.get("action", ""),
+                    trace.get("addr", 0),
+                    json.dumps(trace.get("frames", [])),
+                ),
+            )
+            trace_id += 1
+
+    # Insert segments and blocks (frames used in "Active Memory Timeline" tab)
+    block_id = 0
+    for seg_idx, segment in enumerate(s.get("segments", [])):
+        # Store segment as JSON (without blocks, they go in separate table)
+        segment_data = dict(segment)
+        segment_data.pop("blocks", None)
+
+        cursor.execute(
+            "INSERT INTO segments (segment_id, data) VALUES (?, ?)",
+            (seg_idx, json.dumps(segment_data)),
+        )
+
+        # Insert blocks for addr-based correlation with traces
+        for block in segment.get("blocks", []):
+            cursor.execute(
+                """INSERT INTO blocks (id, segment_id, addr, size, requested_size, state, frames)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    block_id,
+                    seg_idx,
+                    block.get("address", 0),
+                    block.get("size", 0),
+                    block.get("requested_size", 0),
+                    block.get("state", ""),
+                    json.dumps(block.get("frames", [])),
+                ),
+            )
+            block_id += 1
+
+    conn.commit()
+    conn.close()
+
+
 def _set_memory_metadata(metadata: str):
     """
     Set custom metadata that will be attached to all subsequent CUDA memory allocations.
