@@ -3,13 +3,15 @@
 NVIDIA Universal GEMM kernel code generation.
 
 This module generates Python code that calls cutlass_api to execute GEMM operations.
+The runtime helpers (_nvgemm_run, _nvgemm_precompile, etc.) are imported by the
+generated wrapper at runtime, keeping the generated code thin.
 """
 
 from __future__ import annotations
 
 import hashlib
+import importlib
 import logging
-from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 from torch._inductor.codegen.common import (
@@ -41,21 +43,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class _VariantRenderSpec:
-    import_lines: tuple[str, ...] = ()
-    helper_kwargs: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class _EpilogueRenderSpec:
-    import_lines: tuple[str, ...] = ()
-    module_block: str | None = None
-    module_lines: tuple[str, ...] = ()
-    setup_arg_lines: tuple[str, ...] = ()
-    gemm_arg_kwargs: tuple[str, ...] = ()
-    kernel_lookup_kwargs: tuple[str, ...] = ()
-    enabled: bool = False
+# ── Runtime helpers (imported by generated wrapper code at runtime) ───────────
 
 
 def _get_scaled_gemm_modes(
@@ -200,6 +188,178 @@ def _create_gemm_cache_key(
     return cache_key
 
 
+def _nvgemm_run(
+    variant_name: str,
+    kernel_name: str,
+    input_tensors: tuple,
+    out,
+    accumulator_type,
+    compiled_cache: dict,
+    disk_fn_cache: dict,
+    module_path: str,
+    disk_config_key: tuple,
+    *,
+    stream=None,
+    workspace=None,
+    variant_kwargs: dict | None = None,
+    epilogue_args=None,
+    epilogue_source: str = "",
+    has_epilogue: bool = False,
+    aux_tensors: tuple = (),
+):
+    from cutlass_api.artifact import CompiledArtifact
+
+    from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
+
+    args = _create_gemm_arguments(
+        variant_name,
+        input_tensors,
+        out,
+        accumulator_type,
+        epilogue=epilogue_args,
+        **(variant_kwargs or {}),
+    )
+    kernel = _lookup_gemm_kernel(
+        kernel_name,
+        epilogue_args=epilogue_args,
+        epilogue_source=epilogue_source,
+    )
+
+    cache_key = _create_gemm_cache_key(
+        variant_name,
+        input_tensors,
+        out,
+        has_epilogue=has_epilogue,
+        aux_tensors=aux_tensors,
+    )
+    dev_idx = input_tensors[0].device.index or 0
+    mem_key = (cache_key, dev_idx)
+    artifact = compiled_cache.get(mem_key)
+    if artifact is None:
+        compiled_fn = disk_cache_get(
+            disk_fn_cache, module_path, disk_config_key, cache_key, dev_idx
+        )
+        if compiled_fn is not None:
+            artifact = CompiledArtifact(compiled_fn, kernel)
+        else:
+            artifact = kernel.compile(args)
+            disk_cache_set(
+                disk_fn_cache,
+                module_path,
+                disk_config_key,
+                cache_key,
+                artifact.compiled_obj,
+                dev_idx,
+            )
+        compiled_cache[mem_key] = artifact
+
+    kernel.run(
+        args,
+        artifact,
+        stream=stream,
+        workspace=workspace,
+        assume_supported_args=True,
+    )
+
+
+_MAX_ACTIVE_CLUSTERS_MODULES = [
+    "cutlass_api.providers.cutedsl.utils",
+    "cutlass_api.providers.cutedsl.gemm.sm100_static_persistent",
+    "cutlass_api.providers.cutedsl.gemm.sm100_static_persistent_efc",
+    "cutlass_api.providers.cutedsl.gemm.sm100_dense_blockscaled_static_persistent",
+    "cutlass_api.providers.cutedsl.gemm.sm100_contiguous_offset_2d3d_dense_gemm",
+]
+
+
+def _nvgemm_precompile(
+    precompile_shapes: dict,
+    precompile_strides: dict,
+    precompile_dtypes: dict,
+    device_index: int = 0,
+    device_capability: tuple | None = None,
+    *,
+    variant_name: str,
+    kernel_name: str,
+    accumulator_type,
+    compiled_cache: dict,
+    disk_fn_cache: dict,
+    module_path: str,
+    disk_config_key: tuple,
+    input_param_names: list[str],
+    variant_kwargs: dict | None = None,
+    max_active_clusters: int | None = None,
+):
+    """Precompile an NVGEMM kernel in a subprocess for parallel compilation.
+
+    Precompiles only the base (non-EFC) kernel. EFC kernels produce
+    closure-wrapped artifacts that can't be serialized to disk cache.
+    """
+    import torch
+    from torch._inductor.runtime.cutedsl_cache import disk_cache_set
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    if max_active_clusters is None:
+        return
+
+    device = f"cuda:{device_index}"
+    with FakeTensorMode():
+        tensors = {}
+        for name in [*input_param_names, "output"]:
+            key = name if name != "output" else "output"
+            tensors[name] = torch.empty_strided(
+                tuple(precompile_shapes[key]),
+                tuple(precompile_strides[key]),
+                device=device,
+                dtype=getattr(torch, precompile_dtypes[key]),
+            )
+
+    input_tensors = tuple(tensors[n] for n in input_param_names)
+    out = tensors["output"]
+
+    patched_mods = []
+    mac_fn = lambda *a, **kw: max_active_clusters
+    for mod_name in _MAX_ACTIVE_CLUSTERS_MODULES:
+        try:
+            m = importlib.import_module(mod_name)
+        except ImportError:
+            continue
+        if hasattr(m, "get_max_active_clusters"):
+            patched_mods.append((m, m.get_max_active_clusters))
+            m.get_max_active_clusters = mac_fn  # pyrefly: ignore [missing-attribute]
+
+    try:
+        args = _create_gemm_arguments(
+            variant_name,
+            input_tensors,
+            out,
+            accumulator_type,
+            **(variant_kwargs or {}),
+        )
+        kernel = _lookup_gemm_kernel(kernel_name)
+        if kernel is None:
+            return
+        cache_key = _create_gemm_cache_key(variant_name, input_tensors, out)
+        mem_key = (cache_key, device_index)
+        if mem_key not in compiled_cache:
+            artifact = kernel.compile(args)
+            disk_cache_set(
+                disk_fn_cache,
+                module_path,
+                disk_config_key,
+                cache_key,
+                artifact.compiled_obj,
+                device_index,
+                device_capability=device_capability,
+            )
+            compiled_cache[mem_key] = artifact
+    finally:
+        for m, orig in patched_mods:
+            m.get_max_active_clusters = orig  # pyrefly: ignore [missing-attribute]
+
+
+# ── Kernel wrapper (returned by async_compile.nv_universal_gemm) ─────────────
+
+
 class NVUniversalGemmKernelWrapper:
     """Wrapper to provide .run() interface for NVIDIA Universal GEMM kernels."""
 
@@ -212,13 +372,16 @@ class NVUniversalGemmKernelWrapper:
         return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
+# ── Kernel codegen class ─────────────────────────────────────────────────────
+
+
 class NVUniversalGemmKernel(Kernel):
     """
     Kernel implementation for NVIDIA Universal GEMM.
 
-    Generates Python code that calls cutlass_api to execute GEMM operations.
-    Unlike CuteDSL which uses Jinja templates, this generates simpler direct
-    Python code.
+    Generates a thin Python wrapper that delegates to runtime helpers
+    (_nvgemm_run, _nvgemm_precompile) for the actual GEMM execution and
+    compilation logic.
     """
 
     def __init__(
@@ -264,71 +427,6 @@ class NVUniversalGemmKernel(Kernel):
             self._template_input_args.append((param_name, input_node))
             self._seen_input_args.add(param_name)
 
-    @staticmethod
-    def _write_assign_call(
-        code: IndentedBuffer,
-        target: str,
-        fn_name: str,
-        args: tuple[str, ...] | list[str],
-    ) -> None:
-        code.writeline(f"{target} = {fn_name}(")
-        with code.indent():
-            for arg in args:
-                code.writeline(f"{arg},")
-        code.writeline(")")
-
-    def _build_variant_render_spec(self) -> _VariantRenderSpec:
-        if self.variant.name != "SCALED_GEMM":
-            return _VariantRenderSpec()
-
-        scale_mode_a, swizzle_mode_a, scale_mode_b, swizzle_mode_b = (
-            _get_scaled_gemm_modes(
-                self.scale_type_a,
-                self.swizzle_type_a,
-                self.scale_type_b,
-                self.swizzle_type_b,
-            )
-        )
-        return _VariantRenderSpec(
-            import_lines=(
-                "from cutlass_api.library import ScaleMode, ScaleSwizzleMode",
-            ),
-            helper_kwargs=(
-                f"scale_mode_a=ScaleMode.{scale_mode_a.name}",
-                f"swizzle_mode_a=ScaleSwizzleMode.{swizzle_mode_a.name}",
-                f"scale_mode_b=ScaleMode.{scale_mode_b.name}",
-                f"swizzle_mode_b=ScaleSwizzleMode.{swizzle_mode_b.name}",
-            ),
-        )
-
-    def _build_epilogue_render_spec(self) -> _EpilogueRenderSpec:
-        if not self.epilogue_fn_code:
-            return _EpilogueRenderSpec()
-
-        if self.variant.name != "GEMM":
-            raise NotImplementedError(
-                "Epilogue fusion is not yet supported for grouped or scaled GEMM variants"
-            )
-
-        epilogue_arg_lines = ["epilogue_fn=_epilogue_fn"]
-        epilogue_kwargs = self._render_epilogue_kwargs()
-        if epilogue_kwargs:
-            epilogue_arg_lines.append(epilogue_kwargs)
-
-        source_hash = hashlib.sha256(self.epilogue_fn_code.encode()).hexdigest()
-        return _EpilogueRenderSpec(
-            import_lines=("from cutlass_api.arguments import EpilogueArguments",),
-            module_block=self.epilogue_fn_code,
-            module_lines=(f'_EPILOGUE_FN_SOURCE = "{source_hash}"',),
-            setup_arg_lines=tuple(epilogue_arg_lines),
-            gemm_arg_kwargs=("epilogue=epi_args",),
-            kernel_lookup_kwargs=(
-                "epilogue_args=epi_args",
-                "epilogue_source=_EPILOGUE_FN_SOURCE",
-            ),
-            enabled=True,
-        )
-
     def render(self) -> str:
         """Render the Python source for the NVGEMM kernel wrapper."""
         kernel_name_str = self.kernel_metadata["kernel_name"]
@@ -344,133 +442,113 @@ class NVUniversalGemmKernel(Kernel):
             input_params.append("workspace")
         input_params.append("stream=None")
         params_str = ", ".join(input_params)
+
         if len(input_tensor_names) == 1:
             input_tensors_expr = f"({input_tensor_names[0]},)"
         else:
             input_tensors_expr = f"({', '.join(input_tensor_names)})"
 
         workspace_arg = "workspace" if self.workspace_size > 0 else "None"
-        var_prefix = self.variant.op_name.upper()
-        cache_var = f"_{var_prefix}_compiled_cache"
-        kernel_name_var = f"_{var_prefix}_KERNEL_NAME"
-        variant_spec = self._build_variant_render_spec()
-        epilogue_spec = self._build_epilogue_render_spec()
+        has_epilogue = bool(self.epilogue_fn_code)
 
-        disk_cache_config_key = "_DISK_CACHE_CONFIG_KEY"
+        # Build variant_kwargs dict expression for SCALED_GEMM
+        variant_kwargs_expr = "None"
+        variant_extra_imports = ""
+        if self.variant.name == "SCALED_GEMM":
+            sma, swza, smb, swzb = _get_scaled_gemm_modes(
+                self.scale_type_a,
+                self.swizzle_type_a,
+                self.scale_type_b,
+                self.swizzle_type_b,
+            )
+            variant_extra_imports = (
+                "from cutlass_api.library import ScaleMode, ScaleSwizzleMode"
+            )
+            variant_kwargs_expr = (
+                "{"
+                f'"scale_mode_a": ScaleMode.{sma.name}, '
+                f'"swizzle_mode_a": ScaleSwizzleMode.{swza.name}, '
+                f'"scale_mode_b": ScaleMode.{smb.name}, '
+                f'"swizzle_mode_b": ScaleSwizzleMode.{swzb.name}'
+                "}"
+            )
 
         code = IndentedBuffer()
+
+        # -- Module-level imports and constants --
         code.writeline("import torch")
         code.writeline("import cutlass")
-        code.writeline("from cutlass_api.artifact import CompiledArtifact")
         code.writeline(
             "from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import ("
         )
         with code.indent():
-            code.writeline("_create_gemm_arguments,")
-            code.writeline("_create_gemm_cache_key,")
-            code.writeline("_lookup_gemm_kernel,")
+            code.writeline("_nvgemm_run,")
+            code.writeline("_nvgemm_precompile,")
         code.writeline(")")
-        code.writeline(
-            "from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set"
-        )
         code.writeline("from torch._inductor.utils import _ensure_fp4_dtype_registered")
         code.writeline("_ensure_fp4_dtype_registered()")
-        for import_line in (*variant_spec.import_lines, *epilogue_spec.import_lines):
-            code.writeline(import_line)
+        if variant_extra_imports:
+            code.writeline(variant_extra_imports)
+        if has_epilogue:
+            code.writeline("from cutlass_api.arguments import EpilogueArguments")
         code.writeline("")
 
-        if epilogue_spec.module_block is not None:
-            code.splice(epilogue_spec.module_block, strip=True)
-            for line in epilogue_spec.module_lines:
-                code.writeline(line)
+        # -- Epilogue function definition (must be module-level for cutlass_api) --
+        epilogue_source_hash = ""
+        if has_epilogue:
+            assert self.epilogue_fn_code is not None
+            code.splice(self.epilogue_fn_code, strip=True)
+            epilogue_source_hash = hashlib.sha256(
+                self.epilogue_fn_code.encode()
+            ).hexdigest()
+            code.writeline(f'_EPILOGUE_FN_SOURCE = "{epilogue_source_hash}"')
             code.writeline("")
 
-        code.writeline(f"{kernel_name_var} = {kernel_name_str!r}")
-        code.writeline(f"{disk_cache_config_key} = ({kernel_name_var},)")
-        code.writeline(f"{cache_var} = {{}}")
+        # -- Module-level state --
+        code.writeline(f"_KERNEL_NAME = {kernel_name_str!r}")
+        code.writeline("_DISK_CACHE_CONFIG_KEY = (_KERNEL_NAME,)")
+        code.writeline("_compiled_cache = {}")
         code.writeline("_disk_fn_cache = {}")
+        code.writeline(f"_VARIANT_KWARGS = {variant_kwargs_expr}")
+        code.writeline(f"_ACC_TYPE = {acc_dtype_str}")
+        input_param_names_repr = repr([n for n in input_tensor_names])
+        code.writeline(f"_INPUT_PARAM_NAMES = {input_param_names_repr}")
         code.writeline("")
+
+        # -- Main function --
         code.writeline(f"def {self.kernel_name}_main({params_str}):")
         with code.indent():
-            code.writeline(f"global {cache_var}")
-            code.writeline(f"input_tensors = {input_tensors_expr}")
-            if epilogue_spec.enabled:
-                self._write_assign_call(
-                    code,
-                    "epi_args",
-                    "EpilogueArguments",
-                    epilogue_spec.setup_arg_lines,
-                )
-            self._write_assign_call(
-                code,
-                "args",
-                "_create_gemm_arguments",
-                (
-                    f'variant_name="{self.variant.name}"',
-                    "input_tensors=input_tensors",
-                    "out=out_ptr0",
-                    f"accumulator_type={acc_dtype_str}",
-                    *variant_spec.helper_kwargs,
-                    *epilogue_spec.gemm_arg_kwargs,
-                ),
-            )
-            code.writeline("")
-            self._write_assign_call(
-                code,
-                "kernel",
-                "_lookup_gemm_kernel",
-                (kernel_name_var, *epilogue_spec.kernel_lookup_kwargs),
-            )
-            code.writeline("dev_idx = in_ptr0.device.index or 0")
-            if epilogue_spec.enabled and self.epilogue_reads:
-                aux_arg = (
-                    "aux_tensors=("
-                    + ", ".join(f"{name}" for name in self.epilogue_reads)
-                    + ",)"
-                )
-                cache_key_args = (
-                    f'variant_name="{self.variant.name}"',
-                    "input_tensors=input_tensors",
-                    "out=out_ptr0",
-                    f"has_epilogue={epilogue_spec.enabled}",
-                    aux_arg,
-                )
-            else:
-                cache_key_args = (
-                    f'variant_name="{self.variant.name}"',
-                    "input_tensors=input_tensors",
-                    "out=out_ptr0",
-                    f"has_epilogue={epilogue_spec.enabled}",
-                )
-            self._write_assign_call(
-                code,
-                "cache_key",
-                "_create_gemm_cache_key",
-                cache_key_args,
-            )
-            code.writeline("mem_key = (cache_key, dev_idx)")
-            code.writeline(f"artifact = {cache_var}.get(mem_key)")
-            code.writeline("if artifact is None:")
-            with code.indent():
-                code.writeline(
-                    f"compiled_fn = disk_cache_get(_disk_fn_cache, __file__, {disk_cache_config_key}, cache_key, dev_idx)"
-                )
-                code.writeline("if compiled_fn is not None:")
-                with code.indent():
-                    code.writeline("artifact = CompiledArtifact(compiled_fn, kernel)")
-                code.writeline("else:")
-                with code.indent():
-                    code.writeline("artifact = kernel.compile(args)")
-                    code.writeline(
-                        f"disk_cache_set(_disk_fn_cache, __file__, {disk_cache_config_key}, cache_key, artifact.compiled_obj, dev_idx)"
-                    )
-                code.writeline(f"{cache_var}[mem_key] = artifact")
-            code.writeline("")
-            code.writeline(
-                f"kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)"
-            )
+            # Build epilogue args if needed (user-specific variable names)
+            epi_args_expr = "None"
+            epi_source_expr = '""'
+            aux_tensors_expr = "()"
+            if has_epilogue:
+                epilogue_kwargs = self._render_epilogue_kwargs()
+                epi_kwargs_str = "epilogue_fn=_epilogue_fn"
+                if epilogue_kwargs:
+                    epi_kwargs_str += f", {epilogue_kwargs}"
+                code.writeline(f"epi_args = EpilogueArguments({epi_kwargs_str})")
+                epi_args_expr = "epi_args"
+                epi_source_expr = "_EPILOGUE_FN_SOURCE"
+                if self.epilogue_reads:
+                    aux_tensors_expr = "(" + ", ".join(self.epilogue_reads) + ",)"
 
-        # Precompile hook for subprocess parallel compilation
+            code.writeline("_nvgemm_run(")
+            with code.indent():
+                code.writeline(f'"{self.variant.name}", _KERNEL_NAME,')
+                code.writeline(f"{input_tensors_expr}, out_ptr0, _ACC_TYPE,")
+                code.writeline(
+                    "_compiled_cache, _disk_fn_cache, __file__, _DISK_CACHE_CONFIG_KEY,"
+                )
+                code.writeline(f"stream=stream, workspace={workspace_arg},")
+                code.writeline("variant_kwargs=_VARIANT_KWARGS,")
+                code.writeline(f"epilogue_args={epi_args_expr},")
+                code.writeline(f"epilogue_source={epi_source_expr},")
+                code.writeline(f"has_epilogue={has_epilogue},")
+                code.writeline(f"aux_tensors={aux_tensors_expr},")
+            code.writeline(")")
+
+        # -- Precompile hook --
         code.writeline("")
         code.writeline(
             f"def {self.kernel_name}_precompile("
@@ -478,117 +556,25 @@ class NVUniversalGemmKernel(Kernel):
             "device_index=0, device_capability=None, **kwargs):"
         )
         with code.indent():
-            code.writeline(f"global {cache_var}")
-            code.writeline("from torch._subclasses.fake_tensor import FakeTensorMode")
-            code.writeline("")
-            code.writeline("device = f'cuda:{device_index}'")
-            code.writeline("_max_active_clusters = kwargs.get('max_active_clusters')")
-            code.writeline("if _max_active_clusters is None:")
+            code.writeline("_nvgemm_precompile(")
             with code.indent():
-                code.writeline("return")
-            code.writeline("with FakeTensorMode():")
-            with code.indent():
-                for i, (param_name, _) in enumerate(self._template_input_args):
-                    code.writeline(f"{param_name} = torch.empty_strided(")
-                    with code.indent():
-                        code.writeline(f"tuple(precompile_shapes[{param_name!r}]),")
-                        code.writeline(f"tuple(precompile_strides[{param_name!r}]),")
-                        code.writeline(
-                            f"device=device, dtype=getattr(torch, precompile_dtypes[{param_name!r}]))"
-                        )
-                code.writeline("out_ptr0 = torch.empty_strided(")
-                with code.indent():
-                    code.writeline("tuple(precompile_shapes['output']),")
-                    code.writeline("tuple(precompile_strides['output']),")
-                    code.writeline(
-                        "device=device, dtype=getattr(torch, precompile_dtypes['output']))"
-                    )
-            code.writeline("")
-            code.writeline("import importlib")
-            code.writeline("_patched_mods = []")
-            code.writeline("_mac_fn = lambda *a, **kw: _max_active_clusters")
-            code.writeline("for _mod_name in [")
-            with code.indent():
-                code.writeline("'cutlass_api.providers.cutedsl.utils',")
                 code.writeline(
-                    "'cutlass_api.providers.cutedsl.gemm.sm100_static_persistent',"
+                    "precompile_shapes, precompile_strides, precompile_dtypes,"
+                )
+                code.writeline("device_index, device_capability,")
+                code.writeline(f'variant_name="{self.variant.name}",')
+                code.writeline("kernel_name=_KERNEL_NAME,")
+                code.writeline("accumulator_type=_ACC_TYPE,")
+                code.writeline(
+                    "compiled_cache=_compiled_cache, disk_fn_cache=_disk_fn_cache,"
                 )
                 code.writeline(
-                    "'cutlass_api.providers.cutedsl.gemm.sm100_static_persistent_efc',"
+                    "module_path=__file__, disk_config_key=_DISK_CACHE_CONFIG_KEY,"
                 )
-                code.writeline(
-                    "'cutlass_api.providers.cutedsl.gemm.sm100_dense_blockscaled_static_persistent',"
-                )
-                code.writeline(
-                    "'cutlass_api.providers.cutedsl.gemm.sm100_contiguous_offset_2d3d_dense_gemm',"
-                )
-            code.writeline("]:")
-            with code.indent():
-                code.writeline("try:")
-                with code.indent():
-                    code.writeline("_m = importlib.import_module(_mod_name)")
-                code.writeline("except ImportError:")
-                with code.indent():
-                    code.writeline("continue")
-                code.writeline("if hasattr(_m, 'get_max_active_clusters'):")
-                with code.indent():
-                    code.writeline(
-                        "_patched_mods.append((_m, _m.get_max_active_clusters))"
-                    )
-                    code.writeline("_m.get_max_active_clusters = _mac_fn")
-            # Precompile only the base (non-EFC) kernel. EFC kernels produce
-            # closure-wrapped artifacts that can't be serialized to disk cache,
-            # so precompiling them wastes work. The base kernel for the same shape
-            # IS disk-cacheable and benefits from subprocess parallel compilation.
-            code.writeline("try:")
-            with code.indent():
-                code.writeline(f"input_tensors = {input_tensors_expr}")
-                self._write_assign_call(
-                    code,
-                    "args",
-                    "_create_gemm_arguments",
-                    (
-                        f'variant_name="{self.variant.name}"',
-                        "input_tensors=input_tensors",
-                        "out=out_ptr0",
-                        f"accumulator_type={acc_dtype_str}",
-                        *variant_spec.helper_kwargs,
-                    ),
-                )
-                self._write_assign_call(
-                    code,
-                    "kernel",
-                    "_lookup_gemm_kernel",
-                    (kernel_name_var,),
-                )
-                code.writeline("if kernel is None:")
-                with code.indent():
-                    code.writeline("return")
-                self._write_assign_call(
-                    code,
-                    "cache_key",
-                    "_create_gemm_cache_key",
-                    (
-                        f'variant_name="{self.variant.name}"',
-                        "input_tensors=input_tensors",
-                        "out=out_ptr0",
-                    ),
-                )
-                code.writeline("mem_key = (cache_key, device_index)")
-                code.writeline(f"if mem_key not in {cache_var}:")
-                with code.indent():
-                    code.writeline("artifact = kernel.compile(args)")
-                    code.writeline(
-                        f"disk_cache_set(_disk_fn_cache, __file__, {disk_cache_config_key}, "
-                        "cache_key, artifact.compiled_obj, device_index, "
-                        "device_capability=device_capability)"
-                    )
-                    code.writeline(f"{cache_var}[mem_key] = artifact")
-            code.writeline("finally:")
-            with code.indent():
-                code.writeline("for _m, _orig in _patched_mods:")
-                with code.indent():
-                    code.writeline("_m.get_max_active_clusters = _orig")
+                code.writeline("input_param_names=_INPUT_PARAM_NAMES,")
+                code.writeline("variant_kwargs=_VARIANT_KWARGS,")
+                code.writeline("max_active_clusters=kwargs.get('max_active_clusters'),")
+            code.writeline(")")
 
         return code.getvalue()
 
@@ -596,7 +582,7 @@ class NVUniversalGemmKernel(Kernel):
         """Render kwargs for EpilogueArguments constructor.
 
         Skips intermediate stores (write_buffer entries from CutlassEVTCodegen.store()
-        in a multi-node epilogue chain) — those names are not kernel parameters and
+        in a multi-node epilogue chain) -- those names are not kernel parameters and
         would produce NameError at runtime.
         """
         kwargs_parts = []
