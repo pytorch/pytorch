@@ -58,4 +58,31 @@ at::Tensor view(const at::Tensor& self, c10::SymIntArrayRef size);
 
 void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
+// Random generation (explicit generator-aware) for PrivateUse1
+at::Tensor rand(
+    c10::IntArrayRef size,
+    std::optional<at::Generator> generator,
+    std::optional<c10::ScalarType> dtype_opt,
+    std::optional<c10::Layout> layout_opt,
+    std::optional<c10::Device> device_opt,
+    std::optional<bool> pin_memory_opt);
+
+at::Tensor randn(
+    c10::IntArrayRef size,
+    std::optional<at::Generator> generator,
+    std::optional<c10::ScalarType> dtype_opt,
+    std::optional<c10::Layout> layout_opt,
+    std::optional<c10::Device> device_opt,
+    std::optional<bool> pin_memory_opt);
+
+at::Tensor randint(
+    int64_t low,
+    int64_t high,
+    c10::IntArrayRef size,
+    std::optional<at::Generator> generator,
+    std::optional<c10::ScalarType> dtype_opt,
+    std::optional<c10::Layout> layout_opt,
+    std::optional<c10::Device> device_opt,
+    std::optional<bool> pin_memory_opt);
+
 } // namespace at::native::openreg
