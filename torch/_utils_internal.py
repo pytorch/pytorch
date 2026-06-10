@@ -39,6 +39,21 @@ if os.path.basename(os.path.dirname(__file__)) == "shared":
 else:
     torch_parent = os.path.dirname(os.path.dirname(__file__))
 
+# In scikit-build-core editable installs with redirect mode, binary artifacts
+# (bin/, lib/) are installed to the dist package directory rather than the
+# source tree. Fall back to the installed package location for get_file_path.
+_torch_dir = os.path.dirname(os.path.abspath(__file__))
+if not os.path.isdir(os.path.join(_torch_dir, "bin")):
+    try:
+        from importlib.metadata import distribution as _dist
+
+        _installed_torch = str(_dist("torch").locate_file("torch"))
+        if os.path.isdir(os.path.join(_installed_torch, "bin")):
+            torch_parent = os.path.dirname(_installed_torch)
+    except Exception:
+        pass
+del _torch_dir
+
 
 def get_file_path(*path_components: str) -> str:
     return os.path.join(torch_parent, *path_components)
