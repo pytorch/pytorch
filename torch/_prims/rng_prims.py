@@ -311,8 +311,7 @@ run_and_save_rng_state = register_run_and_save_rng_state_op()
 run_with_rng_state = register_run_with_rng_state_op()
 
 
-def _impl_graphsafe_rng(op, *args, rng_state=None, **kwargs):
-    # pyrefly: ignore [missing-attribute]
+def _impl_graphsafe_rng(op, *args, rng_state, **kwargs):
     device_idx = rng_state.device.index
     generator = torch._C._accelerator_getDefaultGenerator(device_idx)
     current_state = generator.graphsafe_get_state()
