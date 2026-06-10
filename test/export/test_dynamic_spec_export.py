@@ -135,7 +135,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 _ModXN(),
                 (torch.randn(4), 42),
-                dynamic_shapes=ShapesSpec(params=ParamsSpec({"n": 10})),
+                dynamic_shapes=ParamsSpec({"n": 10}),
                 strict=True,
             )
 
@@ -148,9 +148,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 _ModXPlus(),
                 (torch.randn(4, 5),),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), 3])})
-                ),
+                dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), 3])}),
                 strict=True,
             )
 
@@ -172,10 +170,8 @@ Range constraints: {u0: VR[0, int_oo]}""",
         export(
             _ModBranch(),
             (torch.randn(20, 3),),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {"x": TensorSpec([ShapeVar("batch", min=10, max=100), STATIC])}
-                )
+            dynamic_shapes=ParamsSpec(
+                {"x": TensorSpec([ShapeVar("batch", min=10, max=100), STATIC])}
             ),
             strict=True,
         )
@@ -191,9 +187,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 _ModBranch(),
                 (torch.randn(10, 3),),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec({"x": TensorSpec([ShapeVar(), STATIC])})
-                ),
+                dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar(), STATIC])}),
                 strict=True,
             )
 
@@ -203,7 +197,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             _ModX(),
             (torch.randn(8, 3),),
-            dynamic_shapes=ShapesSpec(params=ParamsSpec({"x": TensorSpec([b, STATIC])})),
+            dynamic_shapes=ParamsSpec({"x": TensorSpec([b, STATIC])}),
             strict=True,
         )
         shape = _first_tensor_placeholder_shape(ep.graph_module)
@@ -228,13 +222,11 @@ Range constraints: {u0: VR[0, int_oo]}""",
             M(),
             args=(torch.randn(8, 3),),
             kwargs={"y": torch.randn(5, 3), "z": 7},
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "x": TensorSpec([ShapeVar("A"), STATIC]),
-                        "y": TensorSpec([ShapeVar("B"), STATIC]),
-                    }
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "x": TensorSpec([ShapeVar("A"), STATIC]),
+                    "y": TensorSpec([ShapeVar("B"), STATIC]),
+                }
             ),
             strict=True,
         )
@@ -256,13 +248,11 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             M(),
             (torch.randn(8, 3), 5),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "x": TensorSpec([ShapeVar("B"), STATIC]),
-                        "n": IntVar("n_size"),
-                    }
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "x": TensorSpec([ShapeVar("B"), STATIC]),
+                    "n": IntVar("n_size"),
+                }
             ),
             strict=True,
         )
@@ -284,9 +274,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
             M(),
             args=(torch.randn(8, 3),),
             kwargs={"z": torch.randn(7, 3), "y": torch.randn(5, 3)},
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec({"y": TensorSpec([ShapeVar("Y"), STATIC])})
-            ),
+            dynamic_shapes=ParamsSpec({"y": TensorSpec([ShapeVar("Y"), STATIC])}),
             strict=True,
         )
         # y dim 0 is unbacked (u0); x and z keep their static literal sizes.
@@ -331,9 +319,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 M(),
                 args=([torch.randn(8, 3), torch.randn(8, 3)],),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec({"xs": TensorSpec([ShapeVar("B"), STATIC])})
-                ),
+                dynamic_shapes=ParamsSpec({"xs": TensorSpec([ShapeVar("B"), STATIC])}),
                 strict=True,
             )
 
@@ -376,13 +362,11 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 M(),
                 args=(torch.randn(8, 3),),  # y not passed
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec(
-                        {
-                            "x": TensorSpec([ShapeVar("B"), STATIC]),
-                            "y": TensorSpec([ShapeVar("Y"), STATIC]),  # no such arg
-                        }
-                    )
+                dynamic_shapes=ParamsSpec(
+                    {
+                        "x": TensorSpec([ShapeVar("B"), STATIC]),
+                        "y": TensorSpec([ShapeVar("Y"), STATIC]),  # no such arg
+                    }
                 ),
                 strict=True,
             )
@@ -413,8 +397,8 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 _ModX(),
                 (torch.randn(8, 3),),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), STATIC])})
+                dynamic_shapes=ParamsSpec(
+                    {"x": TensorSpec([ShapeVar("batch"), STATIC])}
                 ),
                 strict=False,
             )
@@ -435,9 +419,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep_new = export(
             M(),
             (torch.randn(8, 3),),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec([ShapeVar("B"), STATIC])})
-            ),
+            dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("B"), STATIC])}),
             strict=True,
         )
 
@@ -586,9 +568,7 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
         ep_new = export(
             M(),
             args=(torch.randn(8, 3),),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec([ShapeVar("X"), STATIC])})
-            ),
+            dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("X"), STATIC])}),
             strict=True,
         )
 
@@ -640,15 +620,13 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             M(),
             args=(torch.randn(8, 3), torch.randn(5, 3)),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "*args": [
-                            TensorSpec([ShapeVar("A"), STATIC]),
-                            TensorSpec([ShapeVar("B"), STATIC]),
-                        ]
-                    }
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "*args": [
+                        TensorSpec([ShapeVar("A"), STATIC]),
+                        TensorSpec([ShapeVar("B"), STATIC]),
+                    ]
+                }
             ),
             strict=True,
         )
@@ -669,16 +647,14 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             M(),
             args=(torch.randn(4, 3), torch.randn(8, 3), torch.randn(5, 3)),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "x": TensorSpec([ShapeVar("X"), STATIC]),
-                        "*args": [
-                            TensorSpec([ShapeVar("A"), STATIC]),
-                            TensorSpec([ShapeVar("B"), STATIC]),
-                        ],
-                    },
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "x": TensorSpec([ShapeVar("X"), STATIC]),
+                    "*args": [
+                        TensorSpec([ShapeVar("A"), STATIC]),
+                        TensorSpec([ShapeVar("B"), STATIC]),
+                    ],
+                },
             ),
             strict=True,
         )
@@ -700,14 +676,12 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             M(),
             args=(torch.randn(8, 3), torch.randn(5, 3), torch.randn(6, 3)),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "*args": [
-                            TensorSpec([ShapeVar("A"), STATIC]),
-                        ]
-                    }
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "*args": [
+                        TensorSpec([ShapeVar("A"), STATIC]),
+                    ]
+                }
             ),
             strict=True,
         )
@@ -730,15 +704,13 @@ Range constraints: {u0: VR[0, int_oo]}""",
             M(),
             args=(),
             kwargs={"foo": torch.randn(8, 3), "bar": torch.randn(5, 3)},
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "**kwargs": {
-                            "foo": TensorSpec([ShapeVar("F"), STATIC]),
-                            "bar": TensorSpec([ShapeVar("B"), STATIC]),
-                        }
+            dynamic_shapes=ParamsSpec(
+                {
+                    "**kwargs": {
+                        "foo": TensorSpec([ShapeVar("F"), STATIC]),
+                        "bar": TensorSpec([ShapeVar("B"), STATIC]),
                     }
-                )
+                }
             ),
             strict=True,
         )
@@ -759,8 +731,8 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 _ModX(),
                 (torch.randn(8, 3),),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), STATIC])})
+                dynamic_shapes=ParamsSpec(
+                    {"x": TensorSpec([ShapeVar("batch"), STATIC])}
                 ),
                 strict=True,
                 prefer_deferred_runtime_asserts_over_guards=True,
@@ -784,13 +756,11 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             M(),
             (torch.randn(4, 3), torch.randn(8, 5)),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "x": TensorSpec([B, STATIC]),
-                        "y": TensorSpec([B * 2, STATIC]),
-                    }
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "x": TensorSpec([B, STATIC]),
+                    "y": TensorSpec([B * 2, STATIC]),
+                }
             ),
             strict=True,
         )
@@ -818,14 +788,12 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             M(),
             (torch.randn(3, 2), torch.randn(4, 2), torch.randn(13, 2)),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "x": TensorSpec([A, STATIC]),
-                        "y": TensorSpec([B, STATIC]),
-                        "z": TensorSpec([A * B + 1, STATIC]),
-                    }
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "x": TensorSpec([A, STATIC]),
+                    "y": TensorSpec([B, STATIC]),
+                    "z": TensorSpec([A * B + 1, STATIC]),
+                }
             ),
             strict=True,
         )
@@ -877,10 +845,8 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             _ModX(),
             (torch.randn(20, 3),),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {"x": TensorSpec([ShapeVar("b", min=10, max=100), STATIC])}
-                )
+            dynamic_shapes=ParamsSpec(
+                {"x": TensorSpec([ShapeVar("b", min=10, max=100), STATIC])}
             ),
             strict=True,
         )
@@ -902,9 +868,7 @@ class TestExportDynamicSpecInternalAPIs(TestCase):
         _reset_uid_counter()
 
     def _spec(self):
-        return ShapesSpec(
-            params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), STATIC])})
-        )
+        return ParamsSpec({"x": TensorSpec([ShapeVar("batch"), STATIC])})
 
     def test_export_to_torch_ir_shapes_spec_direct(self):
         """`_export_to_torch_ir` accepts a ShapesSpec (new tracer) and produces
