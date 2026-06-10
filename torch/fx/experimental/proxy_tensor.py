@@ -1183,23 +1183,11 @@ def proxy_call(
         )
         return NotImplemented
 
-    decomp_fn = proxy_mode.decomposition_table.get(func)
-    if decomp_fn is None:
-        skip_default_alias_decomp = False
-    else:
-        from torch._decomp import decomposition_table
-
-        skip_default_alias_decomp = (
-            func not in (torch.ops.aten.t.default, torch.ops.aten.transpose.int)
-            and any(arg.alias_info for arg in func._schema.arguments)
-            and decomposition_table.get(func) is decomp_fn
-        )
-    if not skip_default_alias_decomp:
-        r = maybe_handle_decomp(
-            proxy_mode, func, args, kwargs, record_pointwise_barrier=True
-        )
-        if r is not NotImplemented:
-            return r
+    r = maybe_handle_decomp(
+        proxy_mode, func, args, kwargs, record_pointwise_barrier=True
+    )
+    if r is not NotImplemented:
+        return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
     if (
@@ -2000,7 +1988,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             Mapping[OpOverload, Callable[..., Any]]
         ] = []
         self.decomp_layers: int = 0
-        self.functional_decomp_layers: int = 0
         # See invoke_subgraph
         self._invoke_subgraph_names: set[str] = set()
         self._invoke_subgraph_cache: dict[

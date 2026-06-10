@@ -9718,7 +9718,7 @@ class TestAOTDispatch(AOTTestCase):
         }
         self.assertNotIn(torch.ops.aten.add_.Tensor, ops)
 
-    def test_default_aliasing_op_decomposition_uses_functionalization(self):
+    def test_default_decomposition_with_aliasing_inner_op_uses_proxy_path(self):
         fw_graphs = []
 
         def fw_compiler(gm, _):
@@ -9726,7 +9726,7 @@ class TestAOTDispatch(AOTTestCase):
             return gm.forward
 
         def f(x):
-            return x.unsqueeze(0)
+            return x.sum(dim=0, keepdim=True)
 
         inp = torch.randn(2, 3)
         compiled_f = aot_function(
@@ -9743,8 +9743,7 @@ class TestAOTDispatch(AOTTestCase):
             for node in fw_graphs[0].graph.nodes
             if node.op == "call_function"
         }
-        self.assertIn(torch.ops.aten.unsqueeze.default, ops)
-        self.assertNotIn(torch.ops.prims.broadcast_in_dim.default, ops)
+        self.assertIn(torch.ops.prims.broadcast_in_dim.default, ops)
 
     def test_nested_aliasing_op_decomposition_does_not_escape_functionalization(self):
         fw_graphs = []

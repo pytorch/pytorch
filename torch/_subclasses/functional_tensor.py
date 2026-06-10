@@ -95,15 +95,14 @@ def _is_default_decomposition(func: OpOverload, decomp_fn: Any) -> bool:
     return decomposition_table.get(func) is decomp_fn
 
 
-def _should_skip_default_alias_decomposition(
+def _should_skip_default_decomposition(
     func: OpOverload,
     decomp_fn: Any,
 ) -> bool:
-    return (
-        func not in (torch.ops.aten.t.default, torch.ops.aten.transpose.int)
-        and any(arg.alias_info for arg in func._schema.arguments)
-        and _is_default_decomposition(func, decomp_fn)
-    )
+    return func not in (
+        torch.ops.aten.t.default,
+        torch.ops.aten.transpose.int,
+    ) and _is_default_decomposition(func, decomp_fn)
 
 
 def _assert_functionalize_not_active(msg: str) -> None:
@@ -550,7 +549,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             if func not in decomp_table:
                 return NotImplemented
             decomp_fn = decomp_table[func]
-            if _should_skip_default_alias_decomposition(
+            if _should_skip_default_decomposition(
                 func,
                 decomp_fn,
             ):
@@ -561,7 +560,6 @@ class FunctionalTensorMode(TorchDispatchMode):
 
             with self:
                 self._decomposition_layers += 1
-                proxy_mode.functional_decomp_layers += 1
                 try:
                     return maybe_handle_decomp(
                         proxy_mode,
@@ -572,13 +570,12 @@ class FunctionalTensorMode(TorchDispatchMode):
                         record_pointwise_barrier=True,
                     )
                 finally:
-                    proxy_mode.functional_decomp_layers -= 1
                     self._decomposition_layers -= 1
 
         decomp_fn = decomp_table.get(func)
         if decomp_fn is None:
             return NotImplemented
-        if _should_skip_default_alias_decomposition(
+        if _should_skip_default_decomposition(
             func,
             decomp_fn,
         ):
