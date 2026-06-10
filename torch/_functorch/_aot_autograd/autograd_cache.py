@@ -39,6 +39,7 @@ from torch._guards import StorageMetadata, TracingContext
 from torch._inductor.codecache import (
     _ident,
     _needs_storage_metadata_for_cache_key,
+    _storage_metadata_for_cache_key,
     add_ephemeral_timeout_increase_for_distributed,
     AOTAUTOGRAD_CACHE_PREFIX,
     BypassFxGraphCache,
@@ -907,6 +908,12 @@ def _add_storage_metadata_guards_for_cache_sensitive_ops(
     args: Sequence[Any],
     aot_config: AOTConfig,
 ) -> None:
+    def guarding_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError, RuntimeError):
+            return int(guarding_hint_or_throw(value))
+
     gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
     tracing_context = TracingContext.try_get()
     if (
@@ -925,10 +932,16 @@ def _add_storage_metadata_guards_for_cache_sensitive_ops(
             or not isinstance(arg, torch.Tensor)
         ):
             continue
-        storage_size = int(guarding_hint_or_throw(arg.untyped_storage().size()))
-        storage_offset = int(guarding_hint_or_throw(arg.storage_offset()))
+        storage_metadata = _storage_metadata_for_cache_key(arg)
+        if storage_metadata is None:
+            continue
+        storage_offset, storage_size = storage_metadata
         tracing_context.guards_context.aotautograd_guards.append(
-            StorageMetadata(source, storage_size, storage_offset)
+            StorageMetadata(
+                source,
+                guarding_int(storage_size),
+                guarding_int(storage_offset),
+            )
         )
 
 

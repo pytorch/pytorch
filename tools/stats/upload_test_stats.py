@@ -199,12 +199,18 @@ def backfill_test_jsons_while_running(
             )
 
         for unzipped_dir in unzipped_xml_dirs:
+            reports_root = unzipped_dir / "test" / "test-reports"
             for xml in unzipped_dir.glob("**/*.xml"):
-                corresponding_json = str(
-                    xml.with_suffix(".json").relative_to(
-                        unzipped_dir / "test" / "test-reports"
-                    )
-                )
+                # Most jobs lay reports out under <unzipped_dir>/test/test-reports,
+                # but some (e.g. ROCm gfx950) put them directly under
+                # <unzipped_dir>/test-reports. Those can't be keyed relative to
+                # reports_root, so skip them instead of aborting the whole upload.
+                try:
+                    relative_json = xml.with_suffix(".json").relative_to(reports_root)
+                except ValueError:
+                    print(f"Skipping test json with unexpected layout: {xml}")
+                    continue
+                corresponding_json = str(relative_json)
                 if corresponding_json in all_existing_jsons:
                     print(f"Skipping upload for existing test json for {xml}")
                     continue
@@ -217,12 +223,7 @@ def backfill_test_jsons_while_running(
                     workflow_run_attempt,
                     job_id,
                 )
-                json_file = xml.with_suffix(".json")
-                s3_key = (
-                    json_file.relative_to(unzipped_dir / "test" / "test-reports")
-                    .as_posix()
-                    .replace("/", "_")
-                )
+                s3_key = relative_json.as_posix().replace("/", "_")
                 s3_key = f"test_jsons_while_running/{workflow_run_id}/{job_id}/{s3_key}"
                 upload_to_s3("gha-artifacts", s3_key, remove_nan_inf(test_cases))
 
@@ -340,8 +341,6 @@ if __name__ == "__main__":
         remove_nan_inf(failed_tests_cases),
     )
 
-    backfill_test_jsons_while_running(args.workflow_run_id, args.workflow_run_attempt)
-
     # Upload full test_run only for trusted refs (main or trunk/{sha} tags)
     if should_upload_full_test_run(args.head_branch, args.head_repository):
         # For jobs on main branch, upload everything.
@@ -351,5 +350,8 @@ if __name__ == "__main__":
             "test_run",
             remove_nan_inf(test_cases),
         )
+
+    # Best-effort backfill; run after the authoritative stats uploads.
+    backfill_test_jsons_while_running(args.workflow_run_id, args.workflow_run_attempt)
 
     upload_additional_info(args.workflow_run_id, args.workflow_run_attempt)

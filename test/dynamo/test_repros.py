@@ -5190,6 +5190,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     # https://github.com/pytorch/pytorch/issues/140171
     @parametrize("backend", ["aot_eager", "inductor"])
+    def test_as_strided_mutation_oob_errors(self, backend):
+        def foo(x):
+            x.as_strided((10,), (1,), storage_offset=5).add_(1)
+            return x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "storage.*out of bounds|storage.*size"
+        ):
+            torch.compile(foo, backend=backend)(torch.arange(10))
+
+    # https://github.com/pytorch/pytorch/issues/140171
+    @parametrize("backend", ["aot_eager", "inductor"])
     def test_as_strided_scatter_overlapping_input(self, backend):
         def foo(base, src):
             return torch.as_strided_scatter(base.expand(10), src, (5,), (1,), 0)

@@ -89,7 +89,9 @@ def from_fun(t: object) -> object:
 # Some view mutations can update storage locations that are not part of the
 # input tensor's logical shape, for example as_strided() on a sliced input.
 def mutated_input_storage_copy_length(
-    original_inpt: torch.Tensor, updated_inpt: Any
+    original_inpt: torch.Tensor,
+    updated_inpt: Any,
+    original_storage_len: Any | None = None,
 ) -> int | None:
     if not isinstance(updated_inpt, torch.Tensor):
         return None
@@ -122,6 +124,19 @@ def mutated_input_storage_copy_length(
     # to prove the mutation's as_strided access was in bounds to create
     # updated_inpt in the first place.
     if updated_storage_len > updated_inpt.numel():
+        if original_storage_len is None:
+            try:
+                original_storage_len = compute_storage_length(original_inpt)
+            except RuntimeError:
+                original_storage_len = None
+        if original_storage_len is not None and guard_or_false(
+            original_storage_len < updated_storage_len
+        ):
+            raise RuntimeError(
+                "input mutation requires storage beyond the original input "
+                f"storage size: required {updated_storage_len} elements, "
+                f"but storage has {original_storage_len} elements"
+            )
         return updated_storage_len
     return None
 

@@ -66,6 +66,7 @@ from torch._functorch.aot_autograd import (
 from torch._guards import StorageMetadata, TracingContext
 from torch._inductor.codecache import (
     _needs_storage_metadata_for_cache_key,
+    _storage_metadata_for_cache_key,
     code_hash,
     FxGraphCache,
     output_code_log,
@@ -901,11 +902,15 @@ def _add_storage_metadata_guards_for_cache_sensitive_ops(
         source = _source_from_aot_input_desc(node.meta.get("desc"))
         if not _is_valid_storage_metadata_guard_source(source):
             continue
+        storage_metadata = _storage_metadata_for_cache_key(arg)
+        if storage_metadata is None:
+            continue
+        storage_offset, storage_size = storage_metadata
         tracing_context.guards_context.aotautograd_guards.append(
             StorageMetadata(
                 source,
-                _guarding_int(arg.untyped_storage().size()),
-                _guarding_int(arg.storage_offset()),
+                _guarding_int(storage_size),
+                _guarding_int(storage_offset),
             )
         )
 
@@ -1810,6 +1815,14 @@ class _InProcessFxCompile(FxCompile):
                                 V.graph.device_node_mapping
                             )
                         )
+
+                    if (
+                        cudagraphs
+                        and not V.graph.disable_cudagraphs_reason
+                        and graph.scheduler.count_kernel_nodes(graph.scheduler.nodes)
+                        == 0
+                    ):
+                        V.graph.disable_cudagraphs_reason = "no CUDA kernel invocations"
 
                     self._compile_stats[type(self)].codegen_and_compile += 1
 
