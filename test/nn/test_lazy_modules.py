@@ -689,6 +689,30 @@ class TestLazyModules(TestCase):
         self._check_lazy_batchnorm_state(nn.BatchNorm3d, nn.LazyBatchNorm3d)
         self._check_lazy_batchnorm_state(nn.BatchNorm3d, nn.LazyBatchNorm3d)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_batchnorm_complex_cuda_error(self):
+        test_cases = [
+            (
+                nn.BatchNorm2d(3).cuda(),
+                torch.zeros((1, 3, 4, 4), device="cuda", dtype=torch.complex64),
+            ),
+            (
+                nn.BatchNorm3d(3).cuda(),
+                torch.zeros((1, 3, 4, 4, 4), device="cuda", dtype=torch.complex64),
+            ),
+            (
+                nn.LazyBatchNorm2d().cuda(),
+                torch.zeros((1, 3, 4, 4), device="cuda", dtype=torch.complex64),
+            ),
+            (
+                nn.LazyBatchNorm3d().cuda(),
+                torch.zeros((1, 3, 4, 4, 4), device="cuda", dtype=torch.complex64),
+            ),
+        ]
+
+        for module, input in test_cases:
+            with self.assertRaisesRegex(NotImplementedError, "batch_norm.*complex"):
+                module(input)
     def test_lazy_instancenorm1d(self):
         self._check_lazy_norm(nn.InstanceNorm1d, nn.LazyInstanceNorm1d, (16, 3, 6))
 
