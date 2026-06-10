@@ -1181,13 +1181,12 @@ class TestOptimRenewed(TestCase):
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
 
-    @onlyCUDA
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=[torch.float32],
     )
     def test_fused_does_not_step_if_foundinf(self, device, dtype, optim_info):
-        if device not in optim_info.supports_fused_on:
+        if _get_device_type(device) not in optim_info.supports_fused_on:
             self.skipTest(
                 f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
             )
@@ -2349,34 +2348,43 @@ class TestOptimRenewed(TestCase):
                 self.assertGreater(len(state), 0)
 
     @onlyCUDA
-    @parametrize("amsgrad", [False, True])
-    @parametrize("lr_as_tensor", [False, True])
-    @parametrize("lr", [0.0, 1e-3])
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
         dtypes=[torch.float16, torch.float32],
     )
-    def test_adam_capturable_forloop_no_nan(
-        self, device, dtype, optim_info, amsgrad, lr_as_tensor, lr
-    ):
+    def test_adam_capturable_forloop_no_nan(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        embedding = torch.nn.Embedding(16, 4, device=device, dtype=dtype)
-        initial_weight = embedding.weight.detach().clone()
-        lr_arg = torch.tensor(lr, device=device) if lr_as_tensor else lr
-        optim = optim_cls(
-            embedding.parameters(),
-            lr=lr_arg,
-            capturable=True,
-            foreach=False,
-            amsgrad=amsgrad,
-        )
+        capturable_inputs = [
+            optim_input
+            for optim_input in optim_info.optim_inputs_func(device=device)
+            if optim_input.kwargs.get("capturable", False)
+        ]
+        self.assertGreater(len(capturable_inputs), 0)
 
-        indices = torch.tensor([0, 1, 0, 1], device=device)
-        embedding(indices).sum().backward()
-        optim.step()
+        def move_tensor_kwargs(value):
+            if isinstance(value, torch.Tensor):
+                return value.to(device=device)
+            if isinstance(value, tuple):
+                return tuple(move_tensor_kwargs(v) for v in value)
+            return value
 
-        self.assertTrue(torch.isfinite(embedding.weight).all().item())
-        if lr == 0.0:
+        for optim_input in capturable_inputs:
+            embedding = torch.nn.Embedding(16, 4, device=device, dtype=dtype)
+            initial_weight = embedding.weight.detach().clone()
+            kwargs = {k: move_tensor_kwargs(v) for k, v in optim_input.kwargs.items()}
+            kwargs["foreach"] = False
+            kwargs["lr"] = (
+                torch.zeros_like(kwargs["lr"], device=device)
+                if isinstance(kwargs.get("lr"), torch.Tensor)
+                else 0.0
+            )
+            optim = optim_cls(embedding.parameters(), **kwargs)
+
+            indices = torch.tensor([0, 1, 0, 1], device=device)
+            embedding(indices).sum().backward()
+            optim.step()
+
+            self.assertTrue(torch.isfinite(embedding.weight).all().item())
             self.assertEqual(embedding.weight, initial_weight)
 
     @onlyCUDA

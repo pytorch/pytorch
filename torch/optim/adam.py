@@ -529,8 +529,10 @@ def _single_tensor_adam(
                 denom.add_(eps)
                 param.addcdiv_(exp_avg.float() * step_size_neg, denom)
             else:
-                # Fold the step size into the denominator without forming 0 / -0
-                # when lr is zero and exp_avg_sq is zero.
+                # Build the folded denominator's numerator before dividing by
+                # the step size. This keeps the numerator nonzero for untouched
+                # rows, so lr=0 gives an infinite denominator instead of
+                # 0 / -0 -> NaN.
                 denom.add_(eps * bias_correction2_sqrt)
                 denom.div_(bias_correction2_sqrt * step_size_neg)
                 param.addcdiv_(exp_avg, denom)
