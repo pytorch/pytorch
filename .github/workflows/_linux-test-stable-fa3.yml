@@ -85,7 +85,7 @@ jobs:
       contents: read
     steps:
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.13
 
       - name: Checkout flash-attention as a secondary repository
         uses: actions/checkout@v4
@@ -98,7 +98,7 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.13
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
@@ -112,7 +112,7 @@ jobs:
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.13
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -274,7 +274,7 @@ jobs:
           workflow_attempt: ${{github.run_attempt}}
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.13
         if: always() && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false'
 
   test-osdc:
@@ -292,7 +292,7 @@ jobs:
     steps:
       - name: Setup Linux
         id: setup-linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.13
         with:
           use-arc: true
           python-version: ${{ inputs.python-version }}
@@ -317,7 +317,7 @@ jobs:
           role-duration-seconds: 18000
 
       - name: Download build artifacts
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@release/2.13
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}

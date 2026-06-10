@@ -111,7 +111,7 @@ jobs:
           curr_ref_type="${{ inputs.curr_ref_type }}"
           echo "Current branch is '$curr_branch'"
 
-          # The workflow YAML is loaded from main (via @main in callers) but the
+          # The workflow YAML is loaded from main (via @release/2.13 in callers) but the
           # script is checked out from the PR head, so PRs that predate a newly
           # added optional flag will reject it. Probe --help and only pass flags
           # the checked-out script supports.
