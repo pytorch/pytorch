@@ -71,6 +71,8 @@ ALLOW_LIST = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("aten::cholesky", datetime.date(9999, 1, 1), None, True),
+    ("aten::cholesky.out", datetime.date(9999, 1, 1), None, True),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_cslt_sparse_mm", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
@@ -84,8 +86,6 @@ ALLOW_LIST = [
     ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
     ("aten::eig", datetime.date(9999, 1, 1)),
     ("aten::eig.e", datetime.date(9999, 1, 1)),
-    ("aten::qr", datetime.date(9999, 1, 1), None, True),
-    ("aten::qr.Q", datetime.date(9999, 1, 1), None, True),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::matrix_rank", datetime.date(9999, 1, 1)),

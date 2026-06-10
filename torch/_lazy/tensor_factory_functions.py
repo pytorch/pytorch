@@ -3,7 +3,7 @@ import torch
 
 """
 tensor_factory_functions defines the list of torch functions that create tensors.
-The list is grabbed by searching thru native_functions.yaml by the following
+The list is grabbed by searching through native_functions.yaml by the following
 regular expression:
 
   cat native_functions.yaml | grep 'func:' | grep -v "Tensor.*->" | grep "[-]>.*Tensor"
