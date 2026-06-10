@@ -3648,7 +3648,8 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
         )
 
         output_indices = torch.arange(osize, dtype=torch.float32, device=input.device)
-        input_indices = ((output_indices + offset) * scale).to(torch.int64)
+        input_indices = torch.floor((output_indices + offset) * scale).to(torch.int64)
+        input_indices = torch.min(input_indices, isize - 1)
         for _ in range(num_spatial_dims - 1 - d):
             input_indices = input_indices.unsqueeze(-1)
         indices.append(input_indices)

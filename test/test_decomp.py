@@ -1146,6 +1146,38 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions._log_softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_upsample_nearest_noninteger_scale_factor(self, device):
+        # Regression for https://github.com/pytorch/pytorch/issues/175154
+        from torch._decomp.decompositions import _upsample_nearest, upsample_compute_output_size
+
+        in_t = torch.arange(20, dtype=torch.float32, device=device).view(1, 1, 20)
+        scale = 1.3
+
+        ref = torch.nn.functional.interpolate(
+            in_t, scale_factor=scale, mode="nearest"
+        )
+        osize = upsample_compute_output_size(in_t.shape, None, [scale])
+        decomp_out = _upsample_nearest(in_t, osize, [scale], exact=False)
+        self.assertEqual(decomp_out, ref)
+
+        ref_recompute = torch.nn.functional.interpolate(
+            in_t, scale_factor=scale, mode="nearest", recompute_scale_factor=True
+        )
+        osize_r = upsample_compute_output_size(in_t.shape, None, [scale])
+        decomp_recompute = _upsample_nearest(
+            in_t, osize_r, [None], exact=False
+        )
+        self.assertEqual(decomp_recompute, ref_recompute)
+
+        compiled = torch.compile(
+            lambda x: torch.nn.functional.interpolate(
+                x, scale_factor=scale, mode="nearest"
+            )
+        )
+        self.assertEqual(compiled(in_t), ref)
+
     @onlyCUDA
     def test_exponential_non_inf(self, device):
         inp = torch.empty((4, 400, 256), device=device)
