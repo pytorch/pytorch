@@ -781,22 +781,21 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_dropout"], 1)
         counters.clear()
 
-    @unittest.skipIf(
-        GPU_TYPE == "mps",
-        "batch_linear_lhs auto-enable is not supported for MPS",
+    @unittest.skipUnless(
+        torch.xpu.is_available(),
+        "batch_linear_lhs auto-enable is XPU-only for now",
     )
-    @requires_gpu()
-    def test_gpu_auto_enable_batch_linear_lhs(self):
+    def test_xpu_auto_enable_batch_linear_lhs(self):
         # Verify that batch_linear_lhs fusion is auto-enabled when example inputs
-        # contain GPU tensors, without explicitly setting
+        # contain XPU tensors, without explicitly setting
         # config.pre_grad_fusion_options.
         z = 10
         for has_bias in [True, False]:
             # Capture the global config state before compilation
             orig_fusion_options = dict(config.pre_grad_fusion_options)
             counters.clear()
-            module = MyModule4(z, GPU_TYPE, has_bias)
-            input = [torch.randn(20, z, device=GPU_TYPE)]
+            module = MyModule4(z, "xpu", has_bias)
+            input = [torch.randn(20, z, device="xpu")]
             traced = torch.compile(module)
             ref = module(*input)
             res = traced(*input)
