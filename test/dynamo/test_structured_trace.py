@@ -78,6 +78,10 @@ class StructuredTraceTestingFilter(logging.Filter):
     def filter(self, record):
         if "str" in record.metadata:
             return False
+        # torch_version is emitted by LazyTraceHandler only in fbcode;
+        # filter it out so expected output is consistent across environments.
+        if torch._environment.is_fbcode() and record.metadata.get("artifact", {}).get("name") == "torch_version":
+            return False
         if self.match_name is not None:
             if "artifact" in record.metadata:
                 if self.match_name != record.metadata["artifact"]["name"]:
