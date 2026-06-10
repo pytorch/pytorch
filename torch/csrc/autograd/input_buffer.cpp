@@ -110,6 +110,14 @@ void record_stream_any_impl(Variable& var, const c10::Stream& stream) {
       case c10::kStrided:
         guard.recordDataPtrOnStream(var.storage().data_ptr(), stream);
         break;
+      case c10::kMkldnn:
+        // MKL-DNN tensors do not support stream recording via storage().
+        // They are not used in CUDA stream contexts, so we skip silently.
+        break;
+      case c10::kJagged:
+        // Jagged (nested) tensors manage their own storage internally.
+        // Stream recording is handled at the nested tensor level, not here.
+        break;
       default:
         TORCH_INTERNAL_ASSERT(
             false, "Unknown layout in record_stream_any_impl");
