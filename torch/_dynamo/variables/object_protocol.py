@@ -281,6 +281,12 @@ def type_implements_tp_repr(obj_type: type) -> bool:
     return has_slot(type_slot, PyTypeSlots.TP_REPR)
 
 
+def type_implements_tp_str(obj_type: type) -> bool:
+    """Check whether obj_type implements the tp_str slot."""
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_STR)
+
+
 def pyiter_check(obj_type: type) -> bool:
     # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L2891-L2897
     # CPython checks if tp_iternext != _PyObject_NextNotImplemented
@@ -444,6 +450,36 @@ def generic_repr(
         return result
 
     raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
+
+
+def generic_str(
+    tx: "InstructionTranslatorBase", obj: "VariableTracker"
+) -> "VariableTracker":
+    """Mirrors PyObject_Str semantics in Dynamo.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L781-L829
+
+    Resolution order: str identity check -> tp_str (str_impl) -> tp_repr fallback.
+    """
+    if maybe_get_python_type(obj) is str:
+        return obj
+
+    obj_type = maybe_get_python_type(obj)
+    if (
+        type_implements_tp_str(obj_type)
+        and type(obj).str_impl is not VariableTracker.str_impl
+    ):
+        result = obj.str_impl(tx)
+    else:
+        result = generic_repr(tx, obj)
+
+    result_type = maybe_get_python_type(result)
+    if not issubclass(result_type, str):
+        raise_type_error(
+            tx,
+            f"__str__ returned non-string (type {result_type.__name__})",
+        )
+    return result
 
 
 def vt_getitem(
@@ -852,6 +888,13 @@ NB_SLOT_MAPPING = {
     "nb_inplace_and": PyNumberSlots.NB_INPLACE_AND,
     "nb_xor": PyNumberSlots.NB_XOR,
     "nb_inplace_xor": PyNumberSlots.NB_INPLACE_XOR,
+    "nb_floor_divide": PyNumberSlots.NB_FLOOR_DIVIDE,
+    "nb_inplace_floor_divide": PyNumberSlots.NB_INPLACE_FLOOR_DIVIDE,
+    "nb_true_divide": PyNumberSlots.NB_TRUE_DIVIDE,
+    "nb_inplace_true_divide": PyNumberSlots.NB_INPLACE_TRUE_DIVIDE,
+    "nb_remainder": PyNumberSlots.NB_REMAINDER,
+    "nb_inplace_remainder": PyNumberSlots.NB_INPLACE_REMAINDER,
+    "nb_divmod": PyNumberSlots.NB_DIVMOD,
 }
 
 
