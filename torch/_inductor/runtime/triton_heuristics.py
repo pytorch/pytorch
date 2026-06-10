@@ -150,8 +150,8 @@ def _flex_attention_resource_hint(
         f"memory: {selected_options}. Reduce the kernel resource usage with "
         f"explicit kernel_options using smaller tile sizes and/or lower "
         f"num_stages or num_warps. For example: "
-        f"{flex_kernel_options_example(kind)}. If these options were chosen "
-        f"by the default heuristic, compiling with "
+        f"{flex_kernel_options_example(kind)}. "
+        f"Alternatively, compiling with "
         f"mode='max-autotune-no-cudagraphs' can try additional "
         f"FlexAttention configs automatically."
     )
