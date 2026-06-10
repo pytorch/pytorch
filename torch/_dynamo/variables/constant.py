@@ -241,6 +241,9 @@ class ConstantVariable(VariableTracker):
 
         return python_constant_richcompare_impl(self, tx, other, op)
 
+    def str_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        return ConstantVariable.create(str(self.value))
+
     def len_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Generic len for any constant value (sequence or mapping)."""
         try:

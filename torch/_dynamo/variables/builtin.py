@@ -119,6 +119,7 @@ from .object_protocol import (
     generic_neg,
     generic_pos,
     generic_repr,
+    generic_str,
     maybe_get_python_type,
     pysequence_check,
     ternary_iop,
@@ -1689,6 +1690,10 @@ class BuiltinVariable(BaseBuiltinVariable):
             # type.__len__(instance) → len(instance)
             # e.g. list.__len__(my_list) → len(my_list)
             return generic_len(tx, args[0])
+
+        if name == "__str__" and len(args) == 1 and not kwargs:
+            # type.__str__(instance) → str(instance)
+            return generic_str(tx, args[0])
 
         if name == "__repr__" and len(args) == 1 and not kwargs:
             return super().call_method(tx, name, args, kwargs)
