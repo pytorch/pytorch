@@ -42,11 +42,94 @@ from ...lowering import (
     index_output_size_and_inner_fn,
     to_dtype,
 )
+from ...runtime.triton_compat import OutOfResources
 from ...select_algorithm import realize_inputs
 from ...utils import load_template
 
 
 SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
+
+
+def is_wrapped_triton_shared_memory_error(exc: RuntimeError) -> bool:
+    """Triton raises a generic RuntimeError when it runs out of shared memory."""
+    message = str(exc).lower()
+    return "outofresources" in message and "out of resource" in message
+
+
+def flex_kernel_options_example(kernel_name: str) -> str:
+    match kernel_name:
+        case "backward":
+            return (
+                "kernel_options={'bwd_BLOCK_M1': 32, 'bwd_BLOCK_N1': 32, "
+                "'bwd_BLOCK_M2': 32, 'bwd_BLOCK_N2': 32, "
+                "'bwd_num_stages': 1, 'bwd_num_warps': 4}"
+            )
+        case _:
+            return (
+                "kernel_options={'fwd_BLOCK_M': 32, 'fwd_BLOCK_N': 64, "
+                "'fwd_num_stages': 1, 'fwd_num_warps': 4}"
+            )
+
+
+def flex_kernel_tuning_options(kernel_name: str) -> str:
+    match kernel_name:
+        case "backward":
+            return (
+                "BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2, num_warps, and "
+                "num_stages; use the bwd_ prefix to set backward-only options"
+            )
+        case _:
+            return (
+                "BLOCK_M, BLOCK_N, num_warps, and num_stages; use the fwd_ "
+                "prefix to set forward-only options"
+            )
+
+
+def raise_flex_smem_error(
+    kernel_name: str,
+    kernel_options: dict[str, Any],
+    option_names: Sequence[str],
+    exc: BaseException,
+) -> None:
+    option_values = ", ".join(
+        f"{name}={kernel_options[name]}"
+        for name in option_names
+        if name in kernel_options
+    )
+    raise RuntimeError(
+        f"FlexAttention {kernel_name} failed to compile because the selected "
+        f"Triton kernel requires too much shared memory. The selected options "
+        f"were {option_values}. Pass explicit kernel_options with smaller "
+        f"tile sizes and/or lower num_stages or num_warps. For example: "
+        f"{flex_kernel_options_example(kernel_name)}. If you did not pin "
+        f"these options, compiling with mode='max-autotune-no-cudagraphs' "
+        f"can also fix this by trying more "
+        f"FlexAttention configs. Original Triton error: {exc}"
+    ) from exc
+
+
+def precompile_single_flex_choice(
+    choices: Sequence[Any],
+    kernel_name: str,
+    kernel_options: dict[str, Any] | None,
+    option_names: Sequence[str],
+) -> None:
+    """Precompile singleton choices to specialize shared-memory errors.
+
+    Multi-choice autotune keeps its normal behavior so failing configs can be
+    discarded while valid configs remain selectable.
+    """
+    if len(choices) != 1 or kernel_options is None:
+        return
+
+    try:
+        choices[0].precompile()
+    except OutOfResources as exc:
+        raise_flex_smem_error(kernel_name, kernel_options, option_names, exc)
+    except RuntimeError as exc:
+        if is_wrapped_triton_shared_memory_error(exc):
+            raise_flex_smem_error(kernel_name, kernel_options, option_names, exc)
+        raise
 
 
 def zeros_and_scatter_lowering(shape: list[int], indices, values):

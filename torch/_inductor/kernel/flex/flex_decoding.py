@@ -2,6 +2,7 @@
 """Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
 
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import sympy
@@ -27,6 +28,7 @@ from .common import (
     get_fwd_subgraph_outputs,
     load_flex_template,
     maybe_realize,
+    precompile_single_flex_choice,
     set_head_dim_values,
 )
 
@@ -35,6 +37,31 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 log = logging.getLogger(__name__)
+
+
+def _format_kernel_options(kernel_options: dict[str, Any], names: Sequence[str]) -> str:
+    return ", ".join(f"{name}={kernel_options[name]}" for name in names)
+
+
+def _raise_flex_decoding_kernel_options_error(
+    kernel_options: dict[str, Any],
+    sparse_q_block_size: int,
+    sparse_kv_block_size: int,
+) -> None:
+    raise ValueError(
+        "Invalid FlexAttention decode kernel options: Q and KV block sizes must "
+        "be divisible by the selected tile sizes. Got "
+        f"SPARSE_Q_BLOCK_SIZE={sparse_q_block_size}, "
+        f"SPARSE_KV_BLOCK_SIZE={sparse_kv_block_size}, and "
+        f"{_format_kernel_options(kernel_options, ('BLOCK_M', 'BLOCK_N'))}. "
+        "Pass compatible values with kernel_options. Available decode tuning "
+        "options are BLOCK_M, BLOCK_N, num_warps, and num_stages; use the "
+        "fwd_ prefix to set decode-only options. For example: "
+        "kernel_options={'fwd_BLOCK_M': 16, 'fwd_BLOCK_N': 128, "
+        "'fwd_num_warps': 2, 'fwd_num_stages': 3}. If you did not pin "
+        "these options, compiling with mode='max-autotune-no-cudagraphs' "
+        "can also fix this by trying more FlexAttention configs."
+    )
 
 
 def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> bool:
@@ -322,17 +349,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
+    invalid_block_options: dict[str, Any] | None = None
+    selected_kernel_options: dict[str, Any] | None = None
 
     for conf in configs:
-        if conf.block_n > SPARSE_KV_BLOCK_SIZE:
-            conf.block_n = SPARSE_KV_BLOCK_SIZE
-
-        if SPARSE_Q_BLOCK_SIZE % kernel_options["BLOCK_M"] != 0:
-            continue
-
-        if SPARSE_KV_BLOCK_SIZE % conf.block_n != 0:
-            continue
-
         cur_kernel_options = original_kernel_options.copy()
         # Remove prefix for forward kernels options and delete backward kernel options.
         for k in list(cur_kernel_options.keys()):
@@ -342,11 +362,29 @@ def create_flex_decoding_kernel(*args, **kwargs):
             if k.startswith("bwd_"):
                 cur_kernel_options.pop(k)
         # Performance tuning
-        cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
+        cur_kernel_options.setdefault(
+            "BLOCK_N", min(conf.block_n, SPARSE_KV_BLOCK_SIZE)
+        )
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
         cur_kernel_options.setdefault("num_warps", conf.num_warps)
         cur_kernel_options.setdefault("num_stages", conf.num_stages)
+
+        if (
+            cur_kernel_options["SPARSE_Q_BLOCK_SIZE"] % cur_kernel_options["BLOCK_M"]
+            != 0
+            or cur_kernel_options["SPARSE_KV_BLOCK_SIZE"]
+            % cur_kernel_options["BLOCK_N"]
+            != 0
+        ):
+            invalid_block_options = cur_kernel_options
+            if len(configs) == 1:
+                _raise_flex_decoding_kernel_options_error(
+                    cur_kernel_options,
+                    SPARSE_Q_BLOCK_SIZE,
+                    SPARSE_KV_BLOCK_SIZE,
+                )
+            continue
 
         if cur_kernel_options.get("num_consumer_groups", False):
             cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
@@ -365,6 +403,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             if hasattr(conf, attrib):
                 cur_kernel_options[attrib] = getattr(conf, attrib)
 
+        previous_choice_count = len(choices)
         flex_decoding_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -387,6 +426,22 @@ def create_flex_decoding_kernel(*args, **kwargs):
             call_sizes=query.get_size(),
             **cur_kernel_options,
         )
+        if len(choices) > previous_choice_count:
+            selected_kernel_options = cur_kernel_options
+
+    if not choices and invalid_block_options is not None:
+        _raise_flex_decoding_kernel_options_error(
+            invalid_block_options,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
+        )
+
+    precompile_single_flex_choice(
+        choices,
+        "decode",
+        selected_kernel_options,
+        ("BLOCK_M", "BLOCK_N", "num_stages", "num_warps"),
+    )
 
     filtered_score_mod_buffers = [
         buf for buf in score_mod_other_buffers if not isinstance(buf, sympy.Expr)
