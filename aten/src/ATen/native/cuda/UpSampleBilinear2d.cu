@@ -21,6 +21,8 @@
 #include <ATen/ops/_upsample_bicubic2d_aa_native.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_backward_native.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_native.h>
+#include <ATen/ops/_upsample_lanczos2d_aa_backward_native.h>
+#include <ATen/ops/_upsample_lanczos2d_aa_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/upsample_bilinear2d_backward_native.h>
 #include <ATen/ops/upsample_bilinear2d_native.h>
@@ -766,9 +768,10 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
   }
 }
 
-// In the code below interp_filter_t distinguishes between bilinear and bicubic interpolations
+// In the code below interp_filter_t distinguishes between bilinear, bicubic, and lanczos interpolations
 // InterpFilter as BilinearFilterFunctor <--> bilinear
 // InterpFilter as BicubicFilterFunctor <--> bicubic
+// InterpFilter as LanczosFilterFunctor <--> lanczos
 template<typename InterpFilter>
 static void upsample_gen2d_aa_out_cuda_template(
     const Tensor& output,
@@ -861,9 +864,10 @@ static void upsample_gen2d_aa_out_cuda_template(
   }
 }
 
-// In the code below interp_filter_t distinguishes between bilinear and bicubic interpolations
+// In the code below interp_filter_t distinguishes between bilinear, bicubic, and lanczos interpolations
 // InterpFilter as BilinearFilterFunctor <--> bilinear
 // InterpFilter as BicubicFilterFunctor <--> bicubic
+// InterpFilter as LanczosFilterFunctor <--> lanczos
 template<typename InterpFilter>
 static void upsample_gen2d_aa_backward_out_cuda_template(
     const Tensor& grad_input,
@@ -995,8 +999,8 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_backward_out_cuda) (
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
 }
 
-// We define bicubic anti-alias function implementations in this file instead of
-// UpSampleBicubic2d.cu as we are using a single generic implementation
+// We define bicubic and lanczos anti-alias function implementations in this
+// file as they all share the same generic implementation
 TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
@@ -1020,6 +1024,32 @@ TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_backward_out_cuda) (
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("upsample_bicubic2d_aa_backward_out_cuda");
   upsample_gen2d_aa_backward_out_cuda_template<upsample_antialias::BicubicFilterFunctor>(
+      grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
+}
+
+TORCH_IMPL_FUNC(_upsample_lanczos2d_aa_out_cuda) (
+    const Tensor& input,
+    IntArrayRef output_size,
+    bool align_corners,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
+    const Tensor& output) {
+  upsample_gen2d_aa_out_cuda_template<upsample_antialias::LanczosFilterFunctor>(
+      output, input, output_size, align_corners, scales_h, scales_w);
+}
+
+TORCH_IMPL_FUNC(_upsample_lanczos2d_aa_backward_out_cuda) (
+    const Tensor& grad_output,
+    IntArrayRef output_size,
+    IntArrayRef input_size,
+    bool align_corners,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
+    const Tensor& grad_input) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("upsample_lanczos2d_aa_backward_out_cuda");
+  upsample_gen2d_aa_backward_out_cuda_template<upsample_antialias::LanczosFilterFunctor>(
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
 }
 

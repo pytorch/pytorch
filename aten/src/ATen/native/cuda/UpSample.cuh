@@ -304,6 +304,35 @@ struct BicubicFilterFunctor {
   static constexpr int size = 4;
 };
 
+// Lanczos-3 filter: sinc(x) * sinc(x/3) for |x| < 3
+// taken from
+// https://github.com/python-pillow/Pillow/blob/8004234d879254cc354935ad42fbb51b1700925e/
+// src/libImaging/Resample.c#L64-L86
+struct LanczosFilterFunctor {
+
+  template <typename accscalar_t>
+  __device__ accscalar_t sinc_filter(accscalar_t x) const {
+    if (x == 0) {
+      return 1;
+    }
+    x *= static_cast<accscalar_t>(M_PI);
+    return std::sin(x) / x;
+  }
+
+  template <typename accscalar_t>
+  __device__ accscalar_t operator()(accscalar_t x) const {
+    if (x < 0) {
+      x = -x;
+    }
+    if (x < 3) {
+      return sinc_filter(x) * sinc_filter(x / 3);
+    }
+    return 0;
+  }
+
+  static constexpr int size = 6;
+};
+
 template <typename accscalar_t>
 __device__ __forceinline__ void _compute_weights_span(
     const int i,

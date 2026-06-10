@@ -77,6 +77,7 @@ _COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY = [
     aten.gru.data,
     aten._upsample_bilinear2d_aa.vec,
     aten._upsample_bicubic2d_aa.vec,
+    aten._upsample_lanczos2d_aa.vec,
     aten.upsample_bilinear2d.vec,
     aten.upsample_trilinear3d.vec,
     aten.upsample_linear1d.vec,

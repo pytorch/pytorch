@@ -605,6 +605,7 @@ if torch.backends.mps.is_available():
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
+            "_upsample_lanczos2d_aa": None,  # not implemented for MPS
             "cdouble": None,
             "double": None,
             "log_softmaxwith_dtype": [
@@ -867,6 +868,7 @@ if torch.backends.mps.is_available():
             "_chunk_cat": [torch.float16, torch.float32],
             "_upsample_bilinear2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
             "_upsample_bicubic2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
+            "_upsample_lanczos2d_aa": None,  # not implemented for MPS
             "sparse.mmreduce": [torch.float32],  # csr not supported
             "linalg.householder_product": None,
             "unique_consecutive": [torch.float16, torch.float32],

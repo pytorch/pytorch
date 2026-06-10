@@ -4997,7 +4997,7 @@ def interpolate(  # noqa: F811
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for resizing are: `nearest`, `linear` (3D-only),
-    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `lanczos` (4D-only, CPU only), `area`, `nearest-exact`
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `lanczos` (4D-only), `area`, `nearest-exact`
 
     Args:
         input (Tensor): the input tensor
@@ -5040,7 +5040,7 @@ def interpolate(  # noqa: F811
 
     .. note::
         Mode ``mode='lanczos'`` uses a Lanczos-3 windowed sinc filter (6 taps) and requires
-        ``antialias=True``. It only supports 4-D input (i.e. 2D spatial) and CPU. With ``antialias=True``
+        ``antialias=True``. It only supports 4-D input (i.e. 2D spatial). With ``antialias=True``
         and ``align_corners=False``, the result matches PIL's ``Image.LANCZOS`` resampling filter.
 
     .. note::

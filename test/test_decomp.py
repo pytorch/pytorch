@@ -429,6 +429,7 @@ CROSS_REF_EXCLUDE_SET = {
     # native_batch_norm is only implicit when python dispatcher is on (and noncomposite otherwise)
     (None, None, "native_batch_norm"),
     (None, None, "_upsample_bilinear2d_aa"),
+    (None, None, "_upsample_lanczos2d_aa"),
     (None, None, "empty_strided"),  # aten.empty_strided was not decomposed
     (
         None,
