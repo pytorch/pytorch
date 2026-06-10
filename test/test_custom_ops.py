@@ -5408,6 +5408,49 @@ except RuntimeError as e:
         # lib1 = torch.library.Library(...) is on line 2 of the script.
         self.assertIn("<string>:2", result.stdout)
 
+    def test_register_fake_with_broken_lazy_loader_in_sys_modules(self):
+        # Regression test for register_fake crashing when an unrelated
+        # LazyLoader module in sys.modules raises on attribute access.
+        # Previously _register_fake reached inspect.findsource and
+        # inspect.getmodule, both of which iterate sys.modules and access
+        # __file__ on every entry; a LazyLoader whose underlying import is
+        # missing turns that into an ImportError that propagates out.
+        # Run in a subprocess so the broken module never enters this
+        # process's sys.modules.
+        script = """\
+import sys
+import types
+
+class BrokenLazyLoader(types.ModuleType):
+    def __getattr__(self, name):
+        raise ImportError(
+            f"simulated lazy import failure for {self.__name__} (asked for {name})"
+        )
+
+sys.modules["_broken_lazy_loader_for_test"] = BrokenLazyLoader(
+    "_broken_lazy_loader_for_test"
+)
+
+import torch
+
+lib = torch.library.Library("_test_lazy_loader_ns", "FRAGMENT")
+lib.define("foo(Tensor x) -> Tensor")
+
+@torch.library.register_fake("_test_lazy_loader_ns::foo", lib=lib)
+def _foo_fake(x):
+    return torch.empty_like(x)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"

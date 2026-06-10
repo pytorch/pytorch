@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-import inspect
 import re
 import sys
 import weakref
@@ -330,10 +329,7 @@ class Library:
 
         source = torch._library.utils.get_source(_stacklevel + 1)
         frame = sys._getframe(_stacklevel)
-        caller_module = inspect.getmodule(frame)
-        # Can be none if you call register_fake from somewhere there isn't a module
-        # (e.g. __main__)
-        caller_module_name = None if caller_module is None else caller_module.__name__
+        caller_module_name = frame.f_globals.get("__name__")
 
         # TODO(rzou): We're gonna need to stage this change with torchvision,
         # since torchvision is github first.
