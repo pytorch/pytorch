@@ -288,7 +288,10 @@ def _nvgemm_precompile(
     out = tensors["output"]
 
     patched_mods = []
-    mac_fn = lambda *a, **kw: max_active_clusters
+
+    def mac_fn(*a, **kw):
+        return max_active_clusters
+
     for mod_name in _MAX_ACTIVE_CLUSTERS_MODULES:
         try:
             m = importlib.import_module(mod_name)
