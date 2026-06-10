@@ -9381,6 +9381,7 @@ class FallbackKernel(ExternKernelAlloc):
         if not device and (
             isinstance(kernel, torch._higher_order_ops.torchbind.CallTorchBind)
             or kernel is torch.ops.higher_order.print
+            or kernel is torch.ops.higher_order.invoke_leaf_function
         ):
             device = torch.device("cpu")
 

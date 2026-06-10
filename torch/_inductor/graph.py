@@ -20,6 +20,7 @@ from sympy import Expr
 import torch
 import torch._logging
 import torch.fx
+import torch.utils._pytree as pytree
 from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
@@ -1554,6 +1555,10 @@ class GraphLowering(torch.fx.Interpreter):
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)
         elif is_opaque_type(type(value)):
+            self.torchbind_constants[target] = value  # type: ignore[arg-type]
+            self.constant_reprs[target] = ""
+            return TorchBindObject(name=target, value=value)  # type: ignore[arg-type]
+        elif isinstance(value, pytree.TreeSpec):
             self.torchbind_constants[target] = value  # type: ignore[arg-type]
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)  # type: ignore[arg-type]
