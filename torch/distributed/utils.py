@@ -264,12 +264,12 @@ def _to_kwargs(
     moved_inputs = (
         _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies)
         if inputs
-        else []
+        else [()]
     )
     moved_kwargs = (
         _recursive_to(kwargs, target_device, use_side_stream_for_tensor_copies)
         if kwargs
-        else []
+        else [{}]
     )
     if len(moved_inputs) < len(moved_kwargs):
         moved_inputs.extend([() for _ in range(len(moved_kwargs) - len(inputs))])
