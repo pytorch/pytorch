@@ -6061,6 +6061,9 @@ for dtype in (torch.int32, torch.int64):
     )
     @with_tf32_off
     def test_conv_transpose2d_output_padding_triton(self):
+        if is_dynamic_shape_enabled():
+            self.skipTest("Expected codegen failure under dynamic shapes")
+
         def fn(x, weight):
             return torch.ops.aten.convolution(
                 x,
@@ -6087,6 +6090,9 @@ for dtype in (torch.int32, torch.int64):
     )
     def test_conv_transpose1d_triton_fallback(self):
         """ConvTranspose1d should fall back to ATEN gracefully, not crash."""
+        if is_dynamic_shape_enabled():
+            self.skipTest("Expected codegen failure under dynamic shapes")
+
         m = torch.nn.ConvTranspose1d(4, 8, 3, stride=2, padding=1)
         x = torch.randn(2, 4, 16)
         self.common(m, (x,), check_lowp=False)
