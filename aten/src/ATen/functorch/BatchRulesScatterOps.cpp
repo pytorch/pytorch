@@ -258,13 +258,13 @@ std::tuple<Tensor, std::optional<int64_t>> index_batch_rule(
       // indices: [:, Tensor[2, 2], Tensor[2, 2], :]
       // batched_indices: [:, :, Tensor[2, 2], Tensor[2, 2], :]
       // res: Tensor[B, 5, 2, 2, 8]
-      return std::make_tuple(res, 0);
+      return std::make_tuple(std::move(res), 0);
     } else {
       // self: Tensor[B, 5, 6, 7]
       // indices: [Tensor[2, 2], :, Tensor[2, 2]]
       // batched_indices: [:, Tensor[2, 2], :, Tensor[2, 2]]
       // res: Tensor[2, 2, B, 6]
-      return std::make_tuple(res, max_index_dim);
+      return std::make_tuple(std::move(res), max_index_dim);
     }
   }
 
@@ -275,13 +275,13 @@ std::tuple<Tensor, std::optional<int64_t>> index_batch_rule(
       // indices: [:, :, Tensor[B, 2, 2], Tensor[2, 2]]
       // batched_indices: indices (no change)
       // res: Tensor[5, 6, B, 2, 2]
-      return std::make_tuple(res, num_leading_nones);
+      return std::make_tuple(std::move(res), num_leading_nones);
     } else {
       // self: Tensor[5, 6, 7, 8, 9]
       // indices: [:, :, Tensor[B, 2, 2], :, Tensor[2, 2]]
       // batched_indices: indices (no change)
       // res: Tensor[B, 2, 2, 5, 6, 8]
-      return std::make_tuple(res, 0);
+      return std::make_tuple(std::move(res), 0);
     }
   }
 
@@ -292,7 +292,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_batch_rule(
     // indices: [:, Tensor[B, 2, 2], :, Tensor[2, 2]]
     // batched_indices: [arange(B).expand(B, 2, 2), :, Tensor[B, 2, 2], :, Tensor[2, 2]]
     // res: Tensor[B, 2, 2, 5, 7]
-    return std::make_tuple(res, 0);
+    return std::make_tuple(std::move(res), 0);
   }
   // In other words, in batched_indices, advanced indices are adjacent
   if (num_leading_nones == 0) {
@@ -300,7 +300,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_batch_rule(
     // indices: [Tensor[B, 2, 2], Tensor[2, 2], :, :]
     // batched_indices: [arange(B).expand(B, 2, 2), Tensor[B, 2, 2], Tensor[2, 2], :, :]
     // res: Tensor[B, 2, 2, 7, 8]
-    return std::make_tuple(res, 0);
+    return std::make_tuple(std::move(res), 0);
   }
   // This is the tricky case. In indices, advanced indices are adjacent.
   // In batched_indices, advanced indices are no longer adjacent
@@ -475,7 +475,13 @@ namespace {
       indices_bdims.push_back(index_bdim);
     }
     auto [values_value, values_bdim] = unwrapTensorAtLevel(values, cur_level);
-    return std::make_tuple(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim);
+    return std::make_tuple(
+        std::move(self_value),
+        self_bdim,
+        std::move(indices_value),
+        std::move(indices_bdims),
+        std::move(values_value),
+        values_bdim);
   }
 
 }  // namespace
@@ -647,7 +653,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_put_batch_rule(
   values_ = maybe_permute_values(values_, indices, indices_bdims);
 
   auto result = at::index_put(self_, List<std::optional<Tensor>>(indices_), values_, accumulate);
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 // plumbing done since we don't support List<std::optional<Tensor>> in codegen
@@ -704,7 +710,7 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_batch_rule(
   if (self_logical_rank == 0) {
     result = result.squeeze(-1);
   }
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 template <typename Func, typename ...Args>
@@ -742,7 +748,7 @@ inline std::tuple<Tensor, std::optional<int64_t>> scatter_batch_rule(
   if (self_logical_rank == 0) {
     result = result.squeeze(-1);
   }
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 } // namespace
@@ -774,11 +780,22 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_add_batch_rule(
                             self, self_bdim, dim, index, index_bdim, src, src_bdim);
 }
 
+static void check_scatter_inplace_bdim(
+    std::optional<int64_t> self_bdim,
+    std::optional<int64_t> index_bdim,
+    std::optional<int64_t> src_bdim,
+    const char* schema_name) {
+  if (!self_bdim.has_value() && (index_bdim.has_value() || src_bdim.has_value())) {
+    vmapIncompatibleInplaceError(schema_name);
+  }
+}
+
 std::tuple<Tensor, std::optional<int64_t>> scatter_add__batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     int64_t dim,
     const Tensor& index, std::optional<int64_t> index_bdim,
     const Tensor& src, std::optional<int64_t> src_bdim) {
+  check_scatter_inplace_bdim(self_bdim, index_bdim, src_bdim, "scatter_add_");
   return scatter_batch_rule(ATEN_FN(scatter_add_),
                             self, self_bdim, dim, index, index_bdim, src, src_bdim);
 }
@@ -811,6 +828,8 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_reduce__two_batch_rule(
     const Tensor& src, std::optional<int64_t> src_bdim,
     const std::string_view reduce,
     bool include_self) {
+  check_scatter_inplace_bdim(
+      self_bdim, index_bdim, src_bdim, "scatter_reduce_");
   return scatter_batch_rule(ATEN_FN2(scatter_reduce_, two),
                             self, self_bdim, dim, index, index_bdim, src, src_bdim, reduce, include_self);
 }
@@ -852,7 +871,7 @@ std::tuple<Tensor, std::optional<int64_t>> gather_batch_rule(
   if (index_logical_rank == 0) {
     result = result.squeeze(-1);
   }
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 Tensor get_expanded_index(const Tensor& index, SymIntArrayRef self_size, int64_t dim) {
@@ -1000,7 +1019,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_add_batch_rule_impl(
     if (self_logical_rank == 0) {
       result = result.squeeze(-1);
     }
-    return std::make_tuple(result, 0);
+    return std::make_tuple(std::move(result), 0);
   }
 
   // Index is batched. For-loop and stack is the best thing I can come up with
@@ -1071,7 +1090,7 @@ std::tuple<Tensor,Tensor> binary_pointwise_align(
   tensor_ = maybePadToLogicalRank(tensor_, self_bdim, max_logical_rank);
   other_ = maybePadToLogicalRank(other_, mask_bdim, max_logical_rank);
 
-  return std::make_tuple(tensor_, other_);
+  return std::make_tuple(std::move(tensor_), std::move(other_));
 }
 
 std::tuple<Tensor, std::optional<int64_t>> masked_fill_scalar_batch_rule(
@@ -1082,7 +1101,7 @@ std::tuple<Tensor, std::optional<int64_t>> masked_fill_scalar_batch_rule(
     const Scalar& source) {
   auto tensors = binary_pointwise_align(self, self_bdim, mask, mask_bdim);
   auto result = at::masked_fill(std::get<0>(tensors), std::get<1>(tensors), source);
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> index_fill_batch_rule_helper(

@@ -2,7 +2,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/layer_norm.h>
@@ -30,7 +29,7 @@ std::tuple<Tensor, Tensor> matmul_backward_nested(
   if (grad_input_mask[1]) {
     grad_other = at::matmul(self.transpose(-1, -2), grad);
   }
-  return std::make_tuple(grad_self, grad_other);
+  return std::make_tuple(std::move(grad_self), std::move(grad_other));
 }
 
 std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(

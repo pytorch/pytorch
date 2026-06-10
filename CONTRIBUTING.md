@@ -16,6 +16,7 @@ aspects of contributing to PyTorch.
 - [Codebase structure](#codebase-structure)
 - [AI-Assisted Development](#ai-assisted-development)
 - [Spin](#spin)
+  - [Building](#building)
   - [Linting](#linting)
     - [default lint](#default-lint)
   - [Regenerating](#regenerating)
@@ -297,8 +298,18 @@ A couple reminders here though:
 
 [Spin](https://github.com/scientific-python/spin) is a developer cli tool that
 helps running common tasks.
+You can either install it in your dev environment with `pip install spin` or as a global uv tool in your system with `uv tool install spin --with=packaging,pyyaml,typing_extensions`.
+
 To list the available tasks, run `spin --help`.
 Currently, we support the following tasks with Spin:
+
+### Building
+
+To support building and general development, the following commands exist.
+
+|command||
+|-|-|
+|`clean`|clean, that is remove files and directories listed in .gitignore before the NOT-CLEAN-FILES marker|
 
 ### Linting
 

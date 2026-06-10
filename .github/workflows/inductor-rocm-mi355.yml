@@ -1,12 +1,15 @@
+# Unneeded for CI: trunk.yml covers the same ROCm testing.
+# Kept in-repo for metrics; auto-triggers below are commented out.
+# workflow_dispatch remains for manual runs.
 name: inductor-rocm-mi355
 
 on:
-  push:
-    branches:
-      - main
-      - release/*
-    tags:
-      - ciflow/inductor-rocm-mi355/*
+  #push:
+  #  branches:
+  #    - main
+  #    - release/*
+  #  tags:
+  #    - ciflow/inductor-rocm-mi355/*
   workflow_dispatch:
 
 concurrency:
@@ -16,15 +19,13 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   target-determination:
     if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/target_determination.yml
-    permissions:
-      id-token: write
-      contents: read
 
   get-label-type:
     name: get-label-type
@@ -38,7 +39,7 @@ jobs:
       opt_out_experiments: lf
 
   linux-noble-rocm-py3_12-inductor-build:
-    name: rocm-py3.12-inductor-mi355
+    name: linux-noble-rocm-py3.12-mi355
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -53,10 +54,7 @@ jobs:
     secrets: inherit
 
   linux-noble-rocm-py3_12-inductor-test:
-    permissions:
-      id-token: write
-      contents: read
-    name: rocm-py3.12-inductor-mi355
+    name: linux-noble-rocm-py3.12-mi355
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-noble-rocm-py3_12-inductor-build
     with:

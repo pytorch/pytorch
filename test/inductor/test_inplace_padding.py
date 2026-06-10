@@ -112,6 +112,7 @@ class InplacePaddingTest(TestCase):
         self.assertEqual(num_inplace_padding(), 1)
 
     @inductor_config.patch(cpp_wrapper=True)
+    @inductor_config.patch("triton.autotune_at_compile_time", True)
     def test_pad_non_zero_cpp_wrapper(self):
         def f(x):
             x = x + 1

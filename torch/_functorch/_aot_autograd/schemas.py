@@ -203,6 +203,15 @@ class MemoryFormatMeta:
         if not use_memory_format:
             use_memory_format = t._has_symbolic_sizes_strides
 
+        if (
+            not use_memory_format
+            and t.layout == torch.strided
+            and torch._debug_has_internal_overlap(t) == 1
+        ):
+            # An internally overlapping output, e.g. from expand(), cannot
+            # represent arbitrary incoming gradients with its own strides.
+            use_memory_format = True
+
         if use_memory_format:
             return MemoryFormatMeta(
                 # pyrefly: ignore [unbound-name]
@@ -382,7 +391,7 @@ class SubclassCreationMeta:
         # `_make_size_runtime_safe` replaces any nested int with a dummy value (-1)
         # to prevent serializing a SymInt at runtime. Internally, nested tensor __tensor_unflatten__
         # is designed to safely ignore this dummy value.
-        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299  # noqa: B950
+        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299
         self.outer_size = tuple(map(_make_size_runtime_safe, self.outer_size))
         self.outer_stride = tuple(map(_make_size_runtime_safe, self.outer_stride))
 
@@ -459,9 +468,6 @@ class ViewAndMutationMeta:
     subclass_fw_graph_out_meta: list[PlainTensorMeta | SubclassCreationMeta]
     # length = # backward graph inputs
     subclass_tangent_meta: list[PlainTensorMeta | SubclassCreationMeta]
-    # TODO: we should kill this
-    # (need to default it to not break internal)
-    is_train: bool = False
 
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
@@ -497,6 +503,11 @@ class ViewAndMutationMeta:
     # Keeps track of which input indices store parameters (which we will treat as static)
     static_input_indices: list[int] = field(default_factory=list)
 
+    # Input indices that held AsyncCollectiveTensors at compile time.
+    # Used to emit direct trigger_wait() calls at runtime instead of
+    # scanning every arg on every graph invocation.
+    act_input_indices: list[int] = field(default_factory=list)
+
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
     # dictionary telling us how many tokens we will need during tracing.
@@ -526,6 +537,9 @@ class ViewAndMutationMeta:
     num_graphsafe_rng_states: int = 0
 
     graphsafe_rng_state_index: int | None = None
+
+    # Device for graphsafe RNG states (supports CUDA, TPU, etc.)
+    graphsafe_rng_device: torch.device | None = None
 
     # Stream indices for mutated inputs in the epilogue
     # Maps from index in mutated_inp_runtime_indices to the stream index that last touched
@@ -1090,6 +1104,30 @@ class AOTAutogradCacheInfo:
 
 
 @dataclass
+class CacheableAOTConfig:
+    """
+    Serializable subset of AOTConfig used by cache keys and cached entries.
+    """
+
+    num_params_buffers: int
+    aot_id: int
+    keep_inference_input_mutations: bool
+    is_export: bool = False
+    no_tangents: bool = False
+    dynamic_shapes: bool = False
+    aot_autograd_arg_pos_to_source: list[Source] | None = None
+    static_input_indices: list[int] | None = None
+    enable_log: bool = True
+    # this is always false outside of export.
+    pre_dispatch: bool = False
+    precompile_backend_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.pre_dispatch and not self.is_export:
+            raise AssertionError("Can only have pre_dispatch IR for export.")
+
+
+@dataclass(frozen=True)
 class AOTConfig:
     """
     Configuration for AOTDispatcher
@@ -1128,6 +1166,21 @@ class AOTConfig:
     # This mode is used to track torch_fn metadata but can interfere with
     # certain tracing scenarios.
     _disable_torch_fn_metadata_mode: bool = False
+
+    def to_cacheable(self) -> CacheableAOTConfig:
+        return CacheableAOTConfig(
+            num_params_buffers=self.num_params_buffers,
+            aot_id=self.aot_id,
+            keep_inference_input_mutations=self.keep_inference_input_mutations,
+            is_export=self.is_export,
+            no_tangents=self.no_tangents,
+            dynamic_shapes=self.dynamic_shapes,
+            aot_autograd_arg_pos_to_source=self.aot_autograd_arg_pos_to_source,
+            static_input_indices=self.static_input_indices,
+            enable_log=self.enable_log,
+            pre_dispatch=self.pre_dispatch,
+            precompile_backend_id=self.precompile_backend_id,
+        )
 
     def __post_init__(self) -> None:
         if self.pre_dispatch:
@@ -1187,8 +1240,8 @@ class AOTState:
     # detected by doing an initial trace when we created this state.
     fw_metadata: ViewAndMutationMeta
 
-    # Top-level configuration
-    # This is morally immutable but sometimes we are naughty and mutate it.
+    # Top-level configuration. Stage-local compiler choices are threaded
+    # explicitly rather than mutating this object in place.
     aot_config: AOTConfig
 
     # When performing AOTAutograd traces and other passes, we typically
@@ -1221,7 +1274,7 @@ class CompilerWrapper:
     us factor these into compositional stages so we can handle each transformation incrementally
     instead of having to do it all at once.
 
-    Since there is a calling convention change, there are two parts to the wrpaper:
+    Since there is a calling convention change, there are two parts to the wrapper:
 
     1. The prologue, which is about compile-time behavior: given this original function, what
        is the new function with modified calling convention that we should trace with AOTAutograd

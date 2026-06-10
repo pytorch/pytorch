@@ -92,10 +92,15 @@ if TYPE_CHECKING:
 _SKIP_PYTHON_BINDINGS = [
     "alias",
     "contiguous",
+    "dim",
+    "get_device",
+    "is_contiguous",
     "is_cuda",
     "is_sparse",
     "is_sparse_csr",
+    "numel",
     "size",
+    "storage_offset",
     "stride",
     "sym_is_contiguous",
     "sym_size",
@@ -972,7 +977,7 @@ def gen_has_torch_function_check(
     if noarg:
         if method:
             return f"""\
-if(check_has_torch_function(self_)) {{
+if (has_torch_function(self_)) {{
   return handle_torch_function(self_, "{name}");
 }}
 """
@@ -1232,8 +1237,6 @@ def sort_overloads(
             and str(t2) == "Tensor"
             or str(t1) == "Scalar?"
             and str(t2) == "Tensor?"
-            or "Dimname" in str(t1)
-            and "Dimname" not in str(t2)
             or
             # In the discussion https://github.com/pytorch/pytorch/issues/54555 it has been
             # discussed why it is important to prioritize int/int? over int[]

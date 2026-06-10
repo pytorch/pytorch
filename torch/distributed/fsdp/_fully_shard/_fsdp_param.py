@@ -2,9 +2,13 @@
 import inspect
 import itertools
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import auto, Enum
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from ._fsdp_api import DataParallelMeshDims
 
 import torch
 import torch.nn as nn
@@ -78,7 +82,7 @@ case, the all-gather output and unsharded parameter share the same
 data, so we use storage resizing on the all-gather output.
 """
 
-lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
+lib = torch.library.Library("fsdp", "FRAGMENT")
 
 lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 
@@ -238,6 +242,7 @@ class FSDPParam:
         else:
             self.mesh_info = mesh_info  # pyrefly: ignore[bad-assignment]
             fsdp_placement = None
+        self._shard_mesh = self._init_shard_mesh()
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
@@ -317,8 +322,10 @@ class FSDPParam:
             raise AssertionError(
                 f"Expected contiguous tensor with {self.fsdp_placement=}"
             )
-        self.sharded_param = nn.Parameter(self.to_sharded_dtensor(sharded_param))
-        self.sharded_param.requires_grad_(param.requires_grad)
+        self.sharded_param = nn.Parameter(
+            self.to_sharded_dtensor(sharded_param),
+            requires_grad=param.requires_grad,
+        )
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
@@ -415,12 +422,67 @@ class FSDPParam:
 
         self._spmd_mesh = spmd_mesh
         self._spmd_placements: tuple[Placement, ...] = tuple(new_placements)
-        self._sharding_spec = DTensorSpec(
-            self._spmd_mesh,
-            self._spmd_placements,
-            tensor_meta=self._unsharded_dtensor_spec.tensor_meta,
+        self._sharding_spec = self._build_spmd_sharding_spec(
+            dp_dim_names,
+            dp_shard_indices,
+            fsdp_placement,
         )
         return cast(DTensor, param)._local_tensor
+
+    def _build_spmd_sharding_spec(
+        self,
+        dp_dim_names: "DataParallelMeshDims",
+        dp_shard_indices: list[int],
+        fsdp_placement: Shard,
+    ) -> DTensorSpec:
+        """Build the DTensorSpec for the sharded parameter/gradient.
+
+        When multiple DP shard dims exist (e.g. dp_shard + cp), flatten
+        them into one axis so the parameter and gradient DTensor have one
+        Shard axis for DP.
+        """
+        spmd_mesh = self._spmd_mesh
+        spmd_placements = self._spmd_placements
+        if self._unsharded_dtensor_spec is None:
+            raise AssertionError("_unsharded_dtensor_spec cannot be None")
+        tensor_meta = self._unsharded_dtensor_spec.tensor_meta
+
+        if len(dp_shard_indices) <= 1:
+            return DTensorSpec(spmd_mesh, spmd_placements, tensor_meta=tensor_meta)
+
+        shard_names_set = set(dp_dim_names.shard_names)
+        replicate_names_set = set(dp_dim_names.replicate_names)
+
+        # Walk spmd_mesh.mesh_dim_names in order. Replace consecutive DP
+        # shard dims with the flattened DP mesh; keep non-DP dims as-is.
+        if spmd_mesh.mesh_dim_names is None:
+            raise AssertionError("mesh_dim_names cannot be None")
+        submeshes: list[DeviceMesh] = []
+        spec_placements: list[Placement] = []
+        skip = 0
+        for i, name in enumerate(spmd_mesh.mesh_dim_names):
+            if skip > 0:
+                skip -= 1
+                continue
+            if name in shard_names_set:
+                submeshes.append(self.mesh_info.mesh)
+                if isinstance(self.mesh_info, HSDPMeshInfo):
+                    spec_placements.append(Replicate())
+                # Reuse the placement already computed for this DP shard dim
+                # so that we don't loss _StridedShard.
+                spec_placements.append(spmd_placements[i])
+                skip = len(dp_dim_names.shard_names) - 1
+            elif name in replicate_names_set and isinstance(
+                self.mesh_info, HSDPMeshInfo
+            ):
+                # HSDP replicate is inserted by the shard branch above.
+                continue
+            else:
+                submeshes.append(spmd_mesh[name])
+                spec_placements.append(spmd_placements[i])
+
+        spec_mesh = DeviceMesh._concatenate(submeshes)
+        return DTensorSpec(spec_mesh, tuple(spec_placements), tensor_meta=tensor_meta)
 
     def _init_sharding_spec_tp(
         self,
@@ -529,8 +591,10 @@ class FSDPParam:
         # then we do not need extra casting
         if reduce_dtype == param_dtype:
             reduce_dtype = None
-        # Clamp `param_dtype` to `None` if no casting is required
-        if param_dtype == self.orig_dtype:
+        # Clamp `param_dtype` to `None` if no casting is required or if the
+        # parameter is non-floating-point (mixed precision is only meaningful
+        # for floating-point parameters)
+        if param_dtype == self.orig_dtype or not self.orig_dtype.is_floating_point:
             param_dtype = None
         self.param_dtype = param_dtype
         self.reduce_dtype = reduce_dtype
@@ -555,9 +619,8 @@ class FSDPParam:
         all_gather_input_dtypes: list[torch.dtype],
         world_size: int,
         device: torch.device,
-        force_recreate: bool = False,
     ):
-        if not force_recreate and len(self.all_gather_outputs) > 0:
+        if len(self.all_gather_outputs) > 0:
             return  # already initialized
         self.all_gather_outputs = [
             torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)
@@ -607,11 +670,27 @@ class FSDPParam:
             storage_offset=0,
         )
         if self._unsharded_dtensor_spec is not None:
+            unsharded_dtensor_spec = self._get_unsharded_dtensor_spec(unsharded_param)
             unsharded_param = _from_local_no_grad(
-                unsharded_param, self._unsharded_dtensor_spec
+                unsharded_param, unsharded_dtensor_spec
             )
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
+        )
+
+    def _get_unsharded_dtensor_spec(self, unsharded_param: torch.Tensor) -> DTensorSpec:
+        if self._unsharded_dtensor_spec is None:
+            raise AssertionError("Expected _unsharded_dtensor_spec for DTensor param")
+        tensor_meta = self._unsharded_dtensor_spec.tensor_meta
+        if tensor_meta is None or tensor_meta.dtype == unsharded_param.dtype:
+            return self._unsharded_dtensor_spec
+        return replace(
+            self._unsharded_dtensor_spec,
+            tensor_meta=TensorMeta(
+                tensor_meta.shape,
+                tensor_meta.stride,
+                unsharded_param.dtype,
+            ),
         )
 
     def _unflatten_all_gather_outputs(self) -> tuple[torch.Tensor, ...]:
@@ -659,7 +738,8 @@ class FSDPParam:
             storage_offset=0,
         )
         self._sharded_post_forward_param = nn.Parameter(
-            self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor)
+            self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor),
+            requires_grad=self.sharded_param.requires_grad,
         )
         self._setattr_on_modules(self._sharded_post_forward_param)
         self.free_unsharded_param()
@@ -847,6 +927,10 @@ class FSDPParam:
             raise AssertionError("Expects unsharded_accumulated_grad to not be None")
         return self._get_grad_inner_tensor(grad)
 
+    @property
+    def unsharded_zero_grad_data(self) -> torch.Tensor:
+        return self._get_grad_inner_tensor(torch.zeros_like(self.unsharded_param))
+
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
         if self.is_dtensor:
             if isinstance(grad, AsyncCollectiveTensor):
@@ -886,14 +970,17 @@ class FSDPParam:
     def _sharded_local_tensor(self) -> torch.Tensor:
         return cast(DTensor, self.sharded_param)._local_tensor
 
-    @property
-    def shard_mesh(self):
+    def _init_shard_mesh(self) -> DeviceMesh:
         mesh = self.mesh_info.mesh
         if mesh.ndim == 1:
             return mesh
         if mesh.mesh_dim_names is None:
             raise AssertionError("Expected mesh_dim_names to not be None")
         return mesh[mesh.mesh_dim_names[-1]]
+
+    @property
+    def shard_mesh(self):
+        return self._shard_mesh
 
     @property
     def shard_mesh_from_root(self):

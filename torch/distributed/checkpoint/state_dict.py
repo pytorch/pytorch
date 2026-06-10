@@ -37,6 +37,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state_if_fully_sharded_module,
     FSDP_WRAPPED_MODULE,
 )
+from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
 from torch.distributed.tensor import DTensor
 from torch.nn.modules.module import _IncompatibleKeys
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -452,6 +453,25 @@ def _state_dict_fn(obj: nn.Module | torch.optim.Optimizer, api: str) -> Callable
     return call
 
 
+def _get_fsdp_process_group(
+    model: nn.Module, info: _StateDictInfo
+) -> dist.ProcessGroup | None:
+    if isinstance(model, FSDP):
+        fsdp_module = model
+    elif info.fsdp_modules:
+        fsdp_module = cast(FSDP, info.fsdp_modules[0])
+    else:
+        return None
+
+    if fsdp_module.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+        return None
+
+    process_group = fsdp_module.process_group
+    if isinstance(process_group, tuple):
+        return None
+    return process_group
+
+
 def _maybe_full_or_cpu_state_dict(
     state_dict: dict[str, Any], info: _StateDictInfo
 ) -> dict[str, Any]:
@@ -844,6 +864,7 @@ def _unflatten_optim_state_dict(
                     continue
 
                 # Reconstruct state for this parameter
+                # pyrefly: ignore [unsupported-operation]
                 state[fqn] = {}
                 for state_name in optim.state[param]:
                     flattened_state_key = f"{_STATE}.{fqn}.{state_name}"
@@ -853,11 +874,13 @@ def _unflatten_optim_state_dict(
                         reconstructed_value = _reconstruct_nested_dict(
                             flattened_state_key, state_dict
                         )
+                        # pyrefly: ignore [bad-index]
                         cast(DictValueType, state[fqn])[state_name] = (
                             reconstructed_value
                         )
                     else:
                         # Existing keys mean no nesting, directly use the value.
+                        # pyrefly: ignore [bad-index]
                         cast(DictValueType, state[fqn])[state_name] = state_dict[
                             flattened_state_key
                         ]
@@ -894,7 +917,12 @@ def _get_optim_state_dict(
         osd = _state_dict_fn(optim, "state_dict")()
         if info.fsdp_modules:
             with info.fsdp_context():
-                osd = FSDP.optim_state_dict(model, optim, osd)
+                osd = FSDP.optim_state_dict(
+                    model,
+                    optim,
+                    osd,
+                    group=_get_fsdp_process_group(model, info),
+                )
 
             # We need to specially handle FlatParameter FSDP as
             # FlatParameter FSDP converts the FQNs.
@@ -1104,7 +1132,10 @@ def _load_optim_state_dict(
 
             with info.fsdp_context():
                 optim_state_dict = FSDP.optim_state_dict_to_load(
-                    model, optim, optim_state_dict
+                    model,
+                    optim,
+                    optim_state_dict,
+                    group=_get_fsdp_process_group(model, info),
                 )
         elif info.full_state_dict:
             info.full_state_dict = False
@@ -1339,7 +1370,7 @@ def _unflatten_model_state_dict(
         warnings.warn(
             "Passing model_state_dict as a ``Dict[nn.Module, Dict[str, Any]]``"
             "is deprecated and will be removed in 2.5. If you need this "
-            "feature, please preprocessing the model_state_dict to achieve the "
+            "feature, please preprocess the model_state_dict to achieve the "
             "same functionality.",
             FutureWarning,
             stacklevel=2,

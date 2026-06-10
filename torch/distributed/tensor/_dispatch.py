@@ -60,6 +60,23 @@ def _setLevel_and_reinit(level: int) -> None:
 logger.setLevel = _setLevel_and_reinit  # type: ignore[method-assign]
 
 
+def _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+    output_spec: object,
+) -> contextlib.AbstractContextManager[None]:
+    if not _are_we_tracing() or output_spec is None:
+        return contextlib.nullcontext()
+
+    from torch.fx.experimental.symbolic_shapes import (
+        _ignore_fresh_unbacked_symbols_tls_context,
+    )
+
+    # DTensor exposes the global output contract through output_spec. Fresh
+    # local fake symbols created only while redistributing or computing the
+    # per-rank tensor are implementation details and may not appear in the
+    # returned DTensor object.
+    return _ignore_fresh_unbacked_symbols_tls_context()
+
+
 def as_strided_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
@@ -300,11 +317,14 @@ class OpDispatcher:
                 # on args first, which could potentially modify args (i.e. allgather certain arg)
                 if output_sharding.redistribute_schema is None:
                     raise AssertionError
-                self.redistribute_local_args(
-                    op_info,
-                    output_sharding.redistribute_schema,
-                    output_sharding.use_val_from_redistribute_schema,
-                )
+                with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                    output_sharding.output_spec
+                ):
+                    self.redistribute_local_args(
+                        op_info,
+                        output_sharding.redistribute_schema,
+                        output_sharding.use_val_from_redistribute_schema,
+                    )
 
             local_tensor_args = (
                 pytree.tree_unflatten(
@@ -366,9 +386,12 @@ class OpDispatcher:
                         with random._rng_tracker._distribute_region(
                             first_arg._spec, generator=maybe_user_generator
                         ):
-                            local_results = op_call(
-                                *local_tensor_args, **op_info.local_kwargs
-                            )
+                            with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                                output_sharding.output_spec
+                            ):
+                                local_results = op_call(
+                                    *local_tensor_args, **op_info.local_kwargs
+                                )
                     else:
                         # CUDA device without user generator, use HOP for traceability
                         if not isinstance(
@@ -378,19 +401,45 @@ class OpDispatcher:
                         start_offset_incr, end_offset_incr = (
                             random._rng_tracker._compute_rng_offsets(first_arg._spec)
                         )
-                        local_results = run_dtensor_rng_op(
-                            start_offset_incr,
-                            end_offset_incr,
-                            op_call,
-                            *local_tensor_args,
-                            **op_info.local_kwargs,
-                        )
+                        with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                            output_sharding.output_spec
+                        ):
+                            local_results = run_dtensor_rng_op(
+                                start_offset_incr,
+                                end_offset_incr,
+                                op_call,
+                                *local_tensor_args,
+                                **op_info.local_kwargs,
+                            )
                 else:
                     # No rng_tracker, meta tensor, or distribute_region disabled
-                    local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                    with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                        output_sharding.output_spec
+                    ):
+                        local_results = op_call(
+                            *local_tensor_args, **op_info.local_kwargs
+                        )
             else:
                 # normal case, run local sharded op computation
-                local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                if (
+                    output_sharding.needs_redistribute
+                    and output_sharding.redistribute_schema is not None
+                    and output_sharding.redistribute_schema.op != op_call
+                ):
+                    # Op was rewritten (e.g., squeeze.default → squeeze.dims)
+                    with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                        output_sharding.output_spec
+                    ):
+                        local_results = output_sharding.redistribute_schema.op(
+                            *local_tensor_args, **op_info.local_kwargs
+                        )
+                else:
+                    with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                        output_sharding.output_spec
+                    ):
+                        local_results = op_call(
+                            *local_tensor_args, **op_info.local_kwargs
+                        )
 
         else:
             # For a non-participating device (happens on rank that does not belong to
@@ -481,31 +530,17 @@ class OpDispatcher:
                 if not isinstance(args[0], dtensor.DTensor):
                     raise AssertionError
 
-                # NOTE: aten.squeeze_.dim is an inplace op but it also may change
-                # the inplace argument's tensor meta. Here we choose to special case
-                # this op because as far as I know this is the only inplace op that
-                # has such as behavior. We can extend this special case if necessary.
-                if op_call == aten.squeeze_.dim:
-                    # update the spec to handle tensor meta changes
-                    args[0]._spec = output_spec
-                    # use return_and_correct_aliasing to match the outer and the inner
-                    # aliasing. See https://github.com/pytorch/pytorch/pull/158954
-                    return return_and_correct_aliasing(op_call, args, kwargs, args[0])
-                else:
-                    # For all other inplace ops, check if placement changes are required
-                    # Inplace operations that change placement are not supported because
-                    # they would require redistribution, which breaks aliasing semantics.
-                    # If there are views into the tensor, the views would not be updated.
-                    if args[0]._spec.placements != output_spec.placements:
-                        raise RuntimeError(
-                            f"{op_call}: in-place operations that require placement changes "
-                            f"are not supported. The operation would change placement from "
-                            f"{args[0]._spec.placements} to {output_spec.placements}, "
-                            f"which requires redistribution and breaks aliasing semantics. "
-                            f"Please use the out-of-place version of this operation instead."
-                        )
-                    # Most inplace ops don't change tensor meta, so no spec update needed
+                # Fast path: placements unchanged (common case: add_, mul_, etc.)
+                if args[0]._spec.placements == output_spec.placements:
                     return args[0]
+
+                # Placement reindexed (e.g. squeeze_ removing a non-sharded
+                # dim: Shard(1) → Shard(0)). No redistribution — the local
+                # tensor data is unchanged, only dim indices shift.
+                # strict_view=True in sharding prop prevents the illegal
+                # case (squeezing a sharded dim) from reaching here.
+                args[0]._spec = output_spec
+                return return_and_correct_aliasing(op_call, args, kwargs, args[0])
             else:
                 return None
         elif is_out_variant_op:
@@ -592,6 +627,13 @@ class OpDispatcher:
                     new_local_args.append(reshard_arg_spec)
                 else:
                     new_local_args.append(arg_spec)
+
+        # Append extra non-tensor args from rewritten schema (e.g., dims tuple).
+        if use_val_from_redistribute_schema:
+            for i in range(
+                len(op_info.flat_args_schema), len(flatten_args_schema_to_reshard)
+            ):
+                new_local_args.append(flatten_args_schema_to_reshard[i])
 
         op_info.local_args = tuple(new_local_args)
 

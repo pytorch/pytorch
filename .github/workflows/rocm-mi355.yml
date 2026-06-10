@@ -1,27 +1,30 @@
+# Unneeded for CI: trunk.yml covers the same ROCm testing.
+# Kept in-repo for metrics; auto-triggers below are commented out.
+# workflow_dispatch remains for manual runs.
 name: rocm-mi355
 
 on:
-  push:
-    tags:
-      - ciflow/rocm-mi355/*
+  #push:
+  #  tags:
+  #    - ciflow/rocm-mi355/*
   workflow_dispatch:
-  schedule:
-    - cron: 29 8 * * *  # about 1:29am PDT
+  #schedule:
+  #  - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
+  actions: read
 
 jobs:
   target-determination:
     if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/target_determination.yml
-    permissions:
-      id-token: write
-      contents: read
 
   get-label-type:
     name: get-label-type
@@ -54,9 +57,6 @@ jobs:
     secrets: inherit
 
   linux-noble-rocm-py3_12-test:
-    permissions:
-      id-token: write
-      contents: read
     name: linux-noble-rocm-py3.12-mi355
     uses: ./.github/workflows/_rocm-test.yml
     needs:

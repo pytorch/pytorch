@@ -180,7 +180,7 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_batch_rule(
       "vmap: Attempted to vmap over `mask` in torch.masked_select(self, mask) ",
       "We cannot support this because for each batch this would return a ",
       "differently shaped Tensor. "
-      "Please voice your support in https://github.com/pytorch/functorch/issues/256");
+      "Please file an issue at https://github.com/pytorch/pytorch/issues if you need this feature.");
   auto self_ = moveBatchDimToFront(self, self_bdim);
   const auto batch_size = self_.size(0);
   const auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -188,8 +188,8 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_batch_rule(
   self_ = maybePadToLogicalRank(self_, 0, max_logical_rank);
 
   // masked_select returns a 1D tensor, so we have to reshape it into 2D
-  const auto result = at::masked_select(self_, mask).view({ batch_size, -1 });
-  return std::make_tuple(result, 0);
+  auto result = at::masked_select(self_, mask).view({ batch_size, -1 });
+  return std::make_tuple(std::move(result), 0);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_rule(
@@ -200,7 +200,7 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_r
       "vmap: Attempted to vmap over `mask` in torch.masked_select_backward(grad, self, mask) ",
       "We cannot support this because for each batch this would return a ",
       "differently shaped Tensor. "
-      "Please voice your support in https://github.com/pytorch/functorch/issues/256");
+      "Please file an issue at https://github.com/pytorch/pytorch/issues if you need this feature.");
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto grad_ = moveBatchDimToFront(grad, grad_bdim);
 
@@ -213,8 +213,8 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_r
   self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
   grad_ = ensure_has_bdim(grad_, grad_bdim.has_value(), batch_size);
 
-  const auto result = at::masked_select_backward(grad_, self_.contiguous(), mask);
-  return std::make_tuple(result, 0);
+  auto result = at::masked_select_backward(grad_, self_.contiguous(), mask);
+  return std::make_tuple(std::move(result), 0);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> cdist_backward_batch_rule(
@@ -294,7 +294,7 @@ rrelu_with_noise_batch_rule(
 
   auto ret = at::rrelu_with_noise(self_, noise_, lower, upper, training, std::move(generator));
 
-  return std::make_tuple(ret, 0, noise_, 0);
+  return std::make_tuple(std::move(ret), 0, std::move(noise_), 0);
 }
 
 static Tensor rrelu_with_noise_batch(

@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 
 #include <limits>
+#include <optional>
 #include <stack>
 
 #if defined(USE_ROCM) || !(defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
@@ -64,7 +65,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(CUDAGraph&& other) = delete;
   CUDAGraph& operator=(CUDAGraph&& other) = delete;
 
-  // See Note [Explicit Registration of Generators to the CUDA Graph]
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
   void register_generator_state(const at::Generator& generator);
   void capture_begin(
@@ -88,7 +88,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       const Tensor& scalar_cuda_pred_tensor);
 
  private:
-  std::function<bool(cudaStream_t)> create_allocate_filter();
+  template <typename StreamType>
+  std::function<bool(StreamType)> create_allocate_filter() const;
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
 
  protected:
@@ -144,13 +145,36 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaStreamCaptureMode capture_mode_{};
 
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  struct OwnedCUDAStream {
+    cudaStream_t stream = nullptr;
+    OwnedCUDAStream() = default;
+    explicit OwnedCUDAStream(cudaStream_t s) : stream(s) {}
+    ~OwnedCUDAStream() {
+      if (stream)
+        C10_CUDA_CHECK_WARN(cudaStreamDestroy(stream));
+    }
+    OwnedCUDAStream(const OwnedCUDAStream&) = delete;
+    OwnedCUDAStream& operator=(const OwnedCUDAStream&) = delete;
+    OwnedCUDAStream(OwnedCUDAStream&& o) noexcept
+        : stream(std::exchange(o.stream, nullptr)) {}
+    OwnedCUDAStream& operator=(OwnedCUDAStream&& o) noexcept {
+      if (stream)
+        C10_CUDA_CHECK_WARN(cudaStreamDestroy(stream));
+      stream = std::exchange(o.stream, nullptr);
+      return *this;
+    }
+  };
+
   std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_;
   std::stack<CaptureId_t> conditional_graph_capture_ids_;
-  std::stack<
-      ska::flat_hash_map<c10::intrusive_ptr<at::CUDAGeneratorState>, uint64_t>>
-      conditional_rng_snapshots_;
+  std::stack<OwnedCUDAStream> conditional_node_raw_streams_;
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };
+
+template <>
+std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter<cudaStream_t>() const;
+template <>
+std::function<bool(c10::Stream)> CUDAGraph::create_allocate_filter<c10::Stream>() const;
 
 } // namespace cuda
 } // namespace at

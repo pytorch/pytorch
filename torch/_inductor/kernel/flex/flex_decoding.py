@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> bool:
     """Decide which kernel to use, return true if use flex decoding kernel.
     Note:
-       Since the number of splits is calculated based of the number of batch and head dims
+       Since the number of splits is calculated based on the number of batch and head dims
        we need to ensure that the batch and head dims are statically known. Otherwise we just
        use the main flex_attention kernel.
     """
@@ -87,7 +87,7 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
         and pw_of_two
     )
     log.debug(
-        "Use flex decoding %s, force_flex_attention=%s, short_query_length=%s, static_batch=%s, static_num_heads=%s",  # noqa: B950
+        "Use flex decoding %s, force_flex_attention=%s, short_query_length=%s, static_batch=%s, static_num_heads=%s",
         out,
         force_flex,
         short_query_length,
@@ -161,6 +161,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,  # q_indices
         _,  # full_q_num_blocks,
         _,  # full_q_indices,
+        _,  # dq_write_order
+        _,  # dq_write_order_full
+        _,  # dq_kv_order
+        _,  # dq_kv_order_spt
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         _,
@@ -204,7 +208,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     has_full_blocks = full_kv_num_blocks is not None
     kernel_options.setdefault("HAS_FULL_BLOCKS", has_full_blocks)
     if not has_full_blocks:
-        # Create a plackeholder full block list in case it is empty
+        # Create a placeholder full block list in case it is empty
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
@@ -385,10 +389,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         )
 
     filtered_score_mod_buffers = [
-        buf for buf in score_mod_other_buffers if not isinstance(buf, sympy.Symbol)
+        buf for buf in score_mod_other_buffers if not isinstance(buf, sympy.Expr)
     ]
     filtered_mask_mod_buffers = [
-        buf for buf in mask_mod_other_buffers if not isinstance(buf, sympy.Symbol)
+        buf for buf in mask_mod_other_buffers if not isinstance(buf, sympy.Expr)
     ]
 
     inputs_for_flex_decoding = (

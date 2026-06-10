@@ -17,11 +17,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    skipIfXpu,
-    TEST_WITH_SLOW_GRADCHECK,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_SLOW_GRADCHECK
 
 
 # Make the helper files in test/ importable
@@ -39,6 +35,7 @@ from torch.testing._internal.common_utils import TEST_WITH_ROCM
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
+from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -266,7 +263,9 @@ class OptimizeForInferenceTemplate(TestCase):
                 FileCheck().check_not("@triton.jit").run(code[0])
                 self.assertEqual(out_eager, out_compiled)
 
-    @torch._inductor.config.patch("cpp.enable_concat_linear", True)
+    @torch._inductor.config.patch(
+        {"cpp.enable_concat_linear": True, "shape_padding": False}
+    )
     def test_mm_concat(self):
         class MM(torch.nn.Module):
             def __init__(self) -> None:
@@ -349,14 +348,12 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod2.b1 = torch.nn.Parameter(torch.rand([15], device=self.device))
                 mod2.b2 = torch.nn.Parameter(torch.rand([20], device=self.device))
 
-            # not fused
-            count = 3 if hasattr(mod2, "t3") else 2
-
+            # fused: weights share same dim 0 (in_features), different dim 1 is OK
             with torch.no_grad():
                 out_eager = mod2(inp)
                 out, code = run_and_get_code(foo, mod2, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
-                    mm_invoke, count=count, exactly=True
+                    mm_invoke, count=1, exactly=True
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 
@@ -768,7 +765,8 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
-    @skipIfXpu
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180128")
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/106557")
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
         TEST_WITH_SLOW_GRADCHECK,
@@ -905,6 +903,51 @@ class OptimizeForInferenceTemplate(TestCase):
             func1 = torch.compile(func)
             out_compiled = func1(x.clone())
             self.assertEqual(out_eager, out_compiled)
+
+    @torch._inductor.config.patch(
+        layout_optimization=True, force_layout_optimization=True
+    )
+    def test_as_strided_input_layout_with_symbolic_strides(self):
+        from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                y = x.transpose(1, 2)
+                return torch.as_strided(y, y.size(), y.stride())
+
+        graph_modules = []
+
+        def my_inner_compile(gm, example_inputs, *args, **kwargs):
+            graph_modules.append(gm)
+            return compile_fx_inner(gm, example_inputs, *args, **kwargs)
+
+        mod = Model().eval().to(self.device)
+        inp = torch.randn(2, 3, 4, device=self.device)
+        torch._dynamo.mark_dynamic(inp, 1)
+        torch._dynamo.mark_dynamic(inp, 2)
+
+        with torch.no_grad():
+            expected = mod(inp)
+            opt_mod = torch.compile(
+                mod,
+                backend=functools.partial(compile_fx, inner_compile=my_inner_compile),
+                dynamic=True,
+            )
+            actual = opt_mod(inp)
+            self.assertEqual(expected, actual)
+
+        self.assertTrue(graph_modules)
+        gm = graph_modules[0]
+        nodes = list(gm.graph.nodes)
+        force_stride_node = next(
+            n for n in nodes if n.target == prims.inductor_force_stride_order.default
+        )
+        as_strided_node = next(n for n in nodes if n.target == aten.as_strided.default)
+
+        self.assertLess(nodes.index(force_stride_node), nodes.index(as_strided_node))
+        for stride_arg in force_stride_node.args[1]:
+            if isinstance(stride_arg, torch.fx.Node):
+                self.assertLess(nodes.index(stride_arg), nodes.index(force_stride_node))
 
     @tf32_on_and_off(0.001)
     @torch._inductor.config.patch(layout_optimization=True)

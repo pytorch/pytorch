@@ -297,8 +297,8 @@ void _sparse_binary_op_intersection_kernel_impl(
   std::tie(sorted_hash, argsort_hash) = [&]() -> std::tuple<Tensor, Tensor> {
     if (probably_coalesced.is_coalesced()) {
       // NOTE: argsort.dtype == nnz_arange.dtype
-      const auto argsort = nnz_arange.narrow(-1, 0, probably_coalesced._nnz());
-      return std::make_tuple(probably_coalesced_indices_hash, argsort);
+      auto argsort = nnz_arange.narrow(-1, 0, probably_coalesced._nnz());
+      return std::make_tuple(probably_coalesced_indices_hash, std::move(argsort));
     } else {
       // NOTE: we want argsort.dtype == nnz_arange.dtype,
       // but sort() produces indices of type int64_t,
@@ -306,7 +306,8 @@ void _sparse_binary_op_intersection_kernel_impl(
       // with pointer types in the kernels below.
       Tensor sorted, argsort;
       std::tie(sorted, argsort) = probably_coalesced_indices_hash.sort();
-      return std::make_tuple(sorted, argsort.to(nnz_arange.scalar_type()));
+      return std::make_tuple(
+          std::move(sorted), argsort.to(nnz_arange.scalar_type()));
     }
   }();
 

@@ -336,7 +336,7 @@ inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1
 
   auto arg1_broadcasted  = arg1_expand_size == arg1.sizes() ? arg1 : arg1.expand(arg1_expand_size);
   auto arg2_broadcasted  = arg2_expand_size == arg2.sizes() ? arg2 : arg2.expand(arg2_expand_size);
-  return std::make_tuple(arg1_broadcasted, arg2_broadcasted);
+  return std::make_tuple(std::move(arg1_broadcasted), std::move(arg2_broadcasted));
 }
 
 inline std::vector<int64_t> broadcast_batch_size(const Tensor& t1, const Tensor& t2, int64_t n_batch_dims) {
@@ -406,7 +406,7 @@ inline std::tuple<DimVector, DimVector, int64_t> _compute_geometry_for_Q(
     n_columns_q = std::min(m, n);
   }
   auto q_strides = batched_matrix_contiguous_strides(q_sizes, /*f-contig*/true);
-  return std::make_tuple(q_sizes, q_strides, n_columns_q);
+  return std::make_tuple(std::move(q_sizes), std::move(q_strides), n_columns_q);
 }
 
 inline bool svd_uses_cusolver(const Tensor& A) {

@@ -62,3 +62,44 @@ def _runtime_compute_coordinate_on_dim_impl(full_mesh: torch.Tensor, index: int)
     if mesh_coords is None:
         raise AssertionError
     return mesh_coords[index]
+
+
+def _get_flattened_submesh_impl(mesh: DeviceMesh, mesh_dims: list[int]) -> DeviceMesh:
+    from torch.distributed.tensor._redistribute import (
+        _get_flattened_mesh_by_layout_impl,
+    )
+
+    result = _get_flattened_mesh_by_layout_impl(mesh, tuple(mesh_dims))
+    if result is None:
+        raise ValueError(f"No flattened mesh found for mesh_dims={mesh_dims} on {mesh}")
+    return result
+
+
+@torch.library.custom_op("device_mesh::_get_flattened_submesh", mutates_args=())
+def _get_flattened_submesh(mesh: DeviceMesh, mesh_dims: list[int]) -> DeviceMesh:
+    return _get_flattened_submesh_impl(mesh, mesh_dims)
+
+
+@_get_flattened_submesh.register_fake
+def _get_flattened_submesh_fake(mesh: DeviceMesh, mesh_dims: list[int]) -> DeviceMesh:
+    return _get_flattened_submesh_impl(mesh, mesh_dims)
+
+
+def _get_submesh_impl(mesh: DeviceMesh, mesh_dims: list[int]) -> DeviceMesh:
+    all_dim_names = mesh._mesh_dim_names
+    if all_dim_names is None:
+        raise ValueError(f"Cannot slice mesh without dim names: {mesh}")
+    dim_names = tuple(all_dim_names[i] for i in mesh_dims)
+    if len(dim_names) == 1:
+        return mesh[dim_names[0]]
+    return mesh[dim_names]
+
+
+@torch.library.custom_op("device_mesh::_get_submesh", mutates_args=())
+def _get_submesh(mesh: DeviceMesh, mesh_dims: list[int]) -> DeviceMesh:
+    return _get_submesh_impl(mesh, mesh_dims)
+
+
+@_get_submesh.register_fake
+def _get_submesh_fake(mesh: DeviceMesh, mesh_dims: list[int]) -> DeviceMesh:
+    return _get_submesh_impl(mesh, mesh_dims)

@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import instantiate_parametrized_tests
 
 if dist.is_available():
     from torch.distributed._functional_collectives import (
+        all_gather_single,
         all_to_all_single_autograd,
         wait_tensor,
     )
@@ -27,12 +28,14 @@ def normalize_graph(gm):
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributed(DynamoTestCase):
     def setUp(self):
+        super().setUp()
         # Use FakeProcessGroup to run tests on a single process
         dist.init_process_group(backend="fake", rank=0, world_size=2)
         self.local_rank = 0
         self.world_size = 2
 
     def tearDown(self):
+        super().tearDown()
         dist.destroy_process_group()
 
     def test_all_to_all_single_autograd(self):
@@ -65,7 +68,7 @@ class GraphModule(torch.nn.Module):
 
         wait_tensor: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
         return (wait_tensor, primals_1, primals_2, floordiv)
-""",  # noqa: B950
+""",
         )
         self.assertExpectedInline(
             normalize_graph(backend.bw_graphs[0]),
@@ -75,7 +78,7 @@ class GraphModule(torch.nn.Module):
         all_to_all_single_1: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(tangents_1, [floordiv, floordiv], [floordiv, floordiv], '0');  tangents_1 = floordiv = None
         wait_tensor_1: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single_1);  all_to_all_single_1 = None
         return (None, None, wait_tensor_1)
-""",  # noqa: B950
+""",
         )
 
         backend.fw_graphs.clear()
@@ -106,7 +109,7 @@ class GraphModule(torch.nn.Module):
 
         wait_tensor: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
         return (wait_tensor, primals_1, primals_2, primals_3, floordiv)
-""",  # noqa: B950
+""",
         )
         self.assertExpectedInline(
             normalize_graph(backend.bw_graphs[0]),
@@ -116,8 +119,52 @@ class GraphModule(torch.nn.Module):
         all_to_all_single_1: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(tangents_1, [floordiv, floordiv], [floordiv, floordiv], '0');  tangents_1 = floordiv = None
         wait_tensor_1: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single_1);  all_to_all_single_1 = None
         return (None, None, None, wait_tensor_1)
-""",  # noqa: B950
+""",
         )
+
+    def test_all_gather_tensor_gather_dim_0(self):
+        """all_gather_single with gather_dim=0 (no _maybe_view_chunk_cat call)."""
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            return all_gather_single(x, gather_dim=0, group=dist.group.WORLD)
+
+        x = torch.randn(4, 4)
+        result = fn(x)
+        expected = all_gather_single(x, gather_dim=0, group=dist.group.WORLD)
+        self.assertEqual(result, expected)
+
+    def test_all_gather_tensor_gather_dim_1_view_path(self):
+        """all_gather_single with gather_dim=1 triggers _maybe_view_chunk_cat view path.
+
+        Shape [2, 4] with world_size=2: dim 0 == group_size and no dims between
+        0 and gather_dim, so the view optimization applies.
+        """
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            return all_gather_single(x, gather_dim=1, group=dist.group.WORLD)
+
+        x = torch.randn(1, 4)
+        result = fn(x)
+        expected = all_gather_single(x, gather_dim=1, group=dist.group.WORLD)
+        self.assertEqual(result, expected)
+
+    def test_all_gather_tensor_gather_dim_2_chunk_cat_path(self):
+        """all_gather_single with gather_dim=2 triggers _maybe_view_chunk_cat chunk+cat path.
+
+        Shape [2, 3, 4] with world_size=2: dims between 0 and gather_dim=2
+        include dim 1 with size 3 (not 1), so the chunk+cat fallback is used.
+        """
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            return all_gather_single(x, gather_dim=2, group=dist.group.WORLD)
+
+        x = torch.randn(1, 3, 4)
+        result = fn(x)
+        expected = all_gather_single(x, gather_dim=2, group=dist.group.WORLD)
+        self.assertEqual(result, expected)
 
     def test_device_mesh_get_local_rank(self):
         device_mesh = init_device_mesh(
@@ -158,6 +205,7 @@ class GraphModule(torch.nn.Module):
         res = fn(x)
         self.assertEqual(res, (x + 1, [0]))
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_device_mesh_init_skip_after_graph_break(self):
         device_mesh = init_device_mesh(
             device_type="cpu",
@@ -186,6 +234,7 @@ instantiate_parametrized_tests(TestFakeDistributed)
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributedP2P(DynamoTestCase):
     def setUp(self):
+        super().setUp()
         dist.init_process_group(backend="fake", rank=0, world_size=2)
 
     def tearDown(self):

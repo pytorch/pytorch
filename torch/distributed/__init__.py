@@ -28,6 +28,13 @@ def is_available() -> bool:
     return hasattr(torch._C, "_c10d_init")
 
 
+def _is_spmd_types_available() -> bool:
+    """Check if the spmd_types package is installed."""
+    import importlib.util
+
+    return importlib.util.find_spec("spmd_types") is not None
+
+
 if is_available() and not torch._C._c10d_init():
     raise RuntimeError("Failed to initialize torch.distributed")
 
@@ -169,7 +176,8 @@ else:
     # stubs as necessary.
     # We cannot define stubs directly because they confuse pyre
 
-    class _ProcessGroupStub:
+    class _Stub:
         pass
 
-    sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]
+    sys.modules["torch.distributed"].GroupName = _Stub  # type: ignore[attr-defined]
+    sys.modules["torch.distributed"].ProcessGroup = _Stub  # type: ignore[attr-defined]

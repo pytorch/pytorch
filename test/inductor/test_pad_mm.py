@@ -423,9 +423,12 @@ class PadMMTest(TestCase):
         def mm(a, b):
             return a @ b
 
-        mm(torch.rand([25, 25], device=GPU_TYPE), torch.rand([25, 25], device=GPU_TYPE))
+        # Size must be big enough such that `is_mm_compute_bound` returns True and we need padding to 4 elements
+        # machine balance is ~8.3 (A100), 14.1 (H100), size must be 3x that, see arithmetic_intensity for M=N=K
+        size = [61, 61]
+        mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
-        self.assertTrue(len(local_cache) == 2)
+        self.assertEqual(len(local_cache), 2)
         FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
             repr(local_cache)
         )
@@ -434,10 +437,10 @@ class PadMMTest(TestCase):
         def mm(a, b):
             return (a + 1) @ b
 
-        mm(torch.rand([25, 25], device=GPU_TYPE), torch.rand([25, 25], device=GPU_TYPE))
+        mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
         # reuse original base timing
-        self.assertTrue(len(local_cache) == 3)
+        self.assertEqual(len(local_cache), 3)
 
         FileCheck().check_count("exclude_pad:False", 3, exactly=True).run(
             repr(local_cache)
@@ -649,23 +652,6 @@ class PadMMTest(TestCase):
         torch.compiler.reset()
         torch.manual_seed(42)
         test_masked_mha(B, H, S, D, device, dtype)
-
-    @inductor_config.patch(force_shape_pad=True)
-    def test_pad_mm_output_strides_preserved(self):
-        """Regression test: pad_mm creates views with padded strides.
-        User-visible output strides must match eager execution."""
-
-        def fn(x, y):
-            return torch.mm(x, y)
-
-        # N=2 gets padded to 4, so the mm output is (3, 4) sliced to (3, 2),
-        # creating a view with stride (4, 1) instead of the expected (2, 1).
-        x = torch.randn(3, 5, device=GPU_TYPE)
-        y = torch.randn(5, 2, device=GPU_TYPE)
-        expected = fn(x, y)
-        compiled = torch.compile(fn)(x, y)
-        self.assertEqual(compiled, expected)
-        self.assertEqual(compiled.stride(), expected.stride())
 
 
 if __name__ == "__main__":

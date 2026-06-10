@@ -56,12 +56,12 @@ from torch.testing._internal.common_utils import (
     enable_profiling_mode_for_profiling_tests,
     GRAPH_EXECUTOR,
     IS_FBCODE,
+    IS_LINUX,
     ProfilingMode,
     run_tests,
     skipIfTorchDynamo,
     slowTest,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing._internal.jit_utils import (
@@ -1205,6 +1205,7 @@ class TestTEFuser(JitTestCase):
         ge = self.checkScript(fn, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/156438")
     def test_inlined_optimized_graph(self):
         @torch.jit.script
         def foo(x):
@@ -1326,6 +1327,7 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/121876")
     def test_torch_to(self):
         # test no op
         @torch.jit.script
@@ -2406,32 +2408,34 @@ class TestTEFuser(JitTestCase):
 
     @skipIfTorchDynamo("too slow")
     @unittest.skipIf(TEST_WITH_ASAN, "takes 10+ minutes on asan")
-    @unittest.skipIf(TEST_WITH_ROCM, "Tensor-likes are not close for nans")
     def test_batch_norm(self):
         def test(fn, args):
             trace = torch.jit.trace(fn, args)
             self.assertAllFused(trace.graph_for(*args))
-            # TODO: Are `NaN`'s actually ok here or did this pass silently before, because `equal_nan=True` was the
-            #  default?
             torch.testing.assert_close(fn(*args), trace(*args), equal_nan=True)
 
-        def bn(i, x):
-            return torch.batch_norm(i, x, x, x, x, False, 0.1, 1e-4, False).relu()
+        def bn(i, x, rv):
+            return torch.batch_norm(i, x, x, x, rv, False, 0.1, 1e-4, False).relu()
 
-        def bn_no_weight(i, x):
-            return torch.batch_norm(i, None, x, x, x, False, 0.1, 1e-4, False).relu()
+        def bn_no_weight(i, x, rv):
+            return torch.batch_norm(i, None, x, x, rv, False, 0.1, 1e-4, False).relu()
 
-        def bn_no_bias(i, x):
-            return torch.batch_norm(i, x, None, x, x, False, 0.1, 1e-4, False).relu()
+        def bn_no_bias(i, x, rv):
+            return torch.batch_norm(i, x, None, x, rv, False, 0.1, 1e-4, False).relu()
 
-        def bn_neither(i, x):
-            return torch.batch_norm(i, None, None, x, x, False, 0.1, 1e-4, False).relu()
+        def bn_neither(i, x, rv):
+            return torch.batch_norm(
+                i, None, None, x, rv, False, 0.1, 1e-4, False
+            ).relu()
 
         for device in self.devices:
             i = torch.randn(4, 16, 32, 40, device=device)
             x = torch.randn(16, device=device)
+            rv = torch.randn(
+                16, device=device
+            ).abs()  # running_var must be non-negative
             for fn in [bn, bn_no_weight, bn_no_bias, bn_neither]:
-                test(fn, (i, x))
+                test(fn, (i, x, rv))
 
     def test_profiler(self):
         @torch.jit.script
@@ -2444,6 +2448,7 @@ class TestTEFuser(JitTestCase):
                 test(*args)
         self.assertIn("fused_mul_add", prof.table())
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/156436")
     def test_skip_grad_in_check(self):
         @torch.jit.script
         def foo(x):
