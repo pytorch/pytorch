@@ -229,9 +229,21 @@ def enumerate_filter_symints(lst: Iterable[IntLikeType]) -> list[tuple[int, SymI
     return [(i, s) for i, s in enumerate(lst) if symint_check(s)]
 
 
-def compute_symint_placeholders(lst: Iterable[None | int | SymInt]) -> list[bool]:
-    # Non-nested symints are replaced with None in `make_runtime_safe()`
-    return [s is None for s in lst]
+def compute_symint_placeholders(
+    lst: Iterable[None | int | SymInt],
+    *,
+    symints_are_placeholders: bool = False,
+) -> list[bool]:
+    # Non-nested symints are replaced with None in `make_runtime_safe()`.
+    return [
+        s is None
+        or (
+            symints_are_placeholders
+            and isinstance(s, SymInt)
+            and not s.node.is_nested_int()
+        )
+        for s in lst
+    ]
 
 
 # Intended to make it easier to define function that is
@@ -258,6 +270,7 @@ def unwrap_tensor_subclasses(
     wrapped_args_descs: Sequence[AOTDescriptor],
     *,
     append_symints: bool,
+    subclass_metas: Sequence[PlainTensorMeta | SubclassCreationMeta] | None = None,
 ) -> tuple[list[FxValue], list[AOTDescriptor]]:
     def _maybe_fakeify_opaque(v: Any) -> Any:
         # Registered opaque types need to be wrapped as FakeScriptObject for
@@ -275,15 +288,27 @@ def unwrap_tensor_subclasses(
     def flatten_subclass(
         t: FxValue,
         desc: AOTDescriptor,
+        subclass_meta: PlainTensorMeta | SubclassCreationMeta | OpaqueMeta | None,
         *,
         out: tuple[list[FxValue], list[AOTDescriptor]],
     ) -> None:
         # unwrap a subclass into plain tensors and their size/stride if "append_symint"
         # is True
         if not is_traceable_wrapper_subclass(t):
+            if isinstance(subclass_meta, SubclassCreationMeta):
+                raise AssertionError(
+                    f"expected traceable wrapper subclass, got {type(t)}"
+                )
             out[0].append(_maybe_fakeify_opaque(t))
             out[1].append(desc)
             return
+
+        if subclass_meta is not None and not isinstance(
+            subclass_meta, SubclassCreationMeta
+        ):
+            raise AssertionError(
+                f"expected SubclassCreationMeta, got {type(subclass_meta)}"
+            )
 
         attrs, _ = t.__tensor_flatten__()
 
@@ -302,21 +327,65 @@ def unwrap_tensor_subclasses(
         for attr in attrs:
             inner_value = getattr(t, attr)
             n_desc: Any = SubclassGetAttr(desc, attr)
-            flatten_subclass(inner_value, n_desc, out=out)
+            inner_meta = None
+            if subclass_meta is not None:
+                if attr not in subclass_meta.attrs:
+                    raise AssertionError(
+                        f"attr {attr!r} not found in subclass metadata"
+                    )
+                inner_meta = subclass_meta.attrs[attr]
+            flatten_subclass(inner_value, n_desc, inner_meta, out=out)
 
         if append_symints:
-            sizes = enumerate_filter_symints(t.size())
-            strides = enumerate_filter_symints(t.stride())
-            out[0].extend(s for _, s in sizes)
-            out[0].extend(s for _, s in strides)
-            out[1].extend(SubclassSize(desc, i) for i, _ in sizes)
-            out[1].extend(SubclassStride(desc, i) for i, _ in strides)
+            if subclass_meta is None:
+                sizes = enumerate_filter_symints(t.size())
+                strides = enumerate_filter_symints(t.stride())
+                out[0].extend(s for _, s in sizes)
+                out[0].extend(s for _, s in strides)
+                out[1].extend(SubclassSize(desc, i) for i, _ in sizes)
+                out[1].extend(SubclassStride(desc, i) for i, _ in strides)
+            else:
+
+                def append_symints_from_meta(
+                    values: Sequence[IntLikeType],
+                    meta_values: Iterable[None | int | SymInt],
+                    make_desc: Callable[[AOTInput | AOTOutput, int], AOTDescriptor],
+                    label: str,
+                ) -> None:
+                    symint_placeholders = compute_symint_placeholders(
+                        meta_values,
+                        symints_are_placeholders=True,
+                    )
+                    if len(values) != len(symint_placeholders):
+                        raise AssertionError(
+                            f"{label} length mismatch: "
+                            f"{len(values)} != {len(symint_placeholders)}"
+                        )
+                    for i, (s, is_symint) in enumerate(
+                        zip(values, symint_placeholders)
+                    ):
+                        if is_symint:
+                            out[0].append(s)
+                            out[1].append(make_desc(desc, i))
+
+                append_symints_from_meta(
+                    t.size(), subclass_meta.outer_size, SubclassSize, "size"
+                )
+                append_symints_from_meta(
+                    t.stride(), subclass_meta.outer_stride, SubclassStride, "stride"
+                )
 
     xs_inner: list[FxValue] = []
     descs_inner: list[AOTDescriptor] = []
 
-    for x, desc in zip(wrapped_args, wrapped_args_descs):
-        flatten_subclass(x, desc, out=(xs_inner, descs_inner))
+    if subclass_metas is not None and len(wrapped_args) != len(subclass_metas):
+        raise AssertionError(
+            f"subclass_metas length ({len(subclass_metas)}) != wrapped_args length ({len(wrapped_args)})"
+        )
+
+    for idx, (x, desc) in enumerate(zip(wrapped_args, wrapped_args_descs)):
+        subclass_meta = None if subclass_metas is None else subclass_metas[idx]
+        flatten_subclass(x, desc, subclass_meta, out=(xs_inner, descs_inner))
 
     return xs_inner, descs_inner
 
@@ -428,19 +497,34 @@ def unwrap_tensor_subclasses_with_indices_to_original(
 
 
 def remap_unwrapped_subclass_arg_indices(
-    wrapped_args: list[Any], static_input_indices: list[int]
+    wrapped_args: list[Any],
+    static_input_indices: list[int],
+    *,
+    subclass_metas: Sequence[PlainTensorMeta | SubclassCreationMeta] | None = None,
 ) -> list[int]:
     static_input_indices_set = set(static_input_indices)
     new_ind = 0
     remapped_static_indices = []
+
+    if subclass_metas is not None and len(wrapped_args) != len(subclass_metas):
+        raise AssertionError(
+            f"subclass_metas length ({len(subclass_metas)}) != wrapped_args length ({len(wrapped_args)})"
+        )
+
     for i, arg in enumerate(wrapped_args):
-        num_indices = 1
-        if is_traceable_wrapper_subclass(arg):
+        subclass_meta = None if subclass_metas is None else subclass_metas[i]
+        if isinstance(subclass_meta, SubclassCreationMeta):
+            num_indices = subclass_meta.arg_count
+        elif subclass_meta is not None:
+            num_indices = 1
+        elif is_traceable_wrapper_subclass(arg):
             num_indices = (
                 len(get_plain_tensors(arg, out=[]))
                 + len(enumerate_filter_symints(arg.size()))
                 + len(enumerate_filter_symints(arg.stride()))
             )
+        else:
+            num_indices = 1
 
         for _ in range(num_indices):
             if i in static_input_indices_set:

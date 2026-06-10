@@ -41,9 +41,11 @@ from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     loss_parallel,
     parallelize_module,
+    ParallelStyle,
     PrepareModuleInput,
     PrepareModuleOutput,
     RowwiseParallel,
+    SequenceParallel,
 )
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -163,6 +165,46 @@ class SimpleModel(nn.Module):
 
     def forward(self, input):
         return self.mlp_1(self.mlp_0(input))
+
+
+class _ReplicateParallel(ParallelStyle):
+    @staticmethod
+    def _prepare_input_fn(placement, mod, inputs, device_mesh):
+        x = inputs[0]
+        if not isinstance(x, DTensor):
+            x = DTensor.from_local(x, device_mesh, (placement,), run_check=False)
+        return (x, *inputs[1:])
+
+    @staticmethod
+    def _prepare_output_fn(placement, mod, outputs, device_mesh):
+        def replicate(x):
+            if isinstance(x, DTensor) and x.placements != (placement,):
+                x = x.redistribute(placements=(placement,), async_op=True)
+            return x
+
+        if isinstance(outputs, tuple):
+            return tuple(replicate(x) for x in outputs)
+        return replicate(outputs)
+
+    def _apply(self, module, device_mesh):
+        return distribute_module(
+            module,
+            device_mesh,
+            None,
+            functools.partial(self._prepare_input_fn, Replicate()),
+            functools.partial(self._prepare_output_fn, Replicate()),
+        )
+
+
+class _IdentityFront(nn.Module):
+    def forward(self, x):
+        return x
+
+
+class _ArityRouter(nn.Module):
+    def forward(self, x):
+        y = x.reshape(-1, 8) * 2
+        return y, y + 1
 
 
 def extract_graph(fx_g, _, graph_cell):
@@ -3022,6 +3064,49 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 2,
                 f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
             )
+
+
+class TestDTensorSubclassOutputCompile(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 2
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_dtensor_output_symint_arity_matches_metadata(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        front = parallelize_module(
+            _IdentityFront().to(self.device_type), mesh, SequenceParallel()
+        )
+        router = parallelize_module(
+            _ArityRouter().to(self.device_type), mesh, _ReplicateParallel()
+        )
+
+        front = torch.compile(front, backend="inductor", fullgraph=True)
+        router = torch.compile(router, backend="inductor", fullgraph=True)
+
+        x = torch.randn(
+            1,
+            1,
+            8,
+            device=self.device_type,
+            requires_grad=True,
+        )
+        x = front(x)
+        self.assertIsInstance(x, DTensor)
+
+        x = x.redistribute(placements=(Replicate(),), async_op=False)
+        x = x.to_local(grad_placements=(Partial(),))
+
+        y0, y1 = router(x)
+        out = y0 + y1
+
+        self.assertIsInstance(out, DTensor)
+        self.assertEqual(out.placements, (Replicate(),))
+        self.assertEqual(out.to_local().shape, (self.world_size, 8))
 
 
 class TestDTensorACCompile(DTensorTestBase):

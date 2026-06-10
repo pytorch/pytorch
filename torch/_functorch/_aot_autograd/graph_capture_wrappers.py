@@ -79,7 +79,9 @@ from .schemas import (
     JointTraceFn,
     MutationType,
     OutputType,
+    PlainTensorMeta,
     PreppedForAutogradTraceFn,
+    SubclassCreationMeta,
     SubclassMeta,
     SubclassTracingInfo,
     TraceFn,
@@ -1335,6 +1337,20 @@ def aot_dispatch_subclass(
     # NB: doesn't take descs, this is going from the NEW flat_args to the
     # subclasses, we don't need to do bookkeeping here
     def inner_fn(fn: Callable[..., Any], args: Any, *, use_trace_joint: bool) -> Any:
+        def aligned_subclass_metas(
+            wrapped_outs: list[FxValue],
+            subclass_metas: list[PlainTensorMeta | SubclassCreationMeta] | None,
+        ) -> list[PlainTensorMeta | SubclassCreationMeta] | None:
+            if subclass_metas is None:
+                return None
+            if len(wrapped_outs) != len(subclass_metas):
+                raise AssertionError(
+                    "subclass metadata length mismatch: "
+                    f"{len(wrapped_outs)} wrapped values, "
+                    f"{len(subclass_metas)} metadata entries"
+                )
+            return subclass_metas
+
         # Step 1: wrap tensor inputs into subclasses if necessary
         all_args = wrap_tensor_subclasses_maybe_joint(
             args, is_joint_structure=use_trace_joint, meta=meta
@@ -1361,12 +1377,19 @@ def aot_dispatch_subclass(
                 wrapped_outs[0],
                 wrapped_outs_descs[0],
                 append_symints=True,
+                subclass_metas=aligned_subclass_metas(
+                    wrapped_outs[0],
+                    meta.subclass_fw_graph_out_meta,
+                ),
             )
             # ignore nested ints here
             backward_outs, backward_outs_descs = unwrap_tensor_subclasses(
                 wrapped_outs[1],
                 wrapped_outs_descs[1],
                 append_symints=True,
+                subclass_metas=aligned_subclass_metas(
+                    wrapped_outs[1], subclass_meta.grad_input_metas
+                ),
             )
             return (
                 (forward_outs, backward_outs),
@@ -1375,7 +1398,12 @@ def aot_dispatch_subclass(
 
         # Step 3: Unwrap any subclass outputs back into dense tensors
         return unwrap_tensor_subclasses(
-            wrapped_outs, wrapped_outs_descs, append_symints=True
+            wrapped_outs,
+            wrapped_outs_descs,
+            append_symints=True,
+            subclass_metas=aligned_subclass_metas(
+                wrapped_outs, meta.subclass_fw_graph_out_meta
+            ),
         )
 
     def joint_fn(
@@ -1414,6 +1442,7 @@ def aot_dispatch_subclass(
             primals_wrapped,
             primals_wrapped_descs,
             append_symints=True,
+            subclass_metas=meta.subclass_inp_meta,
         )
         # We pass append_symints=False here because the partitioner will
         # capture and add any extra argument.
@@ -1428,6 +1457,7 @@ def aot_dispatch_subclass(
         remapped_static_indices = remap_unwrapped_subclass_arg_indices(
             primals_wrapped,
             meta.static_input_indices,  # type: ignore[arg-type]
+            subclass_metas=meta.subclass_inp_meta,
         )
 
         primals_unwrapped = args_unwrapped[0]  # type: ignore[assignment]
@@ -1441,10 +1471,12 @@ def aot_dispatch_subclass(
             primals_wrapped,
             primals_wrapped_descs,
             append_symints=True,
+            subclass_metas=meta.subclass_inp_meta,
         )
         remapped_static_indices = remap_unwrapped_subclass_arg_indices(
             primals_wrapped,
             meta.static_input_indices,  # type: ignore[arg-type]
+            subclass_metas=meta.subclass_inp_meta,
         )
 
         primals_unwrapped = args_unwrapped  # type: ignore[assignment]
