@@ -6164,22 +6164,23 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def get_globals_source_and_value(
         self, name: str
     ) -> tuple[Any, VariableTracker, Source]:
-        # NamedTuple's `__new__` has a fake global scope that's not an actual
-        # module. TODO generalize the check for other non-importable cases.
-        # https://github.com/python/cpython/blob/8421b03b16a4852a527256cb7cdce2ab2d318548/Lib/collections/__init__.py#L441-L447
-        if "__name__" in self.f_globals and not self.f_globals["__name__"].startswith(
-            "namedtuple_"
-        ):
-            module_name = self.f_globals["__name__"]
-            module_source = self.import_source(module_name)
+        module_name = self.f_globals.get("__name__")
+        module: types.ModuleType | None = None
+        if isinstance(module_name, str):
             if "torch_package" in module_name:
-                fglobals_value = (
-                    torch.package.package_importer._package_imported_modules[
-                        module_name
-                    ]
-                )  # type: ignore[assignment]
+                module = torch.package.package_importer._package_imported_modules.get(
+                    module_name
+                )
             else:
-                fglobals_value = _import_module(module_name)
+                module = sys.modules.get(module_name)
+
+        if (
+            isinstance(module_name, str)
+            and module is not None
+            and module.__dict__ is self.f_globals
+        ):
+            module_source = self.import_source(module_name)
+            fglobals_value = module
             # Don't use lazy vt because we will do a setattr afterwards
             # TODO: fix InstructionTranslator -> InstructionTranslatorBase
             # pyrefly: ignore[bad-argument-type]
