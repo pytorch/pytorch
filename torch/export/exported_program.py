@@ -354,6 +354,17 @@ def _decompose_and_get_gm_with_new_signature_constants(
             or ep.graph_signature.backward_signature is not None
         )
 
+    if joint_loss_index is not None and ep.graph_signature.parameters_to_mutate:
+        mutated_parameters = ", ".join(
+            repr(name) for name in ep.graph_signature.parameters_to_mutate.values()
+        )
+        raise RuntimeError(
+            "Mutating module parameters while exporting a joint forward/backward "
+            "graph is not supported. Only buffers can be mutated as module state. "
+            "If this state does not need gradients, register it as a buffer "
+            f"instead. Found mutation on parameter(s): {mutated_parameters}."
+        )
+
     if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
 
@@ -721,6 +732,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
     for output_name, input_name in graph_signature.user_inputs_to_mutate.items():
         i = user_inputs_index[input_name]
         input_spec = ep.graph_signature.input_specs[i]
+        if input_spec.kind == InputKind.PARAMETER:
+            raise RuntimeError(
+                "Mutating module parameters while exporting a joint "
+                "forward/backward graph is not supported. Only buffers can be "
+                "mutated as module state. If this state does not need gradients, "
+                "register it as a buffer instead. Found mutation on parameter "
+                f"{input_spec.target!r}."
+            )
         if input_spec.kind not in (InputKind.USER_INPUT, InputKind.BUFFER):
             raise AssertionError(
                 f"expected input_spec.kind to be USER_INPUT or BUFFER, got {input_spec.kind}"
