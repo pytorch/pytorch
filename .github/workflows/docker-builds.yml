@@ -91,14 +91,14 @@ jobs:
       image: ghcr.io/actions/actions-runner:latest
     steps:
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.13
         with:
           use-arc: true
           submodules: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@release/2.13
         with:
           aws-role-to-assume: arn:aws:iam::308535385114:role/arc
 

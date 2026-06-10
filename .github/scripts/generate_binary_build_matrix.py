@@ -304,6 +304,22 @@ WHEEL_CONTAINER_IMAGES = {
     "cpu-s390x": "manylinuxs390x-builder:cpu-s390x",
 }
 
+# RELEASE-ONLY: pin the manywheel builder images to a fixed build so the release
+# uses a reproducible toolchain instead of main's floating tags. The suffix is
+# the .ci/docker tree hash (`git rev-parse HEAD:.ci/docker`), i.e. the same tag
+# .github/actions/binary-docker-build publishes. Only linux manywheel builds run
+# inside these containers, so only those images are pinned.
+DOCKER_IMAGE_PIN = "f38ba0b10220982e39441d29d203d803a2b56c92"
+MANYWHEEL_OSES = ("linux", "linux-aarch64", "linux-s390x")
+
+
+def wheel_container_image_tag_prefix(arch_version: str, os: str) -> str:
+    tag_prefix = WHEEL_CONTAINER_IMAGES[arch_version].split(":")[1]
+    if os in MANYWHEEL_OSES:
+        return f"{tag_prefix}-{DOCKER_IMAGE_PIN}"
+    return tag_prefix
+
+
 RELEASE = "release"
 DEBUG = "debug"
 
@@ -453,9 +469,9 @@ def generate_wheels_matrix(
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
                             ":"
                         )[0],
-                        "container_image_tag_prefix": WHEEL_CONTAINER_IMAGES[
-                            arch_version
-                        ].split(":")[1],
+                        "container_image_tag_prefix": wheel_container_image_tag_prefix(
+                            arch_version, os
+                        ),
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS[
@@ -484,9 +500,9 @@ def generate_wheels_matrix(
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
                             ":"
                         )[0],
-                        "container_image_tag_prefix": WHEEL_CONTAINER_IMAGES[
-                            arch_version
-                        ].split(":")[1],
+                        "container_image_tag_prefix": wheel_container_image_tag_prefix(
+                            arch_version, os
+                        ),
                         "package_type": package_type,
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                             ".", "_"
