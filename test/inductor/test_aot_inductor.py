@@ -8324,6 +8324,65 @@ class AOTInductorTestsTemplate:
                 M(), list_example_inputs, dynamic_shapes=({0: Dim.DYNAMIC},)
             )
 
+    def test_cond_with_triton_op(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        @triton.jit
+        def mul_add_kernel(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            MUL: tl.constexpr,
+            ADD: tl.constexpr,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x * MUL + ADD, mask=mask)
+
+        @torch.library.triton_op("mylib::branch_a", mutates_args=())
+        def branch_a(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n = x.numel()
+            grid = lambda meta: (triton.cdiv(n, meta["BLOCK_SIZE"]),)
+            capture_triton(mul_add_kernel)[grid](
+                x, out, n, MUL=2, ADD=1, BLOCK_SIZE=1024
+            )
+            return out
+
+        @torch.library.triton_op("mylib::branch_b", mutates_args=())
+        def branch_b(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n = x.numel()
+            grid = lambda meta: (triton.cdiv(n, meta["BLOCK_SIZE"]),)
+            capture_triton(mul_add_kernel)[grid](
+                x, out, n, MUL=3, ADD=5, BLOCK_SIZE=1024
+            )
+            return out
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    return branch_a(x)
+
+                def false_fn(x):
+                    return branch_b(x)
+
+                return torch.cond(x.shape[0] < 5, true_fn, false_fn, (x,))
+
+        list_example_inputs = [
+            (torch.randn(3, 16, device=self.device),),
+            (torch.randn(8, 16, device=self.device),),
+        ]
+        self.check_model_with_multiple_inputs(
+            Model(),
+            list_example_inputs,
+            dynamic_shapes=({0: Dim.DYNAMIC},),
+        )
+
     def test_clamp_decomposition(self):
         class Model1(torch.nn.Module):
             def forward(self, x):
