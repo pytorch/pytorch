@@ -584,14 +584,14 @@ class TestControlDeps(InductorTestCase):
         """When codegen_device_guard_enter is called multiple times for the same
         device (e.g., forward + backward sharing a wrapper), only the first call
         should set setup_stream_cache=True. A different device gets its own
-        setup."""
+        setup. Re-entering a previous device after a different one re-runs
+        setup (the flat variable names are shared across device guards)."""
         from unittest.mock import MagicMock
 
         from torch._inductor.codegen.wrapper import PythonWrapperCodegen
-        from torch.utils._ordered_set import OrderedSet
 
         codegen = MagicMock(spec=PythonWrapperCodegen)
-        codegen._stream_cache_setup_devices = OrderedSet()
+        codegen._last_stream_cache_device = None
         codegen.last_seen_device_guard_index = None
         codegen.writeline = MagicMock()
 
@@ -631,6 +631,20 @@ class TestControlDeps(InductorTestCase):
         self.assertTrue(
             third_line.setup_stream_cache,
             "First entry for a new device should setup stream cache",
+        )
+
+        # Re-enter device 0 after device 1: must re-setup because the flat
+        # DEFAULT_STREAM / stream1 variables now hold device 1's values.
+        PythonWrapperCodegen.codegen_device_guard_enter(
+            codegen,
+            device_idx=0,
+            num_streams=2,
+            stream_idx_to_user_obj_idx=stream_map,
+        )
+        fourth_line = codegen.writeline.call_args_list[3][0][0]
+        self.assertTrue(
+            fourth_line.setup_stream_cache,
+            "Re-entering device 0 after device 1 must re-setup stream cache",
         )
 
     @requires_gpu()

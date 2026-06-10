@@ -1883,6 +1883,11 @@ class triton:
     # Synchronize before and after every compiled graph.
     debug_sync_graph = False
 
+    # Synchronize after specific compiled graph returns, identified by
+    # zero-based index within the wrapper.  None means disabled; set to a
+    # set of ints to sync only those graphs (e.g. {0} for the forward graph).
+    sync_graph_indices: set[int] | None = None
+
     # Synchronize after every kernel launch, to help pinpoint bugs
     debug_sync_kernel = False
 
