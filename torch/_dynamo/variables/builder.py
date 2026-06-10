@@ -1636,7 +1636,8 @@ class VariableBuilder:
                 else ConvertIntSource(self.source)
             )
             new_symint = None
-            if value.node.has_hint():
+            has_hint = value.node.has_hint()
+            if has_hint:
                 new_symint = (
                     self.tx.output.shape_env.create_unspecified_symint_and_symbol(
                         int(value.node.hint),
@@ -1645,21 +1646,20 @@ class VariableBuilder:
                     )
                 )
             else:
-                if isinstance(value, torch.SymBool):
-                    # We need to create an unbacked symint to replace the unbacked symbool.
-                    new_symint = self.tx.output.shape_env.create_unbacked_symint()
-                else:
-                    # TODO (yidi): we need to figure out a way to propagate the guards
-                    # we accumulated when tracing the subggraph to outer shape_env. For normal symints,
-                    # this is automatically done by evaluating the guards once but this
-                    # will cause data-dependent error when we evaluate the outer unbacked symints.
-                    # The test case that triggers this graph break is test_cond_unbacked_symint_closure
+                if (
+                    isinstance(value, torch.SymInt)
+                    and self.tx.should_compile_partial_graph()
+                ):
+                    # Preserve Dynamo's existing graph-break behavior for ordinary
+                    # partial-graph tracing. HOP branch tracing cannot graph break
+                    # here, so it wraps the unbacked SymInt instead.
                     unimplemented(
                         gb_type="Attempted to wrap unbacked SymInt",
                         context="",
-                        explanation="Unbacked SymInt input is not supported yet.",
+                        explanation="Unbacked SymInt input is only supported when Dynamo cannot graph break.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
+                new_symint = self.tx.output.shape_env.create_unbacked_symint(source)
             if new_symint is None:
                 raise AssertionError("new_symint must not be None after wrapping")
             if not isinstance(new_symint, SymInt):
@@ -1683,7 +1683,12 @@ class VariableBuilder:
             sym_expr = new_symint.node.expr
             if not isinstance(sym_expr, sympy.Symbol):
                 raise AssertionError(f"{sym_expr} is not a basic Symbol.")
-            self.tx.output.tracked_fakes.append(TrackedFake(new_symint, source, None))
+            # Range refinements on unhinted SymInts must stay in the graph as
+            # runtime asserts instead of becoming guards on data-dependent sources.
+            if has_hint or isinstance(value, torch.SymBool):
+                self.tx.output.tracked_fakes.append(
+                    TrackedFake(new_symint, source, None)
+                )
 
             tracing_symint = (
                 new_symint if isinstance(value, torch.SymInt) else new_symint == 1

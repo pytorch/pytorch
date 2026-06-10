@@ -2171,6 +2171,9 @@ elif [[ "$TEST_CONFIG" == *vllm* ]]; then
 
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "$TEST_CONFIG" == *torchtitan* ]]; then
+    if [[ "$TEST_CONFIG" == *torchtitan_models_integration* ]]; then
+      install_torchvision
+    fi
     (cd .ci/lumen_cli && python -m pip install -e .)
     python -m cli.run test external torchtitan --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
