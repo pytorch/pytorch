@@ -4335,12 +4335,16 @@ def run(runner, args, original_dir=None):
                 "DistillGPT2",
             }
         ):
-            # aten.native_dropout is decomposed in AOT-autograd (see
-            # torch/_decomp/decompositions.py) before inductor's fallback_random
-            # gate fires, so the post-decomposition rand is lowered with a Philox
-            # layout that disagrees with eager. align_random_eager re-aligns it
-            # at codegen time (torch/_inductor/fx_passes/replace_random.py).
-            inductor_config.align_random_eager = True
+            # With the harness-wide fallback_random=True, inductor falls back
+            # to ATen rng for the dropout decomposition. That fallback Philox
+            # path indexes randoms by flat element offset, whereas eager CUDA
+            # rng indexes by (thread_id, intra_thread_iter), so the two produce
+            # different dropout masks for the same seed and trip DistillGPT2's
+            # tight accuracy tolerance (observed on gfx942). Setting
+            # fallback_random=False re-enables inductor's replace_random passes,
+            # which align the masks with eager. This is correct/harmless on
+            # other backends since it only changes how inductor lowers rng.
+            inductor_config.fallback_random = False
 
         # Some models e.g. yolov3 assert batch size on n_gpus
         if "CUDA_VISIBLE_DEVICES" not in os.environ and not args.multiprocess:
