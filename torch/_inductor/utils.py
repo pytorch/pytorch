@@ -111,6 +111,25 @@ def get_gpu_type() -> str:
     return gpu_type
 
 
+@functools.cache
+def get_triton_type() -> str | None:
+    from torch.utils._triton import devices_supporting_triton
+
+    candidates: list[str] = list(devices_supporting_triton())
+
+    if len(candidates) == 0:
+        return None
+
+    # Prefer to return any other device over CPU
+    if "cpu" in candidates:
+        candidates.remove("cpu")
+
+    if len(candidates) == 0:
+        return "cpu"
+
+    return candidates.pop()
+
+
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
@@ -4096,6 +4115,46 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.tpu_backend
     else:
         return config.cuda_backend
+
+
+def set_current_backend(value: str, device_type: str | None = None) -> bool:
+    from torch._inductor.virtualized import V
+
+    if not device_type:
+        device_type = V.graph.get_current_device_or_throw().type
+
+    if device_type == "cpu":
+        config.cpu_backend = value  # pyrefly: ignore [bad-assignment]
+        return True
+    elif device_type == "mps":
+        return False
+    elif device_type == "xpu":
+        config.xpu_backend = value  # pyrefly: ignore [bad-assignment]
+        return True
+    elif device_type == "tpu":
+        config.tpu_backend = value  # pyrefly: ignore [bad-assignment]
+        return True
+    else:
+        config.cuda_backend = value  # pyrefly: ignore [bad-assignment]
+        return True
+
+
+@contextlib.contextmanager
+def with_device_backend(
+    value: str, device_type: str | None = None
+) -> Generator[None, None, None]:
+    from torch._inductor.virtualized import V
+
+    if not device_type:
+        device_type = V.graph.get_current_device_or_throw().type
+
+    prev_value = get_current_backend(device_type)
+
+    try:
+        set_current_backend(value, device_type)
+        yield
+    finally:
+        set_current_backend(prev_value, device_type)
 
 
 def device_supports_fp64(device: torch.device | None) -> bool:

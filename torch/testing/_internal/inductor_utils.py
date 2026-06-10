@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import sys
+from typing import Any
 import unittest
 from subprocess import CalledProcessError
 
@@ -26,8 +27,10 @@ from torch._inductor.compile_fx import shape_env_from_inputs
 from torch._inductor.custom_graph_pass import CustomGraphModulePass, CustomGraphPass
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import (
+    get_current_backend,
     get_gpu_shared_memory,
     get_gpu_type,
+    get_triton_type,
     GPU_TYPES,
     is_big_gpu,
     is_gpu,
@@ -92,6 +95,9 @@ HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON
 HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
+
+TRITON_TYPE: str | None = get_triton_type()
+HAS_TRITON_DEVICE: bool = TRITON_TYPE is not None
 
 HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
@@ -462,6 +468,7 @@ def patch_inductor_backend(
             original_custom_backend_config,
         )
 
+
 def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
     """
     Create a custom pass which falls back based on the provided predicate. For example,
@@ -479,3 +486,57 @@ def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> co
 
 
     return config.patch(post_grad_custom_pre_pass=Pass())
+
+
+def try_patch_inductor_backend_config(device: str, key: str,
+                                      value: Any) -> contextlib.ContextDecorator:
+    """
+    Try to patch the backend-specific Inductor config, for the codegen backend
+    corresponding to the given ``device``. If that config can't be found to
+    patch, skip the test.
+
+    Will patch the member of the global ``config.$BACKEND``, if it exists. If
+    the given device also specifies a custom config module, will also try to
+    patch its ``$BACKEND`` member if it exists.
+
+    Note that if ``device`` has an unknown value, will behave as if it was
+    ``"cuda"``.
+
+    """
+    device_backend = get_current_backend(device)
+
+    config_modules = [torch._inductor.config]
+    if custom_config_module := get_custom_backend_config_for_device(device):
+        config_modules.append(custom_config_module)
+
+    contexts: list[contextlib.ContextDecorator] = []
+
+    for mod in config_modules:
+        if hasattr(mod, f"{device_backend}.{key}"):
+            contexts.append(mod.patch(f"{device_backend}.{key}", value))
+
+    if len(contexts) == 0:
+        return unittest.skip(
+            f"Can't patch Inductor config {key} for device {device}")
+
+    class ContextStack(contextlib.ContextDecorator):
+        def __init__(self, contexts: list[contextlib.ContextDecorator]) -> None:
+            self.contexts: list[contextlib.ContextDecorator] = contexts
+            self.es = None
+
+        def __enter__(self) -> None:
+            es = contextlib.ExitStack()
+            try:
+                es.__enter__()
+                for context in self.contexts:
+                    es.enter_context(context)
+                self.es = es
+            except Exception:
+                es.close()
+                raise
+
+        def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
+            if self.es:
+                self.es.__exit__(exc_type, exc_val, exc_tb)
+
+    return ContextStack(contexts)

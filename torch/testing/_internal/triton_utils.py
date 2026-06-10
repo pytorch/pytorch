@@ -5,6 +5,7 @@ import unittest
 from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
+    HAS_TRITON,
     HAS_XPU_AND_TRITON,
 )
 from torch.utils._triton import has_triton
@@ -20,6 +21,9 @@ requires_gpu_and_triton = unittest.skipUnless(
     HAS_XPU_AND_TRITON or HAS_CUDA_AND_TRITON, "requires gpu and triton"
 )
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
+requires_triton = unittest.skipUnless(
+    HAS_TRITON, "requires device supporting triton codegen"
+)
 
 if has_triton():
     import triton
