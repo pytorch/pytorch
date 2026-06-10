@@ -252,10 +252,6 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/148607",
-    )
     @serialTest()
     def test_host_memory_stats(self):
         # Helper functions
@@ -283,12 +279,21 @@ class TestCuda(TestCase):
                 "active_requests.peak": 0,
             }
 
+        # Deltas from baseline captured after cleanup (not absolute totals), so
+        # ordering against other tests cannot leave host stats in a broken state.
+        baseline = {}
+
         def check_stats(expected):
             stats = torch.cuda.host_memory_stats()
             for k, v in expected.items():
-                if v != stats[k]:
-                    print(f"key: {k}, expected: {v}, stats: {stats[k]}")
-                self.assertEqual(v, stats[k])
+                want = baseline[k] + v
+                actual = stats[k]
+                if actual != want:
+                    print(
+                        f"key: {k}, baseline: {baseline[k]}, delta: {v}, "
+                        f"want: {want}, got: {actual}"
+                    )
+                self.assertEqual(actual, want)
 
         # Setup the test cleanly
         alloc1 = 10
@@ -297,11 +302,12 @@ class TestCuda(TestCase):
         alloc2_aligned = 32
         expected = empty_stats()
 
-        # Reset any lingering state
         gc.collect()
         torch._C._host_emptyCache()
+        torch.cuda.reset_peak_host_memory_stats()
+        torch.cuda.reset_accumulated_host_memory_stats()
+        baseline.update(torch.cuda.host_memory_stats())
 
-        # Check that stats are empty
         check_stats(expected)
 
         # Make first allocation and check stats
@@ -3402,14 +3408,9 @@ exit(2)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/104055")
     @unittest.skipIf(
-        (not TEST_CUDA_GRAPH)
-        or IS_WINDOWS
-        or (  # appears to still be broken on Windows as of 11.4+
-            torch.version.cuda
-            and int(torch.version.cuda.split(".")[0]) == 11
-            and int(torch.version.cuda.split(".")[1]) < 4
-        ),
-        "Graph bindings disallow concurrent replay for CUDA < 11.4, see "
+        (not TEST_CUDA_GRAPH) or IS_WINDOWS,
+        "Graph bindings disallow concurrent replay; "
+        + "still appears broken on Windows. See "
         + "https://github.com/pytorch/pytorch/pull/57556",
     )
     @unittest.skipIf(
@@ -4478,6 +4479,44 @@ exit(2)
         ]
         self.assertEqual(len(x), 2)
         self.assertEqual(x[0], x[1])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    def test_cuda_graph_many_if_nodes_across_graphs(self):
+        pred = torch.zeros((), device="cuda", dtype=torch.bool)
+        x = torch.zeros((), device="cuda")
+        for _ in range(40):
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                g.begin_capture_to_if_node(pred)
+                x.add_(1.0)
+                g.end_capture_to_conditional_node()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    def test_cuda_graph_many_if_nodes_in_one_graph(self):
+        pred = torch.zeros((), device="cuda", dtype=torch.bool)
+        x = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            for _ in range(40):
+                g.begin_capture_to_if_node(pred)
+                x.add_(1.0)
+                g.end_capture_to_conditional_node()
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -5797,11 +5836,9 @@ class TestCudaAllocator(TestCase):
 
     def test_allocator_backend(self):
         def check_output(script: str) -> str:
-            return (
-                subprocess.check_output([sys.executable, "-c", script])
-                .decode("ascii")
-                .strip()
-            )
+            return subprocess.check_output(
+                [sys.executable, "-c", script], env={}, text=True
+            ).strip()
 
         test_script = """\
 import os
@@ -8428,6 +8465,43 @@ class TestMemPool(TestCase):
         finally:
             torch.cuda.empty_cache()
             torch.cuda.memory._set_allocator_settings("")
+
+    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
+    @unittest.skipIf(
+        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
+    )
+    def test_use_uvm(self):
+        with torch.cuda._use_uvm():
+            x = torch.randn(256, 256, device="cuda")
+            y = torch.randn(256, 256, device="cuda")
+            z = x @ y
+        self.assertEqual(z.shape, (256, 256))
+        self.assertTrue(z.is_cuda)
+
+    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
+    @unittest.skipIf(
+        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
+    )
+    def test_use_uvm_numerics(self):
+        torch.manual_seed(42)
+        with torch.cuda._use_uvm():
+            a_uvm = torch.randn(128, 128, device="cuda")
+        torch.manual_seed(42)
+        a_reg = torch.randn(128, 128, device="cuda")
+        self.assertEqual(a_uvm, a_reg)
+
+    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
+    @unittest.skipIf(
+        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
+    )
+    def test_use_uvm_backward(self):
+        with torch.cuda._use_uvm():
+            with torch.autograd.set_multithreading_enabled(False):
+                model = torch.nn.Linear(512, 512, device="cuda")
+                out = model(torch.randn(16, 512, device="cuda"))
+                out.sum().backward()
+        self.assertIsNotNone(model.weight.grad)
+        self.assertEqual(model.weight.grad.shape, (512, 512))
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
