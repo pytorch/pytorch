@@ -50,6 +50,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_unbacked_symbols,
     resolve_unbacked_bindings,
+    SymTypes,
 )
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
@@ -1354,10 +1355,15 @@ def expand(x, sizes):
         # this cannot be done directly as below as we'll choke on the size_hint
         # here
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
-            # maybe realize input before broadcasting it
+            # Broadcast loop reuse is not graph fanout; keep the graph-fanout
+            # read-count heuristic from materializing cheap expanded producers.
+            # In deterministic modes, preserve the old materialization boundary
+            # since fusing through expanded inputs can change reduction numerics.
             x.mark_reuse(
                 V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
-                // x_size_product
+                // x_size_product,
+                graph_reuse=config.deterministic
+                or torch.are_deterministic_algorithms_enabled(),
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
@@ -2918,7 +2924,7 @@ def randn(*args, **kwargs):
 
 @register_lowering(inductor_prims.force_stride_order, type_promotion_kind=None)
 def inductor_force_stride_order(input_tensor, stride):
-    stride_order = ir.get_stride_order(stride)
+    stride_order = ir.get_stride_order(stride, V.graph.sizevars.shape_env)
     return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
 
 
@@ -8421,8 +8427,31 @@ def sym_numel(a):
     return a.get_numel()
 
 
+def _unwrap_symbolic_magic_arg(x):
+    if isinstance(x, SymTypes):
+        return x.node.expr
+    if isinstance(x, (int, float, bool)):
+        return sympy.sympify(x)
+    return x
+
+
 for method, func in magic_methods.items():
-    register_lowering(method_to_operator(method))(func)  # type: ignore[arg-type]
+
+    @register_lowering(method_to_operator(method))
+    def wrapped(*args, _func=func, **kwargs):
+        node = V.graph.current_node
+        meta_val = node.meta.get("val") if node is not None else None
+        if isinstance(meta_val, SymTypes):
+            return meta_val.node.expr
+        if any(
+            isinstance(x, (SymTypes, sympy.Basic))
+            for x in itertools.chain(args, kwargs.values())
+        ):
+            return _func(
+                *(_unwrap_symbolic_magic_arg(x) for x in args),
+                **{k: _unwrap_symbolic_magic_arg(v) for k, v in kwargs.items()},
+            )
+        return _func(*args, **kwargs)
 
 
 @register_lowering(torch.sym_sum)
