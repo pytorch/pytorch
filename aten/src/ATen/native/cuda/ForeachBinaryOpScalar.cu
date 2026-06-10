@@ -22,7 +22,7 @@
 namespace at::native {
 
 template <typename T, template <class> class Op>
-std::vector<Tensor> foreach_binary_op(
+static std::vector<Tensor> foreach_binary_op(
     TensorList tensors,
     const Scalar& scalar) {
   std::vector<std::vector<at::Tensor>> tensor_lists;
@@ -49,7 +49,7 @@ std::vector<Tensor> foreach_binary_op(
 }
 
 template <typename T, template <class> class Op>
-void foreach_binary_op_(TensorList tensors, const Scalar& scalar) {
+static void foreach_binary_op_(TensorList tensors, const Scalar& scalar) {
   std::vector<std::vector<at::Tensor>> tensor_lists;
   tensor_lists.emplace_back(tensors.vec());
 
@@ -67,7 +67,7 @@ void foreach_binary_op_(TensorList tensors, const Scalar& scalar) {
 }
 
 template <template <class> class Op>
-std::vector<Tensor> all_types_complex_bool_half_bfloat16(
+static std::vector<Tensor> all_types_complex_bool_half_bfloat16(
     TensorList tensors,
     const Scalar& scalar) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
@@ -80,7 +80,7 @@ std::vector<Tensor> all_types_complex_bool_half_bfloat16(
 }
 
 template <template <class> class Op>
-void all_types_complex_bool_half_bfloat16_(
+static void all_types_complex_bool_half_bfloat16_(
     TensorList tensors,
     const Scalar& scalar) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
@@ -93,7 +93,7 @@ void all_types_complex_bool_half_bfloat16_(
 }
 
 template <template <class> class Op>
-std::vector<Tensor> all_types_half_bfloat16(
+static std::vector<Tensor> all_types_half_bfloat16(
     TensorList tensors,
     const Scalar& scalar) {
   return AT_DISPATCH_ALL_TYPES_AND2(
@@ -105,7 +105,7 @@ std::vector<Tensor> all_types_half_bfloat16(
 }
 
 template <template <class> class Op>
-void all_types_half_bfloat16_(TensorList tensors, const Scalar& scalar) {
+static void all_types_half_bfloat16_(TensorList tensors, const Scalar& scalar) {
   AT_DISPATCH_ALL_TYPES_AND2(
       kHalf,
       kBFloat16,
@@ -115,7 +115,7 @@ void all_types_half_bfloat16_(TensorList tensors, const Scalar& scalar) {
 }
 
 template <template <class> class Op>
-std::vector<Tensor> all_types_complex_half_bfloat16(
+static std::vector<Tensor> all_types_complex_half_bfloat16(
     TensorList tensors,
     const Scalar& scalar) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
@@ -127,7 +127,7 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
 }
 
 template <template <class> class Op>
-void all_types_complex_half_bfloat16_(
+static void all_types_complex_half_bfloat16_(
     TensorList tensors,
     const Scalar& scalar) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
@@ -195,7 +195,7 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_cuda(
 // Implement via multiply with reciprocal as it's faster and makes it match
 // the behavior of regular Tensor div by scalar.  Loses one bit of
 // precision.
-Scalar scalar_reciprocal(const Scalar& scalar) {
+static Scalar scalar_reciprocal(const Scalar& scalar) {
   if (scalar.isFloatingPoint()) {
     return Scalar(1. / scalar.toDouble());
   } else if (scalar.isIntegral(/*includeBool*/ true)) {

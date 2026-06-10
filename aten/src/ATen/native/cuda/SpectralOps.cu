@@ -72,7 +72,7 @@ struct HermitianSymmetryOffsetCalculator {
 // out[:] = conj(in[:]) where in and out ordering is generalized by offset calculators
 template <typename scalar_t, typename inp_calc_t, typename out_calc_t>
 C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
-__global__ void _fft_conjugate_copy_kernel(
+static __global__ void _fft_conjugate_copy_kernel(
     int64_t numel, scalar_t * out_data, const scalar_t * in_data,
     inp_calc_t ic, out_calc_t oc) {
   CUDA_KERNEL_LOOP_TYPE(index, numel, int64_t) {
@@ -91,7 +91,7 @@ __global__ void _fft_conjugate_copy_kernel(
 // input should be a tensor of same size as full (twosided)
 // signals, but only contains half (onesided) of the values.
 // This function modifies inplace.
-void _fft_fill_with_conjugate_symmetry_cuda_(
+static void _fft_fill_with_conjugate_symmetry_cuda_(
     ScalarType dtype, IntArrayRef mirror_dims, IntArrayRef signal_half_sizes,
     IntArrayRef in_strides, const void * in_data,
     IntArrayRef out_strides, void * out_data) {

@@ -105,7 +105,7 @@ struct Msg {
  char msg[MAX_MSG_LENGTH];
 };
 template <typename scalar_t>
-__global__ void _assert_async_cuda_kernel(const scalar_t* input, Msg msg) {
+static __global__ void _assert_async_cuda_kernel(const scalar_t* input, Msg msg) {
   CUDA_KERNEL_ASSERT_MSG(input[0] != 0, msg.msg);
 }
 

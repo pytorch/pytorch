@@ -117,7 +117,7 @@ struct LpMaxFunctor {
 };
 
 template <typename T>
-__global__ void lpmax_cleanup(
+static __global__ void lpmax_cleanup(
     const T* output_per_tensor,
     TensorListAddresses addr_struct,
     int max_chunks_per_tensor) {
@@ -344,7 +344,7 @@ template <
     typename out_t,
     bool apply_root = true,
     typename out_opmath_t = at::opmath_type<out_t>>
-__global__ void lpnorm_cleanup(
+static __global__ void lpnorm_cleanup(
     const out_opmath_t* output_per_tensor,
     TensorListAddresses addr_struct,
     int max_chunks_per_tensor) {
@@ -442,7 +442,7 @@ struct ForeachNormDispatchName<false> {
 // false, returns raw sum support_infinity: if true, includes L-infinity norm
 // handling
 template <bool apply_root, bool support_infinity>
-std::vector<Tensor> foreach_tensor_norm_cuda_internal(
+static std::vector<Tensor> foreach_tensor_norm_cuda_internal(
     TensorList tensors,
     double p,
     std::optional<ScalarType> dtype) {

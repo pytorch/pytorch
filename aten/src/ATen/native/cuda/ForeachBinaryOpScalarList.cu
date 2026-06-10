@@ -22,7 +22,7 @@
 namespace at::native {
 
 template <typename T, template <class> class Op>
-std::vector<Tensor> foreach_binary_op(
+static std::vector<Tensor> foreach_binary_op(
     TensorList tensors,
     at::ArrayRef<Scalar> scalars) {
   std::vector<std::vector<at::Tensor>> tensor_lists;
@@ -50,7 +50,9 @@ std::vector<Tensor> foreach_binary_op(
 }
 
 template <typename T, template <class> class Op>
-void foreach_binary_op_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
+static void foreach_binary_op_(
+    TensorList tensors,
+    at::ArrayRef<Scalar> scalars) {
   std::vector<std::vector<at::Tensor>> tensor_lists;
   tensor_lists.emplace_back(tensors.vec());
 
@@ -68,7 +70,7 @@ void foreach_binary_op_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
 }
 
 template <template <class> class Op>
-std::vector<Tensor> all_types_complex_bool_half_bfloat16(
+static std::vector<Tensor> all_types_complex_bool_half_bfloat16(
     TensorList tensors,
     at::ArrayRef<Scalar> scalars) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
@@ -81,7 +83,7 @@ std::vector<Tensor> all_types_complex_bool_half_bfloat16(
 }
 
 template <template <class> class Op>
-void all_types_complex_bool_half_bfloat16_(
+static void all_types_complex_bool_half_bfloat16_(
     TensorList tensors,
     at::ArrayRef<Scalar> scalars) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
@@ -94,7 +96,7 @@ void all_types_complex_bool_half_bfloat16_(
 }
 
 template <template <class> class Op>
-std::vector<Tensor> all_types_half_bfloat16(
+static std::vector<Tensor> all_types_half_bfloat16(
     TensorList tensors,
     at::ArrayRef<Scalar> scalars) {
   return AT_DISPATCH_ALL_TYPES_AND2(
@@ -106,7 +108,7 @@ std::vector<Tensor> all_types_half_bfloat16(
 }
 
 template <template <class> class Op>
-void all_types_half_bfloat16_(
+static void all_types_half_bfloat16_(
     TensorList tensors,
     at::ArrayRef<Scalar> scalars) {
   AT_DISPATCH_ALL_TYPES_AND2(
@@ -118,7 +120,7 @@ void all_types_half_bfloat16_(
 }
 
 template <template <class> class Op>
-std::vector<Tensor> all_types_complex_half_bfloat16(
+static std::vector<Tensor> all_types_complex_half_bfloat16(
     TensorList tensors,
     at::ArrayRef<Scalar> scalars) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
@@ -130,7 +132,7 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
 }
 
 template <template <class> class Op>
-void all_types_complex_half_bfloat16_(
+static void all_types_complex_half_bfloat16_(
     TensorList tensors,
     at::ArrayRef<Scalar> scalars) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(

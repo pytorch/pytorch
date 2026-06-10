@@ -27,7 +27,7 @@ static constexpr int launch_size_nd = 128;
 
 template<int nt, int vt, typename func_t>
 C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
-__global__ void index_elementwise_kernel(const int64_t N, const func_t f) {
+static __global__ void index_elementwise_kernel(const int64_t N, const func_t f) {
   const auto tid = threadIdx.x;
   const auto nv = nt * vt;
   auto idx = nv * blockIdx.x + tid;
@@ -479,7 +479,7 @@ void flip_kernel_impl(TensorIterator& iter) {
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
 }
 
-void flip_kernel(TensorIterator& iter, const bool quantized) {
+static void flip_kernel(TensorIterator& iter, const bool quantized) {
   if (quantized) {
     AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cuda",
     [&] {

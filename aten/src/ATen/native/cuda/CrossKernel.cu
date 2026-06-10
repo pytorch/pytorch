@@ -8,7 +8,7 @@
 namespace at::native {
 
 template <typename T, typename OffsetCalc, typename StrideType>
-__global__ void cross_kernel(
+static __global__ void cross_kernel(
     int numel, T* out, const T* x1, const T* x2, OffsetCalc offset_calculator,
     StrideType ostride, StrideType x1stride, StrideType x2stride) {
   CUDA_KERNEL_LOOP(i, numel) {
@@ -33,7 +33,7 @@ __global__ void cross_kernel(
   }
 }
 
-void launch_cross_kernel(const TensorIteratorBase& iter, int64_t ostride,
+static void launch_cross_kernel(const TensorIteratorBase& iter, int64_t ostride,
                          int64_t x1stride, int64_t x2stride) {
   const auto N = iter.numel();
   auto offset_calculator = make_element_offset_calculator<3>(iter);
@@ -61,7 +61,7 @@ void launch_cross_kernel(const TensorIteratorBase& iter, int64_t ostride,
   });
 }
 
-void cross_impl(const Tensor& result, const Tensor& x1, const Tensor& x2, int64_t dim) {
+static void cross_impl(const Tensor& result, const Tensor& x1, const Tensor& x2, int64_t dim) {
   const int64_t ostride = result.stride(dim);
   const int64_t x1stride = x1.stride(dim);
   const int64_t x2stride = x2.stride(dim);

@@ -996,7 +996,7 @@ void launch_tinygemm_kernel(
 
 // FIXME: parallelize better, smem staging etc?
 template <int InnerKTiles>
-__global__ void matrix_to_m16n8k16_Bint4_layout(
+static __global__ void matrix_to_m16n8k16_Bint4_layout(
     // size [n][k / 2]
     const at::PackedTensorAccessor32<uint8_t, 2, at::RestrictPtrTraits> in,
     // size [ceil(n / 8)][ceil(k / (InnerKTiles * 16))][32][InnerKTiles / 2]

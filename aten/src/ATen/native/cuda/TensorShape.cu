@@ -243,7 +243,7 @@ static inline int64_t get_num_chunks(const at::Tensor& tensor, int64_t dim) {
 }
 
 // Pack multiple std::vector<int64_t> into a single cuda tensor.
-std::pair<at::Tensor, std::vector<int64_t*>> pack_vecs(
+static std::pair<at::Tensor, std::vector<int64_t*>> pack_vecs(
     std::vector<const std::vector<int64_t>*> vecs,
     const at::Device& device) {
   int64_t numel = 0;
@@ -616,7 +616,7 @@ void _chunk_cat_out_cuda_contiguous(
 } // namespace detail
 
 // See [CUDA fast path for split_with_sizes_copy.out]
-void split_with_sizes_copy_out_cuda_contiguous_no_cast(
+static void split_with_sizes_copy_out_cuda_contiguous_no_cast(
     const at::Tensor& self,
     at::IntArrayRef split_sizes,
     int64_t dim,
