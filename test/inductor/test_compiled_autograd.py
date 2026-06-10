@@ -37,11 +37,14 @@ from torch.overrides import BaseTorchFunctionMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
+    skipOps,
+    xfail,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_S390X,
     IS_WINDOWS,
+    noncontiguous_like,
     parametrize,
     scoped_load_inline,
     skipIfWindows,
@@ -229,6 +232,38 @@ main()
         # Run it three times to catch bad dynamo state resets
         for _ in range(3):
             self.run_as_subprocess(script)
+
+    def test_index_fill_value_grad_noncontiguous(self):
+        def make_inputs():
+            inp = torch.arange(25, dtype=torch.float32).reshape(5, 5)
+            inp = noncontiguous_like(inp.requires_grad_())
+            index = torch.tensor([2, 1, 4, 2, 2])
+            value = torch.tensor(-1.7658, requires_grad=True)
+            grad_out = torch.arange(1, 26, dtype=torch.float32).reshape(5, 5)
+            grad_out = noncontiguous_like(grad_out)
+            return inp, index, value, grad_out
+
+        def fn(inp, index, value, grad_out):
+            out = inp.index_fill(-1, index, value)
+            return torch.autograd.grad(out, (inp, value), grad_out, allow_unused=True)[
+                1
+            ]
+
+        expected = fn(*make_inputs())
+        self.assertEqual(expected, torch.tensor(200.0))
+
+        counters["compiled_autograd"].clear()
+        with (
+            config.patch(capture_dynamic_output_shape_ops=True),
+            compiled_autograd._enable(make_compiler_fn(backend="inductor")),
+            torch.autograd.set_multithreading_enabled(False),
+        ):
+            actual = torch.compile(fn, backend="inductor")(*make_inputs())
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
+        self.assertFalse(any("_unique" in reason for reason in counters["graph_break"]))
 
     def gen_cache_miss_log_prefix(self):
         if IS_WINDOWS:
@@ -5538,7 +5573,7 @@ test_contexts = {
 }
 
 # These groups of tests aren't supported yet
-xfail_re = re.compile(r"^test_(sparse|profiler|gradcheck|named_tensor)")
+xfail_re = re.compile(r"^test_(sparse|profiler|gradcheck)")
 
 # Tests fail at different stages, we categorize them wrt to their backends
 # We run only the last passing backend in this order:
@@ -5704,6 +5739,9 @@ if torch.distributed.is_available() and HAS_GPU_AND_TRITON:
     )
 
 xfail_hops = {"local_map_hop"}
+hop_test_hops_in_bwd_failures = {
+    xfail("register_hook", "simple"),
+}
 
 
 class TestCompiledAutogradOpInfo(TestCase):
@@ -5719,6 +5757,7 @@ class TestCompiledAutogradOpInfo(TestCase):
         list(filter(lambda op: op.name not in xfail_hops, hop_db)),
         allowed_dtypes=(torch.float,),
     )
+    @skipOps(hop_test_hops_in_bwd_failures)
     def test_hops_in_bwd(self, device, dtype, op):
         def create_bwd_fn_closure(op_args, op_kwargs):
             op_out_ref = []

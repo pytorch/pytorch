@@ -3719,7 +3719,7 @@ def _occupancy_before_and_after_fusion(
         return 1, 1  # Can't calculate, allow fusion
 
     assert num_warps
-    threads_per_block = num_warps * (device_props.warp_size or 32)
+    threads_per_block = num_warps * device_props.warp_size_or_default
 
     regs_per_block_unfused = unfused_n_regs * threads_per_block
     regs_per_block_fused = fused_n_regs * threads_per_block
@@ -4034,6 +4034,10 @@ class Scheduler:
     def __init__(self, nodes: list[ir.Operation]) -> None:
         with dynamo_timed("Scheduler.__init__"):
             self._init(nodes)
+
+    @staticmethod
+    def count_kernel_nodes(nodes: Sequence[BaseSchedulerNode]) -> int:
+        return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
 
     def _init(self, nodes: list[ir.Operation]) -> None:
         super().__init__()
@@ -7453,7 +7457,16 @@ class Scheduler:
 
             # should be true now because we checked `can_fuse_epilogue`
             assert len(node1.node.mutable_args) == 1
-            if node1.node.mutable_args[0].layout != node2.node.layout:
+
+            # Compare layouts, modulo dtype. We allow casting during codegen.
+            layout1 = node1.node.mutable_args[0].layout
+            layout2 = node2.node.layout
+            assert isinstance(layout1, ir.Layout) and isinstance(layout2, ir.Layout)
+            if (
+                layout1.size != layout2.size
+                or layout1.stride != layout2.stride
+                or layout1.device != layout2.device
+            ):
                 why("node1 and node2 uses different buf layouts")
                 return False
 
@@ -7507,7 +7520,9 @@ class Scheduler:
                 why("prologue fusion not implemented for kernel for these inputs")
                 return False
 
-            if node1.has_aliasing_or_mutation() or node2.has_aliasing_or_mutation():
+            if node1.has_aliasing_or_mutation() or (
+                template.has_aliasing_or_mutation_for_prologue_fusion(node2)
+            ):
                 why("template prologue can only fuse functional pointwise nodes")
                 return False
 
@@ -9105,12 +9120,7 @@ class Scheduler:
         if min_size > 0:
             for i, (partition, skip) in enumerate(zip(partitions, skip_cudagraphs)):
                 if not skip:
-                    # Count kernels excluding NopKernelSchedulerNode
-                    kernel_count = sum(
-                        1
-                        for n in partition
-                        if not isinstance(n, NopKernelSchedulerNode)
-                    )
+                    kernel_count = self.count_kernel_nodes(partition)
                     if kernel_count < min_size:
                         skip_cudagraphs[i] = True
                         cudagraphs_log.debug(
