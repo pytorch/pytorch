@@ -580,72 +580,81 @@ class TestControlDeps(InductorTestCase):
             "expected MutationOutput entries for pass-through values in control_deps",
         )
 
-    def test_stream_cache_setup_only_once_per_device(self):
-        """When codegen_device_guard_enter is called multiple times for the same
-        device (e.g., forward + backward sharing a wrapper), only the first call
-        should set setup_stream_cache=True. A different device gets its own
-        setup. Re-entering a previous device after a different one re-runs
-        setup (the flat variable names are shared across device guards)."""
-        from unittest.mock import MagicMock
+    def test_stream_cache_setup_only_once_per_config(self):
+        """When codegen_device_guard_enter is called multiple times with the
+        same (device, num_streams, stream_map) config (e.g., forward + backward
+        sharing a wrapper), only the first call should set
+        setup_stream_cache=True.  A different config re-runs setup."""
+        from torch._inductor.codegen.wrapper import (
+            EnterDeviceContextManagerWithStreamInfoLine,
+            PythonWrapperCodegen,
+        )
 
-        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
-
-        codegen = MagicMock(spec=PythonWrapperCodegen)
-        codegen._last_stream_cache_device = None
-        codegen.last_seen_device_guard_index = None
-        codegen.writeline = MagicMock()
-
+        codegen = PythonWrapperCodegen()
         stream_map = {1: 10}
+        lines: list[EnterDeviceContextManagerWithStreamInfoLine] = []
+
+        def capture_writeline(line):
+            if isinstance(line, EnterDeviceContextManagerWithStreamInfoLine):
+                lines.append(line)
+
+        orig_writeline = codegen.writeline
+        codegen.writeline = capture_writeline
 
         # First call for device 0: should setup
-        PythonWrapperCodegen.codegen_device_guard_enter(
-            codegen,
-            device_idx=0,
-            num_streams=2,
-            stream_idx_to_user_obj_idx=stream_map,
+        codegen.codegen_device_guard_enter(
+            device_idx=0, num_streams=2, stream_idx_to_user_obj_idx=stream_map,
         )
-        first_line = codegen.writeline.call_args_list[0][0][0]
-        self.assertTrue(first_line.setup_stream_cache)
+        self.assertTrue(lines[0].setup_stream_cache)
 
-        # Second call for same device 0: should NOT setup again
-        PythonWrapperCodegen.codegen_device_guard_enter(
-            codegen,
-            device_idx=0,
-            num_streams=2,
-            stream_idx_to_user_obj_idx=stream_map,
+        # Same config again: should NOT setup
+        codegen.codegen_device_guard_enter(
+            device_idx=0, num_streams=2, stream_idx_to_user_obj_idx=stream_map,
         )
-        second_line = codegen.writeline.call_args_list[1][0][0]
         self.assertFalse(
-            second_line.setup_stream_cache,
-            "Second entry for same device should skip stream cache setup",
+            lines[1].setup_stream_cache,
+            "Second entry with same config should skip stream cache setup",
         )
 
-        # First call for device 1: should setup (different device)
-        PythonWrapperCodegen.codegen_device_guard_enter(
-            codegen,
-            device_idx=1,
-            num_streams=2,
-            stream_idx_to_user_obj_idx=stream_map,
+        # Different device: should setup
+        codegen.codegen_device_guard_enter(
+            device_idx=1, num_streams=2, stream_idx_to_user_obj_idx=stream_map,
         )
-        third_line = codegen.writeline.call_args_list[2][0][0]
         self.assertTrue(
-            third_line.setup_stream_cache,
-            "First entry for a new device should setup stream cache",
+            lines[2].setup_stream_cache,
+            "Different device should setup stream cache",
         )
 
         # Re-enter device 0 after device 1: must re-setup because the flat
         # DEFAULT_STREAM / stream1 variables now hold device 1's values.
-        PythonWrapperCodegen.codegen_device_guard_enter(
-            codegen,
-            device_idx=0,
-            num_streams=2,
-            stream_idx_to_user_obj_idx=stream_map,
+        codegen.codegen_device_guard_enter(
+            device_idx=0, num_streams=2, stream_idx_to_user_obj_idx=stream_map,
         )
-        fourth_line = codegen.writeline.call_args_list[3][0][0]
         self.assertTrue(
-            fourth_line.setup_stream_cache,
+            lines[3].setup_stream_cache,
             "Re-entering device 0 after device 1 must re-setup stream cache",
         )
+
+        # Same device, different stream map: must re-setup
+        codegen.codegen_device_guard_enter(
+            device_idx=0, num_streams=2, stream_idx_to_user_obj_idx={1: 20},
+        )
+        self.assertTrue(
+            lines[4].setup_stream_cache,
+            "Same device with different stream map must re-setup",
+        )
+
+        # Same device, more streams: must re-setup
+        codegen.codegen_device_guard_enter(
+            device_idx=0, num_streams=3,
+            stream_idx_to_user_obj_idx={1: 20, 2: 30},
+        )
+        self.assertTrue(
+            lines[5].setup_stream_cache,
+            "Same device with more streams must re-setup",
+        )
+
+        codegen.writeline = orig_writeline
 
     @requires_gpu()
     def test_generated_code_uses_get_stream_by_index(self):

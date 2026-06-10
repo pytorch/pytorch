@@ -1268,7 +1268,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def __init__(self):
         super().__init__()
-        self._last_stream_cache_device: int | None = None
+        self._last_stream_cache_key: tuple[int, int, tuple[tuple[int, int], ...]] | None = None
         self._graph_return_counter: int = 0
         self._pending_input_asserts: dict[str, tuple[str, str]] = {}
         self._pending_alignment_copies: OrderedSet[str] = OrderedSet()
@@ -1848,8 +1848,9 @@ class PythonWrapperCodegen(CodeGen):
             )
             if not self.imports.contains(import_line):
                 self.imports.writeline(import_line)
-            setup_stream_cache = self._last_stream_cache_device != device_idx
-            self._last_stream_cache_device = device_idx
+            cache_key = (device_idx, num_streams, tuple(sorted(stream_idx_to_user_obj_idx.items())))
+            setup_stream_cache = self._last_stream_cache_key != cache_key
+            self._last_stream_cache_key = cache_key
             self.writeline(
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
