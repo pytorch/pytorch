@@ -1316,6 +1316,19 @@ class TypedStorage:
     def _to(self, dtype):
         if not isinstance(dtype, torch.dtype):
             raise TypeError(f"Argument 'dtype' must be torch.dtype, not {type(dtype)}")
+        if self.dtype in (
+            torch.quint8,
+            torch.quint4x2,
+            torch.quint2x4,
+            torch.qint32,
+            torch.qint8,
+        ):
+            raise RuntimeError(
+                f"Cannot cast quantized storage (dtype={self.dtype}) to a "
+                f"non-quantized dtype ({dtype}). Quantized storage is not "
+                f"self-contained and requires a scale and zero_point to be "
+                f"interpreted, so direct dtype conversion is not supported."
+            )
         storage = (
             torch.tensor([], dtype=self.dtype, device=self.device)
             .set_(self)
