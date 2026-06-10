@@ -553,11 +553,26 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     input_node.get_dtype()
                 ).removeprefix("torch.")
 
-            output_size = ctb.layout.size
-            precompile_shapes["output"] = [int(s) for s in output_size]
-            output_stride = ctb.layout.stride
-            precompile_strides["output"] = [int(s) for s in output_stride]
-            precompile_dtypes["output"] = str(ctb.layout.dtype).removeprefix("torch.")
+            if epilogue_nodes:
+                final_node = cast(SchedulerNode, epilogue_nodes[-1])
+                out_layout = cast(
+                    Layout,
+                    final_node.node.get_layout(),  # pyrefly: ignore [missing-attribute]
+                )
+            else:
+                out_layout = cast(Layout, ctb.layout)
+            precompile_shapes["output"] = [int(s) for s in out_layout.size]
+            precompile_strides["output"] = [int(s) for s in out_layout.stride]
+            precompile_dtypes["output"] = str(out_layout.dtype).removeprefix("torch.")
+
+            if epilogue_reads:
+                for read_name in epilogue_reads:
+                    buf = V.graph.get_buffer(read_name)
+                    precompile_shapes[read_name] = [int(s) for s in buf.get_size()]
+                    precompile_strides[read_name] = [int(s) for s in buf.get_stride()]
+                    precompile_dtypes[read_name] = str(buf.get_dtype()).removeprefix(
+                        "torch."
+                    )
         except (TypeError, RuntimeError, ValueError):
             log.debug(
                 "Skipping NV Universal GEMM precompile metadata: symbolic sizes "
@@ -666,7 +681,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
         input_nodes = cast(list[Buffer], ctb.inputs)
         if epilogue_nodes:
             final_node = cast(SchedulerNode, epilogue_nodes[-1])
-            output_layout = cast(Layout, final_node.node.get_layout())
+            output_layout = cast(
+                Layout,
+                final_node.node.get_layout(),  # pyrefly: ignore [missing-attribute]
+            )
         else:
             output_layout = cast(Layout, ctb.layout)
 
