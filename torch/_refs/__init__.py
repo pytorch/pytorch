@@ -5642,7 +5642,8 @@ def meshgrid(
         lambda: "meshgrid expects its inputs to be tensors",
     )
 
-    torch._check(len(tensors) > 0, lambda: "meshgrid expects a non-empty TensorList")
+    if len(tensors) == 0:
+        return []
 
     for i in range(len(tensors) - 1):
         torch._check(
