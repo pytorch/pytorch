@@ -3969,7 +3969,9 @@ def _has_exception_handler(tx: InstructionTranslatorBase) -> bool:
         return False
 
     def check_exc_match_older_python(target_offset: int) -> bool:
-        """Check if exception handler at target_offset contains JUMP_IF_NOT_EXC_MATCH bytecode for <=3.10."""
+        """
+        Check if exception handler at target_offset contains JUMP_IF_NOT_EXC_MATCH bytecode for <=3.10.
+        """
         start = offset_to_index.get(target_offset)
         if start is None:
             return False
@@ -4232,14 +4234,30 @@ def _get_fake_value_impl(
             )
 
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        tx.output.graph.erase_node(node)
-        from .exc import raise_observed_exception
+        if _has_exception_handler(tx):
+            # Use ObservedException for full-graph compilation
+            tx.output.graph.erase_node(node)
+            from .exc import raise_observed_exception
 
-        raise_observed_exception(RuntimeError, tx, args=[msg])
+            raise_observed_exception(RuntimeError, tx, args=[msg])
+        else:
+            # No handler - use graph break with TorchRuntimeError
+            _wrap_graph_break_with_torch_runtime_err(
+                lambda: unimplemented(
+                    gb_type="RuntimeError when making fake tensor call",
+                    context="",
+                    explanation=msg,
+                    hints=[*graph_break_hints.USER_ERROR],
+                    from_exc=cause,
+                )
+            )
+            raise AssertionError("should not be reachable") from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
-            torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
+            torch.Tensor,
+            functools.partial(ensure_graph_fake, tx=tx),
+            ret_val,  # pyrefly: ignore [unbound-name]
         )
 
     if (
