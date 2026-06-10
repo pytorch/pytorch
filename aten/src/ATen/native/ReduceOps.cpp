@@ -1804,7 +1804,7 @@ TORCH_IMPL_FUNC(argmin_out)
   argmax_argmin_impl(self, dim, keepdim, result, argmin_stub);
 }
 
-static double std_var_all_cpu(const Tensor& self, double correction, bool take_sqrt) {
+static std::tuple<double, double> std_var_all_cpu(const Tensor& self, double correction, bool take_sqrt) {
   const auto dtype = self.scalar_type();
   TORCH_CHECK(dtype == kDouble || dtype == kFloat,
               "std_var_all: Unsupported dtype ", dtype);
@@ -1849,9 +1849,9 @@ static double std_var_all_cpu(const Tensor& self, double correction, bool take_s
   if (dtype == kFloat) {
     // Convert to infinity if out of range for a float.
     // Doing it now prevents checked_convert failing later
-    return static_cast<float>(result);
+    return {static_cast<float>(mean), static_cast<float>(result)};
   }
-  return result;
+  return {mean, result};
 }
 
 namespace {
@@ -1928,7 +1928,7 @@ static Tensor& std_var_out(
     // ATen,
     //   so all-reduce has a custom implementation.
     //   See https://github.com/pytorch/pytorch/pull/43858.
-    result.fill_(std_var_all_cpu(self, correction, take_sqrt));
+    result.fill_(std::get<1>(std_var_all_cpu(self, correction, take_sqrt)));
   } else {
     std_var_stub(iter.device_type(), iter, correction, take_sqrt);
   }
@@ -2001,6 +2001,15 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     // Trivial reduction
     result1.fill_(std::numeric_limits<double>::quiet_NaN());
     result2.fill_(std::numeric_limits<double>::quiet_NaN());
+  } else if (
+      result1.numel() == 1 && iter.device_type() == kCPU &&
+      iter.common_dtype() != kBFloat16 && iter.common_dtype() != kHalf) {
+    // Mirror the CPU all-reduce fast path used by std / var alone (see
+    // std_var_out above); std_var_stub is scalar Welford and is a few times
+    // slower than the parallel two-pass path here.
+    auto [mean, res] = std_var_all_cpu(self, correction, take_sqrt);
+    result1.fill_(res);
+    result2.fill_(mean);
   } else {
     std_var_stub(iter.device_type(), iter, correction, take_sqrt);
   }

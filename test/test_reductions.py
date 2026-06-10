@@ -3086,6 +3086,36 @@ class TestReductions(TestCase):
             self.assertEqual(var1, var2)
             self.assertEqual(mean1, mean2)
 
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64)
+    def test_std_var_mean_all_reduce_cpu_fast_path(self, device, dtype):
+        # Regression guard for the CPU all-reduce fast path in
+        # std_var_mean_out added for issue #122191. On fp32/fp64 CPU,
+        # std_mean / var_mean over all dims take the same parallel two-pass
+        # route as std / var alone instead of scalar Welford; verify the
+        # outputs stay consistent with separate calls and within fp32
+        # precision of an fp64 ground truth.
+        torch.manual_seed(0)
+        # Non-trivial mean and stddev; |value| ~ 10 stays well inside fp32.
+        x = make_tensor(
+            (4096,), dtype=dtype, device=device, low=-3.0, high=3.0) + 10.0
+        ref_mean = x.double().mean().item()
+        # cascade_sum(fp32) accumulates error O(log(N) * eps * |value|);
+        # N=4096, |value|=10 => ~1.4e-5.
+        mean_atol = 5e-5 if dtype is torch.float32 else 1e-12
+        for correction in (None, 0, 1):
+            for keepdim in (False, True):
+                kwargs = dict(correction=correction, keepdim=keepdim)
+                got_std, got_smean = torch.std_mean(x, **kwargs)
+                got_var, got_vmean = torch.var_mean(x, **kwargs)
+                # the fast path must agree with separate std / var / mean
+                # calls, which also route through std_var_all_cpu + cascade_sum.
+                self.assertEqual(got_std, torch.std(x, **kwargs))
+                self.assertEqual(got_var, torch.var(x, **kwargs))
+                self.assertEqual(got_smean, got_vmean)
+                self.assertEqual(
+                    got_smean.item(), ref_mean, atol=mean_atol, rtol=0)
+
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     @skipIfMPS
     def test_warn_invalid_degrees_of_freedom(self, device, dtype):
