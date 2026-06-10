@@ -392,6 +392,12 @@ class PackageImporter(Importer):
                 f"module {module.__name__} already exists in _package_imported_modules"
             )
         _package_imported_modules[module.__name__] = module
+        # Also register in sys.modules under the mangled name so that
+        # stdlib code (e.g. dataclasses._is_type in Python 3.12+) that
+        # does sys.modules.get(cls.__module__) can find the module.
+        # The mangled name (e.g. "<torch_package_0>.foo.bar") is unique
+        # and won't collide with normal module names.
+        sys.modules[module.__name__] = module
 
         # preemptively install on the parent to prevent IMPORT_FROM from trying to
         # access sys.modules
