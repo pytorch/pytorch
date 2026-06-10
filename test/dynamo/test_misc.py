@@ -884,6 +884,68 @@ graph():
                 optimized_g = torch.compile(f, backend=counts, fullgraph=True)
                 y = optimized_g(x)
 
+    def test_custom_op_missing_fake_impl_graph_breaks(self):
+        @torch.library.custom_op(
+            "test_dynamo::missing_fake_graph_break",
+            mutates_args=(),
+            tags=torch.Tag.pt2_compliant_tag,
+        )
+        def missing_fake(x: Tensor) -> Tensor:
+            return x.sin()
+
+        def fn(x):
+            return torch.ops.test_dynamo.missing_fake_graph_break(x) + 1
+
+        x = torch.randn(3)
+        expected = fn(x)
+        counters.clear()
+
+        result = torch.compile(fn, backend=CompileCounter(), fullgraph=False)(x)
+
+        self.assertEqual(result, expected)
+        self.assertTrue(
+            any(
+                "Custom operator does not support running with fake tensors" in msg
+                and "test_dynamo.missing_fake_graph_break" in msg
+                for msg in counters["graph_break"]
+            )
+        )
+
+    def test_custom_op_fake_data_access_error_graph_breaks(self):
+        @torch.library.custom_op(
+            "test_dynamo::fake_data_access_graph_break",
+            mutates_args=(),
+            tags=torch.Tag.pt2_compliant_tag,
+        )
+        def fake_data_access(x: Tensor) -> Tensor:
+            return x.sin()
+
+        @fake_data_access.register_fake
+        def _(x):
+            raise RuntimeError(
+                "The tensor has a non-zero number of elements, but its data "
+                "is not allocated yet.\nIf you're using torch.compile/export/fx, "
+                "it is likely that we are erroneously tracing into a custom kernel."
+            )
+
+        def fn(x):
+            return torch.ops.test_dynamo.fake_data_access_graph_break(x) + 1
+
+        x = torch.randn(3)
+        expected = fn(x)
+        counters.clear()
+
+        result = torch.compile(fn, backend=CompileCounter(), fullgraph=False)(x)
+
+        self.assertEqual(result, expected)
+        self.assertTrue(
+            any(
+                "Custom operator does not support running with fake tensors" in msg
+                and "test_dynamo.fake_data_access_graph_break" in msg
+                for msg in counters["graph_break"]
+            )
+        )
+
     @torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True)
     def test_pt2_compliant_overload(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:

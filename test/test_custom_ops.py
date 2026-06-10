@@ -4549,8 +4549,7 @@ Please use `add.register_fake` to add an fake impl.""",
                 return add(x, y)
 
             x = torch.randn(3)
-            with self.assertRaisesRegex(RuntimeError, "no fake impl"):
-                f(x, y)
+            self.assertEqual(f(x, y), x + y)
 
         abstract_called = False
 

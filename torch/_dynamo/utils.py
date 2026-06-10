@@ -3928,6 +3928,30 @@ def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) 
     return msg
 
 
+def _custom_op_name_for_fake_tensor_error(node: torch.fx.Node) -> str | None:
+    target = node.target
+    namespace = None
+
+    if isinstance(target, torch._ops.OpOverload):
+        namespace = target.namespace
+    elif isinstance(target, torch._ops.OpOverloadPacket):
+        namespace = target._qualified_op_name.split("::", 1)[0]
+
+    if namespace is None or namespace in {"aten", "prims", "prim"}:
+        return None
+    return str(target)
+
+
+def _is_missing_fake_custom_op_error(node: torch.fx.Node, cause: BaseException) -> bool:
+    if _custom_op_name_for_fake_tensor_error(node) is None:
+        return False
+
+    msg = str(cause)
+    return "no fake impl registered" in msg or (
+        "data is not allocated yet" in msg and "tracing into a custom kernel" in msg
+    )
+
+
 def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> NoReturn:
     from .exc import TorchRuntimeError, Unsupported
 
@@ -4148,6 +4172,22 @@ def _get_fake_value_impl(
                 context=f"TypeError {node.target}: {cause}",
                 explanation="",
                 hints=[*graph_break_hints.USER_ERROR],
+                from_exc=cause,
+            )
+        elif _is_missing_fake_custom_op_error(node, cause):
+            custom_op_name = _custom_op_name_for_fake_tensor_error(node)
+            unimplemented(
+                gb_type="Custom operator does not support running with fake tensors",
+                context=f"unsupported operator: {custom_op_name}",
+                explanation=(
+                    "Dynamo attempted to run a custom operator with fake tensors, "
+                    "but the operator requires real tensor data. This commonly "
+                    "happens when the operator does not have a fake/meta "
+                    "implementation."
+                ),
+                hints=[
+                    "Register a fake/meta implementation for the operator to compile through it.",
+                ],
                 from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
