@@ -2284,7 +2284,7 @@ def export(
         _SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG,
     )
 
-    shapes_spec: ShapesSpec | None = None
+    shapes_spec: ShapesSpec | ParamsSpec | None = None
     if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
         if constraints:
             raise ValueError(
@@ -2293,11 +2293,8 @@ def export(
             )
         if prefer_deferred_runtime_asserts_over_guards:
             raise ValueError(_SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG)
-        shapes_spec = (
-            ShapesSpec(dynamic_shapes)
-            if isinstance(dynamic_shapes, ParamsSpec)
-            else dynamic_shapes
-        )
+        # ParamsSpec is normalized to ShapesSpec downstream in OptimizeContext.
+        shapes_spec = dynamic_shapes
         dynamic_shapes = None
 
     if _log_export_usage:
@@ -2485,11 +2482,6 @@ def export(
             ),
             _compiling_state_context(),
         ):
-            # `optimize_assert` is dynamo's single-graph-capture entry point
-            # (used by both `fullgraph=True` torch.compile and export). It
-            # forces graph-break-as-error and traces `f` once into a single
-            # FX graph; here the backend just captures the graph instead of
-            # compiling/running it.
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(
