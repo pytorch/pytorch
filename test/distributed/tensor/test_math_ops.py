@@ -30,7 +30,8 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorOpTestBase,
+    LocalDTensorOpTestBase,
     map_local_for_rank,
     skip_unless_torch_gpu,
     with_comms,
@@ -40,7 +41,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 funcol = torch.ops.c10d_functional
 
 
-class DistMathOpsTest(DTensorTestBase):
+class DistMathOpsTest(DTensorOpTestBase):
     def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
         for name, param_m2 in m2.named_parameters():
@@ -1063,7 +1064,7 @@ class DistMathOpsTest(DTensorTestBase):
     def test_cumsum(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
-        inp = torch.rand(3, 5, device=self.device_type)
+        inp = torch.arange(15, dtype=torch.float, device=self.device_type).reshape(3, 5)
 
         shard_dim = 0
         input_dtensor = distribute_tensor(
@@ -1091,7 +1092,9 @@ class DistMathOpsTest(DTensorTestBase):
     def test_scan_ops(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
-        inp = torch.rand(3, 5, device=self.device_type)
+        inp = torch.arange(
+            1, 16, dtype=torch.float, device=self.device_type
+        ).reshape(3, 5)
 
         shard_dim = 0
         input_dtensor = distribute_tensor(
@@ -1113,7 +1116,9 @@ class DistMathOpsTest(DTensorTestBase):
     def test_scan_ops_with_indices(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
-        inp = torch.rand(12, 8, device=self.device_type)
+        inp = torch.arange(
+            96, dtype=torch.float, device=self.device_type
+        ).reshape(12, 8)
 
         shard_dim = 0
         input_dtensor = distribute_tensor(
@@ -1148,7 +1153,11 @@ class DistMathOpsTest(DTensorTestBase):
     @with_comms
     def test_dim_reductions_with_indices(self):
         device_mesh = self.build_device_mesh()
-        tensor = torch.randn(12, 8, device=self.device_type)
+        # Use a deterministic tensor so all threads see the same data
+        # (torch.randn gives independent values per thread under MultiThreadedTestCase).
+        tensor = torch.arange(
+            96, dtype=torch.float, device=self.device_type
+        ).reshape(12, 8)
         shard_dim = 0
         dtensor = distribute_tensor(tensor, device_mesh, [Shard(shard_dim)])
 
@@ -1277,7 +1286,7 @@ class DistMathOpsTest(DTensorTestBase):
     def test_logsumexp(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
-        inp = torch.rand(3, 5, device=self.device_type)
+        inp = torch.arange(15, dtype=torch.float, device=self.device_type).reshape(3, 5)
 
         shard_dim = 0
         input_dtensor = distribute_tensor(
@@ -1835,7 +1844,7 @@ class DistMathOpsTest(DTensorTestBase):
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
-    DistMathOpsTest,
+    DistMathOpsTest, base_class=LocalDTensorOpTestBase
 )
 
 if __name__ == "__main__":

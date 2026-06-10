@@ -39,7 +39,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorOpTestBase,
+    LocalDTensorOpTestBase,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -62,7 +63,7 @@ def scale_for_fp8(
     return t_fp8.flatten(end_dim=1).flatten(start_dim=-2), scale.view(scale_shape)
 
 
-class DistMatrixOpsTest(DTensorTestBase):
+class DistMatrixOpsTest(DTensorOpTestBase):
     @with_comms
     def test_addmm(self):
         """
@@ -1138,7 +1139,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 instantiate_parametrized_tests(DistMatrixOpsTest)
 
 DistMatrixOpsTestWithLocalTensor = create_local_tensor_test_class(
-    DistMatrixOpsTest,
+    DistMatrixOpsTest, base_class=LocalDTensorOpTestBase
 )
 
 if __name__ == "__main__":
