@@ -1658,6 +1658,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @unittest.skipIf(
         IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED, "flaky on AArch64 (no SVE)"
     )
+    @unittest.skipIf(
+        torch.ops.mkldnn._is_mkldnn_acl_supported(), "OP fusion disabled with ACL"
+    )
     def test_int8_woq_mm(self, dtype, batch_size, mid_dim, in_features, out_features):
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
