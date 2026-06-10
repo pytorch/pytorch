@@ -160,8 +160,7 @@ def aoti_compile_and_package(
 
 def _aoti_compile_and_package_inner(
     gm: torch.nn.Module,
-    # flat_example_inputs: List[Any],
-    args: tuple[Any],
+    args: tuple[Any, ...],
     kwargs: dict[str, Any] | None = None,
     *,
     load_and_run: bool = False,
@@ -193,7 +192,12 @@ def _aoti_compile_and_package_inner(
 
     kwargs = kwargs or {}
 
-    aoti_files = aot_compile(gm, args, kwargs, options=inductor_configs)
+    aoti_files = _compile_aot_core(
+        gm,
+        args,
+        kwargs,
+        options=inductor_configs,
+    )
     assert isinstance(aoti_files, list)
 
     if package_path is None:
@@ -236,6 +240,38 @@ def _aoti_compile_and_package_inner(
             compiled_model(*args, **kwargs)
 
     return package_path
+
+
+def _compile_aot_core(
+    gm: torch.fx.GraphModule,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None = None,
+    *,
+    options: dict[str, Any] | None = None,
+) -> str | list[str | Weights] | torch.fx.GraphModule:
+    """Shared AOTInductor compile path for compile-only and package entry points."""
+    from .compile_fx import _aoti_flatten_inputs, compile_fx_aot
+
+    if hasattr(gm, "_guards_fn"):
+        # Do not compile the guards function, since it may contain checks
+        # that are not currently supported by AOTI. In particular, non-Tensor
+        # arguments are converted to None and will fail specialization checks.
+        node = next(iter(gm.graph.find_nodes(op="call_module", target="_guards_fn")))
+        gm.graph.erase_node(node)
+        delattr(gm, "_guards_fn")
+        gm.recompile()
+
+    flat_example_inputs, options = _aoti_flatten_inputs(
+        gm, args, kwargs, options=options
+    )
+    from torch._export.utils import _compiling_state_context
+
+    with _compiling_state_context():
+        return compile_fx_aot(
+            gm,
+            flat_example_inputs,  # type: ignore[arg-type]
+            config_patches=options,
+        )
 
 
 def aoti_load_package(
@@ -292,28 +328,7 @@ def aot_compile(
         AOTI if aot_inductor.package=True.
         TODO: make it return a list by default
     """
-    from .compile_fx import _aoti_flatten_inputs, compile_fx_aot
-
-    if hasattr(gm, "_guards_fn"):
-        # Do not compile the guards function, since it may contain checks
-        # that are not currently supported by AOTI. In particular, non-Tensor
-        # arguments are converted to None and will fail specialization checks.
-        node = next(iter(gm.graph.find_nodes(op="call_module", target="_guards_fn")))
-        gm.graph.erase_node(node)
-        delattr(gm, "_guards_fn")
-        gm.recompile()
-
-    flat_example_inputs, options = _aoti_flatten_inputs(
-        gm, args, kwargs, options=options
-    )
-    from torch._export.utils import _compiling_state_context
-
-    with _compiling_state_context():
-        return compile_fx_aot(
-            gm,
-            flat_example_inputs,  # type: ignore[arg-type]
-            config_patches=options,
-        )
+    return _compile_aot_core(gm, args, kwargs, options=options)
 
 
 lite_mode_options = {
