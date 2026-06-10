@@ -13952,7 +13952,6 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg_lstsq
-    MPS: linalg_lstsq_mps
   tags: dynamic_output_shape
 
 - func: linalg_lstsq.out(Tensor self, Tensor b, float? rcond=None, *, str? driver=None, Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values) -> (Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values)

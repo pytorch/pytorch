@@ -1425,7 +1425,10 @@ kernel void svd_jacobi(
           }
         }
       }
-      threadgroup_barrier(mem_flags::mem_threadgroup);
+      threadgroup_barrier(
+          params.stage_v
+              ? mem_flags::mem_threadgroup
+              : (mem_flags::mem_threadgroup | mem_flags::mem_device));
     }
 
     threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);

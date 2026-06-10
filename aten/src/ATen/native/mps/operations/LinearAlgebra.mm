@@ -2112,10 +2112,10 @@ TORCH_IMPL_FUNC(linalg_qr_out_mps)(const Tensor& A, c10::string_view mode, const
 
 // SVD-based least-squares (x = V Sigma^+ U^H b); reproduces the per-driver output
 // rules (gels: neither rank nor sv; gelsy: rank; gelsd/gelss: both) to match LAPACK.
-std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq_mps(const Tensor& input,
-                                                            const Tensor& other,
-                                                            std::optional<double> rcond,
-                                                            std::optional<std::string_view> driver) {
+static std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq_mps(const Tensor& input,
+                                                                   const Tensor& other,
+                                                                   std::optional<double> rcond,
+                                                                   std::optional<std::string_view> driver) {
   TORCH_CHECK(input.dim() >= 2, "torch.linalg.lstsq: input must have at least 2 dimensions.");
   TORCH_CHECK(other.dim() >= 1, "torch.linalg.lstsq: other must have at least 1 dimension.");
   TORCH_CHECK(input.scalar_type() == other.scalar_type(),
@@ -2137,7 +2137,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq_mps(const Tensor& input,
     TORCH_CHECK(allowed_drivers.find(driver_name) != allowed_drivers.end(),
                 "torch.linalg.lstsq: parameter `driver` should be one of (gels, gelsy, gelsd, gelss)");
   } else {
-    driver_name = "gelsd";
+    driver_name = "gelsy";
   }
 
   const bool sets_rank = (driver_name != "gels");

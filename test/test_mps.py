@@ -11024,6 +11024,21 @@ class TestLinalgMPS(TestCaseMPS):
         m2 = torch.randn(25, device=device).to(dtype)
         self._test_addr(torch.addr, M, m1, m2, beta=0)
 
+    def test_linalg_lstsq_default_driver(self, device="mps", dtype=torch.float32):
+        # With no driver= argument MPS should match the CPU default (gelsy), whose
+        # output shapes differ from the other drivers: rank is populated while
+        # residuals and singular_values are left empty. Check all four outputs so a
+        # CPU->MPS move does not silently change them.
+        torch.manual_seed(0)
+        A = torch.randn(6, 4, dtype=dtype)
+        B = torch.randn(6, 3, dtype=dtype)
+        cpu = torch.linalg.lstsq(A, B)
+        mps = torch.linalg.lstsq(A.to(device), B.to(device))
+        self.assertEqual(mps.solution.cpu(), cpu.solution, atol=1e-4, rtol=1e-4)
+        self.assertEqual(mps.residuals.cpu(), cpu.residuals)
+        self.assertEqual(mps.rank.cpu(), cpu.rank)
+        self.assertEqual(mps.singular_values.cpu(), cpu.singular_values)
+
     def test_matrix_rank(self, device="mps", dtype=torch.float32):
         matrix_rank = torch.linalg.matrix_rank
 
