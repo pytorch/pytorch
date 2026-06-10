@@ -54,6 +54,7 @@ from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
     DeviceProperties,
+    get_warp_size,
     native_matmul_persistent_rblock,
     ReductionHint,
     TRITON_MAX_BLOCK,
@@ -122,7 +123,7 @@ from .triton_utils import (
     config_of,
     equal_1_arg_indices,
     is_unaligned_buffer_name,
-    non_constexpr_signature,
+    select_tile_hint,
     should_unwrap_unspec_arg,
     signature_to_meta,
     use_uint8_triton_storage_for_cuda_float8_e4m3fn,
@@ -6506,14 +6507,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         else:
-            tile_hint = ""
-            if len(size_hints) == 2:
-                if (
-                    len(non_constexpr_signature(signature)) == 4
-                ):  # input, output and 2 args
-                    tile_hint = "tile_hint=TileHint.SQUARE,"
-                else:
-                    tile_hint = "tile_hint=TileHint.DEFAULT,"
+            hint = select_tile_hint(size_hints, signature)
+            tile_hint = f"tile_hint=TileHint.{hint.name}," if hint is not None else ""
             heuristics_line = f"""
                 @triton_heuristics.{self._get_heuristic()}(
                     size_hints={size_hints!r}, {tile_hint}
@@ -6828,7 +6823,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # faults on AMD hardware.  Keep the dynamic mask so that all
             # hardware stays correct.
             device = V.graph.get_current_device_or_throw()
-            warp_size = DeviceProperties.create(device).warp_size or 32
+            warp_size = get_warp_size(device)
             if isinstance(max_block, int) and max_block < warp_size:
                 return False
         elif tree.prefix == "x" and self.no_x_dim:
