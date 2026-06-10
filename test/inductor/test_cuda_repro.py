@@ -1346,6 +1346,85 @@ class CudaReproTests(TestCase):
         buf2 = torch.zeros((2, 512, 768), device=device_type)
         forward(buf0, buf1, buf2)
 
+    def _count_inductor_random_calls(self, code):
+        kernel_code = "\n".join(code)
+        return sum(
+            kernel_code.count(token)
+            for token in (
+                "tl.rand(",
+                "triton_helpers.rand4x(",
+                "triton_helpers.rand_eager_kernel(",
+            )
+        )
+
+    def _run_dropout_random_codegen(self, *, return_random=False, use_where=False):
+        batch, heads, rows, cols = 3, 8, 512, 512
+
+        @torch.compile(fullgraph=True)
+        def forward(bmm, full_mask, fill_value, inductor_seeds):
+            view = torch.ops.aten.view.default(bmm, [batch, heads, rows, cols])
+            masked = torch.ops.aten.where.self(full_mask, fill_value, view)
+            amax = torch.ops.aten.amax.default(masked, [-1], True)
+            sub = torch.ops.aten.sub.Tensor(masked, amax)
+            exp = torch.ops.aten.exp.default(sub)
+            denom = torch.ops.aten.sum.dim_IntList(exp, [-1], True)
+            softmax = torch.ops.aten.div.Tensor(exp, denom)
+            seed = torch.ops.prims.inductor_lookup_seed.default(inductor_seeds, 2)
+            rand = torch.ops.prims.inductor_random.default(
+                [batch, heads, rows, cols], seed, "rand"
+            )
+            mask = torch.ops.aten.gt.Scalar(rand, 0.1)
+            if use_where:
+                zero = torch.ops.aten.full.default(
+                    [batch, heads, rows, cols],
+                    0,
+                    dtype=torch.float32,
+                    layout=torch.strided,
+                    device=torch.device(device_type),
+                    pin_memory=False,
+                )
+                dropout = torch.ops.aten.where.self(mask, softmax, zero)
+            else:
+                dropout = torch.ops.aten.mul.Tensor(mask, softmax)
+            scaled = torch.ops.aten.mul.Tensor(dropout, 1.1111111111111112)
+            viewed = torch.ops.aten.view.default(scaled, [batch * heads, rows, cols])
+            output = torch.ops.aten.permute.default(viewed, [0, 2, 1])
+            if return_random:
+                return output, rand
+            return output
+
+        bmm = torch.randn((batch * heads, rows, cols), device=device_type)
+        full_mask = torch.zeros(
+            (batch, 1, rows, cols), dtype=torch.bool, device=device_type
+        )
+        fill_value = torch.tensor(float("-inf"), device=device_type)
+        seeds = torch.zeros((73,), dtype=torch.int64, device=device_type)
+        return run_and_get_code(forward, bmm, full_mask, fill_value, seeds)[1]
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_single_use_random_sinks_into_dropout_epilogue(self):
+        code = self._run_dropout_random_codegen()
+        kernel_code = "\n".join(code)
+
+        self.assertEqual(self._count_inductor_random_calls(code), 1)
+        self.assertEqual(kernel_code.count("tl.store("), 1)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_multi_use_random_does_not_sink_into_dropout_epilogue(self):
+        code = self._run_dropout_random_codegen(return_random=True)
+        kernel_code = "\n".join(code)
+
+        self.assertEqual(self._count_inductor_random_calls(code), 1)
+        self.assertEqual(kernel_code.count("tl.store("), 2)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_non_dropout_threshold_random_does_not_sink_into_epilogue(self):
+        code = self._run_dropout_random_codegen(use_where=True)
+        kernel_code = "\n".join(code)
+
+        self.assertEqual(self._count_inductor_random_calls(code), 1)
+        self.assertEqual(kernel_code.count("tl.store("), 2)
+
     def test_issue100806(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
