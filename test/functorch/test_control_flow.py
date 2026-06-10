@@ -7620,7 +7620,7 @@ def forward(self, x_1):
     false_graph_0 = self.false_graph_0
     _tensor_constant0 = self._tensor_constant0
     _tensor_constant1 = self._tensor_constant1
-    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1, _tensor_constant0, sym_size_int_1, sym_size_int, _tensor_constant1));  eq = true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = sym_size_int_1 = sym_size_int = _tensor_constant1 = None
+    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1, sym_size_int_1, sym_size_int, _tensor_constant0, _tensor_constant1));  eq = true_graph_0 = false_graph_0 = x_1 = sym_size_int_1 = sym_size_int = _tensor_constant0 = _tensor_constant1 = None
     getitem = cond[0];  cond = None
     return getitem""",
         )
@@ -7628,7 +7628,7 @@ def forward(self, x_1):
             gm.true_graph_0.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
-    add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    add = torch.ops.aten.add.Tensor(arg0_1, arg3_1);  arg0_1 = arg3_1 = None
     return (add,)""",
         )
 

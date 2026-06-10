@@ -4155,6 +4155,20 @@ class ShapeEnv:
         self._unbacked_replacements: dict[sympy.Expr, sympy.Expr] | None = None
 
         self.trace_asserts = trace_asserts
+        self._branch_local_shape_refinement_stack: list[
+            None
+            | tuple[
+                dict[sympy.Expr, sympy.Expr],
+                dict[sympy.Symbol, sympy.Expr],
+                dict[sympy.Symbol, ValueRanges[sympy.Expr]],
+                dict[sympy.Symbol, ValueRangesSLoc],
+                int,
+                dict[sympy.Symbol | None, int],
+                int,
+                Counter[sympy.Symbol],
+            ]
+        ] = []
+        self._branch_local_shape_refinement_allow_eager_checks_stack: list[bool] = []
 
         self.specializations: OrderedSet[Specialization] = OrderedSet()
 
@@ -4276,6 +4290,165 @@ class ShapeEnv:
                 self.replacements.pop(k, None)
             self.frozen = False
 
+    @record_shapeenv_event()
+    def _branch_local_shape_refinement_enter(
+        self, allow_eager_checks: bool = True
+    ) -> None:
+        self._branch_local_shape_refinement_stack.append(None)
+        self._branch_local_shape_refinement_allow_eager_checks_stack.append(
+            allow_eager_checks
+        )
+
+    def _ensure_branch_local_shape_refinement_snapshot(self) -> None:
+        if self._branch_local_shape_refinement_stack[-1] is not None:
+            return
+        self._branch_local_shape_refinement_stack[-1] = (
+            self.axioms.copy(),
+            self.replacements.copy(),
+            self.var_to_range.copy(),
+            {
+                k: ValueRangesSLoc(v.lower, v.upper)
+                for k, v in self.var_to_range_sloc.items()
+            },
+            len(self.guards),
+            {k: len(v) for k, v in self.deferred_runtime_asserts.items()},
+            self.num_deferred_runtime_asserts,
+            self.symbol_guard_counter.copy(),
+        )
+
+    @record_shapeenv_event()
+    def _branch_local_shape_refinement_exit(self) -> None:
+        frame = self._branch_local_shape_refinement_stack.pop()
+        self._branch_local_shape_refinement_allow_eager_checks_stack.pop()
+        if frame is None:
+            return
+        (
+            old_axioms,
+            old_replacements,
+            old_var_to_range,
+            old_var_to_range_sloc,
+            old_guard_len,
+            old_deferred_runtime_assert_lens,
+            old_num_deferred_runtime_asserts,
+            old_symbol_guard_counter,
+        ) = frame
+
+        old_range_symbols = set(old_var_to_range)
+        new_var_to_range = {
+            k: v for k, v in self.var_to_range.items() if k not in old_var_to_range
+        }
+        new_var_to_range_sloc = {
+            k: v
+            for k, v in self.var_to_range_sloc.items()
+            if k not in old_var_to_range_sloc
+        }
+        new_deferred_runtime_asserts = {
+            k: v
+            for k, v in self.deferred_runtime_asserts.items()
+            if k not in old_deferred_runtime_assert_lens
+            and not (isinstance(k, sympy.Symbol) and k in old_range_symbols)
+        }
+
+        changed = (
+            self.axioms != old_axioms
+            or self.replacements != old_replacements
+            or self.var_to_range != old_var_to_range
+            or self.var_to_range_sloc != old_var_to_range_sloc
+        )
+        self.axioms = old_axioms
+        self.replacements = old_replacements
+        self.var_to_range = old_var_to_range
+        self.var_to_range.update(new_var_to_range)
+        self.var_to_range_sloc = old_var_to_range_sloc
+        self.var_to_range_sloc.update(new_var_to_range_sloc)
+        if len(self.guards) != old_guard_len:
+            del self.guards[old_guard_len:]
+            changed = True
+        for k in list(self.deferred_runtime_asserts):
+            old_len = old_deferred_runtime_assert_lens.get(k)
+            if old_len is None:
+                self.deferred_runtime_asserts.pop(k)
+                changed = True
+            elif len(self.deferred_runtime_asserts[k]) != old_len:
+                del self.deferred_runtime_asserts[k][old_len:]
+                changed = True
+        self.deferred_runtime_asserts.update(new_deferred_runtime_asserts)
+
+        new_num_deferred_runtime_asserts = old_num_deferred_runtime_asserts + sum(
+            len(v) for v in new_deferred_runtime_asserts.values()
+        )
+        if self.num_deferred_runtime_asserts != new_num_deferred_runtime_asserts:
+            self.num_deferred_runtime_asserts = new_num_deferred_runtime_asserts
+            changed = True
+        if self.symbol_guard_counter != old_symbol_guard_counter:
+            self.symbol_guard_counter = old_symbol_guard_counter
+            changed = True
+        if changed:
+            self._replacements_version_counter += 1
+            self._update_version_counter()
+            self._version_counter += 1
+            self._maybe_evaluate_static.cache_clear()
+
+    @contextmanager
+    def branch_local_shape_refinement(
+        self, allow_eager_checks: bool = True
+    ) -> Generator[None, None, None]:
+        """Temporarily add counterfactual shape facts while tracing a HOP branch."""
+        self._branch_local_shape_refinement_enter(allow_eager_checks)
+        try:
+            yield
+        finally:
+            self._branch_local_shape_refinement_exit()
+
+    def _has_branch_local_shape_refinement(self) -> bool:
+        return bool(self._branch_local_shape_refinement_stack)
+
+    def _has_branch_local_shape_refinement_for_eager_checks(self) -> bool:
+        return any(self._branch_local_shape_refinement_allow_eager_checks_stack)
+
+    def _has_branch_local_shape_refinement_snapshot(self) -> bool:
+        return any(
+            frame is not None for frame in self._branch_local_shape_refinement_stack
+        )
+
+    def _assume_branch_local_shape_expr(self, expr: SympyBoolean) -> bool:
+        if not self._branch_local_shape_refinement_stack:
+            return False
+
+        self._ensure_branch_local_shape_refinement_snapshot()
+        expr = self.simplify(expr)
+        if expr is sympy.false:
+            return False
+
+        changed = False
+
+        for k, v in self.get_implications(expr):
+            if self.axioms.get(k) != v:
+                self.axioms[k] = v
+                changed = True
+
+        if isinstance(expr, sympy.Eq):
+            for symbol, replacement in (
+                (expr.lhs, expr.rhs),
+                (expr.rhs, expr.lhs),
+            ):
+                if (
+                    isinstance(symbol, sympy.Symbol)
+                    and isinstance(replacement, sympy.Expr)
+                    and symbol not in replacement.free_symbols
+                ):
+                    if self.replacements.get(symbol) != replacement:
+                        self.replacements[symbol] = replacement
+                        changed = True
+                    break
+
+        if changed:
+            self._replacements_version_counter += 1
+            self._update_version_counter()
+            self._version_counter += 1
+            self._maybe_evaluate_static.cache_clear()
+        return True
+
     def check_equal(self, other: ShapeEnv) -> None:
         """Compare another ShapeEnv for equivalence"""
         # ShapeEnv fields that are not relevant for the outcome of
@@ -4310,6 +4483,8 @@ class ShapeEnv:
             # Cached state for optimization_hint unbacked canonicalization
             "_equality_graph",
             "_unbacked_replacements",
+            "_branch_local_shape_refinement_stack",
+            "_branch_local_shape_refinement_allow_eager_checks_stack",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -7798,6 +7973,9 @@ class ShapeEnv:
         cur_replace = {s: self._find(s) for s in res.free_symbols}
         replaced, changed = self.replacements[a]._xreplace(cur_replace)
         if changed:
+            if self._has_branch_local_shape_refinement_snapshot():
+                # Do not path-compress through counterfactual branch facts.
+                return replaced
             self._set_replacement(a, replaced, "find")
         return self.replacements[a]
 
