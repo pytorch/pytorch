@@ -1130,7 +1130,7 @@ class LPPool1d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = :math:`\infty`, one gets Max Pooling
+    - At p = :math:`\infty`, one gets Max Pooling over absolute values
     - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
 
     .. note:: If the sum to the power of `p` is zero, the gradient of this function is
@@ -1177,7 +1177,7 @@ class LPPool2d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = :math:`\infty`, one gets Max Pooling
+    - At p = :math:`\infty`, one gets Max Pooling over absolute values
     - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
@@ -1237,7 +1237,7 @@ class LPPool3d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = :math:`\infty`, one gets Max Pooling
+    - At p = :math:`\infty`, one gets Max Pooling over absolute values
     - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:

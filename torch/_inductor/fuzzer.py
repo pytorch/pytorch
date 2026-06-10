@@ -600,7 +600,7 @@ class ConfigFuzzer:
             test_model_fn_factory: Function that returns a test model, which runs and returns True if successful, or
               the outputs if they should be compared with eager
             seed: Randomness seed.
-            default: Default values for the config. Inductor has preset based on know failures.
+            default: Default values for the config. Inductor has preset based on known failures.
             sm: How type value samples are generated, default TOGGLE.
             test_timeout: max time a test can take.
         """
@@ -623,7 +623,7 @@ class ConfigFuzzer:
     def __repr__(self) -> str:
         return (
             f"ConfigFuzzer(config_module={self.config_module}, "
-            f"test_model_fn_factor={self.test_model_fn_factory}, seed={self.seed}, default={self.default})"
+            f"test_model_fn_factory={self.test_model_fn_factory}, seed={self.seed}, default={self.default})"
         )
 
     def _set_config(self, field_name: str, value: Any) -> None:
@@ -909,8 +909,10 @@ def visualize_results(
     Creates an HTML document representing the results of running the fuzzer with fuzz_n_tuple, with n = 2.
     """
     # TODO support more dimensions
-    assert n == 2
-    assert len(results) > 0
+    if n != 2:
+        raise AssertionError(f"expected n == 2, got {n}")
+    if len(results) <= 0:
+        raise AssertionError("expected non-empty results")
 
     input_set: OrderedSet[str] = OrderedSet({})
     for key in results.keys():  # noqa: SIM118
