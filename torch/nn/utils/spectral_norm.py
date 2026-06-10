@@ -280,9 +280,22 @@ def spectral_norm(
     norm. This is implemented via a hook that calculates spectral norm and
     rescales weight before every :meth:`~Module.forward` call.
 
-    See `Spectral Normalization for Generative Adversarial Networks`_ .
+    See `Miyato et al. (2018)`_ .
 
-    .. _`Spectral Normalization for Generative Adversarial Networks`: https://arxiv.org/abs/1802.05957
+    .. _`Miyato et al. (2018)`: https://arxiv.org/abs/1802.05957
+
+    .. warning::
+        For convolutional layers, the weight tensor is reshaped to 2D by
+        flattening all dimensions except the output channel dimension. The
+        spectral norm of this reshaped matrix is **not** the same as the
+        operator norm (true Lipschitz constant) of the convolutional layer,
+        which depends on the input spatial dimensions. This is a known
+        approximation from `Miyato et al. (2018)`_ that works well in
+        practice for training stabilization, but does not provide tight
+        Lipschitz bounds. See `Sedghi et al. (2019)`_ for an exact
+        characterization of singular values of convolutional layers.
+
+    .. _`Sedghi et al. (2019)`: https://arxiv.org/abs/1805.10408
 
     Args:
         module (nn.Module): containing module

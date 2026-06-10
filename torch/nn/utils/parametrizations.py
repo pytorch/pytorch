@@ -551,17 +551,29 @@ def spectral_norm(
         \mathbf{x}_{SN} = \dfrac{\mathbf{x}}{\|\mathbf{x}\|_2}
 
     Spectral normalization stabilizes the training of discriminators (critics)
-    in Generative Adversarial Networks (GANs) by reducing the Lipschitz constant
-    of the model. :math:`\sigma` is approximated performing one iteration of the
-    `power method`_ every time the weight is accessed. If the dimension of the
-    weight tensor is greater than 2, it is reshaped to 2D in power iteration
-    method to get spectral norm.
+    in Generative Adversarial Networks (GANs) by rescaling the weight tensor
+    with spectral norm :math:`\sigma` of the weight matrix calculated using
+    power iteration method. If the dimension of the weight tensor is greater
+    than 2, it is reshaped to 2D in power iteration method to get spectral
+    norm.
 
+    See `Miyato et al. (2018)`_ .
 
-    See `Spectral Normalization for Generative Adversarial Networks`_ .
+    .. warning::
+        For convolutional layers, the weight tensor is reshaped to 2D by
+        flattening all dimensions except the output channel dimension. The
+        spectral norm of this reshaped matrix is **not** the same as the
+        operator norm (true Lipschitz constant) of the convolutional layer,
+        which depends on the input spatial dimensions. This is a known
+        approximation from `Miyato et al. (2018)`_ that works well in
+        practice for training stabilization, but does not provide tight
+        Lipschitz bounds. See `Sedghi et al. (2019)`_ for an exact
+        characterization of singular values of convolutional layers.
+
+    .. _`Miyato et al. (2018)`: https://arxiv.org/abs/1802.05957
+    .. _`Sedghi et al. (2019)`: https://arxiv.org/abs/1805.10408
 
     .. _`power method`: https://en.wikipedia.org/wiki/Power_iteration
-    .. _`Spectral Normalization for Generative Adversarial Networks`: https://arxiv.org/abs/1802.05957
 
     .. note::
         This function is implemented using the parametrization functionality
