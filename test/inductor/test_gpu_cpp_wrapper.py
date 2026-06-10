@@ -18,6 +18,7 @@ from torch._inductor.utils import IndentedBuffer
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
     slowTest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
@@ -55,6 +56,40 @@ class GpuWrapperTemplate:
     pass
 
 
+def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
+    def impl(xs, dtype, device_arg, layout, memory_format):
+        if dtype != torch.float32:
+            raise AssertionError(f"Unexpected dtype: {dtype}")
+        if torch.device(device_arg).type != device:
+            raise AssertionError(f"Unexpected device: {device_arg}")
+        if layout != torch.strided:
+            raise AssertionError(f"Unexpected layout: {layout}")
+        if memory_format != torch.contiguous_format:
+            raise AssertionError(f"Unexpected memory_format: {memory_format}")
+        return (
+            xs[0]
+            .to(device=device_arg, dtype=dtype)
+            .contiguous(memory_format=memory_format)
+        )
+
+    def meta(xs, dtype, _device_arg, layout, memory_format):
+        return torch.empty_like(
+            xs[0],
+            dtype=dtype,
+            layout=layout,
+            memory_format=memory_format,
+        )
+
+    m.define(
+        "arg_helpers("
+        "Tensor[] xs, ScalarType dtype, Device device, "
+        "Layout layout, MemoryFormat memory_format"
+        ") -> Tensor"
+    )
+    m.impl("arg_helpers", impl, GPU_TYPE.upper())
+    m.impl("arg_helpers", meta, "Meta")
+
+
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
 
@@ -79,48 +114,6 @@ class TestGpuWrapper(InductorTestCase):
         )(test_fn)
         comp()
 
-    def test_debug_sync_graph(self):
-        if not RUN_GPU:
-            self.skipTest("GPU not available")
-        if GPU_TYPE != "cuda":
-            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
-
-        def test_fn(x):
-            return x * 2
-
-        compiled = torch.compile(
-            options={"cpp_wrapper": True, "triton.debug_sync_graph": True}
-        )(test_fn)
-        x = torch.randn(8, device=self.device)
-        with torch.utils._device.DeviceContext(self.device):
-            result, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
-        self.assertEqual(result, x * 2)
-        self.assertRegex(
-            code, r"AOTI_RUNTIME_CUDA_CHECK\((?:cuda|hip)DeviceSynchronize\(\)\);"
-        )
-        self.assertNotIn("torch.cuda.synchronize()", code)
-
-    def test_debug_sync_kernel(self):
-        if not RUN_GPU:
-            self.skipTest("GPU not available")
-        if GPU_TYPE != "cuda":
-            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
-
-        def test_fn(x):
-            return x * 2
-
-        compiled = torch.compile(
-            options={"cpp_wrapper": True, "triton.debug_sync_kernel": True}
-        )(test_fn)
-        x = torch.randn(8, device=self.device)
-        with torch.utils._device.DeviceContext(self.device):
-            result, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
-        self.assertEqual(result, x * 2)
-        self.assertRegex(
-            code, r"AOTI_RUNTIME_CUDA_CHECK\((?:cuda|hip)DeviceSynchronize\(\)\);"
-        )
-        self.assertNotIn("torch.cuda.synchronize()", code)
-
     def test_non_tensor_args_wrapped_on_cpu(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
@@ -133,6 +126,34 @@ class TestGpuWrapper(InductorTestCase):
         with torch.utils._device.DeviceContext(self.device):
             _, code = test_torchinductor.run_and_get_cpp_code(compiled, x, 3)
         self.assertIn("torch.tensor(arg, device='cpu')", code)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_fbcode_custom_op_fallback_python_arg_helpers(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if not config.is_fbcode():
+            self.skipTest("fbcode-only cpp_wrapper symbol visibility test")
+
+        device = self.device
+        with torch.library._scoped_library(
+            "fbcode_cpp_wrapper_arg_helpers", "FRAGMENT"
+        ) as m:
+            _register_fbcode_cpp_wrapper_arg_helper_op(m, device)
+
+            def fn(x):
+                y = x.sin()
+                return torch.ops.fbcode_cpp_wrapper_arg_helpers.arg_helpers(
+                    [y],
+                    torch.float32,
+                    torch.device(device),
+                    torch.strided,
+                    torch.contiguous_format,
+                ).cos()
+
+            x = torch.randn(4, 4, device=device)
+            expected = fn(x)
+            actual = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)(x)
+            self.assertEqual(actual, expected)
 
     def test_cpp_scratch_scales_with_grid_size_for_tma(self):
         if GPU_TYPE != "cuda" or torch.version.hip:
@@ -319,6 +340,86 @@ class TestGpuWrapper(InductorTestCase):
         result = opt_fn(x, output_grad)
         self.assertEqual(result.shape, x.shape)
 
+    def test_cuda_cpp_wrapper_skips_vec_isa_for_device_only_code(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x):
+            return (x.sin() + 1).cos()
+
+        x = torch.randn(128, device=self.device)
+        expected = fn(x)
+        compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+        actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("needs_vec_isa=False", code)
+
+    def test_cuda_cpp_wrapper_keeps_vec_isa_for_host_vectorized_code(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x):
+            x = x + 1
+            x = x + 2
+            x = x.to(device=self.device)
+            x = x + 3
+            x = x + 4
+            x = x.cpu()
+            x = x + 5
+            x = x + 6
+            return x
+
+        x = torch.randn(2, 2, 10)
+        expected = fn(x)
+        compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+        actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("at::vec::", code)
+        self.assertIn("needs_vec_isa=True", code)
+
+    def test_cuda_cpp_wrapper_build_separate_splits_vec_isa_requirements(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x):
+            x = x + 1
+            x = x + 2
+            x = x.to(device=self.device)
+            x = x + 3
+            x = x + 4
+            x = x.cpu()
+            x = x + 5
+            x = x + 6
+            return x
+
+        x = torch.randn(2, 2, 10)
+        expected = fn(x)
+        with config.patch({"cpp_wrapper_build_separate": True}):
+            compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+            actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("kernel_src = (", code)
+        self.assertIn("needs_vec_isa=False", code)
+        self.assertIn("kernel_needs_vec_isa=True", code)
+
+    def test_map_fullgraph_cpp_wrapper(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def body_fn(x):
+            return torch.nn.functional.gelu(x)
+
+        def fn(xs):
+            return torch._higher_order_ops.map(body_fn, xs).sum()
+
+        xs = torch.randn(8, 64, device=self.device)
+        expected = fn(xs)
+        opt_fn = torch.compile(fn, fullgraph=True, options={"cpp_wrapper": True})
+        self.assertEqual(opt_fn(xs), expected)
+
 
 instantiate_parametrized_tests(TestGpuWrapper)
 
@@ -425,6 +526,7 @@ compiled(x)
 class TestCppWrapperStaticInitDeadlock(InductorTestCase):
     device = GPU_TYPE
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184496")
     def test_static_init_dlopen_does_not_deadlock(self):
         """The cpp_wrapper-generated .so must not trigger Triton kernel
         compilation from a static initializer (dlopen-time): doing so

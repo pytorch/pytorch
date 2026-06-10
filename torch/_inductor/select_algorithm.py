@@ -42,7 +42,7 @@ from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
-from ..utils._sympy.functions import CeilDiv
+from ..utils._sympy.functions import CeilDiv, Max, Min
 from . import config, ir
 from .autotune_process import (
     AsyncAutotuner,
@@ -204,9 +204,10 @@ class PartialRender:
         remaining_active_hooks = [
             key for key, fn in self.replacement_hooks.items() if fn is not None
         ]
-        assert len(remaining_active_hooks) == 0, (
-            f"The following hooks have not yet been finalized:\n {remaining_active_hooks=}"
-        )
+        if len(remaining_active_hooks) != 0:
+            raise AssertionError(
+                f"The following hooks have not yet been finalized:\n {remaining_active_hooks=}"
+            )
         return self._code
 
     def _replace_placeholder(self, hook_key: str, result: str) -> str:
@@ -314,7 +315,8 @@ class PartialRender:
                 return
 
         hook = self.replacement_hooks[hook_key]
-        assert hook is not None, f"Hook key {hook_key} can only be called once"
+        if hook is None:
+            raise AssertionError(f"Hook key {hook_key} can only be called once")
         self._code = self._replace_placeholder(hook_key, hook())
 
         self.replacement_hooks[hook_key] = None
@@ -394,6 +396,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         fixed_inputs: dict[str, Any],
         mask: str | None,
         input_shapes: dict[str, tuple[str, ...]] | None = None,
+        input_dtypes: dict[str, torch.dtype | str] | None = None,
     ):
         super().__init__(V.ops)
         self.name = f"PlaceholderSubstitution_{subgraph_number}"
@@ -401,6 +404,17 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         self.fixed_inputs = fixed_inputs
         self.mask = mask
         self.input_shapes = input_shapes or {}
+        self.input_dtypes = input_dtypes or {}
+        extra_input_shapes = self.input_shapes.keys() - self.fixed_inputs.keys()
+        extra_input_dtypes = self.input_dtypes.keys() - self.fixed_inputs.keys()
+        if extra_input_shapes:
+            raise AssertionError(
+                f"input_shapes keys must match fixed inputs: {extra_input_shapes}"
+            )
+        if extra_input_dtypes:
+            raise AssertionError(
+                f"input_dtypes keys must match fixed inputs: {extra_input_dtypes}"
+            )
 
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed input."""
@@ -419,7 +433,10 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
                 var_dtype = torch.float32
 
             out = self.kernel.cse.generate(
-                self.kernel.compute, line, dtype=var_dtype, shape=()
+                self.kernel.compute,
+                line,
+                dtype=var_dtype,
+                shape=TritonSymbols.get_block_shape(index),
             )
             return out
 
@@ -427,9 +444,36 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         return self.kernel.cse.generate(
             self.kernel.compute,
             f"({self.fixed_inputs[name]})",
-            dtype=torch.float32,
+            dtype=self._fixed_input_dtype(name),
             shape=shape,
         )
+
+    def _index_dtype(self) -> torch.dtype:
+        return torch.int64 if self.kernel.index_dtype == "tl.int64" else torch.int32
+
+    def _normalize_input_dtype(self, dtype: torch.dtype | str) -> torch.dtype:
+        if isinstance(dtype, torch.dtype):
+            return dtype
+        if dtype == "index":
+            return self._index_dtype()
+        raise AssertionError(f"Unexpected fixed input dtype: {dtype}")
+
+    def _fixed_input_dtype(self, name: str) -> torch.dtype:
+        if name in self.input_dtypes:
+            return self._normalize_input_dtype(self.input_dtypes[name])
+
+        value = self.fixed_inputs[name]
+        if isinstance(value, CSEVariable) and value.dtype is not None:
+            return value.dtype
+        if isinstance(value, str):
+            cse_value = self.kernel.cse.varname_map.get(value)
+            if cse_value is not None and cse_value.dtype is not None:
+                return cse_value.dtype
+        if isinstance(value, bool):
+            return torch.bool
+        if isinstance(value, float):
+            return torch.float32
+        return torch.float32
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
@@ -443,10 +487,10 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         This is used by flex_attention's backwards grad for captured buffers, see
         zeros_and_scatter lowering
         """
-        assert self.mask is not None, (
-            "Mask is required for inner stores in modifications"
-        )
-        assert mode == "atomic_add", "Only atomic_add is supported for inner stores"
+        if self.mask is None:
+            raise AssertionError("Mask is required for inner stores in modifications")
+        if mode != "atomic_add":
+            raise AssertionError("Only atomic_add is supported for inner stores")
 
         buf_name = self._add_kernel_input(name)
         index_str = self._broadcast_index(index, f"{value}.shape")
@@ -520,9 +564,10 @@ class TritonTemplateKernel(TritonKernel):
             pass
         numel = sympy_product(output_node.get_size())
         if tma_2d:
-            assert len(output_node.get_size()) == 2, (
-                "TMA load/store only supported for 2D with templates"
-            )
+            if len(output_node.get_size()) != 2:
+                raise AssertionError(
+                    "TMA load/store only supported for 2D with templates"
+                )
             tiling = {
                 "x": output_node.get_size()[0],
                 "y": output_node.get_size()[1],
@@ -680,7 +725,8 @@ class TritonTemplateKernel(TritonKernel):
                 result = fn(*args, **kwargs)
                 post_state = self.input_dependent_preserved_state()
                 if pre_state != post_state:
-                    assert self.cached_replay_events is not None
+                    if self.cached_replay_events is None:
+                        raise AssertionError("cached_replay_events must not be None")
                     self.cached_replay_events.append((fn.__name__, [*args], {**kwargs}))
                 return result
 
@@ -694,15 +740,17 @@ class TritonTemplateKernel(TritonKernel):
 
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
-        assert all(
+        if not all(
             hasattr(self, field.name) for field in dataclasses.fields(SubgraphInfo)
-        )
+        ):
+            raise AssertionError("missing expected SubgraphInfo fields on self")
         old_state = {
             key.name: getattr(self, key.name)
             for key in dataclasses.fields(SubgraphInfo)
         }
 
-        assert body_name in self.subgraph_bodies, body_name
+        if body_name not in self.subgraph_bodies:
+            raise AssertionError(body_name)
 
         subgraph = self.subgraph_bodies[body_name]
         for key, value in subgraph.to_dict().items():
@@ -729,7 +777,8 @@ class TritonTemplateKernel(TritonKernel):
 
     @contextlib.contextmanager
     def create_subgraph_body(self, body_name: str, clear_cse: bool = False):
-        assert body_name not in self.subgraph_bodies
+        if body_name in self.subgraph_bodies:
+            raise AssertionError(f"subgraph body {body_name} already exists")
         self.subgraph_bodies[body_name] = SubgraphInfo(
             IndentedBuffer(), None, None, cse=self.cse.clone() if clear_cse else None
         )
@@ -927,19 +976,23 @@ class TritonTemplateKernel(TritonKernel):
         Hook called from template code to generate function def and
         needed args.
         """
-        assert all(isinstance(x, str) for x in argnames)
+        if not all(isinstance(x, str) for x in argnames):
+            raise AssertionError("all argnames must be str")
         renames = IndentedBuffer(initial_indent=1)
 
         named_args = self.input_nodes[
             self.prefix_args : len(self.input_nodes) - self.suffix_args
         ]
 
-        assert len(argnames) == len(named_args), (
-            len(argnames),
-            len(named_args),
-            self.prefix_args,
-            len(self.input_nodes),
-        )
+        if len(argnames) != len(named_args):
+            raise AssertionError(
+                (
+                    len(argnames),
+                    len(named_args),
+                    self.prefix_args,
+                    len(self.input_nodes),
+                )
+            )
 
         for input_node in self.input_nodes[: self.prefix_args]:
             # get args in correct order
@@ -1005,11 +1058,13 @@ class TritonTemplateKernel(TritonKernel):
         Automatically wraps with tl.full([], ..., dtype=INDEX_DTYPE) when
         int64 indexing is needed to prevent overflow in size arithmetic.
         """
-        assert isinstance(index, int)
+        if not isinstance(index, int):
+            raise AssertionError(f"expected index to be int, got {type(index)}")
         if name is None:
             val = self.output_node.get_size()[index]
         else:
-            assert isinstance(name, str)
+            if not isinstance(name, str):
+                raise AssertionError(f"expected name to be str, got {type(name)}")
             val = self.named_input_nodes[name].get_size()[index]
         result = texpr(self.rename_indexing(val))
         if self.index_dtype == "tl.int64":
@@ -1024,7 +1079,8 @@ class TritonTemplateKernel(TritonKernel):
         if name is None:
             val = self.output_node.get_stride()
         else:
-            assert isinstance(name, str)
+            if not isinstance(name, str):
+                raise AssertionError(f"expected name to be str, got {type(name)}")
             val = self.get_stride_and_maybe_freeze_layout(self.named_input_nodes[name])
 
         if isinstance(index, int):
@@ -1032,14 +1088,20 @@ class TritonTemplateKernel(TritonKernel):
         return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def _get_subgraph(self, subgraph_number: int):
-        assert isinstance(subgraph_number, int)
-        assert isinstance(self.subgraphs, list)
-        assert subgraph_number < len(self.subgraphs), (
-            f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
-        )
-        assert self.body.getvalue() == "", (
-            "Body should be clear before adding a modification"
-        )
+        if not isinstance(subgraph_number, int):
+            raise AssertionError(
+                f"expected subgraph_number to be int, got {type(subgraph_number)}"
+            )
+        if not isinstance(self.subgraphs, list):
+            raise AssertionError(
+                f"expected self.subgraphs to be list, got {type(self.subgraphs)}"
+            )
+        if subgraph_number >= len(self.subgraphs):
+            raise AssertionError(
+                f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
+            )
+        if self.body.getvalue() != "":
+            raise AssertionError("Body should be clear before adding a modification")
         return self.subgraphs[subgraph_number]
 
     def _handle_scatter_graph(self, scatter_graph):
@@ -1048,9 +1110,10 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             scatter_graph: The scatter graph to process
         """
-        assert isinstance(scatter_graph, ir.ComputedBuffer), (
-            f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
-        )
+        if not isinstance(scatter_graph, ir.ComputedBuffer):
+            raise AssertionError(
+                f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
+            )
 
         def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
@@ -1068,6 +1131,7 @@ class TritonTemplateKernel(TritonKernel):
         output_name: str | None,
         mask: str | None = None,
         input_shapes: dict[str, tuple[str, ...]] | None = None,
+        input_dtypes: dict[str, torch.dtype | str] | None = None,
         **fixed_inputs,
     ) -> str:
         """This creates a modification function for a subgraph.
@@ -1080,6 +1144,8 @@ class TritonTemplateKernel(TritonKernel):
                 will be applied to the store.
             input_shapes (Optional[dict[str, tuple[str, ...]]]): Optional mapping of input names to their
                 block shapes. Used for proper shape propagation during codegen.
+            input_dtypes (Optional[dict[str, torch.dtype | str]]): Optional dtype
+                mapping. The string "index" resolves to the template index dtype.
         """
         num = 0
         out = None
@@ -1089,12 +1155,18 @@ class TritonTemplateKernel(TritonKernel):
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
             subgraph = self._get_subgraph(subgraph_number)
             modification_handler = ModificationWrapper(
-                self, subgraph_number, fixed_inputs, mask, input_shapes
+                self,
+                subgraph_number,
+                fixed_inputs,
+                mask,
+                input_shapes,
+                input_dtypes,
             )
             with V.set_ops_handler(modification_handler):
-                assert isinstance(subgraph, (ir.ComputedBuffer, list)), (
-                    f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
-                )
+                if not isinstance(subgraph, (ir.ComputedBuffer, list)):
+                    raise AssertionError(
+                        f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
+                    )
                 # Handle scatter stores
                 if isinstance(subgraph, list):
                     for scatter_graph in subgraph:
@@ -1106,11 +1178,16 @@ class TritonTemplateKernel(TritonKernel):
 
             self.codegen_body()
             if output_name is not None:
-                assert isinstance(output_name, str)
-                assert out is not None
+                if not isinstance(output_name, str):
+                    raise AssertionError(
+                        f"expected output_name to be str, got {type(output_name)}"
+                    )
+                if out is None:
+                    raise AssertionError("out must not be None")
                 self.body.writeline(f"{output_name} = {out.value}")
             else:
-                assert out is None
+                if out is not None:
+                    raise AssertionError("out must be None when output_name is None")
                 for scatter in scatters:
                     self.body.writeline(str(scatter))
 
@@ -1159,16 +1236,28 @@ class TritonTemplateKernel(TritonKernel):
         load_code = None
 
         with self.create_subgraph_body(f"<LOAD_INPUT_{input_name}>"):
-            assert isinstance(indices, (list, tuple))
-            assert isinstance(output_name, str)
-            assert isinstance(mask, (str, type(None)))
+            if not isinstance(indices, (list, tuple)):
+                raise AssertionError(
+                    f"expected indices to be list or tuple, got {type(indices)}"
+                )
+            if not isinstance(output_name, str):
+                raise AssertionError(
+                    f"expected output_name to be str, got {type(output_name)}"
+                )
+            if not isinstance(mask, (str, type(None))):
+                raise AssertionError(
+                    f"expected mask to be str or None, got {type(mask)}"
+                )
             self.range_trees = range_trees
             self.numels = {k: V.graph.sizevars.simplify(v) for k, v in groups.items()}
             indices = list(map(OpOverrides.paren, indices))
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
 
             lengths = [V.graph.sizevars.simplify(s) for s in input_node.get_size()]
-            assert len(indices) == len(lengths)
+            if len(indices) != len(lengths):
+                raise AssertionError(
+                    f"expected len(indices) == len(lengths), got {len(indices)} and {len(lengths)}"
+                )
 
             # MM templates use out-of-bounds wrapping (e.g. `rm % M`) so no mask
             # is needed on the load.  Pass "None" when mask is unset to override
@@ -1252,7 +1341,10 @@ class TritonTemplateKernel(TritonKernel):
                 )
                 from .codegen.triton import IndexingOptions
 
-                assert isinstance(out_indexing, IndexingOptions)
+                if not isinstance(out_indexing, IndexingOptions):
+                    raise AssertionError(
+                        f"expected out_indexing to be IndexingOptions, got {type(out_indexing)}"
+                    )
                 output_index_str = (
                     f"({out_indexing.index_str}).broadcast_to(xindex.shape)"
                 )
@@ -1273,7 +1365,8 @@ class TritonTemplateKernel(TritonKernel):
                 self.codegen_body()
                 self.cse.invalidate(OrderedSet())
                 if input_node.get_name() not in self.prologue_fused_inputs:
-                    assert load_code is not None
+                    if load_code is None:
+                        raise AssertionError("load_code must not be None")
                     self.body.writeline(load_code)
 
                 result = self.body.getvalue()
@@ -1317,9 +1410,10 @@ class TritonTemplateKernel(TritonKernel):
             # to the top of the kernel so we can safely extract the tensor
             # descriptor construction to the top of the kernel.
             if block_name in self.prologue_cache:
-                assert self.prologue_cache[block_name] == block_size, (
-                    f"Constant {block_name} must be used for all stores"
-                )
+                if self.prologue_cache[block_name] != block_size:
+                    raise AssertionError(
+                        f"Constant {block_name} must be used for all stores"
+                    )
             else:
                 self.prologue_cache[block_name] = block_size
                 self.prologue.writeline(f"{block_name}: tl.constexpr = {block_size}")
@@ -1378,27 +1472,49 @@ class TritonTemplateKernel(TritonKernel):
         subgraph_idx = next(self.store_output_ctr)
         subgraph_name = self._get_store_output_subgraph_name(subgraph_idx)
         with self.create_subgraph_body(subgraph_name, clear_cse=True):
-            assert isinstance(indices, (list, tuple))
-            assert isinstance(val, str)
-            assert isinstance(mask, (str, type(None)))
-            assert isinstance(val_shape, (tuple, type(None)))
-            assert isinstance(block_indexing, bool)
-            assert self.template_mask is None
+            if not isinstance(indices, (list, tuple)):
+                raise AssertionError(
+                    f"expected indices to be list or tuple, got {type(indices)}"
+                )
+            if not isinstance(val, str):
+                raise AssertionError(f"expected val to be str, got {type(val)}")
+            if not isinstance(mask, (str, type(None))):
+                raise AssertionError(
+                    f"expected mask to be str or None, got {type(mask)}"
+                )
+            if not isinstance(val_shape, (tuple, type(None))):
+                raise AssertionError(
+                    f"expected val_shape to be tuple or None, got {type(val_shape)}"
+                )
+            if not isinstance(block_indexing, bool):
+                raise AssertionError(
+                    f"expected block_indexing to be bool, got {type(block_indexing)}"
+                )
+            if self.template_mask is not None:
+                raise AssertionError("template_mask must be None")
             indices = list(map(OpOverrides.paren, indices))
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             lengths = [
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
             ]
-            assert len(indices) == len(lengths)
+            if len(indices) != len(lengths):
+                raise AssertionError(
+                    f"expected len(indices) == len(lengths), got {len(indices)} and {len(lengths)}"
+                )
 
             output_layout = self.output_node.get_layout()
             self.template_out = val
             if block_indexing:
-                assert val_shape, "Blocking indexing requires passing in val_shape"
-                assert len(val_shape) == 2, (
-                    "Blocking indexing only supports 2D data at this time"
-                )
-                assert not mask, "Mask is not supported with blocking indexing"
+                if not val_shape:
+                    raise AssertionError(
+                        "Blocking indexing requires passing in val_shape"
+                    )
+                if len(val_shape) != 2:
+                    raise AssertionError(
+                        "Blocking indexing only supports 2D data at this time"
+                    )
+                if mask:
+                    raise AssertionError("Mask is not supported with blocking indexing")
                 intermediate_lines: list[str] = []
                 epilogue_index_symbols: list[sympy.Symbol] = []
                 if self.tma_store or self.tma_load_for_template_epilogue:
@@ -1490,7 +1606,8 @@ class TritonTemplateKernel(TritonKernel):
                 for line in intermediate_lines:
                     self.body.writeline(line)
             else:
-                assert not self.tma_store, "TMA store requires block indexing"
+                if self.tma_store:
+                    raise AssertionError("TMA store requires block indexing")
                 contiguous_index = self._setup_contiguous_index_state(
                     indices, index_symbols, lengths, mask
                 )
@@ -1583,10 +1700,11 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         if not allow_overwriting:
-            assert hook_name not in self.render_hooks, (
-                f"Tried to register the hook {hook_name} multiple times. If "
-                "desired, pass allow_overwriting=True to _register_hook"
-            )
+            if hook_name in self.render_hooks:
+                raise AssertionError(
+                    f"Tried to register the hook {hook_name} multiple times. If "
+                    "desired, pass allow_overwriting=True to _register_hook"
+                )
         self.render_hooks[hook_name] = hook_fn
         return hook_name
 
@@ -1640,12 +1758,20 @@ class TritonTemplateKernel(TritonKernel):
         Optional helper called from template code to generate the code
         needed to load from an tensor.
         """
-        assert isinstance(indices, (list, tuple))
-        assert isinstance(name, str)
-        assert isinstance(mask, str)
+        if not isinstance(indices, (list, tuple)):
+            raise AssertionError(
+                f"expected indices to be list or tuple, got {type(indices)}"
+            )
+        if not isinstance(name, str):
+            raise AssertionError(f"expected name to be str, got {type(name)}")
+        if not isinstance(mask, str):
+            raise AssertionError(f"expected mask to be str, got {type(mask)}")
         stride = self.get_stride_and_maybe_freeze_layout(self.named_input_nodes[name])
         indices = list(map(OpOverrides.paren, indices))
-        assert len(indices) == len(stride)
+        if len(indices) != len(stride):
+            raise AssertionError(
+                f"expected len(indices) == len(stride), got {len(indices)} and {len(stride)}"
+            )
         index = " + ".join(
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
         )
@@ -1684,11 +1810,13 @@ class TritonTemplateKernel(TritonKernel):
     def additional_call_args_and_types(self):
         if isinstance(self.grid_fn, SymbolicGridFn):
             grid_args = self.grid_fn.sympy_call(*self.call_sizes, self.meta)
-            assert len(grid_args) in (0, 3), "grid_fn should return 3 values"
+            if len(grid_args) not in (0, 3):
+                raise AssertionError("grid_fn should return 3 values")
             return (grid_args, map(type, grid_args))
         elif all(isinstance(x, (int, sympy.Integer)) for x in self.call_sizes):
             grid_args = self.grid_fn(*map(int, self.call_sizes), self.meta)
-            assert len(grid_args) in (0, 3), "grid_fn should return 3 values"
+            if len(grid_args) not in (0, 3):
+                raise AssertionError("grid_fn should return 3 values")
             return (grid_args, map(type, grid_args))
         return ((), ())
 
@@ -1703,7 +1831,8 @@ class TritonTemplateKernel(TritonKernel):
         )
 
         if not additional_call_args:
-            assert not V.graph.cpp_wrapper, "cpp_wrapper requires SymbolicGridFn"
+            if V.graph.cpp_wrapper:
+                raise AssertionError("cpp_wrapper requires SymbolicGridFn")
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
             fn_name = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}"
@@ -2210,7 +2339,10 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             indices = list(map(OpOverrides.paren, indices))
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             lengths = [V.graph.sizevars.simplify(s) for s in output_size]
-            assert len(indices) == len(lengths)
+            if len(indices) != len(lengths):
+                raise AssertionError(
+                    f"expected len(indices) == len(lengths), got {len(indices)} and {len(lengths)}"
+                )
             self.template_out = val
             self._setup_contiguous_index_state(
                 indices,
@@ -2232,7 +2364,8 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             self.cse.store_cache[buf] = self.cse.namedvar(
                 val, dtype=torch.float32, shape=block_shape
             )
-            assert output_param is not None
+            if output_param is None:
+                raise AssertionError("output_param must not be None")
             self.args.output_buffers[buf] = output_param
 
         self.render_hooks[subgraph_name] = self._make_codegen_hook(subgraph_name)
@@ -2414,7 +2547,8 @@ class GeneratedCodeCache:
         triton_meta: dict[str, Any] | None = None,
     ) -> str | None:
         def layout_key(layout: ir.Layout) -> str:
-            assert not isinstance(layout, ir.FlexibleLayout)
+            if isinstance(layout, ir.FlexibleLayout):
+                raise AssertionError("layout must not be a FlexibleLayout")
             return repr(
                 [
                     layout.size,
@@ -2435,7 +2569,8 @@ class GeneratedCodeCache:
             return False
 
         if epilogue_fn is identity:
-            assert epilogue_fn_hash is None
+            if epilogue_fn_hash is not None:
+                raise AssertionError("epilogue_fn_hash must be None")
             epilogue_fn_hash = "identity"
 
         # we do not cache under those conditions right now.
@@ -2517,7 +2652,8 @@ class TritonTemplate(KernelTemplate):
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
         self.grid = grid
         self.template = self._template_from_string(source)
-        assert name not in self.all_templates, "duplicate template name"
+        if name in self.all_templates:
+            raise AssertionError("duplicate template name")
         TritonTemplate.all_templates[name] = self
         self.debug = debug
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
@@ -2619,7 +2755,8 @@ class TritonTemplate(KernelTemplate):
                 triton_meta,
             )
 
-        assert self.template, "requires jinja2"
+        if not self.template:
+            raise AssertionError("requires jinja2")
         defines = StringIO()
 
         for name, val in kwargs.items():
@@ -2721,16 +2858,20 @@ class TritonTemplate(KernelTemplate):
                     make_kernel() as kernel_test,
                 ):
                     result2 = generate_code(kernel_test)
-                    assert result2 is not None
+                    if result2 is None:
+                        raise AssertionError("result2 must not be None")
                     code_test, extra_test = result2
-                    assert (
+                    if not (
                         code == code_test
                         and extra == extra_test
                         and kernel.args.input_buffers == kernel_test.args.input_buffers
                         and kernel.prologue_supported_inputs
                         == kernel_test.prologue_supported_inputs
                         and kernel.args.sizevars == kernel_test.args.sizevars
-                    ), "Generated code cache results in wrong output"
+                    ):
+                        raise AssertionError(
+                            "Generated code cache results in wrong output"
+                        )
 
         # Generate code, extra.
         code: str | None = None
@@ -2757,9 +2898,10 @@ class TritonTemplate(KernelTemplate):
                     cache_key, code, extra, kernel.cached_replay_events
                 )
 
-        assert code is not None and extra is not None
+        if not (code is not None and extra is not None):
+            raise AssertionError("code and extra must not be None")
 
-        mod = PyCodeCache.load(code, extra)
+        mod = PyCodeCache.load(code, extra, set_sys_modules=False)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
         prologue_supported_inputs = kernel.prologue_supported_inputs.copy()
@@ -2856,12 +2998,13 @@ class TritonTemplate(KernelTemplate):
 
         # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
         expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
-        assert (
-            result.input_call_args[: len(expected_input_args)] == expected_input_args
-        ), (
-            result.input_call_args,
-            expected_input_args,
-        )
+        if result.input_call_args[: len(expected_input_args)] != expected_input_args:
+            raise AssertionError(
+                (
+                    result.input_call_args,
+                    expected_input_args,
+                )
+            )
 
         # `kernel_input_nodes` are the actual inputs that will be passed to the kernel,
         # so e.g. views of the same input are not included. `codegen_input_nodes`
@@ -2903,7 +3046,8 @@ class TritonTemplate(KernelTemplate):
         options = result.kernel_options
 
         def make_kernel_render(out_node, hint_override: int | None = None):
-            assert result is not None
+            if result is None:
+                raise AssertionError("result must not be None")
             # Create a new unique name for the workspace arg buffer for each render
             # to prevent buffer reuse of the same workspace arg
             kernel_workspace_arg = workspace_arg
@@ -2936,7 +3080,8 @@ class TritonTemplate(KernelTemplate):
             return kernel, render
 
         # create the BenchmarkRequest
-        assert result.mod.__file__ is not None
+        if result.mod.__file__ is None:
+            raise AssertionError("result.mod.__file__ must not be None")
 
         grid = self.grid(
             *V.graph.sizevars.optimization_hints_with_override(
@@ -3045,8 +3190,10 @@ class ExternKernelChoice:
     ) -> None:
         super().__init__()
         name = name or kernel.__name__
-        assert callable(kernel)
-        assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
+        if not callable(kernel):
+            raise AssertionError("kernel must be callable")
+        if hasattr(extern_kernels, name):
+            raise AssertionError(f"duplicate extern kernel: {name}")
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
@@ -3125,8 +3272,10 @@ class ExternKernelChoice:
         # convenience function to match the Template interface, so that
         # templates and ExternKernelChoice can be treated the same when
         # generating choice callers
-        assert "input_nodes" in kwargs, "input_nodes argument required"
-        assert "layout" in kwargs, "layout argument required"
+        if "input_nodes" not in kwargs:
+            raise AssertionError("input_nodes argument required")
+        if "layout" not in kwargs:
+            raise AssertionError("layout argument required")
         input_nodes = kwargs.pop("input_nodes")
         layout = kwargs.pop("layout")
         choices.append(self.bind(input_nodes=input_nodes, layout=layout, **kwargs))
@@ -3175,7 +3324,8 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.n_regs = None
 
     def benchmark(self, *args, out):
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("self.bmreq must not be None")
         if (
             config.profile_bandwidth_with_do_bench_using_profiling
             and not self._benchmark_with_cudagraphs
@@ -3186,7 +3336,8 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         return self.bmreq.benchmark(*args, out=out)
 
     def precompile(self):
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("self.bmreq must not be None")
         self.bmreq.precompile()
 
         self.n_regs = self.bmreq.n_regs
@@ -3310,7 +3461,8 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("self.bmreq must not be None")
         # pyrefly: ignore[missing-attribute]
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         return self.bmreq.benchmark(*args, out=out)
@@ -3346,9 +3498,10 @@ class ExternKernelCaller(ChoiceCaller):
 
     def output_node(self):
         if self.choice.use_fallback_kernel:
-            assert self.choice.op_overload is not None, (
-                "Please provide an op_overload to use ir.FallbackKernel"
-            )
+            if self.choice.op_overload is None:
+                raise AssertionError(
+                    "Please provide an op_overload to use ir.FallbackKernel"
+                )
             inner: ir.IRNode = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
@@ -3487,8 +3640,10 @@ class DataProcessorTemplateWrapper:
             self._postprocessor = postprocessor
         else:
             self._postprocessor = lambda x: x
-        assert "input_nodes" in kwargs
-        assert "layout" in kwargs
+        if "input_nodes" not in kwargs:
+            raise AssertionError("input_nodes argument required")
+        if "layout" not in kwargs:
+            raise AssertionError("layout argument required")
 
         kwargs["input_nodes"], kwargs["layout"] = preprocessor(
             kwargs["input_nodes"], kwargs["layout"]
@@ -3528,7 +3683,8 @@ def get_num_workers() -> int:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
 
     cpu_count = torch._utils.cpu_count()
-    assert cpu_count
+    if not cpu_count:
+        raise AssertionError(f"expected nonzero cpu_count, got {cpu_count}")
 
     # Divide the number of CPUs by the number of GPUs for distributed workloads
     if (
@@ -3556,6 +3712,27 @@ def create_precompile_key(
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PrecompileFunction:
+    """Callable precompile wrapper that carries its cache key for scoped cleanup."""
+
+    fn: Callable[[], dict[ChoiceCaller, float]]
+    precompile_key: str | None = None
+
+    def __call__(self) -> dict[ChoiceCaller, float]:
+        return self.fn()
+
+
+def _benchmark_request_for_choice(choice: ChoiceCaller) -> Any | None:
+    bmreq = getattr(choice, "_bmreq", None)
+    if bmreq is not None:
+        return bmreq
+    try:
+        return vars(choice).get("bmreq")
+    except TypeError:
+        return None
 
 
 # Args to FeedbackFunctions
@@ -3647,7 +3824,7 @@ def _classify_kernel_operation(
                 elif template_name.startswith("flex_"):
                     return "flex"
 
-            elif isinstance(choice, ExternKernelChoice):
+            elif isinstance(choice, ExternKernelCaller):
                 # Check extern kernel names
                 choice_name = choice.name
                 if choice_name in (
@@ -3744,7 +3921,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # no guarantee that the first lowering for a given key will also be the
         # first to benchmark it. share a single precompilation function for all lowerings
         # of a particular key
-        self.precompile_cache: dict[str, Callable[[], dict[ChoiceCaller, float]]] = {}
+        self.precompile_cache: dict[str, PrecompileFunction] = {}
         # cache for prescreening results to ensure deterministic candidate selection
         self.prescreening_cache: dict[str, OrderedSet[str]] = {}
         # list of callbacks that are called after benchmarking
@@ -3769,9 +3946,10 @@ class AlgorithmSelectorCache(PersistentCache):
         self.prescreening_cache.clear()
 
     def pick_deterministic_choice(self, choices: list[ChoiceCaller]) -> ChoiceCaller:
-        assert len(choices) >= 2
+        if len(choices) < 2:
+            raise AssertionError(f"expected at least 2 choices, got {len(choices)}")
         externs = [
-            choice for choice in choices if isinstance(choice, ExternKernelChoice)
+            choice for choice in choices if isinstance(choice, ExternKernelCaller)
         ]
         if len(externs) > 0:
             return externs[0]
@@ -3849,9 +4027,10 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
             if use_pipelined_autotuning():
-                assert not config.benchmark_epilogue_fusion, (
-                    "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
-                )
+                if config.benchmark_epilogue_fusion:
+                    raise AssertionError(
+                        "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
+                    )
                 extern_kernels = [
                     c for c in choices if AlgorithmSelectorCache._is_extern(c)
                 ]
@@ -3878,9 +4057,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     precompile_future = None
 
                 def get_timings(hint_override: int | None = None):
-                    assert not hint_override, (
-                        "Hint not supported with pipelined autotuning"
-                    )
+                    if hint_override:
+                        raise AssertionError(
+                            "Hint not supported with pipelined autotuning"
+                        )
                     # Await precompilation future, thread pool
                     precompile_start_ts = time.time()
                     final_choices = choices
@@ -4070,6 +4250,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns,
         hint_override: int | None = None,
         is_collective=False,
+        precompile_key: str | None = None,
     ):
         counters["inductor"]["select_algorithm_autotune"] += 1
         # TODO(nmacchioni): remove this layer of abstraction
@@ -4084,7 +4265,32 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
         # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
-        return benchmark_fn(choices)
+        try:
+            return benchmark_fn(choices)
+        finally:
+            # Safety net for failures before individual BenchmarkRequest cleanup
+            # can run; request-level cleanup remains the authoritative owner cleanup.
+            evict_paths = OrderedSet(
+                [
+                    path
+                    for choice in choices
+                    for bmreq in (_benchmark_request_for_choice(choice),)
+                    for path in (getattr(bmreq, "module_path", None),)
+                    if path is not None
+                ]
+            )
+            if evict_paths:
+                for path in evict_paths:
+                    PyCodeCache.modules_no_attr.pop(path, None)
+                    PyCodeCache.linemaps.pop(path, None)
+                PyCodeCache.modules[:] = [
+                    module
+                    for module in PyCodeCache.modules
+                    if getattr(module, "__file__", None) not in evict_paths
+                ]
+
+            if precompile_key is not None:
+                self.precompile_cache.pop(precompile_key, None)
 
     def autotune(
         self,
@@ -4095,6 +4301,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices,
         hint_override: int | None = None,
         is_collective=False,
+        precompile_key: str | None = None,
     ):
         log.debug("Starting autotuning")
 
@@ -4111,6 +4318,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_gen_fns,
                 hint_override=hint_override,
                 is_collective=is_collective,
+                precompile_key=precompile_key,
             )
             if config.max_autotune_report_choices_stats:
                 _log_autotune_choices_stats(
@@ -4160,6 +4368,8 @@ class AlgorithmSelectorCache(PersistentCache):
             NoValidChoicesError: When all choices fail to compile or benchmark, or when all
                 timing results are non-finite.
         """
+        precompile_key = getattr(precompile_fn, "precompile_key", None)
+
         if log.isEnabledFor(logging.DEBUG) and not use_pipelined_autotuning():
             # Log shape information for debugging timeout issues
             sizevars = V.graph.sizevars
@@ -4277,6 +4487,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 choices,
                 hint_override=hint_override,
                 is_collective=is_collective,
+                precompile_key=precompile_key,
             )
 
         timings = self.lookup(
@@ -4562,9 +4773,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     precompile_times[choice] = elapsed_times[future]
             return precompile_times
 
-        self.precompile_cache[precompile_key] = wait_on_futures
+        precompile_fn = PrecompileFunction(wait_on_futures, precompile_key)
+        self.precompile_cache[precompile_key] = precompile_fn
 
-        return wait_on_futures
+        return precompile_fn
 
     @classmethod
     def get_inputs(
@@ -4590,24 +4802,60 @@ class AlgorithmSelectorCache(PersistentCache):
             )(x)
             for i, x in enumerate(input_nodes)
         }
+
+        def addmm_unique_example_inputs_extern():
+            additional_example_inputs = {}
+            for input_node, extern_node in zip(input_nodes, extern_input_nodes):
+                extern_name = extern_node.get_name()
+                if extern_name in unique_example_inputs:
+                    continue
+
+                # Aten addmm benchmarks the original 1D bias while Triton
+                # benchmarks the expanded 2D input; keep both backed by the
+                # same values by making all rows identical.
+                global_tensor = unique_example_inputs[input_node.get_name()]
+                global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
+                additional_example_inputs[extern_name] = global_tensor[0].contiguous()
+
+            return {
+                **unique_example_inputs,
+                **additional_example_inputs,
+            }
+
+        extern_choice = next(
+            (choice for choice in choices if cls._is_extern(choice)),
+            None,
+        )
+        extern_input_nodes = input_nodes
+        unique_example_inputs_extern = unique_example_inputs
+
+        if extern_choice is not None:
+            if len(extern_choice.input_nodes) != len(input_nodes):
+                raise AssertionError(
+                    "extern_choice.input_nodes length must match input_nodes: "
+                    f"{len(extern_choice.input_nodes)} != {len(input_nodes)}"
+                )
+            extern_input_nodes = extern_choice.input_nodes
+
+            if extern_choice.name == "addmm":
+                unique_example_inputs_extern = addmm_unique_example_inputs_extern()
+
         example_inputs = list(unique_example_inputs.values())
         example_inputs_extern = []
-
-        for i, input_node in enumerate(input_nodes):
-            if unique_example_inputs[input_node.get_name()].is_mkldnn:
-                example_inputs_extern.append(
-                    unique_example_inputs[input_node.get_name()]
-                )
+        for i, input_node in enumerate(extern_input_nodes):
+            input_tensor = unique_example_inputs_extern[input_node.get_name()]
+            if input_tensor.is_mkldnn:
+                example_inputs_extern.append(input_tensor)
             else:
-                base = unique_example_inputs[input_node.get_name()]
-                base = base if base._base is None else base._base
+                base = (
+                    input_tensor if input_tensor._base is None else input_tensor._base
+                )
 
                 if i in input_gen_fns:
                     # Use tensor's actual shape from input_gen_fn
-                    generated_tensor = unique_example_inputs[input_node.get_name()]
-                    sizes = tuple(generated_tensor.size())
-                    strides = tuple(generated_tensor.stride())
-                    storage_offset = generated_tensor.storage_offset()
+                    sizes = tuple(input_tensor.size())
+                    strides = tuple(input_tensor.stride())
+                    storage_offset = input_tensor.storage_offset()
                 else:
                     # Use IR node's shape resolved via size hints
                     sizes = V.graph.sizevars.optimization_hints_with_override(
@@ -4628,8 +4876,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 needed_size = torch._prims_common.compute_required_storage_length(
                     sizes, strides, cast(int, storage_offset)
                 )
-                current_size = base.untyped_storage().size()
-
+                current_size = base.untyped_storage().size() // base.element_size()
                 if needed_size > current_size:
                     # Create a new base tensor with sufficient storage
                     if base.dtype == torch.float4_e2m1fn_x2:
@@ -4712,18 +4959,26 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
-        result = choice.benchmark(*inputs, out=output)
-        device_type = next(
-            (tensor.device.type for tensor in inputs if is_gpu(tensor.device.type)),
-            "cuda",
-        )
-        device_interface = get_interface_for_device(device_type)
-        if device_interface.is_available():
-            device_interface.synchronize()  # shake out any CUDA errors
+        try:
+            result = choice.benchmark(*inputs, out=output)
+            device_type = next(
+                (tensor.device.type for tensor in inputs if is_gpu(tensor.device.type)),
+                "cuda",
+            )
+            device_interface = get_interface_for_device(device_type)
+            if device_interface.is_available():
+                device_interface.synchronize()  # shake out any CUDA errors
 
-        if VERIFY and autotune_args.expected is not None:
-            autotune_args.verify(**VERIFY)
-        return result
+            if VERIFY and autotune_args.expected is not None:
+                autotune_args.verify(**VERIFY)
+            return result
+        finally:
+            bmreq = _benchmark_request_for_choice(choice)
+            cleanup_run_fn = getattr(bmreq, "cleanup_run_fn", None)
+            if cleanup_run_fn is not None:
+                # In-process autotuning owns the loaded benchmark module, so clean it
+                # immediately after each choice. The outer benchmark cleanup is a fallback.
+                cleanup_run_fn()
 
     @classmethod
     def _run_collective_benchmark(
@@ -5343,7 +5598,12 @@ class AlgorithmSelectorCache(PersistentCache):
         if isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller):
             return {"type": "extern", "time": timings[choice]}
 
-        assert isinstance(choice, torch._inductor.select_algorithm.TritonTemplateCaller)
+        if not isinstance(
+            choice, torch._inductor.select_algorithm.TritonTemplateCaller
+        ):
+            raise AssertionError(
+                f"expected choice to be TritonTemplateCaller, got {type(choice)}"
+            )
 
         info = choice.info_dict()
         result = {
@@ -5783,8 +6043,8 @@ class SymbolicGridFn:
         params = inspect.signature(fn).parameters
         for name, fn_sym, fn_int in [
             ("cdiv", CeilDiv, ceildiv),
-            ("min", sympy.Min, min),
-            ("max", sympy.Max, max),
+            ("min", Min, min),
+            ("max", Max, max),
         ]:
             if name in params:
                 self.kwargs_int[name] = fn_int

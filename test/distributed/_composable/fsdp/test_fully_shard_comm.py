@@ -68,6 +68,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
     xfailIf,
@@ -546,6 +547,124 @@ class TestFullyShardCommunication(FSDPTest):
 
             self.assertEqual(ref_loss, loss)
             check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_reduce_scatter_max_input_buffers(self):
+        """
+        Tests that ``set_reduce_scatter_max_input_buffers`` is a pure
+        scheduling change: changing the in-flight reduce-scatter copy-in buffer
+        cap (``2``, or an explicit ``1`` that matches the default) produces
+        identical parameters and gradients to the default single-buffer
+        behavior, across FSDP/HSDP and reshard-after-forward (under bf16 mixed
+        precision, where the retained buffer is in the reduce dtype).
+        """
+        self.run_subtests(
+            {
+                "mesh_shape": [(self.world_size,), (self.world_size // 2, 2)],
+                "reshard_after_forward": [True, False],
+                "max_input_buffers": [1, 2],
+            },
+            self._test_set_reduce_scatter_max_input_buffers,
+        )
+
+    def _test_set_reduce_scatter_max_input_buffers(
+        self,
+        mesh_shape: tuple[int] | tuple[int, int],
+        reshard_after_forward: bool,
+        max_input_buffers: int,
+    ):
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0, weight_tying=False)
+        ref_model = Transformer(model_args)
+        model = copy.deepcopy(ref_model)
+        mesh_dim_names = ("outer",) if len(mesh_shape) == 1 else ("outer", "inner")
+        mesh = init_device_mesh(
+            device_type.type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        fsdp_kwargs = {
+            "reshard_after_forward": reshard_after_forward,
+            "mesh": mesh,
+            "mp_policy": mp_policy,
+        }
+        # Reference model keeps the default (copy-in on the compute stream)
+        for module in ref_model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, **fsdp_kwargs)
+        ref_model = fully_shard(ref_model, **fsdp_kwargs)
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        # Test model retains multiple reduce-scatter copy-in buffers in flight
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, **fsdp_kwargs)
+        model = fully_shard(model, **fsdp_kwargs)
+        model.set_reduce_scatter_max_input_buffers(max_input_buffers)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        for _ in range(3):
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            ref_optim.step()
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+            self.assertEqual(ref_loss, loss)
+            # Check parity before zero_grad so gradients are compared too
+            check_sharded_parity(self, ref_model, model)
+            ref_optim.zero_grad()
+            optim.zero_grad()
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_max_input_buffers_resolves_to_max(self):
+        """
+        Per-module reduce-scatter input-buffer caps share one pipeline (a single
+        ``comm_ctx.reduce_scatter_states`` list), so mixed caps must resolve to
+        the max on the shared comm context: a lower-cap module cannot silently
+        undo a higher-cap module's retention. The per-group values stay as set.
+        """
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0)
+        model = Transformer(model_args)
+        blocks = [m for m in model.modules() if isinstance(m, TransformerBlock)]
+        self.assertGreaterEqual(len(blocks), 2)
+        for block in blocks:
+            fully_shard(block)
+        model = fully_shard(model)
+        # Set a non-default cap on a single block only (recurse=False); every
+        # other group (including the root) keeps the default of 1.
+        expected_max = 3
+        blocks[0].set_reduce_scatter_max_input_buffers(expected_max, recurse=False)
+
+        # Resolution runs in lazy init on the first forward.
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        model(inp).sum().backward()
+
+        comm_ctx = model._get_fsdp_state()._comm_ctx
+        self.assertEqual(comm_ctx.reduce_scatter_max_input_buffers, expected_max)
+        # Resolution leaves the per-group input values untouched.
+        block0_pg = blocks[0]._get_fsdp_state()._fsdp_param_groups[0]
+        block1_pg = blocks[1]._get_fsdp_state()._fsdp_param_groups[0]
+        self.assertEqual(block0_pg.reduce_scatter_max_input_buffers, expected_max)
+        self.assertEqual(block1_pg.reduce_scatter_max_input_buffers, 1)
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_reduce_scatter_max_input_buffers_validation(self):
+        model = fully_shard(nn.Linear(16, 16))
+        # Non-positive -> ValueError
+        with self.assertRaises(ValueError):
+            model.set_reduce_scatter_max_input_buffers(0)
+        # Non-int -> TypeError, even though 2.5 >= 1 numerically
+        with self.assertRaises(TypeError):
+            model.set_reduce_scatter_max_input_buffers(2.5)
+        # bool is an int subclass but is not a valid count -> TypeError
+        with self.assertRaises(TypeError):
+            model.set_reduce_scatter_max_input_buffers(True)
+        # A valid value is accepted
+        model.set_reduce_scatter_max_input_buffers(2)
 
     @skip_if_lt_x_gpu(2)
     def test_set_reshard_after_forward(self):
@@ -1532,6 +1651,7 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 2)
 
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/149349")
     @skip_if_lt_x_gpu(2)
     def test_unshard_async(self):
         class ReduceModule(nn.Module):
