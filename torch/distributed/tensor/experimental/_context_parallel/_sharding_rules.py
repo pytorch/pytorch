@@ -216,18 +216,53 @@ def _scaled_dot_product_cudnn_attention_backward_cp_single_dim_strategy(
     args_schema: ArgsType,
     kwargs_schema: KwargsType,
 ) -> list[SingleDimPlacementList]:
+    if len(args_schema) < 15:
+        raise AssertionError(f"Expected at least 15 args, got {len(args_schema)}")
+
+    for arg_index in range(6):
+        arg = args_schema[arg_index]
+        if not isinstance(arg, TensorMeta):
+            raise AssertionError(f"Expected TensorMeta, got {type(arg)}")
+
+    philox_placements: list[Placement] = []
+    for arg_index in (6, 7):
+        arg = args_schema[arg_index]
+        if isinstance(arg, TensorMeta):
+            philox_placements.append(Replicate())
+        elif not isinstance(arg, torch.Tensor):
+            raise AssertionError(f"Expected TensorMeta or Tensor, got {type(arg)}")
+
     has_attn_bias = args_schema[8] is not None
-    has_scale = len(args_schema) >= 16 and False
+    if has_attn_bias and not isinstance(args_schema[8], (TensorMeta, torch.Tensor)):
+        raise AssertionError(
+            f"Expected TensorMeta or Tensor, got {type(args_schema[8])}"
+        )
 
-    cp_sharding_gout: SingleDimPlacementList = [_cp_sharding()] * 3
-    cp_sharding_ginp: SingleDimPlacementList = [_cp_sharding()] * 6
-    cp_sharding_ginp += [Replicate()] * 2
-    cp_sharding_ginp += [_cp_sharding() if has_attn_bias else None]
-    cp_sharding_ginp += [None] * 6
-    if has_scale:
-        cp_sharding_ginp.append(None)
+    cum_seq_placements: list[None] = []
+    for arg_index in (9, 10):
+        arg = args_schema[arg_index]
+        if isinstance(arg, TensorMeta):
+            cum_seq_placements.append(None)
+        elif not isinstance(arg, torch.Tensor):
+            raise AssertionError(f"Expected TensorMeta or Tensor, got {type(arg)}")
 
-    return [cp_sharding_gout + cp_sharding_ginp]
+    cp_sharding: SingleDimPlacementList = [
+        _cp_sharding(),  # grad_q
+        _cp_sharding(),  # grad_k
+        _cp_sharding(),  # grad_v
+        _cp_sharding(),  # grad_out
+        _cp_sharding(),  # q
+        _cp_sharding(),  # k
+        _cp_sharding(),  # v
+        _cp_sharding(),  # output
+        _cp_sharding(),  # logsumexp
+    ]
+    cp_sharding.extend(philox_placements)
+    if has_attn_bias and isinstance(args_schema[8], TensorMeta):
+        cp_sharding.append(_cp_sharding())
+    cp_sharding.extend(cum_seq_placements)
+
+    return [cp_sharding]
 
 
 # Store context managers and original strategies
