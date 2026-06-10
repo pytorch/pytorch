@@ -81,6 +81,9 @@ struct SnapshotInfo {
   std::vector<std::vector<CachingDeviceAllocator::TraceEntry>> device_traces;
   std::vector<CachingDeviceAllocator::AnnotationEntry> external_annotations;
   AllocatorConfigInfo config_metadata;
+  // Per-device ring buffer status, indexed same as device_traces.
+  std::vector<size_t> trace_alloc_max_entries;
+  std::vector<bool> trace_alloc_overflowed;
 };
 
 // returns the pointers freed in the pool

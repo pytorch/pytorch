@@ -973,10 +973,26 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   }
   allocator_settings[roundup_power2_divisions_s] = roundup_settings;
 
+  // Per-device ring buffer overflow status, indexed same as device_traces.
+  // trace_alloc_max_entries[i]: configured max_entries for device i's ring buffer.
+  // trace_alloc_overflowed[i]: true if device i's ring buffer wrapped around,
+  //   meaning some trace events were overwritten and "alloc not recorded" blocks
+  //   may appear in the visualization.
+  py::list trace_max_entries_list;
+  for (auto v : snapshot.trace_alloc_max_entries) {
+    trace_max_entries_list.append(int64_t(v));
+  }
+  py::list trace_overflowed_list;
+  for (auto v : snapshot.trace_alloc_overflowed) {
+    trace_overflowed_list.append(bool(v));
+  }
+
   py::dict result;
   result["segments"] = segments;
   result["device_traces"] = traces;
   result["allocator_settings"] = allocator_settings;
+  result["trace_alloc_max_entries"] = trace_max_entries_list;
+  result["trace_alloc_overflowed"] = trace_overflowed_list;
   result["external_annotations"] = external_annotations;
 
   auto frames = py_symbolize(to_gather_frames);

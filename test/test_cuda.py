@@ -6190,6 +6190,56 @@ print(f"{torch.cuda.device_count()}")
             )
             self.assertEqual("1", r)
 
+    def test_ring_buffer_overflow_per_device(self):
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory._record_memory_history(
+            max_entries=10, clear_history=True
+        )
+        for _ in range(20):
+            t = torch.randn(1024, device="cuda")
+            del t
+        snapshot = torch.cuda.memory._snapshot()
+        torch.cuda.memory._record_memory_history(enabled=None)
+
+        self.assertIn("trace_alloc_overflowed", snapshot)
+        self.assertIn("trace_alloc_max_entries", snapshot)
+        self.assertIsInstance(snapshot["trace_alloc_overflowed"], list)
+        self.assertIsInstance(snapshot["trace_alloc_max_entries"], list)
+        # Per-device lists should match device_traces length
+        self.assertEqual(
+            len(snapshot["trace_alloc_overflowed"]),
+            len(snapshot["device_traces"]),
+        )
+        self.assertEqual(
+            len(snapshot["trace_alloc_max_entries"]),
+            len(snapshot["device_traces"]),
+        )
+        # The active device should have max_entries=10
+        device_idx = torch.cuda.current_device()
+        self.assertEqual(snapshot["trace_alloc_max_entries"][device_idx], 10)
+        # With 20 alloc+free cycles on a 10-entry buffer, it must overflow
+        self.assertTrue(snapshot["trace_alloc_overflowed"][device_idx])
+        # Inactive devices should not overflow
+        for i, overflowed in enumerate(snapshot["trace_alloc_overflowed"]):
+            if i != device_idx:
+                self.assertFalse(overflowed)
+
+    def test_ring_buffer_no_overflow(self):
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory._record_memory_history(
+            max_entries=1_000_000, clear_history=True
+        )
+        t = torch.randn(1024, device="cuda")
+        del t
+        snapshot = torch.cuda.memory._snapshot()
+        torch.cuda.memory._record_memory_history(enabled=None)
+
+        device_idx = torch.cuda.current_device()
+        self.assertFalse(snapshot["trace_alloc_overflowed"][device_idx])
+        self.assertEqual(
+            snapshot["trace_alloc_max_entries"][device_idx], 1_000_000
+        )
+
 
 MIN_BLOCK_SIZE = 512
 SMALL_SIZE = 1048576

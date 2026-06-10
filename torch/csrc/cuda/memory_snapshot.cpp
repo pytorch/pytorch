@@ -505,9 +505,20 @@ std::string _memory_snapshot_pickled() {
   }
   allocator_settings.insert(roundup_power2_divisions_s, roundup_settings);
 
+  auto trace_max_entries_list = new_list();
+  for (auto v : snapshot.trace_alloc_max_entries) {
+    trace_max_entries_list.push_back(int64_t(v));
+  }
+  auto trace_overflowed_list = new_list();
+  for (auto v : snapshot.trace_alloc_overflowed) {
+    trace_overflowed_list.push_back(bool(v));
+  }
+
   auto result = new_dict();
   result.insert("segments", segments);
   result.insert("device_traces", traces);
+  result.insert("trace_alloc_max_entries", trace_max_entries_list);
+  result.insert("trace_alloc_overflowed", trace_overflowed_list);
   result.insert("allocator_settings", allocator_settings);
   result.insert("external_annotations", external_annotations);
 
