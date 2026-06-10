@@ -8,7 +8,10 @@ from typing import Any
 import sympy
 
 import torch
-from torch._inductor.flex_attention_config import flex_kernel_tuning_options
+from torch._inductor._flex_attention_config import (
+    flex_kernel_options_example,
+    flex_kernel_tuning_options,
+)
 from torch._inductor.virtualized import V
 from torch.utils._sympy.functions import FloorDiv, Mod
 
@@ -56,8 +59,7 @@ def _raise_flex_decoding_kernel_options_error(
         f"{_format_kernel_options(kernel_options, ('BLOCK_M', 'BLOCK_N'))}. "
         "Pass compatible values with kernel_options. Available decode tuning "
         f"options are {flex_kernel_tuning_options('decode')}. For example: "
-        "kernel_options={'fwd_BLOCK_M': 16, 'fwd_BLOCK_N': 128, "
-        "'fwd_num_warps': 2, 'fwd_num_stages': 3}. If you did not pin "
+        f"{flex_kernel_options_example('decode')}. If you did not pin "
         "these options, compiling with mode='max-autotune-no-cudagraphs' "
         "can also fix this by trying more FlexAttention configs."
     )

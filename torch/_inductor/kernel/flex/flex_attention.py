@@ -12,7 +12,7 @@ from typing import Any, cast, TYPE_CHECKING
 import sympy
 
 import torch
-from torch._inductor.flex_attention_config import (
+from torch._inductor._flex_attention_config import (
     flex_kernel_options_example,
     flex_kernel_tuning_options,
 )

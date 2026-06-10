@@ -33,12 +33,12 @@ from typing import (
 import torch
 from torch._dynamo.utils import counters, set_feature_use
 from torch._inductor import metrics
-from torch._inductor.config import triton as inductor_triton_config
-from torch._inductor.flex_attention_config import (
+from torch._inductor._flex_attention_config import (
     flex_attention_kind,
     flex_kernel_options_example,
     flex_kernel_selected_options,
 )
+from torch._inductor.config import triton as inductor_triton_config
 from torch._prims_common import compute_required_storage_length
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
