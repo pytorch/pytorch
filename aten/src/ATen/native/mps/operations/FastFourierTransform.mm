@@ -114,6 +114,8 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
                          Tensor& out) {
   TORCH_CHECK(self.is_complex(), "Input must be complex");
   TORCH_CHECK(out.scalar_type() == c10::toRealValueType(self.scalar_type()), "Unexpected output type");
+  TORCH_CHECK(!dim.empty(), "_fft_c2r: dim must not be empty");
+  check_fft_c2r_input(last_dim_size, self.size(dim.back()));
   const auto in_sizes = self.sym_sizes();
   SymDimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = last_dim_size;
