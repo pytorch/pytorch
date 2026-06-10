@@ -680,14 +680,14 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
 
   Tensor q, k, v;
   if (!use_separate_proj_weight) {
-    if (torch::equal(query, key) && torch::equal(key, value)) {
+    if (query.unsafeGetTensorImpl() == key.unsafeGetTensorImpl() && key.unsafeGetTensorImpl() == value.unsafeGetTensorImpl()) {
       // self-attention
       const auto chunks =
           F::linear(query, in_proj_weight, in_proj_bias).chunk(3, /*dim=*/-1);
       q = chunks[0];
       k = chunks[1];
       v = chunks[2];
-    } else if (torch::equal(key, value)) {
+    } else if (key.unsafeGetTensorImpl() == value.unsafeGetTensorImpl()) {
       // encoder-decoder attention
       // This is inline in_proj function with in_proj_weight and in_proj_bias
       auto _b = in_proj_bias;
