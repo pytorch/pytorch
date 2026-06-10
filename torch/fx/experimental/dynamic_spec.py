@@ -621,13 +621,29 @@ class ShapesSpec:
     ``assumptions`` is an optional list of ``SymBool`` expressions built
     from spec ``IntVar`` / ``ShapeVar`` values. Each assumption is wired
     into the shape env at compile time and asserted at runtime via the
-    deferred-runtime-assert mechanism::
+    deferred-runtime-assert mechanism.
 
-        A = ShapeVar("a")
-        B = ShapeVar("b")
-        ShapesSpec(
-            params={"x": TensorSpec([A, None]), "y": TensorSpec([B, None])},
-            assumptions=[A + B > 10, A * 2 == B],
+        from torch.fx.experimental.dynamic_spec import (
+            ParamsSpec,
+            ShapesSpec,
+            ShapeVar,
+            TensorSpec as T,
+        )
+
+        batch = ShapeVar("batch", min=2, max=128)
+        ep = torch.export.export(
+            mod,
+            (torch.randn(8, 3), torch.randn(16, 3)),
+            dynamic_shapes=ShapesSpec(
+                params=ParamsSpec(
+                    {
+                        "x": T([batch, 3]),
+                        "y": T([batch * 2, 3]),  # derived expression
+                    }
+                ),
+                assumptions=[batch % 2 == 0],
+            ),
+            strict=True,
         )
 
     ``globals`` is reserved for future use and will raise
