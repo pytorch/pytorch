@@ -163,6 +163,27 @@ class TestCppExtensionJIT(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
+    @common.skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_jit_cuda_extension_dlink(self):
+        module = torch.utils.cpp_extension.load(
+            name="torch_test_cuda_extension_dlink_jit",
+            sources=[
+                "cpp_extensions/cuda_dlink_extension.cpp",
+                "cpp_extensions/cuda_dlink_extension_kernel.cu",
+                "cpp_extensions/cuda_dlink_extension_add.cu",
+            ],
+            extra_cuda_cflags=["-O2", "-dc"],
+            extra_cuda_dlink_cflags=[],
+            verbose=True,
+            keep_intermediates=False,
+        )
+
+        a = torch.randn(8, dtype=torch.float, device="cuda")
+        b = torch.randn(8, dtype=torch.float, device="cuda")
+        self.assertEqual(module.add(a, b), a + b)
+
     def _test_jit_xpu_extension(self, extra_sycl_cflags):
         # randomizing extension name and names of extension methods
         # for the case when we test building few extensions in a row

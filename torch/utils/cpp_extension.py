@@ -1819,6 +1819,7 @@ def load(name,
          sources: str | list[str],
          extra_cflags=None,
          extra_cuda_cflags=None,
+         extra_cuda_dlink_cflags=None,
          extra_sycl_cflags=None,
          extra_ldflags=None,
          extra_include_paths=None,
@@ -1863,6 +1864,10 @@ def load(name,
     heuristics for finding the CUDA install directory are used, which usually
     work fine. If not, setting the ``CUDA_HOME`` environment variable is the
     safest option.
+    When a CUDA extension requires an explicit device link step, passing
+    ``extra_cuda_dlink_cflags`` (including an empty list) will enable that
+    step and forward any additional flags to the corresponding ``nvcc``
+    invocation.
 
     SYCL support with mixed compilation is provided. Simply pass SYCL source
     files (``.sycl``) along with other sources. Such files will be detected
@@ -1879,6 +1884,9 @@ def load(name,
         extra_cflags: optional list of compiler flags to forward to the build.
         extra_cuda_cflags: optional list of compiler flags to forward to nvcc
             when building CUDA sources.
+        extra_cuda_dlink_cflags: optional list of compiler flags to forward to
+            nvcc when device-linking CUDA sources. Passing an empty list
+            enables the device link step with default flags.
         extra_sycl_cflags: optional list of compiler flags to forward to SYCL
             compiler when building SYCL sources.
         extra_ldflags: optional list of linker flags to forward to the build.
@@ -1929,6 +1937,7 @@ def load(name,
         [sources] if isinstance(sources, str) else sources,
         extra_cflags,
         extra_cuda_cflags,
+        extra_cuda_dlink_cflags,
         extra_sycl_cflags,
         extra_ldflags,
         extra_include_paths,
@@ -2104,6 +2113,7 @@ def load_inline(name,
                 functions=None,
                 extra_cflags=None,
                 extra_cuda_cflags=None,
+                extra_cuda_dlink_cflags=None,
                 extra_sycl_cflags=None,
                 extra_ldflags=None,
                 extra_include_paths=None,
@@ -2169,6 +2179,8 @@ def load_inline(name,
         functions: A list of function names for which to generate function
             bindings. If a dictionary is given, it should map function names to
             docstrings (which are otherwise just the function names).
+        extra_cuda_dlink_cflags: See :func:`load`. When provided, enables a
+            CUDA device link step for the JIT build.
         with_cuda: Determines whether CUDA headers and libraries are added to
             the build. If set to ``None`` (default), this value is
             automatically determined based on whether ``cuda_sources`` is
@@ -2287,6 +2299,7 @@ def load_inline(name,
         sources,
         extra_cflags,
         extra_cuda_cflags,
+        extra_cuda_dlink_cflags,
         extra_sycl_cflags,
         extra_ldflags,
         extra_include_paths,
@@ -2303,6 +2316,7 @@ def _jit_compile(name,
                  sources,
                  extra_cflags,
                  extra_cuda_cflags,
+                 extra_cuda_dlink_cflags,
                  extra_sycl_cflags,
                  extra_ldflags,
                  extra_include_paths,
@@ -2329,7 +2343,7 @@ def _jit_compile(name,
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
         sources,
-        build_arguments=[extra_cflags, extra_cuda_cflags, extra_ldflags, extra_include_paths],
+        build_arguments=[extra_cflags, extra_cuda_cflags, extra_cuda_dlink_cflags, extra_ldflags, extra_include_paths],
         build_directory=build_directory,
         with_cuda=with_cuda,
         with_sycl=with_sycl,
@@ -2384,6 +2398,7 @@ def _jit_compile(name,
                         sources=sources,
                         extra_cflags=extra_cflags or [],
                         extra_cuda_cflags=extra_cuda_cflags or [],
+                        extra_cuda_dlink_cflags=extra_cuda_dlink_cflags,
                         extra_sycl_cflags=extra_sycl_cflags or [],
                         extra_ldflags=extra_ldflags or [],
                         extra_include_paths=extra_include_paths or [],
@@ -2485,6 +2500,7 @@ def _write_ninja_file_and_build_library(
         sources: list[str],
         extra_cflags,
         extra_cuda_cflags,
+        extra_cuda_dlink_cflags,
         extra_sycl_cflags,
         extra_ldflags,
         extra_include_paths,
@@ -2531,6 +2547,7 @@ def _write_ninja_file_and_build_library(
         sources=sources,
         extra_cflags=extra_cflags or [],
         extra_cuda_cflags=extra_cuda_cflags or [],
+        extra_cuda_dlink_cflags=extra_cuda_dlink_cflags,
         extra_sycl_cflags=extra_sycl_cflags or [],
         extra_ldflags=extra_ldflags or [],
         extra_include_paths=extra_include_paths or [],
@@ -2560,6 +2577,36 @@ def verify_ninja_availability() -> None:
     """Raise ``RuntimeError`` if `ninja <https://ninja-build.org/>`_ build system is not available on the system, does nothing otherwise."""
     if not is_ninja_available():
         raise RuntimeError("Ninja is required to load C++ extensions (pip install ninja to get it)")
+
+
+def _prepare_jit_cuda_dlink_flags(extra_cuda_cflags, extra_cuda_dlink_cflags):
+    if extra_cuda_dlink_cflags is None:
+        return None
+    if IS_HIP_EXTENSION:
+        raise RuntimeError("extra_cuda_dlink_cflags is only supported for CUDA builds")
+
+    cuda_dlink_flags = list(extra_cuda_dlink_cflags)
+    if '-dlink' not in cuda_dlink_flags:
+        cuda_dlink_flags.insert(0, '-dlink')
+
+    if IS_WINDOWS:
+        return COMMON_NVCC_FLAGS + cuda_dlink_flags + _get_cuda_arch_flags(extra_cuda_cflags)
+
+    cuda_dlink_flags = (
+        COMMON_NVCC_FLAGS +
+        ['--compiler-options', "'-fPIC'"] +
+        cuda_dlink_flags +
+        _get_cuda_arch_flags(extra_cuda_cflags)
+    )
+
+    cc_env = os.getenv("CC")
+    if (
+        cc_env is not None
+        and not any(flag.startswith(('-ccbin', '--compiler-bindir')) for flag in cuda_dlink_flags)
+    ):
+        cuda_dlink_flags.extend(['-ccbin', cc_env])
+
+    return cuda_dlink_flags
 
 
 def _prepare_ldflags(extra_ldflags, with_cuda, with_sycl, verbose, is_standalone):
@@ -2943,6 +2990,7 @@ def _write_ninja_file_to_build_library(path,
                                        sources,
                                        extra_cflags,
                                        extra_cuda_cflags,
+                                       extra_cuda_dlink_cflags,
                                        extra_sycl_cflags,
                                        extra_ldflags,
                                        extra_include_paths,
@@ -2951,6 +2999,8 @@ def _write_ninja_file_to_build_library(path,
                                        is_standalone) -> None:
     extra_cflags = [flag.strip() for flag in extra_cflags]
     extra_cuda_cflags = [flag.strip() for flag in extra_cuda_cflags]
+    if extra_cuda_dlink_cflags is not None:
+        extra_cuda_dlink_cflags = [flag.strip() for flag in extra_cuda_dlink_cflags]
     extra_sycl_cflags = [flag.strip() for flag in extra_sycl_cflags]
     extra_ldflags = [flag.strip() for flag in extra_ldflags]
     extra_include_paths = [flag.strip() for flag in extra_include_paths]
@@ -3022,6 +3072,8 @@ def _write_ninja_file_to_build_library(path,
     else:
         cuda_flags = None
 
+    cuda_dlink_flags = _prepare_jit_cuda_dlink_flags(extra_cuda_cflags, extra_cuda_dlink_cflags)
+
     if with_sycl:
         sycl_cflags = cflags + _COMMON_SYCL_FLAGS
         sycl_cflags += extra_sycl_cflags
@@ -3071,7 +3123,7 @@ def _write_ninja_file_to_build_library(path,
         post_cflags=None,
         cuda_cflags=cuda_flags,
         cuda_post_cflags=None,
-        cuda_dlink_post_cflags=None,
+        cuda_dlink_post_cflags=cuda_dlink_flags,
         sycl_cflags=sycl_cflags,
         sycl_post_cflags=[],
         sycl_dlink_post_cflags=sycl_dlink_post_cflags,
