@@ -224,57 +224,120 @@ def find_pypi_package_version(package: str) -> str | None:
     return None
 
 
-def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
-    """Parse expected cuDNN version from generate_binary_build_matrix.py for Linux.
-
-    Reads PYTORCH_EXTRA_INSTALL_REQUIREMENTS and extracts the cudnn version
-    for the given CUDA version (e.g. "12.6").
-    """
+def _read_build_matrix_script(check_name: str) -> str | None:
+    """Return contents of generate_binary_build_matrix.py, or None if missing."""
     matrix_script = (
         PYTORCH_ROOT / ".github" / "scripts" / "generate_binary_build_matrix.py"
     )
     if not matrix_script.exists():
-        print(f"Warning: {matrix_script} not found, skipping cuDNN version check")
+        print(f"Warning: {matrix_script} not found, skipping {check_name}")
         return None
-
-    content = matrix_script.read_text()
-    # Match the full cudnn package version like nvidia-cudnn-cu12==9.10.2.21
-    # and extract major.minor.patch (dropping the build number)
-    pattern = (
-        rf'"{re.escape(cuda_version)}":\s*\(\s*'
-        r"[\s\S]*?nvidia-cudnn-cu\d+==(\d+\.\d+\.\d+)\.\d+"
-    )
-    match = re.search(pattern, content)
-    if match:
-        return match.group(1)
-    return None
+    return matrix_script.read_text()
 
 
-def get_expected_cudnn_version_windows(cuda_version: str) -> str | None:
-    """Parse expected cuDNN version from cuda_install.bat for Windows.
-
-    Reads the batch file and extracts EXPECTED_CUDNN_VERSION for the given
-    CUDA version (e.g. "12.6" maps to CUDA_VER 126).
-    """
+def _read_cuda_install_bat(check_name: str) -> str | None:
+    """Return contents of Windows cuda_install.bat, or None if missing."""
     bat_file = (
         PYTORCH_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
     )
     if not bat_file.exists():
-        print(f"Warning: {bat_file} not found, skipping cuDNN version check")
+        print(f"Warning: {bat_file} not found, skipping {check_name}")
         return None
+    return bat_file.read_text()
 
-    content = bat_file.read_text()
-    # Convert "12.6" to "126" to match batch file's CUDA_VER format
-    cuda_ver_nodot = cuda_version.replace(".", "")
-    # Match: if %CUDA_VER% EQU 126 ( ... set EXPECTED_CUDNN_VERSION=9.10.2 )
-    pattern = (
-        rf"if %CUDA_VER% EQU {re.escape(cuda_ver_nodot)}\s*\("
-        r"[\s\S]*?set EXPECTED_CUDNN_VERSION=(\d+\.\d+\.\d+)"
+
+def get_expected_cuda_full_version_linux(cuda_version: str) -> str | None:
+    """Parse expected full CUDA version (e.g. "13.2.1" for "13.2") from
+    the CUDA_ARCHES_FULL_VERSION dict in generate_binary_build_matrix.py.
+    """
+    content = _read_build_matrix_script("CUDA full version check")
+    if content is None:
+        return None
+    dict_match = re.search(r"CUDA_ARCHES_FULL_VERSION\s*=\s*\{([^}]*)\}", content)
+    if not dict_match:
+        return None
+    match = re.search(
+        rf'"{re.escape(cuda_version)}":\s*"(\d+\.\d+\.\d+)"', dict_match.group(1)
     )
-    match = re.search(pattern, content)
-    if match:
-        return match.group(1)
-    return None
+    return match.group(1) if match else None
+
+
+def get_expected_cuda_full_version_windows(cuda_version: str) -> str | None:
+    """Parse expected full CUDA version from CUDA_INSTALL_EXE in cuda_install.bat.
+    E.g. "13.2" maps to label :cuda132 and exe name "cuda_13.2.1_windows.exe".
+    """
+    content = _read_cuda_install_bat("CUDA full version check")
+    if content is None:
+        return None
+    cuda_ver_nodot = cuda_version.replace(".", "")
+    match = re.search(
+        rf":cuda{re.escape(cuda_ver_nodot)}\b"
+        r"[\s\S]*?CUDA_INSTALL_EXE=cuda_(\d+\.\d+\.\d+)",
+        content,
+    )
+    return match.group(1) if match else None
+
+
+def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
+    """Parse expected cuDNN version for Linux from nvidia-cudnn-cu* pin in
+    PYTORCH_EXTRA_INSTALL_REQUIREMENTS in generate_binary_build_matrix.py.
+    Returns major.minor.patch (dropping the build number).
+    """
+    content = _read_build_matrix_script("cuDNN version check")
+    if content is None:
+        return None
+    match = re.search(
+        rf'"{re.escape(cuda_version)}":\s*\(\s*'
+        r"[\s\S]*?nvidia-cudnn-cu\d+==(\d+\.\d+\.\d+)\.\d+",
+        content,
+    )
+    return match.group(1) if match else None
+
+
+def get_expected_cudnn_version_windows(cuda_version: str) -> str | None:
+    """Parse expected cuDNN version from EXPECTED_CUDNN_VERSION in cuda_install.bat.
+    E.g. "12.6" maps to CUDA_VER 126.
+    """
+    content = _read_cuda_install_bat("cuDNN version check")
+    if content is None:
+        return None
+    cuda_ver_nodot = cuda_version.replace(".", "")
+    match = re.search(
+        rf"if %CUDA_VER% EQU {re.escape(cuda_ver_nodot)}\s*\("
+        r"[\s\S]*?set EXPECTED_CUDNN_VERSION=(\d+\.\d+\.\d+)",
+        content,
+    )
+    return match.group(1) if match else None
+
+
+def check_cuda_full_version(cuda_version: str, actual_cuda_full_version: str) -> None:
+    """Validate CUDA full version matches expected version from build config files."""
+    if sys.platform in ["linux", "linux2"]:
+        expected = get_expected_cuda_full_version_linux(cuda_version)
+        source = "generate_binary_build_matrix.py"
+    elif sys.platform == "win32":
+        expected = get_expected_cuda_full_version_windows(cuda_version)
+        source = "cuda_install.bat"
+    else:
+        print(f"CUDA full version check not supported on platform {sys.platform}")
+        return
+
+    if expected is None:
+        print(
+            f"Warning: Could not determine expected CUDA full version for "
+            f"CUDA {cuda_version} from {source}, skipping validation"
+        )
+        return
+
+    if actual_cuda_full_version != expected:
+        raise RuntimeError(
+            f"CUDA full version mismatch for CUDA {cuda_version}. "
+            f"Loaded: {actual_cuda_full_version} Expected: {expected} (from {source})"
+        )
+    print(
+        f"CUDA full version check passed: {actual_cuda_full_version} matches "
+        f"expected {expected} from {source}"
+    )
 
 
 def check_cudnn_version(cuda_version: str, actual_cudnn_version: str) -> None:
@@ -363,6 +426,15 @@ def smoke_test_cuda(
             )
 
         print(f"torch cuda: {torch.version.cuda}")
+        cuda_compiled_version = torch._C._cuda_getCompiledVersion()
+        cuda_major = cuda_compiled_version // 1000
+        cuda_minor = (cuda_compiled_version // 10) % 100
+        cuda_patch = cuda_compiled_version % 10
+        torch_cuda_full_version = f"{cuda_major}.{cuda_minor}.{cuda_patch}"
+        print(f"torch cuda full version: {torch_cuda_full_version}")
+
+        check_cuda_full_version(gpu_arch_ver, torch_cuda_full_version)
+
         torch.cuda.init()
         print("CUDA initialized successfully")
         print(f"Number of CUDA devices: {torch.cuda.device_count()}")
