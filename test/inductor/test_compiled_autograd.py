@@ -48,7 +48,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     scoped_load_inline,
     skipIfWindows,
-    skipIfXpu,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import (
