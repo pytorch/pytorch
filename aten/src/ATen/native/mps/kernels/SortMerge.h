@@ -327,6 +327,29 @@ inline void block_merge_sort(threadgroup T* tv, threadgroup IdxT* ti, uint lid, 
 // memory, sorted in place with block_merge_sort and written out. Selected
 // by the host when size <= TPTG*TN for the largest available TPTG.
 // =============================================================================
+template <typename T, short TPTG, short TN, bool STABLE>
+inline void sort_block_body(const device T* inp,
+                            threadgroup T* tgv,
+                            threadgroup uint* tgi,
+                            int size,
+                            long stride_sort,
+                            long stride_seg,
+                            bool desc,
+                            uint tid_y,
+                            uint lid) {
+  constexpr int ELEMS_PER_TG = TPTG * TN;
+  T init = sort_init<T>(desc);
+  long base_in = long(tid_y) * stride_seg;
+  for (int i = int(lid); i < ELEMS_PER_TG; i += TPTG) {
+    tgv[i] = i < size ? inp[base_in + i * stride_sort] : init;
+    // Out-of-range slots get sentinel ~0 (largest index) so the bitonic_lt
+    // index tie-break sorts padding last and its bogus index never leaks out.
+    tgi[i] = i < size ? uint(i) : ~uint(0);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  block_merge_sort<T, uint, TPTG, TN, STABLE>(tgv, tgi, lid, desc);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+}
 
 template <typename T, short TPTG, short TN, bool STABLE>
 kernel void sort_block(const device T* inp [[buffer(0)]],
@@ -337,22 +360,11 @@ kernel void sort_block(const device T* inp [[buffer(0)]],
                        constant bool& desc [[buffer(5)]],
                        uint3 tid [[threadgroup_position_in_grid]],
                        uint3 lid [[thread_position_in_threadgroup]]) {
-  const long stride_sort = strides.x;
-  const long stride_seg = strides.y;
   constexpr int ELEMS_PER_TG = TPTG * TN;
   threadgroup T tgv[ELEMS_PER_TG];
   threadgroup uint tgi[ELEMS_PER_TG];
-
-  T init = sort_init<T>(desc);
-  long base_in = tid.y * stride_seg;
+  sort_block_body<T, TPTG, TN, STABLE>(inp, tgv, tgi, size, strides.x, strides.y, desc, tid.y, lid.x);
   long base_out = long(tid.y) * long(size);
-  for (int i = lid.x; i < ELEMS_PER_TG; i += TPTG) {
-    tgv[i] = i < size ? inp[base_in + i * stride_sort] : init;
-    tgi[i] = i < size ? uint(i) : ~uint(0);
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  block_merge_sort<T, uint, TPTG, TN, STABLE>(tgv, tgi, lid.x, desc);
-  threadgroup_barrier(mem_flags::mem_threadgroup);
   for (int i = lid.x; i < size; i += TPTG) {
     out_vals[base_out + i] = tgv[i];
     out_idx[base_out + i] = long(tgi[i]);
@@ -407,28 +419,23 @@ kernel void mb_sort_block(const device T* inp [[buffer(0)]],
   }
 }
 
-template <typename T, typename InIdxT, typename OutIdxT, short TPTG, short TN>
-kernel void mb_merge(const device T* vi [[buffer(0)]],
-                     const device InIdxT* ii [[buffer(1)]],
-                     device T* vo [[buffer(2)]],
-                     device OutIdxT* io [[buffer(3)]],
-                     constant int3& dims [[buffer(4)]],
-                     constant bool& desc [[buffer(5)]],
-                     uint3 tid [[threadgroup_position_in_grid]],
-                     uint3 lid [[thread_position_in_threadgroup]]) {
-  const int size = dims.x;
-  const int merge_tiles = dims.y;
+template <typename T, typename InIdxT, short TPTG, short TN>
+inline void mb_merge_body(const device T* vi,
+                          const device InIdxT* ii,
+                          threadgroup T* tgv,
+                          threadgroup InIdxT* tgi,
+                          int size,
+                          int merge_tiles,
+                          uint tg_x,
+                          bool desc,
+                          uint lid) {
   constexpr int ELEMS_PER_TG = TPTG * TN;
   T init = sort_init<T>(desc);
-  vi += tid.y * size;
-  ii += tid.y * size;
-  vo += tid.y * size;
-  io += tid.y * size;
 
   // Locate the merge group (mg) and our tile inside it (ml). The merge group
   // covers [g_start, g_start + g_span); A is its first half, B is its second.
-  const int mg = tid.x / merge_tiles;
-  const int ml = tid.x % merge_tiles;
+  const int mg = tg_x / merge_tiles;
+  const int ml = tg_x % merge_tiles;
   const int g_start = ELEMS_PER_TG * merge_tiles * mg;
   const int g_span = ELEMS_PER_TG * merge_tiles;
   const int A0 = min(size, g_start);
@@ -448,9 +455,7 @@ kernel void mb_merge(const device T* vi [[buffer(0)]],
   const int Bed = min(size, A0 + A1 + diag_hi - Aed);
   const int Asz = Aed - Ast, Bsz = Bed - Bst;
 
-  threadgroup T tgv[ELEMS_PER_TG];
-  threadgroup InIdxT tgi[ELEMS_PER_TG];
-  for (int x = lid.x; x < ELEMS_PER_TG; x += TPTG) {
+  for (int x = lid; x < ELEMS_PER_TG; x += TPTG) {
     if (x < Asz + Bsz) {
       bool fromA = x < Asz;
       tgv[x] = fromA ? vi[Ast + x] : vi[Bst + x - Asz];
@@ -462,7 +467,7 @@ kernel void mb_merge(const device T* vi [[buffer(0)]],
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  int md = min(Asz + Bsz, TN * int(lid.x));
+  int md = min(Asz + Bsz, TN * int(lid));
   int ap = merge_partition(tgv, tgv + Asz, Asz, Bsz, md, desc);
   thread T lv[TN];
   thread InIdxT li[TN];
@@ -471,10 +476,32 @@ kernel void mb_merge(const device T* vi [[buffer(0)]],
 
   threadgroup_barrier(mem_flags::mem_threadgroup);
   for (int i = 0; i < TN; ++i) {
-    tgv[lid.x * TN + i] = lv[i];
-    tgi[lid.x * TN + i] = li[i];
+    tgv[lid * TN + i] = lv[i];
+    tgi[lid * TN + i] = li[i];
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
+}
+
+template <typename T, typename InIdxT, typename OutIdxT, short TPTG, short TN>
+kernel void mb_merge(const device T* vi [[buffer(0)]],
+                     const device InIdxT* ii [[buffer(1)]],
+                     device T* vo [[buffer(2)]],
+                     device OutIdxT* io [[buffer(3)]],
+                     constant int3& dims [[buffer(4)]],
+                     constant bool& desc [[buffer(5)]],
+                     uint3 tid [[threadgroup_position_in_grid]],
+                     uint3 lid [[thread_position_in_threadgroup]]) {
+  const int size = dims.x;
+  const int merge_tiles = dims.y;
+  constexpr int ELEMS_PER_TG = TPTG * TN;
+  vi += tid.y * size;
+  ii += tid.y * size;
+  vo += tid.y * size;
+  io += tid.y * size;
+
+  threadgroup T tgv[ELEMS_PER_TG];
+  threadgroup InIdxT tgi[ELEMS_PER_TG];
+  mb_merge_body<T, InIdxT, TPTG, TN>(vi, ii, tgv, tgi, size, merge_tiles, tid.x, desc, lid.x);
 
   int base = tid.x * ELEMS_PER_TG;
   for (int i = lid.x; i < ELEMS_PER_TG; i += TPTG) {

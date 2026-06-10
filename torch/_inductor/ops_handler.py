@@ -37,6 +37,10 @@ StoreMode = AtomicMode | Literal["tma"] | None
 ReductionType = Literal[
     "argmax",
     "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
     "welford_reduce",
     "welford_combine",
     "any",
@@ -98,10 +102,6 @@ class OpsHandler(Generic[T]):
         """Computes inductor_prims.random with mode="rand".  offset has dtype int32."""
         raise NotImplementedError
 
-    def rand4x(self, seed: T, offset: T) -> T:
-        """Computes inductor_prims.random with mode="rand" using Philox 4x output."""
-        raise NotImplementedError
-
     def rand_eager(
         self, seed: T, base_offset: T, threads_per_round: T, tid: T, vec: T
     ) -> T:
@@ -110,10 +110,6 @@ class OpsHandler(Generic[T]):
 
     def randn(self, seed: T, offset: T) -> T:
         """Computes inductor_prims.random with mode="randn".  offset has dtype int32."""
-        raise NotImplementedError
-
-    def randn4x(self, seed: T, offset: T) -> T:
-        """Computes inductor_prims.random with mode="randn" using Philox 4x output."""
         raise NotImplementedError
 
     def randint64(self, seed: T, offset: T, low: T, high: T) -> T:
@@ -142,9 +138,21 @@ class OpsHandler(Generic[T]):
 
     def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
         """
-        Converts a sympy expression into a scalar of type dtype.  expr is typically
-        an indexing expression, thus the name; however, it can also be used in
-        non-indexing situations.
+        Converts a sympy expression into a scalar suitable for indexing memory.
+        The kernel decides the actual computation dtype (typically int32) — the
+        ``dtype`` argument is advisory and is not honored when it would conflict
+        with the kernel's indexing dtype. For values that must respect the
+        requested dtype, use ``value_expr`` instead.
+        """
+        raise NotImplementedError
+
+    def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
+        """
+        Converts a sympy expression into a scalar of type ``dtype`` that
+        participates in tensor value computation. Unlike ``index_expr``, the
+        result dtype is respected, so this is the right op when the user
+        explicitly requested the dtype (e.g. ``arange(dtype=torch.int64)``
+        whose result is added to a tensor rather than used as an index).
         """
         raise NotImplementedError
 

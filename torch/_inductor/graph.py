@@ -8,6 +8,7 @@ import operator
 import os
 import re
 import sys
+import textwrap
 import time
 import typing_extensions
 from collections import defaultdict
@@ -38,7 +39,6 @@ from torch._prims_common import (
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
-from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     _get_placeholder_expr,
     free_unbacked_symbols,
@@ -55,7 +55,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
-from . import config, ir, metrics
+from . import config, ir
 from .codegen.common import (
     BackendFeature,
     DeviceOpOverrides,
@@ -107,7 +107,6 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .sizevars import SizeVarAllocator
 from .utils import (
-    convert_shape_to_inductor,
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
@@ -182,11 +181,6 @@ def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> torch.dtype | 
         return None
 
 
-def is_magic_method(op: Any) -> bool:
-    magic_ops = OrderedSet(method_to_operator(m) for m in magic_methods)
-    return op in magic_ops
-
-
 def getattr_recursive(
     obj: GraphModule, target: str
 ) -> Tensor | torch._C.ScriptObject | GraphModule:
@@ -217,6 +211,10 @@ def get_user_visible_output_strides(g: Graph) -> dict[Node, tuple[int, ...]]:
         if idx in output_node.meta["user_visible_output_idxs"]:
             ret[node] = output_node.meta["original_output_strides"][idx]
     return ret
+
+
+def _is_cpu_strided_tensor_pinned(t: torch.Tensor) -> bool:
+    return t.device.type == "cpu" and t.layout == torch.strided and t.is_pinned()
 
 
 def extend_user_visible_output_strides(
@@ -265,6 +263,7 @@ def mark_nodes_dislike_padding(
             aten.convolution,
             aten.convolution_backward,
             aten._scaled_mm,
+            aten._scaled_mm_v2,
         ]
     )
     # what's a better way to collect the reduction ops?
@@ -362,6 +361,16 @@ def is_mkldnn_conv(node: Node) -> bool:
 
 
 class GraphLowering(torch.fx.Interpreter):
+    """Lowers an FX graph to Inductor IR and drives backend code generation.
+
+    Walks the FX graph node-by-node, materializing inputs/outputs and
+    constants, dispatching each call to an Inductor lowering, and accumulating
+    the resulting IR nodes. Holds graph-wide state needed by lowerings and
+    codegen (sizevars, scheduler inputs, device/dtype tracking, wrapper code,
+    etc.) and orchestrates the call into `codegen()` to produce a wrapper +
+    kernel module via the configured backend (Python/C++ wrappers, AOTI).
+    """
+
     graph_outputs: list[ir.IRNode]
 
     def __init__(
@@ -422,6 +431,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, TensorBox | TorchBindObject | sympy.Expr] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
+        # InputBuffer offsets are relative to input.data_ptr(); explicit FX
+        # as_strided storage offsets are relative to the input's storage.
+        self.graph_input_storage_offsets: dict[str, Expr] = {}
         self.partition_maps: list[GraphPartitionMap] | None = None
         self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
@@ -587,18 +599,23 @@ class GraphLowering(torch.fx.Interpreter):
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
 
-    def symbolic_sizes_strides(
+    def get_placeholder_sizes_strides(
         self, ex: torch.Tensor
     ) -> tuple[Sequence[int | Expr], Sequence[int | Expr]]:
+        sizes, strides, _ = self.symbolic_sizes_strides_storage_offset(ex)
+        return sizes, strides
+
+    def symbolic_sizes_strides_storage_offset(
+        self, ex: torch.Tensor
+    ) -> tuple[Sequence[int | Expr], Sequence[int | Expr], Expr]:
         """
         Support dynamic shapes and dynamic strides by assigning variables
         to each dimension.  We duck-shape tensors, so if two tensors
         have the same size they get assigned the same symbolic variable.
         """
         if self.reuse_shape_env:
-            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
-                ex.stride()
-            )
+            size, stride = ex.size(), ex.stride()
+            storage_offset = ex.storage_offset()
         else:
             from torch._dynamo.source import ConstantSource
 
@@ -614,7 +631,7 @@ class GraphLowering(torch.fx.Interpreter):
             (
                 size,
                 stride,
-                _,
+                storage_offset,
             ) = self._shape_env.transfer_symbols_from_foreign_shape_env(
                 ex.size(),
                 ex.stride(),
@@ -622,9 +639,14 @@ class GraphLowering(torch.fx.Interpreter):
                 source,
             )
 
-        r_size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
-        r_stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
-        return r_size, r_stride
+        r_size = [sympy.sympify(i) for i in size]
+        r_stride = [sympy.sympify(i) for i in stride]
+        r_storage_offset = (
+            storage_offset.node.expr
+            if isinstance(storage_offset, torch.SymInt)
+            else sympy.sympify(storage_offset)
+        )
+        return r_size, r_stride, r_storage_offset
 
     def static_sizes_strides(
         self, ex: torch.Tensor
@@ -1188,7 +1210,10 @@ class GraphLowering(torch.fx.Interpreter):
             ir.ConstantBuffer(
                 name=new_name,
                 layout=FixedLayout(
-                    data.device, data.dtype, *self.static_sizes_strides(data)
+                    data.device,
+                    data.dtype,
+                    *self.static_sizes_strides(data),
+                    is_pinned=_is_cpu_strided_tensor_pinned(data),
                 ),
             )
         )
@@ -1273,12 +1298,6 @@ class GraphLowering(torch.fx.Interpreter):
             return None
         # See note: Note: [Generator arguments in AOTDispatcher]
         elif isinstance(example, torch.Generator):
-            assert len(V.graph.current_node.users) == 1 and next(
-                iter(V.graph.current_node.users)
-            ).target in (
-                torch._prims.rng_prims.graphsafe_run_with_rng_state,
-                torch.ops.higher_order.invoke_subgraph,
-            )
             gen = ir.GeneratorState(name=target, device=example.device)
             self.graph_inputs[target] = gen  # type: ignore[assignment]
             self.graph_input_names.append(target)
@@ -1297,8 +1316,11 @@ class GraphLowering(torch.fx.Interpreter):
         if not example._has_symbolic_sizes_strides:
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
+            storage_offset = sympy.Integer(example.storage_offset())
         else:
-            sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
+            sizes, strides, storage_offset = self.symbolic_sizes_strides_storage_offset(
+                example
+            )
 
         if (
             self.is_backward
@@ -1322,6 +1344,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.graph_inputs[target] = tensor
         self.graph_input_names.append(target)
+        self.graph_input_storage_offsets[target] = storage_offset
         self.graph_inputs_original[target] = tensor.data.data  # type: ignore[union-attr]
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
             self.add_device_info(example.device)
@@ -1375,7 +1398,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
                 log.info(
                     "Creating implicit fallback for:\n%s",
-                    error.operator_str(target, args, kwargs),
+                    LazyString(error.operator_str, target, args, kwargs),
                 )
 
                 tag: torch._C.Tag | None = get_layout_constraint_tag(
@@ -1563,7 +1586,12 @@ class GraphLowering(torch.fx.Interpreter):
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 
-                return tensor(value.tolist(), dtype=value.dtype, device=value.device)
+                return tensor(
+                    value.tolist(),
+                    dtype=value.dtype,
+                    device=value.device,
+                    pin_memory=_is_cpu_strided_tensor_pinned(value),
+                )
 
         return self.add_tensor_constant(value, target)
 
@@ -1916,17 +1944,6 @@ class GraphLowering(torch.fx.Interpreter):
                     raise RuntimeError(
                         f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
                     )
-            elif is_magic_method(n.target):
-                # TODO: this is sus, it probably should be handled in the
-                # lowerings themselves similarly to sym_size/sym-stride
-                # https://github.com/pytorch/pytorch/issues/127789
-                debug("is_magic_method")
-                if isinstance(
-                    n.meta["val"], (torch.SymInt, torch.SymFloat, torch.SymBool)
-                ):
-                    result = n.meta["val"].node.expr
-                else:
-                    result = super().run_node(n)
             else:
                 debug("")
                 result = super().run_node(n)
@@ -2554,32 +2571,279 @@ class GraphLowering(torch.fx.Interpreter):
                 return self.codegen()
             else:
                 if not self.aot_mode:
-                    # Lazy kernel compilation does not require two passes
-                    # TODO: need to consolidate the logic between AOT and JIT
+                    # cpp_wrapper JIT does not require two passes
                     return self.codegen()
 
-                # first pass
-                self.cpp_wrapper = False
-                compiled = self.compile_to_module().call
+                # AOTI with lazy compile: single codegen pass producing
+                # two separate C++ files — JIT (for autotuning) and AOTI
+                # (for packaging) — via DualIndentedBuffer.
+                # wrapper_code is the JIT variant; the AOTI variant is
+                # populated into wrapper_codegen._aot_output.
+                from .codegen.cpp_wrapper_gpu import (
+                    CppWrapperGpu,
+                    generate_aoti_kernel_config_header,
+                )
 
-                real_inputs = extract_real_inputs()
-                with torch.utils._python_dispatch._disable_current_modes():
-                    compiled(real_inputs)
-                del real_inputs
+                wrapper_code, kernel_code = self.codegen()
+                assert isinstance(self.wrapper_code, CppWrapperGpu)
+                lazy_kernel_names = list(self.wrapper_code._lazy_kernel_names)
+                if lazy_kernel_names:
+                    try:
+                        self._run_jit_variant_for_autotune(
+                            wrapper_code,
+                            kernel_code,
+                            extract_real_inputs,
+                            lazy_kernel_names,
+                        )
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "When autotune_at_compile_time is False, AOTInductor generates "
+                            "both JIT code and AOT code. The JIT code failed to run."
+                        ) from exc
 
-                # second pass
-                self.cpp_wrapper = True
-                self.removed_buffers.clear()
-                self.removed_operations.clear()
-                self.inplaced_to_remove.clear()
-                V.graph.sizevars.precomputed_replacements.clear()
-                V.graph.sizevars.inv_precomputed_replacements.clear()
-                metrics.reset()
-                with config.patch({"triton.autotune_at_compile_time": False}):
-                    return self.codegen()
+                # Prepend config header with kernel compile results
+                # to the AOTI source for packaging.
+                config_header = generate_aoti_kernel_config_header(lazy_kernel_names)
+                aot_output: str | None = self.wrapper_code._aot_output
+                if aot_output is None:
+                    raise RuntimeError(
+                        "When autotune_at_compile_time is False, AOTInductor generates "
+                        "both JIT code and AOT code. The AOT code should not be None."
+                    )
+                aoti_wrapper = ValueWithLineMap(
+                    config_header + "\n" + aot_output,
+                    wrapper_code.line_map,
+                )
+
+                return aoti_wrapper, kernel_code
         else:
             # cpu
             return self.codegen()
+
+    @staticmethod
+    def _python_source_literal(name: str, source: str | None) -> str:
+        if source is None:
+            return f"{name} = None\n"
+        if source == "":
+            return f"{name} = ''\n"
+        if '"""' in source:
+            return f"{name} = {source!r}\n"
+        return f'{name} = (\nr"""\n{source}"""\n)\n'
+
+    @staticmethod
+    def _tensor_repro_expr(tensor: torch.Tensor) -> str:
+        return (
+            f"_make_strided_tensor({tuple(tensor.size())!r}, "
+            f"{tuple(tensor.stride())!r}, {tensor.storage_offset()!r}, "
+            f"{tensor.dtype}, {str(tensor.device)!r})"
+        )
+
+    @classmethod
+    def _log_jit_variant_for_autotune_repro(
+        cls,
+        *,
+        cpp_source: str,
+        kernel_source: str | None,
+        device_type: str,
+        num_outputs: int,
+        kernel_names: list[str],
+        input_exprs: list[str],
+    ) -> None:
+        from .codecache import output_code_log, PyCodeCache
+
+        if not (
+            output_code_log.isEnabledFor(logging.DEBUG)
+            or output_code_log.isEnabledFor(logging.INFO)
+        ):
+            return
+
+        input_lines = "".join(f"        {expr},\n" for expr in input_exprs)
+        log_name = "JIT wrapper code for AOT lazy autotuning"
+        source = (
+            textwrap.dedent(
+                """
+            import torch
+            from torch._inductor import config
+            from torch._inductor.codecache import (
+                CppWrapperCodeCache,
+                CudaKernelParamCache,
+                get_cpp_wrapper_cubin_path_name,
+            )
+
+            {cpp_wrapper_src}
+            {kernel_src}
+            kernel_names = {kernel_names!r}
+
+
+            def _make_strided_tensor(size, stride, storage_offset, dtype, device):
+                if 0 in size:
+                    storage_size = storage_offset + 1
+                else:
+                    storage_size = storage_offset + 1 + sum(
+                        (dim - 1) * stride_dim
+                        for dim, stride_dim in zip(size, stride)
+                    )
+                base = torch.zeros((storage_size,), dtype=dtype, device=device)
+                return torch.as_strided(base, size, stride, storage_offset)
+
+
+            def make_inputs():
+                return [
+            {input_lines}    ]
+
+
+            def main():
+                for name in kernel_names:
+                    CudaKernelParamCache.cache.pop(name, None)
+                with config.patch('aot_inductor.link_libtorch', True):
+                    compiled_fn = CppWrapperCodeCache.load_pybinding(
+                        argtypes=['std::vector<AtenTensorHandle>'],
+                        main_code=cpp_wrapper_src,
+                        device_type={device_type!r},
+                        num_outputs={num_outputs!r},
+                        kernel_code=kernel_src,
+                    )
+                input_tensors = make_inputs()
+                input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(
+                    input_tensors
+                )
+                output_handles = compiled_fn(input_handles)
+                output_tensors = torch._C._aoti.alloc_tensors_by_stealing_from_void_ptrs(
+                    output_handles
+                )
+                print(f'Produced {{len(output_tensors)}} outputs')
+                cubin_path_name = get_cpp_wrapper_cubin_path_name()
+                for name in kernel_names:
+                    params = CudaKernelParamCache.get(name)
+                    if params and cubin_path_name in params:
+                        print(f'{{name}}: {{params[cubin_path_name]}}')
+
+
+            if __name__ == '__main__':
+                main()
+            """
+            )
+            .lstrip()
+            .format(
+                cpp_wrapper_src=cls._python_source_literal(
+                    "cpp_wrapper_src", cpp_source
+                ),
+                kernel_src=cls._python_source_literal("kernel_src", kernel_source),
+                kernel_names=kernel_names,
+                input_lines=input_lines,
+                device_type=device_type,
+                num_outputs=num_outputs,
+            )
+        )
+        output_code_log.debug("%s: \n%s", log_name, source)
+        _, path = PyCodeCache.write(source)
+        output_code_log.info("%s written to: %s", log_name, path)
+
+    def _run_jit_variant_for_autotune(
+        self,
+        wrapper_code,
+        kernel_code,
+        extract_real_inputs,
+        kernel_names: list[str],
+    ) -> None:
+        """Compile dual-wrapper-mode C++ as JIT variant and run to autotune kernels.
+
+        Compiles the dual-wrapper-mode C++ source without -DAOT_INDUCTOR, which
+        activates the JIT path (inductor_entry_impl). Running this with
+        real inputs triggers lazy Triton compilation and autotuning,
+        populating CudaKernelParamCache for the AOTI packaging step.
+        """
+        from .codecache import (
+            CppWrapperCodeCache,
+            CudaKernelParamCache,
+            get_cpp_wrapper_cubin_path_name,
+        )
+
+        cpp_source = wrapper_code.value
+        kernel_source = kernel_code.value if kernel_code else None
+
+        # The JIT wrapper keeps lazy kernel state in function-local statics.
+        # Compile a fresh wrapper for each first pass so autotuning always reruns.
+        cpp_source += f"\n// AOTI lazy autotune first pass: {id(self)}\n"
+        for name in kernel_names:
+            CudaKernelParamCache.cache.pop(name, None)
+
+        # Prefer the GPU device for the JIT compile: the wrapper includes
+        # cpp_wrapper/<gpu>.h which transitively pulls in cuda_runtime.h.
+        # A "cpu" device would precompile cpp_wrapper/cpu.h, which does not
+        # include the CUDA headers needed to compile the kernel call sites.
+        device_type = next(
+            (d for d in self.device_types if d in ("cuda", "xpu")),
+            next((d for d in self.device_types if d != "meta"), "cpu"),
+        )
+
+        real_inputs = extract_real_inputs()
+
+        def materialize_constant(name: str) -> torch.Tensor:
+            constant = self.constants[name]
+            if isinstance(constant, FakeTensor):
+                constant = defake(constant)
+            assert isinstance(constant, torch.Tensor), (
+                f"Expected tensor constant for {name}"
+            )
+            return constant
+
+        # Non-tensor scalars become 0-d CPU tensors; None and ints/floats
+        # that the graph specialized away aren't part of the C++ wrapper
+        # signature and must be skipped.
+        input_tensors: list[torch.Tensor] = []
+        input_exprs: list[str] = []
+        for arg in real_inputs:
+            if arg is None:
+                continue
+            if isinstance(arg, torch.Tensor):
+                input_tensors.append(arg)
+                input_exprs.append(self._tensor_repro_expr(arg))
+            else:
+                input_tensors.append(torch.tensor(arg, device="cpu"))
+                input_exprs.append(f"torch.tensor({arg!r}, device='cpu')")
+        for name in self.constants:
+            constant = materialize_constant(name)
+            input_tensors.append(constant)
+            input_exprs.append(self._tensor_repro_expr(constant))
+
+        self._log_jit_variant_for_autotune_repro(
+            cpp_source=cpp_source,
+            kernel_source=kernel_source,
+            device_type=device_type,
+            num_outputs=len(self.graph_outputs),
+            kernel_names=kernel_names,
+            input_exprs=input_exprs,
+        )
+
+        # This temporary Python-loaded wrapper can depend on libtorch even when
+        # the final packaged AOTI artifact is built with link_libtorch=False.
+        with config.patch("aot_inductor.link_libtorch", True):
+            compiled_fn = CppWrapperCodeCache.load_pybinding(
+                argtypes=["std::vector<AtenTensorHandle>"],
+                main_code=cpp_source,
+                device_type=device_type,
+                num_outputs=len(self.graph_outputs),
+                kernel_code=kernel_source,
+            )
+
+        input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(
+            input_tensors
+        )
+        del real_inputs, input_tensors, input_exprs
+
+        output_handles = compiled_fn(input_handles)
+        output_tensors = torch._C._aoti.alloc_tensors_by_stealing_from_void_ptrs(
+            output_handles
+        )
+        del output_tensors
+
+        # Collect cubin files produced by lazy compilation for AOTI packaging
+        cubin_path_name = get_cpp_wrapper_cubin_path_name()
+        for name in kernel_names:
+            params = CudaKernelParamCache.get(name)
+            if params and cubin_path_name in params:
+                self.wrapper_code.additional_files.append(params[cubin_path_name])
 
     def _update_scheduler(self) -> None:
         """

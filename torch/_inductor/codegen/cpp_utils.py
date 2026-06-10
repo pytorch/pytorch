@@ -43,6 +43,7 @@ DTYPE_TO_CPP = {
     torch.bool: "bool",
     torch.bfloat16: "at::BFloat16",
     torch.complex32: "at::complex<at::Half>",
+    torch.bcomplex32: "at::complex<at::BFloat16>",
     torch.complex64: "at::complex<float>",
     torch.complex128: "at::complex<double>",
     torch.float8_e4m3fn: "at::Float8_e4m3fn",
@@ -68,6 +69,7 @@ DTYPE_TO_ATEN = {
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
     torch.complex32: "at::kComplexHalf",
+    torch.bcomplex32: "at::kBComplex32",
     torch.complex64: "at::kComplexFloat",
     torch.complex128: "at::kComplexDouble",
     torch.float8_e4m3fn: "at::kFloat8_e4m3fn",
@@ -173,7 +175,7 @@ class CppCSEVariable(CSEVariable):
                     if isinstance(arg, CppCSEVariable)
                 ]
             )
-            if name == "index_expr":
+            if name in ("index_expr", "value_expr"):
                 self._set_dependent_itervars(args[0])
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
@@ -394,7 +396,7 @@ class LocalBufferContext:
                 self.global_to_local[global_buffer_name] = local_buffer
                 if global_buffer_name not in V.graph.removed_buffers:
                     # Record the global buffers that are removed by this LocalBufferContext
-                    # since which may need to restore. Refer to issue:
+                    # since they may need to be restored. Refer to issue:
                     # https://github.com/pytorch/pytorch/issues/144186
                     self.removed_buffers.add(global_buffer_name)
                     V.graph.removed_buffers.add(global_buffer_name)
