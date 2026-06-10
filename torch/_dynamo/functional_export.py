@@ -45,6 +45,7 @@ from torch.fx.experimental.dynamic_spec import (
     DictSpec,
     IntermediateSpec,
     IntVar,
+    LeafSpec,
     ObjectSpec,
     ParamsSpec,
     SeqSpec,
@@ -949,7 +950,9 @@ def _dynamo_graph_capture_for_export(
                     mod, args, kwargs, user_spec
                 )
                 flattened_spec = ShapesSpec(
-                    ParamsSpec({"*args": leaf_specs}),
+                    # leaf_specs is list[LeafSpec]; cast around list invariance
+                    # (ParamsSpec wants list[IntermediateSpec] and copies it).
+                    ParamsSpec({"*args": cast(list[IntermediateSpec], leaf_specs)}),
                     assumptions=user_spec._assumptions or None,
                 )
             else:
@@ -1113,7 +1116,7 @@ def _dynamo_graph_capture_for_export(
 def _walk_spec(
     user_spec: IntermediateSpec | None,
     arg_value: Any,
-    out_leaf_specs: list[IntermediateSpec | None],
+    out_leaf_specs: list[LeafSpec],
     flat_idx: int,
     where: str,
 ) -> int:
@@ -1278,7 +1281,7 @@ def _bind_spec_to_args(
     args: Any,
     kwargs: dict[str, Any] | None,
     shapes_spec: ShapesSpec,
-) -> tuple[list[IntermediateSpec | None], list[Any], pytree.TreeSpec]:
+) -> tuple[list[LeafSpec], list[Any], pytree.TreeSpec]:
     """Bind a user-provided ``ShapesSpec`` to the actual ``(args, kwargs)``
     by inspecting ``f``'s signature, producing:
       - an aligned leaf-spec list ordered to match
@@ -1373,7 +1376,7 @@ def _bind_spec_to_args(
 
     # Walk the user's actual call structure.
     total_leaves = in_spec.num_leaves
-    out_leaf_specs: list[IntermediateSpec | None] = [None] * total_leaves
+    out_leaf_specs: list[LeafSpec] = [None] * total_leaves
 
     flat_idx = 0
 

@@ -64,8 +64,8 @@ from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import GraphModule, Proxy, Tracer
 from torch.fx.experimental.dynamic_spec import (
     _coerce_to_shapes_spec,
-    IntermediateSpec,
     IntVar,
+    LeafSpec,
     ParamsSpec,
     ShapesSpec,
     TensorSpec,
@@ -2896,7 +2896,7 @@ class _MakefxTracer:
             f,
             args,
             {},
-            user_spec or ShapesSpec(),  # type: ignore[arg-type]
+            user_spec or ShapesSpec(),
         )
 
         with shape_env.ignore_fresh_unbacked_symbols():
@@ -2921,7 +2921,7 @@ class _MakefxTracer:
         self,
         x: object,
         source: Source,
-        leaf_spec: IntermediateSpec | None,
+        leaf_spec: LeafSpec,
     ) -> object:
         """Fakify a single flat input leaf."""
         if self.fake_tensor_mode is None:
@@ -2930,8 +2930,9 @@ class _MakefxTracer:
         if isinstance(x, Tensor):
             if leaf_spec is None:
                 return self.fake_tensor_mode.from_tensor(x, source=source)
-            # leaf_spec is guaranteed to be a TensorSpec by _walk_spec.
             shape_env: ShapeEnv = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
+            # leaf_spec is guaranteed to be a TensorSpec by _walk_spec.
+
             tensor_spec = cast(TensorSpec, leaf_spec)
             ctx = _symbolic_context_from_shapes_spec(x, source, tensor_spec, None, {})
             fake_x = self.fake_tensor_mode.from_tensor(
@@ -3136,10 +3137,10 @@ def make_fx(
           controls which dims become unbacked symbolic sizes — everything
           not declared by the spec stays static.
         - ``"symbolic"``: tensors become FakeTensors and **every dim becomes a
-          backed symbolic size**. NOTE: using backed symbols this way is generally 
+          backed symbolic size**. NOTE: using backed symbols this way is generally
           **not recommended and not sound** — backed symbols come with assumptions
-          and can be constrained by guards silently. Kept for backward compatibility. 
-          Prefer ``"fake"`` + ``_dynamic_spec`` to declare dynamism explicitly with 
+          and can be constrained by guards silently. Kept for backward compatibility.
+          Prefer ``"fake"`` + ``_dynamic_spec`` to declare dynamism explicitly with
           unbacked symbols.
     """
 
