@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import itertools
 import operator
+import sys
 from collections.abc import Callable
 from typing import overload, TYPE_CHECKING, TypeAlias, TypeVar
 
@@ -18,8 +19,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "accumulate",
-    "chain",
-    "chain_from_iterable",
+    "combinations_with_replacement",
     "compress",
     "cycle",
     "dropwhile",
@@ -32,19 +32,15 @@ __all__ = [
     "zip_longest",
 ]
 
+if sys.version_info >= (3, 12):
+    __all__.append("batched")
+
 
 _T = TypeVar("_T")
 _U = TypeVar("_U")
 _Predicate: TypeAlias = Callable[[_T], object]
 _T1 = TypeVar("_T1")
 _T2 = TypeVar("_T2")
-
-
-# Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
-@substitute_in_graph(itertools.chain, is_embedded_type=True)  # type: ignore[arg-type]
-def chain(*iterables: Iterable[_T]) -> Iterator[_T]:
-    for iterable in iterables:
-        yield from iterable
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.accumulate
@@ -74,18 +70,6 @@ def accumulate(
             yield total
 
     return _accumulate(iterator)
-
-
-@substitute_in_graph(itertools.chain.from_iterable)  # type: ignore[arg-type]
-def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
-    # previous version of this code was:
-    #   return itertools.chain(*iterable)
-    # If iterable is an infinite generator, this will lead to infinite recursion
-    for it in iterable:
-        yield from it
-
-
-chain.from_iterable = chain_from_iterable  # type: ignore[attr-defined]
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.compress
@@ -336,3 +320,66 @@ def zip_longest(
                 value = fillvalue  # type: ignore[assignment]
             values.append(value)
         yield tuple(values)
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.combinations_with_replacement
+@substitute_in_graph(itertools.combinations_with_replacement, is_embedded_type=True)  # type: ignore[arg-type]
+def combinations_with_replacement(
+    iterable: Iterable[_T], r: int, /
+) -> Iterator[tuple[_T, ...]]:
+    if r < 0:
+        raise ValueError("r must be non-negative")
+
+    pool = tuple(iterable)
+    n = len(pool)
+
+    def _combinations_with_replacement() -> Iterator[tuple[_T, ...]]:
+        if r == 0:
+            yield ()
+            return
+        if n == 0:
+            return
+
+        indices = [0] * r
+        yield tuple(pool[i] for i in indices)
+        while True:
+            for i in range(r - 1, -1, -1):
+                if indices[i] != n - 1:
+                    break
+            else:
+                return
+            indices[i:] = [indices[i] + 1] * (r - i)
+            yield tuple(pool[i] for i in indices)
+
+    return _combinations_with_replacement()
+
+
+if sys.version_info >= (3, 12):
+    # Reference: https://docs.python.org/3/library/itertools.html#itertools.batched
+    @substitute_in_graph(itertools.batched, is_embedded_type=True)  # type: ignore[arg-type]
+    def batched(*args, **kwargs) -> Iterator[tuple[_T, ...]]:  # type: ignore[no-untyped-def]
+        if len(args) != 2:
+            raise TypeError(
+                f"batched takes exactly 2 positional arguments({len(args)} given)"
+            )
+        if kwargs.keys() - {"strict"}:
+            unexpected = next(iter(kwargs.keys() - {"strict"}))
+            raise TypeError(
+                f"batched() got an unexpected keyword argument '{unexpected}'"
+            )
+
+        iterable, n = args
+        strict = kwargs.get("strict", False)
+        n = operator.index(n)
+        if n < 1:
+            raise ValueError("n must be at least one")
+
+        iterator = iter(iterable)
+
+        def _batched(iterator: Iterator[_T]) -> Iterator[tuple[_T, ...]]:
+            while batch := tuple(islice(iterator, n)):
+                if strict and len(batch) != n:
+                    raise ValueError("batched(): incomplete batch")
+                yield batch
+
+        return _batched(iterator)
