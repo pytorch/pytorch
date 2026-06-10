@@ -201,6 +201,7 @@
     "class CaptureIndexing": 175
   },
   "torch/_inductor/lowering.py": {
+    "def adaptive_max_pool2d()": 81,
     "def avg_pool2d_backward()": 163,
     "def avg_pool3d_backward()": 197,
     "def cat()": 122,
@@ -213,7 +214,8 @@
   },
   "torch/_inductor/mkldnn_ir.py": {
     "class MkldnnRnnLayer": 121,
-    "def MkldnnRnnLayer.create()": 101
+    "def MkldnnRnnLayer.create()": 101,
+    "def QConvPointWiseBinaryPT2E.create()": 81
   },
   "torch/_inductor/mkldnn_lowerings.py": {
     "def register_onednn_fusion_ops()": 1207
