@@ -4307,7 +4307,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
 
         if append_broadcast:
-            line = f"tl.broadcast_to({result_var}, {append_broadcast})"
+            bcast_operand = result_var
+            if dtype == torch.bool and str(result_var) in ("True", "False"):
+                bcast_operand = (
+                    f"tl.full([1], {1 if str(result_var) == 'True' else 0}, tl.int1)"
+                )
+            line = f"tl.broadcast_to({bcast_operand}, {append_broadcast})"
             result_var = self.cse.generate(
                 load_buffer, line, dtype=dtype, shape=indexing.expand_shape
             )
@@ -5619,7 +5624,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 accumulator = self.cse.newvar(dtype=dtype, shape=reduced_size)
                 reduced_size_str = f"[{', '.join(reduced_size)}]"
 
-                default = "float('nan')" if dtype.is_floating_point else "-1"
+                default = "float('nan')" if dtype.is_floating_point else "0"
                 self.body.writeline(
                     f"{accumulator} = tl.full({reduced_size_str}, {default}, {acc_type})"
                 )
