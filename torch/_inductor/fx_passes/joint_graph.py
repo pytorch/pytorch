@@ -325,13 +325,6 @@ class UniformValueConstantFolder(ConstantFolder):
             if not any(is_zero_int(a) for a in op.args):
                 continue
 
-            # x * 0 is only uniformly 0 for integer/bool dtypes. For floating
-            # point (and complex) dtypes nan * 0 == nan and (+/-inf) * 0 == nan,
-            # so folding x * 0 -> 0 would incorrectly drop NaN/Inf when x is not
-            # known to be finite.
-            if tensor_val.dtype.is_floating_point or tensor_val.dtype.is_complex:
-                continue
-
             t = torch.full(
                 [1],  # shape
                 0,  # value
@@ -1179,8 +1172,13 @@ def scatter_upon_const_tensor(
         # Create a mask for where to scatter
         mask = selector_expanded == indices_view
 
-        # Use torch.where to implement the scatter pointwise operation
-        return torch.where(mask, val, background_val)
+        # Use torch.where to implement the scatter pointwise operation.
+        # When val and background_val are Python scalars, torch.where promotes
+        # the result to the default floating dtype (float32), which loses the
+        # const tensor's dtype. Cast back to dtype so the rewrite preserves
+        # aten.scatter.value semantics (the result has self's dtype, with the
+        # scalar value cast to it).
+        return torch.where(mask, val, background_val).to(dtype)
 
     # replace the scatter operation with pointwise equivalent
     # pyrefly: ignore [bad-argument-type]
