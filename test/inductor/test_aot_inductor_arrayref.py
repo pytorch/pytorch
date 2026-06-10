@@ -187,6 +187,123 @@ class AOTInductorArrayRefTestsTemplate(AOTInductorTestsTemplate):
             model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
         )
 
+    def test_run_v2_interface(self):
+        """Compile a model, then call V2 via ctypes and verify correctness."""
+        import ctypes
+
+        AOTI_ARRAYREF_TENSOR_MAX_DIMS = 8
+
+        class CArrayRefTensor(ctypes.Structure):
+            _fields_ = [
+                ("data", ctypes.c_void_p),
+                ("numel", ctypes.c_int64),
+                ("sizes", ctypes.c_int64 * AOTI_ARRAYREF_TENSOR_MAX_DIMS),
+                ("strides", ctypes.c_int64 * AOTI_ARRAYREF_TENSOR_MAX_DIMS),
+                ("ndim", ctypes.c_int32),
+                ("dtype", ctypes.c_int32),
+                ("device_type", ctypes.c_int32),
+                ("device_idx", ctypes.c_int32),
+                ("reserved", ctypes.c_int64 * 4),
+            ]
+
+        # at::ScalarType enum values
+        TORCH_DTYPE_TO_SCALARTYPE = {
+            torch.float32: 6,
+            torch.float64: 7,
+            torch.int64: 4,
+            torch.int32: 3,
+        }
+        SCALARTYPE_TO_TORCH_DTYPE = {
+            v: k for k, v in TORCH_DTYPE_TO_SCALARTYPE.items()
+        }
+
+        def tensor_to_descriptor(t):
+            desc = CArrayRefTensor()
+            desc.data = t.data_ptr()
+            desc.numel = t.numel()
+            for i in range(t.ndim):
+                desc.sizes[i] = t.size(i)
+                desc.strides[i] = t.stride(i)
+            desc.ndim = t.ndim
+            desc.dtype = TORCH_DTYPE_TO_SCALARTYPE[t.dtype]
+            desc.device_type = 0  # CPU
+            desc.device_idx = 0
+            return desc
+
+        def descriptor_to_tensor(desc):
+            dtype = SCALARTYPE_TO_TORCH_DTYPE[desc.dtype]
+            sizes = tuple(desc.sizes[i] for i in range(desc.ndim))
+            element_size = torch.tensor([], dtype=dtype).element_size()
+            buf = (ctypes.c_byte * (desc.numel * element_size)).from_address(desc.data)
+            return torch.frombuffer(bytearray(buf), dtype=dtype).reshape(sizes)
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        model = Model()
+        expected = model(*example_inputs)
+
+        so_path = AOTIRunnerUtil.legacy_compile(
+            model,
+            example_inputs,
+            options={
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            },
+        )
+
+        lib = ctypes.CDLL(so_path)
+        lib.AOTInductorModelCreate.restype = ctypes.c_int32
+        lib.AOTInductorModelCreate.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_void_p,
+        ]
+        lib.AOTInductorModelRunMinimalArrayrefInterfaceV2.restype = ctypes.c_int32
+        lib.AOTInductorModelRunMinimalArrayrefInterfaceV2.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int32,
+            ctypes.POINTER(CArrayRefTensor),
+            ctypes.c_int32,
+            ctypes.POINTER(CArrayRefTensor),
+        ]
+        lib.AOTInductorModelDelete.restype = ctypes.c_int32
+        lib.AOTInductorModelDelete.argtypes = [ctypes.c_void_p]
+
+        # Create model — null constant_map loads from embedded data
+        model_handle = ctypes.c_void_p()
+        ret = lib.AOTInductorModelCreate(ctypes.byref(model_handle), ctypes.c_void_p(0))
+        self.assertEqual(ret, 0, "AOTInductorModelCreate failed")
+
+        try:
+            c_inputs = (CArrayRefTensor * 2)()
+            for i, t in enumerate(example_inputs):
+                c_inputs[i] = tensor_to_descriptor(t)
+
+            c_outputs = (CArrayRefTensor * 1)()
+
+            ret = lib.AOTInductorModelRunMinimalArrayrefInterfaceV2(
+                model_handle,
+                ctypes.c_int32(2),
+                c_inputs,
+                ctypes.c_int32(1),
+                c_outputs,
+            )
+            self.assertEqual(ret, 0, "V2 interface run failed")
+
+            actual = descriptor_to_tensor(c_outputs[0])
+            self.assertEqual(actual, expected)
+        finally:
+            lib.AOTInductorModelDelete(model_handle)
+
 
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
