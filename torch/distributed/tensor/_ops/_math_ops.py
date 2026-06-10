@@ -13,7 +13,6 @@ from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
     OpStrategy,
-    PlacementList,
     RuntimeSchemaInfo,
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
@@ -22,7 +21,6 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
 )
 from torch.distributed.tensor._ops.utils import (
     as_list,
-    expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
     is_tensor_evenly_shardable,
     normalize_dim,
@@ -452,8 +450,8 @@ def _shard_non_reduction_dim(
             continue
         out_d = d if keep_dim or d < dim else d - 1
         strategies.append(
-            [_ShardingPlaceholder(out_d)]
-            * n_outputs  # pyrefly: ignore[bad-argument-type]
+            [_ShardingPlaceholder(out_d)]  # pyrefly: ignore[bad-argument-type]
+            * n_outputs
             + [_ShardingPlaceholder(d)]
         )
     return strategies
