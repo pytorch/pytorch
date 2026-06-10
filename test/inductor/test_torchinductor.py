@@ -18455,6 +18455,19 @@ if RUN_GPU:
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        def test_value_expr_int64_mul_preserves_intermediates(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return torch.arange(
+                    0, 9, device=x.device, dtype=torch.int64
+                ) * torch.tensor([1500000000], dtype=torch.int64, device=x.device)
+
+            fn_opt = torch.compile(fn, backend="inductor")
+            inps = [torch.empty(1, device=GPU_TYPE)]
+            code = run_and_get_triton_code(fn_opt, *inps)
+            self.assertTrue("1500000000*(x0).to(tl.int64)" in code)
+            self.assertFalse("(1500000000*x0).to(tl.int64)" in code)
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
         def test_value_expr_float_preserves_integer_intermediates(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 idx = torch.arange(x.numel(), device=x.device, dtype=torch.int64)

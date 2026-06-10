@@ -588,6 +588,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.min_rblock: int | None = None
         self.saved_partial_accumulate: list[PartialAccumulate] = []
         self._index_dtype = self.features.select_index_dtype()
+        self.codegen_value_expr_symbol_casts = False
 
     def codegen_template_body(
         self,

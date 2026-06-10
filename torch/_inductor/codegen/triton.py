@@ -893,6 +893,39 @@ def triton_reshape(
 # inconsistent with Python semantics (and consistent with C semantics).  We
 # must override all of these, or it is potential silent correctness problem
 class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
+    def _print_Symbol(self, expr: sympy.Symbol) -> str:
+        symbol = str(expr)
+        if self._symbol_needs_value_expr_index_cast(expr):
+            return f"({symbol}).to({V.kernel.index_dtype})"
+        return symbol
+
+    @staticmethod
+    def _symbol_needs_value_expr_index_cast(expr: sympy.Symbol) -> bool:
+        if not getattr(V.kernel, "codegen_value_expr_symbol_casts", False):
+            return False
+
+        index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
+        if index_dtype not in (torch.int32, torch.int64):
+            return False
+
+        selected_index_dtype = V.kernel.features.select_index_dtype()
+        if index_dtype == selected_index_dtype:
+            return False
+
+        if expr in V.kernel.range_tree_nodes:
+            return True
+
+        for tree in V.kernel.range_trees:
+            if expr in (tree.index_sym(), tree.block_offset()):
+                return True
+
+        if symbol_is_type(expr, SymT.TMP):
+            var = V.kernel.cse.varname_map.get(expr.name)
+            var_dtype = getattr(var, "dtype", None)
+            return var_dtype in (torch.int32, torch.int64) and var_dtype != index_dtype
+
+        return False
+
     def _print_TruncToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         return (
@@ -2411,17 +2444,23 @@ class TritonKernelOverrides(TritonOverrides):
     def value_expr(cls, expr, dtype):
         """
         Like :meth:`index_expr`, but honors ``dtype`` by setting the kernel
-        index dtype before emitting, and casting the result if needed.
+        index dtype before emitting, casting range symbols before arithmetic,
+        and casting the result if needed.
         """
         real_index_dtype = V.kernel._index_dtype
+        real_codegen_value_expr_symbol_casts = V.kernel.codegen_value_expr_symbol_casts
         V.kernel._index_dtype = (
             dtype if dtype in (torch.int32, torch.int64) else torch.int64
         )
+        V.kernel.codegen_value_expr_symbol_casts = True
         try:
             var = cls.index_expr(expr, dtype)
         finally:
             V.kernel._index_dtype = real_index_dtype
-        if real_index_dtype != dtype or var.dtype != dtype:
+            V.kernel.codegen_value_expr_symbol_casts = (
+                real_codegen_value_expr_symbol_casts
+            )
+        if var.dtype != dtype:
             var = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"({var}).to({triton_type(dtype)})",
