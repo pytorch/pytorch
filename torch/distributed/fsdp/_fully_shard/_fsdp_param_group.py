@@ -9,7 +9,7 @@ from typing_extensions import TypeVarTuple, Unpack
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed import distributed_c10d
+from torch.distributed import _spmd_no_typecheck
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import (
     _named_parameters_with_duplicates,
@@ -547,7 +547,7 @@ class FSDPParamGroup:
             # ``fully_shard([a, b])`` already registered post_backward this
             # pass; skip to avoid duplicate ``RegisterPostBackwardFunction``
             # autograd nodes.
-            with distributed_c10d._spmd_no_typecheck():
+            with _spmd_no_typecheck():
                 entering_forward_pass = self._training_state != TrainingState.FORWARD
                 self._training_state = TrainingState.FORWARD
                 self.unshard(self.unshard_async_op)
@@ -559,7 +559,7 @@ class FSDPParamGroup:
     def post_forward(self, module: nn.Module, input: Any, output: Any):
         logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with (
-            distributed_c10d._spmd_no_typecheck(),
+            _spmd_no_typecheck(),
             record_function(self._with_fqn("FSDP::post_forward")),
         ):
             # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
@@ -583,7 +583,7 @@ class FSDPParamGroup:
             return
         logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         with (
-            distributed_c10d._spmd_no_typecheck(),
+            _spmd_no_typecheck(),
             record_function(self._with_fqn("FSDP::pre_backward")),
         ):
             self._training_state = TrainingState.PRE_BACKWARD
@@ -594,7 +594,7 @@ class FSDPParamGroup:
 
     @_dynamo_disable
     def post_backward(self, *unused: Any):
-        with distributed_c10d._spmd_no_typecheck():
+        with _spmd_no_typecheck():
             # This method should be idempotent and safe to call even when this
             # FSDP parameter group was not used in backward (should be a no-op)
             logger.debug("%s", self._with_fqn("FSDP::post_backward"))
@@ -631,7 +631,9 @@ class FSDPParamGroup:
                     # previous backward did not reduce-scatter
                     if fsdp_param.unsharded_accumulated_grad is not None:
                         fsdp_params_with_grad.append(fsdp_param)
-                        unsharded_grads.append(fsdp_param.unsharded_accumulated_grad_data)
+                        unsharded_grads.append(
+                            fsdp_param.unsharded_accumulated_grad_data
+                        )
                         fsdp_param.unsharded_accumulated_grad = None
                     elif fsdp_param.unsharded_param.grad is not None:
                         fsdp_params_with_grad.append(fsdp_param)
@@ -659,7 +661,9 @@ class FSDPParamGroup:
                 self._param_group_index == self._num_param_groups - 1
                 and len(states) >= max_input_buffers
             ):
-                with record_function(f"FSDP::post_backward_rs_wait ({self._module_fqn})"):
+                with record_function(
+                    f"FSDP::post_backward_rs_wait ({self._module_fqn})"
+                ):
                     while len(states) >= max_input_buffers:
                         oldest = states.pop(0)
                         if oldest.event is not None:
@@ -758,7 +762,9 @@ class FSDPParamGroup:
                     #      Whether vector 2 exists on CUDA FSDP but is timing-
                     #      masked is unresolved. See
                     #      ``fsdp2_chunked_loss_rocm_race.md``.
-                    self.device_handle.current_stream().wait_event(self._post_reduce_event)
+                    self.device_handle.current_stream().wait_event(
+                        self._post_reduce_event
+                    )
                 if all_reduce_input is not None:
                     if self.device.type != "cpu":
                         if all_reduce_event is None:

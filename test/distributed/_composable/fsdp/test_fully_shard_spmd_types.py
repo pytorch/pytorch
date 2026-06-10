@@ -10,8 +10,9 @@ from torch.distributed.fsdp import (
     fully_shard,
     MixedPrecisionPolicy,
 )
-from torch.distributed.tensor import init_device_mesh
+from torch.distributed.tensor import DTensor, init_device_mesh, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -48,7 +49,7 @@ class SpmdLinear(nn.Module):
             dst=spmd.R,
             backward_options={"op_dtype": torch.float32},
         )
-        x = x @ self.sharded_weight
+        x = x @ self.sharded_weight.t()
         x = spmd.redistribute(
             x,
             self.tp_pg,
@@ -101,11 +102,12 @@ class TestFullyShardSpmdTypes(TestCase):
             for seq_parallel in (False, True):
                 with self.subTest(seq_parallel=seq_parallel):
                     model = SpmdLinear(self.mesh, seq_parallel)
+                    # Leave DP unannotated: FSDP should stamp logical DP:R.
                     spmd.assert_type(
                         model.unsharded_weight,
                         {"tp": spmd.R if seq_parallel else spmd.I},
                     )
-                    spmd.assert_type(model.sharded_weight, {"tp": spmd.S(1)})
+                    spmd.assert_type(model.sharded_weight, {"tp": spmd.S(0)})
                     fully_shard(
                         model,
                         mesh=self.mesh,
@@ -114,6 +116,13 @@ class TestFullyShardSpmdTypes(TestCase):
                             param_dtype=torch.bfloat16,
                             reduce_dtype=torch.float32,
                             cast_forward_inputs=True,
+                        ),
+                    )
+                    self.assertEqual(
+                        model.sharded_weight._spec.placements,
+                        (
+                            _StridedShard(0, split_factor=self.mesh["tp"].size()),
+                            Shard(0),
                         ),
                     )
                     inp = torch.randn(4, 8, 16)
@@ -173,6 +182,19 @@ class TestFullyShardSpmdTypes(TestCase):
             """Parameter 'sharded_weight' has V type on mesh dim 'tp' but no PartitionSpec shard info. Use assert_type with S(dim) or pass a PartitionSpec.""",
         )
 
+    def test_spmd_params_require_dp_mesh_dims(self):
+        model = SpmdLinear(self.mesh, seq_parallel=False)
+
+        with spmd.set_current_mesh(self.mesh):
+            spmd.assert_type(model.unsharded_weight, {"tp": spmd.I})
+            with self.assertRaises(ValueError) as cm:
+                fully_shard(model, mesh=self.mesh)
+        self.assertExpectedInline(
+            str(cm.exception),
+            "spmd_types parameters require a named SPMD mesh "
+            "(pass dp_mesh_dims to fully_shard)",
+        )
+
     def test_hsdp_uses_logical_dp_axis_for_spmd_type(self):
         dp_axis = spmd.MeshAxis.of(
             self.hsdp_mesh[("dp_replicate", "dp_shard")]._flatten("dp").get_group()
@@ -190,8 +212,20 @@ class TestFullyShardSpmdTypes(TestCase):
                 replicate="dp_replicate",
             ),
         )
-        model(torch.randn(4, 16))
+        self.assertIsInstance(model.weight, DTensor)
+        self.assertEqual(model.weight._spec.placements, (Replicate(), Shard(0)))
+
+        loss = model(torch.randn(4, 16))
         self.assertEqual(model.compute_local_type, {dp_axis: spmd.R})
+        with CommDebugMode() as bwd_comm_mode:
+            loss.backward()
+        bwd_comm_counts = bwd_comm_mode.get_comm_counts()
+        self.assertEqual(bwd_comm_counts[c10d_ops._reduce_scatter_base_], 1)
+        self.assertEqual(
+            bwd_comm_counts[c10d_ops.allreduce_]
+            + bwd_comm_counts[c10d_functional.all_reduce],
+            1,
+        )
 
 
 if __name__ == "__main__":
