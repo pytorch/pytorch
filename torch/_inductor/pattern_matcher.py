@@ -51,7 +51,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, NoReturn, Protocol, TypeVar
+from typing import Any, NoReturn, Protocol, TypeAlias, TypeVar
 from typing_extensions import Self, TypeIs
 
 import torch
@@ -84,7 +84,7 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
-Constant = Any
+Constant: TypeAlias = torch.fx.node.Argument
 NodeOrConstant = Constant | torch.fx.Node
 
 backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
@@ -460,9 +460,11 @@ class MatchContext:
                 return Match(self, pattern)  # already checked this node
             else:
                 return FailedMatch("repeated pattern differs")
-        m = pattern._match(node, self)
+        m = pattern._match(typing.cast(Any, node), self)
         assert pattern not in self.pattern_to_node
-        self.pattern_to_node[pattern] = node if m else None
+        self.pattern_to_node[pattern] = typing.cast(
+            torch.fx.Node | None, node if m else None
+        )
         return m
 
     def filter_multi_user_patterns(self) -> dict[PatternExpr, torch.fx.Node]:

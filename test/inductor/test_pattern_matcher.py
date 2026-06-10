@@ -2732,6 +2732,37 @@ class TestPatternMatcher(TestCase):
         )
         compiled_fn(x, y)
 
+    def test_keyword_arg_matches_constant(self):
+        test_pass = PatternMatcherPass()
+        matched_alphas = []
+
+        @register_graph_pattern(
+            CallFunction(
+                aten.add.Tensor,
+                KeywordArg("x"),
+                KeywordArg("y"),
+                alpha=KeywordArg("alpha"),
+            ),
+            pass_dict=test_pass,
+        )
+        def add_with_alpha(match: Match, x, y, alpha):
+            matched_alphas.append(alpha)
+
+        def custom_pass(graph: torch.fx.Graph):
+            self.assertEqual(test_pass.apply(graph), 1)
+
+        def fn(x, y):
+            return torch.add(x, y, alpha=2)
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, options={"post_grad_custom_post_pass": custom_pass}
+        )
+        self.assertEqual(compiled_fn(x, y), fn(x, y))
+        self.assertEqual(matched_alphas, [2])
+
     def test_replace_by_example_returns_inserted_nodes(self):
         test_pass = PatternMatcherPass()
         replacement_targets = []
