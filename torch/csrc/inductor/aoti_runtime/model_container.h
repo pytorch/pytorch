@@ -719,6 +719,17 @@ class AOTInductorModelContainer {
           constant_name, RAIIAtenTensorHandle(tensor_handle));
     }
     target.update_array(models_[0].get());
+
+#ifdef USE_CUDA
+    // S638065: the GPU constant copies above run on the default stream (raw
+    // cudaMemcpy), while run_const_fold launches the fold on
+    // getCurrentCUDAStream(). On ROCm the default stream is not implicitly
+    // ordered with the fold's stream, so without this the fold could read
+    // not-yet-copied weights and bake stale values into the folded constants.
+    // Wait for the copies to complete before returning, so any subsequent fold
+    // (on any stream) sees the updated weights.
+    AOTI_RUNTIME_CUDA_CHECK(cudaStreamSynchronize(0));
+#endif // USE_CUDA
   }
 
   void swap_constant_buffer() {
