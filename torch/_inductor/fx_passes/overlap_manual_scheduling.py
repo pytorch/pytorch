@@ -6,7 +6,6 @@ from typing import Any, TYPE_CHECKING
 
 import torch  # noqa: TC001
 import torch.fx as fx  # noqa: TC001
-from torch._dynamo.graph_deduplication import _stable_topological_sort
 from torch._inductor.fx_passes.bucketing import (
     _get_collective_node_from_wait,
     _schedulable_wait_node,
@@ -39,6 +38,78 @@ import logging
 
 
 logger = logging.getLogger(__name__)
+
+
+def _collect_nodes_must_be_after(node: fx.Node) -> list[fx.Node]:
+    """BFS forward collecting node and its transitive users with no external inputs."""
+    result: list[fx.Node] = [node]
+    result_set: OrderedSet[fx.Node] = OrderedSet([node])
+    i = 0
+    while i < len(result):
+        for user in result[i].users:
+            if user not in result_set and all(
+                inp in result_set for inp in user.all_input_nodes
+            ):
+                result_set.add(user)
+                result.append(user)
+        i += 1
+    return result
+
+
+def _collect_nodes_must_be_before(
+    node: fx.Node, node_positions: dict[fx.Node, int]
+) -> list[fx.Node]:
+    """BFS backward collecting node and its non-placeholder dependencies, topo-sorted."""
+    visited: OrderedSet[fx.Node] = OrderedSet()
+    queue = [node]
+    while queue:
+        cur = queue.pop()
+        if cur in visited or cur.op == "placeholder":
+            continue
+        visited.add(cur)
+        queue.extend(cur.all_input_nodes)
+    return sorted(visited, key=lambda n: node_positions[n])
+
+
+def _move_overlap_nodes(
+    graph: fx.Graph,
+    overlap_deps: dict[fx.Node, OrderedSet[fx.Node]],
+    bucketed_node_types: dict[fx.Node, str],
+) -> None:
+    if not overlap_deps:
+        return
+
+    rs_defer: dict[fx.Node, list[fx.Node]] = defaultdict(list)
+    ag_prefetch: dict[fx.Node, list[fx.Node]] = defaultdict(list)
+
+    for target, sources in overlap_deps.items():
+        for source in sources:
+            source_type = bucketed_node_types.get(source, "")
+            if source_type.startswith("bucketed_reduce_scatter"):
+                rs_defer[target].append(source)
+            elif source_type.startswith("bucketed_all_gather"):
+                ag_prefetch[target].append(source)
+
+    node_positions = {n: i for i, n in enumerate(graph.nodes)}
+
+    for rs_wait, rs_starts in rs_defer.items():
+        latest_rs_start = max(rs_starts, key=lambda n: node_positions[n])
+        node_insert_after = latest_rs_start
+        for node in _collect_nodes_must_be_after(rs_wait):
+            node_insert_after.append(node)
+            node_insert_after = node
+
+    # Recompute positions after RS moves
+    node_positions = {n: i for i, n in enumerate(graph.nodes)}
+
+    for ag_wait, ag_prefetch_starts in ag_prefetch.items():
+        ag_wait_pos = node_positions[ag_wait]
+        sorted_starts = sorted(ag_prefetch_starts, key=lambda n: node_positions[n])
+        for ag_start in sorted_starts:
+            if node_positions[ag_start] < ag_wait_pos:
+                continue
+            for node in _collect_nodes_must_be_before(ag_start, node_positions):
+                ag_wait.prepend(node)
 
 
 class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
@@ -321,7 +392,7 @@ class ManualOverlapScheduler(OverlapScheduler):
                 for ag in picked_ag:
                     overlap_deps[last_compute].add(ag)
 
-        _stable_topological_sort(self.graph, overlap_deps)
+        _move_overlap_nodes(self.graph, overlap_deps, self.bucketer.bucketed_node_types)
         self.graph.lint()
 
         if self.insert_overlap_deps:
