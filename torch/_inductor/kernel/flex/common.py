@@ -346,7 +346,7 @@ def create_indices_fake(x) -> torch.Tensor:
     return indices
 
 
-def create_num_blocks_fake_generator(sparse_indices):
+def create_num_blocks_fake_generator(sparse_indices, is_partial=None):
     """Create a fake num_blocks that is used for autotuning.
 
     The idea here is that we need to create a real tensor with real data
@@ -355,16 +355,28 @@ def create_num_blocks_fake_generator(sparse_indices):
     that we are computing 0 blocks for each row, which would provide bogus
     autotuning results.
 
-    In this case, we choose to use min(16, max_block) blocks, because I
-    (Horace) think it'll probably result in pretty representative performance.
-    If it's too short then prefetching won't help. If it's too long then
-    autotuning will take longer for no good reason.
+    is_partial controls the estimate:
+    - is_partial=True  (partial/boundary blocks): uses min(1, max_blocks).
+      For typical causal masks each Q-row has exactly 1 boundary block.
+      Some masks (e.g. sliding-window + causal) may have 2, but 1 is a
+      reasonable approximation that avoids inflating autotuner cost.
+    - is_partial=False (full/interior blocks): uses max(0, max_blocks - 1),
+      complementary to the partial estimate so partial + full = total.
+    - is_partial=None  (default): uses max_blocks unchanged (legacy behavior).
     """
 
     def create_num_blocks_fake(x) -> torch.Tensor:
         num_blocks_for_autotuning = V.graph.sizevars.optimization_hint(
             sparse_indices.shape[-1]
         )
+        # Use 1 as a conservative estimate for partial (boundary) blocks.
+        # For typical causal masks, each Q-row has exactly 1 boundary block.
+        # Some masks (e.g. sliding-window + causal) may have 2, but 1 is a
+        # reasonable approximation that avoids over-inflating autotuner cost.
+        if is_partial is True:
+            num_blocks_for_autotuning = min(1, num_blocks_for_autotuning)
+        elif is_partial is False:
+            num_blocks_for_autotuning = max(0, num_blocks_for_autotuning - 1)
         size = V.graph.sizevars.optimization_hints(x.get_size())
         return torch.full(
             size,

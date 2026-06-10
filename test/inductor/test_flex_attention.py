@@ -6415,6 +6415,46 @@ class GraphModule(torch.nn.Module):
             "get_stride_and_maybe_freeze_layout should be called with FlexibleLayout nodes",
         )
 
+    @supported_platform
+    @skip_on_cpu
+    def test_fake_block_mask_generator_partial_full(self, device):
+        from unittest.mock import MagicMock, patch
+
+        from torch._inductor.kernel.flex.common import create_num_blocks_fake_generator
+
+        def causal(b, h, q, kv):
+            return q >= kv
+
+        bm = create_block_mask(causal, 1, 1, 512, 512, device=device)
+        max_blocks = bm.kv_indices.shape[-1]
+
+        mock_x = MagicMock()
+        mock_x.get_size.return_value = [1, 1, bm.kv_num_blocks.shape[-1]]
+        mock_x.get_dtype.return_value = torch.int32
+        mock_x.get_device.return_value = torch.device(device)
+
+        with patch("torch._inductor.kernel.flex.common.V") as mock_V:
+            mock_V.graph.sizevars.optimization_hint.side_effect = lambda x: int(x)
+            mock_V.graph.sizevars.optimization_hints.side_effect = lambda xs: [
+                int(x) for x in xs
+            ]
+            partial_val = (
+                create_num_blocks_fake_generator(bm.kv_indices, is_partial=True)(mock_x)
+                .max()
+                .item()
+            )
+            full_val = (
+                create_num_blocks_fake_generator(bm.full_kv_indices, is_partial=False)(
+                    mock_x
+                )
+                .max()
+                .item()
+            )
+
+        self.assertEqual(partial_val + full_val, max_blocks)
+        self.assertLessEqual(partial_val, 1)
+        self.assertGreaterEqual(full_val, 0)
+
 
 class TestBlockMask(InductorTestCase):
     def setUp(self):

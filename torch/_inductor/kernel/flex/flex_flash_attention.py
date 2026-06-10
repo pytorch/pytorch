@@ -528,9 +528,9 @@ def create_flex_flash_attention_kernel(
     input_gen_fns: dict[int, Callable] | None = None
     if has_full_blocks:
         input_gen_fns = {
-            4: create_num_blocks_fake_generator(kv_indices),
+            4: create_num_blocks_fake_generator(kv_indices, is_partial=True),
             5: create_indices_fake,
-            6: create_num_blocks_fake_generator(full_kv_indices),
+            6: create_num_blocks_fake_generator(full_kv_indices, is_partial=False),
             7: create_indices_fake,
         }
 
@@ -840,9 +840,9 @@ def create_flex_flash_attention_backward_kernel(
     input_gen_fns: dict[int, Callable] | None = None
     if has_block_mask:
         input_gen_fns = {
-            8: create_num_blocks_fake_generator(q_indices),
+            8: create_num_blocks_fake_generator(q_indices, is_partial=True),
             9: create_indices_fake,
-            10: create_num_blocks_fake_generator(full_q_indices),
+            10: create_num_blocks_fake_generator(full_q_indices, is_partial=False),
             11: create_indices_fake,
         }
 
