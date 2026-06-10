@@ -4761,6 +4761,46 @@
       ]
     }
   ],
+  "GB1272": [
+    {
+      "Gb_type": "ContextVar.get() returned non-constant value",
+      "Context": "ContextVar('{self.cv_obj.name}').get() -> {type(value).__name__}",
+      "Explanation": "ContextVar.get() returned a {type(value).__name__}, but only constant values (str, int, float, bool, None, bytes, enum) are supported inside torch.compile in this release. Move the .get() call outside the compiled region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6815": [
+    {
+      "Gb_type": "ContextVar mutation not supported",
+      "Context": "ContextVar('{self.cv_obj.name}').{name}()",
+      "Explanation": "ContextVar.{name}() is not yet supported inside torch.compile. Move the .{name}() call outside the compiled region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6066": [
+    {
+      "Gb_type": "ContextVar.get() with non-constant default",
+      "Context": "ContextVar('{self.cv_obj.name}').get(...)",
+      "Explanation": "ContextVar.get() default argument must be a compile-time constant inside torch.compile.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0668": [
+    {
+      "Gb_type": "ContextVar.get() with unhashable default",
+      "Context": "ContextVar('{self.cv_obj.name}').get({type(default_value).__name__}(...))",
+      "Explanation": "ContextVar.get() default must be hashable inside torch.compile (mutable containers like list/dict/set are not supported as defaults).",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0321": [
     {
       "Gb_type": "torch.scan: improper init",
