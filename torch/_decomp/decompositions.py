@@ -1272,7 +1272,7 @@ def dropout(input: Tensor, p: float, train: bool | None):
     if train and p != 0:
         return aten.native_dropout(input, p, train)[0]
     else:
-        return input.clone()
+        return input
 
 
 @register_decomposition(aten.native_dropout)
