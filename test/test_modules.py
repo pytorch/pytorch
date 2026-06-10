@@ -542,7 +542,7 @@ class TestModule(TestCase):
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)
-    def test_cpu_gpu_parity(self, device, dtype, module_info, training):
+    def test_cpu_accelerator_parity(self, device, dtype, module_info, training):
         # TODO: RNN / GRU / LSTM don't support backwards on eval mode for cuDNN; skip this in a
         # nicer way for eval mode only.
         # See https://github.com/pytorch/pytorch/issues/79161
