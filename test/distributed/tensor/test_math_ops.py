@@ -1872,6 +1872,24 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(dt_b.grad.full_tensor(), ref_b.grad)
         self.assertEqual(dt_b.grad.placements, (Partial("sum"),))
 
+        # group_norm backward with weight=None, bias=None (affine=False)
+        ref_inp_na = inp_bwd.clone().detach().requires_grad_(True)
+        dt_inp_na = distribute_tensor(
+            inp_bwd.clone().detach().requires_grad_(True), device_mesh, [Shard(0)]
+        )
+
+        ref_out_na = F.group_norm(ref_inp_na, num_groups)
+        ref_out_na.sum().backward()
+
+        with CommDebugMode() as comm_mode:
+            dt_out_na = F.group_norm(dt_inp_na, num_groups)
+            dt_out_na.sum().backward()
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        self.assertEqual(dt_out_na.full_tensor(), ref_out_na)
+        self.assertEqual(dt_inp_na.grad.full_tensor(), ref_inp_na.grad)
+        self.assertTrue(dt_inp_na.grad.placements[0].is_shard(0))
+
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMathOpsTest,
