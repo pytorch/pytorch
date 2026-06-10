@@ -13,10 +13,10 @@ EventRecordCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry(
     "CUDA event record"
 )
 EventWaitCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry("CUDA event wait")
-MemoryAllocationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
+MemoryAllocationCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry(
     "CUDA memory allocation"
 )
-MemoryDeallocationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
+MemoryDeallocationCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry(
     "CUDA memory deallocation"
 )
 StreamCreationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
@@ -49,11 +49,15 @@ def register_callback_for_event_wait(cb: Callable[[int, int], None]) -> None:
     EventWaitCallbacks.add_callback(cb)
 
 
-def register_callback_for_memory_allocation(cb: Callable[[int], None]) -> None:
+def register_callback_for_memory_allocation(
+    cb: Callable[[int, int], None],
+) -> None:
     MemoryAllocationCallbacks.add_callback(cb)
 
 
-def register_callback_for_memory_deallocation(cb: Callable[[int], None]) -> None:
+def register_callback_for_memory_deallocation(
+    cb: Callable[[int, int], None],
+) -> None:
     MemoryDeallocationCallbacks.add_callback(cb)
 
 

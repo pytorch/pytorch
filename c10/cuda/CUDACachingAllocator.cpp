@@ -4501,8 +4501,10 @@ static void* uncached_allocate(size_t size) {
   C10_CUDA_CHECK(cudaMalloc(&devPtr, size));
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
+    // Uncached allocations bypass the caching allocator, so reuse races
+    // cannot occur.  Pass stream=0 as a sentinel.
     (*interp)->trace_gpu_memory_allocation(
-        c10::kCUDA, reinterpret_cast<uintptr_t>(devPtr));
+        c10::kCUDA, reinterpret_cast<uintptr_t>(devPtr), 0);
   }
   return devPtr;
 }
@@ -4514,8 +4516,10 @@ static void uncached_delete(void* ptr) {
 
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
+    // Uncached frees go directly to cudaFree which synchronizes implicitly.
+    // Pass stream=0 as a sentinel.
     (*interp)->trace_gpu_memory_deallocation(
-        c10::kCUDA, reinterpret_cast<uintptr_t>(ptr));
+        c10::kCUDA, reinterpret_cast<uintptr_t>(ptr), 0);
   }
   C10_CUDA_CHECK(cudaFree(ptr));
 }
@@ -4619,7 +4623,9 @@ class NativeCachingAllocator : public CUDAAllocator {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_memory_allocation(
-          c10::kCUDA, reinterpret_cast<uintptr_t>(*devPtr));
+          c10::kCUDA,
+          reinterpret_cast<uintptr_t>(*devPtr),
+          reinterpret_cast<uintptr_t>(stream));
     }
   }
 
@@ -4660,7 +4666,9 @@ class NativeCachingAllocator : public CUDAAllocator {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_memory_deallocation(
-          c10::kCUDA, reinterpret_cast<uintptr_t>(block->ptr));
+          c10::kCUDA,
+          reinterpret_cast<uintptr_t>(block->ptr),
+          reinterpret_cast<uintptr_t>(block->stream));
     }
     device_allocator[block->device]->free(block);
   }
