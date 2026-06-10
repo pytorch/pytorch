@@ -50,12 +50,6 @@ from ...utils import load_template
 SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
 
 
-def is_wrapped_triton_shared_memory_error(exc: RuntimeError) -> bool:
-    """Triton raises a generic RuntimeError when it runs out of shared memory."""
-    message = str(exc).lower()
-    return "outofresources" in message and "out of resource" in message
-
-
 def flex_kernel_options_example(kernel_name: str) -> str:
     match kernel_name:
         case "backward":
@@ -127,7 +121,8 @@ def precompile_single_flex_choice(
     except OutOfResources as exc:
         raise_flex_smem_error(kernel_name, kernel_options, option_names, exc)
     except RuntimeError as exc:
-        if is_wrapped_triton_shared_memory_error(exc):
+        message = str(exc).lower()
+        if "outofresources" in message and "out of resource" in message:
             raise_flex_smem_error(kernel_name, kernel_options, option_names, exc)
         raise
 
