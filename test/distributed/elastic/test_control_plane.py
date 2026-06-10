@@ -167,7 +167,7 @@ class WorkerServerTest(TestCase):
 
         from torch._C._distributed_c10d import _WorkerServer
 
-        server = _WorkerServer("", 1234)
+        server = _WorkerServer("127.0.0.1", 1234)
         out = requests.get("http://localhost:1234/handler/")
         self.assertEqual(out.status_code, 200)
 
