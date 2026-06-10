@@ -3046,7 +3046,9 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
         key = "group_dst" if op.op is isend else "group_src"
         return {key: op.group_peer}
 
-    if type(group) is ProcessGroup and group._get_backend(device).supports_coalescing:
+    if isinstance(group, ProcessGroup) and getattr(
+        group._get_backend(device), "supports_coalescing", False
+    ):
         # NCCL style coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
