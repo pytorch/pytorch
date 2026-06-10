@@ -1224,6 +1224,20 @@ struct alignas(sizeof(T) * VEC) GemmVec {
   T v[VEC];
 };
 
+template <typename DT, int VEC, bool XC>
+inline GemmVec<DT, VEC> load_x(device const DT* x, int k, int xs) {
+  if IF_CONSTEXPR (XC) {
+    return *((const device GemmVec<DT, VEC>*)(&x[k]));
+  } else {
+    GemmVec<DT, VEC> r;
+#pragma unroll
+    for (int i = 0; i < VEC; ++i) {
+      r.v[i] = x[(k + i) * xs];
+    }
+    return r;
+  }
+}
+
 // Epilogue applied to one output element, cast to OUT_T. beta==0 must not read
 // self (may be uninitialized/NaN; matches addmm semantics).
 template <GemmEpilogue EPI, typename OUT_T, typename ACC_T>
@@ -1265,7 +1279,9 @@ kernel void gemv_t(
   using Vec = GemmVec<DT, VEC>;
   constexpr int BLOCK_N = 32 * VEC;
   const int gN = gP.n, gK = gP.K, gLdb = gP.ld, gXs = gP.xs;
-  threadgroup ACC_T partials[NSIMD][BLOCK_N];
+  // +1 pad: the reduce reads partials[lane][cc] down a column; an odd row
+  // stride keeps those 32 accesses on distinct banks.
+  threadgroup ACC_T partials[NSIMD][BLOCK_N + 1];
 
   const int col0 = int(tgid.x) * BLOCK_N;
   const int n0 = col0 + int(lane) * VEC;
@@ -1324,29 +1340,25 @@ kernel void gemv_t(
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  if (sgid == 0) {
-    ACC_T alpha = alpha_beta[0];
-    ACC_T beta = alpha_beta[1];
-#pragma unroll
-    for (int i = 0; i < VEC; ++i) {
-      int cc = int(lane) * VEC + i;
-      ACC_T s = (ACC_T)0;
-#pragma unroll
-      for (int w = 0; w < NSIMD; ++w) {
-        s += partials[w][cc];
-      }
-      int n = col0 + cc;
-      if (n < gN) {
-        y[n] = apply_epilogue<EPI, DT, ACC_T>(
-            s, /*r=*/0, /*c=*/n, self, gP.self_r, gP.self_c, alpha, beta);
-      }
+  // Cross-simdgroup reduce: every simdgroup owns BLOCK_N/NSIMD columns and
+  // simd_sums the NSIMD partials of each (lanes >= NSIMD contribute zero).
+  const ACC_T alpha = alpha_beta[0];
+  const ACC_T beta = alpha_beta[1];
+  for (int cc = int(sgid); cc < BLOCK_N; cc += NSIMD) {
+    ACC_T v = int(lane) < NSIMD ? partials[lane][cc] : (ACC_T)0;
+    v = simd_sum(v);
+    const int n = col0 + cc;
+    if (lane == 0 && n < gN) {
+      y[n] = apply_epilogue<EPI, DT, ACC_T>(
+          v, /*r=*/0, /*c=*/n, self, gP.self_r, gP.self_c, alpha, beta);
     }
   }
 }
 
-// y = A @ x, A is (M, K) row-major. Each simdgroup owns one row; lanes stride K
-// and reduce via threadgroup memory.
-template <typename DT, int NSIMD, int VEC, GemmEpilogue EPI>
+// y = A @ x, A is (M, K) row-major. Each simdgroup owns ROWS consecutive rows
+// (one x load feeds ROWS rows' FMAs); lanes stride K and reduce with simd_sum.
+// XC: x is unit-stride and VEC-aligned.
+template <typename DT, int NSIMD, int VEC, GemmEpilogue EPI, bool XC, int ROWS>
 kernel void gemv_nt(
     device const DT* A [[buffer(0)]],
     device const DT* x [[buffer(1)]],
@@ -1361,63 +1373,82 @@ kernel void gemv_nt(
   using ACC_T = ::c10::metal::opmath_t<DT>;
   using Vec = GemmVec<DT, VEC>;
   const int gM = gP.n, gK = gP.K, gLda = gP.ld, gXs = gP.xs;
-  threadgroup ACC_T part[NSIMD][32];
   const int K_STRIDE = 32 * VEC;
 
-  int row = int(tgid.x) * NSIMD + int(sgid);
-  if (row >= gM) {
+  const int row0 = (int(tgid.x) * NSIMD + int(sgid)) * ROWS;
+  if (row0 >= gM) {
     return;
   }
-  const device DT* Arow = &A[row * gLda];
-  ACC_T acc = (ACC_T)0;
+  const device DT* Arow[ROWS];
+  ACC_T acc[ROWS];
+#pragma unroll
+  for (int r = 0; r < ROWS; ++r) {
+    // Tail rows alias the last row: loads stay in bounds, stores are guarded.
+    Arow[r] = &A[min(row0 + r, gM - 1) * gLda];
+    acc[r] = (ACC_T)0;
+  }
   int k = int(lane) * VEC;
   for (; k + 3 * K_STRIDE + VEC <= gK; k += 4 * K_STRIDE) {
-    Vec a0 = *((const device Vec*)(&Arow[k + 0 * K_STRIDE]));
-    Vec a1 = *((const device Vec*)(&Arow[k + 1 * K_STRIDE]));
-    Vec a2 = *((const device Vec*)(&Arow[k + 2 * K_STRIDE]));
-    Vec a3 = *((const device Vec*)(&Arow[k + 3 * K_STRIDE]));
+    Vec x0 = load_x<DT, VEC, XC>(x, k + 0 * K_STRIDE, gXs);
+    Vec x1 = load_x<DT, VEC, XC>(x, k + 1 * K_STRIDE, gXs);
+    Vec x2 = load_x<DT, VEC, XC>(x, k + 2 * K_STRIDE, gXs);
+    Vec x3 = load_x<DT, VEC, XC>(x, k + 3 * K_STRIDE, gXs);
 #pragma unroll
-    for (int i = 0; i < VEC; ++i) {
-      acc += (ACC_T)a0.v[i] * (ACC_T)x[(k + 0 * K_STRIDE + i) * gXs];
-      acc += (ACC_T)a1.v[i] * (ACC_T)x[(k + 1 * K_STRIDE + i) * gXs];
-      acc += (ACC_T)a2.v[i] * (ACC_T)x[(k + 2 * K_STRIDE + i) * gXs];
-      acc += (ACC_T)a3.v[i] * (ACC_T)x[(k + 3 * K_STRIDE + i) * gXs];
+    for (int r = 0; r < ROWS; ++r) {
+      Vec a0 = *((const device Vec*)(&Arow[r][k + 0 * K_STRIDE]));
+      Vec a1 = *((const device Vec*)(&Arow[r][k + 1 * K_STRIDE]));
+      Vec a2 = *((const device Vec*)(&Arow[r][k + 2 * K_STRIDE]));
+      Vec a3 = *((const device Vec*)(&Arow[r][k + 3 * K_STRIDE]));
+#pragma unroll
+      for (int i = 0; i < VEC; ++i) {
+        acc[r] += (ACC_T)a0.v[i] * (ACC_T)x0.v[i];
+        acc[r] += (ACC_T)a1.v[i] * (ACC_T)x1.v[i];
+        acc[r] += (ACC_T)a2.v[i] * (ACC_T)x2.v[i];
+        acc[r] += (ACC_T)a3.v[i] * (ACC_T)x3.v[i];
+      }
     }
   }
   for (; k + VEC <= gK; k += K_STRIDE) {
-    Vec av = *((const device Vec*)(&Arow[k]));
+    Vec xv = load_x<DT, VEC, XC>(x, k, gXs);
 #pragma unroll
-    for (int i = 0; i < VEC; ++i) {
-      acc += (ACC_T)av.v[i] * (ACC_T)x[(k + i) * gXs];
+    for (int r = 0; r < ROWS; ++r) {
+      Vec av = *((const device Vec*)(&Arow[r][k]));
+#pragma unroll
+      for (int i = 0; i < VEC; ++i) {
+        acc[r] += (ACC_T)av.v[i] * (ACC_T)xv.v[i];
+      }
     }
   }
   if (lane == 0) {
-    int kk = (gK / VEC) * VEC;
-    for (; kk < gK; ++kk) {
-      acc += (ACC_T)Arow[kk] * (ACC_T)x[kk * gXs];
+    for (int kk = (gK / VEC) * VEC; kk < gK; ++kk) {
+      const ACC_T xk = (ACC_T)x[kk * gXs];
+#pragma unroll
+      for (int r = 0; r < ROWS; ++r) {
+        acc[r] += (ACC_T)Arow[r][kk] * xk;
+      }
     }
   }
 
-  ACC_T alpha = alpha_beta[0];
-  ACC_T beta = alpha_beta[1];
-  // simdgroup_barrier, not threadgroup: the divergent out-of-range return above
-  // would deadlock a threadgroup barrier.
-  simdgroup_barrier(mem_flags::mem_threadgroup);
-  part[sgid][lane] = acc;
-  simdgroup_barrier(mem_flags::mem_threadgroup);
-  if (lane == 0) {
-    ACC_T s = (ACC_T)0;
 #pragma unroll
-    for (int i = 0; i < 32; ++i) {
-      s += part[sgid][i];
+  for (int r = 0; r < ROWS; ++r) {
+    const ACC_T s = simd_sum(acc[r]);
+    if (lane == 0 && row0 + r < gM) {
+      y[row0 + r] = apply_epilogue<EPI, DT, ACC_T>(
+          s,
+          /*r=*/row0 + r,
+          /*c=*/0,
+          self,
+          gP.self_r,
+          gP.self_c,
+          alpha_beta[0],
+          alpha_beta[1]);
     }
-    y[row] = apply_epilogue<EPI, DT, ACC_T>(
-        s, /*r=*/row, /*c=*/0, self, gP.self_r, gP.self_c, alpha, beta);
   }
 }
 
-// Explicit instantiations (host_name = dispatch key). The (NSIMD,VEC) sets must
-// cover every config pick_gemv_t/pick_gemv_nt can emit (LinearAlgebra.mm).
+// Explicit instantiations (host_name = dispatch key). The (NSIMD,VEC) sets
+// below are exactly the configs pick_gemv_t/pick_gemv_nt (LinearAlgebra.mm)
+// can emit, including their alignment-clamp fallbacks.
 #define MB_GEMV_T(DT, NSIMD, VEC, EN, EV)                           \
   template [[host_name("gemv_t_" #DT "_" #NSIMD "_" #VEC "_" #EN)]] \
   kernel void gemv_t<DT, NSIMD, VEC, GemmEpilogue::EV>(             \
@@ -1433,38 +1464,63 @@ kernel void gemv_nt(
 #define MB_GEMV_T_E(DT, NSIMD, VEC) \
   MB_GEMV_T(DT, NSIMD, VEC, none, None) MB_GEMV_T(DT, NSIMD, VEC, ab, AlphaBeta)
 
-#define MB_GEMV_NT(DT, NSIMD, VEC, EN, EV)                           \
-  template [[host_name("gemv_nt_" #DT "_" #NSIMD "_" #VEC "_" #EN)]] \
-  kernel void gemv_nt<DT, NSIMD, VEC, GemmEpilogue::EV>(             \
-      device const DT*,                                              \
-      device const DT*,                                              \
-      device DT*,                                                    \
-      constant GemvDims&,                                            \
-      device const DT*,                                              \
-      constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>&,  \
-      uint3,                                                         \
-      uint,                                                          \
+#define MB_GEMV_NT(DT, NSIMD, VEC, EN, EV, XN, XV, RN, R)           \
+  template[[host_name("gemv_nt_" #DT "_" #NSIMD "_" #VEC "_" #EN    \
+                      "_" #XN RN)]] kernel void                     \
+  gemv_nt<DT, NSIMD, VEC, GemmEpilogue::EV, XV, R>(                 \
+      device const DT*,                                             \
+      device const DT*,                                             \
+      device DT*,                                                   \
+      constant GemvDims&,                                           \
+      device const DT*,                                             \
+      constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>&, \
+      uint3,                                                        \
+      uint,                                                         \
       uint);
-#define MB_GEMV_NT_E(DT, NSIMD, VEC)     \
-  MB_GEMV_NT(DT, NSIMD, VEC, none, None) \
-  MB_GEMV_NT(DT, NSIMD, VEC, ab, AlphaBeta)
+// VEC==1: a vector x load degenerates to a scalar one, strided-x only.
+#define MB_GEMV_NT_E1(DT, NSIMD)                       \
+  MB_GEMV_NT(DT, NSIMD, 1, none, None, xs, false, , 1) \
+  MB_GEMV_NT(DT, NSIMD, 1, ab, AlphaBeta, xs, false, , 1)
 
-// fp32: VEC=1 only (a single fp32 column already spans a full 128-B line).
-#define MB_GEMV_FLOAT(DT) \
-  MB_GEMV_T_E(DT, 16, 1) MB_GEMV_T_E(DT, 32, 1) MB_GEMV_NT_E(DT, 4, 1)
+#define MB_GEMV_NT_EV(DT, NSIMD, VEC)                       \
+  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xs, false, , 1)    \
+  MB_GEMV_NT(DT, NSIMD, VEC, ab, AlphaBeta, xs, false, , 1) \
+  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xc, true, , 1)     \
+  MB_GEMV_NT(DT, NSIMD, VEC, ab, AlphaBeta, xc, true, , 1)
 
-// half/bf16: full VEC/NSIMD family (VEC scales with N for cache-line
-// coverage).
-#define MB_GEMV_LP(DT)   \
-  MB_GEMV_T_E(DT, 16, 1) \
-  MB_GEMV_T_E(DT, 32, 1) \
-  MB_GEMV_T_E(DT, 32, 2) \
-  MB_GEMV_T_E(DT, 16, 2) \
-  MB_GEMV_T_E(DT, 16, 4) \
-  MB_GEMV_T_E(DT, 8, 4)  \
-  MB_GEMV_T_E(DT, 8, 8)  \
-  MB_GEMV_T_E(DT, 16, 8) \
-  MB_GEMV_NT_E(DT, 4, 1) MB_GEMV_NT_E(DT, 4, 2) MB_GEMV_NT_E(DT, 4, 4)
+// ROWS=2: one x load feeds two rows (only emitted for aligned, unit-stride x).
+#define MB_GEMV_NT_R2(DT, NSIMD, VEC)                           \
+  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xc, true, "_r2", 2)    \
+  MB_GEMV_NT(DT, NSIMD, VEC, ab, AlphaBeta, xc, true, "_r2", 2) \
+  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xs, false, "_r2", 2)   \
+  MB_GEMV_NT(DT, NSIMD, VEC, ab, AlphaBeta, xs, false, "_r2", 2)
+
+// fp32: VEC caps at 4 (float4 = 16-byte loads).
+#define MB_GEMV_FLOAT(DT)  \
+  MB_GEMV_T_E(DT, 32, 1)   \
+  MB_GEMV_T_E(DT, 32, 2)   \
+  MB_GEMV_NT_E1(DT, 4)     \
+  MB_GEMV_NT_E1(DT, 8)     \
+  MB_GEMV_NT_E1(DT, 16)    \
+  MB_GEMV_NT_EV(DT, 4, 2)  \
+  MB_GEMV_NT_EV(DT, 8, 2)  \
+  MB_GEMV_NT_EV(DT, 16, 2) \
+  MB_GEMV_NT_EV(DT, 16, 4)
+
+// half/bf16: VEC=8 = 16-byte loads.
+#define MB_GEMV_LP(DT)    \
+  MB_GEMV_T_E(DT, 32, 1)  \
+  MB_GEMV_T_E(DT, 32, 2)  \
+  MB_GEMV_T_E(DT, 16, 4)  \
+  MB_GEMV_T_E(DT, 8, 4)   \
+  MB_GEMV_NT_E1(DT, 4)    \
+  MB_GEMV_NT_E1(DT, 8)    \
+  MB_GEMV_NT_EV(DT, 4, 2) \
+  MB_GEMV_NT_EV(DT, 4, 4) \
+  MB_GEMV_NT_EV(DT, 4, 8) \
+  MB_GEMV_NT_EV(DT, 8, 2) \
+  MB_GEMV_NT_EV(DT, 8, 4) \
+  MB_GEMV_NT_R2(DT, 4, 8)
 
 MB_GEMV_FLOAT(float)
 MB_GEMV_LP(half)
