@@ -542,7 +542,7 @@ def patch_torch_manual_seed():
 
     def deterministic_torch_manual_seed(*args, **kwargs):
         seed = 1337
-        return torch.manual_seed(seed)
+        return torch.random._manual_seed_impl(seed)
 
     torch.manual_seed = deterministic_torch_manual_seed
 
