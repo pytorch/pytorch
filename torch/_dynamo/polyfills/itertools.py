@@ -24,7 +24,6 @@ __all__ = [
     "cycle",
     "dropwhile",
     "filterfalse",
-    "islice",
     "pairwise",
     "starmap",
     "takewhile",
@@ -178,35 +177,6 @@ def filterfalse(function: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator
         return filter(lambda x: not function(x), it)
 
 
-# Reference: https://docs.python.org/3/library/itertools.html#itertools.islice
-@substitute_in_graph(itertools.islice, is_embedded_type=True)  # type: ignore[arg-type]
-def islice(iterable: Iterable[_T], /, *args: int | None) -> Iterator[_T]:
-    s = slice(*args)
-    start = 0 if s.start is None else s.start
-    stop = s.stop
-    step = 1 if s.step is None else s.step
-    if start < 0 or (stop is not None and stop < 0) or step <= 0:
-        raise ValueError(
-            "Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.",
-        )
-
-    if stop is None:
-        # TODO: use indices = itertools.count() and merge implementation with the else branch
-        #       when we support infinite iterators
-        next_i = start
-        for i, element in enumerate(iterable):
-            if i == next_i:
-                yield element
-                next_i += step
-    else:
-        indices = range(max(start, stop))
-        next_i = start
-        for i, element in zip(indices, iterable):
-            if i == next_i:
-                yield element
-                next_i += step
-
-
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
 @substitute_in_graph(itertools.pairwise, is_embedded_type=True)  # type: ignore[arg-type]
 def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
@@ -295,7 +265,7 @@ if sys.version_info >= (3, 12):
         iterator = iter(iterable)
 
         def _batched(iterator: Iterator[_T]) -> Iterator[tuple[_T, ...]]:
-            while batch := tuple(islice(iterator, n)):
+            while batch := tuple(itertools.islice(iterator, n)):
                 if strict and len(batch) != n:
                     raise ValueError("batched(): incomplete batch")
                 yield batch
