@@ -579,7 +579,9 @@ def promote_constants(
     inputs: Sequence[_T],
     override_return_dtype: torch.dtype | None = None,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
+    round_scalars_to_tensor_dtype: bool = False,
 ) -> Sequence[_T | BaseView | BaseConstant]:
+    """Convert scalar constants to IR constants compatible with tensor inputs."""
     assert override_return_dtype is None or type_promotion_kind is None, (
         "only one of override_return_dtype or type_promotion_kind may be given"
     )
@@ -608,11 +610,14 @@ def promote_constants(
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
     tensor_dtype = ex.get_dtype()
 
-    # Round scalar to tensor's dtype for comparison ops to match eager
-    if override_return_dtype == torch.bool and tensor_dtype in (
+    # Round scalar to tensor's dtype for ops where eager does the same.
+    should_round_scalars = (
+        round_scalars_to_tensor_dtype or override_return_dtype == torch.bool
+    ) and tensor_dtype in (
         torch.bfloat16,
         torch.float16,
-    ):
+    )
+    if should_round_scalars:
         _round_scalar = lambda v: torch.tensor(v, dtype=tensor_dtype).item()  # noqa: E731
     else:
         _round_scalar = lambda v: v  # noqa: E731
@@ -711,6 +716,7 @@ def make_pointwise(
     allow_alpha: bool = False,
     use_fma_for_alpha: bool = False,
     triton_fallback: Callable[..., _T] | None = None,
+    round_scalars_to_tensor_dtype: bool = False,
 ) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
@@ -723,7 +729,11 @@ def make_pointwise(
             return triton_fallback(*inputs)
 
         # pyrefly: ignore [bad-assignment]
-        inputs = promote_constants(inputs, override_return_dtype)
+        inputs = promote_constants(
+            inputs,
+            override_return_dtype,
+            round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
+        )
         if allow_alpha:
             if alpha is not None and alpha != 1:
                 # Use FMA for add-with-alpha on CUDA floating-point.
@@ -1069,6 +1079,7 @@ def register_pointwise(
     allow_alpha=False,
     use_fma_for_alpha=False,
     triton_fallback=None,
+    round_scalars_to_tensor_dtype=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
@@ -1088,6 +1099,7 @@ def register_pointwise(
         allow_alpha=allow_alpha,
         use_fma_for_alpha=use_fma_for_alpha,
         triton_fallback=triton_fallback,
+        round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
     )
     fn = register_lowering(
         aten_fn,
@@ -7460,7 +7472,7 @@ def fmod(a, b):
         def fn(a, b):
             return ops.fmod(a, b)
 
-    return make_pointwise(fn)(a, b)
+    return make_pointwise(fn, round_scalars_to_tensor_dtype=True)(a, b)
 
 
 @register_lowering([aten.sum, prims.sum])
@@ -8177,7 +8189,7 @@ register_lowering(aten.clamp_max)(minimum)
 neg = register_pointwise(aten.neg)
 abs = register_pointwise(aten.abs)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
-register_pointwise(aten.remainder)
+register_pointwise(aten.remainder, round_scalars_to_tensor_dtype=True)
 sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 

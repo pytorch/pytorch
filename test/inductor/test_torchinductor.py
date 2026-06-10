@@ -8759,6 +8759,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
+    @xfail_if_triton_cpu
+    def test_fmod_remainder_scalar_type_promotion_bf16_fp16(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU scalar rounding behavior")
+
+        def fn(x):
+            return torch.fmod(x, 1.7), torch.remainder(x, 1.7)
+
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        for dtype in (torch.bfloat16, torch.float16):
+            x = torch.tensor([1.703125, -1.703125], dtype=dtype)
+            expected = fn(x)
+            actual = compiled_fn(x)
+            for actual_result, expected_result in zip(actual, expected):
+                self.assertTrue(
+                    torch.equal(actual_result, expected_result),
+                    f"{dtype}: {actual_result} != {expected_result}",
+                )
+
     @skip_if_halide  # log2 not implemented for halide
     def test_log2(self):
         def fn(x):
