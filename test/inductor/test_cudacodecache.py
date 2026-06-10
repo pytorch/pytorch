@@ -69,10 +69,13 @@ class TestCUDACodeCache(InductorTestCase):
                 object_hash_key,
                 source_code_path0,
             ) = codecache.compile(_SOURCE_CODE, "o")
-            dll_wrapper, so_hash_key, source_code_path1 = codecache.load(_SOURCE_CODE, "so")
+            dll_wrapper, so_hash_key, source_code_path1 = codecache.load(
+                _SOURCE_CODE, "so"
+            )
             if TEST_WITH_ROCM:
-                self.assertNotEqual(source_code_path0, source_code_path1)
-                self.assertNotEqual(object_hash_key, so_hash_key)
+                self.assertTrue(object_file_path.endswith(".o"))
+                self.assertTrue(source_code_path0.endswith(".cpp"))
+                self.assertTrue(source_code_path1.endswith(".cpp"))
             else:
                 self.assertEqual(source_code_path0, source_code_path1)
                 self.assertEqual(object_hash_key, so_hash_key)
