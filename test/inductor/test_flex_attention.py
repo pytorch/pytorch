@@ -6153,12 +6153,23 @@ class GraphModule(torch.nn.Module):
         k = torch.randn(1, H, KV_S, D, device=device, dtype=dtype)
         v = torch.randn(1, H, KV_S, D, device=device, dtype=dtype)
 
-        tail = 128
-
         def mask_mod(b, h, q_idx, kv_idx):
             return kv_idx >= (KV_S - tail)
 
-        block_mask = create_block_mask(mask_mod, 1, 1, Q_S, KV_S, device=device)
+        BLOCK = _DEFAULT_SPARSE_BLOCK_SIZE
+        tail = BLOCK
+        last_kv_block = KV_S // BLOCK - 1
+        kv_num_blocks = torch.ones(1, 1, 1, dtype=torch.int32, device=device)
+        kv_indices = torch.full(
+            (1, 1, 1, 1), last_kv_block, dtype=torch.int32, device=device
+        )
+        block_mask = BlockMask.from_kv_blocks(
+            kv_num_blocks,
+            kv_indices,
+            BLOCK_SIZE=BLOCK,
+            mask_mod=mask_mod,
+            seq_lengths=(Q_S, KV_S),
+        )
 
         compiled = torch.compile(flex_attention, fullgraph=True)
         out = compiled(q, k, v, block_mask=block_mask)
