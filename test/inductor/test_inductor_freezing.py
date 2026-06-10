@@ -502,6 +502,28 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(counters["inductor"]["binary_folding"], 4)
 
     @torch._inductor.config.patch(layout_optimization=False)
+    def test_folded_conv_bn_with_no_grad_inside_compiled_region(self):
+        mod = ConvBN(3, 32, bias=True, kernel_size=3, stride=2).eval().to(self.device)
+        x = torch.rand(3, 3, 32, 32).to(self.device)
+
+        with torch.no_grad():
+            out_eager = mod(x)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        @torch.compile()
+        def foo(mod, x):
+            with torch.no_grad():
+                return mod(x)
+
+        out_compiled, code = run_and_get_code(foo, mod, x)
+
+        self.assertEqual(out_compiled, out_eager, atol=1e-2, rtol=1e-2)
+        self.assertEqual(counters["inductor"]["binary_folding"], 4)
+        self.assertTrue(any("frozen_param" in code_part for code_part in code))
+
+    @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn_hardswish(self):
         for use_bias, dtype in itertools.product(
             [True, False], [torch.float16, torch.bfloat16, torch.float32]
