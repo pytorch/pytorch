@@ -323,8 +323,9 @@ mobile::Module FlatbufferLoader::parseModule(
   for (const auto& f : all_functions_) {
     uint32_t class_index =
         ivalues->Get(f.first)->val_as_Function()->class_type();
-    // class_index is parsed from the (untrusted) flatbuffer and is not
-    // range-checked by VerifyModuleBuffer; validate it before indexing.
+    // class_index comes from the flatbuffer but is not range-checked by
+    // VerifyModuleBuffer; validate it before indexing so a malformed module
+    // fails with a clear error instead of crashing.
     ClassTypePtr class_type = getType(class_index);
     TORCH_CHECK(
         class_type != nullptr,
@@ -750,8 +751,8 @@ void FlatbufferLoader::extractJitSourceAndConstants(
     if (f.first >= mobile_ivalue_size_) {
       uint32_t class_index =
           ivalues->Get(f.first)->val_as_Function()->class_type();
-      // See note in parseModule: class_index is untrusted and must be
-      // validated before indexing all_types_.
+      // See note in parseModule: class_index is not range-checked by
+      // VerifyModuleBuffer, so validate it before indexing all_types_.
       ClassTypePtr class_type = getType(class_index);
       TORCH_CHECK(
           class_type != nullptr,
