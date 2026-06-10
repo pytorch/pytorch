@@ -71,4 +71,13 @@ void radix_sort_pairs_impl(
 #define AT_INSTANTIATE_SORT_PAIRS_8(scalar_t, ScalarType) \
   AT_INSTANTIATE_SORT_PAIRS(scalar_t, 8)
 
+#define AT_INSTANTIATE_SORT_PAIRS_4(scalar_t, ScalarType) \
+  AT_INSTANTIATE_SORT_PAIRS(scalar_t, 4)
+
+#define AT_INSTANTIATE_SORT_PAIRS_2(scalar_t, ScalarType) \
+  AT_INSTANTIATE_SORT_PAIRS(scalar_t, 2)
+
+#define AT_INSTANTIATE_SORT_PAIRS_1(scalar_t, ScalarType) \
+  AT_INSTANTIATE_SORT_PAIRS(scalar_t, 1)
+
 } // namespace at::cuda::cub::detail
