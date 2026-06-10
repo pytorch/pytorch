@@ -36,6 +36,17 @@ NSArray<NSNumber*>* IntArrayToNSArray(IntArrayRef arr) {
   return rc;
 }
 
+void check_mps_fft_subset_dims(const Tensor& self, IntArrayRef dim) {
+  TORCH_CHECK(
+      self.dim() <= 4 || static_cast<int64_t>(dim.size()) == self.dim(),
+      "MPS FFT does not support transforming a subset of dimensions on tensors with more than 4 dimensions. "
+      "Got ndim=",
+      self.dim(),
+      " with ",
+      dim.size(),
+      " transform dim(s). Consider moving the tensor to CPU first: tensor.cpu()");
+}
+
 } // anonymous namespace
 
 Tensor _fft_c2r_mps(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
@@ -63,14 +74,7 @@ using namespace mps;
 Tensor& _fft_r2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided, Tensor& out) {
   TORCH_CHECK(self.scalar_type() == kFloat || self.scalar_type() == kHalf, "Only float and half dtypes are supported");
   TORCH_CHECK(out.scalar_type() == c10::toComplexType(self.scalar_type()));
-  TORCH_CHECK(
-      self.dim() <= 4 || static_cast<int64_t>(dim.size()) == self.dim(),
-      "MPS FFT does not support transforming a subset of dimensions on tensors with more than 4 dimensions. "
-      "Got ndim=",
-      self.dim(),
-      " with ",
-      dim.size(),
-      " transform dim(s). Consider moving the tensor to CPU first: tensor.cpu()");
+  check_mps_fft_subset_dims(self, dim);
   const auto input_sizes = self.sym_sizes();
   SymDimVector out_sizes(input_sizes.begin(), input_sizes.end());
   auto last_dim = dim.back();
@@ -122,14 +126,7 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
                          Tensor& out) {
   TORCH_CHECK(self.is_complex(), "Input must be complex");
   TORCH_CHECK(out.scalar_type() == c10::toRealValueType(self.scalar_type()), "Unexpected output type");
-  TORCH_CHECK(
-      self.dim() <= 4 || static_cast<int64_t>(dim.size()) == self.dim(),
-      "MPS FFT does not support transforming a subset of dimensions on tensors with more than 4 dimensions. "
-      "Got ndim=",
-      self.dim(),
-      " with ",
-      dim.size(),
-      " transform dim(s). Consider moving the tensor to CPU first: tensor.cpu()");
+  check_mps_fft_subset_dims(self, dim);
   const auto in_sizes = self.sym_sizes();
   SymDimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = last_dim_size;
@@ -159,14 +156,7 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
 }
 
 Tensor& _fft_c2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward, Tensor& out) {
-  TORCH_CHECK(
-      self.dim() <= 4 || static_cast<int64_t>(dim.size()) == self.dim(),
-      "MPS FFT does not support transforming a subset of dimensions on tensors with more than 4 dimensions. "
-      "Got ndim=",
-      self.dim(),
-      " with ",
-      dim.size(),
-      " transform dim(s). Consider moving the tensor to CPU first: tensor.cpu()");
+  check_mps_fft_subset_dims(self, dim);
   auto key = __func__ + getTensorsStringKey({self}) + ":" + getArrayRefString(dim) + ":" +
       std::to_string(normalization) + ":" + std::to_string(forward);
   @autoreleasepool {
