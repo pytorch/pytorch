@@ -404,8 +404,7 @@ class Fuzzer:
     def take(self, n):
         import numpy as np
         state = np.random.RandomState(self._seed)
-        seed: int = int(state.randint(low=0, high=2 ** 63, dtype=np.int64))
-        torch.manual_seed(seed)
+        torch.manual_seed(state.randint(low=0, high=2 ** 63, dtype=np.int64))
         for _ in range(n):
             params = self._generate(state)
             tensors = {}
