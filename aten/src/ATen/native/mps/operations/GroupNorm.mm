@@ -125,17 +125,12 @@ static void group_norm_backward_x(const Tensor& dY,
                                   int64_t C,
                                   int64_t HxW,
                                   int64_t group,
-                                  const Tensor& dmean,
-                                  const Tensor& drstd,
                                   Tensor& dX) {
   using namespace mps;
   static_assert(std::is_same_v<idx_T, uint32_t> || std::is_same_v<idx_T, uint64_t>);
 
   MPSStream* stream = getCurrentMPSStream();
-  auto dY_opt = dY.defined() ? std::make_optional(dY) : std::nullopt;
   auto gamma_opt = gamma.defined() ? std::make_optional(gamma) : std::nullopt;
-  auto dmean_opt = dmean.defined() ? std::make_optional(dmean) : std::nullopt;
-  auto drstd_opt = drstd.defined() ? std::make_optional(drstd) : std::nullopt;
   idx_T channels_per_group = C / group;
   idx_T elements_per_group = channels_per_group * HxW;
 
@@ -164,7 +159,7 @@ static void group_norm_backward_x(const Tensor& dY,
                                                   std::is_same_v<idx_T, uint32_t> ? "uint32_t" : "uint64_t"));
       getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_x", {dY, X});
       [compute_encoder setComputePipelineState:pipeline_state];
-      mtl_setArgs(compute_encoder, dX, dY_opt, X, mean, rstd, gamma_opt, params, dmean_opt, drstd_opt);
+      mtl_setArgs(compute_encoder, dX, dY, X, mean, rstd, gamma_opt, params);
       [compute_encoder dispatchThreadgroups:MTLSizeMake(num_threadgroups, 1, 1)
                       threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
       getMPSProfiler().endProfileKernel(pipeline_state);
@@ -219,28 +214,35 @@ static void group_norm_backward_affine(const Tensor& dY,
   });
 }
 
-static void GroupNormBackwardMultipleGradsKernelImpl(const Tensor& dY,
-                                                     const Tensor& X,
-                                                     const Tensor& mean,
-                                                     const Tensor& rstd,
-                                                     const Tensor& gamma,
-                                                     int64_t N,
-                                                     int64_t C,
-                                                     int64_t HxW,
-                                                     int64_t group,
-                                                     const Tensor& dmean,
-                                                     const Tensor& drstd,
-                                                     Tensor& dX,
-                                                     Tensor& dgamma,
-                                                     Tensor& dbeta) {
+static void GroupNormBackwardKernelImpl(const Tensor& dY,
+                                        const Tensor& X,
+                                        const Tensor& mean,
+                                        const Tensor& rstd,
+                                        const Tensor& gamma,
+                                        int64_t N,
+                                        int64_t C,
+                                        int64_t HxW,
+                                        int64_t group,
+                                        Tensor& dX,
+                                        Tensor& dgamma,
+                                        Tensor& dbeta) {
+  if (X.numel() == 0) {
+    if (dgamma.defined()) {
+      dgamma.zero_();
+    }
+    if (dbeta.defined()) {
+      dbeta.zero_();
+    }
+    return;
+  }
   if (dX.defined()) {
     if (X.numel() >= (uint64_t(1) << 32)) {
-      group_norm_backward_x<uint64_t>(dY, X, mean, rstd, gamma, N, C, HxW, group, dmean, drstd, dX);
+      group_norm_backward_x<uint64_t>(dY, X, mean, rstd, gamma, N, C, HxW, group, dX);
     } else {
-      group_norm_backward_x(dY, X, mean, rstd, gamma, N, C, HxW, group, dmean, drstd, dX);
+      group_norm_backward_x(dY, X, mean, rstd, gamma, N, C, HxW, group, dX);
     }
   }
-  if (dY.defined() && (dgamma.defined() || dbeta.defined())) {
+  if (dgamma.defined() || dbeta.defined()) {
     // If only one of either dgamma or dbeta is defined, create a temporary for
     // the other, so that the kernel doesn't need to switch on it.
     const Tensor& affine_ref = dgamma.defined() ? dgamma : dbeta;
@@ -254,24 +256,7 @@ static void GroupNormBackwardMultipleGradsKernelImpl(const Tensor& dY,
   }
 }
 
-static void GroupNormBackwardKernelImpl(const Tensor& dY,
-                                        const Tensor& X,
-                                        const Tensor& mean,
-                                        const Tensor& rstd,
-                                        const Tensor& gamma,
-                                        int64_t N,
-                                        int64_t C,
-                                        int64_t HxW,
-                                        int64_t group,
-                                        Tensor& dX,
-                                        Tensor& dgamma,
-                                        Tensor& dbeta) {
-  GroupNormBackwardMultipleGradsKernelImpl(
-      dY, X, mean, rstd, gamma, N, C, HxW, group, Tensor{}, Tensor{}, dX, dgamma, dbeta);
-}
-
 REGISTER_DISPATCH(GroupNormKernel, &GroupNormKernelImpl);
 REGISTER_DISPATCH(GroupNormBackwardKernel, &GroupNormBackwardKernelImpl);
-REGISTER_DISPATCH(GroupNormBackwardMultipleGradsKernel, &GroupNormBackwardMultipleGradsKernelImpl);
 
 } // namespace at::native
