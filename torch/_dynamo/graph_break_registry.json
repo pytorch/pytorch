@@ -2063,6 +2063,16 @@
       "Hints": []
     }
   ],
+  "GB3554": [
+    {
+      "Gb_type": "RuntimeError during FakeTensor execution in try-except",
+      "Context": "Operation raised RuntimeError with active exception handler",
+      "Explanation": "msg",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0150": [
     {
       "Gb_type": "Unsupported hasattr call",
