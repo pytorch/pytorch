@@ -9,6 +9,7 @@ from unittest.mock import patch
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_utils import munge_exc
 
 
 class ToyModel(torch.nn.Module):
@@ -321,7 +322,9 @@ class FullgraphTests(TestCase):
 
         x = torch.randn(5)
         with SkipMode():
-            with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
+            with self.assertRaisesRegex(
+                RuntimeError, "non-infra torch dispatch mode present"
+            ):
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
 
     def test_fullgraph_errors_on_frame_skip_dynamo_disabled(self):
@@ -330,7 +333,7 @@ class FullgraphTests(TestCase):
 
         x = torch.randn(5)
         with torch._dynamo.config.patch(disable=True):
-            with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
+            with self.assertRaisesRegex(RuntimeError, "Dynamo tracing is disabled"):
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
 
     def test_fullgraph_empty_graph_no_error(self):
@@ -340,6 +343,33 @@ class FullgraphTests(TestCase):
         x = torch.randn(5)
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, 5)
+
+    def test_fullgraph_skip_reason_message(self):
+        def my_function(x):
+            return x + 1
+
+        x = torch.randn(5)
+        with torch._dynamo.config.patch(disable=True):
+            try:
+                torch.compile(my_function, backend="eager", fullgraph=True)(x)
+                self.fail("Expected RuntimeError")
+            except RuntimeError as e:
+                self.assertExpectedInline(
+                    munge_exc(str(e)),
+                    """\
+torch.compile with fullgraph=True found no compiled frames. Skipped frames:
+  - my_function (test_compile.py:N): Dynamo tracing is disabled""",
+                )
+
+    def test_fullgraph_no_error_with_non_default_stance(self):
+        @torch.compile(fullgraph=True, backend="eager", dynamic=False)
+        def fn(x, n):
+            return x + n
+
+        fn(torch.ones(3), 1)
+        with torch.compiler.set_stance("eager_on_recompile"):
+            result = fn(torch.ones(3), 2)
+        self.assertEqual(result, torch.ones(3) + 2)
 
     def test_fullgraph_exported_module_no_error(self):
         class M(torch.nn.Module):

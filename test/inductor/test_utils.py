@@ -2,13 +2,25 @@
 
 import importlib.util
 import unittest
+from collections.abc import Callable, Iterator
 
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
-from torch._inductor.fx_utils import count_flops_fx, countable_fx
+from torch._dynamo.testing import AotEagerAndRecordGraphs
+from torch._dynamo.utils import detect_fake_mode
+from torch._inductor.compile_fx import _get_subgraph_names
+from torch._inductor.fx_utils import (
+    _is_fake_tensor_same,
+    count_flops_fx,
+    countable_fx,
+    FakeTensorUpdater,
+    get_fake,
+)
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.ops import aten
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -238,6 +250,57 @@ class TestUtils(TestCase):
                     countable_fx(fx_node_2), f"Expected false {f}: {fx_node_2}"
                 )
 
+    def test_flops_fx_higher_order_op(self):
+        """count_flops_fx must use the registered formula for HOP targets
+        rather than invoking the HOP. flex_attention.__call__ requires a
+        Dynamo/proxy tracing context (TransformGetItemToIndex) and raises
+        TypeError when invoked on bare (fake) tensors.
+        """
+        from torch.utils.flop_counter import flop_registry
+
+        flex_attention = torch.ops.higher_order.flex_attention
+        self.assertIn(flex_attention, flop_registry)
+
+        q_shape = (2, 16, 1024, 64)
+        k_shape = (2, 4, 1024, 64)
+        v_shape = (2, 4, 1024, 64)
+
+        with V.set_fake_mode(
+            torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+        ):
+            graph = torch.fx.Graph()
+            q = graph.placeholder("q")
+            k = graph.placeholder("k")
+            v = graph.placeholder("v")
+            q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
+            k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
+            v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
+            node = graph.call_function(flex_attention, args=(q, k, v))
+            node.meta["val"] = (
+                torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
+                torch.randn(
+                    q_shape[0],
+                    q_shape[1],
+                    q_shape[2],
+                    device="meta",
+                    dtype=torch.float32,
+                ),
+                torch.randn(
+                    q_shape[0],
+                    q_shape[1],
+                    q_shape[2],
+                    device="meta",
+                    dtype=torch.float32,
+                ),
+            )
+
+            self.assertTrue(countable_fx(node))
+            flops = count_flops_fx(node)
+            expected = flop_registry[flex_attention](
+                q.meta["val"], k.meta["val"], v.meta["val"], out_val=node.meta["val"]
+            )
+            self.assertEqual(flops, expected)
+
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
@@ -315,6 +378,292 @@ class TestFP4Support(TestCase):
         self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
         self.assertEqual(t.shape, (16, 32))
         self.assertTrue(t.is_cuda)
+
+
+class TestTritonTypeMapping(TestCase):
+    """Tests for acc_type() dtype conversions."""
+
+    def test_acc_type(self):
+        from torch._inductor.kernel.mm_common import acc_type
+
+        cases = {
+            "half promotes to float32": (torch.float16, "tl.float32"),
+            "bfloat16 promotes to float32": (torch.bfloat16, "tl.float32"),
+            "float32 passthrough": (torch.float32, "tl.float32"),
+            "fp8 e4m3fn promotes to float32": (torch.float8_e4m3fn, "tl.float32"),
+            "fp8 e5m2 promotes to float32": (torch.float8_e5m2, "tl.float32"),
+            "fp8 e4m3fnuz promotes to float32": (torch.float8_e4m3fnuz, "tl.float32"),
+            "fp8 e5m2fnuz promotes to float32": (torch.float8_e5m2fnuz, "tl.float32"),
+        }
+        for desc, (dtype, expected) in cases.items():
+            with self.subTest(desc=desc, dtype=dtype):
+                self.assertEqual(acc_type(dtype), expected)
+
+
+class TestFakeTensorUpdater(TestCase):
+    @staticmethod
+    def _get_faketensormode(
+        graph: torch.fx.GraphModule,
+    ) -> torch._subclasses.FakeTensorMode:
+        return (
+            detect_fake_mode(get_fake(next(iter(graph.graph.nodes)), graph))
+            or torch._subclasses.FakeTensorMode()
+        )
+
+    @staticmethod
+    def _get_graph(
+        fn: Callable[..., torch.Tensor], *args: torch.Tensor
+    ) -> torch.fx.GraphModule:
+        backend = AotEagerAndRecordGraphs()
+        torch.compile(backend=backend, fullgraph=True)(fn)(*args)
+        return backend.fw_graphs[0]
+
+    @staticmethod
+    def _get_call_function_nodes(
+        graph: torch.fx.GraphModule,
+    ) -> Iterator[tuple[torch.fx.GraphModule, torch.fx.Node]]:
+        """Recursively yields all call_function nodes in a GraphModule.  These nodes are
+        ideal to apply transformations to, since callables are the focus of
+        FakeTensorUpdater."""
+        for sn in _get_subgraph_names(graph):
+            yield from TestFakeTensorUpdater._get_call_function_nodes(
+                getattr(graph, sn)
+            )
+
+        yield from ((graph, n) for n in graph.graph.nodes if n.op == "call_function")
+
+    def _add_delete_nodes_test(self, graph: torch.fx.GraphModule) -> None:
+        updater = FakeTensorUpdater(graph)
+        fake_mode = self._get_faketensormode(graph)
+
+        for gm, fn in self._get_call_function_nodes(graph):
+            fake_outputs = get_fake(fn, gm)
+            self.assertIsNot(fake_outputs, fn, msg="No fake outputs for node!")
+
+            # Since we're testing changes in subgraphs, we've explicitly disallowed
+            # changes other than striding to anything input to a subgraph.  With
+            # cascading changes, cloning is the most straightforward approach to ensure
+            # that constraint is met.
+            clone_function = (
+                torch._foreach_clone if isinstance(fake_outputs, tuple) else torch.clone
+            )
+            with gm.graph.inserting_after(fn):
+                # When tests use input tensors with dim == 4, shuffle striding order to
+                # test that updating subgraphs handles striding changes.
+                should_shuffle_strides = "val" in fn.meta and (
+                    (
+                        isinstance(fn.meta["val"], tuple)
+                        and all(len(v.size()) == 4 for v in fn.meta["val"])
+                    )
+                    or len(fn.meta["val"].size()) == 4
+                )
+                if should_shuffle_strides:
+                    cloned_node = gm.graph.call_function(
+                        clone_function, (fn,), {"memory_format": torch.channels_last}
+                    )
+                else:
+                    cloned_node = gm.graph.call_function(clone_function, (fn,))
+            nodes_modified = fn.replace_all_uses_with(
+                cloned_node, lambda n: n != cloned_node
+            )
+
+            with V.set_fake_mode(fake_mode):
+                clone_num_updated = updater.incremental_update()
+
+            # At a minimum, we have to update the newly inserted node and all the nodes
+            # which had an input replaced.  There may be more nodes modified in
+            # subgraphs, so we can't do a strict equality assertion here.
+            self.assertGreaterEqual(clone_num_updated, len(nodes_modified) + 1)
+
+            cloned_node.replace_all_uses_with(fn)
+            gm.graph.erase_node(cloned_node)
+            with V.set_fake_mode(fake_mode):
+                erase_num_updated = updater.incremental_update()
+
+            # Deleting the node should update the same number of nodes as previously,
+            # excluding the reshaped node itself.
+            self.assertEqual(clone_num_updated - 1, erase_num_updated)
+
+    def test_hop_implicit_subgraph_inputs(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return torch.cond(torch.sum(x) < 0, torch.sin, torch.cos, (x,))
+
+        # Use 4-D tensor so that we can test re-striding with channels_last.
+        a = torch.randn((8, 4, 2, 1))
+        graph = self._get_graph(fn, a)
+        self._add_delete_nodes_test(graph)
+
+    def test_hop_subgraph_inputs(self):
+        @torch.compiler.nested_compile_region
+        def nested_section_inner(a: torch.Tensor) -> torch.Tensor:
+            return torch.sin(a)
+
+        @torch.compiler.nested_compile_region
+        def nested_section_outer(
+            a: torch.Tensor, b: torch.Tensor
+        ) -> tuple[torch.Tensor, ...]:
+            return nested_section_inner(nested_section_inner(a)), nested_section_inner(
+                b
+            )
+
+        def fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            x, y = nested_section_outer(a, b)
+            return x + y
+
+        # Use 4-D tensor so that we can test re-striding with channels_last.
+        a = torch.randint(0, (1 << 16), (8, 4, 2, 1), dtype=torch.int32)
+        b = torch.randint(0, (1 << 16), (8, 4, 2, 1), dtype=torch.int32)
+        graph = self._get_graph(fn, a, b)
+        self._add_delete_nodes_test(graph)
+
+    def test_flex_attention_backward_updates_subgraph_inputs(self):
+        with torch._subclasses.FakeTensorMode() as mode:
+            query = mode.from_tensor(torch.randn(2, 2, 4, 8))
+            logsumexp = mode.from_tensor(torch.randn(2, 2, 4))
+            score = query.new_zeros(())
+            index = query.new_zeros((), dtype=torch.int)
+            grad = query.new_zeros(())
+            score_buffer = mode.from_tensor(torch.randn(2, 3, 4, 5).contiguous())
+            restrided_score_buffer = mode.from_tensor(
+                torch.randn(2, 3, 5, 4).permute(0, 1, 3, 2)
+            )
+            mask_buffer = mode.from_tensor(torch.randn(2, 3, 4, 5))
+            restrided_mask_buffer = mode.from_tensor(
+                torch.randn(2, 3, 5, 4).permute(0, 1, 3, 2)
+            )
+
+            def fw(score, b, h, q_idx, kv_idx, score_buffer):
+                return score + score_buffer[0, 0, 0, 0]
+
+            def joint(score, b, h, q_idx, kv_idx, grad, score_buffer):
+                return grad, None, None, None, None, score_buffer
+
+            def mask(b, h, q_idx, kv_idx, mask_buffer):
+                return mask_buffer[0, 0, 0, 0] > 0
+
+            fw_subgraph = make_fx(fw, tracing_mode="fake")(
+                score, index, index, index, index, score_buffer
+            )
+            joint_subgraph = make_fx(joint, tracing_mode="fake")(
+                score, index, index, index, index, grad, score_buffer
+            )
+            mask_subgraph = make_fx(mask, tracing_mode="fake")(
+                index, index, index, index, mask_buffer
+            )
+
+            def flex_backward(
+                query,
+                logsumexp,
+                score_buffer,
+                restrided_score_buffer,
+                mask_buffer,
+                restrided_mask_buffer,
+            ):
+                return torch.ops.higher_order.flex_attention_backward(
+                    query,
+                    query,
+                    query,
+                    query,
+                    logsumexp,
+                    query,
+                    None,
+                    fw_subgraph,
+                    joint_subgraph,
+                    (mask_subgraph,),
+                    1.0,
+                    {},
+                    (score_buffer,),
+                    (mask_buffer,),
+                )
+
+            gm = make_fx(flex_backward, tracing_mode="fake")(
+                query,
+                logsumexp,
+                score_buffer,
+                restrided_score_buffer,
+                mask_buffer,
+                restrided_mask_buffer,
+            )
+            flex_backward_node = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is torch.ops.higher_order.flex_attention_backward
+            )
+            placeholders = {
+                node.target: node for node in gm.graph.find_nodes(op="placeholder")
+            }
+            score_buffer_node = placeholders["score_buffer_1"]
+            restrided_score_buffer_node = placeholders["restrided_score_buffer_1"]
+            mask_buffer_node = placeholders["mask_buffer_1"]
+            restrided_mask_buffer_node = placeholders["restrided_mask_buffer_1"]
+            fw_subgraph = get_fake(flex_backward_node.args[7], gm)
+            joint_subgraph = get_fake(flex_backward_node.args[8], gm)
+            mask_subgraph = get_fake(flex_backward_node.args[9][-1], gm)
+            fw_placeholders = list(fw_subgraph.graph.find_nodes(op="placeholder"))
+            joint_placeholders = list(joint_subgraph.graph.find_nodes(op="placeholder"))
+            mask_placeholders = list(mask_subgraph.graph.find_nodes(op="placeholder"))
+
+            updater = FakeTensorUpdater(gm)
+            flex_backward_args = list(flex_backward_node.args)
+            self.assertEqual(flex_backward_args[12], (score_buffer_node,))
+            self.assertEqual(flex_backward_args[13], (mask_buffer_node,))
+            flex_backward_args[12] = (restrided_score_buffer_node,)
+            flex_backward_args[13] = (restrided_mask_buffer_node,)
+            flex_backward_node.args = tuple(flex_backward_args)
+
+            with V.set_fake_mode(mode):
+                updater.incremental_update()
+
+        self.assertIs(
+            fw_placeholders[-1].meta["val"], restrided_score_buffer_node.meta["val"]
+        )
+        self.assertIs(
+            joint_placeholders[-1].meta["val"], restrided_score_buffer_node.meta["val"]
+        )
+        self.assertIs(
+            mask_placeholders[-1].meta["val"], restrided_mask_buffer_node.meta["val"]
+        )
+
+    def test_reorder_nodes(self):
+        def fn(*args: torch.Tensor) -> torch.Tensor:
+            ret = torch.ones_like(args[0])
+            for a in args:
+                ret = a * ret
+            return ret
+
+        a = torch.rand((8,))
+        b = torch.rand((8, 8))
+        c = torch.rand((8, 8, 8))
+        d = torch.rand((8, 8, 8, 8))
+        graph = self._get_graph(fn, a, b, c, d)
+        updater = FakeTensorUpdater(graph)
+
+        reversed_placeholders: list[torch.fx.Node] = list(
+            reversed(graph.graph.find_nodes(op="placeholder"))
+        )
+        mul_nodes: list[torch.fx.Node] = graph.graph.find_nodes(
+            op="call_function", target=aten.mul.Tensor
+        )
+        for p, m in zip(reversed_placeholders, mul_nodes, strict=True):
+            # The argument tensor is always at index zero.
+            m.replace_input_with(m.all_input_nodes[0], p)
+
+        with V.set_fake_mode(self._get_faketensormode(graph)):
+            num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 4)
+        # With reversed multiplication order, all the mul_nodes should output 4-D
+        # tensors.
+        for m in mul_nodes:
+            self.assertEqual(len(m.meta["val"].size()), 4)
+
+    def test_fake_tensor_same_recursion(self):
+        l = [1, 2, 3]
+        l.append(l)
+        m = [4, 5, 6, l]
+        # If recursion is broken, we'll get a recursion error here.
+        self.assertTrue(_is_fake_tensor_same(l, l, {}))
+        self.assertFalse(_is_fake_tensor_same(l, m, {}))
 
 
 if __name__ == "__main__":

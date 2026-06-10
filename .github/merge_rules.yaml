@@ -470,6 +470,8 @@
   patterns:
   - torch/_dynamo/**
   - torch/csrc/dynamo/**
+  - torch/_C/_dynamo/**
+  - test/cpython/**
   - test/dynamo/**
   - test/dynamo_expected_failures/**
   - test/dynamo_skips/**
@@ -477,6 +479,8 @@
   - test/inductor_skips/**
   approved_by:
   - guilhermeleobas
+  - rtimpe
+  - trichmo
   mandatory_checks_name:
   - EasyCLA
   - Lint

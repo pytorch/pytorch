@@ -353,7 +353,6 @@ if torch.backends.mps.is_available():
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
-            "lcm": None,
             "linalg.cond": None,
             "linalg.eigh": None,
             "linalg.eigvalsh": None,
@@ -415,7 +414,6 @@ if torch.backends.mps.is_available():
             ],
             "nn.functional.fractional_max_pool2d": None,
             "nn.functional.fractional_max_pool3d": None,
-            "nn.functional.group_norm": [torch.int16, torch.int32],
             "nn.functional.glu": [
                 torch.int32,
                 torch.uint8,
@@ -578,13 +576,11 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.int16,
             ],
-            "scatter_reduceamax": [torch.int32, torch.int64]
-            if MACOS_VERSION < 15.0
-            else [torch.int64],
-            "scatter_reduceamin": [torch.int32, torch.int64]
-            if MACOS_VERSION < 15.0
-            else [torch.int64],
-            "scatter_reducemean": [torch.bool],
+            # int64 lacks atomic_binary_op in Metal; the old MPSGraph path cast
+            # to int32 (silently lossy). amin/amax for int64 go through the
+            # sign-flip encode + ulong atomic_min/max bracket and work fine.
+            # bool prod/mean are excluded via dtypesIfMPS in the OpInfo itself.
+            "scatter_reduceprod": [torch.int64],
             "segment_reduce": None,
             "_segment.reduce": None,
             "segment.reduce": None,
@@ -606,22 +602,6 @@ if torch.backends.mps.is_available():
             "symeig": None,
             "take": None,
             "to": None,
-            "var_meanunbiased": [
-                torch.uint8,
-                torch.int8,
-                torch.int32,
-                torch.int16,
-                torch.bool,
-            ],
-            "var_mean": [torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool],
-            "std_mean": [torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool],
-            "std_meanunbiased": [
-                torch.uint8,
-                torch.int8,
-                torch.int32,
-                torch.int16,
-                torch.bool,
-            ],
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
@@ -684,16 +664,6 @@ if torch.backends.mps.is_available():
 
         UNDEFINED_XFAILLIST: dict[str, list | None] = {
             # Top 60 operators
-            # topk fails with duplicate indices
-            "topk": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-                torch.float16,
-                torch.bfloat16,
-            ],
             # PCA singular vectors are sign-ambiguous; the new Metal randn in
             # #182386 shifted the sequence so seeded sample inputs land on
             # different sign choices than CPU.
@@ -760,7 +730,7 @@ if torch.backends.mps.is_available():
             # Failure due to precision issue for fp16
             # on both cpu and mps there are test cases that might produce inf result
             # 'nn.functional.pairwise_distance': [torch.float16],
-            # test blow pass on macOS 12 as it falls back to cpu
+            # test below pass on macOS 12 as it falls back to cpu
             # Argsort case using duplicate indices (undefined behaviour):
             #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
             #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
@@ -878,7 +848,7 @@ if torch.backends.mps.is_available():
                     ),
                 )
 
-            # If ops is not supported for complex types, expect it to fail
+            # If op is not supported for complex types, expect it to fail
             if key not in SUPPORTED_COMPLEX_OPS:
                 addDecorator(
                     op,
@@ -901,7 +871,6 @@ if torch.backends.mps.is_available():
             "linalg.householder_product": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
-            "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
@@ -910,7 +879,7 @@ if torch.backends.mps.is_available():
             # Correctness issues
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
             # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
-            # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
+            # On the backward pass for `sort` both are used (values and indices), thus resulting in a mismatch between CPU and MPS.
             # Running `msort` with stable `sort` passes.
             "msort": [torch.float16],
             # Random ops are routed to `_assert_random_op_match` for the

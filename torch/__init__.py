@@ -62,6 +62,7 @@ from torch.torch_version import __version__ as __version__
 
 
 if TYPE_CHECKING:
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
     from torch.types import Device, IntLikeType
 
 
@@ -1423,6 +1424,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
+        * :func:`torch.topk` when called on a CPU or CUDA tensor
         * :func:`torch.gather` when called on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
@@ -1714,6 +1716,12 @@ def _check_with(
     message: _Callable[[], str],
 ):
     if not isinstance(cond, (builtins.bool, SymBool)):
+        if isinstance(cond, torch.Tensor):
+            raise TypeError(
+                "cond must be a bool, but got a Tensor. "
+                "For tensor conditions, use torch._check_tensor_all() "
+                "to assert that all elements are true."
+            )
         raise TypeError(f"cond must be a bool, but got {type(cond)}")
 
     from torch.fx.experimental.symbolic_shapes import expect_true
@@ -2580,6 +2588,7 @@ def compile(
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
+    shapes_spec: _Any = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2594,6 +2603,7 @@ def compile(
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
+    shapes_spec: _Any = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2609,6 +2619,7 @@ def compile(
     disable: builtins.bool = False,
     recompile_limit: builtins.int | None = None,
     isolate_recompiles: builtins.bool = False,
+    shapes_spec: _Any = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -2748,6 +2759,13 @@ def compile(
 
         backend = get_default_backend()
 
+    # Auto-wrap ParamsSpec → ShapesSpec for convenience
+    if shapes_spec is not None:
+        from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+
+        if isinstance(shapes_spec, ParamsSpec):
+            shapes_spec = ShapesSpec(shapes_spec)
+
     # Decorator mode
     if model is None:
 
@@ -2765,6 +2783,7 @@ def compile(
                 disable=disable,
                 recompile_limit=recompile_limit,
                 isolate_recompiles=isolate_recompiles,
+                shapes_spec=shapes_spec,
             )
 
         return fn
@@ -2823,6 +2842,7 @@ def compile(
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
         isolate_recompiles=isolate_recompiles,
+        shapes_spec=shapes_spec,
     )(model)  # type: ignore[return-value]
 
 
@@ -2873,13 +2893,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
-from torch import fx as fx
-
-
-# Register MPS specific decomps
-torch.backends.mps._init()
-
-from torch import compiler as compiler
+from torch import compiler as compiler, fx as fx
 
 
 class _TritonLibrary:
@@ -3001,12 +3015,6 @@ def _constrain_as_size(
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)
 
 
-from torch import _logging
-
-
-_logging._init_logs()
-
-
 def _import_device_backends():
     """
     Leverage the Python plugin mechanism to load out-of-the-tree device extensions.
@@ -3063,11 +3071,18 @@ def _as_tensor_fullprec(t):
         return torch.as_tensor(t)
 
 
-# `_import_device_backends` should be kept at the end to ensure
-# all the other functions in this module that may be accessed by
-# an autoloaded backend are defined
+# `_import_device_backends` should run after the definitions above to ensure
+# all the other functions in this module that may be accessed by an autoloaded
+# backend are defined.
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+from torch import _logging
+
+
+# Keep `TORCH_LOGS` initialization after backend autoload so backends can
+# register their log names before `TORCH_LOGS` is parsed and validated.
+_logging._init_logs()
 
 # Register all registered custom / override ops in torch/_native
 import torch._native
