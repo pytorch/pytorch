@@ -171,8 +171,12 @@ class TestComplexBwdGradients(TestCase):
         self.check_grad(device, dtype, op)
 
 
-instantiate_device_type_tests(TestComplexTensor, globals())
-instantiate_device_type_tests(TestComplexBwdGradients, globals())
+instantiate_device_type_tests(
+    TestComplexTensor, globals(), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestComplexBwdGradients, globals(), allow_xpu=True
+)
 
 
 if dist.is_available():

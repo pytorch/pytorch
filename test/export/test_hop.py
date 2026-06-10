@@ -159,7 +159,9 @@ class TestHOP(TestCase):
         torchdynamo._reset_guarded_backend_cache()
 
 
-instantiate_device_type_tests(TestHOP, globals())
+instantiate_device_type_tests(
+    TestHOP, globals(), allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
