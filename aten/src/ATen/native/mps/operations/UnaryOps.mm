@@ -224,10 +224,22 @@ static void logit_mps_impl(const Tensor& self, std::optional<double> eps, Tensor
     if (eps.has_value()) {
       MPSGraphTensor* lowTensor = [mpsGraph constantWithScalar:eps.value() shape:@[ @1 ] dataType:inputTensor.dataType];
       MPSGraphTensor* highTensor = [mpsGraph subtractionWithPrimaryTensor:oneTensor secondaryTensor:lowTensor name:nil];
-      logitInputTensor = [mpsGraph clampWithTensor:inputTensor
-                                    minValueTensor:lowTensor
-                                    maxValueTensor:highTensor
-                                              name:nil];
+      // Apply lo last so it wins when eps > 1 - eps, matching the
+      // scalar `x < lo ? lo : (x > hi ? hi : x)` priority.
+      MPSGraphTensor* inputGreaterThanHighTensor = [mpsGraph greaterThanWithPrimaryTensor:inputTensor
+                                                                          secondaryTensor:highTensor
+                                                                                     name:nil];
+      MPSGraphTensor* clampedHighTensor = [mpsGraph selectWithPredicateTensor:inputGreaterThanHighTensor
+                                                          truePredicateTensor:highTensor
+                                                         falsePredicateTensor:inputTensor
+                                                                         name:nil];
+      MPSGraphTensor* inputLessThanLowTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
+                                                                   secondaryTensor:lowTensor
+                                                                              name:nil];
+      logitInputTensor = [mpsGraph selectWithPredicateTensor:inputLessThanLowTensor
+                                         truePredicateTensor:lowTensor
+                                        falsePredicateTensor:clampedHighTensor
+                                                        name:nil];
     } else {
       logitInputTensor = inputTensor;
     }
