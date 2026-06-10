@@ -1459,7 +1459,6 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
 
 _LINALG_NUM_PLACEMENTS = {
     # 1 in 1 out
-    aten.cholesky.default: 2,
     aten.cholesky_inverse.default: 2,
     aten.linalg_matrix_exp.default: 2,
     # 2 in 1 out
@@ -1515,7 +1514,6 @@ def _get_ndim(tensor_meta: Any) -> int:
 
 @register_single_dim_strategy(
     [
-        aten.cholesky.default,
         aten.cholesky_inverse.default,
         aten.linalg_matrix_exp.default,
         aten.cholesky_solve.default,
