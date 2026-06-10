@@ -10,6 +10,7 @@ from contextlib import nullcontext
 from typing import Any, cast, TYPE_CHECKING, TypeVar
 
 import sympy
+
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
@@ -941,10 +942,15 @@ def _dynamo_graph_capture_for_export(
         with _compiling_state_context():
             # Normalize ParamsSpec/dict → ShapesSpec up front.
             user_spec = _coerce_to_shapes_spec(dynamic_shapes)
+            flattened_spec: ShapesSpec | None = None
             if user_spec is not None:
                 # _bind_spec_to_args also flattens (args, kwargs) for us.
-                leaf_specs, flat_inputs, in_spec = _bind_spec_to_args(  # noqa: F821 -- defined below
+                leaf_specs, flat_inputs, in_spec = _bind_spec_to_args(
                     mod, args, kwargs, user_spec
+                )
+                flattened_spec = ShapesSpec(
+                    ParamsSpec({"*args": leaf_specs}),
+                    assumptions=user_spec._assumptions or None,
                 )
             else:
                 flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
@@ -984,11 +990,7 @@ def _dynamo_graph_capture_for_export(
             # expressions are the same Python objects.
             shapes_spec_in_use = user_spec is not None
             shapes_spec_ctx = nullcontext()
-            if user_spec is not None:
-                flattened_spec = ShapesSpec(
-                    ParamsSpec({"*args": leaf_specs}),
-                    assumptions=user_spec._assumptions or None,
-                )
+            if flattened_spec is not None:
                 shapes_spec_ctx = torch._dynamo.config.patch(
                     _shapes_spec=flattened_spec
                 )
@@ -1273,7 +1275,7 @@ def _walk_spec(
 
 def _bind_spec_to_args(
     f: Callable[..., Any],
-    args: tuple[Any, ...],
+    args: Any,
     kwargs: dict[str, Any] | None,
     shapes_spec: ShapesSpec,
 ) -> tuple[list[IntermediateSpec | None], list[Any], pytree.TreeSpec]:

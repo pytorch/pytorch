@@ -13,6 +13,7 @@ import logging
 import operator
 import threading
 import typing
+import typing_extensions
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
@@ -29,6 +30,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec, Self, TypeVarTuple, Unpack
 from weakref import WeakKeyDictionary
 
 import torch
@@ -36,7 +38,6 @@ import torch._ops
 import torch.fx as fx
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
-import typing_extensions
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
@@ -63,8 +64,11 @@ from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import GraphModule, Proxy, Tracer
 from torch.fx.experimental.dynamic_spec import (
     _coerce_to_shapes_spec,
+    IntermediateSpec,
     IntVar,
+    ParamsSpec,
     ShapesSpec,
+    TensorSpec,
 )
 from torch.fx.experimental.symbolic_shapes import (
     _finalize_spec_wiring,
@@ -72,6 +76,7 @@ from torch.fx.experimental.symbolic_shapes import (
     _wire_spec_assumptions,
     _wire_spec_slot,
     _wire_tensor_spec_dims,
+    ShapeEnv,
 )
 from torch.fx.graph_module import _assign_attr
 from torch.fx.node import (
@@ -93,7 +98,6 @@ from torch.utils._python_dispatch import (
 from torch.utils._stats import count
 from torch.utils._thunk import Thunk
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary, WeakTensorKeyDictionary
-from typing_extensions import ParamSpec, Self, TypeVarTuple, Unpack
 
 from ._backward_state import BackwardState
 from .sym_node import SymNode
@@ -104,14 +108,9 @@ if TYPE_CHECKING:
     from collections.abc import MutableMapping
 
     import sympy
+
     from torch._guards import Source
     from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
-    from torch.fx.experimental.dynamic_spec import (
-        IntermediateSpec,
-        ParamsSpec,
-        ShapesSpec,
-    )
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
 __all__ = [
@@ -564,6 +563,7 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     (e.g. ``sympy.Mul`` -> ``operator.mul``, ``sympy.Add`` -> ``torch.sym_sum``).
     """
     import sympy
+
     import torch.utils._sympy.interp
 
     handlers = {}
@@ -2883,19 +2883,20 @@ class _MakefxTracer:
         # Spec set-up. Pass an empty ShapesSpec when no user spec was
         # supplied so the binding path is uniform (yields all-None
         # leaf_specs aligned to the flat layout).
-        shape_env = (
-            self.fake_tensor_mode.shape_env if self.fake_tensor_mode else None
-        )
+        # Both fake_tensor_mode and shape_env are guaranteed set for tracing.
+        shape_env: ShapeEnv = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
         user_spec = self._dynamic_spec
         if user_spec is not None:
-            shape_env = cast(ShapeEnv, shape_env)
             # Wire assumptions BEFORE processing any inputs so derived /
             # assumption checks can drain as inputs bind.
             if user_spec._assumptions:
                 _wire_spec_assumptions(shape_env, user_spec)
 
         leaf_specs, flat_args, args_pytree_spec = _bind_spec_to_args(
-            f, args, {}, user_spec or ShapesSpec()
+            f,
+            args,
+            {},
+            user_spec or ShapesSpec(),  # type: ignore[arg-type]
         )
 
         with shape_env.ignore_fresh_unbacked_symbols():
@@ -2922,8 +2923,7 @@ class _MakefxTracer:
         source: Source,
         leaf_spec: IntermediateSpec | None,
     ) -> object:
-        """Fakify a single flat input leaf.
-        """
+        """Fakify a single flat input leaf."""
         if self.fake_tensor_mode is None:
             raise AssertionError("fake_tensor_mode should not be None")
 
@@ -2931,25 +2931,24 @@ class _MakefxTracer:
             if leaf_spec is None:
                 return self.fake_tensor_mode.from_tensor(x, source=source)
             # leaf_spec is guaranteed to be a TensorSpec by _walk_spec.
-            shape_env = self.fake_tensor_mode.shape_env
-            ctx = _symbolic_context_from_shapes_spec(
-                x, source, leaf_spec, None, {}
-            )
+            shape_env: ShapeEnv = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
+            tensor_spec = cast(TensorSpec, leaf_spec)
+            ctx = _symbolic_context_from_shapes_spec(x, source, tensor_spec, None, {})
             fake_x = self.fake_tensor_mode.from_tensor(
                 x,
                 static_shapes=False,
                 source=source,
                 symbolic_context=ctx,
             )
-            _wire_tensor_spec_dims(leaf_spec, fake_x)
+            _wire_tensor_spec_dims(tensor_spec, fake_x)
             return fake_x
 
         # NB: don't match on bools.
         if type(x) is int and (
             self._dynamic_spec is not None or self.tracing_mode == "symbolic"
         ):
-            shape_env = self.fake_tensor_mode.shape_env
-            sym_node = shape_env.create_symintnode(
+            shape_env: ShapeEnv = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
+            sym_node: torch.SymInt = shape_env.create_symintnode(  # type: ignore[assignment]
                 shape_env.create_symbol(x, source, positive=None),
                 hint=x,
                 source=source,

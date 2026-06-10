@@ -721,8 +721,9 @@ _SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG = (
     "runtime assertions; the flag has no effect."
 )
 
+
 def _coerce_to_shapes_spec(
-    x: ShapesSpec | ParamsSpec | dict[str, Any] | None,
+    x: Any,
 ) -> ShapesSpec | None:
     """Normalize a user-supplied dynamic-spec value to ``ShapesSpec | None``.
 

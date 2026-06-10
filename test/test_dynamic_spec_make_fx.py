@@ -5,11 +5,11 @@ import itertools
 import torch
 from torch.fx.experimental.dynamic_spec import (
     IntVar,
-    ParamsSpec,
+    ParamsSpec as PARAMS,
     ShapesSpec,
-    ShapeVar,
+    ShapeVar as VAR,
     STATIC,
-    TensorSpec,
+    TensorSpec as T,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -82,7 +82,7 @@ class TestMakeFxDynamicSpec(TestCase):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": TensorSpec([ShapeVar("batch"), None])},
+            _dynamic_spec={"x": T([VAR("batch"), None])},
         )(torch.randn(8, 3))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -107,7 +107,7 @@ class f(torch.nn.Module):
         gm = make_fx(
             _ModX(),
             tracing_mode="fake",
-            _dynamic_spec={"x": TensorSpec([ShapeVar("batch"), None])},
+            _dynamic_spec={"x": T([VAR("batch"), None])},
         )(torch.randn(8, 3))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -122,7 +122,7 @@ class f(torch.nn.Module):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": TensorSpec([None, None])},
+            _dynamic_spec={"x": T([None, None])},
         )(torch.randn(4, 5))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -142,7 +142,7 @@ class f(torch.nn.Module):
             make_fx(
                 f,
                 tracing_mode="fake",
-                _dynamic_spec={"x": TensorSpec([ShapeVar("batch"), 3])},
+                _dynamic_spec={"x": T([VAR("batch"), 3])},
             )(torch.randn(4, 5))
 
     def test_no_params_spec_short_circuits(self):
@@ -170,8 +170,8 @@ class f(torch.nn.Module):
             _ModXYIndep(),
             tracing_mode="fake",
             _dynamic_spec={
-                "x": TensorSpec([ShapeVar("a"), None]),
-                "y": TensorSpec([ShapeVar("b"), None]),
+                "x": T([VAR("a"), None]),
+                "y": T([VAR("b"), None]),
             },
         )(torch.randn(4, 3), torch.randn(7, 3))
 
@@ -191,11 +191,11 @@ class <lambda>(torch.nn.Module):
         """Passing the SAME ``ShapeVar`` instance for both inputs makes
         them share one symbol in the traced graph (``u0`` for both),
         even with the independent-ops model."""
-        a = ShapeVar("a")
+        a = VAR("a")
         gm = make_fx(
             _ModXYIndep(),
             tracing_mode="fake",
-            _dynamic_spec={"x": TensorSpec([a, None]), "y": TensorSpec([a, None])},
+            _dynamic_spec={"x": T([a, None]), "y": T([a, None])},
         )(torch.randn(5, 3), torch.randn(5, 3))
 
         self.assertExpectedInline(
@@ -212,11 +212,11 @@ class <lambda>(torch.nn.Module):
 
     def test_shared_shape_var_links_dims(self):
         """Original add-model: shared ShapeVar -> shared symbol."""
-        B = ShapeVar("batch")
+        B = VAR("batch")
         gm = make_fx(
             _ModXY(),
             tracing_mode="fake",
-            _dynamic_spec={"x": TensorSpec([B, None]), "y": TensorSpec([B, None])},
+            _dynamic_spec={"x": T([B, None]), "y": T([B, None])},
         )(torch.randn(5, 3), torch.randn(5, 3))
 
         tensor_shapes = []
@@ -235,7 +235,7 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             _ModXN(),
             tracing_mode="fake",
-            _dynamic_spec={"x": TensorSpec([None]), "n": IntVar("n")},
+            _dynamic_spec={"x": T([None]), "n": IntVar("n")},
         )(torch.randn(4), 7)
 
         sym_placeholders = [
@@ -247,7 +247,7 @@ class <lambda>(torch.nn.Module):
 
     def test_dict_shorthand_accepted(self):
         """A bare ``dict`` is accepted as shorthand for
-        ``ShapesSpec(ParamsSpec(dict))``."""
+        ``ShapesSpec(PARAMS(dict))``."""
 
         def f(x):
             return x.sum(0)
@@ -255,7 +255,7 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": TensorSpec([ShapeVar("batch"), None])},
+            _dynamic_spec={"x": T([VAR("batch"), None])},
         )(torch.randn(8, 3))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -276,7 +276,7 @@ class <lambda>(torch.nn.Module):
                 make_fx(
                     f,
                     tracing_mode=bad_mode,
-                    _dynamic_spec={"x": TensorSpec([ShapeVar("batch"), None])},
+                    _dynamic_spec={"x": T([VAR("batch"), None])},
                 )(torch.randn(4, 5))
 
     def test_invalid_spec_type_raises(self):
@@ -305,7 +305,7 @@ class <lambda>(torch.nn.Module):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": TensorSpec([ShapeVar("batch"), None])},
+            _dynamic_spec={"x": T([VAR("batch"), None])},
         )(torch.randn(6, 4))
 
         self.assertExpectedInline(
@@ -323,7 +323,7 @@ class f(torch.nn.Module):
         gm(torch.randn(13, 4))
 
     def test_shape_var_min_bound_constrains_range(self):
-        """A ``ShapeVar(min=...)`` is reflected in the shape env's range."""
+        """A ``VAR(min=...)`` is reflected in the shape env's range."""
 
         def f(x):
             return x + 1
@@ -331,7 +331,7 @@ class f(torch.nn.Module):
         gm = make_fx(
             f,
             tracing_mode="fake",
-            _dynamic_spec={"x": TensorSpec([ShapeVar("batch", min=4, max=128), None])},
+            _dynamic_spec={"x": T([VAR("batch", min=4, max=128), None])},
         )(torch.randn(10, 3))
 
         shape = _first_tensor_placeholder_shape(gm)
@@ -361,13 +361,13 @@ class f(torch.nn.Module):
             make_fx(
                 f,
                 tracing_mode="fake",
-                _dynamic_spec={"x": TensorSpec([ShapeVar("batch"), None])},
+                _dynamic_spec={"x": T([VAR("batch"), None])},
             )(torch.randn(8, 3))
 
     def test_derived_dim_in_traced_graph(self):
         """Derived expressions (``B * 2``) materialize as derived dim
         expressions in the traced graph and emit a runtime assertion."""
-        B = ShapeVar("batch")
+        B = VAR("batch")
 
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -381,8 +381,8 @@ class f(torch.nn.Module):
             M(),
             tracing_mode="fake",
             _dynamic_spec={
-                "x": TensorSpec([B, STATIC]),
-                "y": TensorSpec([B * 2, STATIC]),
+                "x": T([B, STATIC]),
+                "y": T([B * 2, STATIC]),
             },
         )(torch.randn(4, 3), torch.randn(8, 5))
 
@@ -406,8 +406,8 @@ class f(torch.nn.Module):
         """A relational ``assumptions=[A > B]`` is wired into the shape env:
         the assumed-true branch is taken at trace time and the relation
         is materialized as a runtime assertion."""
-        A = ShapeVar("a")
-        B = ShapeVar("b")
+        A = VAR("a")
+        B = VAR("b")
 
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -421,9 +421,7 @@ class f(torch.nn.Module):
             M(),
             tracing_mode="fake",
             _dynamic_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {"x": TensorSpec([A, STATIC]), "y": TensorSpec([B, STATIC])}
-                ),
+                params=PARAMS({"x": T([A, STATIC]), "y": T([B, STATIC])}),
                 assumptions=[A > B],
             ),
         )(torch.randn(5, 2), torch.randn(3, 2))

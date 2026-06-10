@@ -93,9 +93,11 @@ from torch.fx.experimental.sym_node import _DynamicScalar, DynamicInt
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     _nested_int_aware_sort,
+    _symbolic_context_from_shapes_spec,
+    _wire_spec_slot,
+    _wire_tensor_spec_dims,
     DimDynamic,
     RelaxedUnspecConstraint,
-    ShapeEnv,
     StatefulSymbolicContext,
     SubclassSymbolicContext,
     SymbolicContext,
@@ -4338,21 +4340,6 @@ def is_dynamic_value(value: int) -> bool:
             f"is_dynamic_value got a bool ({value}); callers must pass an int"
         )
     return value in dynamic_values
-
-
-# Spec-wiring helpers were moved to torch.fx.experimental.symbolic_shapes
-# (these are fundamentally ShapeEnv operations, used by both make_fx and
-# the dynamo strict export tracer). Keep the names re-exported here for
-# back-compat with any external importer.
-from torch.fx.experimental.symbolic_shapes import (  # noqa: F401, E402
-    _drain_shape_spec_pending_assumptions,
-    _emit_pending_bool,
-    _finalize_spec_wiring,
-    _symbolic_context_from_shapes_spec,
-    _wire_spec_assumptions,
-    _wire_spec_slot,
-    _wire_tensor_spec_dims,
-)
 
 
 # Performs automatic dynamic dim determination.

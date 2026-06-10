@@ -110,6 +110,7 @@ if TYPE_CHECKING:
     from torch import Tensor
     from torch._dynamo.source import TensorPropertySource
     from torch._subclasses.fake_tensor import FakeTensor
+    from torch.fx.experimental.dynamic_spec import IntVar, ShapesSpec, TensorSpec
     from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
 
@@ -8975,11 +8976,11 @@ def _get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
 
 def _symbolic_context_from_shapes_spec(
     e: Any,
-    source: "Source",
-    tensor_spec: "TensorSpec | None",
-    view_base_context: "SymbolicContext | None",
+    source: Source,
+    tensor_spec: TensorSpec | None,
+    view_base_context: SymbolicContext | None,
     shape_env_to_source_to_symbol_cache: dict[Any, Any],
-) -> "StatefulSymbolicContext":
+) -> StatefulSymbolicContext:
     if tensor_spec is not None and len(tensor_spec) != e.dim():
         raise ValueError(
             f"TensorSpec has {len(tensor_spec)} dims but tensor {source.name} "
@@ -9020,9 +9021,7 @@ def _symbolic_context_from_shapes_spec(
     )
 
 
-def _wire_tensor_spec_dims(
-    tensor_spec: "TensorSpec", fake_tensor: torch.Tensor
-) -> None:
+def _wire_tensor_spec_dims(tensor_spec: TensorSpec, fake_tensor: torch.Tensor) -> None:
     """Wire each ``ShapeVar``/``IntVar`` dim of ``tensor_spec`` to the
     corresponding fake-tensor symbolic size via ``_wire_spec_slot``.
 
@@ -9041,7 +9040,7 @@ def _wire_tensor_spec_dims(
 
 
 def _wire_spec_slot(
-    spec: "IntVar | SymInt",
+    spec: IntVar | SymInt,
     size_sym: torch.SymInt,
 ) -> None:
     """Wire an IntVar or SymInt spec leaf into the real shape env.
@@ -9137,7 +9136,7 @@ def _drain_shape_spec_pending_assumptions(shape_env: ShapeEnv) -> None:
     shape_env._shape_spec_pending_assumptions[:] = keep
 
 
-def _wire_spec_assumptions(shape_env: ShapeEnv, shapes_spec: "ShapesSpec") -> None:
+def _wire_spec_assumptions(shape_env: ShapeEnv, shapes_spec: ShapesSpec) -> None:
     """Append each ShapesSpec.assumptions SymBool to the pending list.
     Called BEFORE any input is processed.
     """
