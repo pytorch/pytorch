@@ -3118,6 +3118,7 @@ class SIMDScheduling(BaseScheduling):
         self.codegen_comment(base_scheduler_nodes, kernel.kernel_name)
         if config.cpp.enable_kernel_profile:
             V.graph.wrapper_code.write_kernel_context_guard_begin()
+        if config.cpp.enable_kernel_profile and config.cpp.enable_kernel_context_guard:
             V.graph.wrapper_code.write_kernel_context_guard(
                 kernel.kernel_name,
                 base_scheduler_nodes,
