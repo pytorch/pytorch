@@ -410,6 +410,16 @@ threading model in mind and should understand the issues described above.
 The functional API {func}`torch.autograd.grad` may be used to calculate the
 gradients instead of ``backward()`` to avoid non-determinism.
 
+The general rule is the same as for other Python objects shared across threads:
+concurrent reads are safe, while in-place writes to shared objects require
+synchronization. Forward computations can run in multiple threads as long as
+in-place modifications to shared tensors are protected. ``backward()`` may
+modify shared ``.grad`` fields when graphs share leaf tensors, so callers should
+synchronize those calls or prefer {func}`torch.autograd.grad`, which does not
+accumulate into ``.grad`` and is safe to call concurrently. User-defined
+``autograd.Function`` implementations and hooks still need to be thread safe if
+they mutate shared state.
+
 ### Graph retaining
 
 If part of the autograd graph is shared between threads, i.e. run first
