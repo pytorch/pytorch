@@ -6973,6 +6973,17 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
+    def setUp(self):
+        super().setUp()
+        # Ensure a clean state for memory pool tests. Some tests in this class or
+        # previous classes might have changed allocator settings.
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:False,graph_capture_record_stream_reuse:False"
+        )
+        gc.collect()
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+
     def _setup_mempool_limited_memory_test(self, additional_allowed_memory_in_mb):
         device = torch.device("cuda:0")
 
