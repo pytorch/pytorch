@@ -117,6 +117,22 @@ class DummyAttrProcessGroup(dist.ProcessGroup):
         return self._group_desc
 
 
+class StoreProcessGroup(dist.ProcessGroup):
+    """
+    A ProcessGroup constructed with the 3-arg (store, rank, size) constructor.
+    Used to verify the store is accessible and that a Python subclass built
+    this way is routed through the PyProcessGroup trampoline.
+    """
+
+    def __init__(self, store, rank, world):
+        super().__init__(store, rank, world)
+        self._rank = rank
+        self._world = world
+
+    def getBackendName(self):
+        return "store-pg"
+
+
 # We cannot use parametrize as some tests are defined on the base class and use _get_process_group
 class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
     def setUp(self):
@@ -208,6 +224,24 @@ class TestPyProcessGroup(TestCase):
 
         pg._set_group_desc("desc")
         self.assertEqual(pg.group_desc, "py:desc")
+
+    def test_store_constructor(self):
+        store = dist.HashStore()
+        store.set("test_key", "test_value")
+
+        pg = StoreProcessGroup(store, 0, 1)
+
+        # The store passed to the 3-arg constructor is accessible via the PG
+        # and is the same store object we passed in.
+        group_store = pg.get_group_store()
+        self.assertIs(group_store, store)
+        self.assertEqual(group_store.get("test_key"), b"test_value")
+
+        # A Python subclass built via the 3-arg constructor must be routed
+        # through the PyProcessGroup trampoline so the getBackendName override
+        # dispatches back into Python; a raw C++ ProcessGroup would return the
+        # base backend name ("undefined") instead.
+        self.assertEqual(pg.name(), "store-pg")
 
     def test_abort_shutdown(self) -> None:
         # verify this are noops
