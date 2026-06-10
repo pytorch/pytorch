@@ -20,6 +20,7 @@ import torch
 import torch.distributed as dist
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining._utils import (
+    _derive_grad_metas,
     _DTensorMeta,
     _MeshCache,
     _StageMeta,
@@ -38,6 +39,7 @@ from torch.distributed.pipelining.microbatch import (
     merge_chunks,
     TensorChunkSpec,
 )
+from torch.distributed.pipelining.stage import PipelineStage
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -337,6 +339,58 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
                     expected,
                     f"Case {i} failed",
                 )
+
+    @_requires_multi_gpu
+    def test_NoneGrad_dtensor_grad_metadata_not_derived(self):
+        self.init_pg()
+        mesh = self._make_mesh()
+
+        plain_meta = self._make_tensor_meta()
+        dtensor_meta = _DTensorMeta.from_dtensor(
+            self._make_dtensor(mesh, [Replicate()], requires_grad=True)
+        )
+
+        plain_grad_meta, dtensor_grad_meta = _derive_grad_metas(
+            (plain_meta, dtensor_meta)
+        )
+        self.assertIsNotNone(plain_grad_meta)
+        self.assertIsNone(dtensor_grad_meta)
+
+    @_requires_multi_gpu
+    def test_NoneGrad_dtensor_runtime_send_contract(self):
+        self.init_pg()
+        mesh = self._make_mesh()
+        dtensor_grad = self._make_dtensor(
+            mesh,
+            [Replicate()],
+            shape=(4, 8),
+            requires_grad=False,
+        )
+        dtensor_meta = _DTensorMeta.from_dtensor(dtensor_grad)
+
+        stage = PipelineStage(
+            torch.nn.Identity(),
+            1,
+            self.world_size,
+            self.device,
+        )
+        stage.has_backward = True
+        stage.chunks = 1
+        stage.grad_send_info = [0]
+
+        stage._stage_meta = _StageMeta(input_grads=(None,))
+        stage.bwd_cache[0] = (dtensor_grad,)
+        with self.assertRaisesRegex(
+            PipeliningMetadataError,
+            "DTensor grad metadata cannot be derived",
+        ):
+            stage.get_bwd_send_ops(0)
+
+        stage._stage_meta = _StageMeta(input_grads=(dtensor_meta,))
+        stage.bwd_cache[0] = (None,)
+        ops = stage.get_bwd_send_ops(0)
+        self.assertEqual(len(ops), 1)
+        self.assertEqual(ops[0].tensor, torch.zeros_like(dtensor_grad.to_local()))
 
     # -----------------------------------------------------------------
     # Category 3: Validation Functions
@@ -655,6 +709,38 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
                 (chunk_spec,),
             )
         self.assertIn("mix", str(ctx.exception))
+
+    @_requires_multi_gpu
+    def test_split_target_preserves_dtensor_placements(self):
+        """Regression test: schedules' target-split path must split DTensor
+        targets via _split_tensor (not torch.tensor_split) so that Shard
+        placements survive (no implicit all-gather to Replicate) and so that
+        uneven splits agree across ranks. If the target-split path is reverted
+        to torch.tensor_split, Shard(0) placements degrade to Replicate() and
+        this test fails."""
+        from torch.distributed.pipelining.schedules import _TARGET_CHUNK_SPEC
+
+        self.init_pg()
+        mesh = self._make_mesh()
+
+        # Even-split and uneven-split cases; Shard(0) and Replicate() placements.
+        for n_microbatches, batch in [(2, 8), (3, 7)]:
+            for placements in ([Shard(0)], [Replicate()]):
+                dt = self._make_dtensor(mesh, placements, shape=(batch,))
+                chunks = list(_split_tensor(dt, _TARGET_CHUNK_SPEC, n_microbatches))
+
+                self.assertEqual(len(chunks), n_microbatches)
+                total = 0
+                for i, chunk in enumerate(chunks):
+                    self.assertIsInstance(chunk, DTensor, f"chunk {i} not DTensor")
+                    self.assertEqual(
+                        chunk.placements,
+                        tuple(placements),
+                        f"chunk {i} placements changed from {placements} "
+                        f"to {chunk.placements}",
+                    )
+                    total += chunk.shape[0]
+                self.assertEqual(total, batch)
 
 
 # =============================================================================

@@ -17,6 +17,62 @@ __all__ = [
 _privateuse1_backend_name = "privateuseone"
 
 
+def _rename_profiler_activity(backend_name: str) -> None:
+    """Mirror the privateuse1 rename in ProfilerActivity so users can write e.g.
+    ProfilerActivity.<backend_name> instead of ProfilerActivity.PrivateUse1."""
+    from torch._C._profiler import ProfilerActivity
+
+    alias = backend_name.upper()
+    setattr(ProfilerActivity, alias, ProfilerActivity.PrivateUse1)
+
+    pu1 = ProfilerActivity.PrivateUse1
+    original_repr = ProfilerActivity.__repr__
+    original_str = ProfilerActivity.__str__
+
+    def custom_repr(self):
+        if self == pu1:
+            return f"<ProfilerActivity.{alias}: {pu1.value}>"
+        return original_repr(self)
+
+    def custom_str(self):
+        if self == pu1:
+            return f"ProfilerActivity.{alias}"
+        return original_str(self)
+
+    ProfilerActivity.__repr__ = custom_repr
+    ProfilerActivity.__str__ = custom_str
+    ProfilerActivity.name = property(  # type: ignore[assignment]
+        lambda self: alias if self == pu1 else original_str(self).split(".")[-1]
+    )
+
+
+def _rename_device_type(backend_name: str) -> None:
+    from torch._C._autograd import DeviceType
+
+    alias = backend_name.upper()
+    setattr(DeviceType, alias, DeviceType.PrivateUse1)
+
+    pu1 = DeviceType.PrivateUse1
+    original_repr = DeviceType.__repr__
+    original_str = DeviceType.__str__
+
+    def custom_repr(self):
+        if self == pu1:
+            return f"<DeviceType.{alias}: {pu1.value}>"
+        return original_repr(self)
+
+    def custom_str(self):
+        if self == pu1:
+            return f"DeviceType.{alias}"
+        return original_str(self)
+
+    DeviceType.__repr__ = custom_repr
+    DeviceType.__str__ = custom_str
+    DeviceType.name = property(  # type: ignore[assignment]
+        lambda self: alias if self == pu1 else original_str(self).split(".")[-1]
+    )
+
+
 def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
     Rename the privateuse1 backend device to make it more convenient to use as a device name within PyTorch APIs.
@@ -79,6 +135,8 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     _rename_privateuse1_backend(backend_name)
     global _privateuse1_backend_name
     _privateuse1_backend_name = backend_name
+    _rename_profiler_activity(backend_name)
+    _rename_device_type(backend_name)
 
 
 def _check_register_once(module, attr) -> None:

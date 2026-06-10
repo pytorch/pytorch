@@ -57,7 +57,7 @@ Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_hardswish_nc_q8(
     hardswish_op,
     qx.size(0), // batch size
-    (uint8_t*)qx.data_ptr<c10::quint8>(), // input data
+    reinterpret_cast<const uint8_t*>(qx.const_data_ptr<c10::quint8>()), // input data
     num_elems, // input stride
     (uint8_t*)qy.data_ptr<c10::quint8>(), // output data
     num_elems); // output stride

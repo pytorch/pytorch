@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import itertools
 import time
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, cast, Literal, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 
@@ -422,7 +423,7 @@ AOT_COUNTER = itertools.count()
 
 # Note [Side-Effectful Tokens in AOTAutograd]
 #
-# We allow some some side-effectful operators in
+# We allow some side-effectful operators in
 # the post-AOTAutograd (functional) graph, such as prints and torchbind operations.
 # To ensure that these side-effects are compatible to future graph passes that
 # assume that the graph is functional, we will thread "effect tokens" to show
@@ -506,20 +507,23 @@ def create_aot_state(
     # TODO: Chillee argues that dynamo itself should pass in fake tensors to
     # the list of arguments when compiling; at the moment we do not do this
 
-    if aot_config.decompositions is None:
-        aot_config.decompositions = {}
-
-    aot_config.decompositions = {
+    decompositions = aot_config.decompositions or {}
+    decompositions = {
         **aot_autograd_decompositions,
-        **aot_config.decompositions,
+        **decompositions,
     }
 
     if config.functionalize_rng_ops:
         # Update the decompositions with functionalized random decompositions
-        aot_config.decompositions = {  # type: ignore[assignment]
+        decompositions = {
             **rng_decompositions,
-            **aot_config.decompositions,
+            **decompositions,
         }
+
+    aot_config = dataclasses.replace(
+        aot_config,
+        decompositions=cast("dict[OpOverload, Callable[..., Any]]", decompositions),
+    )
 
     # Check flat_args to see if they're already fake.  If so, use that fake
     # mode instead.
@@ -1201,7 +1205,7 @@ def aot_module_simplified(
             remote = should_use_remote_autograd_cache()
             if local or remote:
                 set_feature_use("aot_autograd_remote_cache", remote)
-                compiled_fn = AOTAutogradCache.try_load(
+                compiled_fn, aot_config = AOTAutogradCache.try_load(
                     mod,
                     fake_flat_args,
                     aot_config,
@@ -1474,10 +1478,13 @@ def aot_compile_joint_with_descriptors(
 
     cache_ctx = nullcontext()
     if serializable:
-        jd._aot_state.aot_config.cache_info = AOTAutogradCacheInfo(
-            jd.cache_hash(),
-            time.time_ns(),
-            forward_symints=[],
+        jd._aot_state.aot_config = dataclasses.replace(
+            jd._aot_state.aot_config,
+            cache_info=AOTAutogradCacheInfo(
+                jd.cache_hash(),
+                time.time_ns(),
+                forward_symints=[],
+            ),
         )
         cache_ctx = torch._functorch.config.patch(
             {

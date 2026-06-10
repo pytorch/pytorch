@@ -5,6 +5,7 @@ import os
 import random
 import re
 import unittest
+import unittest.mock
 import weakref
 from contextlib import nullcontext
 from numbers import Number
@@ -12,12 +13,14 @@ from numbers import Number
 import torch
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
+    dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCUDA,
+    onlyOn,
     OpDTypes,
     ops,
 )
@@ -36,17 +39,24 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     serialTest,
+    skipIfNoNvmath,
     skipIfTorchDynamo,
+    TEST_MULTIACCELERATOR,
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 class RegularFuncWrapper:
@@ -96,11 +106,18 @@ class ForeachFuncWrapper:
                 # synchronize within the profiler context to make sure events happen before exiting
                 torch.cuda.synchronize()
             keys = tuple([e.key for e in p.key_averages()])
-            mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
+            mta_kernel_called = any("multi_tensor_apply_kernel" in k for k in keys)
+            # Explicitly track MTA launch on ROCm via RECORD_FUNCTION in
+            # MultiTensorApply.cuh to avoid dependence on ROCm kernel
+            # symbolization.
+            mta_launch_marker_called = TEST_WITH_ROCM and any(
+                "_foreach_mta_launch" in k for k in keys
+            )
+            mta_called = mta_kernel_called or mta_launch_marker_called
 
             if mta_called != (expect_fastpath and (not zero_size)):
                 raise AssertionError(
-                    f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
+                    f"{mta_called=}, {mta_kernel_called=}, {mta_launch_marker_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
                 )
         else:
             actual = self.func(*inputs, **kwargs)
@@ -169,7 +186,7 @@ class TestForeach(TestCase):
     #   - https://github.com/pytorch/pytorch/pull/94655
     #   - https://github.com/pytorch/pytorch/issues/100701
     #   - https://github.com/pytorch/pytorch/pull/100811
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(
         foreach_unary_op_db
         + foreach_binary_op_db
@@ -544,7 +561,8 @@ class TestForeach(TestCase):
                     ):
                         ref(ref_inputs, **kwargs)
                 else:
-                    self.assertEqual(re.escape(str(e)), re.escape(custom_values_err))
+                    self.assertRegex(str(e), re.escape(custom_values_err))
+
             else:
                 expected = ref(ref_inputs, **kwargs)
                 self.assertEqual(expected, actual)
@@ -565,7 +583,7 @@ class TestForeach(TestCase):
             # Regression test for https://github.com/pytorch/pytorch/issues/113156
             torch._foreach_mul_(tensors, 1)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.float32)
     def test_foreach_check_stride_ignore_dims_of_one(self, device, dtype):
         # default tensor stride is (9, 9, 3, 1).
@@ -689,9 +707,9 @@ class TestForeach(TestCase):
             foreach_op_(tensors1, tensors2)
 
         # different devices
-        if self.device_type == "cuda" and torch.cuda.device_count() > 1:
-            tensor1 = torch.zeros(10, 10, device="cuda:0", dtype=dtype)
-            tensor2 = torch.ones(10, 10, device="cuda:1", dtype=dtype)
+        if self.device_type != "cpu" and torch.accelerator.device_count() > 1:
+            tensor1 = torch.zeros(10, 10, device=f"{device_type}:0", dtype=dtype)
+            tensor2 = torch.ones(10, 10, device=f"{device_type}:1", dtype=dtype)
             with self.assertRaisesRegex(
                 RuntimeError, "Expected all tensors to be on the same device"
             ):
@@ -708,7 +726,7 @@ class TestForeach(TestCase):
                 ):
                     foreach_op_([tensor1], [tensor2])
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
+    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA/XPU not found")
     @ops(
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
@@ -860,7 +878,7 @@ class TestForeach(TestCase):
     # note: Below three tests (postfixed with `_tensors_on_different_devices`)
     # checks whether foreach works with lists of tensors on different devices
     # but tensors of the same index are on the same device, e.g., ['cuda', 'cpu'].
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(foreach_unary_op_db)
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
         method, ref, inplace_method, ref_inplace = self._get_funcs(op)
@@ -899,7 +917,7 @@ class TestForeach(TestCase):
             else:
                 self.assertEqual(expected, tensors)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(filter(lambda op: op.supports_out, foreach_binary_op_db))
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         _cuda_tensors = next(
@@ -944,7 +962,7 @@ class TestForeach(TestCase):
         else:
             self.assertEqual(actual, tensors1)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(foreach_pointwise_op_db, allowed_dtypes=floating_types())
     def test_pointwise_op_tensors_on_different_devices(self, device, dtype, op):
         # tensors1: ['cuda', 'cpu]
@@ -988,7 +1006,7 @@ class TestForeach(TestCase):
 
     # note: BFloat16 has the same number of exponent bits as FP32
     # so if squared L2 norm overflows in BF16, then it also overflows in FP32.
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(
         [o for o in foreach_reduce_op_db if "norm" in o.name],
         allowed_dtypes=(torch.half, torch.bfloat16),
@@ -1051,7 +1069,7 @@ class TestForeach(TestCase):
         self.assertEqual(result[0], expected_x_max)
         self.assertEqual(result[1], expected_y_max)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
     @parametrize("use_cuda_graph", (False, True))
     @parametrize("w_empty", (False, True))
@@ -1093,6 +1111,8 @@ class TestForeach(TestCase):
                     zero_size=False,
                     **kwargs,
                 )
+            elif "cuda" not in device:
+                self.skipTest("only CUDA support CUDAGraph")
             else:
                 # When using CUDA graphs and the tensor metadata doesn't fit in
                 # the static kernel argument space, multi_tensor_apply creates
@@ -1107,7 +1127,7 @@ class TestForeach(TestCase):
 
             self.assertEqual(expect, actual, equal_nan=True)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(foreach_reduce_op_db)
     @parametrize("w_empty", (False, True))
     def test_foreach_reduce_large_input(self, device, dtype, op, w_empty):
@@ -1189,7 +1209,7 @@ class TestForeach(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_re):
             torch._foreach_max([empty_tensor, non_empty_tensor])
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(
         foreach_unary_op_db
         + foreach_binary_op_db
@@ -1225,7 +1245,7 @@ class TestForeach(TestCase):
         self.assertIsNotNone(tensors[0].grad_fn)
         self.assertIsNone(tensors[1].grad_fn)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(
         filter(
             lambda op: op.supports_out,
@@ -1317,15 +1337,15 @@ class TestForeach(TestCase):
                     sample.args = new_args
             _test(func, sample)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "multi-GPU not supported")
     def test_tensors_grouping(self):
         num_tensors_per_list = 10
-        num_devices = torch.cuda.device_count()
+        num_devices = torch.accelerator.device_count()
         dtypes = (torch.float16, torch.float32, torch.float64)
         list1 = [
             torch.tensor(
                 i,
-                device=torch.device("cuda", random.randint(0, num_devices - 1)),
+                device=torch.device(device_type, random.randint(0, num_devices - 1)),
                 dtype=dtypes[random.randint(0, 2)],
             )
             for i in range(num_tensors_per_list)
@@ -1350,9 +1370,11 @@ class TestForeach(TestCase):
                 self.assertEqual(l3[i], list3[index])
         self.assertEqual(num_tensors_seen, 2 * num_tensors_per_list)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_0dim_tensor_overload_cpu_ok(self):
-        tensors = [torch.ones((), device="cuda", dtype=torch.float32) for _ in range(2)]
+        tensors = [
+            torch.ones((), device=device_type, dtype=torch.float32) for _ in range(2)
+        ]
         scalar_cpu_tensor = torch.tensor(4.0, device="cpu")
 
         # For mul and div, the scalar is allowed to be on CPU too
@@ -1361,7 +1383,7 @@ class TestForeach(TestCase):
         actual = torch._foreach_div(tensors, scalar_cpu_tensor)
         self.assertEqual(actual, [t.div(scalar_cpu_tensor) for t in tensors])
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_pointwise_op_with_0d_tensor1(self, device, dtype):
         # Test that foreach_addcmul/addcdiv uses fast path when tensor1 is a list of 0D tensors
@@ -1442,19 +1464,20 @@ class TestForeach(TestCase):
                 )
                 self.assertEqual(inputs_copy, expected_addcdiv)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_div_reciprocal(self):
         expect_m, expect_e = torch.frexp(
-            torch.div(torch.tensor(0.1, device="cuda"), 10.0)
+            torch.div(torch.tensor(0.1, device=device_type), 10.0)
         )
         actual_m, actual_e = torch.frexp(
-            torch._foreach_div([torch.tensor(0.1, device="cuda")], [10.0])[0]
+            torch._foreach_div([torch.tensor(0.1, device=device_type)], [10.0])[0]
         )
         self.assertEqual(expect_m, actual_m)
         self.assertEqual(expect_e, actual_e)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(torch.half, torch.bfloat16)
     def test_addcmul_alpha_one_fma_parity(self, device, dtype):
         # Test that addcmul with alpha=1 produces bitwise identical results
         # to add with alpha=scalar_val (when tensor1 is a 0D tensor with that value).
@@ -1538,28 +1561,29 @@ class TestForeach(TestCase):
             rtol=0,
         )
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_0dim_tensor_overload_exception(self):
         # check exceptions of fast path
         tensors = [
-            make_tensor((2, 2), dtype=torch.float, device="cuda") for _ in range(2)
+            make_tensor((2, 2), dtype=torch.float, device=device_type) for _ in range(2)
         ]
         with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be on"):
             torch._foreach_add(tensors, torch.tensor(1.0, device="cpu"), alpha=1.0)
 
         tensors = [
-            make_tensor((2, 2), dtype=torch.float, device=d) for d in ("cpu", "cuda")
+            make_tensor((2, 2), dtype=torch.float, device=d)
+            for d in ("cpu", device_type)
         ]
         with self.assertRaisesRegex(
             RuntimeError, "scalar tensor expected to be 0 dim but"
         ):
-            torch._foreach_mul(tensors, torch.tensor([1.0, 1.0], device="cuda"))
+            torch._foreach_mul(tensors, torch.tensor([1.0, 1.0], device=device_type))
         with self.assertRaisesRegex(
             RuntimeError, "scalar tensor expected to be 0 dim but"
         ):
-            torch._foreach_add(tensors, torch.tensor([1.0, 1.0], device="cuda"))
+            torch._foreach_add(tensors, torch.tensor([1.0, 1.0], device=device_type))
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_multi_device_inputs(self, device, dtype, op):
         foreach_copy_ = op.inplace_variant
@@ -1575,14 +1599,14 @@ class TestForeach(TestCase):
                     copy_(t, s, non_blocking)
                 self.assertEqual(sample.input, ref_input)
                 if torch.cuda.device_count() > 1:
-                    device = torch.device("cuda", 1)
+                    device = torch.device(device_type, 1)
                     rhs_tensors = [t.to(device) for t in sample.args[0]]
                     foreach_copy_(sample.input, rhs_tensors, non_blocking)
                     for t, s in zip(ref_input, rhs_tensors):
                         copy_(t, s, non_blocking)
                     self.assertEqual(ref_input, sample.input)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
         # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
@@ -1606,7 +1630,7 @@ class TestForeach(TestCase):
                 for t, ref_t in zip(out, ref_out):
                     self.assertTrue(torch.equal(t, ref_t))
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_mixed_dtypes_within_tensor(self, device, dtype, op):
         foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
@@ -1648,17 +1672,18 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @serialTest()
-    @largeTensorTest("40GB", device="cuda")
+    # OOM issue on xpu, see https://github.com/intel/torch-xpu-ops/issues/2444
+    @largeTensorTest("40GB", device=device_type)
     def test_foreach_copy_with_multi_dtypes_large_input(self):
         # see https://github.com/pytorch/pytorch/issues/156261
-        self_tensor = torch.empty(2**31 + 1, device="cuda", dtype=torch.float32)
-        src_tensor = torch.ones(2**31 + 1, device="cuda", dtype=torch.bfloat16)
+        self_tensor = torch.empty(2**31 + 1, device=device_type, dtype=torch.float32)
+        src_tensor = torch.ones(2**31 + 1, device=device_type, dtype=torch.bfloat16)
 
         torch._foreach_copy_([self_tensor], [src_tensor])
         ref_out = torch.empty_like(self_tensor).copy_(src_tensor)
         self.assertEqual(self_tensor, ref_out)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_different_device_inputs(self, device, dtype, op):
         if dtype in (torch.complex128, torch.complex64):
@@ -1692,7 +1717,7 @@ class TestForeach(TestCase):
                 self.assertEqual(output2, ref_input_cpu)
 
     # Test reverse-mode & forward-mode AD if supported.
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(
         foreach_unary_op_db
         + foreach_binary_op_db
@@ -1903,7 +1928,239 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
     return True, ""
 
 
-instantiate_device_type_tests(TestForeach, globals())
+instantiate_device_type_tests(TestForeach, globals(), allow_xpu=True)
+
+
+_FOREACH_MM_SHAPES = [
+    # (label, [(M, N, K)] * G)
+    ("single_group", [(64, 64, 64)]),
+    ("uniform_1024_G16", [(1024, 1024, 1024)] * 16),
+    ("uniform_2048_G8", [(2048, 2048, 2048)] * 8),
+    ("uniform_4096_G4", [(4096, 4096, 4096)] * 4),
+    ("mixed_small", [(128, 64, 256), (256, 128, 512), (64, 32, 128)]),
+    ("mixed_muon", [(1024, 1024, 1024), (1024, 1024, 2752), (1024, 2752, 1024)]),
+    ("nonsquare", [(32, 64, 128), (64, 128, 32)]),
+    # uniform K,N + variable M: exercises the _grouped_mm offs path (MoE pattern)
+    ("uniform_kn_var_m", [(128, 64, 64), (256, 64, 64), (64, 64, 64)]),
+]
+
+
+class TestForeachMM(TestCase):
+    def _check(self, shapes, dtype, device):
+        A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
+        B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
+        ref = [torch.mm(a, b) for a, b in zip(A, B)]
+        out = torch._foreach_mm(A, B)
+        self.assertEqual(len(out), len(ref))
+        # Grouped GEMM backends may use different accumulation order than
+        # torch.mm, so fp32 needs relaxed tolerances.
+        kwargs = {"atol": 2e-4, "rtol": 2e-4} if dtype == torch.float32 else {}
+        for i, (r, o) in enumerate(zip(ref, out)):
+            self.assertEqual(o, r, msg=f"mismatch at group {i}", **kwargs)
+
+    @parametrize(
+        "label,shapes",
+        _FOREACH_MM_SHAPES,
+        name_fn=lambda label, shapes: label,
+    )
+    def test_foreach_mm_cpu(self, label, shapes):
+        self._check(shapes, torch.float32, "cpu")
+
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
+    @parametrize(
+        "label,shapes",
+        _FOREACH_MM_SHAPES,
+        name_fn=lambda label, shapes: label,
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float32])
+    def test_foreach_mm_cuda(self, label, shapes, dtype):
+        self._check(shapes, dtype, "cuda")
+
+    def test_foreach_mm_gradcheck(self):
+        G = 4
+        shapes = [(32, 32, 32)] * G
+        A = [
+            torch.randn(M, K, dtype=torch.float64, requires_grad=True)
+            for M, _, K in shapes
+        ]
+        B = [
+            torch.randn(K, N, dtype=torch.float64, requires_grad=True)
+            for _, N, K in shapes
+        ]
+
+        def fn(*tensors):
+            return torch._foreach_mm(list(tensors[:G]), list(tensors[G:]))
+
+        gradcheck(fn, (*A, *B))
+
+    @parametrize(
+        "label,a_dtype,b_dtype,K,expected",
+        [
+            ("mixed_bf16_fp32", torch.bfloat16, torch.float32, 16, False),
+            ("mixed_fp32_bf16", torch.float32, torch.bfloat16, 16, False),
+            ("fp32", torch.float32, torch.float32, 16, False),
+            # bf16 eligible iff N,K are 16-byte aligned (K a multiple of 8)
+            ("bf16_aligned", torch.bfloat16, torch.bfloat16, 16, True),
+            ("bf16_unaligned", torch.bfloat16, torch.bfloat16, 4, False),
+        ],
+        name_fn=lambda label, *_: label,
+    )
+    def test_foreach_mm_can_use_nvmath_cublaslt_grouped_mm(
+        self, label, a_dtype, b_dtype, K, expected
+    ):
+        from torch._native.ops.foreach_mm.impl import (
+            _can_use_nvmath_cublaslt_grouped_mm,
+        )
+
+        A = [torch.randn(16, K, dtype=a_dtype) for _ in range(2)]
+        B = [torch.randn(K, K, dtype=b_dtype) for _ in range(2)]
+        self.assertEqual(_can_use_nvmath_cublaslt_grouped_mm(A, B), expected)
+
+    # One case per _foreach_mm_route branch; reads only metadata, does not require GPU.
+    @parametrize(
+        "label,dtype,shapes,available,expected",
+        [
+            # bf16 aligned + nvmath available -> nvmath_cublaslt_grouped_mm
+            (
+                "nvmath_cublaslt",
+                torch.bfloat16,
+                [(16, 16, 16)] * 2,
+                True,
+                "nvmath_cublaslt_grouped_mm",
+            ),
+            # fp32 uniform aligned -> cutlass_grouped_mm (fp32 is never nvmath-eligible)
+            (
+                "cutlass_fp32",
+                torch.float32,
+                [(16, 16, 16)] * 2,
+                False,
+                "cutlass_grouped_mm",
+            ),
+            # bf16 uniform aligned, nvmath unavailable -> cutlass_grouped_mm
+            (
+                "cutlass_bf16",
+                torch.bfloat16,
+                [(16, 16, 16)] * 2,
+                False,
+                "cutlass_grouped_mm",
+            ),
+            # non-uniform K -> mm_loop
+            (
+                "mm_loop_nonuniform",
+                torch.float32,
+                [(16, 16, 16), (16, 16, 8)],
+                False,
+                "mm_loop",
+            ),
+            # uniform but >= 1024 groups -> mm_loop (group-count guard)
+            (
+                "mm_loop_group_limit",
+                torch.float32,
+                [(8, 8, 8)] * 1024,
+                False,
+                "mm_loop",
+            ),
+        ],
+        name_fn=lambda label, *_: label,
+    )
+    def test_foreach_mm_route(self, label, dtype, shapes, available, expected):
+        from torch._native.ops.foreach_mm import impl
+
+        A = [torch.randn(M, K, dtype=dtype) for (M, N, K) in shapes]
+        B = [torch.randn(K, N, dtype=dtype) for (M, N, K) in shapes]
+        # the only mock is the nvmath availability probe
+        with unittest.mock.patch.object(
+            impl, "_check_nvmath_cublaslt", return_value=available
+        ):
+            self.assertEqual(impl._foreach_mm_route(A, B), expected)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+    )
+    @parametrize(
+        "label,a_shape,b_shape,a_dtype,b_dtype",
+        [
+            # mixed A/B dtype, unsupported dtype, and zero-sized K/N each fall back
+            # to fallback_loop_mm rather than a grouped kernel.
+            ("mixed_bf16_fp32", (16, 16), (16, 16), torch.bfloat16, torch.float32),
+            ("mixed_fp32_bf16", (16, 16), (16, 16), torch.float32, torch.bfloat16),
+            ("unsupported_fp16", (16, 16), (16, 16), torch.float16, torch.float16),
+            ("zero_K", (16, 0), (0, 16), torch.bfloat16, torch.bfloat16),
+            ("zero_N", (16, 16), (16, 0), torch.bfloat16, torch.bfloat16),
+        ],
+        name_fn=lambda label, *_: label,
+    )
+    def test_foreach_mm_cond_rejects(self, label, a_shape, b_shape, a_dtype, b_dtype):
+        from torch._native.ops.foreach_mm.impl import _foreach_mm_cond
+
+        A = [torch.randn(*a_shape, dtype=a_dtype, device="cuda") for _ in range(2)]
+        B = [torch.randn(*b_shape, dtype=b_dtype, device="cuda") for _ in range(2)]
+        self.assertFalse(_foreach_mm_cond(A, B))
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+    )
+    @parametrize(
+        "label,shapes",
+        [
+            # Cases no grouped kernel takes: zero-sized K/N (cond -> fallback_loop_mm)
+            # and >= 1024 groups (cutlass cap -> mm_loop).
+            ("zero_K", [(16, 16, 0)] * 2),
+            ("zero_N", [(16, 0, 16)] * 2),
+            ("group_limit", [(8, 8, 8)] * 1024),
+        ],
+        name_fn=lambda label, shapes: label,
+    )
+    def test_foreach_mm_fallback_correctness(self, label, shapes):
+        from torch._native.ops.foreach_mm import impl
+
+        A = [
+            torch.randn(M, K, dtype=torch.bfloat16, device="cuda")
+            for (M, N, K) in shapes
+        ]
+        B = [
+            torch.randn(K, N, dtype=torch.bfloat16, device="cuda")
+            for (M, N, K) in shapes
+        ]
+        ref = [torch.mm(a, b) for a, b in zip(A, B)]
+        with unittest.mock.patch.object(
+            impl, "_check_nvmath_cublaslt", return_value=False
+        ):
+            out = torch._foreach_mm(A, B)
+        for o, r in zip(out, ref):
+            self.assertEqual(o, r)
+
+    @skipIfNoNvmath
+    @unittest.skipUnless(
+        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+    )
+    @parametrize(
+        "label,shapes",
+        [
+            # Large uniform
+            ("large_uniform", [(4096, 4096, 4096)] * 8),
+            # Non-square uniform (M is unaligned — ok for cublasLt)
+            ("nonsquare_uniform", [(1000, 2048, 512)] * 8),
+            # Mixed shapes — stresses per-group narrowing + max-padded buffer
+            (
+                "mixed_muon",
+                [
+                    (1024, 1024, 1024),
+                    (1024, 1024, 2752),
+                    (1024, 2752, 1024),
+                    (512, 512, 512),
+                ],
+            ),
+            # Many small groups
+            ("many_groups", [(128, 128, 128)] * 64),
+        ],
+        name_fn=lambda label, shapes: label,
+    )
+    def test_foreach_mm_nvmath(self, label, shapes):
+        self._check(shapes, torch.bfloat16, "cuda")
+
+
+instantiate_parametrized_tests(TestForeachMM)
 
 
 if __name__ == "__main__":
