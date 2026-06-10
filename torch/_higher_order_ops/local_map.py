@@ -205,6 +205,62 @@ redirect_to_mode(local_map_hop, _CachingTorchDispatchMode)
 redirect_to_mode(local_map_hop, _CachedTorchDispatchMode)
 
 
+def _functionalize_joint_gm(joint_gm: GraphModule) -> GraphModule:
+    """
+    Functionalize joint GraphModule using torch.func.functionalize.
+
+    local_map traces with suspend_functionalization() for AutoParallel shape handling,
+    causing mutable operations to leak into the graph. The partitioner requires functional graphs.
+    See issue #182403.
+    """
+    # Lazy import to avoid circular dependency (make_fx imports local_map)
+    from torch._functorch._aot_autograd.functional_utils import _is_functional_graph
+    from torch._guards import detect_fake_mode
+    from torch.fx.experimental.proxy_tensor import make_fx
+
+    error, _ = _is_functional_graph(joint_gm.graph)
+    if error is None:
+        return joint_gm
+
+    fake_args = []
+    for node in joint_gm.graph.nodes:
+        if node.op == "placeholder":
+            if "val" not in node.meta:
+                raise RuntimeError(
+                    f"Placeholder {node.name} missing 'val' in metadata. "
+                    f"Available keys: {list(node.meta.keys())}. "
+                    "This indicates an upstream tracing issue in local_map."
+                )
+            fake_args.append(node.meta["val"])
+
+    if not fake_args:
+        raise RuntimeError(
+            "No placeholder nodes found in joint graph. "
+            "This should not happen for a valid local_map graph."
+        )
+
+    functionalized = torch.func.functionalize(lambda *args: joint_gm(*args))
+    fake_mode = detect_fake_mode(fake_args)
+
+    if fake_mode is not None:
+        with fake_mode:
+            new_gm = make_fx(functionalized)(*fake_args)
+    else:
+        new_gm = make_fx(functionalized)(*fake_args)
+
+    new_gm.meta = joint_gm.meta
+
+    error, _ = _is_functional_graph(new_gm.graph)
+    if error is not None:
+        raise RuntimeError(
+            f"Functionalization failed: {error}\n"
+            "This is unexpected - torch.func.functionalize should handle all mutable ops.\n"
+            "Please file an issue with a reproducer."
+        )
+
+    return new_gm
+
+
 def create_hop_fw_bw(
     fw_gm: GraphModule,
     *_args: Any,
@@ -342,6 +398,10 @@ def create_hop_fw_bw(
             *[example_grads[i] for i in filtered_grads_idx],
         ]
         joint_hop_gm = make_fx(joint_f)(*primals_and_tangents)
+
+        # Functionalize mutable ops before partitioning
+        joint_hop_gm = _functionalize_joint_gm(joint_hop_gm)
+
         from torch._functorch._aot_autograd.graph_capture import (
             copy_fwd_metadata_to_bw_nodes,
         )
