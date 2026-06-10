@@ -663,18 +663,14 @@ class CachingAutotuner(KernelInterface):
                 if plugin.pre_compile(self) is not DEFER:
                     return
             self._precompile_worker()
-            if static_triton_bundle_key is not None and self.is_statically_launchable():
-                TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
-            self._make_launchers()
+            self._maybe_put_static_autotuner(static_triton_bundle_key)
+            self._make_launchers(self.compile_results)
             self._dynamic_scale_rblock()
 
     def _precompile_worker(self):
         if self.compile_results:
             for result in self.compile_results:
-                TritonBundler.put(
-                    triton_hash_to_path_key(result.kernel.hash),  # type: ignore[attr-defined]
-                    self.triton_meta.get("device", 0),
-                )
+                self._bundle_compile_result(result)
             return
         assert not self.launchers
         if not self.configs:
@@ -821,9 +817,12 @@ class CachingAutotuner(KernelInterface):
             return
         if not self._could_rblock_scale:
             return
+        new_results = []
         for new_config in self._iter_rblock_scale_candidates():
-            self.compile_results.append(self._precompile_config(new_config))  # noqa: B909
-        self._make_launchers()
+            result = self._precompile_config(new_config)
+            self.compile_results.append(result)  # noqa: B909
+            new_results.append(result)
+        self._make_launchers(new_results)
 
     def compile_by_disabling_pipelining(self, config):
         self._ensure_kernel_loaded()
@@ -853,8 +852,12 @@ class CachingAutotuner(KernelInterface):
         ) as e:
             return None, e
 
-    def _make_launchers(self):
-        if len(self.launchers) == len(self.compile_results):
+    def _make_launchers(self, compile_results):
+        """Wrap each result in ``compile_results`` into a launcher and
+        append the survivors to ``self.launchers``. Fires the all-failed
+        fallback only when ``self.launchers`` is empty AND no new launcher
+        survived this call."""
+        if not compile_results:
             return
 
         from torch._dynamo.device_interface import DeviceGuard
@@ -864,26 +867,43 @@ class CachingAutotuner(KernelInterface):
         exc = None
         # DeviceGuard ensures each launcher's binary loads onto the right device.
         with DeviceGuard(device_interface, self.triton_meta["device"]):
-            for result in self.compile_results:
+            for result in compile_results:
                 launcher, exc = self._make_launcher(result)
                 if launcher is not None:
                     launchers.append(launcher)
-            if len(launchers) == 0:
-                result = self.compile_results[-1]
-                config = result.config
-                if (
-                    isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
-                    and (
-                        config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1
-                    )
-                    and self.inductor_meta.get("dynamic_disable_pipelining", True)
-                ):
-                    self.launchers = [self.compile_by_disabling_pipelining(config)]
-                    return
-                raise RuntimeError(
-                    f"No valid triton configs. {type(exc).__name__}: {exc}"
-                )
-        self.launchers = launchers
+            if not self.launchers and not launchers:
+                self._all_failed_fallback(exc)
+                return
+        self.launchers.extend(launchers)
+
+    def _bundle_compile_result(self, result: CompileResult[_KernelType]) -> None:
+        """Parent-side ``TritonBundler.put`` for one CompileResult."""
+        TritonBundler.put(
+            triton_hash_to_path_key(result.kernel.hash),  # type: ignore[attr-defined]
+            self.triton_meta.get("device", 0),
+        )
+
+    def _all_failed_fallback(self, exc: BaseException | None) -> None:
+        """If the last failure was OOM on a pipelined config, retry with
+        pipelining disabled; otherwise raise. Caller holds the DeviceGuard.
+        Mutates self.launchers and self.compile_results on the OOM-retry path.
+        """
+        result = self.compile_results[-1]
+        config = result.config
+        if (
+            isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
+            and (config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1)
+            and self.inductor_meta.get("dynamic_disable_pipelining", True)
+        ):
+            self.launchers = [self.compile_by_disabling_pipelining(config)]
+            return
+        raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+
+    def _maybe_put_static_autotuner(
+        self, static_triton_bundle_key: str | None
+    ) -> None:
+        if static_triton_bundle_key is not None and self.is_statically_launchable():
+            TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
 
     def _prune_compile_results_to_launcher(self, launcher: LauncherType) -> None:
         if not self.compile_results:
