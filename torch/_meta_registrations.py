@@ -6467,29 +6467,23 @@ def meta__scaled_dot_product_attention_math_for_mps(
             return x, False
 
     q_, unsqueezed = ensure_4d(query)
-    k_, _ = ensure_4d(key)
     v_, _ = ensure_4d(value)
 
     batch_size, num_head, q_size, _ = q_.shape
     _, _, max_seq_length, value_head_size = v_.shape
 
-    def sdpa_general_mps():
-        out = q_.new_empty((batch_size, num_head, q_size, value_head_size))
-        attn = q_.new_empty((batch_size, num_head, q_size, max_seq_length))
-        if unsqueezed:
-            if query.dim() == 3:
-                out = out.squeeze(0)
-                attn = attn.squeeze(0)
-            else:
-                out_shape = list(query.shape[:-3]) + list(out.shape[1:4])
-                attn_shape = list(query.shape[:-3]) + list(attn.shape[1:4])
-                out = out.view(out_shape)
-                attn = attn.view(attn_shape)
-        return out, attn
-
-    # sdpa_vector_2pass_mps and sdpa_vector_fast_mps are intentionally left out.
-    # See https://github.com/pytorch/pytorch/issues/177603 for additional context.
-    return sdpa_general_mps()
+    out = q_.new_empty((batch_size, num_head, q_size, value_head_size))
+    attn = q_.new_empty((batch_size, num_head, q_size, max_seq_length))
+    if unsqueezed:
+        if query.dim() == 3:
+            out = out.squeeze(0)
+            attn = attn.squeeze(0)
+        else:
+            out_shape = list(query.shape[:-3]) + list(out.shape[1:4])
+            attn_shape = list(query.shape[:-3]) + list(attn.shape[1:4])
+            out = out.view(out_shape)
+            attn = attn.view(attn_shape)
+    return out, attn
 
 
 @register_meta([aten._scaled_dot_product_efficient_attention])

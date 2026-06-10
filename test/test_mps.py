@@ -22,7 +22,6 @@ import re
 from collections import defaultdict
 from torch import inf
 from torch.nn import Buffer, Parameter
-from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
@@ -11204,38 +11203,6 @@ class TestSDPA(TestCaseMPS):
 
     def test_sdpa_no_mask_causal_fp16(self):
         self._test_sdpa_no_mask(True, torch.float16)
-
-    def test_sdpa_export_dynamic_seq_len(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/177603
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer("k", torch.zeros(1, 4, 64, 128))
-                self.register_buffer("v", torch.zeros(1, 4, 64, 128))
-
-            def forward(self, q, mask):
-                out, _ = torch.ops.aten._scaled_dot_product_attention_math_for_mps(
-                    q, self.k, self.v, mask, 0.0, False, None
-                )
-                return out
-
-        model = M().to(device="mps", dtype=torch.float32).eval()
-        seq = Dim("seq", min=1, max=64)
-
-        q = torch.randn(1, 4, 4, 128, device="mps", dtype=torch.float32)
-        mask = torch.zeros(4, 64, device="mps", dtype=torch.bool)
-
-        ep = export(
-            model,
-            (q, mask),
-            dynamic_shapes={"q": {2: seq}, "mask": {0: seq}},
-            strict=True,
-        )
-
-        q2 = torch.randn(1, 4, 7, 128, device="mps", dtype=torch.float32)
-        mask2 = torch.zeros(7, 64, device="mps", dtype=torch.bool)
-        out = ep.module()(q2, mask2)
-        self.assertEqual(out.shape, (1, 4, 7, 128))
 
     def test_sdpa_no_mask_causal_fp16_L7(self):
         self._test_sdpa_no_mask(True, torch.float16, 7)

@@ -2000,6 +2000,36 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    def test_sdpa_dynamic_seq_len(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/177603
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("k", torch.zeros(1, 4, 64, 128))
+                self.register_buffer("v", torch.zeros(1, 4, 64, 128))
+
+            def forward(self, q, mask):
+                return torch.nn.functional.scaled_dot_product_attention(
+                    q, self.k, self.v, attn_mask=mask
+                )
+
+        for mask_dtype in [torch.bool, torch.float32]:
+            model = Model()
+            seq = torch.export.Dim("seq", min=1, max=64)
+            dynamic_shapes = {"q": {2: seq}, "mask": {0: seq}}
+            list_example_inputs = [
+                (
+                    torch.randn(1, 4, sl, 128, device=self.device),
+                    torch.zeros(sl, 64, device=self.device, dtype=mask_dtype),
+                )
+                for sl in [1, 8, 9, 32]
+            ]
+            self.check_model_with_multiple_inputs(
+                model,
+                list_example_inputs,
+                dynamic_shapes=dynamic_shapes,
+            )
+
     @skipIfNoFBGEMM
     def test_quantized_linear(self):
         class Model(torch.nn.Module):
