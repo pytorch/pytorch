@@ -1322,6 +1322,7 @@ def default_partition(
     node_info = classify_nodes(
         joint_module, static_lifetime_input_indices, num_fwd_outputs
     )
+    force_save_cpu_floating_aminmax_eq_input(joint_module.graph, node_info)
 
     saved_values = []
     saved_sym_nodes = []
@@ -2036,6 +2037,88 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
             # We do not want to iterate through all the joint graph,
             # so break at the first non-output, non-copy_ node.
             break
+
+
+def force_save_cpu_floating_aminmax_eq_input(
+    joint_graph: fx.Graph,
+    node_info: NodeInfo,
+) -> None:
+    def is_cpu_floating_tensor(node: fx.Node) -> bool:
+        val = node.meta.get("val")
+        return (
+            isinstance(val, torch.Tensor)
+            and val.device.type == "cpu"
+            and val.dtype.is_floating_point
+        )
+
+    view_ops = OrderedSet(
+        [
+            aten.squeeze,
+            aten.unsqueeze,
+            aten.alias,
+            aten.view,
+            aten.slice,
+            aten.t,
+            aten.transpose,
+            prims.broadcast_in_dim,
+            aten.expand,
+            aten.as_strided,
+            aten.permute,
+            aten.select,
+        ]
+    )
+
+    def is_view_node(node: fx.Node) -> bool:
+        return get_aten_target(node) in view_ops
+
+    def materialized_producer(node: fx.Node) -> fx.Node | None:
+        seen: OrderedSet[fx.Node] = OrderedSet()
+        cur = node
+        while is_view_node(cur):
+            if cur in seen:
+                return None
+            seen.add(cur)
+            view_inputs = [
+                arg
+                for arg in pytree.tree_leaves((cur.args, cur.kwargs))
+                if isinstance(arg, fx.Node)
+                and node_info.is_required_fw(arg)
+                and is_cpu_floating_tensor(arg)
+            ]
+            if len(view_inputs) != 1:
+                return None
+            cur = view_inputs[0]
+        return cur if cur.op == "call_function" else None
+
+    def used_by_backward_exact_eq(node: fx.Node) -> bool:
+        return any(
+            not node_info.is_required_fw(user) and get_aten_target(user) == aten.eq
+            for user in node.users
+        )
+
+    for reduction in joint_graph.nodes:
+        if (
+            reduction.op != "call_function"
+            or not node_info.is_required_fw(reduction)
+            or get_aten_target(reduction) not in (aten.amin, aten.amax)
+        ):
+            continue
+        reduction_input = reduction.args[0]
+        if not isinstance(reduction_input, fx.Node):
+            continue
+        if not (
+            is_cpu_floating_tensor(reduction_input)
+            and used_by_backward_exact_eq(reduction_input)
+        ):
+            continue
+        producer = materialized_producer(reduction_input)
+        if producer is None or must_recompute(producer):
+            continue
+        # amin/amax backward routes gradients by exact value equality with the
+        # reduced input. Rematerializing a CPU floating input in the backward can
+        # take a different math path from the forward reduction, making the
+        # equality mask miss the selected element.
+        producer.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
 
 def is_getitem_of_multi_output(node: fx.Node) -> bool:
@@ -3782,6 +3865,7 @@ def min_cut_rematerialization_partition(
     node_info = classify_nodes(
         joint_module, static_lifetime_input_indices, num_fwd_outputs
     )
+    force_save_cpu_floating_aminmax_eq_input(joint_graph, node_info)
 
     # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
