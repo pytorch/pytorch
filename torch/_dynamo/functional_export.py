@@ -1334,15 +1334,19 @@ def _bind_spec_to_args(
     #   2) varargs: VAR_POSITIONAL (`*args`). Bound from user's positional
     #      `args[i]` where i >= varargs_idx. Spec lookup:
     #      `user._varargs[i - varargs_idx]`.
-    #   3) kwargs: KEYWORD_ONLY params (also POSITIONAL_OR_KEYWORD ones
-    #      passed by name) and VAR_KEYWORD (`**kwargs`). All arrive in
-    #      user's `kwargs[name]` and are handled by one loop. Spec lookup:
-    #      `user._named_args[name]` first; falls back to
-    #      `user._varkw[name]` for names not declared as named params.
+    #   3) keyword-named: KEYWORD_ONLY params (also POSITIONAL_OR_KEYWORD
+    #      ones passed by name). Arrive in user's `kwargs[name]`. Spec
+    #      lookup: `user._named_args[name]`.
+    #   4) var-keyword: VAR_KEYWORD (`**kwargs`). Also arrive in user's
+    #      `kwargs[name]`. Spec lookup: `user._varkw[name]` for names not
+    #      declared as named params.
+    #   Regions 3 and 4 both arrive in `kwargs` and are handled by one
+    #   loop: `user._named_args[name]` first, falling back to
+    #   `user._varkw[name]`.
     # Python's call grammar guarantees the user's call layout is always
     # `[positionals][kwargs]` — never interleaved (`func(a, b=c, d)` is a
     # SyntaxError). So we walk `args` first (regions 1 + 2 below), then
-    # `kwargs.items()` (region 3, handled in the kwargs loop further
+    # `kwargs.items()` (regions 3 + 4, handled in the kwargs loop further
     # down).
     #
     # `varargs_idx` is the position of `*args` in the signature's parameter
