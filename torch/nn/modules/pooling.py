@@ -123,6 +123,12 @@ class MaxPool1d(_MaxPoolNd):
         - Ensure that the last pooling starts inside the image, make :math:`L_{out} = L_{out} - 1`
           when :math:`(L_{out} - 1) * \text{stride} >= L_{in} + \text{padding}`.
 
+    .. note::
+        When :attr:`return_indices` is ``True``, the return value is a tuple
+        ``(output, indices)`` where ``indices`` has the same shape as ``output``
+        and contains the index of the maximum value in each pooling window.
+        These indices can be passed to :class:`~torch.nn.MaxUnpool1d`.
+
     Examples::
 
         >>> # pool of size=3, stride=2
@@ -200,6 +206,12 @@ class MaxPool2d(_MaxPoolNd):
           .. math::
               W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding[1]} - \text{dilation[1]}
                     \times (\text{kernel\_size[1]} - 1) - 1}{\text{stride[1]}} + 1\right\rfloor
+
+    .. note::
+        When :attr:`return_indices` is ``True``, the return value is a tuple
+        ``(output, indices)`` where ``indices`` has the same shape as ``output``
+        and contains the index of the maximum value in each pooling window.
+        These indices can be passed to :class:`~torch.nn.MaxUnpool2d`.
 
     Examples::
 
@@ -284,6 +296,12 @@ class MaxPool3d(_MaxPoolNd):
           .. math::
               W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] - \text{dilation}[2] \times
                 (\text{kernel\_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
+
+    .. note::
+        When :attr:`return_indices` is ``True``, the return value is a tuple
+        ``(output, indices)`` where ``indices`` has the same shape as ``output``
+        and contains the index of the maximum value in each pooling window.
+        These indices can be passed to :class:`~torch.nn.MaxUnpool3d`.
 
     Examples::
 
