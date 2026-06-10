@@ -625,7 +625,11 @@ def _clear_torch_ops_cache(op_defs):
         if not hasattr(torch.ops, ns):
             continue
         namespace = getattr(torch.ops, ns)
-        if not hasattr(namespace, name):
+        # Use vars() to check the instance dict directly, avoiding
+        # __getattr__ which calls into C++ via _jit_get_operation.
+        # During interpreter shutdown the C++ runtime may already be
+        # torn down, causing UnicodeDecodeError or segfaults.
+        if name not in vars(namespace):
             continue
         delattr(namespace, name)
         if name in namespace._dir:
