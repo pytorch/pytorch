@@ -109,6 +109,22 @@ class ItertoolsVariable(VariableTracker):
             # Convert outer iterable to iterator; each sub-iterable converted lazily.
             source = generic_getiter(tx, args[0])
             return ChainVariable(source, mutation_type=ValueMutationNew())
+        elif self.value is itertools.zip_longest:
+            fillvalue_vt = kwargs.pop("fillvalue", ConstantVariable.create(None))
+            if kwargs:
+                unimplemented(
+                    gb_type="Unsupported kwargs for itertools.zip_longest",
+                    context=f"call_function {self} {args} {kwargs}",
+                    explanation=f"Expected kwargs: 'fillvalue', but got "
+                    f"{','.join(set(kwargs.keys()) - {'fillvalue'})}",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+            iterables = [generic_getiter(tx, arg) for arg in args]
+            return ZipLongestVariable(
+                iterables,
+                fillvalue=fillvalue_vt,
+                mutation_type=ValueMutationNew(),
+            )
         elif self.value is itertools.product:
             if any(kw != "repeat" for kw in kwargs):
                 unimplemented(
@@ -540,6 +556,92 @@ class ZipVariable(IteratorVariable):
             [
                 codegen.create_load_const("strict"),
                 codegen.create_load_const(self.strict),
+                create_instruction("BUILD_MAP", arg=1),
+                *create_call_function_ex(True, False),
+            ]
+        )
+
+
+class ZipLongestVariable(IteratorVariable):
+    """
+    Represents itertools.zip_longest(*iterables, fillvalue=None)
+    """
+
+    # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L2822-L2887
+    _cpython_type = itertools.zip_longest
+
+    _nonvar_fields = {
+        "exhausted",
+        *IteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        iterables: "list[VariableTracker]",
+        fillvalue: "VariableTracker",
+        exhausted: "list[bool] | None" = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.iterables = iterables
+        self.fillvalue = fillvalue
+        self.exhausted = exhausted if exhausted is not None else [False] * len(iterables)
+
+    def python_type(self) -> type:
+        return itertools.zip_longest
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+        # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L2737-L2808
+        if not self.is_mutable():
+            raise AssertionError("ZipLongestVariable must be mutable for next()")
+        if all(self.exhausted):
+            raise_observed_exception(StopIteration, tx)
+        values = []
+        # CPython: when the last active iterator exhausts, return without yielding.
+        any_active = False
+        for i, it in enumerate(self.iterables):
+            if self.exhausted[i]:
+                values.append(self.fillvalue)
+            else:
+                try:
+                    values.append(generic_iternext(tx, it))
+                    any_active = True
+                except ObservedUserStopIteration:
+                    handle_observed_exception(tx)
+                    tx.output.side_effects.mutation(self)
+                    self.exhausted[i] = True
+                    values.append(self.fillvalue)
+        if not any_active:
+            raise_observed_exception(StopIteration, tx)
+        return variables.TupleVariable(values)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(itertools),
+                    codegen.create_load_attr("zip_longest"),
+                ]
+            ),
+            call_function_ex=True,
+        )
+        for i, it in enumerate(self.iterables):
+            if not self.exhausted[i]:
+                codegen(it)
+            else:
+                codegen.add_push_null(
+                    lambda: codegen.append_output(
+                        codegen.create_load_python_module(iter)  # type: ignore[arg-type]
+                    )
+                )
+                codegen.extend_output(
+                    [create_instruction("BUILD_TUPLE", arg=0), *create_call_function(1, False)]
+                )
+        codegen.extend_output([create_instruction("BUILD_TUPLE", arg=len(self.iterables))])
+        codegen.extend_output([codegen.create_load_const("fillvalue")])
+        codegen(self.fillvalue)
+        codegen.extend_output(
+            [
                 create_instruction("BUILD_MAP", arg=1),
                 *create_call_function_ex(True, False),
             ]
