@@ -1176,14 +1176,24 @@ def is_dynamic_shape_enabled():
     return not torch._dynamo.config.assume_static_by_default
 
 
+def cpp_int_array_str(values):
+    suffix = "LL" if sys.platform in ["darwin", "win32"] else "L"
+
+    def fmt(v):
+        return f"{v}{suffix}" if isinstance(v, int) else str(v)
+
+    return "{" + ", ".join(fmt(v) for v in values) + "}"
+
+
 def target_assert_size_stride_str(
     name, sizes, strides, dynamic_sizes=None, dynamic_strides=None
 ):
     """Build expected assert_size_stride check string for generated code.
 
-    Handles cpp_wrapper ({}/L suffix) vs Python wrapper (()). When dynamic_sizes
+    Handles cpp_wrapper ({}/L or LL suffix) vs Python wrapper (()). When dynamic_sizes
     and dynamic_strides are provided, uses them if dynamic shapes are enabled.
-    Values that are ints get the L suffix in cpp_wrapper mode; strings are kept as-is.
+    Values that are ints get the platform-specific C++ int64 suffix in cpp_wrapper
+    mode; strings are kept as-is.
 
     If name is None, returns just the tuple pair (e.g. "(16, 32), (32, 1)")
     for substring matching when the buffer name is unknown.
@@ -1192,13 +1202,8 @@ def target_assert_size_stride_str(
         sizes, strides = dynamic_sizes, dynamic_strides
 
     if config.cpp_wrapper:
-        suffix = "LL" if sys.platform in ["darwin", "win32"] else "L"
-
-        def fmt(v):
-            return f"{v}{suffix}" if isinstance(v, int) else str(v)
-
-        size_str = "{" + ", ".join(fmt(s) for s in sizes) + "}"
-        stride_str = "{" + ", ".join(fmt(s) for s in strides) + "}"
+        size_str = cpp_int_array_str(sizes)
+        stride_str = cpp_int_array_str(strides)
     else:
         size_str = "(" + ", ".join(str(s) for s in sizes) + ")"
         stride_str = "(" + ", ".join(str(s) for s in strides) + ")"
