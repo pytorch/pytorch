@@ -157,51 +157,60 @@ kernel void group_norm_backward_x(
     constant stat_T* rstd [[buffer(4)]],
     constant gamma_T* gamma [[buffer(5)]],
     constant GroupNormParams<idx_T>& params [[buffer(6)]],
+    constant stat_T* dmean [[buffer(7)]],
+    constant stat_T* drstd [[buffer(8)]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
     uint tptg [[threads_per_threadgroup]]) {
   idx_T group_offset = tgid * params.elements_per_group;
   constant T* x = X + group_offset;
-  constant T* dy = dY + group_offset;
+  constant T* dy = dY ? dY + group_offset : nullptr;
   device T* dx = dX + group_offset;
 
   auto mean_val = float(mean[tgid]);
   auto rstd_val = float(rstd[tgid]);
+  auto dmean_val = dmean ? float(dmean[tgid]) : 0.0f;
+  auto drstd_val = drstd ? float(drstd[tgid]) : 0.0f;
   idx_T channel_base = (tgid % params.num_groups) * params.channels_per_group;
 
   // Accumulate `ds = sum(dY * gamma * X)` and `db = sum(dY * gamma)` over all
   // elements in the group.
-  float partial_ds = 0;
-  float partial_db = 0;
-  for (idx_T r = 0; r < params.elements_per_group; r += tptg * BLOCK_SIZE) {
-    idx_T base = r + tid * BLOCK_SIZE;
+  float ds_val{0.0};
+  float db_val{0.0};
+  if (C10_LIKELY(dy)) {
+    float partial_ds = 0;
+    float partial_db = 0;
+    for (idx_T r = 0; r < params.elements_per_group; r += tptg * BLOCK_SIZE) {
+      idx_T base = r + tid * BLOCK_SIZE;
 #pragma unroll
-    for (idx_T i = 0; i < BLOCK_SIZE; i++) {
-      auto elem = base + i;
-      if (elem < params.elements_per_group) {
-        auto gamma_val =
-            load_affine_scale(gamma, channel_base + elem / params.HxW);
-        auto dy_val = float(dy[elem]);
-        auto x_val = float(x[elem]);
-        auto dy_gamma = dy_val * gamma_val;
-        partial_ds += dy_gamma * x_val;
-        partial_db += dy_gamma;
+      for (idx_T i = 0; i < BLOCK_SIZE; i++) {
+        auto elem = base + i;
+        if (elem < params.elements_per_group) {
+          auto gamma_val =
+              load_affine_scale(gamma, channel_base + elem / params.HxW);
+          auto dy_val = float(dy[elem]);
+          auto x_val = float(x[elem]);
+          auto dy_gamma = dy_val * gamma_val;
+          partial_ds += dy_gamma * x_val;
+          partial_db += dy_gamma;
+        }
       }
     }
-  }
 
-  // Reduce ds and db across the threadgroup.
-  threadgroup float local_ds[simdgroup_size];
-  threadgroup float local_db[simdgroup_size];
-  auto reduction =
-      threadgroup_sum2(local_ds, local_db, partial_ds, partial_db, tid, tptg);
-  auto ds_val = reduction[0];
-  auto db_val = reduction[1];
+    // Reduce ds and db across the threadgroup.
+    threadgroup float local_ds[simdgroup_size];
+    threadgroup float local_db[simdgroup_size];
+    auto reduction =
+        threadgroup_sum2(local_ds, local_db, partial_ds, partial_db, tid, tptg);
+    auto ds_val = reduction[0];
+    auto db_val = reduction[1];
+  }
 
   // Compute per-group coefficients
   auto m = float(params.elements_per_group);
-  auto c2 = (db_val * mean_val - ds_val) * rstd_val * rstd_val * rstd_val / m;
-  auto c3 = -c2 * mean_val - db_val * rstd_val / m;
+  auto c2 = (db_val * mean_val - ds_val - drstd_val) * rstd_val * rstd_val *
+      rstd_val / m;
+  auto c3 = -c2 * mean_val - (db_val * rstd_val - dmean_val) / m;
 
   // Write dX.
   for (idx_T r = 0; r < params.elements_per_group; r += tptg * BLOCK_SIZE) {
