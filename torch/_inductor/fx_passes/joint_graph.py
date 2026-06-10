@@ -191,10 +191,18 @@ def remove_no_ops(
                 val = n.meta.get("val")
                 if isinstance(val, torch.Tensor) and val.device.type == "meta":
                     with graph.inserting_before(output_node):
+                        # size/stride may be symbolic under dynamic shapes;
+                        # materialize them so we never pass raw SymInts as args.
+                        # Use materialize_symints (roots backed sizes on input
+                        # placeholders) rather than create_size_node(n, d), which
+                        # would query `n` and pin it alive, blocking the
+                        # eliminate_dead_code() that removes this meta tensor.
+                        size = graph.materialize_symints(val.size())
+                        stride = graph.materialize_symints(val.stride())
                         n.replace_all_uses_with(
                             graph.call_function(
                                 torch.ops.aten.empty_strided.default,
-                                args=(val.size(), val.stride()),
+                                args=(size, stride),
                                 kwargs={"dtype": val.dtype, "device": val.device},
                             )
                         )
@@ -396,7 +404,8 @@ class UniformValueConstantFolder(ConstantFolder):
             node.target.overloadpacket in self.view_op_packets
             or node.target.overloadpacket in self.indexing_op_packets
         ):
-            assert isinstance(node.args[0], torch.fx.Node)
+            if not isinstance(node.args[0], torch.fx.Node):
+                raise AssertionError(f"expected fx.Node, got {type(node.args[0])}")
             return self.env[node.args[0]]
 
         # we don't want to return unknown value for symints so that we can
@@ -578,7 +587,10 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
 
         quant_options_node = kwargs.pop("quant_options", None)
         if quant_options_node is not None:
-            assert isinstance(quant_options_node, torch.fx.Node)
+            if not isinstance(quant_options_node, torch.fx.Node):
+                raise AssertionError(
+                    f"expected fx.Node, got {type(quant_options_node)}"
+                )
             quant_options = torch._higher_order_ops.InvokeQuant(
                 *invoke_quant.kwargs["quant_options"].args,
                 **invoke_quant.kwargs["quant_options"].kwargs,
@@ -613,10 +625,13 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             ):
                 subgraph_graph = getattr(gm, subgraph.target)
                 output_node = torch._inductor.utils.output_node(subgraph_graph)
-                assert (
+                if not (
                     isinstance(output_node.args[0], (list, tuple))
                     and len(output_node.args[0]) == 1
-                )
+                ):
+                    raise AssertionError(
+                        "expected subgraph output to be a single-element list or tuple"
+                    )
 
                 unpacked_output = output_node.args[0][0]
                 # pyrefly: ignore [bad-argument-type]
@@ -791,6 +806,9 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         return
 
     if arg_val.dtype in allowed and dtype1 in allowed and dtype2 in allowed:
+        # A narrower intermediate can be worth materializing before upcasting.
+        if dtype1.itemsize < dtype2.itemsize:
+            return
         if config.emulate_precision_casts and not _is_lossless_fp_widening_cast(
             arg_val.dtype, dtype1
         ):
@@ -828,8 +846,10 @@ def definitely_equal(
         if isinstance(rhs_item, torch.fx.Node):
             rhs_item = rhs_item.meta["val"]
 
-        assert isinstance(lhs_item, (int, torch.SymInt)), type(lhs_item)
-        assert isinstance(rhs_item, (int, torch.SymInt)), type(rhs_item)
+        if not isinstance(lhs_item, (int, torch.SymInt)):
+            raise AssertionError(type(lhs_item))
+        if not isinstance(rhs_item, (int, torch.SymInt)):
+            raise AssertionError(type(rhs_item))
 
         # It still makes sense to call guard_or_true/false since lhs_item
         # rhs_item are torch.SymInt rather than sympy expressions when
@@ -893,7 +913,8 @@ def pointless_view_pair(match: Match, arg, size1, size2):
 )
 def pointless_permute_pair(match: Match, arg, perm1, perm2):
     rank = len(perm1)
-    assert len(perm2) == rank
+    if len(perm2) != rank:
+        raise AssertionError(f"expected len(perm2) == {rank}, got {len(perm2)}")
 
     for i in range(rank):
         if perm1[perm2[i]] != i:
@@ -965,6 +986,14 @@ def _partial_softmax_pattern(linear_func, reverse=False, to_dtype=False):
     return CallFunction(aten.sub.Tensor, scaled, amax)
 
 
+def _preserve_scaled_softmax_nonfinite_semantics(scaled, stable, dim, keepdim):
+    # This pattern also matches the raw scaled - amax(scaled) expression.  Only
+    # use the stable form when it preserves that expression's nonfinite behavior.
+    original = scaled - torch.amax(scaled, dim=dim, keepdim=keepdim)
+    finite_scaled = torch.all(torch.isfinite(scaled), dim=dim, keepdim=True)
+    return torch.where(finite_scaled, stable, original)
+
+
 def _other_is_broadcasted_in_dim(match):
     # Check that the scaling factor is constant across the reduction dim,
     # so scaling doesn't change which index corresponds to the maximum value
@@ -1004,7 +1033,9 @@ def _other_is_broadcasted_in_dim(match):
 
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
+        scaled = inp * other
         if dtype is not None:
+            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -1017,7 +1048,10 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
 
-        return (inp - max_) * (sign * other)
+        stable = (inp - max_) * (sign * other)
+        return _preserve_scaled_softmax_nonfinite_semantics(
+            scaled, stable, dim, keepdim
+        )
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
@@ -1034,7 +1068,9 @@ for reverse, to_dtype in itertools.product((False, True), repeat=2):
 
 def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
+        scaled = inp / other
         if dtype is not None:
+            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -1047,7 +1083,10 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
 
-        return (inp - max_) / (sign * other)
+        stable = (inp - max_) / (sign * other)
+        return _preserve_scaled_softmax_nonfinite_semantics(
+            scaled, stable, dim, keepdim
+        )
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
@@ -1072,7 +1111,10 @@ def scatter_upon_const_tensor_extra_check(m):
         dim += len(full_shape)
 
     selector_ft = selector.meta["val"]
-    assert selector_ft.dim() == len(full_shape)
+    if selector_ft.dim() != len(full_shape):
+        raise AssertionError(
+            f"expected selector_ft.dim() == {len(full_shape)}, got {selector_ft.dim()}"
+        )
 
     for idx, select_sz, full_sz in zip(
         itertools.count(), selector_ft.shape, full_shape
@@ -1143,8 +1185,13 @@ def scatter_upon_const_tensor(
         # Create a mask for where to scatter
         mask = selector_expanded == indices_view
 
-        # Use torch.where to implement the scatter pointwise operation
-        return torch.where(mask, val, background_val)
+        # Use torch.where to implement the scatter pointwise operation.
+        # When val and background_val are Python scalars, torch.where promotes
+        # the result to the default floating dtype (float32), which loses the
+        # const tensor's dtype. Cast back to dtype so the rewrite preserves
+        # aten.scatter.value semantics (the result has self's dtype, with the
+        # scalar value cast to it).
+        return torch.where(mask, val, background_val).to(dtype)
 
     # replace the scatter operation with pointwise equivalent
     # pyrefly: ignore [bad-argument-type]

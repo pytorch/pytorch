@@ -984,7 +984,7 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8):
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(primals_0, primals_0, primals_0, sdpa_score0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  sdpa_score0 = sdpa_mask0 = None
+    flex_attention = torch.ops.higher_order.flex_attention(primals_0, primals_0, primals_0, sdpa_score0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, None, None, None, None, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  sdpa_score0 = sdpa_mask0 = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  flex_attention = None
     return (getitem, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, getitem, getitem_1)""",
@@ -999,7 +999,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
     fw_graph0 = self.fw_graph0
     joint_graph0 = self.joint_graph0
     mask_graph0 = self.mask_graph0
-    flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_0, primals_0, primals_0, getitem, getitem_1, tangents_0, None, fw_graph0, joint_graph0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, mask_graph0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_0 = getitem = getitem_1 = tangents_0 = fw_graph0 = joint_graph0 = primals_1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_6 = primals_7 = primals_8 = mask_graph0 = None
+    flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_0, primals_0, primals_0, getitem, getitem_1, tangents_0, None, fw_graph0, joint_graph0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, None, None, None, None, 128, 128, mask_graph0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_0 = getitem = getitem_1 = tangents_0 = fw_graph0 = joint_graph0 = primals_1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_6 = primals_7 = primals_8 = mask_graph0 = None
     getitem_3 = flex_attention_backward[0]
     getitem_4 = flex_attention_backward[1]
     getitem_5 = flex_attention_backward[2];  flex_attention_backward = None
@@ -1492,6 +1492,58 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         out_loss, out_grad = opt_fn(x, ts)
         self.assertEqual(out_loss, ref_loss)
         self.assertEqual(out_grad, ref_grad)
+
+    def test_invoke_subgraph_functionalize_schema_cache(self):
+        from torch._guards import InvokeSubgraphCache
+        from torch._higher_order_ops.invoke_subgraph import InvokeSubgraphHOP
+
+        orig_gen_schema = InvokeSubgraphHOP.gen_schema
+        orig_get_schema = InvokeSubgraphCache.get_functionalize_schema_entry
+        orig_add_schema = InvokeSubgraphCache.add_functionalize_schema_entry
+
+        def run(disable_cache):
+            gen_schema_calls = 0
+
+            def counted_gen_schema(self, *args, **kwargs):
+                nonlocal gen_schema_calls
+                gen_schema_calls += 1
+                return orig_gen_schema(self, *args, **kwargs)
+
+            @torch.compiler.nested_compile_region
+            def gn(x):
+                return torch.sin(x) + 1
+
+            def fn(x):
+                out = x
+                for _ in range(4):
+                    out = gn(out)
+                return out.sum()
+
+            try:
+                torch._dynamo.reset()
+                InvokeSubgraphHOP.gen_schema = counted_gen_schema
+                if disable_cache:
+                    InvokeSubgraphCache.get_functionalize_schema_entry = (
+                        lambda self, key: None
+                    )
+                    InvokeSubgraphCache.add_functionalize_schema_entry = (
+                        lambda self, key, schema: None
+                    )
+                x = torch.randn(8, requires_grad=True)
+                opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    opt_fn(x).backward()
+                return gen_schema_calls
+            finally:
+                torch._dynamo.reset()
+                InvokeSubgraphHOP.gen_schema = orig_gen_schema
+                InvokeSubgraphCache.get_functionalize_schema_entry = orig_get_schema
+                InvokeSubgraphCache.add_functionalize_schema_entry = orig_add_schema
+
+        cached_calls = run(disable_cache=False)
+        uncached_calls = run(disable_cache=True)
+        self.assertLess(cached_calls, uncached_calls)
 
     def test_refcounts(self):
         """Tests that activations can be cleared before the end of graph"""

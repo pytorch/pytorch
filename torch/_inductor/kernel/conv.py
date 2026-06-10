@@ -465,7 +465,8 @@ def convolution(
     output_padding = tuple(output_padding)
     if not isinstance(groups, int):
         groups = V.graph.sizevars.guard_int(groups)
-    assert isinstance(groups, int)
+    if not isinstance(groups, int):
+        raise AssertionError(f"Expected int for groups, got {type(groups)}")
 
     # Need use hint for triton template since the template does not
     # work with a dynamic shape.
@@ -597,7 +598,8 @@ def convolution(
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
         bias = ir.ExternKernel.realize_input(bias)  # type: ignore[assignment]
-        assert bias is not None
+        if bias is None:
+            raise AssertionError("bias must not be None after realize_input")
         args = [x, weight, bias]
         bias.freeze_layout()
         V.graph.sizevars.guard_int_seq(bias.get_size())
@@ -656,6 +658,11 @@ def convolution(
             in_chan,
             dtype_size=dtype_size,
         ):
+            unroll = is_ones(kernel_shape)
+            # The non-unrolled loop in these templates triggers triton#1254
+            # with 8 warps, producing incorrect results for non-1x1 kernels.
+            num_warps = cfg.num_warps if unroll else min(cfg.num_warps, 4)
+
             if ndim == 2:
                 conv2d_template.maybe_append_choice(
                     choices,
@@ -670,10 +677,10 @@ def convolution(
                     GROUPS=groups,
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
+                    UNROLL=unroll,
                     ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
+                    num_warps=num_warps,
                     **cfg.kwargs,
                 )
             elif ndim == 3:
@@ -693,10 +700,10 @@ def convolution(
                     GROUPS=groups,
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
+                    UNROLL=unroll,
                     ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
+                    num_warps=num_warps,
                     **cfg.kwargs,
                 )
     if use_ck_conv_template(layout):
@@ -736,7 +743,8 @@ def _convolution(
 
 
 def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
-    assert fx_node.target is torch.ops.aten.convolution.default
+    if fx_node.target is not torch.ops.aten.convolution.default:
+        raise AssertionError(f"Expected aten.convolution.default, got {fx_node.target}")
     if V.graph.layout_opt:
         return args, kwargs
     else:
@@ -984,6 +992,10 @@ def convolution_backward_lowering(
 
     out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_int_seq(weight.get_size())
 
+    # The Triton bwd templates substitute DILATION_H/W into the generated
+    # kernel source, so they must be concrete Python ints. The fwd template
+    # gates on is_ones(dilation) and hard-codes dilation=1, so it can skip
+    # this guard.
     stride = tuple(V.graph.sizevars.guard_int_seq(stride))
     padding = tuple(V.graph.sizevars.guard_int_seq(padding))
     dilation = tuple(V.graph.sizevars.guard_int_seq(dilation))
@@ -1213,7 +1225,10 @@ def convolution_backward_lowering(
 
 
 def constrain_conv_bwd_to_fx_strides(fx_node, *args, **kwargs):
-    assert fx_node.target == torch.ops.aten.convolution_backward.default
+    if fx_node.target != torch.ops.aten.convolution_backward.default:
+        raise AssertionError(
+            f"expected convolution_backward target, got {fx_node.target}"
+        )
     if V.graph.layout_opt:
         return args, kwargs
     else:
