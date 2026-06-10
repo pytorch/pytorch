@@ -3224,6 +3224,28 @@ class GraphModule(torch.nn.Module):
         )
         torch.export.export(M(), args)
 
+    def test_cond_unbacked_symint_size_closure_non_strict(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                u0 = x.item()
+
+                def true_fn():
+                    return torch.zeros(u0, 10)
+
+                def false_fn():
+                    return torch.ones(u0, 10)
+
+                return torch.cond(u0 > 0, true_fn, false_fn, ())
+
+        args = (torch.tensor([4]),)
+        ep = torch.export.export(M(), args, strict=False)
+        self.assertEqual(ep.module()(*args), M()(*args))
+        FileCheck().check("torch.ops.higher_order.cond").check(
+            "torch.ops.aten.zeros.default"
+        ).check("torch.ops.aten.ones.default").run(
+            ep.module().print_readable(print_output=False)
+        )
+
     def test_cond_int_closure(self):
         class M(torch.nn.Module):
             def __init__(self):

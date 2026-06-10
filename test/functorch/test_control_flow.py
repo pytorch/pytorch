@@ -9506,9 +9506,8 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    # unbacked symint inputs are created during non-strict export,
-    # which causes a graph break
-    @unittest.expectedFailure
+    # unbacked symint inputs are created during non-strict export
+    @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
     def test_cond_unbacked_symint_closure(self):
         from torch.export import Dim
 

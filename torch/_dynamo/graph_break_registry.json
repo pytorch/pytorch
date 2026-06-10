@@ -238,6 +238,14 @@
     {
       "Gb_type": "Attempted to wrap unbacked SymInt",
       "Context": "",
+      "Explanation": "Unbacked SymInt input is only supported when Dynamo cannot graph break.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Attempted to wrap unbacked SymInt",
+      "Context": "",
       "Explanation": "Unbacked SymInt input is not supported yet.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
