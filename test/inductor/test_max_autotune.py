@@ -163,6 +163,479 @@ class TestMaxAutotune(TestCase):
         b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
         return a, b
 
+    def test_streamk_autotune_config_variants(self):
+        from torch._inductor.kernel import mm as mm_kernel
+
+        base_config = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64,
+            "GROUP_M": 8,
+            "STREAMK_TILES": 16,
+            "NUM_SMS": 120,
+            "EVEN_K": True,
+            "ACC_TYPE": "tl.float32",
+            "ALLOW_TF32": True,
+            "CACHE_MODIFIER_A": None,
+            "CACHE_MODIFIER_B": None,
+            "CHUNK_SIZE": 16,
+            "NUM_XCDS": 1,
+            "BIAS": False,
+            "INPUT_PRECISION": None,
+            "OUTPUT_DTYPE_IS_INT8": False,
+            "QUANTIZED": False,
+            "USE_FAST_ACCUM": True,
+            "num_warps": 8,
+            "num_stages": 2,
+            "waves_per_eu": 0,
+            "matrix_instr_nonkdim": 16,
+            "kpack": 1,
+        }
+        non_streamk_config = dict(base_config)
+        non_streamk_config["STREAMK_TILES"] = 0
+
+        with mock.patch.object(mm_kernel, "STREAMK_AUTOTUNE", False):
+            self.assertEqual(mm_kernel._get_streamk_autotune_configs(base_config), [])
+
+        with mock.patch.object(mm_kernel, "STREAMK_AUTOTUNE", True):
+            non_streamk_configs = mm_kernel._get_streamk_autotune_configs(
+                non_streamk_config
+            )
+            configs = mm_kernel._get_streamk_autotune_configs(base_config)
+
+        self.assertIs(mm_kernel._get_streamk_template(0), mm_kernel.mm_streamk_template)
+        self.assertIs(mm_kernel._get_streamk_template(1), mm_kernel.mm_streamk_template)
+        self.assertEqual(len(non_streamk_configs), 2)
+        self.assertEqual(len(configs), 2)
+        self.assertEqual(
+            len({tuple(sorted(config.items())) for config in configs}),
+            len(configs),
+        )
+
+        for config in configs:
+            self.assertEqual(config["BLOCK_M"], base_config["BLOCK_M"])
+            self.assertEqual(config["BLOCK_N"], base_config["BLOCK_N"])
+            self.assertEqual(config["BLOCK_K"], base_config["BLOCK_K"])
+            self.assertEqual(config["STREAMK_TILES"], base_config["STREAMK_TILES"])
+            self.assertEqual(config["NUM_SMS"], base_config["NUM_SMS"])
+
+        self.assertEqual({config["num_warps"] for config in configs}, {4, 8})
+        self.assertEqual(sorted(config["num_stages"] for config in configs), [2, 2])
+        self.assertEqual(sorted(config["waves_per_eu"] for config in configs), [0, 1])
+        self.assertTrue(
+            all(
+                config["STREAMK_TILES"] == non_streamk_config["STREAMK_TILES"]
+                for config in non_streamk_configs
+            )
+        )
+
+    def test_streamk_grid_policy_env(self):
+        from torch._inductor.kernel import mm as mm_kernel
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            mm_kernel.refresh_streamk_env()
+            self.assertEqual(mm_kernel.STREAMK_GRID_POLICY, "autotune")
+
+        with mock.patch.dict(
+            os.environ,
+            {"TORCHINDUCTOR_STREAMK_GRID_POLICY": "manual"},
+        ):
+            mm_kernel.refresh_streamk_env()
+            self.assertEqual(mm_kernel.STREAMK_GRID_POLICY, "manual")
+            self.assertEqual(mm_kernel._normalize_streamk_grid_policy("manual"), "manual")
+
+        with mock.patch.dict(
+            os.environ,
+            {"TORCHINDUCTOR_STREAMK_GRID_POLICY": "auto_tune"},
+        ):
+            mm_kernel.refresh_streamk_env()
+            self.assertEqual(mm_kernel.STREAMK_GRID_POLICY, "auto_tune")
+            self.assertEqual(
+                mm_kernel._normalize_streamk_grid_policy("auto_tune"), "autotune"
+            )
+
+        with mock.patch.object(mm_kernel, "streamk_log_info"):
+            self.assertEqual(
+                mm_kernel._normalize_streamk_grid_policy("unknown"), "origami"
+            )
+        mm_kernel.refresh_streamk_env()
+
+    def test_streamk_grid_policy_autotune_expands_grid_candidates(self):
+        from torch._inductor.kernel import mm as mm_kernel
+
+        class DummyOrigamiSelector:
+            def __init__(self, M, N, K, *args):
+                self.M = M
+                self.N = N
+                self.K = K
+                self.num_sms = 304
+                self.xcc_workgroup_mapping = 8
+
+            def get_config(self):
+                return (256, 256, 64, 5)
+
+            def get_grid(self):
+                return 225
+
+        mm_kernel._make_streamk_selector.cache_clear()
+        try:
+            with (
+                mock.patch.object(
+                    mm_kernel, "StreamKOrigamiSelector", DummyOrigamiSelector
+                ),
+                mock.patch.object(mm_kernel, "STREAMK_AUTOTUNE", False),
+            ):
+                selector = mm_kernel._make_streamk_selector(
+                    3840, 3840, 6964, torch.float16, torch.float16, torch.float16, GPU_TYPE
+                )
+                configs = selector.get_autotune_configs()
+                self.assertEqual(
+                    [(config["NUM_SMS"], config["STREAMK_TILES"]) for config in configs],
+                    [(225, 0), (304, 225)],
+                )
+
+            mm_kernel._make_streamk_selector.cache_clear()
+            with (
+                mock.patch.object(
+                    mm_kernel, "StreamKOrigamiSelector", DummyOrigamiSelector
+                ),
+                mock.patch.object(mm_kernel, "STREAMK_AUTOTUNE", True),
+            ):
+                selector = mm_kernel._make_streamk_selector(
+                    3840, 3840, 6964, torch.float16, torch.float16, torch.float16, GPU_TYPE
+                )
+                configs = selector.get_autotune_configs()
+                config_tuples = [
+                    (
+                        config["BLOCK_M"],
+                        config["BLOCK_N"],
+                        config["BLOCK_K"],
+                        config["GROUP_M"],
+                        config["NUM_SMS"],
+                        config["STREAMK_TILES"],
+                    )
+                    for config in configs
+                ]
+                self.assertEqual(config_tuples[:3], [
+                    (256, 256, 64, 5, 225, 0),
+                    (256, 256, 64, 5, 304, 225),
+                    (256, 256, 64, 5, 304, 0),
+                ])
+                self.assertEqual(len(config_tuples), 12)
+                self.assertIn((128, 128, 64, 8, 304, 0), config_tuples)
+                self.assertIn((128, 256, 64, 8, 304, 0), config_tuples)
+                self.assertIn((64, 128, 64, 8, 304, 0), config_tuples)
+                self.assertIn((128, 64, 64, 8, 304, 0), config_tuples)
+                self.assertIn((256, 256, 64, 4, 304, 0), config_tuples)
+                self.assertIn((256, 256, 64, 6, 304, 0), config_tuples)
+                self.assertIn((128, 64, 128, 4, 304, 0), config_tuples)
+                self.assertIn((128, 256, 64, 6, 304, 0), config_tuples)
+                self.assertIn((128, 128, 128, 6, 304, 0), config_tuples)
+                self.assertNotIn((16, 16, 256, 1, 304, 0), config_tuples)
+                self.assertNotIn((256, 128, 64, 8, 304, 0), config_tuples)
+        finally:
+            mm_kernel._make_streamk_selector.cache_clear()
+
+    def test_streamk_reference_config_path_adds_debug_candidate(self):
+        from torch._inductor.kernel import mm as mm_kernel
+
+        class DummyOrigamiSelector:
+            def __init__(self, M, N, K, *args):
+                self.M = M
+                self.N = N
+                self.K = K
+                self.a_dtype = torch.bfloat16
+                self.num_sms = 304
+                self.xcc_workgroup_mapping = 8
+
+            def get_config(self):
+                return (256, 256, 64, 5)
+
+            def get_grid(self):
+                return 225
+
+        reference_payload = {
+            "configs": [
+                {
+                    "M": 3840,
+                    "N": 3840,
+                    "K": 6964,
+                    "dtype": "bfloat16",
+                    "config": {
+                        "BLOCK_M": 128,
+                        "BLOCK_N": 256,
+                        "BLOCK_K": 64,
+                        "GROUP_M": 8,
+                        "NUM_SMS": 304,
+                        "STREAMK_TILES": 0,
+                        "num_warps": 4,
+                        "num_stages": 2,
+                        "waves_per_eu": 1,
+                    },
+                }
+            ]
+        }
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+            json.dump(reference_payload, f)
+            f.flush()
+            mm_kernel._make_streamk_selector.cache_clear()
+            try:
+                with (
+                    mock.patch.object(
+                        mm_kernel, "StreamKOrigamiSelector", DummyOrigamiSelector
+                    ),
+                    mock.patch.object(mm_kernel, "STREAMK_AUTOTUNE", False),
+                    mock.patch.object(
+                        mm_kernel, "STREAMK_REFERENCE_CONFIG_PATH", f.name
+                    ),
+                ):
+                    selector = mm_kernel._make_streamk_selector(
+                        3840,
+                        3840,
+                        6964,
+                        torch.bfloat16,
+                        torch.bfloat16,
+                        torch.bfloat16,
+                        GPU_TYPE,
+                    )
+                    configs = selector.get_autotune_configs()
+
+                config_tuples = [
+                    (
+                        config["BLOCK_M"],
+                        config["BLOCK_N"],
+                        config["BLOCK_K"],
+                        config["GROUP_M"],
+                        config["NUM_SMS"],
+                        config["STREAMK_TILES"],
+                        config["num_warps"],
+                        config["waves_per_eu"],
+                    )
+                    for config in configs
+                ]
+                self.assertIn((128, 256, 64, 8, 304, 0, 4, 1), config_tuples)
+            finally:
+                mm_kernel._load_streamk_reference_configs.cache_clear()
+                mm_kernel._make_streamk_selector.cache_clear()
+
+    def test_streamk_split_workspace_zero_on_call(self):
+        from torch._inductor.codegen.common import WorkspaceZeroMode
+        from torch._inductor.kernel import mm as mm_kernel
+
+        class FakeInputNode:
+            def __init__(self, size, dtype):
+                self._size = size
+                self._dtype = dtype
+
+            def get_size(self):
+                return self._size
+
+            def get_dtype(self):
+                return self._dtype
+
+        config = self._streamk_test_config(streamk_tiles=4)
+        a_node = FakeInputNode((128, 256), torch.float16)
+        b_node = FakeInputNode((256, 128), torch.float16)
+        layout = mock.Mock(device=torch.device(GPU_TYPE), dtype=torch.float16)
+
+        with (
+            mock.patch.object(mm_kernel, "ENABLE_STREAMK", True),
+            mock.patch.object(
+                mm_kernel.WorkspaceArg, "unique_name", return_value="streamk_workspace"
+            ),
+            mock.patch.object(
+                TritonTemplate,
+                "maybe_append_choice",
+                autospec=True,
+                return_value="streamk_choice",
+            ) as append_choice,
+        ):
+            choice = mm_kernel.mm_streamk_template.maybe_append_choice(
+                [],
+                input_nodes=(a_node, b_node),
+                layout=layout,
+                **config,
+            )
+
+        self.assertEqual(choice, "streamk_choice")
+        workspace_arg = append_choice.call_args.kwargs["workspace_arg"]
+        self.assertIsNotNone(workspace_arg)
+        self.assertEqual(workspace_arg.zero_mode, WorkspaceZeroMode.ZERO_ON_CALL)
+        self.assertEqual(
+            workspace_arg.count,
+            config["NUM_SMS"] * config["BLOCK_M"] * config["BLOCK_N"] * 4
+            + config["NUM_SMS"] * 4,
+        )
+
+    def _streamk_test_config(self, *, streamk_tiles):
+        return {
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 64,
+            "GROUP_M": 4,
+            "STREAMK_TILES": streamk_tiles,
+            "NUM_SMS": 8 if streamk_tiles else 4,
+            "EVEN_K": True,
+            "ACC_TYPE": "tl.float32",
+            "ALLOW_TF32": True,
+            "CACHE_MODIFIER_A": None,
+            "CACHE_MODIFIER_B": None,
+            "CHUNK_SIZE": 4,
+            "NUM_XCDS": 1,
+            "BIAS": False,
+            "INPUT_PRECISION": None,
+            "OUTPUT_DTYPE_IS_INT8": False,
+            "QUANTIZED": False,
+            "USE_FAST_ACCUM": True,
+            "num_warps": 4,
+            "num_stages": 2,
+            "waves_per_eu": 0,
+            "matrix_instr_nonkdim": 16,
+            "kpack": 1,
+        }
+
+    @contextlib.contextmanager
+    def _force_streamk_config(self, streamk_config):
+        from torch._inductor.kernel import mm as mm_kernel
+
+        class DummyStreamKSelector:
+            def get_config(self):
+                return dict(streamk_config)
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "TORCHINDUCTOR_ENABLE_STREAMK": "1",
+                    "TORCHINDUCTOR_STREAMK_ONLY": "1",
+                },
+            ),
+            mock.patch.object(
+                mm_kernel,
+                "_make_streamk_selector",
+                return_value=DummyStreamKSelector(),
+            ),
+            fresh_cache(),
+        ):
+            mm_kernel.refresh_streamk_env()
+            try:
+                yield
+            finally:
+                mm_kernel.refresh_streamk_env()
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA and Triton are required")
+    def test_streamk_epilogue_fusion_relu_add_nosplit(self):
+        def fn(a, b):
+            return torch.mm(a, b).relu() + 1.0
+
+        a = torch.randn(128, 256, dtype=torch.float16, device=GPU_TYPE)
+        b = torch.randn(256, 128, dtype=torch.float16, device=GPU_TYPE)
+
+        with (
+            self._force_streamk_config(self._streamk_test_config(streamk_tiles=0)),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "Triton",
+                    "epilogue_fusion": True,
+                    "benchmark_epilogue_fusion": False,
+                    "autotune_fallback_to_aten": False,
+                }
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(fn), a, b)
+            expected = fn(a, b)
+
+        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+        FileCheck().check("STREAMK_TILES").check("NUM_SMS").check("relu").run(code[0])
+        FileCheck().check_not("triton_poi_fused_relu").run(code[0])
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA and Triton are required")
+    def test_streamk_epilogue_fusion_relu_split(self):
+        def fn(a, b):
+            return torch.mm(a, b).relu() + 1.0
+
+        a = torch.randn(128, 256, dtype=torch.float16, device=GPU_TYPE)
+        b = torch.randn(256, 128, dtype=torch.float16, device=GPU_TYPE)
+
+        with (
+            self._force_streamk_config(self._streamk_test_config(streamk_tiles=4)),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "Triton",
+                    "epilogue_fusion": True,
+                    "benchmark_epilogue_fusion": False,
+                    "autotune_fallback_to_aten": False,
+                }
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(fn), a, b)
+            expected = fn(a, b)
+
+        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+        FileCheck().check("STREAMK_TILES").check("WORKSPACE").check("LOCKS").check(
+            "relu"
+        ).run(code[0])
+        FileCheck().check_not("triton_poi_fused_relu").run(code[0])
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA and Triton are required")
+    def test_streamk_addmm_bias_then_epilogue_fusion(self):
+        def fn(bias, a, b):
+            return torch.addmm(bias, a, b).relu()
+
+        bias = torch.randn(128, dtype=torch.float16, device=GPU_TYPE)
+        a = torch.randn(128, 256, dtype=torch.float16, device=GPU_TYPE)
+        b = torch.randn(256, 128, dtype=torch.float16, device=GPU_TYPE)
+
+        with (
+            self._force_streamk_config(self._streamk_test_config(streamk_tiles=0)),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "Triton",
+                    "epilogue_fusion": True,
+                    "benchmark_epilogue_fusion": False,
+                    "autotune_fallback_to_aten": False,
+                }
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(fn), bias, a, b)
+            expected = fn(bias, a, b)
+
+        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+        FileCheck().check("STREAMK_TILES").check("NUM_SMS").check("addmm").check(
+            "relu"
+        ).run(code[0])
+        FileCheck().check_not("triton_poi_fused_relu").run(code[0])
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA and Triton are required")
+    def test_streamk_epilogue_fusion_config_disabled(self):
+        def fn(a, b):
+            return torch.mm(a, b).relu()
+
+        a = torch.randn(128, 256, dtype=torch.float16, device=GPU_TYPE)
+        b = torch.randn(256, 128, dtype=torch.float16, device=GPU_TYPE)
+
+        with (
+            self._force_streamk_config(self._streamk_test_config(streamk_tiles=0)),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "Triton",
+                    "epilogue_fusion": False,
+                    "benchmark_epilogue_fusion": False,
+                    "autotune_fallback_to_aten": False,
+                }
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(fn), a, b)
+            expected = fn(a, b)
+
+        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+        FileCheck().check("STREAMK_TILES").check("NUM_SMS").check("relu").run(code[0])
+
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic, search_space):

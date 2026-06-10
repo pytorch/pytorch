@@ -900,6 +900,30 @@ def if_mask(mask: Any, val, *, _builder: object = None) -> tl.constexpr:
 
 
 @triton.jit
+def chiplet_transform_chunked(
+    pid,
+    num_sms: tl.constexpr,
+    num_xcds: tl.constexpr,
+    chunk_size: tl.constexpr,
+):
+    """
+    Transform PID for chunked multi-chiplet execution.
+
+    Workgroups are distributed in chunks across XCDs to improve locality while
+    leaving the non-divisible tail in its original order.
+    """
+    limit = (num_sms // (num_xcds * chunk_size)) * (num_xcds * chunk_size)
+    if pid >= limit:
+        return pid
+
+    local_pid = pid // num_xcds
+    chunk_idx = local_pid // chunk_size
+    pos_in_chunk = local_pid % chunk_size
+    xcd = pid % num_xcds
+    return chunk_idx * num_xcds * chunk_size + xcd * chunk_size + pos_in_chunk
+
+
+@triton.jit
 def inline_asm_pack(x, pack: tl.constexpr):
     """Ravel to 1D and pad (via join with zeros) so numel is divisible by pack."""
     result = x.ravel()

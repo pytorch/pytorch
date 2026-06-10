@@ -5873,6 +5873,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         make_kernel_render: Callable[_P, _T] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
         allowed_prologue_inps: OrderedSet[str] | None = None,
+        allow_epilogue_fusion: bool = True,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -5890,6 +5891,7 @@ class TritonTemplateBuffer(TemplateBuffer):
             mutated_inputs=mutated_inputs,
             allowed_prologue_inps=allowed_prologue_inps,
         )
+        self.allow_epilogue_fusion = allow_epilogue_fusion
         assert self.name is not None
         self.epilogue_fusable_outputs = {self.name: self.name}
 

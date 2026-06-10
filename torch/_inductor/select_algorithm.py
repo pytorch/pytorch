@@ -3066,6 +3066,7 @@ class TritonTemplate(KernelTemplate):
             workspace_arg=workspace_arg,
             allowed_prologue_inps=result.prologue_supported_inputs,
             hint_override=hint_override,
+            allow_epilogue_fusion=kwargs.get("allow_epilogue_fusion", True),
         )
 
 
@@ -3199,6 +3200,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         workspace_arg: WorkspaceArg | None = None,
         allowed_prologue_inps: OrderedSet[str] | None = None,
         hint_override: int | None = None,
+        allow_epilogue_fusion: bool = True,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
@@ -3219,6 +3221,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             allowed_prologue_inps if allowed_prologue_inps is not None else OrderedSet()
         )
         self.hint_override = hint_override
+        self.allow_epilogue_fusion = allow_epilogue_fusion
 
         self.n_regs = None
 
@@ -3260,6 +3263,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             make_kernel_render=self.make_kernel_render,
             mutated_inputs=self.mutated_inputs,
             allowed_prologue_inps=self.allowed_prologue_inps,
+            allow_epilogue_fusion=self.allow_epilogue_fusion,
         )
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
@@ -5988,6 +5992,8 @@ def _log_autotune_choices_stats(
     if best_choice.description:
         metadata["best_kernel_desc"] = best_choice.description
     metadata["best_time"] = timings[best_choice]
+    os.environ["TORCHINDUCTOR_LAST_AUTOTUNE_BEST_KERNEL"] = best_choice.name
+    os.environ["TORCHINDUCTOR_LAST_AUTOTUNE_EVENT"] = event_name
 
     best_triton_pos = next(
         (
