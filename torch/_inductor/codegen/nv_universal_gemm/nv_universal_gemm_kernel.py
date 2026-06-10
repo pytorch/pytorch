@@ -81,40 +81,42 @@ def _create_gemm_arguments(
             "Epilogue fusion is not yet supported for grouped or scaled GEMM variants"
         )
 
-    if variant_name == "GROUPED_GEMM":
-        a, b, offsets = input_tensors
-        return cutlass_api.arguments.GroupedGemmArguments(
-            a,
-            b,
-            out,
-            accumulator_type=accumulator_type,
-            offsets=offsets,
-        )
-
-    if variant_name == "SCALED_GEMM":
-        from cutlass_api.arguments import ScaledTensor
-
-        a, b, scale_a, scale_b = input_tensors
-        scaled_a = ScaledTensor(a, scale_a, scale_mode_a, swizzle_mode_a)
-        scaled_b = ScaledTensor(b, scale_b, scale_mode_b, swizzle_mode_b)
-        return cutlass_api.arguments.GemmArguments(
-            scaled_a,
-            scaled_b,
-            out,
-            accumulator_type=accumulator_type,
-        )
-
-    if variant_name == "GEMM":
-        a, b = input_tensors
-        if epilogue is not None:
-            return cutlass_api.arguments.GemmArguments(
-                a, b, out, accumulator_type=accumulator_type, epilogue=epilogue
+    match variant_name:
+        case "GROUPED_GEMM":
+            a, b, offsets = input_tensors
+            return cutlass_api.arguments.GroupedGemmArguments(
+                a,
+                b,
+                out,
+                accumulator_type=accumulator_type,
+                offsets=offsets,
             )
-        return cutlass_api.arguments.GemmArguments(
-            a, b, out, accumulator_type=accumulator_type
-        )
 
-    raise NotImplementedError(f"Unsupported NVGEMM variant: {variant_name}")
+        case "SCALED_GEMM":
+            from cutlass_api.arguments import ScaledTensor
+
+            a, b, scale_a, scale_b = input_tensors
+            scaled_a = ScaledTensor(a, scale_a, scale_mode_a, swizzle_mode_a)
+            scaled_b = ScaledTensor(b, scale_b, scale_mode_b, swizzle_mode_b)
+            return cutlass_api.arguments.GemmArguments(
+                scaled_a,
+                scaled_b,
+                out,
+                accumulator_type=accumulator_type,
+            )
+
+        case "GEMM":
+            a, b = input_tensors
+            if epilogue is not None:
+                return cutlass_api.arguments.GemmArguments(
+                    a, b, out, accumulator_type=accumulator_type, epilogue=epilogue
+                )
+            return cutlass_api.arguments.GemmArguments(
+                a, b, out, accumulator_type=accumulator_type
+            )
+
+        case _:
+            raise NotImplementedError(f"Unsupported NVGEMM variant: {variant_name}")
 
 
 def _lookup_gemm_kernel(
