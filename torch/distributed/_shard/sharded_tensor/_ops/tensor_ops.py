@@ -51,21 +51,45 @@ def tensor_device(types, args=(), kwargs=None, pg=None):
     elif pg and pg._get_backend_name() == "gloo":
         dev = torch.device("cpu")
     else:
-        # Device-agnostic fallback that works on any accelerator
-        # backend (cuda / xpu / hpu / mps / ...). Mirrors what
-        # torch.distributed.checkpoint.planner_helpers._init_state_dict
-        # already does for plain tensors and DTensors. The previous
+        # Accelerator-agnostic fallback. The previous
         # `torch.cuda.current_device()` fallback raised
         # `AssertionError: Torch not compiled with CUDA enabled` on
         # any non-CUDA build (e.g. XPU), breaking FSDP checkpoint
         # resume via HF Trainer's `_load_from_checkpoint` path.
-        from torch._utils import _get_device_module
-        from torch.distributed.distributed_c10d import (
-            _get_pg_default_device,
-        )
+        #
+        # We prefer the current accelerator over `_get_pg_default_device`
+        # because composite PGs (e.g. `cpu:gloo,cuda:nccl`) cause the
+        # latter to return `cpu`, which would silently swap the device
+        # for a CUDA/XPU ShardedTensor that legitimately wants the
+        # accelerator. The accelerator namespace is the source of
+        # truth for "which device should new tensors land on for this
+        # process," which is what `tensor.device` should report when
+        # there are no local shards to introspect.
+        try:
+            acc = torch.accelerator.current_accelerator()
+            if acc is not None:
+                dev = torch.device(
+                    f"{acc.type}:{torch.accelerator.current_device_index()}"
+                )
+            else:
+                dev = torch.device("cpu")
+        except (AttributeError, RuntimeError):
+            # torch < 2.5 has no torch.accelerator. Fall back to
+            # inspecting the process group's registered devices and
+            # preferring any non-CPU type.
+            non_cpu = [
+                d for d in (pg._device_types if pg is not None else ())
+                if d.type != "cpu"
+            ]
+            if non_cpu:
+                from torch._utils import _get_device_module
 
-        device_type = _get_pg_default_device(pg).type
-        dev = torch.device(_get_device_module(device_type).current_device())
+                dev = torch.device(
+                    f"{non_cpu[0].type}:"
+                    f"{_get_device_module(non_cpu[0].type).current_device()}"
+                )
+            else:
+                dev = torch.device("cpu")
     return dev
 
 
