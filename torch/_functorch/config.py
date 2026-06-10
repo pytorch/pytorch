@@ -46,6 +46,7 @@ debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"
 # See # NOTE [Export custom triton op]
 decompose_custom_triton_ops = True
 
+
 static_weight_shapes = True
 
 # See https://github.com/pytorch/pytorch/issues/141881

@@ -20,6 +20,7 @@ from torch._library.custom_ops import (
 )
 from torch._library.effects import EffectType
 from torch._library.infer_schema import infer_schema
+from torch._library.pallas import pallas_op
 from torch._library.triton import triton_op, wrap_triton
 from torch._ops import OpOverload
 from torch.types import _dtype
@@ -38,6 +39,7 @@ __all__ = [
     "get_ctx",
     "get_kernel",
     "custom_op",
+    "pallas_op",
     "triton_op",
     "wrap_triton",
     "infer_schema",
