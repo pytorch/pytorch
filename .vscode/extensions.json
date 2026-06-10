@@ -6,6 +6,6 @@
         "meta.pyrefly",
         "ms-vscode.cmake-tools",
         "EditorConfig.EditorConfig",
-        "streetsidesoftware.code-spell-checker",
+        "streetsidesoftware.code-spell-checker"
     ]
 }
