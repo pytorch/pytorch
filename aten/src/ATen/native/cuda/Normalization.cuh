@@ -39,6 +39,7 @@ static int getNumThreads(int nElem) {
 #else
   int threadSizes[5] = { 32, 64, 128, 256, MAX_BLOCK_SIZE };
 #endif
+#pragma unroll
   for (int i = 0; i != 5; ++i) {
     if (nElem <= threadSizes[i]) {
       return threadSizes[i];
@@ -116,10 +117,12 @@ template<typename scalar_t, typename Op, typename PTA>
 __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
   // first the reductions each thread does separately
   scalar_t sum = static_cast<scalar_t>(0);
+#pragma unroll
   for (int batch = threadIdx.y; batch < tensor.size(0); batch += blockDim.y) {
 #if defined(USE_ROCM)
     constexpr int UNRL = 4; // load deserilize factor
     scalar_t tmp[UNRL];
+#pragma unroll
     for (int x = threadIdx.x; x < tensor.size(2); x += blockDim.x*UNRL) {
 #pragma unroll
       for (int u = 0; u < UNRL; u++)
@@ -130,6 +133,7 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
           sum += tmp[u];
     }
 #else
+#pragma unroll
     for (int x = threadIdx.x; x < tensor.size(2); x += blockDim.x) {
       sum += op(batch, plane, x);
     }
@@ -254,9 +258,11 @@ __global__ void batch_norm_transform_input_kernel(
   index_t fs = input.size(2);
 
   index_t bstep  = blockDim.y * gridDim.y;
+#pragma unroll
   for (index_t batch = threadIdx.y + blockIdx.y * blockDim.y; batch < bs; batch += bstep) {
     auto o = output[batch][plane];
     auto i = input[batch][plane];
+#pragma unroll
     for (index_t feature = threadIdx.x; feature < fs; feature += blockDim.x) {
       o[feature] = static_cast<input_scalar_t>(gamma * (i[feature] - mean) * invstd + beta);
     }
@@ -307,13 +313,17 @@ __global__ void batch_norm_collect_statistics_kernel(
   stat_accscalar_t avg = 0;
   stat_accscalar_t var_n = 0;
   int n = 0;
+#pragma unroll
   for (int batch = threadIdx.y; batch < input.size(0); batch += blockDim.y) {
 #if defined(USE_ROCM)
     constexpr int UNRL = 4;
     stat_accscalar_t v_[UNRL];
+#pragma unroll
     for (int x = threadIdx.x; x < input.size(2); x += blockDim.x*UNRL) {
+#pragma unroll
       for (int u = 0; u < UNRL; u++)
         v_[u] = input[batch][plane][std::min(x+u*blockDim.x, input.size(2)-1)];
+#pragma unroll
       for (int u = 0; u < UNRL; u++) {
         if (x+u*blockDim.x < input.size(2)) {
           stat_accscalar_t d1 = v_[u] - avg;
@@ -324,6 +334,7 @@ __global__ void batch_norm_collect_statistics_kernel(
       }
     }
 #else
+#pragma unroll
     for (int x = threadIdx.x; x < input.size(2); x += blockDim.x) {
       stat_accscalar_t v = input[batch][plane][x];
       stat_accscalar_t d1 = v - avg;
@@ -336,6 +347,7 @@ __global__ void batch_norm_collect_statistics_kernel(
 
   // first warpSum to get one value per thread to
   // one value per warp
+#pragma unroll
   for (int i = 0; i < getMSB(C10_WARP_SIZE); ++i) {
     stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, C10_WARP_SIZE);
     int o_n = WARP_SHFL_XOR(n, 1 << i, C10_WARP_SIZE);
@@ -364,6 +376,7 @@ __global__ void batch_norm_collect_statistics_kernel(
     avg = (tid < blockDim.x * blockDim.y  / C10_WARP_SIZE ? shared_avg_var[2 * tid] : stat_accscalar_t(0));
     var_n = (tid < blockDim.x * blockDim.y  / C10_WARP_SIZE ? shared_avg_var[2 * tid + 1] : stat_accscalar_t(0));
   }
+#pragma unroll
   for (int i = 0; i < getMSB(C10_WARP_SIZE); ++i) {
     stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, C10_WARP_SIZE);
     int o_n = WARP_SHFL_XOR(n, 1 << i, C10_WARP_SIZE);
@@ -429,7 +442,9 @@ __global__ void batch_norm_backward_kernel(
   stat_accscalar_t grad_scale = invstd * weight_val;
 
   if (grad_input.data() != NULL) {
+#pragma unroll
     for (int batch = threadIdx.y; batch < grad_output.size(0); batch += blockDim.y) {
+#pragma unroll
       for (int x = threadIdx.x; x < grad_output.size(2); x += blockDim.x) {
         input_scalar_t go = grad_output[batch][plane][x];
         if (train) {
@@ -475,10 +490,12 @@ __global__ void batch_norm_reduce_statistics_kernel(
   int tid = threadIdx.x;
 
   // first the reductions each thread does separately
+#pragma unroll
   for (int i = bid*blockDim.x+tid; i < feature_size; i += gridDim.x*blockDim.x) {
     accscalar_t avg = 0;
     accscalar_t var_n = 0;
     index_t n = 0;
+#pragma unroll
     for (int j = 0; j < world_size; j++) {
       scalar_t count = counts[j];
       accscalar_t m = vec_mean[j][i];
@@ -565,10 +582,12 @@ __device__ __forceinline__ void batch_norm_backward_elemt_kernel_impl(
   index_t fs = input.size(2);
 
   index_t bstep  = blockDim.y * gridDim.y;
+#pragma unroll
   for (index_t batch = threadIdx.y + blockIdx.y * blockDim.y; batch < bs; batch += bstep) {
     auto g_i = grad_input[batch][plane];
     auto g_o = grad_output[batch][plane];
     auto i = input[batch][plane];
+#pragma unroll
     for (index_t feature = threadIdx.x; feature < fs; feature += blockDim.x) {
       g_i[feature] = static_cast<input_scalar_t>((g_o[feature] - m_dy_c - (i[feature] - m_c) * factor_1_c) * factor_2_c);
     }
@@ -587,6 +606,7 @@ __global__ void batch_norm_backward_elemt_kernel(
     GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t> grad_input,
     const int* __restrict__ numel, const int world_size) {
   int64_t total_numel = 0;
+#pragma unroll
   for (int i = 0; i < world_size; i ++) {
     total_numel += numel[i];
   }
@@ -1012,6 +1032,7 @@ batch_norm_collect_statistics_channels_last_kernel(
   int address_base = m_offset * stride + c_offset;
   int address_increment = inner_loop_stride * stride;
 
+#pragma unroll
   for (int i = 0; i < loop_count; i++) {
     accscalar_t x_math[PARALLEL_LOADS];
     accscalar_t x_count_inv[PARALLEL_LOADS];
@@ -1103,6 +1124,7 @@ batch_norm_collect_statistics_channels_last_kernel(
       mean_th = accscalar_t(0.0);
       m2_th = accscalar_t(0.0);
 
+#pragma unroll
       for (int y = threadIdx.y; y < gridDim.y; y += blockDim.y) {
         address_base = c_offset + y * stride;
         int count_new = c_offset < stride ? staging_count[address_base] : 0;
@@ -1165,6 +1187,7 @@ __global__ void batch_norm_transform_input_channels_last_kernel(
   int address_base = m_offset * stride + c_offset;
   int address_increment = inner_loop_stride * stride;
 
+#pragma unroll
   for (int i = 0; i < loop_count; i++) {
 #pragma unroll
     for (int j = 0; j < PARALLEL_LOADS; j++) {
@@ -1255,6 +1278,7 @@ __global__ void batch_norm_backward_reduce_channels_last_kernel(
   auto r_mean = mean[c_offset];
   auto factor = inv_std[c_offset];
 
+#pragma unroll
   for (int i = 0; i < loop_count; i++) {
     accscalar_t x_input[PARALLEL_LOADS];
     accscalar_t x_grad_output[PARALLEL_LOADS];
@@ -1335,6 +1359,7 @@ __global__ void batch_norm_backward_reduce_channels_last_kernel(
       sum_dy_th = accscalar_t(0.0);
       sum_dy_xmu_th = accscalar_t(0.0);
 
+#pragma unroll
       for (int y = threadIdx.y; y < gridDim.y; y += blockDim.y) {
         address_base = c_offset + y * stride;
         sum_dy_th += (c_offset < stride ? staging_sum_dy[address_base] : accscalar_t(0.0));
@@ -1412,6 +1437,7 @@ __device__ __forceinline__ void batch_norm_backward_elemt_channels_last_kernel_i
   int address_base = m_offset * stride + c_offset;
   int address_increment = inner_loop_stride * stride;
 
+#pragma unroll
   for (int i = 0; i < loop_count; i++) {
 #pragma unroll
     for (int j = 0; j < PARALLEL_LOADS; j++) {
@@ -1447,6 +1473,7 @@ __global__ void batch_norm_backward_elemt_channels_last_kernel(
       const int stride) {
 
   int64_t total_numel = 0;
+#pragma unroll
   for (int i = 0; i < world_size; i++) {
     total_numel += numel[i];
   }
