@@ -220,9 +220,7 @@ def add_needs_realized_inputs(fn):
         return [add_needs_realized_inputs(x) for x in fn]
     needs_realized_inputs.add(fn)
     if isinstance(fn, torch._ops.OpOverloadPacket):
-        needs_realized_inputs.update(
-            getattr(fn, overload) for overload in fn.overloads()
-        )
+        needs_realized_inputs.update(fn.op_overloads())
 
 
 def add_layout_constraint(
@@ -230,8 +228,8 @@ def add_layout_constraint(
     constraint: Callable[..., tuple[Any, Any]],
 ) -> None:
     if isinstance(fn, torch._ops.OpOverloadPacket):
-        for overload in fn.overloads():
-            _maybe_layout_constraints[getattr(fn, overload)] = constraint
+        for overload in fn.op_overloads():
+            _maybe_layout_constraints[overload] = constraint
     else:
         _maybe_layout_constraints[fn] = constraint
 
@@ -333,8 +331,7 @@ def get_overloads(aten_fn):
 
     for fn in list(aten_fn):
         if isinstance(fn, torch._ops.OpOverloadPacket):
-            for overload in fn.overloads():
-                other_fn = getattr(fn, overload)
+            for other_fn in fn.op_overloads():
                 if other_fn not in lowerings:
                     aten_fn.append(other_fn)
 
@@ -1358,10 +1355,15 @@ def expand(x, sizes):
         # this cannot be done directly as below as we'll choke on the size_hint
         # here
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
-            # maybe realize input before broadcasting it
+            # Broadcast loop reuse is not graph fanout; keep the graph-fanout
+            # read-count heuristic from materializing cheap expanded producers.
+            # In deterministic modes, preserve the old materialization boundary
+            # since fusing through expanded inputs can change reduction numerics.
             x.mark_reuse(
                 V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
-                // x_size_product
+                // x_size_product,
+                graph_reuse=config.deterministic
+                or torch.are_deterministic_algorithms_enabled(),
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
@@ -2774,8 +2776,7 @@ def make_fallback(
         )
 
     if isinstance(op, torch._ops.OpOverloadPacket):
-        for ol in op.overloads():
-            op_overload = getattr(op, ol)
+        for op_overload in op.op_overloads():
             register_fallback(op_overload)
     elif isinstance(op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
         register_fallback(op)
@@ -2923,7 +2924,7 @@ def randn(*args, **kwargs):
 
 @register_lowering(inductor_prims.force_stride_order, type_promotion_kind=None)
 def inductor_force_stride_order(input_tensor, stride):
-    stride_order = ir.get_stride_order(stride)
+    stride_order = ir.get_stride_order(stride, V.graph.sizevars.shape_env)
     return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
 
 
@@ -8241,8 +8242,7 @@ def _get_pointwise_overrides(ns, name):
             return fallback_handler(op)
 
     if isinstance(op, torch._ops.OpOverloadPacket):
-        for olname in op.overloads():
-            ol = getattr(op, olname)
+        for ol in op.op_overloads():
             yield ol, data.type_promotion_kind, make_triton_fallback(ol)
     else:
         yield op, data.type_promotion_kind, make_triton_fallback(op)
@@ -8761,6 +8761,44 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
             op_name = op.operation_name
             assert op_name is not None
             V.graph.additional_buffer_deps[op_name].add(dep_name)
+
+    # For void ops (e.g. wait_stream) that don't produce tensor outputs,
+    # passthrough args returned by control_deps are the same IR nodes as
+    # their inputs. This means downstream consumers have no scheduling
+    # dependency on the void op. Create MutationOutput entries to force
+    # the scheduler to order subsequent readers after the void op.
+    # Only apply this for wait_stream, which needs forward ordering on the
+    # waiting stream. Other sync ops (synchronize_stream, record_event) are
+    # full barriers or have event-based cross-sync tracking.
+    void_ops = [
+        op
+        for op in new_ops
+        if isinstance(op, ir.Buffer)
+        and op.name is not None
+        and isinstance(op.layout, ir.NoneLayout)
+        and not isinstance(op, ir.MutationOutput)
+    ]
+    if void_ops and args:
+        # Check if the subgraph contains a wait_stream call
+        has_wait_stream = any(
+            n.op == "call_function"
+            and n.target is torch.ops.streams.wait_stream.default
+            for n in subgraph_fn.graph_module.graph.nodes
+        )
+        if has_wait_stream:
+            for void_op in void_ops:
+                assert isinstance(void_op, ir.ExternKernel)
+                for arg in args:
+                    for arg_leaf in pytree.tree_leaves(arg):
+                        if not isinstance(arg_leaf, IRNode):
+                            continue
+                        device = arg_leaf.get_device()
+                        if device is None:
+                            continue
+                        mut_out = ir.MutationOutput(
+                            ir.NoneLayout(device=device), arg_leaf, void_op
+                        )
+                        void_op.mutation_outputs.append(mut_out)
 
     return output
 
