@@ -3,6 +3,8 @@
 
 #include <ATen/core/IListRef.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/PyInterpreterHooks.h>
 #include <c10/util/Exception.h>
 
 #include <c10/util/irange.h>
@@ -430,9 +432,24 @@ template <typename VariableVersion>
 c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_core(
     VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
-  if (key_set_.has(DispatchKey::Python) &&
-      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = (*c10::impl::getGlobalPyInterpreter())->detach(this);
+  c10::impl::PyInterpreter* interpreter = nullptr;
+  if (!c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::Python)) {
+    // FunctionalTensorWrapper skips the normal mode stack here; routing
+    // functionalized FakeTensor detach through normal modes can recurse.
+    if (c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::PreDispatch) &&
+        !c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::PreDispatch) &&
+        c10::impl::hasGlobalPyInterpreter()) {
+      auto* global_interpreter = c10::impl::getGlobalPyInterpreter();
+      if ((*global_interpreter)->has_pre_dispatch_torch_dispatch_mode()) {
+        interpreter = global_interpreter;
+      }
+    } else if (key_set_.has(c10::DispatchKey::Python)) {
+      interpreter = c10::impl::getGlobalPyInterpreter();
+    }
+  }
+
+  if (interpreter) {
+    auto r = (*interpreter)->detach(this);
     if (r) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
