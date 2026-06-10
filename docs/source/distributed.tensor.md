@@ -191,6 +191,39 @@ specifying the {class}`DeviceMesh` and {class}`Placement` for the {class}`DTenso
 
 ```
 
+### SymmetricMemory-Backed DTensor Objects
+
+DTensor can optionally use SymmetricMemory to allocate local tensors. This is
+useful for one-sided communication algorithms that need each rank's local shard
+or replica to be remotely addressable.
+
+This behavior is disabled by default. It can be enabled for a region of code
+with {meth}`torch.distributed.tensor.experimental.use_symmetric_memory`:
+
+```python
+import torch.distributed.tensor as dtensor
+from torch.distributed.tensor import Shard
+from torch.distributed.tensor.experimental import use_symmetric_memory
+
+with use_symmetric_memory():
+    x = dtensor.empty(1024, 1024, device_mesh=mesh, placements=[Shard(0)])
+```
+
+It can also be enabled process-wide by setting
+`torch.distributed.config.dtensor_use_symmetric_memory = True`, or with the
+`TORCH_DTENSOR_USE_SYMMETRIC_MEMORY=1` environment variable.
+
+When enabled, DTensor factory functions and {meth}`distribute_tensor` allocate
+CUDA local tensor objects using SymmetricMemory. The SymmetricMemory backend
+should be selected as normal through the
+`torch.distributed._symmetric_memory` APIs. {meth}`DTensor.from_local` preserves
+the user-provided local tensor and does not implicitly copy it into
+SymmetricMemory.
+
+DTensor may use SymmetricMemory-backed operands to run one-sided implementations
+for supported operator and placement combinations. Unsupported combinations fall
+back to the existing DTensor collective-based implementation.
+
 ### Random Operations
 
 DTensor provides distributed RNG functionality to ensure that random operations on sharded tensors get unique values, and random operations on replicated tensors get the same values. This system requires that all participating

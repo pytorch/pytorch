@@ -285,6 +285,58 @@ void nccl_get(at::Tensor& tensor, const int64_t peer) {
 #endif
 }
 
+at::Tensor& nccl_get_out(
+    at::Tensor& dst,
+    const at::Tensor& src,
+    int64_t peer,
+    const std::string& group_name) {
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  TORCH_CHECK(dst.is_cuda() && src.is_cuda(), "symm_mem.get: expected CUDA tensors");
+  TORCH_CHECK(
+      dst.device() == src.device(),
+      "symm_mem.get: dst and src must be on the same device");
+  TORCH_CHECK(
+      dst.scalar_type() == src.scalar_type(),
+      "symm_mem.get: dst and src must have the same dtype");
+  TORCH_CHECK(
+      dst.numel() == src.numel(),
+      "symm_mem.get: dst and src must have the same number of elements");
+  TORCH_CHECK(
+      dst.is_contiguous() && src.is_contiguous(),
+      "symm_mem.get: dst and src must be backed by contiguous memory");
+
+  auto symm_mem = c10d::symmetric_memory::rendezvous(src, group_name);
+  TORCH_CHECK(
+      symm_mem != nullptr,
+      "symm_mem.get: src must be allocated from symmetric memory");
+  TORCH_CHECK(peer >= 0 && peer < symm_mem->get_world_size(), "symm_mem.get: invalid peer");
+  auto nbytes = dst.numel() * dst.element_size();
+  if (nbytes == 0) {
+    return dst;
+  }
+
+  c10::cuda::CUDAGuard guard(dst.device());
+  int threads = THREADS_PER_BLOCK;
+  int blocks = (nbytes + threads - 1) / threads;
+  size_t src_byte_offset =
+      symm_mem->get_offset() + src.storage_offset() * src.element_size();
+
+  lsa_get_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+      symm_mem->get_buffer_ptrs_dev(),
+      peer,
+      src_byte_offset,
+      dst.mutable_data_ptr(),
+      nbytes);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return dst;
+#else
+  TORCH_CHECK(
+      false,
+      "NCCL symmetric memory get is not supported. Requires NCCL >= 2.28.0");
+  return dst;
+#endif
+}
+
 bool is_nccl_symmem_available() {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
     return true;
@@ -401,6 +453,7 @@ void nccl_wait_signal_boxed(
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nccl_put", c10d::nccl_extension::nccl_put);
   m.impl("nccl_get", c10d::nccl_extension::nccl_get);
+  m.impl("nccl_get_out", c10d::nccl_extension::nccl_get_out);
   // APIs that accept a signal pad from user
   // TODO: rename with more descriptive name
   m.impl("nccl_wait_for_signal", c10d::nccl_extension::nccl_wait_for_signal);

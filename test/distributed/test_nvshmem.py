@@ -290,6 +290,66 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             # TODO: remove after we have wait_signal
             dist.barrier()
 
+    def test_get(self) -> None:
+        self._init_device()
+        group = dist.group.WORLD
+
+        dtype = torch.float
+        numel = 1024
+        src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        dst = torch.empty_like(src)
+        symm_mem.rendezvous(src, group=group)
+        dist.barrier()
+
+        if self.rank == 0:
+            ret = symm_mem.get(dst, src, group, peer=1)
+            self.assertIs(ret, dst)
+            torch.testing.assert_close(dst, torch.ones_like(dst))
+
+        dist.barrier()
+
+        src_base = symm_mem.empty(2 * numel, dtype=dtype, device=self.device)
+        src_base.copy_(
+            torch.arange(2 * numel, dtype=dtype, device=self.device)
+            + self.rank * 2 * numel
+        )
+        src_view = src_base.narrow(0, numel // 2, numel)
+        dst = torch.empty_like(src_view)
+        symm_mem.rendezvous(src_base, group=group)
+        dist.barrier()
+
+        if self.rank == 0:
+            ret = symm_mem.get(dst, src_view, group, peer=1)
+            self.assertIs(ret, dst)
+            expected = (
+                torch.arange(
+                    numel // 2, numel // 2 + numel, dtype=dtype, device=self.device
+                )
+                + 2 * numel
+            )
+            torch.testing.assert_close(dst, expected)
+
+            with self.assertRaisesRegex(ValueError, "contiguous"):
+                symm_mem.get(
+                    torch.empty(numel, dtype=dtype, device=self.device),
+                    src_base[::2],
+                    group,
+                    peer=1,
+                )
+
+            noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[
+                ::2
+            ]
+            with self.assertRaisesRegex(ValueError, "contiguous"):
+                symm_mem.get(noncontig_dst, src, group, peer=1)
+
+            with self.assertRaisesRegex(RuntimeError, "symmetric memory"):
+                symm_mem.get(
+                    torch.empty_like(src), torch.empty_like(src), group, peer=1
+                )
+
+        dist.barrier()
+
 
 @instantiate_parametrized_tests
 @requires_nvshmem()

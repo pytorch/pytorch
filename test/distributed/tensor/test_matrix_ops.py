@@ -5,8 +5,10 @@ import itertools
 import math
 import unittest
 from typing import cast
+from unittest.mock import patch
 
 import torch
+import torch.distributed._symmetric_memory as symm_mem
 import torch.nn.functional as F
 from torch.distributed import init_device_mesh
 from torch.distributed.tensor import (
@@ -26,13 +28,18 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     register_single_dim_strategy,
 )
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.experimental import use_symmetric_memory
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    PLATFORM_SUPPORTS_SYMM_MEM,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda_p2p_access,
     run_tests,
     skipIfRocm,
     TEST_WITH_ROCM,
@@ -1133,6 +1140,72 @@ class DistMatrixOpsTest(DTensorTestBase):
         result = torch.nn.functional.pad(dt, pad, value=1.0)
         self.assertNotEqual(result.placements, (Partial(),))
         self.assertEqual(result.full_tensor(), expected_nz)
+
+
+@unittest.skipIf(
+    not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this platform"
+)
+@requires_cuda_p2p_access()
+class DTensorOneSidedMMTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 2
+
+    @with_comms
+    def test_mm_uses_onesided_algorithm_for_selected_layout(self):
+        device_mesh = self.build_device_mesh()
+        lhs_full = torch.randn(6, 8, device=self.device_type)
+        rhs_full = torch.randn(8, 5, device=self.device_type)
+        expected = torch.mm(lhs_full, rhs_full)
+
+        with use_symmetric_memory():
+            lhs = distribute_tensor(lhs_full, device_mesh, [Shard(0)])
+            rhs = distribute_tensor(rhs_full, device_mesh, [Shard(0)])
+
+        self.assertTrue(symm_mem.is_symm_mem_tensor(rhs.to_local()))
+        with patch.object(symm_mem, "get", wraps=symm_mem.get) as get_mock:
+            out = torch.mm(lhs, rhs)
+            self.assertEqual(get_mock.call_count, self.world_size - 1)
+
+        self.assertEqual(out.placements, (Shard(0),))
+        self.assertEqual(out.full_tensor(), expected)
+
+    @with_comms
+    def test_mm_falls_back_without_symmetric_memory(self):
+        device_mesh = self.build_device_mesh()
+        lhs_full = torch.randn(6, 8, device=self.device_type)
+        rhs_full = torch.randn(8, 5, device=self.device_type)
+        expected = torch.mm(lhs_full, rhs_full)
+
+        lhs = distribute_tensor(lhs_full, device_mesh, [Shard(0)])
+        rhs = distribute_tensor(rhs_full, device_mesh, [Shard(0)])
+
+        self.assertFalse(symm_mem.is_symm_mem_tensor(rhs.to_local()))
+        with patch.object(symm_mem, "get", wraps=symm_mem.get) as get_mock:
+            out = torch.mm(lhs, rhs)
+            self.assertEqual(get_mock.call_count, 0)
+
+        self.assertEqual(out.placements, (Shard(0),))
+        self.assertEqual(out.full_tensor(), expected)
+
+    @with_comms
+    def test_mm_selection_depends_on_placements(self):
+        device_mesh = self.build_device_mesh()
+        lhs_full = torch.randn(6, 8, device=self.device_type)
+        rhs_full = torch.randn(8, 5, device=self.device_type)
+        expected = torch.mm(lhs_full, rhs_full)
+
+        with use_symmetric_memory():
+            lhs = distribute_tensor(lhs_full, device_mesh, [Shard(0)])
+            rhs = distribute_tensor(rhs_full, device_mesh, [Replicate()])
+
+        self.assertTrue(symm_mem.is_symm_mem_tensor(rhs.to_local()))
+        with patch.object(symm_mem, "get", wraps=symm_mem.get) as get_mock:
+            out = torch.mm(lhs, rhs)
+            self.assertEqual(get_mock.call_count, 0)
+
+        self.assertEqual(out.placements, (Shard(0),))
+        self.assertEqual(out.full_tensor(), expected)
 
 
 instantiate_parametrized_tests(DistMatrixOpsTest)

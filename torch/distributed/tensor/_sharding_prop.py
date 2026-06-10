@@ -27,6 +27,7 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed.tensor._op_algorithm import select_op_algorithm
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
     _SingleDimStrategyInfo,
@@ -911,6 +912,7 @@ class ShardingPropagator:
                     suggestion_schema,
                     needs_redistribute=needs_redistribute,
                     use_val_from_redistribute_schema=use_val_from_redistribute_schema,
+                    algorithm=select_op_algorithm(op_schema, output_strategy),
                 )
             elif isinstance(op_strategy, TupleStrategy):
                 # tuple strategy output sharding processing

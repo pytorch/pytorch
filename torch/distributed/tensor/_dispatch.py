@@ -22,6 +22,10 @@ from torch.distributed.tensor._op_schema import (
     OutputSharding,
     OutputSpecType,
 )
+from torch.distributed.tensor._op_algorithm import (
+    not_implemented as op_algorithm_not_implemented,
+    run_op_algorithm,
+)
 from torch.distributed.tensor._random import is_rng_supported_mesh
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
@@ -312,6 +316,11 @@ class OpDispatcher:
         local_results = None
         if participating:
             # computation that happens in the current rank of the mesh, normal case
+            if output_sharding.algorithm is not None:
+                local_results = run_op_algorithm(op_info, output_sharding.algorithm)
+                if local_results is not op_algorithm_not_implemented:
+                    return local_results
+
             if output_sharding.needs_redistribute:
                 # If sharding propagation decision needs redistribute, perform redistribute
                 # on args first, which could potentially modify args (i.e. allgather certain arg)

@@ -11,6 +11,12 @@ TORCH_API void nccl_put(at::Tensor& tensor, const int64_t peer);
 
 TORCH_API void nccl_get(at::Tensor& tensor, const int64_t peer);
 
+TORCH_API at::Tensor& nccl_get_out(
+    at::Tensor& dst,
+    const at::Tensor& src,
+    int64_t peer,
+    const std::string& group_name);
+
 TORCH_API void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal);
 
 TORCH_API void nccl_put_with_signal(
