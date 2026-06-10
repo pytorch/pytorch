@@ -391,6 +391,7 @@ def _broadcast_shapes(*_shapes):
         guarding_hint_or_throw,
         has_guarding_hint,
         is_nested_int,
+        statically_known_true,
     )
 
     backed_so = torch.fx.experimental._config.backed_size_oblivious
@@ -414,6 +415,17 @@ def _broadcast_shapes(*_shapes):
     common_shape: list[int | torch.SymInt] = [
         1,
     ] * reduce(max, (len(shape) for shape in shapes))
+
+    def guard_or_false_unless_static_metadata(x):
+        if isinstance(x, torch.SymBool):
+            shape_env = getattr(x.node, "shape_env", None)
+            if (
+                shape_env is None
+                or not shape_env.prefer_deferred_runtime_asserts_over_guards
+            ):
+                return statically_known_true(x)
+        return guard_or_false(x)
+
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
             # NB: handle nested ints specially to avoid invalid guarding on Ne(j0, 1).
@@ -445,17 +457,21 @@ def _broadcast_shapes(*_shapes):
                         torch._check(shape[idx] == 1)
                     if b == 1 and a != 1:
                         torch._check(common_shape[idx] == 1)
-                if guard_or_false(shape[idx] == common_shape[idx]):
+                if guard_or_false_unless_static_metadata(
+                    shape[idx] == common_shape[idx]
+                ):
                     continue
 
-            if guard_or_false(common_shape[idx] == 1):
+            if guard_or_false_unless_static_metadata(common_shape[idx] == 1):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
 
-            if not is_nested_int(shape[idx]) and guard_or_false(shape[idx] == 1):
+            if not is_nested_int(shape[idx]) and guard_or_false_unless_static_metadata(
+                shape[idx] == 1
+            ):
                 # broadcast case .
                 continue
             else:
@@ -477,34 +493,15 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
     )
 
     def should_expand(a: ShapeType, b: ShapeType) -> bool:
-        from torch.fx.experimental.symbolic_shapes import (
-            guard_or_false,
-            sym_and,
-            sym_or,
-        )
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
 
         if len(a) != len(b):
             return True
 
         for x, y in zip(a, b):
-            if guard_or_false(x != y):
-                # We know they are not the same.
-                return True
-
-            # They are the same or we do not know if they are the same or not.
-            # 1==1 no-broadcast
-            # u0==1 and 1==u0 cases. We broadcast!
-            if guard_or_false(sym_and(x == 1, y == 1)):
-                pass
-            elif guard_or_false(sym_or(x == 1, y == 1)):
-                # assume broadcasting.
-                return True
-
-            # u0==u1 assume the same, no broadcasting!
-            torch._check(
-                x == y,
-                lambda: "sizes assumed to be the same due to unbacked broadcasting semantics",
-            )
+            if statically_known_true(x == y):
+                continue
+            return True
 
         return False
 
@@ -3355,6 +3352,14 @@ def _unsqueeze_multiple(x: TensorLikeType, dimensions: list[int]) -> TensorLikeT
     return x
 
 
+def _contiguous_or_clone_without_guards(x: TensorLikeType) -> TensorLikeType:
+    from torch._prims_common import is_contiguous_or_false
+
+    if is_contiguous_or_false(x):
+        return x
+    return x.clone(memory_format=torch.contiguous_format)
+
+
 @register_decomposition(aten.native_group_norm.default)
 def native_group_norm(
     input: Tensor,
@@ -3400,8 +3405,12 @@ def native_group_norm(
                 bias, [1, num_groups, num_channels // num_groups, 1]
             )
             b = b + bias_reshaped
-        w = w.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
-        b = b.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
+        w = _contiguous_or_clone_without_guards(w).as_strided(
+            [batch_size, num_channels], [num_channels, 1]
+        )
+        b = _contiguous_or_clone_without_guards(b).as_strided(
+            [batch_size, num_channels], [num_channels, 1]
+        )
         broadcast_dims = list(range(2, input.ndim))
         unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
         unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
@@ -3958,6 +3967,15 @@ def _reshape_view_helper_core_alg(
             # NOTE: using split_dim instead of unsqueeze may seem silly here,
             # but it's necessary to get the strides correct
             a_ = prims.split_dim(a_, last_dim, a_.shape[last_dim])
+            idx = idx + 1
+            continue
+
+        # A target dimension of length 1 can always be produced by splitting
+        # the current source dimension with an outer length of 1. Do this before
+        # equality checks so symbolic source sizes do not specialize on whether
+        # they are 1.
+        if isinstance(length, utils.IntWithoutSymInt) and length == 1:
+            a_ = prims.split_dim(a_, idx, 1)
             idx = idx + 1
             continue
 

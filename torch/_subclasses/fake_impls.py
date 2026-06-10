@@ -1025,8 +1025,10 @@ def _view_unbacked_meta(
     from torch._prims import view_of
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
-    # Creates a valid shape
-    shape = utils.extract_shape_from_varargs(shape, validate=False)
+    # Creates a valid shape. Keep the pre-inference shape around so retries
+    # after symbol unification can re-run -1 inference with the new equalities.
+    original_shape = utils.extract_shape_from_varargs(shape, validate=False)
+    shape = original_shape
 
     # Reshape may be given a shape with a -1 length
     # This indicates that the dimension's length should be inferred
@@ -1098,7 +1100,7 @@ def _view_unbacked_meta(
         ):
             return _view_unbacked_meta(
                 a,
-                shape,
+                original_shape,
                 size_oblivious_enabled=True,
                 allow_copy=allow_copy,
                 tried_duck_specialize=True,
@@ -1933,7 +1935,10 @@ def register_fast_op_impl(
 def infer_size(
     a: Sequence[IntLikeType], b: Sequence[IntLikeType]
 ) -> tuple[IntLikeType, ...]:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        statically_known_true,
+    )
 
     dimsA = len(a)
     dimsB = len(b)
@@ -1945,6 +1950,16 @@ def infer_size(
         dimB = dimsB - 1 - offset
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
+
+        if statically_known_true(sizeA == sizeB):
+            expandedSizes[i] = sizeA
+            continue
+        if statically_known_true(sizeA == 1):
+            expandedSizes[i] = sizeB
+            continue
+        if statically_known_true(sizeB == 1):
+            expandedSizes[i] = sizeA
+            continue
 
         # NB: It is very important to test for broadcasting, before testing
         # sizeA == sizeB.  This is because the broadcasting tests are likely
@@ -2003,7 +2018,7 @@ def make_fast_binary_impl(
         if final_shape is None:
             raise AssertionError("final_shape must not be None")
 
-        from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
+        from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
         # Do some extra safety checks to see if the output
         # stride is obvious
@@ -2012,7 +2027,7 @@ def make_fast_binary_impl(
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
                 # take the slow path if result is not determined.
-                and guard_or_false(sym_eq(op.shape, final_shape))  # type: ignore[arg-type]
+                and statically_known_true(sym_eq(op.shape, final_shape))  # type: ignore[arg-type]
             ):
                 break
         else:
