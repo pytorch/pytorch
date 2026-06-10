@@ -9,8 +9,6 @@ import torch.distributed as dist
 import torch.distributed._dist2 as dist2
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    requires_gloo,
-    requires_nccl,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import IS_LINUX, run_tests, TestCase
@@ -266,12 +264,14 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
             self.assertEqual(merged_pg.group_name, "merged_pg")
 
 
+@unittest.skipUnless(
+    dist.is_gloo_available(), "c10d was not compiled with the Gloo backend"
+)
 class ProcessGroupGlooTest(Dist2MultiProcessTestCase):
     @property
     def device(self) -> torch.device:
         return torch.device("cpu")
 
-    @requires_gloo()
     def new_group(self) -> torch.distributed.ProcessGroup:
         os.environ["RANK"] = str(self.rank)
         os.environ["WORLD_SIZE"] = str(self.world_size)
@@ -285,12 +285,14 @@ class ProcessGroupGlooTest(Dist2MultiProcessTestCase):
         )
 
 
+@unittest.skipUnless(
+    dist.is_nccl_available(), "c10d was not compiled with the NCCL backend"
+)
 class ProcessGroupNCCLTest(Dist2MultiProcessTestCase):
     @property
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def new_group(self) -> torch.distributed.ProcessGroup:
         os.environ["RANK"] = str(self.rank)
