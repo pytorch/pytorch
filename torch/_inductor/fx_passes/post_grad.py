@@ -21,7 +21,12 @@ from torch._inductor.custom_graph_pass import (
 )
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
-from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+from torch._prims_common import (
+    canonicalize_dims,
+    is_boolean_dtype,
+    is_expandable_to,
+    is_integer_dtype,
+)
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
@@ -81,6 +86,16 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
+_MASKED_INVARIANT_EXPAND_DIV_OPS = (
+    aten.div.Tensor,
+    aten.div.Scalar,
+)
+# This rewrite currently materializes the mask count before the final reduction.
+# Keep it to shapes large enough to amortize the extra launches.
+_MIN_MASKED_INVARIANT_EXPAND_COUNT = 128
+_MIN_MASKED_INVARIANT_BASE_REDUCTION_COUNT = 128
+_MIN_MASKED_INVARIANT_EXPANDED_NUMEL = 1_000_000
+
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
     PatternMatcherPass(),
@@ -139,6 +154,316 @@ def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
         additional_deps_map[random_nodes[i]] = OrderedSet([random_nodes[i - 1]])
 
     preserve_node_ordering(graph, additional_deps_map)
+
+
+def _is_numeric_scalar(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_call_function(node: Any, target: Any) -> bool:
+    return (
+        isinstance(node, fx.Node)
+        and node.op == "call_function"
+        and node.target is target
+    )
+
+
+def _get_tensor_meta(node: Any) -> torch.Tensor | None:
+    if not isinstance(node, fx.Node):
+        return None
+    meta_val = node.meta.get("val")
+    return meta_val if isinstance(meta_val, torch.Tensor) else None
+
+
+def _shapes_statically_equal(lhs: Sequence[Any], rhs: Sequence[Any]) -> bool:
+    return len(lhs) == len(rhs) and all(
+        statically_known_true(sym_eq(a, b)) for a, b in zip(lhs, rhs)
+    )
+
+
+def _normalize_reduction_dims(dim: Any, rank: int) -> list[int] | None:
+    if dim is None:
+        return list(range(rank))
+    if not isinstance(dim, (int, list, tuple)):
+        return None
+
+    try:
+        dims = canonicalize_dims(rank, dim)
+    except (IndexError, TypeError):
+        return None
+    if isinstance(dims, int):
+        dims = (dims,)
+    if len(dims) != len(OrderedSet(dims)):
+        return None
+    return list(dims)
+
+
+def _static_dim_product(shape: Sequence[Any], dims: list[int]) -> int | None:
+    product = 1
+    for dim in dims:
+        size = shape[dim]
+        if not isinstance(size, int):
+            return None
+        product *= size
+    return product
+
+
+def _static_shape_numel(shape: Sequence[Any]) -> int | None:
+    product = 1
+    for size in shape:
+        if not isinstance(size, int):
+            return None
+        product *= size
+    return product
+
+
+def _is_exact_zero_tensor(value: Any) -> bool:
+    if _is_numeric_scalar(value):
+        return value == 0
+
+    if not isinstance(value, fx.Node):
+        return False
+
+    if value.target is aten.full.default:
+        fill_value = get_arg_value(value, 1, "fill_value")
+        return _is_numeric_scalar(fill_value) and fill_value == 0
+
+    return False
+
+
+def _match_divided_expand(node: Any) -> tuple[fx.Node, Any, Any] | None:
+    candidate = node
+
+    if (
+        not isinstance(candidate, fx.Node)
+        or candidate.op != "call_function"
+        or candidate.target not in _MASKED_INVARIANT_EXPAND_DIV_OPS
+    ):
+        return None
+
+    divisor = get_arg_value(candidate, 1, "other")
+    if not _is_numeric_scalar(divisor):
+        return None
+    div_target = candidate.target
+    candidate = get_arg_value(candidate, 0, "self")
+
+    if not _is_call_function(candidate, aten.expand.default):
+        return None
+
+    return candidate, div_target, divisor
+
+
+def _match_expand_base(expand_node: fx.Node, count_dims: list[int]) -> fx.Node | None:
+    expanded_meta = _get_tensor_meta(expand_node)
+    expand_input = get_arg_value(expand_node, 0, "self")
+    if expanded_meta is None or not isinstance(expand_input, fx.Node):
+        return None
+
+    base = expand_input
+    if _is_call_function(expand_input, aten.reshape.default) or _is_call_function(
+        expand_input, aten.view.default
+    ):
+        view_input = get_arg_value(expand_input, 0, "self")
+        if not isinstance(view_input, fx.Node):
+            return None
+        base = view_input
+
+    base_meta = _get_tensor_meta(base)
+    if base_meta is None:
+        return None
+
+    projected_shape = [
+        size for dim, size in enumerate(expanded_meta.shape) if dim not in count_dims
+    ]
+    if not _shapes_statically_equal(projected_shape, base_meta.shape):
+        return None
+
+    return base
+
+
+def _match_masked_invariant_expand_reduction(
+    sum_node: fx.Node,
+) -> tuple[fx.Node, fx.Node, list[int], list[int], Any, Any, torch.device] | None:
+    if not _is_call_function(sum_node, aten.sum.dim_IntList):
+        return None
+
+    where_node = get_arg_value(sum_node, 0, "self")
+    if not _is_call_function(where_node, aten.where.self):
+        return None
+
+    if len(where_node.users) != 1:
+        return None
+
+    sum_keepdim = get_arg_value(sum_node, 2, "keepdim")
+    sum_dtype = get_arg_value(sum_node, 3, "dtype")
+    if sum_keepdim not in (None, False) or sum_dtype is not None:
+        return None
+
+    mask = get_arg_value(where_node, 0, "condition")
+    zero_branch = get_arg_value(where_node, 1, "self")
+    nonzero_branch = get_arg_value(where_node, 2, "other")
+    if not isinstance(mask, fx.Node) or not _is_exact_zero_tensor(zero_branch):
+        return None
+
+    divided_expand = _match_divided_expand(nonzero_branch)
+    if divided_expand is None:
+        return None
+    expand_node, div_target, divisor = divided_expand
+
+    mask_meta = _get_tensor_meta(mask)
+    expand_meta = _get_tensor_meta(expand_node)
+    sum_meta = _get_tensor_meta(sum_node)
+    if mask_meta is None or expand_meta is None or sum_meta is None:
+        return None
+
+    if (
+        mask_meta.dtype != torch.bool
+        or expand_meta.dtype != torch.float32
+        or sum_meta.dtype != torch.float32
+    ):
+        return None
+
+    if (
+        mask_meta.device.type != "cuda"
+        or expand_meta.device.type != "cuda"
+        or sum_meta.device.type != "cuda"
+    ):
+        return None
+
+    if not _shapes_statically_equal(mask_meta.shape, expand_meta.shape):
+        return None
+
+    rank = expand_meta.dim()
+    reduced_dims = _normalize_reduction_dims(get_arg_value(sum_node, 1, "dim"), rank)
+    if reduced_dims is None:
+        return None
+
+    expanded_strides = expand_meta.stride()
+    count_dims = [
+        dim
+        for dim in reduced_dims
+        if statically_known_true(sym_eq(expanded_strides[dim], 0))
+    ]
+    if not count_dims:
+        return None
+
+    count_dim_product = _static_dim_product(expand_meta.shape, count_dims)
+    if (
+        count_dim_product is None
+        or count_dim_product < _MIN_MASKED_INVARIANT_EXPAND_COUNT
+    ):
+        return None
+    expanded_numel = _static_shape_numel(expand_meta.shape)
+    if expanded_numel is None or expanded_numel < _MIN_MASKED_INVARIANT_EXPANDED_NUMEL:
+        return None
+    # Keep this to the average-over-expanded-lanes pattern from the repro.
+    if divisor != count_dim_product:
+        return None
+
+    base = _match_expand_base(expand_node, count_dims)
+    base_meta = _get_tensor_meta(base)
+    if base is None or base_meta is None:
+        return None
+
+    if base_meta.dtype != torch.float32 or base_meta.device.type != "cuda":
+        return None
+
+    count_dim_set = OrderedSet(count_dims)
+    remaining_base_reduced_dims: list[int] = []
+    base_dim = 0
+    reduced_dim_set = OrderedSet(reduced_dims)
+    for expanded_dim in range(rank):
+        if expanded_dim in count_dim_set:
+            continue
+        if expanded_dim in reduced_dim_set:
+            remaining_base_reduced_dims.append(base_dim)
+        base_dim += 1
+
+    base_reduction_product = _static_dim_product(
+        base_meta.shape, remaining_base_reduced_dims
+    )
+    if (
+        base_reduction_product is None
+        or base_reduction_product < _MIN_MASKED_INVARIANT_BASE_REDUCTION_COUNT
+    ):
+        return None
+
+    expected_output_shape = [
+        size
+        for dim, size in enumerate(base_meta.shape)
+        if dim not in remaining_base_reduced_dims
+    ]
+    if not _shapes_statically_equal(expected_output_shape, sum_meta.shape):
+        return None
+
+    return (
+        mask,
+        base,
+        count_dims,
+        remaining_base_reduced_dims,
+        div_target,
+        divisor,
+        sum_meta.device,
+    )
+
+
+def _insert_masked_invariant_expand_reduction(
+    graph: fx.Graph,
+    mask: fx.Node,
+    base: fx.Node,
+    count_dims: list[int],
+    remaining_base_reduced_dims: list[int],
+    div_target: Any,
+    divisor: Any,
+    device: torch.device,
+) -> fx.Node:
+    inverted_mask = graph.call_function(aten.bitwise_not.default, (mask,))
+    keep = graph.call_function(
+        prims.convert_element_type.default, (inverted_mask, torch.float32)
+    )
+    count = graph.call_function(aten.sum.dim_IntList, (keep, count_dims))
+    count_is_zero = graph.call_function(aten.eq.Scalar, (count, 0))
+    scaled_count = graph.call_function(div_target, (count, divisor))
+    zero = graph.call_function(
+        aten.full.default,
+        ([], 0.0),
+        {
+            "dtype": torch.float32,
+            "layout": torch.strided,
+            "device": device,
+            "pin_memory": False,
+        },
+    )
+    contrib = graph.call_function(aten.mul.Tensor, (base, scaled_count))
+    contrib = graph.call_function(aten.where.self, (count_is_zero, zero, contrib))
+    if remaining_base_reduced_dims:
+        return graph.call_function(
+            aten.sum.dim_IntList, (contrib, remaining_base_reduced_dims)
+        )
+    return contrib
+
+
+def rewrite_masked_invariant_expand_reductions(graph: fx.Graph) -> int:
+    """
+    Rewrite sum(where(mask, 0, expand(base) / divisor), dims) by first counting
+    unmasked lanes along reduced zero-stride expansion dims.
+    """
+    count = 0
+    for node in list(graph.nodes):
+        matched = _match_masked_invariant_expand_reduction(node)
+        if matched is None:
+            continue
+
+        with graph.inserting_before(node):
+            replacement = _insert_masked_invariant_expand_reduction(graph, *matched)
+        node.replace_all_uses_with(replacement)
+        count += 1
+
+    if count:
+        counters["inductor"]["masked_invariant_expand_reduction"] += count
+        graph.eliminate_dead_code()
+
+    return count
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -209,6 +534,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
             )
+        invariant_expand_reduction_rewrites = GraphTransformObserver(
+            gm, "rewrite_masked_invariant_expand_reductions"
+        ).apply_graph_pass(rewrite_masked_invariant_expand_reductions)
+        if invariant_expand_reduction_rewrites:
+            fake_tensor_updater.incremental_update()
         if config.partitioned_scatter_enabled:
             GraphTransformObserver(
                 gm, "partitioned_scatter_optimization"
