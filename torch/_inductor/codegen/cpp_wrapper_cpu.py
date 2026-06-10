@@ -687,6 +687,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
         input/output.
         """
 
+        def gen_rank_check(handle_kind, idx, name, tensor):
+            expected_ndim = len(tensor.get_size())
+            self.prefix.splice_aot(
+                f"""
+                    int64_t {name}_ndim;
+                    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim({handle_kind}[{idx}], &{name}_ndim));
+                    if ({expected_ndim} != {name}_ndim) {{
+                        std::stringstream ss;
+                        ss << "{handle_kind}[{idx}]: unmatched dim count, "
+                           << "expected: {expected_ndim}, " << "but got: " << {name}_ndim
+                           << "\\n";
+                        throw std::runtime_error(std::move(ss).str());
+                    }}
+                """
+            )
+
         def gen_check(handle_kind, idx, name, tensor):
             # Wrap AtenTensorHandle with ConstantHandle for cleaner utility function access
             self.prefix.writeline_aot(
@@ -802,6 +818,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
             self.prefix.splice_aot(
                 f"""
+                AOTI_NOINLINE static void check_input_rank_{idx}(
+                    AtenTensorHandle* input_handles
+                ) {{
+                """
+            )
+            with self.prefix.indent():
+                gen_rank_check("input_handles", idx, name, tensor)
+            self.prefix.writeline_aot("}")
+
+            self.prefix.splice_aot(
+                f"""
                 AOTI_NOINLINE static void check_input_{idx}(
                     AtenTensorHandle* input_handles
                 ) {{
@@ -824,6 +851,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             AOTI_NOINLINE static void __check_inputs_outputs(
                 AtenTensorHandle* input_handles,
                 AtenTensorHandle* output_handles) {
+            """
+        )
+        with self.prefix.indent():
+            for idx in range(len(V.graph.graph_inputs)):
+                self.prefix.writeline_aot(f"check_input_rank_{idx}(input_handles);")
+        self.prefix.splice_aot(
+            """
                 if (!_check_aoti_runtime_check_inputs_env()){
                     return;
                 }

@@ -5059,6 +5059,28 @@ class AOTInductorTestsTemplate:
         with self.assertRaisesRegex(RuntimeError, "unmatched dtype"):
             aoti_module(bad_dtype)
 
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "0"})
+    def test_runtime_rank_check_always_on(self):
+        if self.device == "mps":
+            raise unittest.SkipTest("MPS AOTI does not support this test")
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        good = torch.randn(2, device=self.device)
+        bad_rank = torch.randn(3, 1, device=self.device)
+        model = M().eval().to(self.device)
+        package_path = AOTIRunnerUtil.compile(model, (good,))
+        aoti_module = torch._inductor.aoti_load_package(package_path)
+        aoti_module(good)
+        with self.assertRaisesRegex(RuntimeError, "unmatched dim count"):
+            aoti_module(bad_rank)
+
     def test_fqn(self):
         class NestedChild(torch.nn.Module):
             def __init__(self) -> None:
