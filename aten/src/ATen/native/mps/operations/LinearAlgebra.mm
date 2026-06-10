@@ -79,6 +79,188 @@ AlphaBeta make_alpha_beta(const Scalar& alpha, const Scalar& beta, ScalarType sc
   return alpha_beta;
 }
 
+// Describes how a kernel reads one logical matrix from possibly-strided memory.
+struct Resolved {
+  Tensor view; // original tensor or a contiguous copy
+  int64_t ld; // leading dim (row stride, with the other dim unit-stride)
+  bool trans; // true when stored column-major (the "other" orientation)
+};
+
+Resolved resolve_mat(const Tensor& mat, int64_t row_dim, int64_t col_dim) {
+  const int64_t rows = mat.size(row_dim), cols = mat.size(col_dim);
+  const int64_t row_stride = mat.stride(row_dim), col_stride = mat.stride(col_dim);
+  if (col_stride == 1 && row_stride >= cols) {
+    return {mat, row_stride, false};
+  }
+  if (row_stride == 1 && col_stride >= rows) {
+    return {mat, col_stride, true};
+  }
+  auto contig = mat.contiguous();
+  return {contig, cols, false};
+}
+
+// (NSIMD, VEC) for a launch, every pair has a metal instantiation.
+struct GemvCfg {
+  int nsimd, vec;
+};
+
+GemvCfg pick_gemv_t(c10::ScalarType dt, int64_t outlen, int64_t K, int64_t align) {
+  // for float seems max nsimdgroups doesn't hurt performance
+  if (dt == kFloat) {
+    return {32, 1};
+  }
+  const auto k_big = (K >= 2048);
+  int nsimd, vec;
+  if (outlen >= 4096 && (k_big || K >= 1024)) {
+    vec = 8;
+    nsimd = (K >= 8192) ? 16 : 8;
+  } else if (outlen >= 2560 && (k_big || K >= 1024)) {
+    vec = 4;
+    nsimd = 8;
+  } else if (k_big && outlen >= 1280) {
+    vec = 4;
+    nsimd = 16;
+  } else if (outlen >= 1024) {
+    vec = 2;
+    nsimd = 16;
+  } else if (outlen > 512) {
+    vec = 2;
+    nsimd = 32;
+  } else {
+    vec = 1;
+    nsimd = 32;
+  }
+  // Clamp VEC to the row-stride|offset alignment.
+  if (vec == 8 && (align & 7)) {
+    if (!(align & 3)) {
+      vec = 4;
+      nsimd = 8;
+    } else if (!(align & 1)) {
+      vec = 2;
+      nsimd = 32;
+    } else {
+      vec = 1;
+      nsimd = 32;
+    }
+  } else if (vec == 4 && (align & 3)) {
+    vec = !(align & 1) ? 2 : 1;
+    nsimd = 32;
+  } else if (vec == 2 && (align & 1)) {
+    vec = 1;
+    nsimd = 32;
+  }
+  return {nsimd, vec};
+}
+
+GemvCfg pick_gemv_nt(c10::ScalarType dt, int64_t K, int64_t align) {
+  if (dt == kFloat) {
+    return {4, 1};
+  }
+  const int vec = (!(align & 3) && K >= 512) ? 4 : ((!(align & 1) && K >= 512) ? 2 : 1);
+  return {4, vec};
+}
+
+// Rank-1 GEMV launch. Matrix orientation selects gemv_t vs gemv_nt; one
+// GemvDims packing handles all four mat/vec layouts.
+void dispatch_gemv(const Tensor& A,
+                   const Tensor& B,
+                   const Tensor& out,
+                   const std::optional<Tensor>& self,
+                   const Scalar& alpha,
+                   const Scalar& beta,
+                   at_gemm::GemmEpilogue epi,
+                   bool m_is_one,
+                   int64_t outlen,
+                   int64_t K) {
+  const auto dt = out.scalar_type();
+  const std::string dt_str = scalarToMetalTypeString(out);
+  constexpr int64_t r = 0, c = 1;
+
+  // Matrix is B when M==1, else A; resolve to (ld, trans).
+  const Resolved mat = resolve_mat(m_is_one ? B : A, r, c);
+  // gemv_t when the output runs along the matrix's columns; else gemv_nt.
+  const bool gemv_use_t = m_is_one ? !mat.trans : mat.trans;
+  const int64_t align = mat.ld | mat.view.storage_offset();
+  const GemvCfg cfg = gemv_use_t ? pick_gemv_t(dt, outlen, K, align) : pick_gemv_nt(dt, K, align);
+
+  const auto vvec = m_is_one ? A : B;
+  const auto vec_xs = m_is_one ? A.stride(c) : B.stride(r);
+
+  Tensor self_e;
+  int32_t out_stride = 0;
+  if (epi == at_gemm::GemmEpilogue::AlphaBeta) {
+    TORCH_INTERNAL_ASSERT(self.has_value());
+    self_e = self->expand_as(out);
+    out_stride = static_cast<int32_t>(m_is_one ? self_e.stride(c) : self_e.stride(r));
+  } else {
+    self_e = mat.view; // dummy binding for buffer(4); never dereferenced
+  }
+
+  // gemv_t indexes self at (0,n) -> self_c; gemv_nt at (row,0) -> self_r.
+  at_gemm::GemvDims dims;
+  dims.n = static_cast<int>(outlen);
+  dims.K = static_cast<int>(K);
+  dims.ld = static_cast<int>(mat.ld);
+  dims.xs = static_cast<int>(vec_xs);
+  dims.self_r = gemv_use_t ? 0 : out_stride;
+  dims.self_c = gemv_use_t ? out_stride : 0;
+
+  const std::string fname = fmt::format("gemv_{}_{}_{}_{}_{}",
+                                        gemv_use_t ? "t" : "nt",
+                                        dt_str,
+                                        cfg.nsimd,
+                                        cfg.vec,
+                                        epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none");
+  auto pso = lib.getPipelineStateForFunc(fname);
+  const NSUInteger threads_per_tg = static_cast<NSUInteger>(cfg.nsimd * 32);
+  const int64_t num_groups =
+      gemv_use_t ? ((outlen + 32 * cfg.vec - 1) / (32 * cfg.vec)) : ((outlen + cfg.nsimd - 1) / cfg.nsimd);
+  const std::array<float, 2> ab = {static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "gemm_gemv", {mat.view, vvec});
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, mat.view, vvec, out, dims, self_e, ab);
+      [enc dispatchThreadgroups:MTLSizeMake(num_groups, 1, 1) threadsPerThreadgroup:MTLSizeMake(threads_per_tg, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+}
+
+// Rank-1 GEMV gate for mm/addmm: dispatch when out is rank-1 (M==1 xor N==1)
+// and unit-stride along its length, otherwise return false to fall back to MPSGraph
+// A=(M,K), B=(K,N), self=bias.
+bool try_mps_gemv(const Tensor& A,
+                  const Tensor& B,
+                  const Tensor& out,
+                  const std::optional<Tensor>& self,
+                  const Scalar& alpha,
+                  const Scalar& beta,
+                  at_gemm::GemmEpilogue epi) {
+  if (!c10::isFloatingType(out.scalar_type())) {
+    // only support floats for gemv for now
+    return false;
+  }
+  const auto M = A.size(0);
+  const auto N = B.size(1);
+  const auto K = A.size(1);
+  if (M != 1 && N != 1) {
+    return false;
+  }
+  const auto m_is_one = (M == 1);
+  const auto outlen = m_is_one ? N : M;
+  // Output must be unit-stride along its length for the flat store.
+  const auto out_unit = m_is_one ? (out.stride(1) == 1) : (out.stride(0) == 1);
+  if (!out_unit) {
+    return false;
+  }
+  dispatch_gemv(A, B, out, self, alpha, beta, epi, m_is_one, outlen, K);
+  return true;
+}
+
 Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
   // Handle conjugated inputs by creating resolved copies
   auto self_ = self.is_conj() ? self.resolve_conj() : self;
@@ -695,6 +877,11 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     return output.zero_();
   }
 
+  // Rank-1 (M==1 xor N==1): route mm/mv to the metal GEMV kernels.
+  if (try_mps_gemv(self, other, output, std::nullopt, 1, 0, at_gemm::GemmEpilogue::None)) {
+    return output;
+  }
+
   // MPS matmul returns silently incorrect results if one of the matrix dimensions is greater than 2**15
   // And crashes if its a view of matrix with dimensions larger than 2**15
   // See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
@@ -900,6 +1087,11 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
       output.copy_(*bias_);
       output.mul_(beta);
     }
+    return output;
+  }
+
+  // Rank-1 (M==1 xor N==1): route addmm/addmv to the metal GEMV kernels.
+  if (try_mps_gemv(self, other, output, *bias_, alpha, beta, at_gemm::GemmEpilogue::AlphaBeta)) {
     return output;
   }
 
