@@ -5948,6 +5948,42 @@ print(value, end="")
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device="cuda")
 
+    @serialTest()
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setAllocatorSettings not supported")
+    def test_oom_message_expandable_segments_suggestion(self):
+        """When expandable_segments is already enabled, the OOM error
+        should not suggest enabling it again."""
+        for expandable in (False, True):
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._set_allocator_settings(
+                f"expandable_segments:{expandable}"
+            )
+            try:
+                torch.empty(1024 * 1024 * 1024 * 1024, device="cuda")
+            except torch.cuda.OutOfMemoryError as e:
+                msg = str(e)
+                if expandable:
+                    self.assertNotIn(
+                        "expandable_segments:True",
+                        msg,
+                        "OOM message should not suggest expandable_segments "
+                        "when it is already enabled",
+                    )
+                else:
+                    self.assertIn(
+                        "expandable_segments:True",
+                        msg,
+                        "OOM message should suggest expandable_segments "
+                        "when it is not enabled",
+                    )
+            else:
+                self.fail("Expected OutOfMemoryError")
+
+        # Restore suite baseline
+        torch.cuda.memory._set_allocator_settings(
+            f"expandable_segments:{EXPANDABLE_SEGMENTS}"
+        )
+
     @unittest.skipIf(
         not ((IS_X86 or IS_ARM64) and IS_LINUX), "cpp traces are linux x86/aarch64 only"
     )
