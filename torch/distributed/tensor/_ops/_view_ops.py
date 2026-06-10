@@ -1498,6 +1498,63 @@ register_op_strategy_map(
 )
 
 
+@register_op_strategy(aten.as_strided.default, schema_info=RuntimeSchemaInfo(1))
+def as_strided_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Conservatively support as_strided for non-sharded DTensor inputs.
+
+    Dynamo/AOT decompositions can introduce aten.as_strided.default for simple
+    replicated views such as `x[:]`.  We do not yet have a general rule for
+    propagating sharded placements through arbitrary size/stride/offset
+    rewrites, so preserve placements only when no mesh dimension shards the
+    input. Sharded inputs continue to fall back to other registered strategies
+    (if any) or raise as unsupported.
+    """
+
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    mesh = op_schema.get_mesh_from_args(validate=False)
+    size = cast(Sequence[int], op_schema.args_schema[1])
+    stride = cast(Sequence[int], op_schema.args_schema[2])
+
+    output_strategy = OpStrategy([])
+    for input_placement_strategy in input_strategy.strategies:
+        input_src_spec = input_placement_strategy.output_spec
+        if any(isinstance(p, Shard | _StridedShard) for p in input_src_spec.placements):
+            continue
+
+        input_tgt_spec = DTensorSpec(
+            mesh=mesh,
+            placements=input_src_spec.placements,
+            tensor_meta=input_src_spec.tensor_meta,
+        )
+        redistribute_costs: list[list[float]] = [
+            generate_redistribute_costs(input_strategy, input_tgt_spec)
+        ]
+
+        output_tensor_meta = None
+        if input_src_spec.tensor_meta is not None:
+            output_tensor_meta = TensorMeta(
+                shape=torch.Size(size),
+                stride=tuple(stride),
+                dtype=input_src_spec.tensor_meta.dtype,
+            )
+
+        output_spec = DTensorSpec(
+            mesh=mesh,
+            placements=input_src_spec.placements,
+            tensor_meta=output_tensor_meta,
+        )
+        output_strategy.strategies.append(
+            OpSpec(
+                output_specs=output_spec,
+                input_specs=(input_tgt_spec,),
+                redistribute_cost=redistribute_costs,
+            )
+        )
+
+    return output_strategy
+
+
 @register_single_dim_strategy(aten.view_as_complex.default)
 def view_as_complex_single_dim_strategy(op, args_schema, kwargs_schema):
     # view_as_complex: float [..., 2] -> complex [...]

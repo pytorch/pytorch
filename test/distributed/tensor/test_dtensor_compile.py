@@ -711,6 +711,42 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertEqual(res, ref)
 
     @skipIfHpu
+    def test_dtensor_dynamic_replicate_slice(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            return x[:]
+
+        x = DTensor.from_local(
+            torch.rand(16, requires_grad=True), mesh, [Replicate()], run_check=False
+        )
+        torch._dynamo.mark_dynamic(x, 0)
+
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+        self.assertEqual(res.placements, (Replicate(),))
+
+    @skipIfHpu
+    def test_dtensor_dynamic_replicate_slice_default_compile(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            return x[:]
+
+        x = DTensor.from_local(
+            torch.rand(16, requires_grad=True), mesh, [Replicate()], run_check=False
+        )
+        torch._dynamo.mark_dynamic(x, 0)
+
+        ref = fn(x)
+        opt_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+        self.assertEqual(res.placements, (Replicate(),))
+
+    @skipIfHpu
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1981")
     def test_dtensor_dynamic_loss_parallel_log_softmax(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
