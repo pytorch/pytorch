@@ -23,7 +23,6 @@ import tempfile
 import textwrap
 import time
 import unittest
-import warnings
 from collections.abc import (
     Callable,
     Collection,
@@ -74,6 +73,7 @@ from torch.fx.experimental._size_hinting import _sympy_subs
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
+    GuardOnDataDependentSymNode,
     IterateExprs,
     ShapeEnv,
 )
@@ -1510,18 +1510,37 @@ def argsort_sym(
     *,
     reverse: bool = False,
 ) -> list[int]:
+    """
+    Return a symbolic sort order for optimization-only layout heuristics.
+
+    Data-dependent comparisons can fall back to non-guarding optimization hints,
+    so callers must not use this order to make correctness decisions.
+    """
+
     def cmp(a: tuple[int, sympy.Expr], b: tuple[int, sympy.Expr]) -> int:
         a_idx, a_val = a
         b_idx, b_val = b
 
-        def evaluate(expr: bool | torch.SymInt | sympy.Expr) -> bool:
+        def evaluate(
+            expr: bool | torch.SymInt | sympy.Expr,
+            fallback: Callable[[], bool],
+        ) -> bool:
             if isinstance(expr, bool):
                 return expr
-            return shape_env.evaluate_expr(expr, size_oblivious=True)
+            try:
+                return shape_env.evaluate_expr(expr)
+            except GuardOnDataDependentSymNode:
+                return fallback()
 
-        if evaluate(a_val < b_val):
+        def hint_lt(lhs: sympy.Expr, rhs: sympy.Expr) -> bool:
+            # Stride sorting is an optimization-only ordering decision.  Keep
+            # semantic reasoning symbolic first, then fall back to explicit
+            # optimization hints when unbacked comparisons are data-dependent.
+            return shape_env.optimization_hint(lhs) < shape_env.optimization_hint(rhs)
+
+        if evaluate(a_val < b_val, lambda: hint_lt(a_val, b_val)):
             return -1
-        if evaluate(a_val > b_val):
+        if evaluate(a_val > b_val, lambda: hint_lt(b_val, a_val)):
             return 1
         # If strides are the same, prefer the original order.
         # (this matches argsort's algorithm).
@@ -1829,11 +1848,14 @@ class AotOnlyBuffer(IndentedBuffer):
 def make_codegen_buffer() -> IndentedBuffer:
     """Construct the IndentedBuffer subclass matching the current codegen mode.
 
+    Dual-wrapper mode -> DualIndentedBuffer (JIT and AOTI both active).
     Pure AOTI -> AotOnlyBuffer (writeline_aot writes; writeline_jit drops).
     Pure JIT  -> IndentedBuffer  (writeline_jit writes; writeline_aot drops).
     """
     from .virtualized import V
 
+    if V.graph.is_dual_wrapper_mode:
+        return DualIndentedBuffer()
     if V.graph.aot_mode:
         return AotOnlyBuffer()
     return IndentedBuffer()
@@ -2415,21 +2437,6 @@ def use_blackwell_cutedsl_grouped_mm(
 
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
-
-    # TODO: Enable CUTLASS in non-AOT cpp_wrapper mode. The CUTLASS
-    # codegen (CUDATemplateKernel.call_kernel) already has cpp_wrapper-aware
-    # arg handling, but the other half is missing: the non-triton branch of
-    # CppWrapperGpu._generate_kernel_call_helper unconditionally emits
-    # `kernels.<name>(...)`, and that AOTInductorModelKernels struct only
-    # exists in AOT mode. Fixing this requires adding dlopen/dlsym loading
-    # for the compiled CUTLASS .so, similar to how the triton branch uses
-    # static CUfunction + loadKernel for non-AOT mode.
-    if V.graph.cpp_wrapper and not V.graph.aot_mode:
-        warnings.warn(
-            "CUTLASS backend is not supported with non-AOT cpp_wrapper mode. "
-            "Skipping CUTLASS backend.",
-        )
-        return False
 
     gemm_size = V.graph.sizevars.optimization_hint(m * n * k, fallback=-1)
     if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:
@@ -3191,9 +3198,11 @@ def get_gpu_shared_memory() -> int:
 
 def get_max_numwarps() -> int:
     if torch.cuda.is_available():
-        warp_size = torch.cuda.get_device_properties().warp_size
-        # pyrefly: ignore [missing-attribute]
-        max_threads_per_block = torch.cuda.get_device_properties().max_threads_per_block
+        device = torch.device("cuda", torch.cuda.current_device())
+        props = DeviceProperties.create(device)
+        warp_size = props.warp_size_or_default
+        max_threads_per_block = props.max_threads_per_block
+        assert max_threads_per_block is not None
     else:
         # Defaults
         warp_size = 32
