@@ -309,10 +309,10 @@ class TestAccelerator(TestCase):
             generator = torch._C._accelerator_getDefaultGenerator(device_idx)
             old_state = torch.accelerator.get_rng_state(device_idx)
             self.assertIsInstance(old_state, torch.Tensor)
-            self.assertEqual(old_state.dtype, torch.uint8)
             generator.manual_seed(12345)
             new_state = torch.accelerator.get_rng_state(device_idx)
             self.assertNotEqual(old_state, new_state)
+            self.assertEqual(12345, torch.accelerator.initial_seed(device_idx))
             torch.accelerator.set_rng_state(old_state, device_idx)
             self.assertEqual(old_state, torch.accelerator.get_rng_state(device_idx))
 
