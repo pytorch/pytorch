@@ -28,6 +28,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
     sys.exit(0)
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = dist.get_default_backend_for_device(device_type)
 
 device_type = (
     acc.type
@@ -220,9 +222,10 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
 
 
 if __name__ == "__main__":
-    if torch.cuda._initialized:
+    mod = torch.get_device_module(device_type)
+    if (device_type == "xpu" or device_type == "cuda") and mod._initialized:
         raise AssertionError(
-            "test_distributed must not have initialized CUDA context on main process"
+            "test_distributed must not have initialized accelerator context on main process"
         )
 
     run_tests()
