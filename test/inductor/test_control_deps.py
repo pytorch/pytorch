@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
@@ -8,9 +10,13 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU_AND_TRITON,
     requires_gpu,
 )
+
+
+requires_cuda_triton = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
 
 
 class TestControlDeps(InductorTestCase):
@@ -573,6 +579,99 @@ class TestControlDeps(InductorTestCase):
             0,
             "expected MutationOutput entries for pass-through values in control_deps",
         )
+
+    def test_stream_cache_setup_only_once_per_config(self):
+        """When codegen_device_guard_enter is called multiple times with the
+        same (device, num_streams, stream_map) config (e.g., forward + backward
+        sharing a wrapper), only the first call should set
+        setup_stream_cache=True.  A different config re-runs setup."""
+        from torch._inductor.codegen.wrapper import (
+            EnterDeviceContextManagerWithStreamInfoLine,
+            PythonWrapperCodegen,
+        )
+
+        codegen = PythonWrapperCodegen()
+        stream_map = {1: 10}
+        lines: list[EnterDeviceContextManagerWithStreamInfoLine] = []
+
+        def capture_writeline(line):
+            if isinstance(line, EnterDeviceContextManagerWithStreamInfoLine):
+                lines.append(line)
+
+        orig_writeline = codegen.writeline
+        codegen.writeline = capture_writeline
+
+        # First call for device 0: should setup
+        codegen.codegen_device_guard_enter(
+            device_idx=0, num_streams=2, stream_idx_to_user_obj_idx=stream_map,
+        )
+        self.assertTrue(lines[0].setup_stream_cache)
+
+        # Same config again: should NOT setup
+        codegen.codegen_device_guard_enter(
+            device_idx=0, num_streams=2, stream_idx_to_user_obj_idx=stream_map,
+        )
+        self.assertFalse(
+            lines[1].setup_stream_cache,
+            "Second entry with same config should skip stream cache setup",
+        )
+
+        # Different device: should setup
+        codegen.codegen_device_guard_enter(
+            device_idx=1, num_streams=2, stream_idx_to_user_obj_idx=stream_map,
+        )
+        self.assertTrue(
+            lines[2].setup_stream_cache,
+            "Different device should setup stream cache",
+        )
+
+        # Re-enter device 0 after device 1: must re-setup because the flat
+        # DEFAULT_STREAM / stream1 variables now hold device 1's values.
+        codegen.codegen_device_guard_enter(
+            device_idx=0, num_streams=2, stream_idx_to_user_obj_idx=stream_map,
+        )
+        self.assertTrue(
+            lines[3].setup_stream_cache,
+            "Re-entering device 0 after device 1 must re-setup stream cache",
+        )
+
+        # Same device, different stream map: must re-setup
+        codegen.codegen_device_guard_enter(
+            device_idx=0, num_streams=2, stream_idx_to_user_obj_idx={1: 20},
+        )
+        self.assertTrue(
+            lines[4].setup_stream_cache,
+            "Same device with different stream map must re-setup",
+        )
+
+        # Same device, more streams: must re-setup
+        codegen.codegen_device_guard_enter(
+            device_idx=0, num_streams=3,
+            stream_idx_to_user_obj_idx={1: 20, 2: 30},
+        )
+        self.assertTrue(
+            lines[5].setup_stream_cache,
+            "Same device with more streams must re-setup",
+        )
+
+        codegen.writeline = orig_writeline
+
+    @requires_gpu()
+    def test_generated_code_uses_get_stream_by_index(self):
+        """Generated inductor code should use _get_stream_by_index to
+        retrieve user streams from the external object registry."""
+
+        def fn(x):
+            s = torch.Stream(device=GPU_TYPE)
+            with s:
+                return x + 1
+
+        x = torch.ones(4, 4, device=GPU_TYPE)
+        result, code = run_and_get_code(torch.compile(fn), x)
+        FileCheck().check("_get_stream_by_index").run(code[0])
+
+        expected = fn(torch.ones(4, 4, device=GPU_TYPE))
+        torch.testing.assert_close(result, expected)
 
 
 if __name__ == "__main__":
