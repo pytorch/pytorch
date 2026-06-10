@@ -6518,6 +6518,130 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder":
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
+    def test_dynamic_shapes_var_keyword(self):
+        class M(torch.nn.Module):
+            def forward(self, input_ids, **kwargs):
+                bias = kwargs["bias"]
+                if kwargs.get("return_dict", False):
+                    return input_ids + bias
+                return input_ids - bias
+
+        m = M()
+        input_ids = torch.randn(3, 8)
+        bias = torch.randn(3, 8)
+        dynamic_shapes = {
+            "input_ids": {0: torch.export.Dim.AUTO},
+            "kwargs": {
+                "return_dict": None,
+                "bias": {0: torch.export.Dim.AUTO},
+            },
+        }
+
+        for strict in (False, True):
+            ep = export(
+                m,
+                (input_ids,),
+                kwargs={"return_dict": True, "bias": bias},
+                dynamic_shapes=dynamic_shapes,
+                strict=strict,
+            )
+            self.assertTrue(
+                torch.allclose(
+                    ep.module()(input_ids, return_dict=True, bias=bias),
+                    m(input_ids, return_dict=True, bias=bias),
+                )
+            )
+
+    def test_dynamic_shapes_var_keyword_nested(self):
+        class M(torch.nn.Module):
+            def forward(self, input_ids, **model_kwargs):
+                return input_ids + model_kwargs["bundle"]["bias"]
+
+        m = M()
+        input_ids = torch.randn(3, 8)
+        bias = torch.randn(3, 8)
+        kwargs = {"bundle": {"bias": bias}}
+        dynamic_shapes = {
+            "input_ids": {0: torch.export.Dim.AUTO},
+            "model_kwargs": {
+                "bundle": {
+                    "bias": {0: torch.export.Dim.AUTO},
+                },
+            },
+        }
+
+        for strict in (False, True):
+            ep = export(
+                m,
+                (input_ids,),
+                kwargs=kwargs,
+                dynamic_shapes=dynamic_shapes,
+                strict=strict,
+            )
+            self.assertTrue(
+                torch.allclose(
+                    ep.module()(input_ids, bundle={"bias": bias}),
+                    m(input_ids, **kwargs),
+                )
+            )
+
+    def test_dynamic_shapes_var_keyword_name_collision(self):
+        class M(torch.nn.Module):
+            def forward(self, input_ids, **model_kwargs):
+                return input_ids + model_kwargs["model_kwargs"]
+
+        m = M()
+        input_ids = torch.randn(3, 8)
+        bias = torch.randn(3, 8)
+        dynamic_shapes = {
+            "input_ids": {0: torch.export.Dim.AUTO},
+            "model_kwargs": {
+                "model_kwargs": {0: torch.export.Dim.AUTO},
+            },
+        }
+
+        for strict in (False, True):
+            ep = export(
+                m,
+                (input_ids,),
+                kwargs={"model_kwargs": bias},
+                dynamic_shapes=dynamic_shapes,
+                strict=strict,
+            )
+            self.assertTrue(
+                torch.allclose(
+                    ep.module()(input_ids, model_kwargs=bias),
+                    m(input_ids, model_kwargs=bias),
+                )
+            )
+
+    def test_dynamic_shapes_builder_var_keyword(self):
+        class M(torch.nn.Module):
+            def forward(self, input_ids, **kwargs):
+                return input_ids + kwargs["bias"]
+
+        m = M()
+        input_ids = torch.randn(3, 8)
+        bias = torch.randn(3, 8)
+        shapes_collection = torch.export.ShapesCollection()
+        shapes_collection[input_ids] = {0: torch.export.Dim.AUTO}
+        shapes_collection[bias] = {0: torch.export.Dim.AUTO}
+
+        for strict in (False, True):
+            ep = export(
+                m,
+                (input_ids,),
+                kwargs={"bias": bias},
+                dynamic_shapes=shapes_collection,
+                strict=strict,
+            )
+            self.assertTrue(
+                torch.allclose(
+                    ep.module()(input_ids, bias=bias),
+                    m(input_ids, bias=bias),
+                )
+            )
+
     def test_dynamic_shapes_builder_pytree(self):
         torch.export.register_dataclass(
             Inp1,

@@ -1500,6 +1500,106 @@ def _get_module_call_graph(
     return gm, module_call_graph
 
 
+def _get_var_keyword_arg_name(mod: torch.nn.Module) -> str | None:
+    signature = inspect.signature(mod.forward)
+    for param in signature.parameters.values():
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            return param.name
+    return None
+
+
+def _get_dynamic_shape_for_traced_arg(
+    dynamic_shapes_by_arg: dict[str, Any],
+    arg_name: str,
+    var_keyword_arg_name: str | None,
+    from_var_keyword: bool,
+) -> Any:
+    if from_var_keyword and var_keyword_arg_name is not None:
+        var_keyword_dynamic_shapes = dynamic_shapes_by_arg.get(var_keyword_arg_name)
+        if (
+            isinstance(var_keyword_dynamic_shapes, dict)
+            and arg_name in var_keyword_dynamic_shapes
+        ):
+            return var_keyword_dynamic_shapes[arg_name]
+
+    if arg_name in dynamic_shapes_by_arg:
+        return dynamic_shapes_by_arg[arg_name]
+
+    raise AssertionError(
+        f"expected dynamic shape spec for traced input {arg_name!r}; "
+        "dynamic_shapes should have been validated before generating range constraints"
+    )
+
+
+def _reorder_kwargs_for_tracing(
+    mod: torch.nn.Module,
+    combined_args: dict[str, Any],
+    kwargs: dict[str, object],
+    dynamic_shapes,
+) -> tuple[dict[str, Any], Any]:
+    # The traced graph uses placeholders based on the raw kwargs passed by the user.
+    # For a **kwargs parameter, signature.bind instead puts those values under the
+    # var-keyword parameter name, so expand that container for range constraints.
+    var_keyword_arg_name = _get_var_keyword_arg_name(mod)
+    combined_args_traced_order: dict[str, Any] = {}
+
+    dynamic_shapes_by_arg: dict[str, Any] | None
+    dynamic_shapes_traced_order: Any = dynamic_shapes
+    dynamic_shapes_traced_order_dict: dict[str, Any] | None = None
+    dynamic_shapes_traced_order_list: list[Any] | None = None
+    if not dynamic_shapes:
+        dynamic_shapes_by_arg = None
+    elif isinstance(dynamic_shapes, dict):
+        dynamic_shapes_by_arg = dynamic_shapes
+        dynamic_shapes_traced_order_dict = {}
+    elif isinstance(dynamic_shapes, (tuple, list)):
+        dynamic_shapes_by_arg = dict(zip(combined_args.keys(), dynamic_shapes))
+        dynamic_shapes_traced_order_list = []
+    else:
+        dynamic_shapes_by_arg = None
+
+    def add_traced_arg(
+        arg_name: str, arg: object, from_var_keyword: bool = False
+    ) -> None:
+        combined_args_traced_order[arg_name] = arg
+        if dynamic_shapes_by_arg is None:
+            return
+        dynamic_shape = _get_dynamic_shape_for_traced_arg(
+            dynamic_shapes_by_arg,
+            arg_name,
+            var_keyword_arg_name,
+            from_var_keyword,
+        )
+        if dynamic_shapes_traced_order_dict is not None:
+            dynamic_shapes_traced_order_dict[arg_name] = dynamic_shape
+        elif dynamic_shapes_traced_order_list is not None:
+            dynamic_shapes_traced_order_list.append(dynamic_shape)
+
+    for arg_name, arg in combined_args.items():
+        if arg_name in kwargs or arg_name == var_keyword_arg_name:
+            continue
+        add_traced_arg(arg_name, arg)
+
+    for arg_name, arg in kwargs.items():
+        from_var_keyword = var_keyword_arg_name is not None and (
+            arg_name not in combined_args or arg_name == var_keyword_arg_name
+        )
+        add_traced_arg(arg_name, arg, from_var_keyword)
+
+    if dynamic_shapes_traced_order_dict is not None:
+        dynamic_shapes_traced_order = dynamic_shapes_traced_order_dict
+    elif isinstance(dynamic_shapes, tuple):
+        if dynamic_shapes_traced_order_list is None:
+            raise AssertionError("expected dynamic_shapes_traced_order_list")
+        dynamic_shapes_traced_order = tuple(dynamic_shapes_traced_order_list)
+    elif isinstance(dynamic_shapes, list):
+        if dynamic_shapes_traced_order_list is None:
+            raise AssertionError("expected dynamic_shapes_traced_order_list")
+        dynamic_shapes_traced_order = list(dynamic_shapes_traced_order_list)
+
+    return combined_args_traced_order, dynamic_shapes_traced_order
+
+
 def _get_range_constraints(
     mod: torch.nn.Module,
     export_artifact: ExportArtifact,
@@ -1524,15 +1624,9 @@ def _get_range_constraints(
     # not based on the signature. I feel it would be better to just enforce
     # one ordering at the start of tracing to avoid confusions, but that is
     # bigger refactor, so do this to unblock for now.
-    combined_args_traced_order = {}
-    for arg in combined_args:
-        if arg not in kwargs:
-            combined_args_traced_order[arg] = combined_args[arg]
-
-    for key in kwargs:
-        combined_args_traced_order[key] = kwargs[key]
-
-    combined_args = combined_args_traced_order
+    combined_args, dynamic_shapes = _reorder_kwargs_for_tracing(
+        mod, combined_args, kwargs, dynamic_shapes
+    )
 
     range_constraints = make_constraints(
         fake_mode,

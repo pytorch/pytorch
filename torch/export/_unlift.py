@@ -2,6 +2,7 @@
 import copy
 import inspect
 import math
+import re
 import warnings
 from collections.abc import Sequence
 from itertools import chain
@@ -105,6 +106,19 @@ def _force_ep_signature_match(ep_guards_code: list[str], input_paths):
         for old_name, new_name in name_mapping.items():
             guard = guard.replace(old_name, new_name)
         new_guards_code.append(guard)
+
+    # Non-strict tracing sees tensors read from **kwargs as the local
+    # var-keyword dict, e.g. L['model_kwargs']['bundle']['bias'].  The unlifted
+    # module exposes those placeholders as original kwarg paths, e.g.
+    # L['bundle']['bias'].
+    input_path_strings = {"L" + pytree.keystr(path) for path in input_paths}
+    for path in sorted(input_paths, key=lambda p: len(p), reverse=True):
+        path_str = pytree.keystr(path)
+        for i, guard in enumerate(new_guards_code):
+            for match in re.finditer(rf"L\['([^']+)'\]{re.escape(path_str)}", guard):
+                if match.group(0) not in input_path_strings:
+                    guard = guard.replace(match.group(0), f"L{path_str}")
+            new_guards_code[i] = guard
 
     return new_guards_code
 
