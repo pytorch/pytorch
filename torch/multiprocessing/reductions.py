@@ -159,7 +159,7 @@ def rebuild_xpu_tensor(
     Rebuild a tensor that was originally on XPU from serialized raw bytes.
 
     XPU lacks IPC support (no cudaIpcMemHandle equivalent), so XPU tensors
-    are serialized as raw bytes (via memoryview of the CPU storage) and
+    are serialized as raw bytes (via numpy().tobytes() of the CPU tensor) and
     reconstructed here before being copied back to XPU.
 
     We avoid fd-based storage sharing because the DupFd / SCM_RIGHTS fd
@@ -431,7 +431,10 @@ def reduce_tensor(tensor):
         # Always contiguous after .contiguous(), so we don't need
         # storage_offset or stride in metadata.
         cpu_tensor = tensor.detach().cpu().contiguous()
-        raw_bytes = memoryview(cpu_tensor.untyped_storage()).tobytes()
+        # Use numpy().tobytes() instead of memoryview(untyped_storage())
+        # to avoid a PYREFLY bad-argument-type lint error (UntypedStorage
+        # is not recognized as a Buffer in type stubs).
+        raw_bytes = cpu_tensor.numpy().tobytes()
         metadata = (
             tuple(cpu_tensor.size()),
             tensor.requires_grad,
