@@ -51,7 +51,6 @@ from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
 from .hints import (
-    _NUM_THREADS_PER_WARP,
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
@@ -87,7 +86,6 @@ from .static_triton_launcher import (
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
-    cc_warp_size,
     CompiledKernel,
     Config,
     GPUTarget,
@@ -207,13 +205,13 @@ def autotune_hints_to_configs(
                     (1, block_size // 4, 1),
                     (1, 1, block_size // 4),
                 )
+            warp_size = device_props.warp_size_or_default
             configs.extend(
                 triton_config(
                     size_hints,
                     *xyz,
-                    num_elements_per_warp=(
-                        device_props.warp_size if device_props.warp_size else 32
-                    ),
+                    num_elements_per_warp=warp_size,
+                    warp_size=warp_size,
                 )
                 for xyz in xyz_options
             )
@@ -727,7 +725,7 @@ class CachingAutotuner(KernelInterface):
         assert device_prop.max_threads_per_multi_processor
         assert device_prop.multi_processor_count
         seen_config_hashes: OrderedSet[Hashable] | None = None
-        warp_size = device_prop.warp_size or 32
+        warp_size = device_prop.warp_size_or_default
         for result in self.compile_results:
             triton_config = result.config
             compiled_binary = result.kernel
@@ -967,8 +965,15 @@ class CachingAutotuner(KernelInterface):
     def prepare_for_caching(self) -> None:
         """
         Statically Launched CUDA Kernels have a raw cubin on them
-        that we don't need to store in the cache(since TritonBundler handles the collection for us)
+        that we don't need to store in the cache(since TritonBundler handles the collection for us),
+        this behavior is gated by keep_static_cubin_raw config.
         """
+        # Only cubin_raw must be retained: __getstate__ already nulls cubin_path
+        # on every serialize, so a cold-container load rehydrates the cubin from
+        # cubin_raw (reload_cubin_path calls reload_cubin_from_raw) instead of
+        # pointing at a missing file.
+        if torch._inductor.config.keep_static_cubin_raw:
+            return
         for result in self.compile_results:
             if isinstance(result, StaticTritonCompileResult):
                 # Don't save this in the inductor cache, as it is very large
@@ -1137,7 +1142,7 @@ class CachingAutotuner(KernelInterface):
         target = GPUTarget(
             compile_meta["device_type"],
             arch,
-            cc_warp_size(compile_meta["cc"]),
+            self.device_props.warp_size_or_default,
         )
 
         options = self._create_compile_options(cfg, compile_meta)
@@ -3264,10 +3269,18 @@ def _enforce_reduction_config_block_minimums(
     return configs
 
 
-def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
-    # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
-    # therefore using half the number of warps here correspondingly.
-    if torch.version.hip:
+def _num_warps(
+    num_warps,
+    max_num_warps=8,
+    min_num_warps=2,
+    register_intensive=False,
+    *,
+    warp_size: int = 32,
+):
+    # On wave64 AMD GPUs (CDNA / gfx9) each warp has 64 lanes, double NVIDIA
+    # and RDNA, so use half the number of warps to keep total thread count
+    # comparable. RDNA (wave32) follows the NVIDIA path.
+    if warp_size == 64:
         max_num_warps = (max_num_warps + 1) // 2
         min_num_warps = (min_num_warps + 1) // 2
     # persistent reduction is register intensive
@@ -3276,13 +3289,10 @@ def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=F
     return next_power_of_2(min(max(num_warps, min_num_warps), max_num_warps))
 
 
-def _check_max_grid_x(size_hints, x, num_warps):
+def _check_max_grid_x(size_hints, x, num_warps, *, warp_size: int = 32):
     # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
     max_grid_x = 2147483647
     max_block_x = TRITON_MAX_BLOCK["X"]
-    warp_size = (
-        64 if torch.version.hip else 32
-    )  # TODO: query warp size once #129663 is merged
     num_blocks = (size_hints["x"] + x - 1) // x
 
     if torch.version.hip:
@@ -3319,6 +3329,8 @@ def triton_config(
     matrix_instr=None,
     waves_per_eu=None,
     kpack=None,
+    *,
+    warp_size: int = 32,
 ) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
@@ -3378,7 +3390,9 @@ def triton_config(
     # Calculate num_warps if they are not hard passed to config
     if num_warps is None:
         num_warps = _num_warps(
-            conditional_product(x, y, z) // num_elements_per_warp, min_num_warps=1
+            conditional_product(x, y, z) // num_elements_per_warp,
+            min_num_warps=1,
+            warp_size=warp_size,
         )
     # we are going to arrive at 2 warps only if bs was too small due to
     # numel being too small. However to workaround some ptx bugs we still
@@ -3395,11 +3409,11 @@ def triton_config(
     # Increase x to satisfy min_elem_per_thread requirements.
     block_size = max(
         conditional_product(x, y, z),
-        min_elem_per_thread * _NUM_THREADS_PER_WARP * num_warps,
+        min_elem_per_thread * warp_size * num_warps,
     )
     x *= math.ceil(block_size / conditional_product(x, y, z))
 
-    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps, warp_size=warp_size)
     x = min(x, size_hints["x"])
 
     cfg = {"XBLOCK": x}
@@ -3471,6 +3485,8 @@ def triton_config_reduction(
     dynamic_scale_rblock=True,
     reduction_hint=None,
     min_num_warps=None,
+    *,
+    warp_size: int = 32,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -3511,10 +3527,13 @@ def triton_config_reduction(
         _num_warps_func = _num_warps
 
     num_warps = _num_warps_func(
-        num_warps, max_num_warps=max_num_warps, register_intensive=register_intensive
+        num_warps,
+        max_num_warps=max_num_warps,
+        register_intensive=register_intensive,
+        warp_size=warp_size,
     )
 
-    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps, warp_size=warp_size)
 
     for prefix in sorted(rnumels):
         while total_numel() > target:
@@ -3622,6 +3641,20 @@ def _handle_combo_kernel_per_subkernel_blocks(
     combo_meta = inductor_meta.get("combo_grid_meta")
     if combo_meta is None or "heuristic_0" not in combo_meta:
         return None
+
+    # CAP no-bench: combo_grid_meta carries a stitched config; skip the
+    # combo_tuning_groups computation and return a single stitched config.
+    # default_config holds BLOCK keys for the grid lambda; backend kwargs
+    # (HIP options like waves_per_eu) come from stitched_backend_kwargs.
+    stitched_warps = combo_meta.get("stitched_num_warps")
+    if stitched_warps is not None:
+        return [
+            triton.Config(
+                combo_meta["stitched_backend_kwargs"],
+                num_warps=stitched_warps,
+                num_stages=combo_meta["stitched_num_stages"],
+            )
+        ]
 
     num_kernels = combo_meta["num_kernels"]
     inductor_meta_clean = {
@@ -3763,6 +3796,8 @@ def triton_config_tiled_reduction(
     num_stages=1,
     register_intensive=False,
     waves_per_eu=None,
+    *,
+    warp_size: int = 32,
 ):
     """
     Construct a tile reduction triton config with some adjustment
@@ -3793,9 +3828,12 @@ def triton_config_tiled_reduction(
         y *= 2
 
     cfg = _get_config({"x": x, "y": y, **rnumels})
-    num_warps = _num_warps(total_numel() // 256, min_num_warps=1)
+    num_warps = _num_warps(total_numel() // 256, min_num_warps=1, warp_size=warp_size)
     num_warps = _num_warps(
-        num_warps, max_num_warps=16, register_intensive=register_intensive
+        num_warps,
+        max_num_warps=16,
+        register_intensive=register_intensive,
+        warp_size=warp_size,
     )
     check_config(cfg, xnumel=size_hints["x"], ynumel=size_hints["y"])
     check_max_block(cfg)
@@ -3897,8 +3935,9 @@ def pointwise(
         triton_meta["device"],
     )
 
+    warp_size = triton_meta["device"].warp_size_or_default
     triton_config_with_settings = functools.partial(
-        triton_config, min_elem_per_thread=min_elem_per_thread
+        triton_config, min_elem_per_thread=min_elem_per_thread, warp_size=warp_size
     )
 
     configs = None
@@ -4131,6 +4170,7 @@ def _reduction_configs(
     )
 
     device_major = triton_meta["device"].major
+    warp_size = triton_meta["device"].warp_size_or_default
     # Prefer smaller MAX_R0_BLOCK for Blackwell
     MAX_R0_BLOCK = 1024 if device_major is not None and device_major >= 10 else 2048
     if size_hints["x"] >= 1024 and loads_and_red >= 10:
@@ -4184,6 +4224,7 @@ def _reduction_configs(
                 num_stages=num_stages,
                 register_intensive=register_intensive,
                 waves_per_eu=waves_per_eu,
+                warp_size=warp_size,
             )
         else:
             # For other cases, use the original function
@@ -4197,6 +4238,7 @@ def _reduction_configs(
                 waves_per_eu=waves_per_eu,
                 dynamic_scale_rblock=dynamic_scale_rblock,
                 reduction_hint=reduction_hint,
+                warp_size=warp_size,
             )
 
     def outer_config_opt():
@@ -4395,6 +4437,8 @@ def adapt_config_for_tiling(
     register_intensive=False,
     persistent_reduction=False,
     waves_per_eu=None,
+    *,
+    warp_size: int = 32,
 ) -> Config:
     """
     Create an adapted configuration based on tiling scores,
@@ -4414,6 +4458,7 @@ def adapt_config_for_tiling(
         num_stages=num_stages,
         register_intensive=register_intensive,
         waves_per_eu=waves_per_eu,
+        warp_size=warp_size,
     )
 
 
@@ -4659,6 +4704,7 @@ def _persistent_reduction_configs(
     rnumel = get_total_reduction_numel(size_hints)
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
+    warp_size = triton_meta["device"].warp_size_or_default
 
     if triton_meta.get("native_matmul"):
         native_matmul_rblock = inductor_meta.get("native_matmul_persistent_rblock")
@@ -4697,6 +4743,7 @@ def _persistent_reduction_configs(
                 rnumel,
                 register_intensive=True,
                 reduction_hint=reduction_hint,
+                warp_size=warp_size,
             )
             for xblock in xblock_vals
             if xblock == 1
@@ -4719,6 +4766,7 @@ def _persistent_reduction_configs(
                     block_sizes["x"],
                     block_sizes["y"],
                     rnumel,
+                    warp_size=warp_size,
                 )
             )
 
@@ -4727,6 +4775,7 @@ def _persistent_reduction_configs(
             size_hints,
             2 * (256 // rnumel) if rnumel <= 256 else 1,
             rnumel,
+            warp_size=warp_size,
         )
     ]
 
@@ -4762,6 +4811,7 @@ def _persistent_reduction_configs(
                         num_warps=num_warps,
                         min_num_warps=min_num_warps,
                         reduction_hint=reduction_hint,
+                        warp_size=warp_size,
                     )
                 ]
 

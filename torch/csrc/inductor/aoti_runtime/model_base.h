@@ -172,7 +172,12 @@ int open(char* pathname, int flags) {
   }
 
   if (flags & O_APPEND) {
-    lseek(fd, 0, SEEK_END);
+    if (_lseeki64(fd, 0, SEEK_END) == -1) {
+      int saved_errno = errno;
+      _close(fd);
+      errno = saved_errno;
+      return -1;
+    }
   }
 
   return fd;
@@ -1084,11 +1089,21 @@ class AOTInductorModelBase {
         dladdr(__func__, &dl_info), "Can't find shared library name");
     int fd = open(dl_info.dli_fname, O_RDONLY);
     AOTI_RUNTIME_CHECK(fd >= 0, "Shared library file cannot be opened");
-    auto fsize = lseek(fd, 0, SEEK_END);
+#ifdef _WIN32
+    auto seek_result = _lseeki64(fd, 0, SEEK_END);
+#else
+    auto seek_result = lseek(fd, 0, SEEK_END);
+#endif
+    AOTI_RUNTIME_CHECK(
+        seek_result >= 0, "Failed to seek to end of shared library file");
     auto weights_size =
         reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
     auto magic_number =
         reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[1];
+    uint64_t fsize = static_cast<uint64_t>(seek_result);
+    AOTI_RUNTIME_CHECK(
+        fsize >= weights_size,
+        "Shared library file is smaller than embedded weights size");
     auto weights_offset = fsize - weights_size;
     AOTI_RUNTIME_CHECK(
         (weights_offset & 0x3fff) == 0,
