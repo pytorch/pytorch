@@ -392,6 +392,11 @@ NON_LINEAR_BOOL_REDUCTION_OPS = [
     aten.any.out,
 ]
 
+ARGMAX_ARGMIN_OPS = {
+    aten.argmax.default: "max",
+    aten.argmin.default: "min",
+}
+
 
 LINEAR_REDUCTION_OPS = [
     op for op in LINEAR_REDUCTION_OP_MAP if op not in NON_LINEAR_BOOL_REDUCTION_OPS
@@ -513,11 +518,6 @@ def max_min_dim_single_dim_strategy(
     return _shard_non_reduction_dim(args_schema, dim, keep_dim, n_outputs=2)
 
 
-@register_single_dim_strategy(
-    [aten.argmax.default, aten.argmin.default],
-    schema_info=RuntimeSchemaInfo(1),
-    allow_uneven_sharding=True,
-)
 def argmax_argmin_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -547,6 +547,29 @@ def argmax_argmin_single_dim_strategy(
             out_d = d - sum(1 for rd in reduce_dims if rd < d)
         strategies.append([_ShardingPlaceholder(out_d), _ShardingPlaceholder(d)])
     return strategies
+
+
+@register_op_strategy(list(ARGMAX_ARGMIN_OPS.keys()), schema_info=RuntimeSchemaInfo(1))
+def argmax_argmin_strategy(op_schema: OpSchema) -> OpStrategy:
+    args_schema = op_schema.args_schema
+    input_strategy = args_schema[0]
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+
+    dims = None
+    if len(args_schema) > 1:
+        dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
+
+    reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
+    keep_dim = len(args_schema) > 2 and bool(args_schema[2])
+    reduction_op = ARGMAX_ARGMIN_OPS[op_schema.op]
+    return common_reduction_strategy(
+        input_strategy,
+        reduce_dims,
+        keep_dim=keep_dim,
+        reduction_linear=False,
+        reduction_op=reduction_op,
+    )
 
 
 def _shard_except_dim_strategy(
