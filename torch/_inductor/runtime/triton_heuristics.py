@@ -146,13 +146,14 @@ def _flex_attention_resource_hint(
         None if config is None else config.num_warps,
     )
     return (
-        f"\n\nFlexAttention {kind} selected options were "
-        f"{selected_options}. Pass explicit kernel_options with smaller "
-        f"tile sizes and/or lower num_stages or "
-        f"num_warps. For example: {flex_kernel_options_example(kind)}. "
-        f"If you did not pin these options, compiling with "
-        f"mode='max-autotune-no-cudagraphs' can also fix this by trying more "
-        f"FlexAttention configs."
+        f"\n\nFlexAttention {kind} selected config uses too much shared "
+        f"memory: {selected_options}. Reduce the kernel resource usage with "
+        f"explicit kernel_options using smaller tile sizes and/or lower "
+        f"num_stages or num_warps. For example: "
+        f"{flex_kernel_options_example(kind)}. If these options were chosen "
+        f"by the default heuristic, compiling with "
+        f"mode='max-autotune-no-cudagraphs' can try additional "
+        f"FlexAttention configs automatically."
     )
 
 

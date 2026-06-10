@@ -4612,7 +4612,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     {"config_args": config_args},
                     config,
                 )
-                self.assertIn(f"FlexAttention {kind} selected options", msg)
+                self.assertIn(
+                    f"FlexAttention {kind} selected config uses too much shared memory",
+                    msg,
+                )
                 self.assertIn(option_name, msg)
                 self.assertIn("max-autotune-no-cudagraphs", msg)
 
