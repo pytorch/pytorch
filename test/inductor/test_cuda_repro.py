@@ -269,9 +269,6 @@ class CudaReproTests(TestCase):
     # Greatest absolute difference: 0.07861328125 at index (14, 13, 1008, 36) (up to 1e-05 allowed)
     # Greatest relative difference: 2.90625 at index (14, 13, 1008, 36) (up to 0.016 allowed)
     @skipIfRocmArch(MI350_ARCH)
-    @skipIfXpu(
-        msg="EFFICIENT_ATTENTION backend is CUDA-only"
-    )
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -1021,9 +1018,7 @@ class CudaReproTests(TestCase):
 
         def record_memory_history(value: bool):
             if torch.xpu.is_available():
-                torch.xpu.memory._record_memory_history(
-                    "all" if value else None
-                )
+                torch.xpu.memory._record_memory_history(value)
             else:
                 torch.cuda.memory._record_memory_history(value)
 
@@ -2381,7 +2376,6 @@ class CudaReproTests(TestCase):
 
     @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
-    @skipIfXpu(msg="cudagraphs disabled on multi-device XPU")
     def test_unused_cpu_input_cudagraphs(self):
         def fn(x, y):
             return x.sin().sin().sin().sin().cos() + 1
@@ -2420,7 +2414,6 @@ class CudaReproTests(TestCase):
 
     @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
-    @skipIfXpu(msg="cudagraphs disabled on multi-device XPU")
     def test_cpu_index(self):
         @torch.compile(fullgraph=True)
         def fn(x):

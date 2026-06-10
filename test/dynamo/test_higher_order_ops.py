@@ -821,8 +821,7 @@ class GraphModule(torch.nn.Module):
             )
 
     @unittest.skipIf(
-        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/184831",
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/184831"
     )
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
@@ -876,8 +875,7 @@ class GraphModule(torch.nn.Module):
         )
 
     @unittest.skipIf(
-        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/184682",
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/184682"
     )
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
@@ -948,8 +946,7 @@ class GraphModule(torch.nn.Module):
             )
 
     @unittest.skipIf(
-        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/183671",
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/183671"
     )
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
@@ -2252,8 +2249,7 @@ def forward(self, l_x_):
             )
 
     @unittest.skipIf(
-        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/183892",
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/183892"
     )
     def test_cond_branches_no_arguments_no_closure(self):
         def fn(x):
@@ -3288,8 +3284,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         self.assertEqual(compiled_fn_2(a, b), fn_2(a, b))
 
     @unittest.skipIf(
-        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/184537",
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/184537"
     )
     def test_hints_wrapper(self):
         def ref_fn(x, y):

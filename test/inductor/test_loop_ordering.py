@@ -681,7 +681,7 @@ class LoopOrderingTest(TestCase):
         torch._dynamo.reset()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
-    @unittest.skipIf(not (SM90OrLater or GPU_TYPE == "xpu"), "sm89 errors out on this test")
+    @unittest.skipIf(not SM90OrLater, "sm89 errors out on this test")
     def test_fp8_cast_and_t(self):
         """
         This test repros the not able to fuses issue in
