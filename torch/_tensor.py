@@ -92,6 +92,27 @@ def _dtype_to_typestr(dtype):
     }[dtype]
 
 
+def _check_and_warn_oversized_storage_copy(tensor, stacklevel=2):
+    if not torch._C._has_storage(tensor):
+        return
+    storage_size = tensor._typed_storage().size()
+    tensor_size = tensor.numel()
+    if storage_size > tensor_size:
+        _warn_oversized_storage_copy(
+            stacklevel=stacklevel + 1
+        )
+
+
+def _warn_oversized_storage_copy(stacklevel=2):
+    from torch._dynamo.utils import warn_once
+    message = (
+        f"Deepcopying or serializing this tensor view will include its full underlying storage"
+        f"which may result in an oversized serialized file or copy. Consider using tensor.clone() before "
+        "serialization or deepcopy if this is not intended and preserving storage sharing is not required."
+    )
+    warn_once(message, stacklevel=stacklevel + 1)
+
+
 # NB: If you subclass Tensor, and want to share the subclassed class
 # across processes, you must also update torch/multiprocessing/reductions.py
 # to define a ForkingPickler serialization mode for the class.
@@ -171,6 +192,7 @@ class Tensor(torch._C.TensorBase):
                         "different type."
                     )
             else:
+                _check_and_warn_oversized_storage_copy(self, stacklevel=3)
                 new_storage = self._typed_storage()._deepcopy(memo)
                 if self.is_quantized:
                     # quantizer_params can be different type based on torch attribute
@@ -384,6 +406,8 @@ class Tensor(torch._C.TensorBase):
                 raise RuntimeError(
                     f"Serialization is not supported for tensors of type {self.qscheme()}"
                 )
+            if not skip_data:
+                _check_and_warn_oversized_storage_copy(self, stacklevel=5)
             # TODO: Once we decide to break serialization FC, no longer
             # need to wrap with TypedStorage
             args_qtensor = (
@@ -494,6 +518,8 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
+            if not skip_data:
+                _check_and_warn_oversized_storage_copy(self, stacklevel=5)
             v3_dtypes = torch.storage._new_dtypes()
             if self.dtype in v3_dtypes:
                 rebuild_func = torch._utils._rebuild_tensor_v3
