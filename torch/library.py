@@ -57,6 +57,28 @@ _defs: set[str] = set()
 _reserved_namespaces = ["prim"]
 
 
+def _plain_int_schema_arg_types(schema: str) -> dict[str, str]:
+    from torchgen.model import BaseTy, BaseType, FunctionSchema, ListType, OptionalType
+
+    def contains_plain_int(typ):
+        if isinstance(typ, BaseType):
+            return typ.name == BaseTy.int
+        if isinstance(typ, (ListType, OptionalType)):
+            return contains_plain_int(typ.elem)
+        return False
+
+    try:
+        parsed_schema = FunctionSchema.parse(schema)
+    except Exception:
+        return {}
+
+    return {
+        arg.name: str(arg.type)
+        for arg in parsed_schema.arguments.flat_all
+        if contains_plain_int(arg.type)
+    }
+
+
 def fallthrough_kernel():
     """
     A dummy function to pass to ``Library.impl`` in order to register a fallthrough.
@@ -269,7 +291,7 @@ class Library:
     def __repr__(self):
         return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
 
-    def define(self, schema, alias_analysis="", *, tags=()):
+    def define(self, schema, alias_analysis="", *, tags=(), _stacklevel=1):
         r"""Defines a new operator and its semantics in the ns namespace.
 
         Args:
@@ -313,6 +335,12 @@ class Library:
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]
         qualname = self.ns + "::" + name
+        torch._ops._set_schema_definition_source(
+            qualname,
+            torch._library.utils.get_source(_stacklevel + 1),
+            schema,
+            _plain_int_schema_arg_types(schema),
+        )
 
         # If the OpOverloadPacket exists already, then this means we're adding a
         # new OpOverload for it. Refresh the packet to include the new OpOverload.
@@ -608,6 +636,7 @@ class Library:
         global _impls
         _impls -= self._op_impls
         _clear_torch_ops_cache(self._op_defs)
+        torch._ops._clear_schema_definition_sources(self._op_defs)
 
 
 def _clear_torch_ops_cache(op_defs):
@@ -665,6 +694,7 @@ def _del_library(
         m.reset()
 
     _clear_torch_ops_cache(op_defs)
+    torch._ops._clear_schema_definition_sources(op_defs)
 
 
 @contextlib.contextmanager
@@ -746,7 +776,7 @@ def define(qualname, schema, *, lib=None, tags=()):
             f'to look like e.g. "(Tensor x) -> Tensor" but '
             f'got "{schema}"'
         )
-    lib.define(name + schema, alias_analysis="", tags=tags)
+    lib.define(name + schema, alias_analysis="", tags=tags, _stacklevel=2)
 
 
 @define.register
@@ -756,7 +786,7 @@ def _(lib: Library, schema, alias_analysis=""):
     """
 
     def wrap(f):
-        name = lib.define(schema, alias_analysis)
+        name = lib.define(schema, alias_analysis, _stacklevel=2)
         lib.impl(name, f)
         return f
 

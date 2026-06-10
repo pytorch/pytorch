@@ -1005,6 +1005,118 @@ class LRUCacheWarningTests(LoggingTestCase):
                 self.fail("lru_cache warning was incorrectly logged")
 
 
+class CustomOpSchemaWarningTests(torch._dynamo.test_case.TestCase):
+    def _run_custom_op_with_changing_int(self, namespace, schema_type):
+        torch._dynamo.reset()
+
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            lib.define(f"multi_input_op({schema_type} a, Tensor b) -> Tensor")
+
+            def meta(a, b):
+                return b.new_empty(b.shape)
+
+            def cpu(a, b):
+                return b + a
+
+            lib.impl("multi_input_op", meta, "Meta")
+            lib.impl("multi_input_op", cpu, "CPU")
+
+            class Holder:
+                pass
+
+            op = getattr(torch.ops, namespace).multi_input_op
+
+            def forward(input_data, input_tensor):
+                return op(input_data.input_int, input_tensor)
+
+            compiled = torch.compile(forward, backend="eager")
+            input_data = Holder()
+            input_tensor = torch.ones(1)
+            for i in range(3):
+                input_data.input_int = i
+                compiled(input_data, input_tensor)
+
+    def test_custom_op_int_schema_warns_when_symint_specializes(self):
+        with self.assertLogs("torch._ops", level="WARNING") as records:
+            self._run_custom_op_with_changing_int(
+                "test_custom_op_int_schema_warning", "int"
+            )
+
+        self.assertEqual(len(records.output), 1)
+        msg = records.output[0]
+        self.assertIn("Operator test_custom_op_int_schema_warning::multi_input_op", msg)
+        self.assertIn("argument 'a'", msg)
+        self.assertIn("schema defines this argument as int", msg)
+        self.assertIn("Use SymInt in the operator schema", msg)
+        self.assertIn("multi_input_op(int a, Tensor b) -> Tensor", msg)
+        self.assertIn("test_repros.py", msg)
+
+    def test_custom_op_symint_schema_does_not_warn(self):
+        with self.assertNoLogs("torch._ops", level="WARNING"):
+            self._run_custom_op_with_changing_int(
+                "test_custom_op_symint_schema_warning", "SymInt"
+            )
+
+    def test_overloaded_packet_call_does_not_warn_for_other_int_overload(self):
+        torch._dynamo.reset()
+        namespace = "test_custom_op_overloaded_schema_warning"
+
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            lib.define("multi_input_op.symint(SymInt a, Tensor b) -> Tensor")
+            lib.define("multi_input_op.int(int a, Tensor b) -> Tensor")
+
+            def meta(a, b):
+                return b.new_empty(b.shape)
+
+            def symint_cpu(a, b):
+                return b + a + 20
+
+            def int_cpu(a, b):
+                return b + a + 10
+
+            lib.impl("multi_input_op.symint", meta, "Meta")
+            lib.impl("multi_input_op.int", meta, "Meta")
+            lib.impl("multi_input_op.symint", symint_cpu, "CPU")
+            lib.impl("multi_input_op.int", int_cpu, "CPU")
+
+            class Holder:
+                pass
+
+            op = getattr(torch.ops, namespace).multi_input_op
+
+            def forward(input_data, input_tensor):
+                return op(input_data.input_int, input_tensor)
+
+            compiled = torch.compile(forward, backend="eager")
+            input_data = Holder()
+            input_tensor = torch.ones(1)
+
+            with self.assertNoLogs("torch._ops", level="WARNING"):
+                for i in range(3):
+                    input_data.input_int = i
+                    self.assertEqual(
+                        compiled(input_data, input_tensor), input_tensor + i + 20
+                    )
+
+    def test_scoped_library_destroy_clears_schema_warning_metadata(self):
+        namespace = "test_custom_op_scoped_schema_warning"
+
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            lib.define("multi_input_op(int a, Tensor b) -> Tensor")
+
+            def meta(a, b):
+                return b.new_empty(b.shape)
+
+            def cpu(a, b):
+                return b + a
+
+            lib.impl("multi_input_op", meta, "Meta")
+            lib.impl("multi_input_op", cpu, "CPU")
+
+        with self.assertNoLogs("torch._ops", level="WARNING"):
+            self._run_custom_op_with_changing_int(namespace, "SymInt")
+
+
 class ReproTests(torch._dynamo.test_case.TestCase):
     def setUp(self) -> None:
         try:
