@@ -39,7 +39,7 @@ from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._opaque_base import OpaqueBase
 from torch._ops import OpOverload
-from torch._prims_common import CUDARngStateHelper
+from torch._prims_common import compute_required_storage_length, CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
@@ -110,6 +110,18 @@ def _unwrap_tensor_subclasses_no_symints(
 zip = strict_zip
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
+
+
+def _resize_storage_if_needed(dst: Tensor, src: Tensor) -> None:
+    dst_storage = dst.untyped_storage()
+    required_nbytes = (
+        compute_required_storage_length(
+            src.size(), src.stride(), typing.cast(int, src.storage_offset())
+        )
+        * src.element_size()
+    )
+    if dst_storage.nbytes() < required_nbytes:
+        dst_storage.resize_(required_nbytes)
 
 
 def _unwrap_no_symints(args: list[Any]) -> list[Any]:
@@ -692,6 +704,7 @@ class _RuntimeForwardEpilogue:
                     updated_inpt = updated_inpt.alias
                 # We need to grab the size/stride/storage_offset from the compiled forward,
                 # and use that to mutate the metadata of the input
+                _resize_storage_if_needed(original_inpt, updated_inpt)
                 original_inpt.as_strided_(
                     updated_inpt.size(),
                     updated_inpt.stride(),
@@ -699,6 +712,7 @@ class _RuntimeForwardEpilogue:
                 )
             else:
                 if meta.mutates_data and meta.mutates_metadata:
+                    _resize_storage_if_needed(original_inpt, updated_inpt)
                     original_inpt.as_strided_(
                         updated_inpt.size(),
                         updated_inpt.stride(),
@@ -1015,6 +1029,7 @@ def _create_runtime_wrapper(
         mut_globals: dict[str, object] = {
             "torch": torch,
             "_unwrap_tensoralias": _unwrap_tensoralias,
+            "_resize_storage_if_needed": _resize_storage_if_needed,
         }
         for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
             meta = runtime_metadata.input_info[inpt_idx]
@@ -1033,11 +1048,13 @@ def _create_runtime_wrapper(
                     mut_lines.append(f"    _u{i} = _unwrap_tensoralias({ui})")
                 else:
                     mut_lines.append(f"    _u{i} = {ui}")
+                mut_lines.append(f"    _resize_storage_if_needed({oi}, _u{i})")
                 mut_lines.append(
                     f"    {oi}.as_strided_(_u{i}.size(), _u{i}.stride(), _u{i}.storage_offset())"
                 )
             else:
                 if meta.mutates_data and meta.mutates_metadata:
+                    mut_lines.append(f"    _resize_storage_if_needed({oi}, {ui})")
                     mut_lines.append(
                         f"    {oi}.as_strided_({ui}.size(), {ui}.stride(), {ui}.storage_offset())"
                     )
