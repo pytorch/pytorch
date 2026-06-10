@@ -155,9 +155,37 @@ jobs:
           bash .ci/${{ inputs.PACKAGE_TYPE }}/build.sh
 
       # Bare-runner path: spawn the build container manually.
+      - name: configure aws credentials
+        id: aws_creds
+        if: ${{ !inputs.use_container_directive && inputs.build_environment != 'linux-s390x-binary-manywheel' && startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        if: ${{ !inputs.use_container_directive && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
+          docker-image-name: ${{ inputs.DOCKER_IMAGE }}
+          custom-tag-prefix: ${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
+          docker-build-dir: .ci/docker
+          docker-build-script: manywheel/build.sh
+
+      - name: Pull Docker image
+        if: ${{ !inputs.use_container_directive && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+
       - name: Build PyTorch binary (docker run)
         if: ${{ !inputs.use_container_directive }}
         shell: bash
+        env:
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image || format('pytorch/{0}:{1}', inputs.DOCKER_IMAGE, inputs.DOCKER_IMAGE_TAG_PREFIX) }}
         run: |
           set -x
           container_name=$(docker run \

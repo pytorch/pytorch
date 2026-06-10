@@ -62,6 +62,13 @@ name: !{{ build_environment }}
   {%- set timeout_minutes = 420 %}
   {%- set runner_prefix = "" %}
   {%- set use_container_directive = false %}
+{%- elif "xpu" in build_environment %}
+  {%- set build_runs_on = "linux.12xlarge.memory.ephemeral" %}
+  {%- set test_runs_on  = "" %}
+  {%- set alpine_image  = "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine" %}
+  {%- set timeout_minutes = common.timeout_minutes %}
+  {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
+  {%- set use_container_directive = false %}
 {%- else %}
   {%- set build_runs_on = "linux.12xlarge.memory.ephemeral" %}
   {%- set test_runs_on  = "" %}{# CPU/CUDA test runners are picked per-matrix entry below #}
