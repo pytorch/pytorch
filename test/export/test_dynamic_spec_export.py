@@ -63,7 +63,7 @@ def _has_assert_scalar(gm):
     )
 
 
-# Modules with explicit signatures so PARAMS name lookup works.
+# Modules with explicit signatures so ParamsSpec name lookup works.
 class _ModX(torch.nn.Module):
     def forward(self, x):
         return x.sum(0)
@@ -174,7 +174,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
 
     @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
     def test_unbacked_raises_dde_on_branching(self):
-        """Without min/max, branching on a VAR dim raises a DDE
+        """Without min/max, branching on a ShapeVar dim raises a DDE
         (export wraps it as a UserError)."""
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
@@ -892,7 +892,7 @@ class TestContainerSpec(TestCase):
     # ---- Positive cases ----
 
     def test_seq_spec_on_list_of_tensors(self):
-        """L marks each list position dynamic independently."""
+        """SeqSpec marks each list position dynamic independently."""
 
         class M(torch.nn.Module):
             def forward(self, xs):
@@ -976,7 +976,7 @@ class TestContainerSpec(TestCase):
         self.assertRegex(ep_str, r'p_second: "f32\[u\d+, 3\]"')
 
     def test_object_spec_on_custom_pytree_node(self):
-        """OBJ on a class registered via
+        """ObjectSpec on a class registered via
         ``pytree.register_pytree_node`` with a caller-supplied
         ``flatten_with_keys_fn`` that yields ``GetAttrKey`` entries."""
 
@@ -987,7 +987,7 @@ class TestContainerSpec(TestCase):
 
         # Caller supplies flatten / unflatten / flatten_with_keys_fn —
         # the KeyPath shape is whatever the caller chooses to return.
-        # We use GetAttrKey so OBJ can address fields by name.
+        # We use GetAttrKey so ObjectSpec can address fields by name.
         def _flatten(c):
             return [c.a, c.b], None
 
@@ -1078,7 +1078,7 @@ class TestContainerSpec(TestCase):
         self.assertRegex(ep_str, r'box_y: "f32\[u\d+, 3\]"')
 
     def test_nested_dict_of_seq_spec(self):
-        """Nested DICT({"foo": L([TensorSpec, None])}) — first
+        """Nested DictSpec({"foo": SeqSpec([TensorSpec, None])}) — first
         list elem dynamic, second left to default (static)."""
 
         class M(torch.nn.Module):
@@ -1164,7 +1164,7 @@ class TestContainerSpec(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            r"L expected list/tuple, got dict",
+            r"SeqSpec expected list/tuple, got dict",
         ):
             export(
                 M(),
@@ -1180,7 +1180,7 @@ class TestContainerSpec(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            r"L has 2 entries beyond runtime sequence length 1",
+            r"SeqSpec has 2 entries beyond runtime sequence length 1",
         ):
             export(
                 M(),
@@ -1205,7 +1205,7 @@ class TestContainerSpec(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            r"shapes_spec\['d'\]: DICT has entries \['missing'\] that do not match any key in the runtime dict\. Runtime keys: \['a'\]",
+            r"shapes_spec\['d'\]: DictSpec has entries \['missing'\] that do not match any key in the runtime dict\. Runtime keys: \['a'\]",
         ):
             export(
                 M(),
@@ -1229,7 +1229,7 @@ class TestContainerSpec(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            r"OBJ has entries .*'nope'.* that do not match any attribute",
+            r"ObjectSpec has entries .*'nope'.* that do not match any attribute",
         ):
             export(
                 M(),
@@ -1241,8 +1241,8 @@ class TestContainerSpec(TestCase):
     def test_where_path_accumulates_in_nested_error(self):
         """Errors from nested specs should report the full path to the
         offending spot, exercising all three ``where``-formatting
-        variants: ``[str]`` (DICT), ``.attr`` (OBJ), and
-        ``[int]`` (L)."""
+        variants: ``[str]`` (DictSpec), ``.attr`` (ObjectSpec), and
+        ``[int]`` (SeqSpec)."""
         import dataclasses
 
         @dataclasses.dataclass
@@ -1259,7 +1259,7 @@ class TestContainerSpec(TestCase):
             ValueError,
             re.escape(
                 "shapes_spec['batch']['b'].items[1]: "
-                "DICT has entries ['missing'] that do not match "
+                "DictSpec has entries ['missing'] that do not match "
                 "any key in the runtime dict. Runtime keys: ['data']"
             ),
         ):
@@ -1323,7 +1323,7 @@ class TestContainerSpec(TestCase):
         ``pytree.tree_flatten(value)``.
 
         Proof technique: build a "complete" container spec where every
-        leaf is a unique T whose VAR name encodes the
+        leaf is a unique TensorSpec whose ShapeVar name encodes the
         ``id()`` of the tensor it targets. After flattening the user
         spec, assert that the i-th returned spec carries the name
         corresponding to the i-th tensor from
@@ -1343,7 +1343,7 @@ class TestContainerSpec(TestCase):
 
         def _build_complete_spec(v):
             """Build a container spec that targets every tensor in v
-            with a uniquely-named VAR."""
+            with a uniquely-named ShapeVar."""
             if isinstance(v, torch.Tensor):
                 return T([VAR(f"t{id(v)}")])
             if isinstance(v, (list, tuple)):
@@ -1402,7 +1402,7 @@ class TestContainerSpec(TestCase):
                 self.assertIsInstance(
                     slot_spec,
                     T,
-                    msg=f"slot {i} is {slot_spec!r} (expected T) "
+                    msg=f"slot {i} is {slot_spec!r} (expected TensorSpec) "
                     f"for case {arg_value!r}",
                 )
                 expected = f"t{id(leaf)}"
