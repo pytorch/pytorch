@@ -5279,13 +5279,26 @@ infinitely_differentiable_native_group_norm_backward(
                .reshape_as(X);
     }
   }
-  if (grad_input_mask[1] && dY.defined()) {
-    dgamma = ((ds - db * mean_tensor) * rstd_tensor)
-                 .sum(0)
-                 .reshape_as(toNonOptTensor(gamma));
+
+  auto dparam_options{
+      isDefined(gamma)
+          ? gamma->options()
+          : X.options().memory_format(at::MemoryFormat::Contiguous)};
+  if (grad_input_mask[1]) {
+    if (dY.defined()) {
+      dgamma = ((ds - db * mean_tensor) * rstd_tensor)
+                   .sum(0)
+                   .reshape_as(toNonOptTensor(gamma));
+    } else {
+      dgamma = at::zeros_symint({C}, dparam_options);
+    }
   }
-  if (grad_input_mask[2] && dY.defined()) {
-    dbeta = db.sum(0).reshape_as(toNonOptTensor(gamma));
+  if (grad_input_mask[2]) {
+    if (dY.defined()) {
+      dbeta = db.sum(0).reshape_as(toNonOptTensor(gamma));
+    } else {
+      dbeta = at::zeros_symint({C}, dparam_options);
+    }
   }
 
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
