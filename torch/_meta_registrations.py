@@ -196,6 +196,12 @@ def meta__standard_gamma(self, generator=None):
     return torch.empty_like(self)
 
 
+@register_meta([aten._sample_dirichlet.default, aten._sample_dirichlet.out])
+@out_wrapper()
+def meta__sample_dirichlet(self, generator=None):
+    return torch.empty_like(self)
+
+
 @register_meta(
     [
         aten._transformer_encoder_layer_fwd.default,
