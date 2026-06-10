@@ -122,7 +122,6 @@ def gemm_epilogue(
     out: torch.Tensor | None = None,
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
-    epilogue_source: str | None = None,
     tuned: bool = False,
 ) -> torch.Tensor:
     """Run a dense GEMM through QuACK with a CuTeDSL epilogue.
@@ -139,7 +138,6 @@ def gemm_epilogue(
         out: Optional preallocated output tensor with shape ``[M, N]``.
         epilogue_args: Optional tensor args captured by the epilogue.
         epilogue_arg_kinds: Explicit ``tile``, ``row``, or ``col`` kind per arg.
-        epilogue_source: Optional source string included in the epilogue cache key.
         tuned: Whether to use QuACK autotuned config selection. Not supported yet.
 
     Returns:
@@ -192,11 +190,6 @@ def gemm_epilogue(
     row_args, col_args, tile_args = _split_epilogue_args(
         epilogue_args, inferred_arg_kinds
     )
-
-    if epilogue_source is not None:
-        from torch._vendor.quack._compile_payload import set_epilogue_source_cache_key
-
-        set_epilogue_source_cache_key(epilogue_fn, epilogue_source)
 
     from torch._vendor.quack.gemm_act import gemm_act as gemm_act_dispatch
 

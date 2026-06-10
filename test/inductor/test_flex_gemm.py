@@ -316,7 +316,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         for check in checks:
             file_check = file_check.check(check)
-        file_check.check("tuned=False").check("epilogue_source=").check_not(
+        file_check.check("tuned=False").check_not("epilogue_source=").check_not(
             "tuned=True"
         ).check_not("from quack").check_not("import quack").check_not(
             "torch._vendor.quack"

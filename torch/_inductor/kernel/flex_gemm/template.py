@@ -33,10 +33,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         call_args, call_kwargs = self._gemm_call_args(
             [arg_name for arg_name, _ in self._template_input_args], config
         )
-        call_kwargs += (
-            f", out={self.get_output()}, tuned={config.tuned!r}, "
-            f"epilogue_source={config.epilogue_source!r}"
-        )
+        call_kwargs += f", out={self.get_output()}, tuned={config.tuned!r}"
 
         code = IndentedBuffer()
         code.splice(
