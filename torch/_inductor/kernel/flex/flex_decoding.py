@@ -210,6 +210,14 @@ def create_flex_decoding_kernel(*args, **kwargs):
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
+    # Decode uses forward-prefixed options, so normalize before deriving buffer
+    # sizes or safety flags from options such as BLOCK_M and SPLIT_KV.
+    for k in list(kernel_options.keys()):
+        if k.startswith("fwd_"):
+            v = kernel_options.pop(k)
+            kernel_options[k[4:]] = v
+        elif k.startswith("bwd_"):
+            kernel_options.pop(k)
 
     seq_q_divisible = V.graph.sizevars.statically_known_true(
         sympy.Eq(Mod(seq_len_q, 128), 0)
@@ -352,13 +360,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     for conf in configs:
         cur_kernel_options = original_kernel_options.copy()
-        # Remove prefix for forward kernels options and delete backward kernel options.
-        for k in list(cur_kernel_options.keys()):
-            if k.startswith("fwd_"):
-                v = cur_kernel_options.pop(k)
-                cur_kernel_options[k[4:]] = v
-            if k.startswith("bwd_"):
-                cur_kernel_options.pop(k)
         # Performance tuning
         cur_kernel_options.setdefault(
             "BLOCK_N", min(conf.block_n, SPARSE_KV_BLOCK_SIZE)

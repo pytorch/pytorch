@@ -6,10 +6,8 @@ from typing import Any
 from torch.utils._ordered_set import OrderedSet
 
 
-_FLEX_ATTENTION_MARKERS = OrderedSet(["SPARSE_Q_BLOCK_SIZE", "SPARSE_KV_BLOCK_SIZE"])
-_FORWARD_OPTION_NAMES = ("BLOCK_M", "BLOCK_N")
-_BACKWARD_OPTION_NAMES = ("BLOCK_M1", "BLOCK_N1", "BLOCK_M2", "BLOCK_N2")
-_OPTIONS_EXAMPLES = {
+FLEX_ATTENTION_MARKERS = OrderedSet(["SPARSE_Q_BLOCK_SIZE", "SPARSE_KV_BLOCK_SIZE"])
+OPTIONS_EXAMPLES = {
     "backward": (
         "kernel_options={'bwd_BLOCK_M1': 32, 'bwd_BLOCK_N1': 32, "
         "'bwd_BLOCK_M2': 32, 'bwd_BLOCK_N2': 32, "
@@ -20,7 +18,7 @@ _OPTIONS_EXAMPLES = {
         "'fwd_num_stages': 1, 'fwd_num_warps': 4}"
     ),
 }
-_TUNING_OPTIONS = {
+TUNING_OPTIONS = {
     "backward": (
         "BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2, num_warps, and "
         "num_stages; use the bwd_ prefix to set backward-only options"
@@ -37,7 +35,7 @@ _TUNING_OPTIONS = {
 
 
 def flex_attention_kind(config_args: dict[str, Any]) -> str | None:
-    if not _FLEX_ATTENTION_MARKERS <= config_args.keys():
+    if not FLEX_ATTENTION_MARKERS <= config_args.keys():
         return None
     if "BLOCK_M1" in config_args:
         return "backward"
@@ -49,11 +47,11 @@ def flex_attention_kind(config_args: dict[str, Any]) -> str | None:
 
 
 def flex_kernel_options_example(kind: str) -> str:
-    return _OPTIONS_EXAMPLES["backward" if kind == "backward" else "forward"]
+    return OPTIONS_EXAMPLES["backward" if kind == "backward" else "forward"]
 
 
 def flex_kernel_tuning_options(kind: str) -> str:
-    return _TUNING_OPTIONS[kind if kind in ("backward", "decode") else "forward"]
+    return TUNING_OPTIONS[kind if kind in ("backward", "decode") else "forward"]
 
 
 def flex_kernel_selected_options(
@@ -63,7 +61,9 @@ def flex_kernel_selected_options(
     num_warps: int | None = None,
 ) -> str:
     option_names = (
-        _BACKWARD_OPTION_NAMES if kind == "backward" else _FORWARD_OPTION_NAMES
+        ("BLOCK_M1", "BLOCK_N1", "BLOCK_M2", "BLOCK_N2")
+        if kind == "backward"
+        else ("BLOCK_M", "BLOCK_N")
     )
     options = [
         f"{name}={config_args[name]}" for name in option_names if name in config_args

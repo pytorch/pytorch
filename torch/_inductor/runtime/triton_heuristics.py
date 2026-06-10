@@ -124,10 +124,6 @@ class NoTritonConfigsError(RuntimeError):
     pass
 
 
-def _is_cuda_resource_error(exc: BaseException | None) -> bool:
-    return isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
-
-
 def _flex_attention_resource_hint(
     inductor_meta: dict[str, Any], config: Config | None
 ) -> str:
@@ -165,9 +161,18 @@ def _no_valid_triton_configs_message(
     if exc is None:
         return "No valid triton configs."
 
+    exc_msg = str(exc)
     hint = (
         _flex_attention_resource_hint(inductor_meta, config)
-        if _is_cuda_resource_error(exc)
+        if (
+            (isinstance(exc, OutOfResources) and exc.name == "shared memory")
+            or (
+                isinstance(exc, torch.cuda.OutOfMemoryError)
+                and "out of resource:" in exc_msg
+                and "Required:" in exc_msg
+                and "Hardware limit:" in exc_msg
+            )
+        )
         else ""
     )
     return f"No valid triton configs. {type(exc).__name__}: {exc}{hint}"
@@ -929,7 +934,7 @@ class CachingAutotuner(KernelInterface):
             if not launchers:
                 config = self.compile_results[-1].config
                 if (
-                    _is_cuda_resource_error(exc)
+                    isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
                     and (
                         config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1
                     )
