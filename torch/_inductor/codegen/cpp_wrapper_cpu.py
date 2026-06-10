@@ -2886,11 +2886,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # ScalarTypeType, LayoutType, and MemoryFormatType are seen as IntType
             # when queried via torch.JitType.type.
             torch.IntType,
+            torch.SymIntType,
             torch.TensorType,
         )
 
         def type_supported(t: torch.JitType) -> bool:
             if isinstance(t, torch.OptionalType):
+                return type_supported(t.getElementType())
+            if isinstance(t, torch.ListType):
                 return type_supported(t.getElementType())
             return isinstance(t, supported_types)
 
@@ -2947,6 +2950,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         op_overload: torch._ops.OpOverload | torch._ops.HigherOrderOperator,
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
+        route_through_call_dispatcher: bool = False,
     ) -> None:
         """Generate a call to a kernel not contained in the C-shim.  This results in
         different code paths for AOT Inductor vs cpp_wrapper Inductor mode."""
@@ -2995,6 +2999,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         # In AOT mode, we use a ProxyExecutor to run fallback kernels.
         if V.graph.aot_mode:
+            if route_through_call_dispatcher:
+                assert isinstance(op_overload, torch._ops.OpOverload), type(op_overload)
+                assert self._compatible_with_stableivalue(op_overload)
+                self.generate_fallback_kernel_with_runtime_lookup_nopython(
+                    get_args,
+                    op_overload,
+                    raw_args,
+                    output_args,  # type: ignore[arg-type]
+                    outputs,
+                )
+                return
+
             self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
                 raw_args,
@@ -3038,6 +3054,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.generate_fallback_kernel_with_runtime_lookup_nopython(
                 get_args,
                 op_overload,
+                raw_args,
                 output_args,  # type: ignore[arg-type]
                 outputs,
             )
@@ -3228,6 +3245,7 @@ if (!custom_op_wrapper) {
         self,
         get_args: Callable[[], Sequence[str]],
         op_overload: torch._ops.OpOverload,
+        raw_args: Sequence[Any],
         output_args: Sequence[str | None],
         raw_outputs: Sequence[ir.Buffer],
     ) -> None:
@@ -3237,19 +3255,29 @@ if (!custom_op_wrapper) {
 
         In the future, we may switch over to directly calling c10::Dispatcher if we need
         to support more datatypes."""
-        if raw_outputs:
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
-                if output_arg is not None
-                and not isinstance(raw_output_arg, ir.MutationOutput)
-            ]
-        else:
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args  # type: ignore[arg-type]
-                if output_arg is not None
-            ]
+        self.include_extra_header("torch/csrc/stable/stableivalue_conversions.h")
+
+        def return_uses_tensor_handle(return_type: torch.JitType) -> bool:
+            if isinstance(return_type, torch.OptionalType):
+                return isinstance(return_type.getElementType(), torch.TensorType)
+            return isinstance(return_type, torch.TensorType)
+
+        raw_output_args: list[Any] = list(raw_outputs)
+        if len(raw_output_args) < len(output_args):
+            raw_output_args.extend([None] * (len(output_args) - len(raw_output_args)))
+
+        declarations_before_scope = []
+        for output_arg, raw_output_arg, return_schema in zip(
+            output_args, raw_output_args, op_overload._schema.returns
+        ):
+            if output_arg is None:
+                continue
+            if isinstance(raw_output_arg, ir.MutationOutput):
+                continue
+            if not return_uses_tensor_handle(return_schema.real_type):
+                continue
+            assert isinstance(output_arg, str), type(output_arg)
+            declarations_before_scope.append(f"RAIIAtenTensorHandle {output_arg};")
 
         dispatch_lines = IndentedBuffer()
         dispatch_lines.writelines(declarations_before_scope)
@@ -3258,7 +3286,9 @@ if (!custom_op_wrapper) {
         with dispatch_lines.indent():
             tmp_var_number = count()
 
-            def parse_arg(arg_type: torch.JitType, codegen_arg: str) -> str:
+            def parse_arg(
+                arg_type: torch.JitType, codegen_arg: str, raw_arg: Any
+            ) -> str:
                 # Strip off any temporary references; we're in an indented context, so
                 # any saved-off variables will be auto-destroyed.
                 new_codegen_arg = codegen_arg.removeprefix("&temporary_reference(")
@@ -3277,14 +3307,29 @@ if (!custom_op_wrapper) {
                     # from<std::optional> handle any internal pointers.
                     codegen_arg = codegen_arg.removeprefix("&")
 
-                    if codegen_arg == "nullptr":
+                    if raw_arg is None or codegen_arg == "nullptr":
                         return "torch::stable::detail::from(std::nullopt)"
 
                     var_name = f"tmp_var_{next(tmp_var_number)}"
                     dispatch_lines.writeline(
-                        f"std::optional {var_name}{{{parse_arg(arg_type.getElementType(), codegen_arg)}}};"
+                        f"std::optional {var_name}{{{parse_arg(arg_type.getElementType(), codegen_arg, raw_arg)}}};"
                     )
                     return f"torch::stable::detail::from({var_name})"
+
+                if isinstance(arg_type, torch.ListType):
+                    assert isinstance(raw_arg, (list, tuple)), type(raw_arg)
+                    elem_type = arg_type.getElementType()
+                    list_var = f"tmp_var_{next(tmp_var_number)}"
+                    dispatch_lines.writeline(f"StableListHandle {list_var};")
+                    dispatch_lines.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(torch_new_list_reserve_size({len(raw_arg)}, &{list_var}));"
+                    )
+                    for elem in raw_arg:
+                        elem_codegen_arg = self.val_to_arg_str(elem, elem_type)
+                        dispatch_lines.writeline(
+                            f"AOTI_TORCH_ERROR_CODE_CHECK(torch_list_push_back({list_var}, {parse_arg(elem_type, elem_codegen_arg, elem)}));"
+                        )
+                    return f"torch::stable::detail::from({list_var})"
 
                 raii_var = self.create_tmp_raii_handle_var_if_needed(
                     codegen_arg, dispatch_lines
@@ -3309,8 +3354,10 @@ if (!custom_op_wrapper) {
 
             codegen_args = get_args()
             ivalue_args = (
-                parse_arg(a.type, c)
-                for a, c in zip(op_overload._schema.arguments, codegen_args)
+                parse_arg(a.type, c, r)
+                for a, c, r in zip(
+                    op_overload._schema.arguments, codegen_args, raw_args
+                )
             )
             array_len = max(len(codegen_args), len(output_args))
             dispatch_lines.writeline(
@@ -3323,10 +3370,18 @@ if (!custom_op_wrapper) {
                 )
             dispatch_lines.writeline(");")
 
-            # assign result(s), ignoring None
-            for idx, output_arg in enumerate(output_args):
-                if output_arg is None:
+            # assign tensor result(s), ignoring None and non-tensor metadata returns
+            for idx, (output_arg, return_schema) in enumerate(
+                zip(output_args, op_overload._schema.returns)
+            ):
+                if not return_uses_tensor_handle(return_schema.real_type):
                     continue
+                if output_arg is None:
+                    dispatch_lines.writeline(
+                        f"RAIIAtenTensorHandle discarded_dispatch_return_{idx}(torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]));"
+                    )
+                    continue
+                assert isinstance(output_arg, str), type(output_arg)
                 dispatch_lines.writeline(
                     f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
                 )

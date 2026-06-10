@@ -7,7 +7,11 @@ import textwrap
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from torchgen.aoti.fallback_ops import aten_shimified_ops, inductor_fallback_ops
+from torchgen.aoti.fallback_ops import (
+    AOTIFallbackMetadata,
+    aten_shimified_ops,
+    inductor_fallback_ops,
+)
 from torchgen.api.types import DispatcherSignature
 from torchgen.api.types.signatures import CppSignature, CppSignatureGroup
 from torchgen.context import method_with_native_function
@@ -300,7 +304,7 @@ _TORCH_VERSION_PATTERN = re.compile(r"^TORCH_VERSION_\d+_\d+_\d+$")
 
 
 def _get_earliest_torch_version_for_op_variant(
-    op_metadata: dict[str, str | dict[str, list[str] | str]],
+    op_metadata: AOTIFallbackMetadata,
     op_version: int,
 ) -> str | None:
     """
@@ -332,7 +336,7 @@ def gen_declaration_and_definition(
     schema: FunctionSchema,
     device: str,
     backend_call: str,
-    op_metadata: dict[str, str | dict[str, list[str] | str]],
+    op_metadata: AOTIFallbackMetadata,
 ) -> tuple[str, str]:
     base_name = schema.name.unambiguous_name()
 
@@ -346,7 +350,7 @@ def gen_declaration_and_definition(
     indexed_op_metadata: dict[int, list[str]] = {1: []}
     for ver_str, payload in sorted(op_metadata.items()):
         # since will get processed later per op
-        if ver_str == "since":
+        if ver_str in ("since", "only_for_kernel_backends"):
             continue
         if not ver_str.startswith("v"):
             raise AssertionError(
@@ -532,7 +536,11 @@ def get_header_for_aoti(
     extend_aoti_c_shim: bool,
 ) -> str | None:
     backend_index = get_backend_index_for_aoti(
-        func, func_group_mapping, dispatch_key, backend_indices, extend_aoti_c_shim
+        func,
+        func_group_mapping,
+        dispatch_key,
+        backend_indices,
+        extend_aoti_c_shim,
     )
     if backend_index is None:
         if dispatch_key is None:
@@ -552,7 +560,7 @@ def get_fallback_op_name(func: NativeFunction) -> str:
 
 def gen_c_shim(
     func: NativeFunction,
-    version_info: dict[str, str | dict[str, list[str] | str]],
+    version_info: AOTIFallbackMetadata,
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
@@ -560,7 +568,11 @@ def gen_c_shim(
     extend_aoti_c_shim: bool,
 ) -> str | None:
     backend_index = get_backend_index_for_aoti(
-        func, func_group_mapping, dispatch_key, backend_indices, extend_aoti_c_shim
+        func,
+        func_group_mapping,
+        dispatch_key,
+        backend_indices,
+        extend_aoti_c_shim,
     )
     if backend_index is None and dispatch_key is not None:
         return None
@@ -590,7 +602,7 @@ def gen_c_shim(
 
 @dataclass(frozen=True)
 class ShimGenerator:
-    inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]]
+    inductor_fallback_ops: dict[str, AOTIFallbackMetadata]
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup]
     dispatch_key: DispatchKey | None
     backend_indices: dict[DispatchKey, BackendIndex]
@@ -617,7 +629,7 @@ class ShimGenerator:
 
 def gen_aoti_c_shim(
     native_functions: Sequence[NativeFunction],
-    inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]],
+    inductor_fallback_ops: dict[str, AOTIFallbackMetadata],
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],

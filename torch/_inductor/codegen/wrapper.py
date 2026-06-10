@@ -2119,6 +2119,7 @@ class PythonWrapperCodegen(CodeGen):
         op_overload: torch._ops.OpOverload | torch._ops.HigherOrderOperator,
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
+        route_through_call_dispatcher: bool = False,
     ) -> None:
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(get_args())})")
 

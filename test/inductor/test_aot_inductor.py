@@ -9174,6 +9174,247 @@ copy_tests(
 )
 
 
+class TestAOTInductorOnlyForKernelBackends(TestCase):
+    @staticmethod
+    def _overrideable_sdpa_impl(sentinel):
+        def impl(
+            query,
+            key,
+            value,
+            attn_bias=None,
+            dropout_p=0.0,
+            is_causal=False,
+            return_debug_mask=False,
+            *,
+            scale=None,
+        ):
+            output = torch.full_like(query, sentinel)
+            log_sumexp = torch.zeros(
+                query.shape[:-1], device=query.device, dtype=torch.float
+            )
+            cum_seq_q = torch.arange(2, device=query.device, dtype=torch.int64)
+            cum_seq_k = torch.arange(3, device=query.device, dtype=torch.int64)
+            philox_seed = torch.empty((), device=query.device, dtype=torch.int64)
+            philox_offset = torch.empty((), device=query.device, dtype=torch.int64)
+            debug_attn_mask = torch.full(
+                (1,), sentinel, device=query.device, dtype=query.dtype
+            )
+            return (
+                output,
+                log_sumexp,
+                cum_seq_q,
+                cum_seq_k,
+                query.shape[-2],
+                key.shape[-2],
+                philox_seed,
+                philox_offset,
+                debug_attn_mask,
+            )
+
+        return impl
+
+    @staticmethod
+    def _overrideable_sdpa_backward_impl(sentinel):
+        def impl(
+            grad_out,
+            query,
+            key,
+            value,
+            attn_bias,
+            grad_input_mask,
+            out,
+            logsumexp,
+            cum_seq_q,
+            cum_seq_k,
+            max_q,
+            max_k,
+            dropout_p,
+            is_causal,
+            philox_seed,
+            philox_offset,
+            *,
+            scale=None,
+        ):
+            mask_was_marshalled = list(grad_input_mask) == [
+                True,
+                False,
+                True,
+                False,
+            ]
+            fill = sentinel if mask_was_marshalled else -sentinel
+            return (
+                torch.full_like(query, fill),
+                torch.full_like(key, fill),
+                torch.full_like(value, fill),
+                torch.full_like(attn_bias, fill),
+            )
+
+        return impl
+
+    def _check_overrideable_sdpa_routes_through_dispatcher(
+        self, device, dtype, dispatch_key
+    ):
+        sentinel = 1.25
+
+        class Model(torch.nn.Module):
+            def forward(self, query, key, value):
+                return torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
+                    query, key, value
+                )
+
+        model = Model().eval().to(device)
+        query = torch.randn(1, 4, 8, 16, device=device, dtype=dtype)
+        key = torch.randn(1, 4, 8, 16, device=device, dtype=dtype)
+        value = torch.randn(1, 4, 8, 16, device=device, dtype=dtype)
+        inputs = (query, key, value)
+        expected = torch.full_like(query, sentinel)
+
+        with torch.library._scoped_library("aten", "IMPL") as lib:
+            lib.impl(
+                "_scaled_dot_product_fused_attention_overrideable",
+                self._overrideable_sdpa_impl(sentinel),
+                dispatch_key,
+            )
+
+            eager_output = model(*inputs)
+            self.assertTrue(torch.allclose(eager_output[0], expected))
+
+            package_path = AOTIRunnerUtil.compile(model, inputs)
+            with zipfile.ZipFile(package_path) as package:
+                wrapper_sources = "\n".join(
+                    package.read(name).decode()
+                    for name in package.namelist()
+                    if name.endswith(".wrapper.cpp")
+                )
+
+            self.assertIn(
+                'aoti_torch_call_dispatcher("aten::_scaled_dot_product_fused_attention_overrideable"',
+                wrapper_sources,
+            )
+            self.assertIn(
+                "RAIIAtenTensorHandle discarded_dispatch_return_2",
+                wrapper_sources,
+            )
+            self.assertIn(
+                "RAIIAtenTensorHandle discarded_dispatch_return_3",
+                wrapper_sources,
+            )
+            self.assertIn(
+                "RAIIAtenTensorHandle discarded_dispatch_return_8",
+                wrapper_sources,
+            )
+            self.assertNotIn(
+                f"aoti_torch_{device}__scaled_dot_product_fused_attention_overrideable(",
+                wrapper_sources,
+            )
+
+            runner = torch._inductor.aoti_load_package(package_path)
+            actual_output = runner(*inputs)
+            if isinstance(actual_output, (list, tuple)):
+                actual_output = actual_output[0]
+            self.assertTrue(torch.allclose(actual_output, expected))
+
+    def _check_overrideable_sdpa_backward_routes_through_dispatcher(
+        self, device, dtype, dispatch_key
+    ):
+        sentinel = 1.5
+
+        class Model(torch.nn.Module):
+            def forward(self, grad_out, query, key, value):
+                attn_bias = torch.empty(1, device=query.device, dtype=query.dtype)
+                out = torch.empty_like(query)
+                logsumexp = torch.empty(
+                    query.shape[:-1], device=query.device, dtype=torch.float
+                )
+                cum_seq_q = torch.arange(2, device=query.device, dtype=torch.int64)
+                cum_seq_k = torch.arange(2, device=query.device, dtype=torch.int64)
+                philox_seed = torch.empty((), device=query.device, dtype=torch.int64)
+                philox_offset = torch.empty((), device=query.device, dtype=torch.int64)
+                return torch.ops.aten._scaled_dot_product_fused_attention_overrideable_backward(
+                    grad_out,
+                    query,
+                    key,
+                    value,
+                    attn_bias,
+                    [True, False, True, False],
+                    out,
+                    logsumexp,
+                    cum_seq_q,
+                    cum_seq_k,
+                    query.shape[-2],
+                    key.shape[-2],
+                    0.0,
+                    False,
+                    philox_seed,
+                    philox_offset,
+                )
+
+        model = Model().eval().to(device)
+        query = torch.randn(1, 4, 8, 16, device=device, dtype=dtype)
+        key = torch.randn(1, 4, 8, 16, device=device, dtype=dtype)
+        value = torch.randn(1, 4, 8, 16, device=device, dtype=dtype)
+        grad_out = torch.randn(1, 4, 8, 16, device=device, dtype=dtype)
+        inputs = (grad_out, query, key, value)
+        expected = torch.full_like(query, sentinel)
+
+        with torch.library._scoped_library("aten", "IMPL") as lib:
+            lib.impl(
+                "_scaled_dot_product_fused_attention_overrideable_backward",
+                self._overrideable_sdpa_backward_impl(sentinel),
+                dispatch_key,
+            )
+
+            eager_output = model(*inputs)
+            self.assertTrue(torch.allclose(eager_output[0], expected))
+
+            package_path = AOTIRunnerUtil.compile(model, inputs)
+            with zipfile.ZipFile(package_path) as package:
+                wrapper_sources = "\n".join(
+                    package.read(name).decode()
+                    for name in package.namelist()
+                    if name.endswith(".wrapper.cpp")
+                )
+
+            self.assertIn(
+                'aoti_torch_call_dispatcher("aten::_scaled_dot_product_fused_attention_overrideable_backward"',
+                wrapper_sources,
+            )
+            self.assertIn("torch_new_list_reserve_size(4", wrapper_sources)
+            self.assertIn("torch_list_push_back", wrapper_sources)
+            self.assertNotIn(
+                f"aoti_torch_{device}__scaled_dot_product_fused_attention_overrideable_backward(",
+                wrapper_sources,
+            )
+
+            runner = torch._inductor.aoti_load_package(package_path)
+            actual_output = runner(*inputs)
+            if isinstance(actual_output, (list, tuple)):
+                actual_output = actual_output[0]
+            self.assertTrue(torch.allclose(actual_output, expected))
+
+    def test_overrideable_sdpa_routes_through_dispatcher_cpu(self):
+        self._check_overrideable_sdpa_routes_through_dispatcher(
+            "cpu", torch.float32, "CPU"
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_overrideable_sdpa_routes_through_dispatcher_cuda(self):
+        self._check_overrideable_sdpa_routes_through_dispatcher(
+            "cuda", torch.float16, "CUDA"
+        )
+
+    def test_overrideable_sdpa_backward_routes_through_dispatcher_cpu(self):
+        self._check_overrideable_sdpa_backward_routes_through_dispatcher(
+            "cpu", torch.float32, "CPU"
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_overrideable_sdpa_backward_routes_through_dispatcher_cuda(self):
+        self._check_overrideable_sdpa_backward_routes_through_dispatcher(
+            "cuda", torch.float16, "CUDA"
+        )
+
+
 class TestCheckLowerboundConfig(TestCase):
     def test_aoti_check_lowerbound_codegen(self):
         """
