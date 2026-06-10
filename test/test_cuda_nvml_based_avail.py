@@ -149,6 +149,14 @@ class TestVisibleDeviceParses(TestCase):
             [],
         )
 
+    def test_rocm_uuid_resolver_is_case_insensitive(self):
+        from torch.cuda import _transform_uuid_to_ordinals
+
+        with patch.object(torch.version, "hip", "7.0"):
+            self.assertEqual(
+                _transform_uuid_to_ordinals(["GPU-ABCDEF"], ["abcdef"]), [0]
+            )
+
     def test_ordinal_parse_visible_devices(self):
         def _device_count_nvml(val):
             from torch.cuda import _device_count_nvml as _dc

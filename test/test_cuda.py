@@ -6140,13 +6140,15 @@ print(value, end="")
         """
         cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid:.*GPU-//'"
         uuids = subprocess.check_output(cmd, shell=True, text=True).strip().split("\n")
-        uuids = [s.strip() for s in uuids]
+        uuids = [s.strip().lower() for s in uuids if s.strip()]
         raw_uuids = torch.cuda._raw_device_uuid_amdsmi()
+        self.assertIsNotNone(raw_uuids)
+        raw_uuids = [s.lower() for s in raw_uuids or []]
         for uuid in uuids:
-            matching = True
-            if not any(uuid in raw_id for raw_id in raw_uuids):
-                matching = False
-        self.assertEqual(True, matching)
+            self.assertTrue(
+                any(uuid in raw_id for raw_id in raw_uuids),
+                f"{uuid} not found in {raw_uuids}",
+            )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180123")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
