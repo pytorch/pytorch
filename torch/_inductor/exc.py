@@ -69,9 +69,13 @@ class LoweringException(OperatorIssue):
         kwargs: dict[str, Any],
         stack_trace: str | None = None,
     ) -> None:
-        msg = f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
+        msg = f"While lowering:\n{self.operator_str(target, args, kwargs)}"
         if stack_trace:
-            msg += f"{msg}\nFound from : \n {stack_trace}"
+            msg += f"\nFound from : \n {stack_trace}"
+        root_cause = textwrap.indent(
+            textwrap.fill(f"{type(exc).__name__}: {exc}", width=100), "  "
+        )
+        msg += f"\n\nWhile lowering, an exception was raised:\n{root_cause}"
         super().__init__(msg)
 
 
