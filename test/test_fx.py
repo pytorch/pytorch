@@ -2456,6 +2456,26 @@ class TestFX(JitTestCase):
         x, w = torch.rand(3, 4), torch.rand(4, 4)
         self.assertTrue(any(n.target == torch.relu for n in traced.graph.nodes))
 
+    def test_wrapped_method_with_kwargs(self):
+        def foo():
+            def wrapped_fn(func):
+                @functools.wraps(func)
+                def wrapper(self, *args, **kwargs):
+                    return func(self, *args, **kwargs)
+                return wrapper
+            return wrapped_fn
+
+        class MyModule(torch.nn.Module):
+            @foo()
+            def forward(self, x, a, **kwargs):
+                return torch.relu(x + a)
+
+        tracer = torch.fx.Tracer()
+        graph = tracer.trace(MyModule())
+        gm = torch.fx.GraphModule(MyModule(), graph)
+        x, a = torch.rand(3), torch.rand(3)
+        self.assertEqual(gm(x, a), torch.relu(x + a))
+
     def test_empty_graph_codegen(self):
         graph = torch.fx.Graph()
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
