@@ -4154,6 +4154,44 @@ graph():
         ep = export(Vmap(), inputs, {}, dynamic_shapes=dynamic).run_decompositions({})
         self.assertTrue(torch.allclose(ep.module()(*inputs), Vmap()(*inputs)))
 
+    def test_non_strict_vmap_tensor_indexing(self):
+        class VmapTensorIndex(torch.nn.Module):
+            def forward(self, padding_mask):
+                batch = padding_mask.shape[0]
+                seq = padding_mask.shape[1]
+                batch_arange = torch.arange(batch, device=padding_mask.device)
+                seq_arange = torch.arange(seq, device=padding_mask.device)
+
+                def mask(batch_idx, seq_idx):
+                    return padding_mask[batch_idx, seq_idx]
+
+                return torch.vmap(
+                    torch.vmap(mask, in_dims=(None, 0)),
+                    in_dims=(0, None),
+                )(batch_arange, seq_arange)
+
+        mod = VmapTensorIndex()
+        padding_mask = torch.arange(32).reshape(2, 16) % 3 == 0
+        dynamic_shapes = {
+            "padding_mask": {
+                0: Dim("batch", min=1, max=4),
+                1: Dim("seq", min=1, max=1024),
+            }
+        }
+        ep = export(
+            mod,
+            (padding_mask,),
+            dynamic_shapes=dynamic_shapes,
+            strict=False,
+        )
+        FileCheck().check("torch.ops.aten.index.Tensor").run(str(ep.graph))
+
+        for test_padding_mask in (
+            padding_mask,
+            torch.arange(21).reshape(3, 7) % 2 == 0,
+        ):
+            self.assertEqual(ep.module()(test_padding_mask), mod(test_padding_mask))
+
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access(self):
