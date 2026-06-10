@@ -4,6 +4,18 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
+
+#include <nlohmann/json.hpp>
+
+static_assert(
+    NLOHMANN_JSON_VERSION_MAJOR == 3 && NLOHMANN_JSON_VERSION_MINOR == 12 &&
+        NLOHMANN_JSON_VERSION_PATCH == 0 && JSON_DIAGNOSTICS == 0 &&
+        JSON_DIAGNOSTIC_POSITIONS == 0 &&
+        NLOHMANN_JSON_NAMESPACE_NO_VERSION == 0,
+    "Forward declaration in combined_traceback.h hardcodes nlohmann ABI "
+    "namespace json_abi_v3_12_0; update it when bumping the vendored nlohmann "
+    "version or changing nlohmann ABI namespace options.");
+
 namespace py = pybind11;
 
 namespace torch {
