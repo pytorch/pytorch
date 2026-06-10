@@ -3840,11 +3840,10 @@ class InstructionTranslatorBase(
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
-        source = getattr(obj, "source", None)
         if (
             self.is_tracing_resume_prologue
-            and isinstance(source, LocalSource)
-            and source.local_name == self._boxed_resume_arg_name()
+            and isinstance(obj.source, LocalSource)
+            and obj.source.local_name == self._boxed_resume_arg_name()
         ):
             return
         # Check for tensor items using side-effect-free internal lookups

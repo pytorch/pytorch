@@ -426,6 +426,13 @@ class PyCodegen:
         self.tempvars[value] = var
         self._output.append(self.create_store(var))
 
+    def clear_tempvars(self) -> None:
+        for key, var in list(self.tempvars.items()):
+            if var is not None:
+                self._output.append(self.create_delete(var))
+            del self.tempvars[key]
+        self.top_of_stack = None
+
     def foreach(self, items: Iterable[VariableTracker | Source]) -> None:
         for i in items:
             self(i)
@@ -748,6 +755,8 @@ class PyCodegen:
             self.extend_output([self.create_load(cm_var)])
             self.extend_output(create_call_function(1, False))
             self.pop_top()
+
+        self.clear_tempvars()
 
         for name in sorted(graph_input_names_to_clear):
             self.append_output(self.create_load(name))

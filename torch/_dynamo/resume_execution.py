@@ -397,10 +397,20 @@ class ContinueExecutionCache:
         ) -> None:
             meta.instructions = copy.deepcopy(instructions)
 
-            boxed_resume = not nested_code_objs
             resume_arg_names = ["__nested_resume_fns", "__nested_frame_values"]
             resume_arg_names += [f"___stack{i}" for i in range(nstack)]
             resume_arg_names.extend(v for v in argnames if v not in resume_arg_names)
+            frame_value_names = set(argnames)
+            frame_value_names.update(f"___stack{i}" for i in range(nstack))
+            boxed_resume = not nested_code_objs or any(
+                (
+                    inst.opname == "DELETE_FAST"
+                    and inst.argval in frame_value_names
+                    and inst.offset is not None
+                    and inst.offset >= resume_offset
+                )
+                for inst in instructions
+            )
             resume_args_varname = RESUME_ARGS_VARNAME
             if boxed_resume:
                 unavailable_names = (
@@ -674,6 +684,10 @@ class ContinueExecutionCache:
         new_code, _ = transform_code_object(code, update)
         ContinueExecutionCache.generated_code_metadata[new_code] = meta
         return new_code
+
+    @classmethod
+    def uses_boxed_call(cls, code: types.CodeType) -> bool:
+        return _is_boxed_resume_code(code)
 
     @staticmethod
     def unreachable_codes(code_options: dict[str, Any]) -> list[Instruction]:

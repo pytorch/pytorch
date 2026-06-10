@@ -2234,20 +2234,16 @@ class OutputGraph(OutputGraphCommon):
                 live_local_names = (
                     self._live_local_names(pass2) | self._resume_live_local_names()
                 )
-                graph_input_names_to_delete = (
-                    self._dead_tensor_graph_input_names(live_local_names)
-                    | tx.deleted_fast_locals
+                graph_input_names_to_delete = self._dead_tensor_graph_input_names(
+                    live_local_names
                 )
                 resume_args_varname = tx._boxed_resume_arg_name()
-                live_local_names_to_preserve = live_local_names - (
-                    {resume_args_varname}
-                    if resume_args_varname is not None
-                    and resume_args_varname in tx.deleted_fast_locals
-                    else set()
-                )
-                graph_input_names_to_clear = (
-                    tx.cleared_fast_locals - live_local_names_to_preserve
-                )
+                if (
+                    resume_args_varname is not None
+                    and resume_args_varname in live_local_names
+                ):
+                    graph_input_names_to_delete.discard(resume_args_varname)
+                graph_input_names_to_clear = tx.cleared_fast_locals - live_local_names
                 instructions, subgraph_pycode = self.compile_and_call_fx_graph(
                     tx,
                     pass2.graph_output_vars(),
