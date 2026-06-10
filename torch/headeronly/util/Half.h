@@ -63,6 +63,15 @@
 #endif // __x86_64__ || _M_X64 || __i386 || _M_IX86
 #endif // __GNUC__ || __clang__
 
+// Detect compiler-builtin _Float16 type support.
+// __FLT16_MAX__ is defined by GCC/Clang when _Float16 is available.
+// Excluded on aarch64 (already has native float16_t from ARM NEON)
+// and during CUDA/HIP compilation (they have their own half types).
+#if defined(__FLT16_MAX__) && !defined(__aarch64__) && !defined(__CUDACC__) && \
+    !defined(__HIPCC__)
+#define C10_HAS_FLOAT16_TYPE 1
+#endif
+
 namespace c10 {
 
 struct alignas(2) Half {
@@ -88,6 +97,9 @@ struct alignas(2) Half {
 #else
   inline C10_HOST_DEVICE Half(float value);
   inline C10_HOST_DEVICE operator float() const;
+#if defined(C10_HAS_FLOAT16_TYPE)
+  inline operator _Float16() const;
+#endif
 #endif
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -465,6 +477,12 @@ inline C10_HOST_DEVICE Half::operator float() const {
   return detail::fp16_ieee_to_fp32_value(x);
 #endif
 }
+
+#if defined(C10_HAS_FLOAT16_TYPE)
+inline Half::operator _Float16() const {
+  return static_cast<_Float16>(detail::fp16_ieee_to_fp32_value(x));
+}
+#endif
 
 #endif /* !defined(__aarch64__) || defined(__CUDACC__) \
         */
