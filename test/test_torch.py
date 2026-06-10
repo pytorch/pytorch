@@ -6154,6 +6154,26 @@ class TestTorchDeviceType(TestCase):
                         check_equal(torch.tensor(True), x, y)
                         check_equal(torch.tensor(True), y, x)
 
+    @onlyNativeDeviceTypes
+    def test_where_condition_requires_bool(self, device):
+        x = torch.ones(3, device=device)
+        y = torch.zeros(3, device=device)
+        out = torch.empty_like(x)
+
+        def assert_where_raises(fn):
+            with self.assertRaisesRegex(
+                RuntimeError, "where expected condition to be a boolean tensor"
+            ):
+                fn()
+
+        for dtype in (torch.uint8, torch.float32):
+            condition = torch.ones(3, dtype=dtype, device=device)
+            assert_where_raises(lambda: torch.where(condition, x, y))
+            assert_where_raises(lambda: torch.where(condition, x, y, out=out))
+            assert_where_raises(lambda: torch.where(condition, x, 0.0))
+            assert_where_raises(lambda: torch.where(condition, 1.0, y))
+            assert_where_raises(lambda: torch.where(condition, 1.0, 0.0))
+
 
     @skipIfTorchInductor("FIXME")
     def test_hook_remove(self, device):

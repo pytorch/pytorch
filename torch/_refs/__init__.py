@@ -2083,7 +2083,7 @@ def where(
     utils.check_same_device(pred, a, b, allow_cpu_scalar_tensors=True)
     torch._check(
         pred.dtype is torch.bool,
-        lambda: f"expected predicate to be bool, got {pred.dtype}",
+        lambda: f"where expected condition to be a boolean tensor, but got a tensor with dtype {pred.dtype}",
     )
 
     pred, a, b = _maybe_broadcast(pred, a, b)
