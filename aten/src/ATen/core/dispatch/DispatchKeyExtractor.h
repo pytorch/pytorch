@@ -248,9 +248,9 @@ struct TORCH_API DispatchKeyExtractor final {
 
   explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
       : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse),
-        nonFallthroughKeys_(DispatchKeySet::FULL) {
+        nonFallthroughKeys_(DispatchKeySet::Full::FULL) {
     for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
-      nonFallthroughKeysPerBackend_[i] = DispatchKeySet::FULL;
+      nonFallthroughKeysPerBackend_[i] = DispatchKeySet(DispatchKeySet::Full::FULL);
     }
   }
 

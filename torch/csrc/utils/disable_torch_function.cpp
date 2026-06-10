@@ -338,9 +338,9 @@ PyObject* THPModule_disable_torch_dispatch(PyObject* self, PyObject* a) {
   // set, but if there are, then we will have to do something else here.
   c10::impl::ExcludeDispatchKeyGuard guard_(
       // TODO: add constructor for this specifically
-      c10::DispatchKeySet(c10::DispatchKeySet::FULL) -
+      c10::DispatchKeySet(c10::DispatchKeySet::Full::FULL) -
       c10::DispatchKeySet(
-          c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Python)
+          c10::DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::Python)
       // NB: off by one hazard here, but it works out: python key is not
       // included in AFTER, so it is included in the negation (and that's
       // correct: we want to exclude Python key and everything BEFORE it.)

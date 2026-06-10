@@ -329,7 +329,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     auto dispatch_key_set_raw_repr =
         metadata["dispatch_key_set"].cast<uint64_t>();
     auto dispatch_key_set = c10::DispatchKeySet(
-        c10::DispatchKeySet::RAW, dispatch_key_set_raw_repr);
+        c10::DispatchKeySet::Raw::RAW, dispatch_key_set_raw_repr);
     auto device = c10::Device(device_type);
     device.set_index(device_index);
 

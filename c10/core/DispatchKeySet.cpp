@@ -57,7 +57,7 @@ constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset |
 constexpr DispatchKeySet nested_dispatch_keyset =
     DispatchKeySet(
         {DispatchKey::AutogradNestedTensor, DispatchKey::NestedTensor}) |
-    DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+    DispatchKeySet(DispatchKeySet::Raw::RAW, full_backend_mask);
 
 constexpr DispatchKeySet functorch_batched_dispatch_keyset =
     DispatchKeySet(DispatchKey::FuncTorchBatched);
@@ -71,7 +71,7 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       // getRuntimeDispatchKeySet() expects to return a keyset of runtime
       // dispatch keys, like AutogradCPU, but that requires having backend bits.
       return autograd_dispatch_keyset |
-          DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+          DispatchKeySet(DispatchKeySet::Raw::RAW, full_backend_mask);
     case DispatchKey::CompositeImplicitAutograd:
       return math_dispatch_keyset;
     case DispatchKey::CompositeImplicitAutogradNestedTensor:
@@ -144,7 +144,7 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::PrivateUse3);
     case DispatchKey::AutogradNestedTensor:
       return DispatchKeySet(DispatchKey::NestedTensor) |
-          DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+          DispatchKeySet(DispatchKeySet::Raw::RAW, full_backend_mask);
     case DispatchKey::AutogradOther:
       return autogradother_backends;
     default:
