@@ -103,7 +103,7 @@ TORCH_CUDA_CPP_API void setCUDABlasLtWorkspaceSize(size_t size);
 TORCH_CUDA_CPP_API void resetChosenWorkspaceSize();
 TORCH_CUDA_CPP_API void resetCUDABlasLtWorkspaceSize();
 
-TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
+TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle(bool allow_fp32emulation = false);
 
 #if defined(USE_CUDSS)
 TORCH_CUDA_CPP_API cudssHandle_t getCurrentCudssHandle();

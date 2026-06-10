@@ -957,7 +957,7 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau) {
   size_t worksize_host; // workspaceInBytesOnHost
   cusolverDnParams_t params = nullptr; // use default algorithm (currently it's the only option)
   at::cuda::solver::xgeqrf_bufferSize<scalar_t>(
-      at::cuda::getCurrentCUDASolverDnHandle(),
+      at::cuda::getCurrentCUDASolverDnHandle(true),
       params,
       m,
       n,
@@ -972,13 +972,13 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau) {
   int n_32 = cuda_int_cast(n, "n");
   int lda_32 = cuda_int_cast(lda, "lda");
   at::cuda::solver::geqrf_bufferSize<scalar_t>(
-      at::cuda::getCurrentCUDASolverDnHandle(), m_32, n_32, A_data, lda_32, &lwork);
+      at::cuda::getCurrentCUDASolverDnHandle(true), m_32, n_32, A_data, lda_32, &lwork);
 #endif // USE_CUSOLVER_64_BIT
 
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
     scalar_t* A_working_ptr = &A_data[i * A_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
-    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle(true);
 
 #ifdef USE_CUSOLVER_64_BIT
     // allocate workspace storage on device and host
@@ -1144,7 +1144,7 @@ static void apply_orgqr(Tensor& self, const Tensor& tau) {
   // get the optimal work size and allocate workspace tensor
   int lwork;
   at::cuda::solver::orgqr_buffersize<scalar_t>(
-    at::cuda::getCurrentCUDASolverDnHandle(), m, n, k, self_data, lda, tau_data, &lwork);
+    at::cuda::getCurrentCUDASolverDnHandle(true), m, n, k, self_data, lda, tau_data, &lwork);
 
   auto info = at::zeros({1}, self.options().dtype(at::kInt));
   auto info_data = info.data_ptr<int>();
@@ -1152,7 +1152,7 @@ static void apply_orgqr(Tensor& self, const Tensor& tau) {
   for (auto i = decltype(batchsize){0}; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     const scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
-    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle(true);
 
     // allocate workspace storage
     auto& allocator = *at::cuda::getCUDADeviceAllocator();
@@ -1663,7 +1663,7 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
     const auto pivots_data = get_pivots ? pivots.data_ptr<int>() : nullptr;
     const auto pivots_stride = get_pivots ? pivots.size(-1) : 0;
 
-    const auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    const auto handle = at::cuda::getCurrentCUDASolverDnHandle(true);
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
       at::cuda::solver::getrf<scalar_t>(
         handle, m, n,
