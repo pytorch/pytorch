@@ -45,9 +45,7 @@ __all__ = [
 
 
 def broadcast_tensors(*tensors):
-    r"""broadcast_tensors(*tensors) -> List of Tensors
-
-    Broadcasts the given tensors according to :ref:`broadcasting-semantics`.
+    r"""Broadcast the given tensors according to :ref:`broadcasting-semantics`.
 
     Args:
         *tensors: any number of tensors of the same type
@@ -77,7 +75,7 @@ def broadcast_tensors(*tensors):
 
 
 def broadcast_shapes(*shapes):
-    r"""broadcast_shapes(*shapes) -> Size
+    r"""Return a shape compatible with all input shapes.
 
     Similar to :func:`broadcast_tensors` but for shapes.
 
@@ -122,7 +120,7 @@ def split(
     split_size_or_sections: int | list[int],
     dim: int = 0,
 ) -> tuple[Tensor, ...]:
-    r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
+    r"""Split the tensor into chunks. Each chunk is a view of the original tensor.
 
     If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
     be split into equally sized chunks (if possible). Last chunk will be smaller if
@@ -173,9 +171,7 @@ def split(
 
 
 def einsum(*args: Any) -> Tensor:
-    r"""einsum(equation, *operands) -> Tensor
-
-    Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
+    r"""Sum the product of the elements of the input :attr:`operands` along dimensions specified using a notation
     based on the Einstein summation convention.
 
     Einsum allows computing many common multi-dimensional linear algebraic array operations by representing them
@@ -393,7 +389,7 @@ if TYPE_CHECKING:
 else:
 
     def meshgrid(*tensors, indexing: str | None = None) -> tuple[Tensor, ...]:
-        r"""Creates grids of coordinates specified by the 1D inputs in `attr`:tensors.
+        r"""Create grids of coordinates specified by the 1D inputs in `attr`:tensors.
 
         This is helpful when you want to visualize data over some
         range of inputs. See below for a plotting example.
@@ -807,7 +803,7 @@ def _unique_impl(
     return_counts: bool = False,
     dim: int | None = None,
 ) -> _unique_impl_out:
-    r"""unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None) -> tuple[Tensor, Tensor, Tensor]
+    r"""Return the unique elements of the input tensor.
 
     Returns the unique elements of the input tensor.
 
@@ -1309,7 +1305,7 @@ def tensordot(
     dims=2,
     out: torch.Tensor | None = None,
 ):
-    r"""Returns a contraction of a and b over multiple dimensions.
+    r"""Return a contraction of a and b over multiple dimensions.
 
     :attr:`tensordot` implements a generalized matrix product.
 
@@ -1410,8 +1406,9 @@ def tensordot(
 
 
 def cartesian_prod(*tensors: Tensor) -> Tensor:
-    """Do cartesian product of the given sequence of tensors. The behavior is similar to
-    python's `itertools.product`.
+    """Do cartesian product of the given sequence of tensors.
+
+    The behavior is similar to python's `itertools.product`.
 
     Args:
         *tensors: any number of 1 dimensional tensors.
@@ -1482,7 +1479,7 @@ def block_diag(*tensors):
 
 def cdist(x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     # type: (Tensor, Tensor, float, str) -> (Tensor)
-    r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
+    r"""Compute batched the p-norm distance between each pair of the two collections of row vectors.
 
     Args:
         x1 (Tensor): input tensor where the last two dimensions represent the points and the feature dimension respectively.
@@ -1511,8 +1508,7 @@ def cdist(x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     `scipy.spatial.distance.cdist(input, 'hamming') * M`. When :math:`p = \infty`, the closest
     scipy function is `scipy.spatial.distance.cdist(xn, lambda x, y: np.abs(x - y).max())`.
 
-    Example:
-
+    Example::
         >>> a = torch.tensor([[0.9041, 0.0196], [-0.3108, -2.4423], [-0.4821, 1.059]])
         >>> a
         tensor([[ 0.9041,  0.0196],
@@ -1542,8 +1538,8 @@ def cdist(x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
 
 
 def atleast_1d(*tensors):
-    r"""
-    Returns a 1-dimensional view of each input tensor with zero dimensions.
+    r"""Return a 1-dimensional view of each input tensor with zero dimensions.
+
     Input tensors with one or more dimensions are returned as-is.
 
     Args:
@@ -1580,8 +1576,8 @@ def atleast_1d(*tensors):
 
 
 def atleast_2d(*tensors):
-    r"""
-    Returns a 2-dimensional view of each input tensor with zero dimensions.
+    r"""Return a 2-dimensional view of each input tensor with zero dimensions.
+
     Input tensors with two or more dimensions are returned as-is.
 
     Args:
@@ -1620,8 +1616,8 @@ def atleast_2d(*tensors):
 
 
 def atleast_3d(*tensors):
-    r"""
-    Returns a 3-dimensional view of each input tensor with zero dimensions.
+    r"""Return a 3-dimensional view of each input tensor with zero dimensions.
+
     Input tensors with three or more dimensions are returned as-is.
 
     Args:
@@ -1739,7 +1735,7 @@ def norm(
     out=None,
     dtype=None,
 ):
-    r"""Returns the matrix norm or vector norm of a given tensor.
+    r"""Return the matrix norm or vector norm of a given tensor.
 
     .. warning::
 
@@ -1831,7 +1827,6 @@ def norm(
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
     """
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype
@@ -2055,7 +2050,9 @@ def _unravel_index(indices: Tensor, shape: int | Sequence[int]) -> Tensor:
 
 
 def chain_matmul(*matrices, out=None):
-    r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
+    r"""Return the matrix product of the :math:`N` 2-D tensors.
+
+    This product is efficiently computed
     using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms
     of arithmetic operations (`[CLRS]`_). Note that since this is a function to compute the product, :math:`N`
     needs to be greater than or equal to 2; if equal to 2 then a trivial matrix-matrix product is returned.
@@ -2103,8 +2100,9 @@ def chain_matmul(*matrices, out=None):
 
 def _lu_impl(A, pivot=True, get_infos=False, out=None):
     # type: (Tensor, bool, bool, Any) -> tuple[Tensor, Tensor, Tensor]
-    r"""Computes the LU factorization of a matrix or batches of matrices
-    :attr:`A`. Returns a tuple containing the LU factorization and
+    r"""Compute the LU factorization of a matrix or batches of matrices.
+
+    Returns a tuple containing the LU factorization and
     pivots of :attr:`A`.  Pivoting is done if :attr:`pivot` is set to
     ``True``.
 

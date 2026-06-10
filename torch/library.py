@@ -211,8 +211,8 @@ def _validate_inplace_schema(schema: "str | torch._C.FunctionSchema") -> None:
 
 class Library:
     """
-    A class to create libraries that can be used to register new operators or
-    override operators in existing libraries from Python.
+    A class to create libraries that can be used to register or override operators.
+
     A user can optionally pass in a dispatch keyname if they only want to register
     kernels corresponding to only one specific dispatch key.
 
@@ -227,6 +227,7 @@ class Library:
         kind: "DEF", "IMPL", "FRAGMENT"
         dispatch_key: PyTorch dispatch key (default: "")
     """
+
 
     def __init__(self, ns, kind, dispatch_key=""):
         from torch.fx.operator_schemas import _SCHEMA_TO_SIGNATURE_CACHE
@@ -270,7 +271,7 @@ class Library:
         return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
 
     def define(self, schema, alias_analysis="", *, tags=()):
-        r"""Defines a new operator and its semantics in the ns namespace.
+        r"""Define a new operator and its semantics in the ns namespace.
 
         Args:
             schema: function schema to define a new operator.

@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
-"""
+"""Provide the weak_script annotation.
+
 The weak_script annotation needs to be here instead of inside torch/jit/ so it
 can be used in other places in torch/ (namely torch.nn) without running into
-circular dependency problems
+circular dependency problems.
 """
 
 import ast
@@ -102,10 +103,11 @@ for i in range(2, 7):
 
 
 def is_scripting() -> bool:
-    r"""
-    Function that returns True when in compilation and False otherwise. This
-    is useful especially with the @unused decorator to leave code in your
+    r"""Return True when in compilation and False otherwise.
+
+    This is useful especially with the @unused decorator to leave code in your
     model that is not yet TorchScript compatible.
+
     .. testcode::
 
         import torch
@@ -209,9 +211,9 @@ loader = SourceLoader()
 
 
 def createResolutionCallbackFromEnv(lookup_base: HasGetattr) -> Callable[[str], Any]:
-    """
-    Creates a resolution callback that will look up qualified names in an
-    environment, starting with `lookup_base` for the base of any qualified
+    """Create a resolution callback to look up qualified names in an environment.
+
+    Starting with `lookup_base` for the base of any qualified
     names, then proceeding down the lookup chain with the resolved object.
 
     You should not use this directly, it should only be used from the other
@@ -277,10 +279,11 @@ def createResolutionCallbackFromEnv(lookup_base: HasGetattr) -> Callable[[str], 
 
 
 def createResolutionCallbackFromFrame(frames_up: int = 0) -> Callable[[str], Any]:
-    """
-    Creates a function which, given a string variable name,
-    returns the value of the variable in the scope of the caller of
-    the function which called createResolutionCallbackFromFrame (by default).
+    """Create a function to resolve variable names from a stack frame.
+
+    Given a string variable name, returns the value of the variable in the
+    scope of the caller of the function which called
+    createResolutionCallbackFromFrame (by default).
 
     This is used to enable access in-scope Python variables inside
     TorchScript fragments.
@@ -331,9 +334,7 @@ def createResolutionCallbackFromFrame(frames_up: int = 0) -> Callable[[str], Any
 
 
 def get_closure(fn):
-    """
-    Get a dictionary of closed over variables from a function
-    """
+    """Get a dictionary of closed over variables from a function."""
     captures = {}
     captures.update(fn.__globals__)
 
@@ -388,9 +389,10 @@ def get_closure(fn):
 
 
 def createResolutionCallbackFromClosure(fn) -> Callable[[str], Any]:
-    """
-    Create a resolutionCallback by introspecting the function instead of
-    looking up the stack for the enclosing scope
+    """Create a resolution callback by introspecting the function.
+
+    This resolves names by introspecting the function instead of looking up
+    the stack for the enclosing scope.
     """
     closure = get_closure(fn)
 
@@ -432,8 +434,8 @@ def can_compile_class(cls) -> bool:
 
 
 def get_callable_argument_names(fn) -> list[str]:
-    """
-    Gets names of all POSITIONAL_OR_KEYWORD arguments for callable `fn`.
+    """Get names of all POSITIONAL_OR_KEYWORD arguments for callable `fn`.
+
     Returns an empty list when other types of arguments are present.
 
     This is used by `torch.jit.trace` to assign meaningful argument names to
@@ -463,9 +465,9 @@ def get_callable_argument_names(fn) -> list[str]:
 
 
 def get_annotation_str(annotation):
-    """
-    Convert an AST node containing a type annotation to the string present in the source
-    that represents the same annotation.
+    """Convert an AST node containing a type annotation to the string present in the source.
+
+    The returned string represents the same annotation.
     """
     if isinstance(annotation, ast.Name):
         return annotation.id
@@ -485,10 +487,11 @@ def get_annotation_str(annotation):
 
 
 def get_type_hint_captures(fn):
-    """
-    Get a dictionary containing type resolution mappings necessary to resolve types
-    for the literal annotations on 'fn'. These are not considered to be closed-over by fn
-    and must be obtained separately (e.g. using this function).
+    """Get a dictionary containing type resolution mappings necessary to resolve types.
+
+    These mappings are for the literal annotations on 'fn'. These are not
+    considered to be closed-over by fn and must be obtained separately
+    (e.g. using this function).
 
     Args:
         fn: A callable.
@@ -572,9 +575,10 @@ def get_type_hint_captures(fn):
 
 
 def createResolutionCallbackForClassMethods(cls: type) -> Callable[[str], Any]:
-    """
-    This looks at all the methods defined in a class and pulls their closed-over
-    variables into a dictionary and uses that to resolve variables.
+    """Create a resolution callback for class methods.
+
+    Look at all the methods defined in a class and pull their closed-over
+    variables into a dictionary and use that to resolve variables.
     """
     # cls is a type here, so `ismethod` is false since the methods on the type
     # aren't bound to anything, so Python treats them as regular functions
@@ -618,8 +622,8 @@ def boolean_dispatch(
     module_name,
     func_name,
 ):
-    """
-    Dispatches to either of 2 script functions based on a boolean argument.
+    """Dispatch to either of 2 script functions based on a boolean argument.
+
     In TorchScript, the boolean argument must be constant so that the correct
     function to use can be determined at compile time.
     """
@@ -665,9 +669,9 @@ def boolean_dispatch(
 
 
 class FunctionModifiers:
-    """
-    Used to denote the behavior of a function in TorchScript. See export() and
-    ignore() for details.
+    """Denote the behavior of a function in TorchScript.
+
+    See export() and ignore() for details.
     """
 
     UNUSED = "unused (ignored and replaced with raising of an exception)"
@@ -681,7 +685,8 @@ class FunctionModifiers:
 
 
 def export(fn: Callable[_P, _R]) -> Callable[_P, _R]:
-    """
+    """Indicate that a method on an ``nn.Module`` is used as an entry point.
+
     This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
     :class:`ScriptModule` and should be compiled.
 
@@ -730,7 +735,8 @@ def export(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
 
 def unused(fn: Callable[_P, _R]) -> Callable[_P, _R]:
-    """
+    """Indicate to the compiler that a function or method should be ignored.
+
     This decorator indicates to the compiler that a function or method should
     be ignored and replaced with the raising of an exception. This allows you
     to leave code in your model that is not yet TorchScript compatible and still
@@ -796,7 +802,8 @@ class _IgnoreContextManager(contextlib.AbstractContextManager):
 
 
 def ignore(drop=False, **kwargs):
-    """
+    """Indicate to the compiler that a function or method should be ignored.
+
     This decorator indicates to the compiler that a function or method should
     be ignored and left as a Python function. This allows you to leave code in
     your model that is not yet TorchScript compatible. If called from TorchScript,
@@ -862,7 +869,6 @@ def ignore(drop=False, **kwargs):
         import os
         os.remove('m.pt')
     """
-
     if callable(drop):
         # used without any args, so drop is actually a function
         #   @torch.jit.ignore
@@ -1561,7 +1567,8 @@ class _TensorExtractor(pickle.Pickler):
 
 
 def _extract_tensors(obj):
-    r"""
+    r"""Extract tensors from an object.
+
     This function is exclusively called from C++.
     See ``torch/csrc/jit/python/python_ivalue.h``.
 
