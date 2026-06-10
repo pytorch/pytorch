@@ -842,6 +842,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_len
 
             return generic_len(tx, self)
+        elif name == "__str__" and not (args or kwargs):
+            from .object_protocol import generic_str
+
+            return generic_str(tx, self)
         elif name == "__repr__" and not args and not kwargs:
             return self.repr_impl(tx)
         elif name == "__iter__" and not args and not kwargs:
@@ -1370,6 +1374,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             context=f"{type(self).__name__} has tp_repr slot but no repr_impl override",
             explanation=f"The type {self.python_type_name()} has a tp_repr C slot but "
             "the corresponding VariableTracker doesn't implement repr_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def str_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Dynamo hook for VariableTrackers with dedicated str behavior.
+        Subclasses override this for the per-type str result; generic_str()
+        handles dispatch and repr fallback.
+        """
+        unimplemented(
+            gb_type="str_impl not implemented",
+            context=f"{type(self).__name__} has no str_impl override for {self.python_type_name()}",
+            explanation=f"Dynamo does not implement __str__ for {self.python_type_name()} "
+            f"in {type(self).__name__}.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
