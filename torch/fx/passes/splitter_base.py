@@ -618,14 +618,55 @@ class _SplitterBase:
         - nodes from the same fusion depend on the same set of outer nodes,
         - outer nodes depending on a fusion depend on all nodes in that fusion.
         """
+        # --- DEBUG: log deps added by fusion propagation ---
+        _dbg_env = os.environ.get("_SPLITTER_DEBUG_LOG")
+        if _dbg_env:
+            import builtins
+            _dbg_fh = builtins.open(_dbg_env, "a")
+            import datetime as _dt
+
+            def _dbg(msg):
+                _dbg_fh.write(
+                    f"[{_dt.datetime.now().isoformat()}] [DEPS] {msg}\n"
+                )
+                _dbg_fh.flush()
+        else:
+            def _dbg(msg):
+                pass
+
+        _dbg(f"update_deps_for_fusions: processing {len(self.fusions)} fused nodes")
+
         for node in self.fusions:
             fusion = self.fusions[node]
+            orig_deps = set(self.deps[node])
             for fused_neighbor in fusion:
-                self.deps[node].update(self.deps[fused_neighbor] - fusion)
+                new_deps = self.deps[fused_neighbor] - fusion
+                if new_deps - self.deps[node]:
+                    _dbg(
+                        f"  {node.name} += deps from {fused_neighbor.name}: "
+                        f"{sorted(d.name for d in new_deps - self.deps[node])}"
+                    )
+                self.deps[node].update(new_deps)
 
                 for user in fused_neighbor.users:
                     if user not in fusion:
+                        if node not in self.deps[user]:
+                            _dbg(
+                                f"  {user.name} (outside fusion) += dep on "
+                                f"{node.name} (via {fused_neighbor.name}.users)"
+                            )
                         self.deps[user].add(node)
+            added = self.deps[node] - orig_deps
+            if added:
+                _dbg(
+                    f"  SUMMARY {node.name}: orig_deps="
+                    f"{sorted(d.name for d in orig_deps)}, "
+                    f"deps_ADDED_by_fusion="
+                    f"{sorted(d.name for d in added)}"
+                )
+
+        if _dbg_env:
+            _dbg_fh.close()
 
     def _merge_overlapping_fusions(self) -> None:
         """
@@ -640,10 +681,27 @@ class _SplitterBase:
         This method detects overlapping groups via union-find and merges
         them into single groups before dep propagation.
         """
-        if os.environ.get("_SPLITTER_MERGE_OVERLAPPING_FUSIONS", "0") != "1":
+        if os.environ.get("_SPLITTER_MERGE_OVERLAPPING_FUSIONS", "1") != "1":
             return
 
+        # --- DEBUG helper: write to splitter debug log if open ---
+        _dbg_env = os.environ.get("_SPLITTER_DEBUG_LOG")
+        if _dbg_env:
+            import builtins
+            _dbg_fh = builtins.open(_dbg_env, "a")
+            import datetime as _dt
+
+            def _dbg(msg):
+                _dbg_fh.write(
+                    f"[{_dt.datetime.now().isoformat()}] [MERGE] {msg}\n"
+                )
+                _dbg_fh.flush()
+        else:
+            def _dbg(msg):
+                pass
+
         if not self.fusions:
+            _dbg("No fusions found — nothing to merge.")
             return
 
         # Collect unique groups by identity.
@@ -651,14 +709,47 @@ class _SplitterBase:
         for group in self.fusions.values():
             unique_groups[id(group)] = group
 
+        _dbg(f"Total unique fusion groups: {len(unique_groups)}")
+
         if len(unique_groups) <= 1:
+            if unique_groups:
+                only_group = next(iter(unique_groups.values()))
+                _dbg(
+                    f"  Only 1 group ({len(only_group)} nodes): "
+                    f"{sorted(n.name for n in only_group)[:15]}..."
+                )
+            _dbg("Only 0 or 1 group — nothing to merge.")
             return
+
+        # Log each group before merging.
+        gid_label: dict[int, str] = {}
+        for idx, (gid, group) in enumerate(unique_groups.items()):
+            label = f"G{idx}"
+            gid_label[gid] = label
+            node_names = sorted(n.name for n in group)
+            _dbg(
+                f"  {label} (id={gid}, {len(group)} nodes): {node_names}"
+            )
 
         # Map each node to all group IDs it belongs to.
         node_to_gids: dict[torch.fx.Node, list[int]] = defaultdict(list)
         for gid, group in unique_groups.items():
             for node in group:
                 node_to_gids[node].append(gid)
+
+        # Log shared nodes (nodes appearing in multiple groups).
+        shared_nodes = {
+            node: gids for node, gids in node_to_gids.items() if len(gids) > 1
+        }
+        if shared_nodes:
+            _dbg(f"Shared nodes (in multiple groups): {len(shared_nodes)}")
+            for node, gids in sorted(
+                shared_nodes.items(), key=lambda x: x[0].name
+            ):
+                labels = [gid_label[g] for g in gids]
+                _dbg(f"    node={node.name}  in groups: {labels}")
+        else:
+            _dbg("No shared nodes — groups are disjoint, nothing to merge.")
 
         # Union-find: merge groups that share nodes.
         parent: dict[int, int] = {gid: gid for gid in unique_groups}
@@ -670,7 +761,7 @@ class _SplitterBase:
             return x
 
         needs_merge = False
-        for gids in node_to_gids.values():
+        for node, gids in node_to_gids.items():
             if len(gids) > 1:
                 root = find(gids[0])
                 for i in range(1, len(gids)):
@@ -678,8 +769,14 @@ class _SplitterBase:
                     if other != root:
                         parent[other] = root
                         needs_merge = True
+                        _dbg(
+                            f"  Union: {gid_label[gids[i]]} → "
+                            f"{gid_label[gids[0]]}  "
+                            f"(shared node: {node.name})"
+                        )
 
         if not needs_merge:
+            _dbg("Union-find found no merges needed.")
             return
 
         # Build merged groups.
@@ -687,10 +784,23 @@ class _SplitterBase:
         for gid, group in unique_groups.items():
             merged[find(gid)].update(group)
 
+        _dbg(f"After merge: {len(merged)} group(s)")
+        for root_gid, group in merged.items():
+            node_names = sorted(n.name for n in group)
+            _dbg(
+                f"  Merged group (root={gid_label.get(root_gid, '?')}, "
+                f"{len(group)} nodes): {node_names}"
+            )
+
         # Rebuild self.fusions so every node points to its merged group.
         for merged_group in merged.values():
             for node in merged_group:
                 self.fusions[node] = merged_group
+
+        _dbg("self.fusions rebuilt — every node now points to its merged group.")
+
+        if _dbg_env:
+            _dbg_fh.close()
 
     # ===============================================================
     # Helpers for preview
@@ -1073,6 +1183,82 @@ class _SplitterBase:
         current_cpu_nodes, current_acc_nodes = self.starter_nodes()
         visited_nodes: NodeSet = set()
 
+        # --- DEBUG: Write diagnostics to a dedicated file only when
+        # _SPLITTER_DEBUG_LOG env var is explicitly set.  When not set,
+        # _dbg_print is a no-op with zero I/O overhead. ---
+        _dbg_env = os.environ.get("_SPLITTER_DEBUG_LOG")
+        _dbg = None
+        if _dbg_env is not None:
+            import datetime
+
+            _dbg_path = _dbg_env or os.path.expanduser(
+                f"~/logs/splitter_debug_lowering_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            )
+            os.makedirs(os.path.dirname(_dbg_path), exist_ok=True)
+            _dbg = open(_dbg_path, "a")
+
+            def _dbg_print(msg: str) -> None:
+                _dbg.write(f"[{datetime.datetime.now().isoformat()}] {msg}\n")  # type: ignore[union-attr]
+                _dbg.flush()  # type: ignore[union-attr]
+        else:
+
+            def _dbg_print(msg: str) -> None:
+                pass
+
+        try:
+            return self._put_nodes_into_subgraphs_impl(
+                current_cpu_nodes,
+                current_acc_nodes,
+                visited_nodes,
+                _dbg_print,
+            )
+        finally:
+            if _dbg is not None:
+                _dbg.close()
+
+    def _put_nodes_into_subgraphs_impl(
+        self,
+        current_cpu_nodes: NodeSet,
+        current_acc_nodes: NodeSet,
+        visited_nodes: NodeSet,
+        _dbg_print,  # type: ignore[no-untyped-def]
+    ) -> list[Subgraph]:
+
+        _dbg_print(
+            f"[DEBUG splitter] starter_cpu_nodes ({len(current_cpu_nodes)}): "
+            f"{sorted(n.name for n in current_cpu_nodes)[:20]}"
+            f"{'...' if len(current_cpu_nodes) > 20 else ''}"
+        )
+        _dbg_print(
+            f"[DEBUG splitter] starter_acc_nodes ({len(current_acc_nodes)}): "
+            f"{sorted(n.name for n in current_acc_nodes)[:20]}"
+            f"{'...' if len(current_acc_nodes) > 20 else ''}"
+        )
+
+        # Find callable nodes with zero callable deps that are NOT in any
+        # starter set.  These "orphaned" nodes will never be visited,
+        # blocking any downstream node that depends on them.
+        all_callable = {n for n in self.module.graph.nodes if n.op in CALLABLE_NODE_OPS}
+        zero_dep_callable = {n for n in all_callable if len(self.deps[n]) == 0}
+        orphaned = zero_dep_callable - current_cpu_nodes - current_acc_nodes
+        if orphaned:
+            _dbg_print(
+                f"[DEBUG splitter] WARNING: {len(orphaned)} orphaned zero-deps "
+                f"callable node(s) found (not in any starter set):"
+            )
+            for n in sorted(orphaned, key=lambda x: x.name):
+                _dbg_print(
+                    f"[DEBUG splitter]   node={n.name}  op={n.op}  "
+                    f"target={n.target}  "
+                    f"all_input_nodes={[i.name for i in n.all_input_nodes]}  "
+                    f"input_ops={[i.op for i in n.all_input_nodes]}  "
+                    f"users={[u.name for u in n.users]}  "
+                    f"in_acc_nodes={n in self.acc_nodes}"
+                )
+        else:
+            _dbg_print("[DEBUG splitter] No orphaned zero-deps callable nodes found.")
+        # --- END DEBUG ---
+
         # Determine which subgraph to start from based on which subgraph has
         # 0-dep node
         acc_subgraph: bool = not any(len(self.deps[n]) == 0 for n in current_cpu_nodes)
@@ -1092,7 +1278,201 @@ class _SplitterBase:
             # If nothing was found, then it's time to flip the mode and start a new subgraph
             if node is None:
                 if not current_subgraph_nodes:
-                    raise FxNetSplitterInternalError("Subgraph can't be empty")
+                    # --- DEBUG: Cycle detection + full diagnostic (adapted from D75636868) ---
+                    example_cycle: NodeList = []
+                    external_deps: NodeSet = set()
+
+                    def get_remaining_deps(n):
+                        return self.deps[n] - visited_nodes
+
+                    def analyze_deps():
+                        remaining_nodes = current_acc_nodes | current_cpu_nodes
+
+                        def dfs(
+                            node: torch.fx.Node,
+                            visited: NodeSet,
+                            rec_stack: NodeList,
+                        ):
+                            nonlocal example_cycle
+                            visited.add(node)
+                            rec_stack.append(node)
+                            rem_deps = get_remaining_deps(node)
+                            for d in rem_deps:
+                                if d not in remaining_nodes:
+                                    external_deps.add(d)
+                                    continue
+                                if d not in visited:
+                                    dfs(d, visited, rec_stack)
+                                elif d in rec_stack:
+                                    cycle_start_index = rec_stack.index(d)
+                                    cycle = rec_stack[cycle_start_index:]
+                                    if len(example_cycle) == 0 or len(cycle) < len(
+                                        example_cycle
+                                    ):
+                                        example_cycle = cycle
+                            rec_stack.pop()
+
+                        visited: NodeSet = set()
+                        rec_stack: NodeList = []
+                        for n in remaining_nodes:
+                            if n not in visited:
+                                dfs(n, visited, rec_stack)
+
+                    msg = ""
+                    try:
+                        import sys
+
+                        old_limit = sys.getrecursionlimit()
+                        sys.setrecursionlimit(max(old_limit, 10000))
+                        analyze_deps()
+                        sys.setrecursionlimit(old_limit)
+                        if example_cycle:
+                            names = [n.name for n in example_cycle]
+                            msg = f"Found a cycle: {names}."
+                        for n in external_deps:
+                            if len(get_remaining_deps(n)) == 0:
+                                msg += (
+                                    f"\nFound external node with 0 dependency: {n.name}"
+                                )
+                                break
+                    except Exception as e:
+                        msg = f"Failed to provide details about this issue: {e}"
+
+                    _dbg_print(
+                        f"[DEBUG splitter] CRASH: Subgraph can't be empty! "
+                        f"acc_subgraph={acc_subgraph}"
+                    )
+                    _dbg_print(
+                        f"[DEBUG splitter]   visited_nodes: {len(visited_nodes)}"
+                    )
+                    _dbg_print(
+                        f"[DEBUG splitter]   remaining cpu_nodes "
+                        f"({len(current_cpu_nodes)}):"
+                    )
+                    _dbg_print(
+                        f"[DEBUG splitter]   remaining acc_nodes "
+                        f"({len(current_acc_nodes)}):"
+                    )
+                    _dbg_print(f"[DEBUG splitter]   analyze_deps msg: {msg!r}")
+
+                    if example_cycle:
+                        _dbg_print(
+                            f"[DEBUG splitter]   CYCLE DETECTED: "
+                            f"{[n.name for n in example_cycle]}"
+                        )
+                        for n in example_cycle:
+                            rem = sorted(d.name for d in get_remaining_deps(n))
+                            fused = (
+                                sorted(f.name for f in self.fusions.get(n, set()))
+                                if hasattr(self, "fusions")
+                                else "N/A"
+                            )
+                            _dbg_print(
+                                f"[DEBUG splitter]     cycle node={n.name}  "
+                                f"op={n.op}  target={n.target}  "
+                                f"in_acc_nodes={n in self.acc_nodes}  "
+                                f"remaining_deps={rem}  "
+                                f"fusion_group={fused}"
+                            )
+                            for inp in n.all_input_nodes:
+                                _dbg_print(
+                                    f"[DEBUG splitter]       input: {inp.name}  "
+                                    f"op={inp.op}  target={inp.target}  "
+                                    f"visited={inp in visited_nodes}  "
+                                    f"in_acc_nodes={inp in self.acc_nodes if inp.op in CALLABLE_NODE_OPS else 'N/A'}"
+                                )
+                    else:
+                        _dbg_print("[DEBUG splitter]   NO CYCLE found by DFS.")
+
+                    if external_deps:
+                        _dbg_print(
+                            f"[DEBUG splitter]   EXTERNAL DEPS (not in any queue): "
+                            f"{sorted(n.name for n in external_deps)}"
+                        )
+                        for n in sorted(external_deps, key=lambda x: x.name):
+                            rem = sorted(d.name for d in get_remaining_deps(n))
+                            _dbg_print(
+                                f"[DEBUG splitter]     external node={n.name}  "
+                                f"op={n.op}  target={n.target}  "
+                                f"in_acc_nodes={n in self.acc_nodes}  "
+                                f"visited={n in visited_nodes}  "
+                                f"remaining_deps={rem}"
+                            )
+                    else:
+                        _dbg_print("[DEBUG splitter]   NO EXTERNAL DEPS found.")
+
+                    # --- Fusion group analysis for stuck nodes ---
+                    remaining_all = current_acc_nodes | current_cpu_nodes
+                    fused_stuck = {
+                        n
+                        for n in remaining_all
+                        if hasattr(self, "fusions") and n in self.fusions
+                    }
+                    _dbg_print(
+                        f"[DEBUG splitter]   Stuck nodes in fusion groups: "
+                        f"{len(fused_stuck)}"
+                    )
+                    logged_fusions: set[frozenset[str]] = set()
+                    orig_deps_map = self.find_deps()
+                    for n in sorted(fused_stuck, key=lambda x: x.name):
+                        fusion_key = frozenset(f.name for f in self.fusions[n])
+                        if fusion_key in logged_fusions:
+                            continue
+                        logged_fusions.add(fusion_key)
+                        fusion_members = sorted(f.name for f in self.fusions[n])
+                        _dbg_print(
+                            f"[DEBUG splitter]     FUSION GROUP "
+                            f"(via {n.name}): {fusion_members}"
+                        )
+                        for fm_name in fusion_members:
+                            fm = next(x for x in self.fusions[n] if x.name == fm_name)
+                            orig_deps = sorted(
+                                d.name for d in orig_deps_map.get(fm, set())
+                            )
+                            fused_deps = sorted(
+                                d.name for d in self.deps.get(fm, set())
+                            )
+                            added = sorted(set(fused_deps) - set(orig_deps))
+                            _dbg_print(
+                                f"[DEBUG splitter]       member={fm.name}  "
+                                f"op={fm.op}  target={fm.target}  "
+                                f"visited={fm in visited_nodes}  "
+                                f"in_remaining={fm in remaining_all}  "
+                                f"orig_deps={orig_deps}  "
+                                f"fused_deps={fused_deps}  "
+                                f"deps_ADDED_by_fusion={added}"
+                            )
+
+                    # --- Root blocker trace: find nodes with fewest
+                    # unsatisfied deps (most likely root blockers) ---
+                    _dbg_print(
+                        "[DEBUG splitter]   ROOT BLOCKER TRACE "
+                        "(stuck nodes sorted by #unsatisfied_deps):"
+                    )
+                    stuck_with_counts = []
+                    for n in remaining_all:
+                        unsatisfied = self.deps[n] - visited_nodes
+                        stuck_with_counts.append((len(unsatisfied), n))
+                    stuck_with_counts.sort(key=lambda x: (x[0], x[1].name))
+                    for count, n in stuck_with_counts[:20]:
+                        unsatisfied = sorted(
+                            d.name for d in self.deps[n] - visited_nodes
+                        )
+                        fused = (
+                            sorted(f.name for f in self.fusions.get(n, set()))
+                            if hasattr(self, "fusions") and n in self.fusions
+                            else []
+                        )
+                        _dbg_print(
+                            f"[DEBUG splitter]     [{count} unsat] "
+                            f"{n.name}  op={n.op}  target={n.target}  "
+                            f"in_acc={n in self.acc_nodes}  "
+                            f"unsatisfied={unsatisfied}  "
+                            f"fusion={fused}"
+                        )
+
+                    # --- END DEBUG ---
+                    raise FxNetSplitterInternalError(f"Subgraph can't be empty. {msg}")
 
                 subgraphs.append(
                     Subgraph(is_acc=acc_subgraph, nodes=current_subgraph_nodes)
