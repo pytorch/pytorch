@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -218,7 +219,7 @@ class CuptiMonitor:
         self,
         *,
         buffer_size: int = _DEFAULT_BUFFER_SIZE,
-        flush_period_s: float = _DEFAULT_FLUSH_PERIOD_S,
+        flush_period_s: float | None = None,
     ) -> None:
         # The monitor is the engine and the multiplexer: it owns the single CUPTI
         # subscription + buffer pool + decode worker, demuxes each completed buffer
@@ -229,6 +230,23 @@ class CuptiMonitor:
         # selection, decoded columnar against a record layout computed from the
         # field-size spec (no captured layout needed). This requires libcupti >= 13.2.
         self.buffer_size = buffer_size
+        # Background-drain flush period (seconds). An explicit arg wins; otherwise it
+        # comes from TORCH_CUPTI_MONITOR_FLUSH_PERIOD_S (default 1.0). Sign-encoded:
+        #   > 0  -> background flush thread drains every flush_period_s.
+        #    0   -> background flush thread drains continuously (no wait between flushes).
+        #   < 0  -> NO background flush thread; the caller must drive flush() itself
+        #           (e.g. at end of step). flush() semantics are unchanged -- the caller
+        #           chooses sync=. This is the escape hatch for a libcupti/libnvperf HES
+        #           thread-safety bug: the HW-trace decode the worker runs after
+        #           cuptiActivityFlushAll can wild-write the host heap when it overlaps
+        #           concurrent host activity (e.g. NCCL collective setup); draining only
+        #           from the (quiescent) foreground avoids that race.
+        if flush_period_s is None:
+            flush_period_s = float(
+                os.environ.get(
+                    "TORCH_CUPTI_MONITOR_FLUSH_PERIOD_S", _DEFAULT_FLUSH_PERIOD_S
+                )
+            )
         self.flush_period_s = flush_period_s
         self._cupti = cupti_python.pylibcupti()
         # The CUPTI subscriber handle.
@@ -321,7 +339,9 @@ class CuptiMonitor:
             daemon=True,
         )
         self._worker_thread.start()
-        if self.flush_period_s > 0:
+        # Background drain when flush_period_s >= 0 (0 = drain continuously, no wait);
+        # < 0 means no background thread -- the caller drives flush() itself.
+        if self.flush_period_s >= 0:
             self._flush_thread = threading.Thread(
                 target=self._flush_loop,
                 name="torch-cupti-monitor-flush",
