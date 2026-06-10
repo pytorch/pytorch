@@ -161,10 +161,27 @@ mkldnn_gemm(
   bool fp16_usable = std::is_same_v<scalar_t, c10::Half> && use_mkldnn_fp16_matmul();
   bool bf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_bf32_matmul();
   bool tf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_tf32_matmul();
-  if ( !(bf16_usable || fp16_usable || bf32_usable || tf32_usable) ||
-      (m * n * k <= 16 * 16 * 16) || (alpha == 0.0f)) {
-    return false;
+  if (bf16_usable) {
+  // BF16 heuristic: use BGEMM for GEMV-like or small shapes,
+  // otherwise prefer oneDNN for larger workloads.
+  #if defined(__aarch64__)
+    // Arm-specific BF16 heuristic: avoid oneDNN for GEMV-like or small shapes.
+    if ((m == 1 || n == 1) || (m * n * k <= 786432) || (alpha == 0.0f)) {
+      return false;
+    }
+  #else
+    // Keep existing generic behavior for non-Arm.
+    if ((m * n * k <= 16 * 16 * 16) || (alpha == 0.0f)) {
+      return false;
+    }
+  #endif
+  } else {
+    if (!(fp16_usable || bf32_usable || tf32_usable) ||
+        (m * n * k <= 16 * 16 * 16) || (alpha == 0.0f)) {
+      return false;
+    }
   }
+
 
   ideep::attr_t op_attr;
   // Use mkldnn post ops to perform the add.
