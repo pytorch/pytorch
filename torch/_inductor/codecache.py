@@ -2411,10 +2411,12 @@ class CudaKernelParamCache:
         basename, _ = get_name_and_dir_from_output_file_path(bin_path)
 
         if config.aot_inductor.emit_multi_arch_kernel:
+            # Distinct from the single-arch .hsaco the JIT pass reloads, so
+            # the multi-arch bundle doesn't clobber it.
             bin_type_to_ext = {
                 "cubin": ".fatbin",
                 XPU_KERNEL_FORMAT: ".spv",
-                "hsaco": ".hsaco",
+                "hsaco": "_multiarch.hsaco",
             }
             assert bin_type in bin_type_to_ext, (
                 "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
@@ -2637,8 +2639,8 @@ class AotCodeCompiler:
             if not config.aot_inductor.dynamic_linkage:
                 generated_files.append(header_path)
 
-        output_code_log.info("Wrapper code written to: %s", wrapper_path)
-        output_code_log.info("Kernel code written to: %s", kernel_path)
+        output_code_log.info("AOT wrapper code written to: %s", wrapper_path)
+        output_code_log.info("AOT kernel code written to: %s", kernel_path)
         trace_structured(
             "graph_dump",
             lambda: {

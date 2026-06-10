@@ -576,25 +576,25 @@ class EnterDeviceContextManagerLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         if V.graph.cpp_wrapper:
             code.writeline("\n")
-            if V.graph.aot_mode:
-                # In AOT mode, we have a stream provided as a param. A stream is
-                # associated with a device, so we never expect the device to change.
-                # CUDAStreamGuard sets the stream and the device.
-                if self.last_seen_device_guard_index is None:
-                    code.writeline(
-                        f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
-                    )
-                else:
+            # AOTI stream is bound to a device, so CUDAStreamGuard sets both
+            # stream and device, and the device cannot change later.
+            if self.last_seen_device_guard_index is None:
+                code.writeline_aot(
+                    f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
+                )
+                code.writeline_jit(
+                    f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
+                )
+            else:
+                if V.graph.aot_mode:
+                    # AOTI emits a single stream_guard on first use; later
+                    # contexts can only re-enter the same device. In dual-wrapper
+                    # mode the JIT side still needs device_guard updates.
                     assert self.last_seen_device_guard_index == self.device_idx, (
                         "AOTInductor only supports running on one CUDA device"
                     )
-            else:
-                if self.last_seen_device_guard_index is None:
-                    code.writeline(
-                        f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
-                    )
-                else:
-                    code.writeline(f"device_guard.set_index({self.device_idx});")
+                if not V.graph.aot_mode or V.graph.is_dual_wrapper_mode:
+                    code.writeline_jit(f"device_guard.set_index({self.device_idx});")
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
@@ -2222,9 +2222,15 @@ class PythonWrapperCodegen(CodeGen):
         result.splice(self.imports)
         result.writeline("")
         result.splice(self.header)
-        # We do not want the cpp header for intermediate const graph. Headers would be
-        # rendered by the main module instead.
-        if V.graph.aot_mode and V.graph.cpp_wrapper and V.graph.is_const_graph:
+        # Intermediate const graphs normally use headers rendered by the main
+        # module. In dual-wrapper-mode, the const graph's JIT wrapper is emitted as
+        # standalone C++ and needs its own header.
+        if (
+            V.graph.aot_mode
+            and V.graph.cpp_wrapper
+            and V.graph.is_const_graph
+            and not V.graph.is_dual_wrapper_mode
+        ):
             result = IndentedBuffer()
 
         # Add subgraph definitions to the result
