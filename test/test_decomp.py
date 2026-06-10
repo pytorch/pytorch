@@ -197,8 +197,6 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
             f"{i} Operation: {op} shape mismatch: {orig.shape} != {decomp.shape}"
         )
     tol_table = {
-        (torch.bfloat16, torch.ops.aten.native_group_norm.default): 5e-6,
-        (torch.float16, torch.ops.aten.native_group_norm.default): 5e-6,
         (torch.bfloat16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_layer_norm_backward.default): 1e-3,
@@ -279,7 +277,7 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         # different reduction orders.
         (torch.float32, torch.ops.aten.native_group_norm_backward.multiple_grads): (
             1e-5,
-            2e-5,
+            5e-6,
         ),
         # This exceeds default tolerances only on CPU, on CUDA it's fine
         (torch.float32, torch.ops.aten.grid_sampler_2d.default): (7e-6, 3e-5),
