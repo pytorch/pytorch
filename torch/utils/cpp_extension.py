@@ -389,6 +389,10 @@ COMMON_HIP_FLAGS = [
     '-DHIPBLAS_V2',
 ]
 
+if ROCM_VERSION is not None:
+    COMMON_HIP_FLAGS.append(
+        f'-DTORCH_HIP_VERSION={ROCM_VERSION[0] * 100 + ROCM_VERSION[1]}')
+
 if not IS_WINDOWS:
     COMMON_HIP_FLAGS.append('-fPIC')
 
