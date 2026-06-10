@@ -69,17 +69,22 @@ def _get_pattern_output_dtype(match: Match):
     Assume only 1 output node in this matched pattern.
     """
     pattern_output_nodes = match.output_nodes()
-    assert len(pattern_output_nodes) == 1
+    if len(pattern_output_nodes) != 1:
+        raise AssertionError(
+            f"expected exactly 1 output node, got {len(pattern_output_nodes)}"
+        )
     output_node = pattern_output_nodes[0]
-    assert isinstance(output_node, torch.fx.Node)
+    if not isinstance(output_node, torch.fx.Node):
+        raise AssertionError(f"expected torch.fx.Node, got {type(output_node)}")
     output_dtype = output_node.meta["val"].dtype
-    assert output_dtype in [
+    if output_dtype not in [
         torch.int8,
         torch.uint8,
         torch.float32,
         torch.bfloat16,
         torch.float8_e4m3fn,
-    ]
+    ]:
+        raise AssertionError(f"unexpected output dtype {output_dtype}")
     return output_dtype
 
 
@@ -112,7 +117,8 @@ def _generate_linear_t_pattern(
     _dequant_per_channel_pattern,
     dtype,
 ):
-    assert dtype in [torch.float32, torch.bfloat16]
+    if dtype not in [torch.float32, torch.bfloat16]:
+        raise AssertionError(f"expected float32 or bfloat16, got {dtype}")
     t_pattern = CallFunction(
         aten.permute.default,
         _may_generate_pattern_with_dtype_convert(
@@ -366,7 +372,10 @@ def _check_node_kwarg_arg_value(check_node, kwarg_name, args_index, expected_val
         actual_value = check_node.kwargs[kwarg_name]
         return actual_value == expected_value
     else:
-        assert len(check_node.args) >= (args_index + 1)
+        if len(check_node.args) < (args_index + 1):
+            raise AssertionError(
+                f"expected at least {args_index + 1} args, got {len(check_node.args)}"
+            )
         actual_value = check_node.args[args_index]
         return actual_value == expected_value
 
@@ -441,13 +450,14 @@ def _register_quantized_conv_lowering(
             kwargs["groups"],
         )
         output_dtype = _get_pattern_output_dtype(match)
-        assert output_dtype in [
+        if output_dtype not in [
             torch.int8,
             torch.uint8,
             torch.float8_e4m3fn,
             torch.float32,
             torch.bfloat16,
-        ]
+        ]:
+            raise AssertionError(f"unexpected output dtype {output_dtype}")
         # Output QParams
         o_inv_scale = kwargs["output_scale"]
         o_zero_point = kwargs["output_zero_point"]
@@ -592,7 +602,8 @@ def _register_quantized_linear_binary_lowering(
     )
     def qlinear_binary(match: Match, *args, **kwargs):
         output_dtype = _get_pattern_output_dtype(match)
-        assert output_dtype is not None
+        if output_dtype is None:
+            raise AssertionError("expected non-None output dtype")
         # Activation QParams
         x, x_scale, x_zp = (
             kwargs["x"],
@@ -691,14 +702,16 @@ def _is_valid_quantized_op_binary_optimization_pattern(
         if len(compute_node.users) != 1:
             return False
         binary_node_inputs = next(iter(compute_node.users)).args
-        assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
+        if len(binary_node_inputs) != 2:
+            raise AssertionError("Expects binary node with 2 inputs")
         if output_dtype in [torch.float32, torch.bfloat16]:
             extra_input_of_binary_node = None
             for arg in binary_node_inputs:
                 if arg != compute_node:
                     extra_input_of_binary_node = arg
                     break
-            assert extra_input_of_binary_node is not None
+            if extra_input_of_binary_node is None:
+                raise AssertionError("expected non-None extra input of binary node")
             # Extra input of binary node comes from dequant pattern
             if extra_input_from_dequant and (
                 (not isinstance(extra_input_of_binary_node, torch.fx.Node))
@@ -763,7 +776,8 @@ def _register_quantized_conv_binary_lowering(
     )
     def qconv_binary(match: Match, *args, **kwargs):
         output_dtype = _get_pattern_output_dtype(match)
-        assert output_dtype is not None
+        if output_dtype is None:
+            raise AssertionError("expected non-None output dtype")
         x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
         accum = kwargs["accum"]
         accum_scale = kwargs["accum_scale"]
@@ -794,9 +808,10 @@ def _register_quantized_conv_binary_lowering(
         accum.realize()
         from .mkldnn_fusion import _can_be_inplace
 
-        assert _can_be_inplace(accum), (
-            "QConv Binary Inplace Fusion requires accum is not an alias or mutation."
-        )
+        if not _can_be_inplace(accum):
+            raise AssertionError(
+                "QConv Binary Inplace Fusion requires accum is not an alias or mutation."
+            )
 
         computation_args = (
             x,
@@ -926,10 +941,16 @@ def _register_quantized_maxpool2d_lowering(
         padding = pad_listlike(padding, 2)
         dilation = pad_listlike(dilation, 2)
 
-        assert len(kernel_size) == 2
-        assert len(stride) == 2
-        assert len(padding) == 2
-        assert len(dilation) == 2
+        if len(kernel_size) != 2:
+            raise AssertionError(
+                f"expected kernel_size of length 2, got {len(kernel_size)}"
+            )
+        if len(stride) != 2:
+            raise AssertionError(f"expected stride of length 2, got {len(stride)}")
+        if len(padding) != 2:
+            raise AssertionError(f"expected padding of length 2, got {len(padding)}")
+        if len(dilation) != 2:
+            raise AssertionError(f"expected dilation of length 2, got {len(dilation)}")
 
         computation_args = (
             x,
@@ -1022,7 +1043,8 @@ def _is_input_output_same_scale_zp(check_node):
         quant_nodes = filter_nodes(
             match.nodes, quantized_decomposed.quantize_per_tensor.default
         )
-        assert len(quant_nodes) == 1, "expect only 1 add node at output quant pattern"
+        if len(quant_nodes) != 1:
+            raise AssertionError("expect only 1 add node at output quant pattern")
         zero_points.append(quant_nodes[0].args[2])
         if not all(zero_point == zero_points[0] for zero_point in zero_points):
             return False
@@ -1113,7 +1135,8 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
     def fn(match):
         if not config.cpp.enable_concat_linear:
             return False
-        assert all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales"))
+        if not all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales")):
+            raise AssertionError("expected x, w1, w2, w3, scales in match kwargs")
         if not all(
             hasattr(match.kwargs[key], "meta")
             for key in ["x", "w1", "w2", "w3", "scales"]
@@ -1151,7 +1174,8 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
 
 def _is_valid_woq_optimization_pattern():
     def fn(match):
-        assert all(k in match.kwargs for k in ("x", "weight", "scales"))
+        if not all(k in match.kwargs for k in ("x", "weight", "scales")):
+            raise AssertionError("expected x, weight, scales in match kwargs")
         if not all(
             hasattr(match.kwargs[key], "meta") for key in ["x", "weight", "scales"]
         ):
@@ -1205,7 +1229,8 @@ def _register_concat_linear_int8_woq_lowering(
             ):
                 mm_node_of_x = candidate
                 break
-        assert mm_node_of_x is not None, "unable to find mm node"
+        if mm_node_of_x is None:
+            raise AssertionError("unable to find mm node")
         _, cat_wgt_node = mm_node_of_x._input_nodes
         scaling_node = next(iter(mm_node_of_x.users.keys()))
         user_of_scaling_node = next(iter(scaling_node.users.keys()))
@@ -1403,7 +1428,8 @@ def _register_woq_lowerings():
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
     def _inner(match):
-        assert dtype in [torch.float32, torch.bfloat16]
+        if dtype not in [torch.float32, torch.bfloat16]:
+            raise AssertionError(f"Unexpected dtype: {dtype}")
         dequant_pattern_end_node = match.output_node()
         if dequant_pattern_end_node.target not in [
             quantized_decomposed.dequantize_per_tensor.default,
@@ -1478,14 +1504,16 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         # After this transformation, the graph 2 could hit the int8
         # fusion pattern: dequant-node-quant, respectively for
         # node1 and node2.
-        assert dtype in [torch.float32, torch.bfloat16]
+        if dtype not in [torch.float32, torch.bfloat16]:
+            raise AssertionError(f"Unexpected dtype: {dtype}")
 
         def clone_to_new_node(graph, source_node, user_node):
             # Clone the source_node to a new node
             # Replace user_node's input from source_node to new_node
-            assert source_node.op == "call_function", (
-                "clone_to_new_node only support node.op call_function"
-            )
+            if source_node.op != "call_function":
+                raise AssertionError(
+                    "clone_to_new_node only support node.op call_function"
+                )
             with graph.inserting_before(user_node):
                 new_node = graph.call_function(
                     source_node.target,
@@ -1500,12 +1528,15 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         # * End node should be the match.output_node()
         # * Start node should be the node of dequantize_per_tensor
         dequant_pattern_end_node = match.output_node()
-        assert dequant_pattern_end_node.target in [
+        if dequant_pattern_end_node.target not in [
             quantized_decomposed.dequantize_per_tensor.default,
             quantized_decomposed.dequantize_per_tensor.tensor,
             prims.convert_element_type.default,
             aten.reshape.default,
-        ]
+        ]:
+            raise AssertionError(
+                f"Unexpected dequant pattern end node: {dequant_pattern_end_node.target}"
+            )
 
         # For a dequant pattern, we should expect see the node list as:
         # * OPT(aten.reshape.default)
@@ -1519,19 +1550,23 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
                 # For a dequant pattern, we expect the start node is a dequantize_per_tensor node
                 return _node
             else:
-                assert len(_node.args) >= 1, (
-                    "In dequant pattern, each node should have more than 1 arg."
-                )
+                if len(_node.args) < 1:
+                    raise AssertionError(
+                        "In dequant pattern, each node should have more than 1 arg."
+                    )
                 return _find_first_node_in_dequant_pattern(_node.args[0])
 
         dequant_pattern_start_node = _find_first_node_in_dequant_pattern(
             dequant_pattern_end_node
         )
 
-        assert dequant_pattern_start_node.target in [
+        if dequant_pattern_start_node.target not in [
             quantized_decomposed.dequantize_per_tensor.default,
             quantized_decomposed.dequantize_per_tensor.tensor,
-        ]
+        ]:
+            raise AssertionError(
+                f"Unexpected dequant pattern start node: {dequant_pattern_start_node.target}"
+            )
 
         # Clone the dequant pattern for each user node
         graph = match.graph
@@ -1556,7 +1591,10 @@ def _is_valid_dequant_conv_pattern(dtype, with_dtype_convert):
         # If these conditions don't meet, we will not
         # insert weight prepack node into the matched pattern.
         conv_node = match.output_node()
-        assert conv_node.target is aten.convolution.default
+        if conv_node.target is not aten.convolution.default:
+            raise AssertionError(
+                f"Expected aten.convolution.default, got {conv_node.target}"
+            )
         input_meta_value = conv_node.args[0].meta.get("val")
         weight_meta_value = conv_node.args[1].meta.get("val")
         for meta_value in [input_meta_value, weight_meta_value]:
@@ -1568,7 +1606,8 @@ def _is_valid_dequant_conv_pattern(dtype, with_dtype_convert):
                 # Only support conv1d/2d now
                 return False
 
-        assert dtype in [torch.float32, torch.bfloat16]
+        if dtype not in [torch.float32, torch.bfloat16]:
+            raise AssertionError(f"Unexpected dtype: {dtype}")
 
         if not with_dtype_convert:
             dequant_node = conv_node.args[0]
@@ -1607,9 +1646,13 @@ def _register_qconv_weight_prepack_pass(
           |
         onednn.qconv_pointwise <- onednn.qconv_prepack <- int8_weight
         """
-        assert dtype in [torch.float32, torch.bfloat16]
+        if dtype not in [torch.float32, torch.bfloat16]:
+            raise AssertionError(f"Unexpected dtype: {dtype}")
         conv_node = match.output_node()
-        assert conv_node.target is aten.convolution.default
+        if conv_node.target is not aten.convolution.default:
+            raise AssertionError(
+                f"Expected aten.convolution.default, got {conv_node.target}"
+            )
         if not with_dtype_convert:
             dequant_node = conv_node.args[0]
         else:
@@ -1636,10 +1679,13 @@ def _register_qconv_weight_prepack_pass(
             )
             dequant_per_channel = weight_to_bf16_node.args[0]  # type: ignore[union-attr]
 
-        assert (
+        if (
             dequant_per_channel.target  # type: ignore[union-attr]
-            is quantized_decomposed.dequantize_per_channel.default
-        )
+            is not quantized_decomposed.dequantize_per_channel.default
+        ):
+            raise AssertionError(
+                "Expected dequantize_per_channel.default for weight dequant node"
+            )
 
         # Activation QParams
         qx, x_zp, x_scale = (
@@ -1733,7 +1779,8 @@ def _register_qconv_weight_prepack_pass(
 def _generate_dequant_convolution_node_pattern(
     _dequant_per_channel_pattern, dtype=torch.float32, with_dtype_convert=False
 ):
-    assert dtype in [torch.float32, torch.bfloat16]
+    if dtype not in [torch.float32, torch.bfloat16]:
+        raise AssertionError(f"Unexpected dtype: {dtype}")
     dequant_convolution_node_pattern = CallFunction(
         aten.convolution.default,
         _may_generate_pattern_with_dtype_convert(
@@ -1756,7 +1803,8 @@ def _generate_dequant_convolution_node_pattern(
 def _generate_qconv_weight_prepack_patterns(
     dtype=torch.float32, with_dtype_convert=False
 ):
-    assert dtype in [torch.float32, torch.bfloat16]
+    if dtype not in [torch.float32, torch.bfloat16]:
+        raise AssertionError(f"Unexpected dtype: {dtype}")
     return (
         _generate_dequant_convolution_node_pattern(
             dequantize_per_channel_weight_pattern
@@ -1784,20 +1832,27 @@ def _get_linear_node(match, input_dim_exceeds_two, input_contiguous):
     if input_dim_exceeds_two:
         if input_contiguous:
             output_reshape_node = match.output_node()
-            assert output_reshape_node.target is aten.reshape.default
+            if output_reshape_node.target is not aten.reshape.default:
+                raise AssertionError(
+                    f"Expected aten.reshape.default, got {output_reshape_node.target}"
+                )
             linear_node = output_reshape_node.args[0]
         else:
             linear_nodes = filter_nodes(match.nodes, aten.bmm.default)
-            assert len(linear_nodes) == 1
+            if len(linear_nodes) != 1:
+                raise AssertionError(
+                    f"Expected exactly 1 bmm node, got {len(linear_nodes)}"
+                )
             linear_node = linear_nodes[0]
     else:
         linear_node = match.output_node()
 
-    assert linear_node.target in (
+    if linear_node.target not in (
         aten.addmm.default,
         aten.mm.default,
         aten.bmm.default,
-    )
+    ):
+        raise AssertionError(f"Unexpected linear node target: {linear_node.target}")
     return linear_node, output_reshape_node
 
 
@@ -1814,7 +1869,10 @@ def _get_linear_dq_node(
     if input_dim_exceeds_two:
         if input_contiguous:
             act_reshape_node = linear_node.args[input_index]
-            assert act_reshape_node.target is aten.reshape.default
+            if act_reshape_node.target is not aten.reshape.default:
+                raise AssertionError(
+                    f"Expected aten.reshape.default, got {act_reshape_node.target}"
+                )
             if not with_dtype_convert:
                 # pattern: linear -> reshape -> dequant
                 dequant_node = act_reshape_node.args[0]
@@ -1825,7 +1883,10 @@ def _get_linear_dq_node(
         else:
             # bmm pattern decomposed from linear when input dim exceeds 2 and not contiguous
             act_expand_node = linear_node.args[input_index]
-            assert act_expand_node.target is aten.expand.default
+            if act_expand_node.target is not aten.expand.default:
+                raise AssertionError(
+                    f"Expected aten.expand.default, got {act_expand_node.target}"
+                )
             if not with_dtype_convert:
                 dequant_node = act_expand_node.args[0]
             else:
@@ -1853,7 +1914,8 @@ def _is_valid_dequant_linear_pattern(
         ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
 
         input_index = 1 if linear_node.target is aten.addmm.default else 0
-        assert dtype in [torch.float32, torch.bfloat16]
+        if dtype not in [torch.float32, torch.bfloat16]:
+            raise AssertionError(f"Unexpected dtype: {dtype}")
         (
             dequant_node,
             _,
@@ -1867,10 +1929,13 @@ def _is_valid_dequant_linear_pattern(
             with_dtype_convert,
         )
 
-        assert dequant_node.target in [
+        if dequant_node.target not in [
             quantized_decomposed.dequantize_per_tensor.default,
             quantized_decomposed.dequantize_per_tensor.tensor,
-        ]
+        ]:
+            raise AssertionError(
+                f"Unexpected dequant node target: {dequant_node.target}"
+            )
 
         if len(list(dequant_node.users)) != 1:
             # Ensure the dequant pattern only has 1 user
@@ -1949,7 +2014,8 @@ def _register_qlinear_weight_prepack_pass(
           |
         onednn.qlinear_pointwise <- onednn.qlinear_prepack <- int8_weight
         """
-        assert dtype in [torch.float32, torch.bfloat16]
+        if dtype not in [torch.float32, torch.bfloat16]:
+            raise AssertionError(f"Unexpected dtype: {dtype}")
         (
             linear_node,
             output_reshape_node,
@@ -1972,7 +2038,10 @@ def _register_qlinear_weight_prepack_pass(
 
         if input_dim_exceeds_two and not input_contiguous:
             wgt_expand_node = linear_node.args[weight_index]
-            assert wgt_expand_node.target is aten.expand.default
+            if wgt_expand_node.target is not aten.expand.default:
+                raise AssertionError(
+                    f"Expected aten.expand.default, got {wgt_expand_node.target}"
+                )
             t_node = wgt_expand_node.args[0]
         else:
             t_node = linear_node.args[weight_index]
@@ -1982,10 +2051,13 @@ def _register_qlinear_weight_prepack_pass(
         else:
             weight_to_bf16_node = t_node.args[0]
             dequant_per_channel = weight_to_bf16_node.args[0]
-        assert (
+        if (
             dequant_per_channel.target
-            is quantized_decomposed.dequantize_per_channel.default
-        )
+            is not quantized_decomposed.dequantize_per_channel.default
+        ):
+            raise AssertionError(
+                "Expected dequantize_per_channel.default for weight dequant node"
+            )
 
         # Activation QParams
         qx, x_zp, x_scale = (
@@ -2051,7 +2123,10 @@ def _register_qlinear_weight_prepack_pass(
                 else:
                     if bias:
                         output_add_node_for_bias = match.output_node()
-                        assert output_add_node_for_bias.target is aten.add.Tensor
+                        if output_add_node_for_bias.target is not aten.add.Tensor:
+                            raise AssertionError(
+                                f"Expected aten.add.Tensor, got {output_add_node_for_bias.target}"
+                            )
                         output_add_node_for_bias.replace_all_uses_with(new_linear_node)
                         new_linear_node.meta.update(output_add_node_for_bias.meta)
                     else:
@@ -2097,7 +2172,8 @@ def _generate_dequant_linear_node_pattern(
     is_tensor_overload=False,
     with_dtype_convert=False,
 ):
-    assert dtype in [torch.float32, torch.bfloat16]
+    if dtype not in [torch.float32, torch.bfloat16]:
+        raise AssertionError(f"Unexpected dtype: {dtype}")
     t_pattern = _generate_linear_t_pattern(_dequant_per_channel_pattern, dtype)
     dequant_linear_bias_pattern = _may_generate_pattern_with_reshape(
         CallFunction(
@@ -2147,7 +2223,8 @@ def _generate_dequant_bmm_node_pattern(
     # When activation of linear dim exceed 2 and not contiguous
     t_pattern = _generate_linear_t_pattern(_dequant_per_channel_pattern, dtype)
 
-    assert dtype in [torch.float32, torch.bfloat16]
+    if dtype not in [torch.float32, torch.bfloat16]:
+        raise AssertionError(f"Unexpected dtype: {dtype}")
     dequant_bmm_pattern = CallFunction(
         aten.bmm.default,
         CallFunction(
@@ -2484,9 +2561,13 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
         linear_nodes = []
         for node in nodes_to_find:
             linear_nodes.extend(filter_nodes(match.nodes, node))
-        assert len(linear_nodes) == 1
+        if len(linear_nodes) != 1:
+            raise AssertionError(
+                f"Expected exactly 1 linear node, got {len(linear_nodes)}"
+            )
         linear_node = linear_nodes[0]
-        assert isinstance(linear_node, torch.fx.node.Node)
+        if not isinstance(linear_node, torch.fx.node.Node):
+            raise AssertionError(f"Expected fx Node, got {type(linear_node)}")
         input_index = 1 if linear_node.target is aten.addmm.default else 0
         weight_index = input_index + 1
 
@@ -2494,7 +2575,8 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
         relu_node = None
         if relu_fused:
             relu_node = match.output_node()
-            assert isinstance(relu_node, torch.fx.node.Node)
+            if not isinstance(relu_node, torch.fx.node.Node):
+                raise AssertionError(f"Expected fx Node, got {type(relu_node)}")
 
         # find reshape node, expand node and add node
         (
@@ -2510,31 +2592,45 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
                 act_reshape_node = linear_node.args[input_index]
                 t_node = linear_node.args[weight_index]
                 output_reshape_node = next(iter(linear_node.users))
-                assert output_reshape_node.target is aten.reshape.default
+                if output_reshape_node.target is not aten.reshape.default:
+                    raise AssertionError(
+                        f"Expected aten.reshape.default, got {output_reshape_node.target}"
+                    )
             else:
                 expand_x_node = linear_node.args[input_index]
                 expand_w_node = linear_node.args[weight_index]
-                assert isinstance(expand_w_node, torch.fx.node.Node)
+                if not isinstance(expand_w_node, torch.fx.node.Node):
+                    raise AssertionError(f"Expected fx Node, got {type(expand_w_node)}")
                 t_node = expand_w_node.args[0]
                 if bias:
                     add_bias_node = next(iter(linear_node.users))
-                    assert add_bias_node.target is aten.add.Tensor
+                    if add_bias_node.target is not aten.add.Tensor:
+                        raise AssertionError(
+                            f"Expected aten.add.Tensor, got {add_bias_node.target}"
+                        )
         else:
             t_node = linear_node.args[weight_index]
-        assert isinstance(t_node, torch.fx.node.Node)
+        if not isinstance(t_node, torch.fx.node.Node):
+            raise AssertionError(f"Expected fx Node, got {type(t_node)}")
 
         w_to_fp32_node = t_node.args[0]
-        assert (
+        if not (
             isinstance(w_to_fp32_node, torch.fx.node.Node)
             and w_to_fp32_node.target
             is quantized_decomposed.convert_element_type.no_fuse
-        )
+        ):
+            raise AssertionError(
+                "Expected convert_element_type.no_fuse for w_to_fp32_node"
+            )
         w_to_fp16_node = w_to_fp32_node.args[0]
-        assert (
+        if not (
             isinstance(w_to_fp16_node, torch.fx.node.Node)
             and w_to_fp16_node.target
             is quantized_decomposed.convert_element_type.no_fuse
-        )
+        ):
+            raise AssertionError(
+                "Expected convert_element_type.no_fuse for w_to_fp16_node"
+            )
 
         x_shape = x.meta.get("tensor_meta").shape
         if has_free_symbols(x_shape):
@@ -2577,13 +2673,18 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
                 graph.erase_node(add_bias_node)
             graph.erase_node(linear_node)
             if act_reshape_node is not None:
-                assert isinstance(act_reshape_node, torch.fx.node.Node)
+                if not isinstance(act_reshape_node, torch.fx.node.Node):
+                    raise AssertionError(
+                        f"Expected fx Node, got {type(act_reshape_node)}"
+                    )
                 graph.erase_node(act_reshape_node)
             if expand_x_node is not None:
-                assert isinstance(expand_x_node, torch.fx.node.Node)
+                if not isinstance(expand_x_node, torch.fx.node.Node):
+                    raise AssertionError(f"Expected fx Node, got {type(expand_x_node)}")
                 graph.erase_node(expand_x_node)
             if expand_w_node is not None:
-                assert isinstance(expand_w_node, torch.fx.node.Node)
+                if not isinstance(expand_w_node, torch.fx.node.Node):
+                    raise AssertionError(f"Expected fx Node, got {type(expand_w_node)}")
                 graph.erase_node(expand_w_node)
             graph.erase_node(t_node)
             graph.erase_node(w_to_fp32_node)
@@ -2936,7 +3037,13 @@ def _register_qconv_post_op_fusion_pass(
             kwargs["groups"],
         )
         output_dtype = _get_pattern_output_dtype(match)
-        assert output_dtype in [torch.int8, torch.uint8, torch.float32, torch.bfloat16]
+        if output_dtype not in [
+            torch.int8,
+            torch.uint8,
+            torch.float32,
+            torch.bfloat16,
+        ]:
+            raise AssertionError(f"Unexpected output_dtype: {output_dtype}")
         # Output QParams
         o_inv_scale = (
             kwargs["o_inv_scale"]
@@ -2948,9 +3055,9 @@ def _register_qconv_post_op_fusion_pass(
             if (output_dtype == torch.uint8 or output_dtype == torch.int8)
             else 0
         )
-        assert (
-            kwargs["postop_name"] == "none"
-        )  # Expected no post op fused in weight prepack phase
+        # Expected no post op fused in weight prepack phase
+        if kwargs["postop_name"] != "none":
+            raise AssertionError(f"Expected no post op, got {kwargs['postop_name']}")
         if post_op_attr.unary_op_name == "hardtanh":
             min_value = kwargs.get("min_value")
             max_value = kwargs.get("max_value")
@@ -3313,9 +3420,9 @@ def _register_qlinear_post_op_fusion_pass(
         o_zero_point = (
             kwargs["o_zp"] if (output_dtype in [torch.uint8, torch.int8]) else 0
         )
-        assert (
-            kwargs["postop_name"] == "none"
-        )  # Expected no post op fused in weight prepack phase
+        # Expected no post op fused in weight prepack phase
+        if kwargs["postop_name"] != "none":
+            raise AssertionError(f"Expected no post op, got {kwargs['postop_name']}")
 
         out_node = match.output_node()
         with match.graph.inserting_before(out_node):
@@ -3806,7 +3913,10 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
             users = list(act.users)
             if _is_valid_concat_linear_woq_int4_fusion(users):
                 with graph.inserting_before(node):
-                    assert all(user.args[1].op == "get_attr" for user in users)
+                    if not all(user.args[1].op == "get_attr" for user in users):
+                        raise AssertionError(
+                            "expected all users to have get_attr weight"
+                        )
                     computation_node_0 = users[0]
                     packed_wgts = [getattr(gm, user.args[1].target) for user in users]
                     group_size = computation_node_0.args[2]
@@ -3857,7 +3967,10 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
                         )
                     with graph.inserting_after(split_node):
                         for gemm_idx, user in enumerate(users):
-                            assert user.target == computation_op
+                            if user.target != computation_op:
+                                raise AssertionError(
+                                    f"expected target {computation_op}, got {user.target}"
+                                )
                             get_item = graph.create_node(
                                 "call_function",
                                 operator.getitem,
