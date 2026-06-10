@@ -30,7 +30,8 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorOpTestBase,
+    LocalDTensorOpTestBase,
     map_local_for_rank,
     skip_unless_torch_gpu,
     with_comms,
@@ -40,7 +41,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 funcol = torch.ops.c10d_functional
 
 
-class DistMathOpsTest(DTensorTestBase):
+class DistMathOpsTest(DTensorOpTestBase):
     def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
         for name, param_m2 in m2.named_parameters():
@@ -1063,6 +1064,7 @@ class DistMathOpsTest(DTensorTestBase):
     def test_cumsum(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
+        torch.manual_seed(42)
         inp = torch.rand(3, 5, device=self.device_type)
 
         shard_dim = 0
@@ -1091,6 +1093,7 @@ class DistMathOpsTest(DTensorTestBase):
     def test_scan_ops(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
+        torch.manual_seed(42)
         inp = torch.rand(3, 5, device=self.device_type)
 
         shard_dim = 0
@@ -1113,6 +1116,7 @@ class DistMathOpsTest(DTensorTestBase):
     def test_scan_ops_with_indices(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
+        torch.manual_seed(42)
         inp = torch.rand(12, 8, device=self.device_type)
 
         shard_dim = 0
@@ -1277,6 +1281,7 @@ class DistMathOpsTest(DTensorTestBase):
     def test_logsumexp(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
+        torch.manual_seed(42)
         inp = torch.rand(3, 5, device=self.device_type)
 
         shard_dim = 0
@@ -1835,7 +1840,7 @@ class DistMathOpsTest(DTensorTestBase):
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
-    DistMathOpsTest,
+    DistMathOpsTest, base_class=LocalDTensorOpTestBase
 )
 
 if __name__ == "__main__":
