@@ -97,6 +97,14 @@ except ImportError:
         pass
 
 
+try:
+    from torch.testing._internal.common_utils import TestHardwareScope
+
+    _HS_CHOICES = [e.name for e in TestHardwareScope]
+except ImportError:
+    _HS_CHOICES = ["GENERIC", "DEVICE_GENERIC", "DEVICE_SPECIFIC"]
+
+
 # Make sure to remove REPO_ROOT after import is done
 sys.path.remove(str(REPO_ROOT))
 
@@ -556,6 +564,10 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
+
+    if options.hardware_scope:
+        # forward hardware scope filter to test subprocess
+        unittest_args += ["--hardware-scope"] + options.hardware_scope
 
     if options.showlocals:
         if options.pytest:
@@ -1487,6 +1499,15 @@ def parse_args():
         metavar="TESTS",
         help="select a set of tests to include (defaults to ALL tests)."
         " tests must be a part of the TESTS list defined in run_test.py",
+    )
+    parser.add_argument(
+        "--hardware-scope",
+        nargs="+",
+        choices=_HS_CHOICES,
+        type=str.upper,
+        default=None,
+        metavar="SCOPE",
+        help="filter tests by hardware requirement categories (e.g., GENERIC DEVICE_GENERIC)",
     )
     parser.add_argument(
         "-x",

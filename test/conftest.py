@@ -45,6 +45,13 @@ def pytest_addoption(parser: Parser) -> None:
     group.addoption("--scs", action="store", default=None, dest="stepcurrent_skip")
     group.addoption("--sc", action="store", default=None, dest="stepcurrent")
     group.addoption("--rs", action="store", default=None, dest="run_single")
+    parser.addoption(
+        "--hardware-scope",
+        nargs="+",
+        default=None,
+        metavar="SCOPE",
+        help="filter tests by hardware scope categories (e.g., GENERIC DEVICE_GENERIC)",
+    )
 
     parser.addoption("--use-main-module", action="store_true")
     group = parser.getgroup("terminal reporting")
@@ -92,8 +99,52 @@ def pytest_addoption(parser: Parser) -> None:
     shard_addoptions(parser)
 
 
+class HardwareScopePytestPlugin:
+    """Pytest plugin to filter collected tests by hardware_scope."""
+
+    def __init__(self, requirement):
+        self.requirement = requirement
+
+    def pytest_collection_modifyitems(self, items):
+        if self.requirement is None:
+            return
+        import torch.testing._internal.common_utils as _cu
+
+        filtered = []
+        for item in items:
+            # hardware_scope is a class-level attribute. Function-based tests
+            # do not have item.cls and are therefore not filtered.
+            cls = getattr(item, "cls", None)
+            if cls is not None:
+                req = _cu._get_hardware_scope(cls)
+                if req is not None and req in self.requirement:
+                    filtered.append(item)
+            else:
+                filtered.append(item)
+        items[:] = filtered
+
+
 def pytest_configure(config: Config) -> None:
     parse_cmd_line_args()
+
+    # Some pytest jobs (e.g. tools/* tests) run directly from the source tree
+    # without a built torch package. In that environment importing
+    # torch.testing._internal.common_utils may fail because generated files such
+    # as torch.version are not available yet. Skip hardware requirement plugin
+    # registration in that case.
+    try:
+        import torch.testing._internal.common_utils as _cu
+    except ImportError:
+        _cu = None
+
+    # Use getattr to handle the case where this conftest.py runs against a nightly
+    # torch that doesn't yet have HARDWARE_SCOPE in common_utils.
+    if _cu is not None and getattr(_cu, "HARDWARE_SCOPE", None) is not None:
+        config.pluginmanager.register(
+            HardwareScopePytestPlugin(_cu.HARDWARE_SCOPE),
+            "hardware_scope_plugin",
+        )
+
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
     if xmlpath and not hasattr(config, "workerinput"):

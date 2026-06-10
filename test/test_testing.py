@@ -2650,6 +2650,148 @@ class TestOpInfoSampleFunctions(TestCase):
         samples = op.error_inputs(device)
         self.assertIsInstance(samples, Iterator)
 
+# Tests hardware scope classification.
+class TestHardwareScopes(TestCase):
+    def setUp(self):
+        super().setUp()
+        import torch.testing._internal.common_utils as _cu
+
+        self._cu = _cu
+
+    def _suite_test_names(self, suite) -> set[str]:
+        return {test_case.id().split(".")[-1] for test_case in self._cu._iter_test_cases_recursively(suite)}
+
+    def test_filter_suite(self):
+        requirement = self._cu.TestHardwareScope
+
+        class GenericTest(TestCase):
+            hardware_scope = requirement.GENERIC
+
+            def test_generic(self):
+                pass
+
+        class DeviceSpecificTest(TestCase):
+            hardware_scope = requirement.DEVICE_SPECIFIC
+
+            def test_device_specific(self):
+                pass
+
+        class MissingRequirementTest(TestCase):
+            def test_missing_requirement(self):
+                pass
+
+        suite = unittest.TestSuite(
+            [
+                unittest.defaultTestLoader.loadTestsFromTestCase(GenericTest),
+                unittest.defaultTestLoader.loadTestsFromTestCase(DeviceSpecificTest),
+                unittest.defaultTestLoader.loadTestsFromTestCase(MissingRequirementTest),
+            ]
+        )
+
+        with unittest.mock.patch.object(
+            self._cu,
+            "HARDWARE_SCOPE",
+            {self._cu.TestHardwareScope.GENERIC},
+        ):
+            filtered_suite = self._cu._filter_suite_by_hardware_scope(suite)
+
+        self.assertEqual(
+            self._suite_test_names(filtered_suite),
+            {"test_generic"},
+        )
+
+    def test_filter_suite_uses_inherited_metadata(self):
+        requirement = self._cu.TestHardwareScope
+
+        class DeviceGenericBase(TestCase):
+            hardware_scope = requirement.DEVICE_GENERIC
+
+        class DeviceGenericChild(DeviceGenericBase):
+            def test_inherited_scope(self):
+                pass
+
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(DeviceGenericChild)
+        with unittest.mock.patch.object(
+            self._cu,
+            "HARDWARE_SCOPE",
+            {self._cu.TestHardwareScope.DEVICE_GENERIC},
+        ):
+            filtered_suite = self._cu._filter_suite_by_hardware_scope(suite)
+
+        self.assertEqual(
+            self._suite_test_names(filtered_suite),
+            {"test_inherited_scope"},
+        )
+
+    def test_hardware_requirement_test_loader(self):
+        requirement = self._cu.TestHardwareScope
+        import types
+
+        # Build a mock module with test classes
+        class GenericA(TestCase):
+            hardware_scope = requirement.GENERIC
+
+            def test_a1(self):
+                pass
+
+            def test_a2(self):
+                pass
+
+        class GenericB(TestCase):
+            hardware_scope = requirement.GENERIC
+
+            def test_b1(self):
+                pass
+
+        class DeviceSpecific(TestCase):
+            hardware_scope = requirement.DEVICE_SPECIFIC
+
+            def test_c1(self):
+                pass
+
+        mod = types.ModuleType("_test_hs_module")
+        mod.GenericA = GenericA
+        mod.GenericB = GenericB
+        mod.DeviceSpecific = DeviceSpecific
+
+        loader = self._cu.HardwareScopeTestLoader()
+        with unittest.mock.patch.object(
+            self._cu,
+            "HARDWARE_SCOPE",
+            {requirement.GENERIC},
+        ):
+            suite = loader.loadTestsFromModule(mod)
+
+        self.assertEqual(
+            self._suite_test_names(suite),
+            {"test_a1", "test_a2", "test_b1"},
+        )
+
+    def test_hardware_requirement_test_loader_no_filter(self):
+        import types
+
+        class GenericA(TestCase):
+            hardware_scope = self._cu.TestHardwareScope.GENERIC
+
+            def test_a(self):
+                pass
+
+        class DeviceSpecific(TestCase):
+            hardware_scope = self._cu.TestHardwareScope.DEVICE_SPECIFIC
+
+            def test_b(self):
+                pass
+
+        mod = types.ModuleType("_test_hs_module_none")
+        mod.GenericA = GenericA
+        mod.DeviceSpecific = DeviceSpecific
+
+        loader = self._cu.HardwareScopeTestLoader()
+        with unittest.mock.patch.object(self._cu, "HARDWARE_SCOPE", None):
+            suite = loader.loadTestsFromModule(mod)
+
+        self.assertEqual(self._suite_test_names(suite), {"test_a", "test_b"})
+
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
 instantiate_parametrized_tests(TestImports)
