@@ -114,6 +114,15 @@ class ProfilingMode(Enum):
     SIMPLE = 2
     PROFILING = 3
 
+class HardwareClassification(Enum):
+    # Class-level metadata describing the hardware classification of a test.
+    GENERIC = "generic"
+    DEVICE_GENERIC = "device_generic"
+    CUDA = "cuda"
+    XPU = "xpu"
+    MPS = "mps"
+
+
 # Set by parse_cmd_line_args() if called
 DISABLED_TESTS_FILE = ""
 GRAPH_EXECUTOR : ProfilingMode | None = None
@@ -130,6 +139,49 @@ TEST_IN_SUBPROCESS = False
 TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
+HW_CLASSIFICATION : set[HardwareClassification] | None = None
+
+
+def _iter_test_cases_recursively(
+    suite_or_case: unittest.TestSuite | unittest.TestCase,
+) -> Iterator[unittest.TestCase]:
+    if isinstance(suite_or_case, unittest.TestCase):
+        yield suite_or_case
+        return
+
+    for element in suite_or_case:
+        yield from _iter_test_cases_recursively(element)
+
+
+def _get_hw_classification(
+    test_case_cls: type[unittest.TestCase],
+) -> HardwareClassification | None:
+    requirement = getattr(test_case_cls, "hw_classification", None)
+    if requirement is None:
+        return None
+
+    if not isinstance(requirement, HardwareClassification):
+        raise TypeError(
+            f"{test_case_cls.__module__}.{test_case_cls.__name__}."
+            "hw_classification must be a HardwareClassification"
+        )
+
+    return requirement
+
+
+def _filter_suite_by_hw_classification(tests: unittest.TestSuite) -> unittest.TestSuite:
+    if HW_CLASSIFICATION is None:
+        return tests
+
+    filtered_suite = unittest.TestSuite()
+
+    for test_case in _iter_test_cases_recursively(tests):
+        requirement = _get_hw_classification(test_case.__class__)
+
+        if requirement is not None and requirement in HW_CLASSIFICATION:
+            filtered_suite.addTest(test_case)
+
+    return filtered_suite
 
 def is_navi3_arch():
     if torch.cuda.is_available():
@@ -1006,6 +1058,7 @@ def parse_cmd_line_args():
     global TEST_SAVE_XML
     global UNITTEST_ARGS
     global USE_PYTEST
+    global HW_CLASSIFICATION
 
     is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
     parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
@@ -1027,6 +1080,7 @@ def parse_cmd_line_args():
     parser.add_argument('--rerun-disabled-tests', action='store_true')
     parser.add_argument('--pytest-single-test', type=str, nargs=1)
     parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--hw-classification', nargs='+', choices=[e.name for e in HardwareClassification], type=str.upper, default=None)
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
     def run_unittest_help(argv):
@@ -1062,6 +1116,11 @@ def parse_cmd_line_args():
     TEST_SAVE_XML = args.save_xml
     REPEAT_COUNT = args.repeat
     SHOWLOCALS = args.showlocals
+    HW_CLASSIFICATION = (
+        {HardwareClassification[name] for name in args.hw_classification}
+        if args.hw_classification is not None
+        else None
+    )
     if not getattr(expecttest, "ACCEPT", False):
         expecttest.ACCEPT = args.accept
     UNITTEST_ARGS = [sys.argv[0]] + remaining
@@ -1267,6 +1326,15 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
     return test_collector_plugin.tests
 
 
+class HardwareClassificationTestLoader(unittest.TestLoader):
+    """Unittest TestLoader that filters loaded tests by hw_classification."""
+    def loadTestsFromModule(self, module, *args, pattern=None, **kwargs):
+        suite = super().loadTestsFromModule(
+            module, *args, pattern=pattern, **kwargs
+        )
+        return _filter_suite_by_hw_classification(suite)
+
+
 def run_tests(argv=None):
     parse_cmd_line_args()
     if argv is None:
@@ -1295,8 +1363,12 @@ def run_tests(argv=None):
         _print_test_names()
         return
 
+    testLoader = unittest.loader.defaultTestLoader
+    if HW_CLASSIFICATION is not None:
+        testLoader = HardwareClassificationTestLoader()
+
     # Before running the tests, lint to check that every test class extends from TestCase
-    suite = unittest.TestLoader().loadTestsFromModule(__main__)
+    suite = testLoader.loadTestsFromModule(__main__)
     if not lint_test_case_extension(suite):
         sys.exit(1)
 
@@ -1319,6 +1391,8 @@ def run_tests(argv=None):
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
             other_args += ['--save-xml', TEST_SAVE_XML]
+        if HW_CLASSIFICATION is not None:
+            other_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1423,13 +1497,13 @@ def run_tests(argv=None):
         unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
             output=test_report_path,
             verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose))
+            resultclass=XMLTestResultVerbose), testLoader=testLoader)
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
-            if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
+            if not unittest.main(exit=False, argv=argv, testLoader=testLoader).result.wasSuccessful():
                 sys.exit(-1)
     else:
-        unittest.main(argv=argv)
+        unittest.main(argv=argv, testLoader=testLoader)
 
 IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
