@@ -48,6 +48,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
+    IS_MACOS,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -57,6 +59,9 @@ from torch.testing._internal.common_utils import (
     subtest,
     TemporaryFileName,
     TEST_ACCELERATOR,
+    TEST_WITH_ASAN,
+    TEST_WITH_SLOW,
+    TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
     TestCase,
 )
@@ -279,6 +284,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         self.assertEqual(len(ret), 1)
         self.assertEqual(x, ret[0])
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179898"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TORCHDYNAMO or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/118253",
+    )
     def test_missing_abstract_impl(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -319,15 +331,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             @staticmethod
             def forward(ctx, x):
                 # Emulate AutoDispatchBelowADInplaceOrView, which is not bound into python
-                guard = torch._C._AutoDispatchBelowAutograd()
-                guard2 = torch._C.ExcludeDispatchKeyGuard(
-                    torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
-                )
-                try:
+                with (
+                    torch._C._AutoDispatchBelowAutograd(),
+                    torch._C._ExcludeDispatchKeyGuard(
+                        torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
+                    ),
+                ):
                     return op(x)
-                finally:
-                    del guard
-                    del guard2
 
             @staticmethod
             def backward(ctx, gx):
@@ -450,6 +460,38 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         # Test atol/rtol overrides
         torch.library.opcheck(op, (x,), {}, atol=3, rtol=0.01)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180338",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180323",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180301",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180262",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180214",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180196",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/179992",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/179909",
+    )
     @ops(custom_op_db.custom_op_db, dtypes=OpDTypes.any_one)
     def test_opcheck_opinfo(self, device, dtype, op):
         for sample_input in op.sample_inputs(
@@ -459,6 +501,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             kwargs = sample_input.kwargs
             torch.library.opcheck(op.op, args, kwargs)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179991"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TORCHDYNAMO or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/119159",
+    )
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor: ...
@@ -3824,6 +3873,69 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(result.numel(), 0)
         self.assertEqual(out, x)
         self.assertGreater(out._version, version)
+
+    def test_mutated_version_bump_does_not_fill_all_defaults(self):
+        @torch.library.custom_op(
+            "_torch_testing::mutated_fastpath", mutates_args={"x", "ys"}
+        )
+        def mutated_fastpath(
+            x: Tensor,
+            a: Tensor,
+            b: Tensor,
+            c: Tensor,
+            d: Tensor,
+            ys: List[Tensor],
+        ) -> None:
+            pass
+
+        @torch.library.custom_op(
+            "_torch_testing::mutated_fastpath_out",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def mutated_fastpath_out(x: Tensor, *, out: Tensor) -> Tensor:
+            out.copy_(x)
+            return out
+
+        @torch.library.custom_op(
+            "_torch_testing::mutated_fastpath_default", mutates_args={"out"}
+        )
+        def mutated_fastpath_default(x: Tensor, out: Optional[Tensor] = None) -> Tensor:
+            if out is None:
+                return x.clone()
+            out.copy_(x)
+            return out
+
+        x = torch.randn(3)
+        args = [torch.randn(3) for _ in range(4)]
+        ys = [torch.randn(3), torch.randn(3)]
+        out = torch.empty_like(x)
+
+        initial_versions = pytree.tree_map_only(
+            torch.Tensor, lambda t: t._version, (x, ys, out)
+        )
+        with patch(
+            "torch._library.utils.fill_defaults",
+            side_effect=AssertionError("unexpected fill_defaults"),
+        ):
+            mutated_fastpath(
+                x=x,
+                a=args[0],
+                b=args[1],
+                c=args[2],
+                d=args[3],
+                ys=ys,
+            )
+            mutated_fastpath_out(x, out=out)
+            self.assertEqual(mutated_fastpath_default(x), x)
+        new_versions = pytree.tree_map_only(
+            torch.Tensor, lambda t: t._version, (x, ys, out)
+        )
+
+        self.assertGreater(new_versions[0], initial_versions[0])
+        for new_version, initial_version in zip(new_versions[1], initial_versions[1]):
+            self.assertGreater(new_version, initial_version)
+        self.assertGreater(new_versions[2], initial_versions[2])
 
     def test_mutated_no_warning(self):
         # Run in subprocess since the warning is emitted only once
