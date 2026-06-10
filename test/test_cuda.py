@@ -5286,9 +5286,6 @@ class TestCudaAllocator(TestCase):
             disarm()
 
     @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179744"
-    )
-    @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     @requiresCppContext
@@ -5364,6 +5361,9 @@ class TestCudaAllocator(TestCase):
             "Torch-Compiled Region: 1/0",
             "Torch-Compiled Region: 0/0",
         ]
+        input_tensor = None
+        model = None
+        compiled_model = None
 
         class MyModel(nn.Module):
             def __init__(self):
@@ -5413,6 +5413,12 @@ class TestCudaAllocator(TestCase):
             pass
         finally:
             torch.cuda.memory._record_memory_history(None)
+            input_tensor = None
+            model = None
+            compiled_model = None
+            torch._dynamo.reset()
+            gc.collect()
+            torch.cuda.memory.empty_cache()
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
