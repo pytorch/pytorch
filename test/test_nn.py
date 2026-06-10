@@ -14434,7 +14434,7 @@ if __name__ == '__main__':
         self.assertEqual(p1.grad, p2.grad)
 
     @skipIfMPS  # TypeError: the MPS framework doesn't support float64
-    @parametrize_test('foreach', (False, True))
+    @parametrize_test('foreach', (None, False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
@@ -14517,16 +14517,6 @@ if __name__ == '__main__':
             clip_grad_norm_(params, max_norm, norm_type=norm_type, foreach=foreach)
             self.assertEqual(len(w), 1)
             self.assertEqual(str(w[0].message), "`parameters` is an empty generator, no gradient clipping will occur.")
-
-    # issue #133586: skip no-op .to(first_device) in _get_total_norm
-    @onlyCPU
-    @parametrize_test('norm_type', (1.0, 2.0, float('inf')))
-    def test_clip_grad_norm_skip_to_single_device(self, norm_type, device):
-        # skip-no-op-.to(): large tensors all on same device should still be correct
-        tensors = [torch.randn(4096, device=device) for _ in range(200)]
-        result = get_total_norm(tensors, norm_type=norm_type, foreach=None)
-        reference = get_total_norm(tensors, norm_type=norm_type, foreach=True)
-        self.assertEqual(result, reference, atol=1e-5, rtol=1e-5)
 
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA
