@@ -120,10 +120,7 @@ from .graph_signature import _convert_to_export_graph_signature, ExportGraphSign
 
 log = logging.getLogger(__name__)
 
-# Legacy dynamic shapes specification: the raw container spelling that
-# predates the structured ShapesSpec / ParamsSpec types. AdditionalInputs
-# and ShapesCollection are entry-point helpers that get unwrapped into one
-# of these containers, so they are *not* part of this alias.
+# Legacy dynamic shapes specification (backed based spec).
 _LegacyDynamicShapesSpec: TypeAlias = dict[str, Any] | tuple[Any, ...] | list[Any]
 
 # Full set of accepted ``dynamic_shapes`` inputs across export entry points.
@@ -617,10 +614,16 @@ def _add_input_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
         if (val := node.meta.get("val")) is None:
             continue
         pending: set = set()
-        dims = list(val.shape) if isinstance(val, torch.Tensor) else [val]
+        if isinstance(val, torch.Tensor):
+            dims = [
+                d for d in val.shape if isinstance(d, (torch.SymInt, torch.SymFloat))
+            ]
+        elif isinstance(val, (torch.SymInt, torch.SymFloat)):
+            dims = [val]
+        else:
+            dims = []
         for dim in dims:
-            if isinstance(dim, (torch.SymInt, torch.SymFloat)):
-                pending |= set(free_unbacked_symbols(dim.node._expr))
+            pending |= set(free_unbacked_symbols(dim.node._expr))
         if unbacked_bindings := _free_unbacked_symbols_with_path(
             val,
             (),
@@ -913,6 +916,7 @@ def _export_to_torch_ir(
     is_shapes_spec = isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec))
 
     if not is_shapes_spec:
+        # legacy dynamic shapes.
         combined_args = _combine_args(f, args, kwargs)
         _check_dynamic_shapes(combined_args, dynamic_shapes)
         constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
@@ -940,7 +944,7 @@ def _export_to_torch_ir(
     def use_legacy_dynamo_graph_capture() -> bool:
         return bool(
             constraints  # dynamic shape
-            or dynamic_shapes  # dynamic shape (legacy or ShapesSpec)
+            or dynamic_shapes  # dynamic shape
             or isinstance(f, torch.fx.GraphModule)  # retracing
             or preserve_module_call_signature  # unflatten
             or torch._functorch.config.fake_tensor_propagate_real_tensors  # draft
@@ -1455,12 +1459,9 @@ def _process_export_inputs(
     mod: torch.nn.Module,
     args: tuple[object, ...],
     kwargs: dict[str, object] | None,
-    dynamic_shapes: _LegacyDynamicShapesSpec
+    dynamic_shapes: _DynamicShapesInput
     | torch.export.AdditionalInputs
-    | torch.export.ShapesCollection
-    | ShapesSpec
-    | ParamsSpec
-    | None,
+    | torch.export.ShapesCollection,
 ) -> tuple[
     tuple[object, ...],
     dict[str, object],
@@ -2367,8 +2368,6 @@ def _export_for_training(
         verify_additional_inputs,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
 
-    range_constraints_dynamic_shapes = None if is_shapes_spec else dynamic_shapes
-
     original_state_dict = _get_original_state_dict(mod)
 
     has_ambient_mode = False
@@ -2427,7 +2426,7 @@ def _export_for_training(
         export_artifact,
         args,
         kwargs,
-        range_constraints_dynamic_shapes,
+        None if is_shapes_spec else dynamic_shapes,
     )
     # The returned the gm is in-place modified
     gm, module_call_graph = _get_module_call_graph(
@@ -2577,7 +2576,6 @@ def _export(
     from torch._utils_internal import export_training_ir_rollout_check
 
     is_shapes_spec = isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec))
-    range_constraints_dynamic_shapes = None if is_shapes_spec else dynamic_shapes
 
     if is_shapes_spec and prefer_deferred_runtime_asserts_over_guards:
         raise ValueError(_SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG)
@@ -2653,7 +2651,7 @@ def _export(
         export_artifact,
         args,
         kwargs,
-        range_constraints_dynamic_shapes,
+        None if is_shapes_spec else dynamic_shapes,
     )
     gm, module_call_graph = _get_module_call_graph(
         export_artifact,

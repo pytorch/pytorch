@@ -2250,43 +2250,11 @@ def export(
 
          **ShapesSpec API.** ``dynamic_shapes`` may also be a
          :class:`torch.fx.experimental.dynamic_spec.ShapesSpec` (or its
-         shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`).
-         This is the same spec API exposed via ``shapes_spec=`` in
-         :func:`torch.compile`.
-
-         The keys of ``ParamsSpec`` are **parameter names of the callable
-         being traced** (for an ``nn.Module`` this is the parameters of
-         ``forward``)::
-
-             class M(torch.nn.Module):
-                 def forward(self, x, y, z=None): ...
-
-
-             ep = torch.export.export(
-                 M(),
-                 args=(torch.randn(8, 3),),  # x
-                 kwargs={"y": torch.randn(5, 3), "z": 7},  # y, z
-                 dynamic_shapes=ShapesSpec(
-                     params=ParamsSpec(
-                         {
-                             "x": TensorSpec([ShapeVar("A"), None]),
-                             "y": TensorSpec([ShapeVar("B"), None]),
-                         }
-                     )
-                 ),
-                 strict=True,
-             )
-
-         Key properties of the ``ShapesSpec`` path (see
-         :mod:`torch.fx.experimental.dynamic_spec` for full details):
-
-         * **Unbacked-only.** Dims / scalars marked dynamic become unbacked
-           SymInts (``u`` symbols) and are never specialized (including no
-           0/1 specialization).
-         * **Assumptions and derived expressions.** You may attach
-           assumptions and expressions derived from the spec's symbols.
-         * **Export-time soundness.** The exported graph is guaranteed to be
-           valid for every assumption provided, otherwise export fails.
+         shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`) --
+         the same spec API exposed via ``shapes_spec=`` in
+         :func:`torch.compile`. See :func:`torch.export.export` for usage
+         and semantics, and :mod:`torch.fx.experimental.dynamic_spec` for
+         full details.
 
         same_signature (bool): If True, rewrite the returned graph's signature to be the same as f.
 
@@ -2316,7 +2284,7 @@ def export(
         _SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG,
     )
 
-    shapes_spec: ShapesSpec | None = None
+    shapes_spec: ShapesSpec | ParamsSpec | None = None
     if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
         if constraints:
             raise ValueError(
@@ -2325,11 +2293,8 @@ def export(
             )
         if prefer_deferred_runtime_asserts_over_guards:
             raise ValueError(_SHAPES_SPEC_VS_DEFERRED_RUNTIME_ASSERTS_MSG)
-        shapes_spec = (
-            ShapesSpec(dynamic_shapes)
-            if isinstance(dynamic_shapes, ParamsSpec)
-            else dynamic_shapes
-        )
+        # ParamsSpec is normalized to ShapesSpec downstream in OptimizeContext.
+        shapes_spec = dynamic_shapes
         dynamic_shapes = None
 
     if _log_export_usage:
@@ -2517,11 +2482,6 @@ def export(
             ),
             _compiling_state_context(),
         ):
-            # `optimize_assert` is dynamo's single-graph-capture entry point
-            # (used by both `fullgraph=True` torch.compile and export). It
-            # forces graph-break-as-error and traces `f` once into a single
-            # FX graph; here the backend just captures the graph instead of
-            # compiling/running it.
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(
