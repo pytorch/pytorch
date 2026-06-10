@@ -523,8 +523,6 @@ if(USE_PYTORCH_QNNPACK)
       # them into a shared library for Caffe2, so they need PIC.
       set_property(TARGET pytorch_qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
       set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-      # QNNPACK depends on gemmlowp headers
-      target_include_directories(pytorch_qnnpack PRIVATE "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
     endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
