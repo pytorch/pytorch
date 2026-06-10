@@ -3975,7 +3975,8 @@ class MethodWrapperVariable(VariableTracker):
         return self.obj.is_python_constant()
 
     def as_python_constant(self) -> types.MethodWrapperType:
-        return self.descriptor.__get__(self.obj.as_python_constant())
+        obj_value = self.obj.as_python_constant()
+        return self.descriptor.__get__(obj_value, type(obj_value))
 
     def call_function(
         self,
@@ -4509,14 +4510,13 @@ class GetSetDescriptorVariable(VariableTracker):
         # concrete Python object (UDOV.value, or as_python_constant
         # for classes/constants). Fall back to getattro_impl for
         # proxy-based VTs like TensorVariable.
-        obj_value = getattr(obj, "value", None)
-        if obj_value is None:
-            try:
-                obj_value = obj.as_python_constant()
-            except NotImplementedError:
-                return obj.getattro_impl(tx, attr_name)
+        from .base import NO_SUCH_SUBOBJ
+
+        obj_value = obj.get_real_python_backed_value()
+        if obj_value is NO_SUCH_SUBOBJ:
+            return obj.getattro_impl(tx, attr_name)
         try:
-            resolved = self.descriptor.__get__(obj_value)
+            resolved = self.descriptor.__get__(obj_value, type(obj_value))
         except AttributeError:
             raise_observed_exception(
                 AttributeError,
