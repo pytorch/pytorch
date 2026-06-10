@@ -59,7 +59,7 @@ def _has_assert_scalar(gm):
     )
 
 
-# Modules with explicit signatures so PARAMS name lookup works.
+# Modules with explicit signatures so ParamsSpec name lookup works.
 class _ModX(torch.nn.Module):
     def forward(self, x):
         return x.sum(0)
