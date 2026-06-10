@@ -1134,7 +1134,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
         mock_repo.amend_commit_message.assert_any_call(
             "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\n"
             "Differential Revision: ["
-            "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\n"
+            "D47852461](https://www.internalfb.com/intern/diff/D47852461)\n"
             "Pull Request resolved: "
             "https://github.com/pytorch/pytorch/pull/106068\n"
             "Approved by: \n"
