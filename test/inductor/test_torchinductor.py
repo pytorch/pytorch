@@ -8193,14 +8193,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ignore_empty_lines=True,
         )
 
-    @unittest.skipIf(
-        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_ROCM or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/151381",
-    )
-    @unittest.skipIf(
-        TEST_WITH_ASAN or (IS_LINUX and GPU_TYPE != "xpu") or IS_MACOS or TEST_WITH_ROCM,
-        "https://github.com/pytorch/pytorch/issues/151379",
-    )
     def test_remove_noop_slice1(self):
         def f(x):
             x = x + 1
@@ -8225,14 +8217,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
             ignore_empty_lines=True,
         )
 
-    @unittest.skipIf(
-        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_ROCM or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/151378",
-    )
-    @unittest.skipIf(
-        TEST_WITH_ASAN or (IS_LINUX and GPU_TYPE != "xpu") or IS_MACOS or TEST_WITH_ROCM,
-        "https://github.com/pytorch/pytorch/issues/151382",
-    )
     def test_remove_noop_slice_scatter(self):
         def f(x):
             x = x + 1
@@ -17144,14 +17128,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             f"{expected=} {actual=}",
         )
 
-    @unittest.skipIf(
-        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_ROCM or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/151511",
-    )
-    @unittest.skipIf(
-        TEST_WITH_ASAN or (IS_LINUX and GPU_TYPE != "xpu") or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/151512",
-    )
+    
     def test_remove_noop_view_default(self):
         def f(x):
             batch_size = x.shape[0]
