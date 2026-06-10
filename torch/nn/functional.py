@@ -6780,6 +6780,80 @@ def multi_head_attention_forward(
             average_attn_weights=average_attn_weights,
         )
 
+    # MPS fast path: when attention weights are not needed, bypass the Python-heavy
+    # general path and go straight to SDPA.  The general path runs ~30% slower on
+    # MPS at typical model sizes because every intermediate reshape and mask
+    # normalisation encodes a separate Metal command buffer entry.
+    if (
+        not need_weights
+        and not use_separate_proj_weight
+        and in_proj_weight is not None
+        and bias_k is None
+        and bias_v is None
+        and not add_zero_attn
+        and static_k is None
+        and static_v is None
+        and not torch.jit.is_scripting()
+        and not torch.jit.is_tracing()
+        and query.device.type == "mps"
+        and query.dim() == 3  # batched seq-first: (L, N, E)
+        and not (query.is_nested or key.is_nested or value.is_nested)
+    ):
+        tgt_len, bsz, embed_dim = query.shape
+        src_len = key.shape[0]
+        if embed_dim != embed_dim_to_check:
+            raise ValueError(
+                f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
+            )
+        head_dim = embed_dim // num_heads
+        if head_dim * num_heads != embed_dim:
+            raise ValueError(
+                f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
+            )
+        q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+        # (L, N, E) -> (N, H, L, D)
+        q = q.view(tgt_len, bsz, num_heads, head_dim).permute(1, 2, 0, 3)
+        k = k.view(src_len, bsz, num_heads, head_dim).permute(1, 2, 0, 3)
+        v = v.view(src_len, bsz, num_heads, head_dim).permute(1, 2, 0, 3)
+        # Build merged mask
+        merged_mask: Tensor | None = None
+        if key_padding_mask is not None:
+            kpm = _canonical_mask(
+                mask=key_padding_mask,
+                mask_name="key_padding_mask",
+                other_type=_none_or_dtype(attn_mask),
+                other_name="attn_mask",
+                target_type=query.dtype,
+            )
+            if kpm is not None:
+                merged_mask = kpm.view(bsz, 1, 1, src_len)
+        if attn_mask is not None:
+            am = _canonical_mask(
+                mask=attn_mask,
+                mask_name="attn_mask",
+                other_type=None,
+                other_name="",
+                target_type=query.dtype,
+                check_other=False,
+            )
+            if am is not None:
+                if am.dim() == 2:
+                    am = am.unsqueeze(0).unsqueeze(0)
+                elif am.dim() == 3:
+                    am = am.view(bsz, num_heads, tgt_len, src_len)
+                merged_mask = am if merged_mask is None else merged_mask + am
+                is_causal = False
+        attn_output = scaled_dot_product_attention(
+            q, k, v, merged_mask, dropout_p if training else 0.0, is_causal
+        )
+        # (N, H, L, D) -> (L, N, E)
+        attn_output = attn_output.permute(2, 0, 1, 3).contiguous().view(
+            tgt_len * bsz, embed_dim
+        )
+        attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+        attn_output = attn_output.view(tgt_len, bsz, embed_dim)
+        return attn_output, None
+
     is_batched = _mha_shape_check(
         query, key, value, key_padding_mask, attn_mask, num_heads
     )
