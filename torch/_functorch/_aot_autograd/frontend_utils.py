@@ -188,7 +188,7 @@ def _resolve_input_async_collectives(
         act_input_paths.append((idx, attr_path))
         return x.trigger_wait()
 
-    if not isinstance(x, torch.Tensor) or not is_traceable_wrapper_subclass(x):
+    if not is_traceable_wrapper_subclass(x):
         return x
 
     attrs, meta = x.__tensor_flatten__()

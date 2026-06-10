@@ -510,6 +510,28 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch({"fx_graph_cache": True, "compile_threads": 1})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_act_input_paths_cache_hit(self):
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        elem = torch.randn(4)
+        self.assertEqual(compiled_fn(AsyncCollectiveTensor(elem)), elem + 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+        self._clear_dynamo_and_codecache()
+
+        elem = torch.randn(4)
+        self.assertEqual(compiled_fn(AsyncCollectiveTensor(elem)), elem + 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
