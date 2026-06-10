@@ -242,16 +242,21 @@ def toy_example(a, b):
 torch.compile(toy_example, fullgraph=True, backend=<compiler>)(a, b)
 ```
 
-### Why didn’t my code recompile when I changed it?
+### Why didn’t my code recompile when the input shapes changed?
 
-If you enabled dynamic shapes by setting
-`env TORCHDYNAMO_DYNAMIC_SHAPES=1 python model.py` then your code
-won’t recompile on shape changes. We’ve added support for dynamic shapes
-which avoids recompilations in the case when shapes vary by less than a
-factor of 2. This is especially useful in scenarios like varying image
-sizes in CV or variable sequence length in NLP. In inference scenarios
-it’s often not possible to know what a batch size will be beforehand
-because you take what you can get from different client apps.
+If dynamic shapes are in effect for the dimensions that changed, the
+existing compiled graph is reused and no recompilation happens. This
+can occur via:
+
+- **Automatic dynamic** (the default): the first compile assumes static
+  shapes; on the second time a dimension changes, that dimension is
+  recompiled as dynamic, after which further changes to it reuse the
+  same graph.
+- **Explicit annotation** via {func}`torch._dynamo.mark_dynamic` or
+  `torch.compile(..., dynamic=True)` (testing only).
+
+See {ref}`dynamic_shapes` (in particular {ref}`automatic_dynamic`) for
+the full set of options.
 
 In general, TorchDynamo tries very hard not to recompile things
 unnecessarily so if for example TorchDynamo finds 3 graphs and your
@@ -282,7 +287,7 @@ Dynamo is still an alpha product so there’s a few sources of OOMs and if
 you’re seeing an OOM try disabling the following configurations in this
 order and then open an issue on GitHub so we can solve the root problem
 1\. If you’re using dynamic shapes try disabling them, we’ve disabled
-them by default: `env TORCHDYNAMO_DYNAMIC_SHAPES=0 python model.py` 2.
+them by default: `torch.compile(dynamic=False)`. 2.
 CUDA graphs with Triton are enabled by default in inductor but removing
 them may alleviate some OOM issues: `torch._inductor.config.triton.cudagraphs = False`.
 
