@@ -7620,7 +7620,7 @@ def forward(self, x_1):
     false_graph_0 = self.false_graph_0
     _tensor_constant0 = self._tensor_constant0
     _tensor_constant1 = self._tensor_constant1
-    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1, _tensor_constant0, sym_size_int_1, sym_size_int, _tensor_constant1));  eq = true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = sym_size_int_1 = sym_size_int = _tensor_constant1 = None
+    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1, sym_size_int_1, sym_size_int, _tensor_constant0, _tensor_constant1));  eq = true_graph_0 = false_graph_0 = x_1 = sym_size_int_1 = sym_size_int = _tensor_constant0 = _tensor_constant1 = None
     getitem = cond[0];  cond = None
     return getitem""",
         )
@@ -7628,7 +7628,7 @@ def forward(self, x_1):
             gm.true_graph_0.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
-    add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    add = torch.ops.aten.add.Tensor(arg0_1, arg3_1);  arg0_1 = arg3_1 = None
     return (add,)""",
         )
 
@@ -8742,7 +8742,7 @@ class GraphModule(torch.nn.Module):
         out_x: "f32[s77, s27]" = while_loop[1];  while_loop = None
 
         gt: "Sym(u2 > 0)" = getitem_4 > 0
-        _check = torch._check(gt);  gt = _check = None
+        _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression u2 > 0 on node 'gt'");  gt = _assert_scalar_default_2 = None
 
         add: "Sym(u2 + 1)" = getitem_4 + 1
 
@@ -8775,11 +8775,11 @@ class GraphModule(torch.nn.Module):
             x_clone: "f32[s77, s27]" = child_1.clone()
 
             ge: "Sym(u1 >= 0)" = unbacked_symint_0 >= 0
-            _check = torch._check(ge);  ge = _check = None
+            _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
 
             size = child_1.size();  child_1 = size = None
             lt: "Sym(u1 < s77)" = unbacked_symint_0 < sym_size_int;  sym_size_int = None
-            _check_1 = torch._check(lt);  lt = _check_1 = None
+            _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < s77 on node 'lt'");  lt = _assert_scalar_default_1 = None
 
             select: "f32[s27]" = x_clone.select(0, unbacked_symint_0)
             select_1: "f32[s27]" = x_clone.select(0, unbacked_symint_0)
