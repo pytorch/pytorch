@@ -950,29 +950,17 @@ def _flatten_shapes_spec(
     kwargs: dict[str, Any] | None,
     shapes_spec: ShapesSpec,
 ) -> ShapesSpec:
-    """Re-key a user-provided ``ShapesSpec`` for export's intermediate
-    trace module.
+    """Re-key a user ``ShapesSpec`` from the original module's parameter
+    names to export's intermediate trace layout.
 
-    Export traces an intermediate module (``ModuleToTrace``) instead of
-    the user's original module. The intermediate module's forward
-    signature is ``forward(*flat_args)`` — a single varargs that holds
-    all original inputs flattened. Concretely (see ``ModuleToTrace``)::
+    Export traces ``ModuleToTrace`` instead of the user's module. Its
+    forward is ``forward(*flat_args)`` — a single varargs holding all
+    inputs flattened — so every source dynamo tracks is rooted at a
+    positional ``flat_args[i]``. The user wrote their spec against the
+    original parameter names, so we rewrite it to target ``flat_args``.
 
-        def forward(self, *flat_args):
-            # Reconstructs original (args, kwargs) from the flat list.
-            args, kwargs = pytree.tree_unflatten(flat_args, self.in_spec)
-            # User's module is called with its ORIGINAL signature.
-            return self._export_root(*args, **kwargs)
-
-    The *entry point* dynamo traces is the wrapper above — so every input
-    source dynamo tracks is rooted at a positional ``flat_args[i]``. The
-    user, however, wrote their spec against the *original* module's
-    parameter names. This function rewrites the spec so it targets the
-    intermediate module's flat layout ``flat_args``.
-
-    The flat layout is learned from the example input pytree
-    Limitations (v0): container specs (DictSpec / SeqSpec / ObjectSpec)
-    on any arg/kwarg slot are rejected inline with NotImplementedError.
+    Limitations (v0): container specs (DictSpec / SeqSpec / ObjectSpec) on
+    any arg/kwarg slot are rejected inline with NotImplementedError.
     """
     params_spec = shapes_spec._params
     kwargs = kwargs or {}
@@ -990,42 +978,25 @@ def _flatten_shapes_spec(
     sig = inspect.signature(f.forward)
     pos_params = list(sig.parameters.values())
 
-    # The user's signature has up to four logical regions of parameters
-    # (in this order). "Bound from" = where each signature param gets its
-    # runtime value when the user makes the call.
-    #   1) named-positional: POSITIONAL_ONLY or POSITIONAL_OR_KEYWORD
-    #      params before `*args`. Bound from user's positional `args[i]`
-    #      `args[i]` where i < varargs_idx. Spec lookup:
-    #      `user._named_args[name]` using `pos_params[i].name`.
-    #   2) varargs: VAR_POSITIONAL (`*args`). Bound from user's positional
-    #      `args[i]` where i >= varargs_idx. Spec lookup:
-    #      `user._varargs[i - varargs_idx]`.
-    #   3) kwargs: KEYWORD_ONLY params (also POSITIONAL_OR_KEYWORD ones
-    #      passed by name) and VAR_KEYWORD (`**kwargs`). All arrive in
-    #      user's `kwargs[name]` and are handled by one loop. Spec lookup:
-    #      `user._named_args[name]` first; falls back to
-    #      `user._varkw[name]` for names not declared as named params.
-    # Python's call grammar guarantees the user's call layout is always
-    # `[positionals][kwargs]` — never interleaved (`func(a, b=c, d)` is a
-    # SyntaxError). So we walk `args` first (regions 1 + 2 below), then
-    # `kwargs.items()` (regions 3 + 4, handled in the kwargs loop further
-    # down).
+    # The signature has up to four param regions, bound from the user's
+    # call as follows (spec lookup in parens):
+    #   1) named-positional: params before `*args`, from args[i] where
+    #      i < varargs_idx            (params_spec_named_args[name])
+    #   2) varargs (`*args`): from args[i] where i >= varargs_idx
+    #                                 (params_spec_varargs[i - varargs_idx])
+    #   3) keyword-named (KEYWORD_ONLY, or pos-or-kw passed by name): from
+    #      kwargs[name]               (params_spec_named_args[name])
+    #   4) var-keyword (`**kwargs`): from kwargs[name]
+    #                                 (params_spec_varkw[name])
+    # Python guarantees the call layout is [positionals][kwargs], so we
+    # walk `args` first (regions 1 + 2), then `kwargs.items()` (regions
+    # 3 + 4, same loop). `varargs_idx` is the index of `*args` in the
+    # signature (or len(pos_params) if none); it splits args[:varargs_idx]
+    # (named) from args[varargs_idx:] (varargs).
     #
-    # `varargs_idx` is the position of `*args` in the signature's parameter
-    # list (or `len(pos_params)` if the signature has no `*args` — sentinel
-    # meaning "no varargs region; everything the user passes positionally is
-    # named"). We use it as a slicing boundary on `args`:
-    #   args[:varargs_idx]  → named-positional region
-    #   args[varargs_idx:]  → varargs region
-    #
-    # Example: signature `def forward(self, x, y, *args, **kwargs)`, user
-    # calls `mod(T1, T2, T3, T4, foo=T5, bar=T6)`:
-    #   pos_params = [x, y, *args, **kwargs]    varargs_idx = 2
-    #   args   = (T1, T2, T3, T4)
-    #   kwargs = {"foo": T5, "bar": T6}
-    #   args[:2] = (T1, T2)        → named-positional loop (x, y)
-    #   args[2:] = (T3, T4)        → varargs loop (*args[0], *args[1])
-    #   kwargs.items()             → kwargs loop (foo, bar) handled separately
+    # Example: `def forward(self, x, y, *args, **kwargs)` called as
+    # `mod(T1, T2, T3, T4, foo=T5, bar=T6)` → varargs_idx=2;
+    # args[:2]=(T1,T2) named; args[2:]=(T3,T4) varargs; kwargs={foo,bar}.
     varargs_idx = len(pos_params)  # default: no `*args` in the signature
     for i, p in enumerate(pos_params):
         if p.kind is inspect.Parameter.VAR_POSITIONAL:
@@ -1035,29 +1006,22 @@ def _flatten_shapes_spec(
     # Walk the user's actual call structure.
     _, in_spec = pytree.tree_flatten((args, kwargs))
     total_leaves = in_spec.num_leaves
-    # out_leaf_specs[i] is the leaf-spec for flat_args[i] (or None for static).
-    # Length matches pytree.tree_flatten((args, kwargs))[0]. It's keyed under
-    # "*args" in the returned ParamsSpec because the intermediate
-    # ModuleToTrace.forward(*flat_args) only has a varargs signature.
+    # out_leaf_specs[i] = leaf-spec for flat_args[i] (None = static); keyed
+    # under "*args" since ModuleToTrace.forward only has a varargs signature.
     out_leaf_specs: list[IntermediateSpec | None] = [None] * total_leaves
 
     flat_idx = 0
 
-    # Track which named / **kwargs spec entries actually get bound to an
-    # input. Anything left over at the end is an entry that matched no
-    # passed argument (typo or a spec for an omitted defaulted param), which
-    # we reject below rather than silently ignore.
+    # Track which named / **kwargs spec entries get bound; leftovers (typo
+    # or spec for an omitted defaulted param) are rejected below.
     matched_named_keys: set[str] = set()
     matched_varkw_keys: set[str] = set()
 
-    # Loop 1: named-positional region. Look up each arg's spec by the
-    # corresponding signature param name in `params_spec_named_args`.
+    # Loop 1: named-positional. Spec keyed by signature param name. A key
+    # present with value None means "explicitly static" — it skips binding
+    # but still counts as matched (not flagged as unmatched below).
     for i, arg_value in enumerate(args[:varargs_idx]):
         arg_name = pos_params[i].name
-        # Note: distinguish "key absent" from "key present with value None"
-        # (the latter means the user explicitly marked this arg static).
-        # Both skip spec binding, but the explicit-None form still counts
-        # as matched so it isn't reported in `unmatched` below.
         if arg_name in params_spec_named_args:
             matched_named_keys.add(arg_name)
             user_spec = params_spec_named_args[arg_name]
@@ -1077,15 +1041,13 @@ def _flatten_shapes_spec(
             leaves, _ = pytree.tree_flatten(arg_value)
             flat_idx += len(leaves)
 
-    # Pad params_spec_varargs to match the actual `*args` count, filling
-    # missing tail entries with None ("static"). Lets Loop 2 below index
-    # uniformly without a bounds check.
+    # Pad varargs spec to the actual `*args` count (missing tail = static)
+    # so Loop 2 can index uniformly without a bounds check.
     n_actual_varargs = len(args) - varargs_idx
     params_spec_varargs = list(params_spec_varargs or [])
     params_spec_varargs += [None] * max(0, n_actual_varargs - len(params_spec_varargs))
 
-    # Loop 2: varargs region. Look up each arg's spec by its position
-    # within `*args` in `params_spec_varargs`.
+    # Loop 2: varargs. Spec keyed by position within `*args`.
     for user_idx, arg_value in enumerate(args[varargs_idx:]):
         user_spec = params_spec_varargs[user_idx]
         if user_spec is not None:
@@ -1100,13 +1062,8 @@ def _flatten_shapes_spec(
             sub_leaves, _ = pytree.tree_flatten(arg_value)
             flat_idx += len(sub_leaves)
 
-    # Loop 3: kwargs region. Each kwarg's spec can come from either:
-    #   (a) `params_spec_named_args[name]` — when the kwarg matches a named param
-    #       in the signature (e.g. user passed `mod(foo=T1)` to a forward
-    #       that has `def forward(self, foo)`).
-    #   (b) `params_spec_varkw[name]` — when the kwarg flows through the
-    #       signature's `**kwargs` slot (e.g. `def forward(self, **kwargs)`
-    #       called with `mod(foo=T1)`, user spec `{"**kwargs": {"foo": ...}}`).
+    # Loop 3: kwargs. Spec comes from named_args[name] (kwarg matches a
+    # named param) or varkw[name] (kwarg flows through `**kwargs`).
     params_spec_varkw = params_spec._varkw  # may be None
     for arg_name, arg_value in kwargs.items():
         if arg_name in params_spec_named_args:
@@ -1129,10 +1086,8 @@ def _flatten_shapes_spec(
             leaves, _ = pytree.tree_flatten(arg_value)
             flat_idx += len(leaves)
 
-    # Every named / **kwargs spec entry must bind to an argument that was
-    # actually passed to export(). A leftover entry is almost always a
-    # mistake (a misspelled parameter name, or a spec for a defaulted param
-    # the caller omitted), so error out instead of silently dropping it.
+    # Every named / **kwargs spec entry must bind to a passed argument; a
+    # leftover is almost always a typo or a spec for an omitted default.
     unmatched = set(params_spec_named_args) - matched_named_keys
     if params_spec_varkw is not None:
         unmatched |= set(params_spec_varkw) - matched_varkw_keys
@@ -1146,9 +1101,8 @@ def _flatten_shapes_spec(
             f"{passed!r}."
         )
 
-    # Sanity check: summing leaves per-arg must equal pytree.tree_flatten
-    # on (args, kwargs) as a whole. A mismatch means our per-arg walk
-    # drifted from the tracer's flatten layout.
+    # Sanity: per-arg leaf count must equal the whole-tree flatten, else
+    # our per-arg walk drifted from the tracer's layout.
     if flat_idx != total_leaves:
         raise AssertionError(
             f"_flatten_shapes_spec leaf-count drift: walked {flat_idx} leaves "
@@ -1157,10 +1111,8 @@ def _flatten_shapes_spec(
             f"flat input layout."
         )
 
-    # Carry assumptions / derived expressions through unchanged: this
-    # function only re-keys *which positional slot* each TensorSpec lands
-    # in; the ShapeVar/IntVar symbols inside the assumption expressions
-    # are the same Python objects, so the assumptions remain valid.
+    # Re-keying only moves which slot each TensorSpec lands in; the
+    # ShapeVar/IntVar symbols in assumptions are unchanged, so carry them.
     return ShapesSpec(
         ParamsSpec({"*args": out_leaf_specs}),
         assumptions=shapes_spec._assumptions or None,
