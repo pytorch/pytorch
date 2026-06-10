@@ -27,6 +27,7 @@ from torch.distributed.elastic.rendezvous.etcd_rendezvous_backend import (
 )
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.elastic.rendezvous.etcd_store import EtcdStore
+from torch.testing._internal.common_utils import run_tests
 
 
 class EtcdRendezvousBackendTest(TestCase, RendezvousBackendTestMixin):
@@ -184,3 +185,7 @@ class CreateBackendTest(TestCase):
             )
         if not (result_dict["time"] >= 2):
             raise AssertionError(f"Expected time >= 2, got {result_dict['time']}")
+
+
+if __name__ == "__main__":
+    run_tests()
