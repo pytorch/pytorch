@@ -16,7 +16,8 @@
 #endif
 #endif
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
 #define NCCL_HAS_ONE_SIDED_API
 #endif
 
