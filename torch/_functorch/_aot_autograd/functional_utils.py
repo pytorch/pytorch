@@ -290,12 +290,13 @@ def has_metadata_mutation(
         # Multiple metadata mutations can cancel out, so check the final
         # concrete metadata. In addition, auto-functionalized out= ops can
         # update wrapper metadata via replace_() without setting the C++
-        # metadata mutation bit. In that case, only treat a logical size
-        # change as metadata mutation; stride/offset may differ for ordinary
-        # data mutations on non-contiguous inputs.
+        # metadata mutation bit. In that case, only treat a logical resize
+        # from an empty tensor as a metadata mutation: non-empty size changes
+        # without the bit can be artifacts from functionalization pointing
+        # other mutable inputs at an out= result.
         same_sizes = arg.shape == arg_after.shape
-        if not maybe_metadata_mutated and same_sizes:
-            return False
+        if not maybe_metadata_mutated:
+            return not same_sizes and arg.numel() == 0
         same_strides = arg.stride() == arg_after.stride()
         same_offsets = arg.storage_offset() == arg_after.storage_offset()
         return not (same_sizes and same_strides and same_offsets)
