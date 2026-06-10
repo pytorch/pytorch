@@ -4365,6 +4365,21 @@ class Layout(OutputSpec):
                 return False
         return True
 
+    @staticmethod
+    def _stride_expr_ge_or_false(left: _IntLike, right: _IntLike) -> bool:
+        """
+        Returns true if left is symbolically greater than or equal to right,
+        assuming both expressions are tensor strides.
+        """
+        sizevars = V.graph.sizevars
+        if sizevars.guard_or_false(sympy.Eq(right, 0)):
+            return True
+        if sizevars.guard_or_false(sympy.Eq(left, 0)):
+            return False
+        return sizevars.guard_or_false(
+            sympy.Ge(left, right)
+        ) or sizevars.guard_or_false(sympy.Eq(left % right, 0))
+
     def is_stride_ordered(self, order: Sequence[int]) -> bool:
         assert len(self.stride) == len(order)
 
@@ -4372,7 +4387,7 @@ class Layout(OutputSpec):
         non_1_indices = [
             i
             for i, dim in enumerate(self.size)
-            if V.graph.sizevars.optimization_hint(dim, fallback=2) != 1
+            if not V.graph.sizevars.statically_known_equals(dim, 1)
         ]
 
         stride = [self.stride[i] for i in non_1_indices]
@@ -4391,12 +4406,13 @@ class Layout(OutputSpec):
             stride_ordered[order[i]] = stride[i]
         # check if it is in ascending order
         for i in range(len(order) - 1):
-            expr = stride_ordered[i] > stride_ordered[i + 1]
-            if not isinstance(expr, bool):
-                expr = V.graph._shape_env.evaluate_expr(
-                    stride_ordered[i] > stride_ordered[i + 1], size_oblivious=True
-                )
-            if expr:
+            left = stride_ordered[i]
+            right = stride_ordered[i + 1]
+            if V.graph.sizevars.guard_or_false(sympy.Eq(left, right)):
+                continue
+            if self._stride_expr_ge_or_false(left, right):
+                return False
+            if not self._stride_expr_ge_or_false(right, left):
                 return False
         return True
 
@@ -6595,6 +6611,23 @@ class ConcatKernel(NopKernel):
         return True
 
 
+@contextlib.contextmanager
+def _track_fresh_unbacked_symbols(shape_env: ShapeEnv) -> Iterator[None]:
+    prev = shape_env._ignore_fresh_unbacked_symbols_set(False)
+    try:
+        yield
+    finally:
+        shape_env._ignore_fresh_unbacked_symbols_set(prev)
+
+
+def _fallback_kernel_symbol_tracking_context(
+    shape_env: ShapeEnv | None,
+) -> AbstractContextManager[None]:
+    if shape_env is not None and shape_env._ignore_fresh_unbacked_symbols_tls():
+        return _track_fresh_unbacked_symbols(shape_env)
+    return nullcontext()
+
+
 @ir_dataclass(frozen=False)
 class ExternKernel(InputsKernel):
     """
@@ -6946,11 +6979,15 @@ class ExternKernel(InputsKernel):
                 example_args.append(ir_node_to_tensor(x))
 
         new_args, new_kwargs = unflatten_args(example_args, real_non_tensor_args)
-        with enable_python_dispatcher():
+        shape_env = V.fake_mode.shape_env
+        with (
+            enable_python_dispatcher(),
+            _fallback_kernel_symbol_tracking_context(shape_env),
+        ):
             example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None = None
-        if shape_env := V.fake_mode.shape_env:
+        if shape_env:
             node_meta_val = V.current_node.meta.get("val")
             ctx: AbstractContextManager[None] = nullcontext()
             if V.current_node.target is torch._higher_order_ops.effects.with_effects:
@@ -7135,23 +7172,18 @@ class ExternKernel(InputsKernel):
                     # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
                     use_current_stride_order = is_stride_order_storage_and_layout(
                         x, order
-                    ) and not free_unbacked_symbols(x.get_layout().stride)
-                    # fix flexiblelayout to be FixedLayout with stride_order
-                    as_storage_and_layout(
-                        x,
-                        freeze=True,
-                        want_contiguous=False,
-                        stride_order=(
-                            get_stride_order(
-                                V.graph.sizevars.guarding_hints_or_throw(
-                                    x.get_layout().stride
-                                )
-                            )
-                            if use_current_stride_order
-                            else order
-                        ),
-                        allow_padding=allow_padding,
                     )
+                    if use_current_stride_order:
+                        x.freeze_layout()
+                    else:
+                        # fix flexiblelayout to be FixedLayout with stride_order
+                        as_storage_and_layout(
+                            x,
+                            freeze=True,
+                            want_contiguous=False,
+                            stride_order=order,
+                            allow_padding=allow_padding,
+                        )
                     return x
                 else:
                     # If the exact_strides is given, freeze the FlexibleLayout to a FixedLayout with the exact_strides.
@@ -7281,7 +7313,11 @@ class ExternKernel(InputsKernel):
             allow_padding=allow_padding,
             exact_strides=exact_strides,
         )
-        if order:
+        if (
+            order
+            and not free_unbacked_symbols(x.get_size())
+            and not free_unbacked_symbols(x.get_stride())
+        ):
             assert is_stride_order_storage_and_layout(x, order)
         elif expanded_dims:
             assert orig_size is not None and exact_strides is not None
