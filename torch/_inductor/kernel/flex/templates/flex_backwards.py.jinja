@@ -480,6 +480,12 @@ def bwd_dq_block_mn(
             "score": ("BLOCK_M2", "BLOCK_N2"),
             "m": ("BLOCK_M2", "1"),
             "n": ("1", "BLOCK_N2"),
+        },
+        input_dtypes={
+            "b": "index",
+            "h": "index",
+            "m": "index",
+            "n": "index",
         }
     ) | indent_except_first(1) }}
 
@@ -505,6 +511,12 @@ def bwd_dq_block_mn(
                 "score": ("BLOCK_M2", "BLOCK_N2"),
                 "m": ("BLOCK_M2", "1"),
                 "n": ("1", "BLOCK_N2"),
+            },
+            input_dtypes={
+                "b": "index",
+                "h": "index",
+                "m": "index",
+                "n": "index",
             }
         ) | indent_except_first(2) }}
 
@@ -542,6 +554,12 @@ def bwd_dq_block_mn(
             "grad_score_mod": ("BLOCK_M2", "BLOCK_N2"),
             "m": ("BLOCK_M2", "1"),
             "n": ("1", "BLOCK_N2"),
+        },
+        input_dtypes={
+            "b": "index",
+            "h": "index",
+            "m": "index",
+            "n": "index",
         }
     ) | indent_except_first(1) }}
     {# See Note Selective masking DQ #}
@@ -562,6 +580,12 @@ def bwd_dq_block_mn(
                 "n": ("1", "BLOCK_N2"),
                 "b": ("1", "1"),
                 "h": ("1", "1"),
+            },
+            input_dtypes={
+                "b": "index",
+                "h": "index",
+                "m": "index",
+                "n": "index",
             },
             score="pre_mod_scores",
             b="off_z",
@@ -689,6 +713,12 @@ def bwd_dkdv_block_mn(
             "score": ("BLOCK_N1", "BLOCK_M1"),
             "m": ("1", "BLOCK_M1"),
             "n": ("BLOCK_N1", "1"),
+        },
+        input_dtypes={
+            "b": "index",
+            "h": "index",
+            "m": "index",
+            "n": "index",
         }
     ) | indent_except_first(1) }}
 
@@ -711,6 +741,12 @@ def bwd_dkdv_block_mn(
             input_shapes={
                 "m": ("1", "BLOCK_M1"),
                 "n": ("BLOCK_N1", "1"),
+            },
+            input_dtypes={
+                "b": "index",
+                "h": "index",
+                "m": "index",
+                "n": "index",
             }
         ) | indent_except_first(2) }}
         # (grads) apply mask for fully masked block
@@ -752,6 +788,12 @@ def bwd_dkdv_block_mn(
             "grad_score_mod": ("BLOCK_N1", "BLOCK_M1"),
             "m": ("1", "BLOCK_M1"),
             "n": ("BLOCK_N1", "1"),
+        },
+        input_dtypes={
+            "b": "index",
+            "h": "index",
+            "m": "index",
+            "n": "index",
         }
     ) | indent_except_first(1) }}
 
@@ -773,10 +815,16 @@ def bwd_dkdv_block_mn(
             input_shapes={
                 "score": ("BLOCK_N1", "BLOCK_M1"),
                 "grad_score_mod": ("BLOCK_N1", "BLOCK_M1"),
-                "idx_m": ("1", "BLOCK_M1"),
-                "idx_n": ("BLOCK_N1", "1"),
-                "idx_b": ("1", "1"),
-                "idx_h": ("1", "1"),
+                "m": ("1", "BLOCK_M1"),
+                "n": ("BLOCK_N1", "1"),
+                "b": ("1", "1"),
+                "h": ("1", "1"),
+            },
+            input_dtypes={
+                "b": "index",
+                "h": "index",
+                "m": "index",
+                "n": "index",
             },
             score="pre_mod_scores",
             b="idx_b",

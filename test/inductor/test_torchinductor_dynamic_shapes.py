@@ -135,6 +135,33 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
+        def test_bincount_weighted_count_nonzero_dtype(self):
+            def fn(x, weights):
+                counts = torch.bincount(x, weights=weights, minlength=6)
+                return counts, counts.count_nonzero()
+
+            x = torch.tensor(
+                [0, 2, 2, 3, 1, 0, 3, 3],
+                dtype=torch.int64,
+            )
+            weights = torch.tensor(
+                [1.0, -2.0, 3.0, 0.0, 4.0, -5.0, 6.0, 7.0],
+                dtype=torch.float32,
+            )
+
+            expected = fn(x, weights)
+            for dynamic in [False, True]:
+                torch._dynamo.reset()
+                compiled_fn = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    dynamic=dynamic,
+                )
+                actual = compiled_fn(x, weights)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[1], expected[1])
+
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
@@ -665,6 +692,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         torch.compile(fullgraph=True)(f)(x, w).sum().backward()
         self.assertEqual(orig_w, w.grad)
 
+    @onlyOn(GPU_TYPE)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -675,6 +703,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         On CUDA: uses num_blocks only (not num_blocks * num_warps * warp_size).
         On ROCm: uses num_blocks * num_warps * warp_size (total threads limit).
         """
+        from torch._inductor.runtime.hints import get_warp_size
         from torch._inductor.runtime.triton_heuristics import (
             _check_max_grid_x,
             _num_warps,
@@ -682,13 +711,15 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
         size_hints = {"x": 600_000_000}
         x = 64
-        num_warps = _num_warps(8)
+        warp_size = get_warp_size(torch.device(device))
+        num_warps = _num_warps(8, warp_size=warp_size)
 
-        result_x, result_num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+        result_x, result_num_blocks = _check_max_grid_x(
+            size_hints, x, num_warps, warp_size=warp_size
+        )
 
         max_grid_x = 2147483647
         if torch.version.hip:
-            warp_size = 64  # TODO: query warp size once #129663 is merged
             # ROCm limits total threads (num_blocks * num_warps * warp_size)
             self.assertLessEqual(
                 result_num_blocks * num_warps * warp_size,
@@ -894,6 +925,49 @@ class TestInductorDynamic(DynamicShapesTestCase):
         expect = fn(a, 2)
         actual = cfn(a, 2)
         self.assertEqual(expect, actual)
+
+    def test_magic_method_lowerings_with_symbolic_scalars(self, device):
+        def mod(x):
+            return x.new_ones((x.shape[0] % 3) + 1)
+
+        def floordiv(x):
+            return x.new_ones((x.shape[0] // 3) + 1)
+
+        def shifts(x):
+            return (
+                x.new_ones((x.shape[0] << 1) + 1),
+                x.new_ones((x.shape[0] >> 1) + 1),
+            )
+
+        def comparison(x):
+            n = torch.sym_ite(x.shape[0] < 10, x.shape[0], x.shape[0] + 1)
+            return x.new_ones(n)
+
+        def sym_min_max(x):
+            return (
+                x.new_ones(torch.sym_min(x.shape[0], 3) + 1),
+                x.new_ones(torch.sym_max(x.shape[0], 3) + 1),
+            )
+
+        def pow_log2(x):
+            return x + 2 ** (math.floor(math.log2(x.shape[0]) + 1))
+
+        def float_constant(x):
+            return x + ((x.numel() ** 0) / 1.0)
+
+        x = torch.randn(7, 5, device=device)
+        for fn in (
+            mod,
+            floordiv,
+            shifts,
+            comparison,
+            sym_min_max,
+            pow_log2,
+            float_constant,
+        ):
+            with self.subTest(fn=fn.__name__):
+                cfn = self.compile_fn(fn, fullgraph=True)
+                self.assertEqual(fn(x), cfn(x))
 
     @onlyCPU
     def test_arithmetic_constant_folding(self, device):

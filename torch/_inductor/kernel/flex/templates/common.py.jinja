@@ -63,6 +63,12 @@ def forward_block_mn(
             "score": ("BLOCK_M", "BLOCK_N"),
             "m": ("BLOCK_M", "1"),
             "n": ("1", "BLOCK_N"),
+        },
+        input_dtypes={
+            "b": "index",
+            "h": "index",
+            "m": "index",
+            "n": "index",
         }
     ) | indent_except_first(1) }}
 
@@ -83,6 +89,12 @@ def forward_block_mn(
                 "score": ("BLOCK_M", "BLOCK_N"),
                 "m": ("BLOCK_M", "1"),
                 "n": ("1", "BLOCK_N"),
+            },
+            input_dtypes={
+                "b": "index",
+                "h": "index",
+                "m": "index",
+                "n": "index",
             }
         ) | indent_except_first(2) }}
 
