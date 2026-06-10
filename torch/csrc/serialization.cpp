@@ -248,15 +248,8 @@ void THPStorage_writeFileRaw(
     // won't mutate the data.
     data = static_cast<uint8_t*>(self->mutable_data());
   } else {
-    // Here we use a tensor.to() to impl D2H for all non-CPU device.
-    auto device_tensor = at::from_blob(
-        self->mutable_data(),
-        {static_cast<int64_t>(size_bytes)},
-        {1},
-        nullptr,
-        at::device(self->device()).dtype(c10::kByte),
-        {self->device()});
-    cpu_tensor = device_tensor.to(at::kCPU);
+    cpu_tensor = storage_copy_to_host(
+        c10::Storage(c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(self)));
     data = static_cast<uint8_t*>(cpu_tensor.data_ptr());
   }
   if (save_size) {
@@ -400,19 +393,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
   }
 
   if (storage->device_type() != at::kCPU) {
-    // Here we use a tensor.copy_() to impl H2D for all non-CPU device.
-    auto cpu_tensor = at::from_blob(
-        (void*)data,
-        {static_cast<int64_t>(nbytes)},
-        at::device(at::kCPU).dtype(c10::kByte));
-    auto device_tensor = at::from_blob(
-        storage->mutable_data(),
-        {static_cast<int64_t>(nbytes)},
-        {1},
-        nullptr,
-        at::device(storage->device()).dtype(c10::kByte),
-        {storage->device()});
-    device_tensor.copy_(cpu_tensor);
+    storage_copy_from_host(c10::Storage(storage), data, nbytes);
   }
   return storage;
 }

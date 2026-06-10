@@ -118,8 +118,18 @@ void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char* func);
 
-void storage_fill(const at::Storage& self, uint8_t value);
-void storage_set(const at::Storage& self, ptrdiff_t idx, uint8_t value);
-uint8_t storage_get(const at::Storage& self, ptrdiff_t idx);
+void storage_fill(const at::Storage& storage, uint8_t value);
+void storage_fill_range(
+    const at::Storage& storage,
+    ptrdiff_t start,
+    ptrdiff_t stop,
+    uint8_t value);
+void storage_copy_from_host(
+    const at::Storage& storage,
+    const uint8_t* src,
+    size_t nbytes);
+at::Tensor storage_copy_to_host(const at::Storage& storage);
+void storage_set(const at::Storage& storage, ptrdiff_t idx, uint8_t value);
+uint8_t storage_get(const at::Storage& storage, ptrdiff_t idx);
 
 std::string uuid_to_string(const char* uuid_bytes);
