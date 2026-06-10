@@ -201,7 +201,6 @@ for tracking purposes -->
 .. py:module:: torch.utils.data.graph_settings
 .. py:module:: torch.utils.data.sampler
 .. py:module:: torch.utils.dlpack
-.. py:module:: torch.utils.file_baton
 .. py:module:: torch.utils.hipify.constants
 .. py:module:: torch.utils.hipify.cuda_to_hip_mappings
 .. py:module:: torch.utils.hipify.version
