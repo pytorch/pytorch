@@ -728,13 +728,20 @@ class TensorLikePair(Pair):
     def _process_inputs(
         self, actual: Any, expected: Any, *, id: tuple[Any, ...], allow_subclasses: bool
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        is_python_scalar = isinstance(actual, (int, float, complex)) or isinstance(
+            expected, (int, float, complex)
+        )
         directly_related = isinstance(actual, type(expected)) or isinstance(
             expected, type(actual)
-        )
+        ) or is_python_scalar
         if not directly_related:
             self._inputs_not_supported()
 
-        if not allow_subclasses and type(actual) is not type(expected):
+        if (
+            not allow_subclasses
+            and type(actual) is not type(expected)
+            and not is_python_scalar
+        ):
             self._inputs_not_supported()
 
         actual, expected = (self._to_tensor(input) for input in (actual, expected))

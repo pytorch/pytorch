@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import collections
 import functools
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeVar
@@ -28,7 +29,7 @@ from .utils import strict_zip
 
 if TYPE_CHECKING:
     import contextlib
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable
 
     from torch._guards import Source
     from torch._inductor.output_code import OutputCode
@@ -406,6 +407,36 @@ class SubclassCreationMeta:
             raise AssertionError(
                 f"original_subclass must be a fake tensor to avoid memory leaks, got {type(self.original_subclass)}"
             )
+
+
+@dataclass(frozen=True)
+class CompilerMetadata:
+    """
+    Lightweight, stable public API for backend compilers (e.g., inductor) to access
+    mutation and aliasing metadata from the forward graph.
+
+    This class is intentionally minimal to preserve backward compatibility and allow
+    internal changes to ViewAndMutationMeta without affecting out-of-tree backends.
+    All fields are read-only (frozen=True).
+
+    Backends should use this instead of directly accessing ViewAndMutationMeta,
+    which is an internal implementation detail subject to change.
+    """
+
+    # Indices of input parameters to treat as static (not compiled as graph inputs)
+    static_input_indices: Sequence[int]
+
+    # Number of inputs with MUTATED_OUT_GRAPH mutation type
+    num_mutated_inp_runtime_indices: int
+
+    # Info about every user input and what sort of mutation happened to it
+    input_info: Sequence[InputAliasInfo]
+
+    # Info about every user output (whether it aliases other tensors, etc)
+    output_info: Sequence[OutputAliasInfo]
+
+    # Indexes of saved tensors which are donated buffers (for memory optimization)
+    bw_donated_idxs: Sequence[int] | None
 
 
 # This class encapsulates all aliasing + mutation info we need about the forward graph

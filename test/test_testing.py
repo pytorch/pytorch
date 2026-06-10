@@ -968,8 +968,50 @@ class TestAssertClose(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
             torch.testing.assert_close(actual, expected)
+    def test_tensor_to_int_scalar(self):
+        actual = torch.ones(())
+        expected = 1
+        torch.testing.assert_close(actual, expected)
 
+    def test_tensor_to_float_scalar(self):
+        actual = torch.ones((), dtype=torch.float32)
+        expected = 1.0
+        torch.testing.assert_close(actual, expected)
 
+    def test_tensor_to_complex_scalar(self):
+        actual = torch.ones((), dtype=torch.complex64)
+        expected = 1 + 0j
+        torch.testing.assert_close(actual, expected)
+
+    def test_tensor_to_list(self):
+        actual = torch.arange(3)
+        expected = [0, 1, 2]
+        torch.testing.assert_close(actual, expected)
+
+    def test_tensor_to_tuple(self):
+        actual = torch.arange(3)
+        expected = (0, 1, 2)
+        torch.testing.assert_close(actual, expected)
+
+    def test_int_scalar_to_tensor(self):
+        actual = 1
+        expected = torch.ones(())
+        torch.testing.assert_close(actual, expected)
+
+    def test_list_to_tensor(self):
+        actual = [0, 1, 2]
+        expected = torch.arange(3)
+        torch.testing.assert_close(actual, expected)
+
+    def test_tensor_to_int_in_sequence(self):
+        actual = (torch.ones(()),)
+        expected = (1,)
+        torch.testing.assert_close(actual, expected)
+
+    def test_tensor_to_int_in_mapping(self):
+        actual = {"x": torch.ones(())}
+        expected = {"x": 1}
+        torch.testing.assert_close(actual, expected)
 
 
 class TestAssertCloseMultiDevice(TestCase):
