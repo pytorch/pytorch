@@ -58,6 +58,26 @@ if TYPE_CHECKING:
     from torch.types import IntLikeType
 
 
+def _get_tracing_context_functorch_stack() -> list[Any] | None:
+    # Local import avoids an import cycle while FakeTensorMode is being defined.
+    from torch._guards import TracingContext
+
+    tracing_context = TracingContext.try_get()
+    if tracing_context is None:
+        return None
+    return tracing_context.functorch_dynamic_layer_stack
+
+
+@contextmanager
+def _maybe_restore_tracing_functorch_stack() -> Generator[None, None, None]:
+    stack = _get_tracing_context_functorch_stack()
+    if stack is not None and peek_interpreter_stack() is None:
+        with torch._functorch.pyfunctorch.temporarily_restore_interpreter_stack(stack):
+            yield
+    else:
+        yield
+
+
 def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
     from torch._subclasses.fake_tensor import FakeTensor
 
@@ -1783,9 +1803,16 @@ class MetaConverter(Generic[_TensorT]):
                                 source,
                                 symbolic_context,
                             )
-                            r = self._checked_cast_tensor_t(
-                                _wrap_functional_tensor(ft, t.current_level),
-                            )
+                            if t.functorch_stack is None:
+                                raise AssertionError(
+                                    "t.functorch_stack must not be None for functional tensor"
+                                )
+                            with torch._functorch.pyfunctorch.temporarily_restore_interpreter_stack(
+                                t.functorch_stack
+                            ):
+                                r = self._checked_cast_tensor_t(
+                                    _wrap_functional_tensor(ft, t.current_level),
+                                )
                             # TODO: is_leaf/requires_grad?
                         else:
                             if t.stride is None:
@@ -2263,7 +2290,13 @@ class MetaConverter(Generic[_TensorT]):
 
         # Describe the tensor.  NB: do NOT disable ambient modes, we may need
         # to query them when figuring out what to put in here
-        t_desc = self.describer.describe_tensor(t, trace=trace)
+        describe_context = (
+            _maybe_restore_tracing_functorch_stack()
+            if is_functorch_wrapped_tensor(t)
+            else contextlib.nullcontext()
+        )
+        with describe_context:
+            t_desc = self.describer.describe_tensor(t, trace=trace)
 
         if trace:
             if source is None:
