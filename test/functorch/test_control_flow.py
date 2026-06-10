@@ -5737,12 +5737,15 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
                 return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
 
             g = torch.cuda.CUDAGraph()
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "graph_capture_record_stream_reuse:True",
+            side_stream = torch.cuda.Stream()
+            with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+                torch.cond(predicate, true_fn, false_fn, [])
+            with (
+                torch.cuda.graph(g, stream=side_stream),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
             ):
-                with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
-                    torch.cond(predicate, true_fn, false_fn, [])
+                torch.cond(predicate, true_fn, false_fn, [])
+            g.replay()
         finally:
             torch.cuda.memory._set_allocator_settings(
                 "graph_capture_record_stream_reuse:False"

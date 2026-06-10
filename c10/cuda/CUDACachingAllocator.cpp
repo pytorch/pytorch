@@ -1490,8 +1490,8 @@ class DeviceCachingAllocator {
     ska::flat_hash_map<cudaStream_t, ska::flat_hash_set<cudaGraphNode_t>>
         visited;
   };
-  ska::flat_hash_map<MempoolId_t, CaptureId_t, MempoolIdHash>
-      mempool_to_capture_id;
+  ska::flat_hash_map<MempoolId_t, std::vector<CaptureId_t>, MempoolIdHash>
+      mempool_to_capture_ids;
   ska::flat_hash_map<CaptureId_t, GraphReuseContext> graph_reuse_context;
 
   // outstanding cuda events
@@ -2240,16 +2240,22 @@ class DeviceCachingAllocator {
       if (owning_graph == nullptr) {
         owning_graph = info.graph;
       }
-      TORCH_INTERNAL_ASSERT(
-          info.graph == owning_graph,
-          "All streams in the same capture should agree on the graph");
+
+      if (info.graph != owning_graph) {
+        // This stream is capturing into a different cudaGraph_t (e.g., a
+        // conditional node's child graph). Child graph nodes live in a
+        // separate DAG unreachable via cudaGraphNodeGetDependencies from the
+        // parent graph's terminals. Skip — the conditional node in the parent
+        // graph provides synchronization via
+        // cudaStreamUpdateCaptureDependencies.
+        return true;
+      }
 
       // Use current terminals as the free markers for the stream
       for (size_t i = 0; i < info.num_terminals; ++i) {
         auto terminal = info.terminals[i];
         markers.insert(terminal);
       }
-      owning_graph = info.graph; // all streams in the same capture should agree
       return true;
     };
 
@@ -2368,7 +2374,7 @@ class DeviceCachingAllocator {
               "Could not find graph pool for capture.");
           auto mempool_id = graph_pool->first;
           graph_reuse_context[info.capture_id] = GraphReuseContext{};
-          mempool_to_capture_id[mempool_id] = info.capture_id;
+          mempool_to_capture_ids[mempool_id].push_back(info.capture_id);
           found = true;
           break;
         }
@@ -3152,64 +3158,6 @@ class DeviceCachingAllocator {
   void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
-    if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
-      // Remove stream reuse context and mapping for this capture, if present.
-      if (!graph_reuse_context.empty()) {
-        auto capture_id = mempool_to_capture_id[mempool_id];
-        auto graph_context = graph_reuse_context[capture_id];
-        for (auto& [stream, _] : graph_context.visited) {
-          TORCH_INTERNAL_ASSERT(
-              stream_get_capture_info(stream).status ==
-                  cudaStreamCaptureStatusNone,
-              "This stream should not be capturing when the capture is ended");
-        }
-        graph_reuse_context.erase(capture_id);
-        mempool_to_capture_id.erase(mempool_id);
-      }
-
-      // Free deferred blocks associated with the ended pool, if any.
-      // cudaStreamEndCapture would have failed if any stream used during
-      // capture hadn't been joined back, so all stream uses on these
-      // blocks are known to be complete and we can safely clear them.
-      if (!deferred_blocks.empty()) {
-        auto pool_it = graph_pools.find(mempool_id);
-        if (pool_it != graph_pools.end()) {
-          auto* private_pool = pool_it->second.get();
-          auto context = maybeGatherContext(RecordContext::ALL);
-          std::vector<Block*> blocks_to_erase;
-          for (auto& [block, markers] : deferred_blocks) {
-            if (block->pool->owner_PrivatePool == private_pool) {
-              // At capture end, handle blocks associated with non-capturing
-              // streams. Remove only stream uses introduced during capture
-              // (guaranteed complete), and for any leftover pre-capture uses,
-              // insert events to track their completion. This aligns with
-              // insert_events_deferred_until_no_capture semantics.
-              remove_cudagraph_stream_uses(block);
-              if (block->stream_uses.empty()) {
-                free_block(block, context);
-              } else {
-                // Pre-capture stream uses remain; record events so
-                // process_events can free the block once they complete.
-                insert_events(block);
-                // block->event_count should likely be non-zero here since
-                // block->stream_uses is not empty. Defensive: still free if
-                // event_count is zero, but this should be rare.
-                if (block->event_count == 0) {
-                  free_block(block, context);
-                }
-              }
-              // Must erase from deferred_blocks regardless of which branch we
-              // took.
-              blocks_to_erase.push_back(block);
-            }
-          }
-          for (auto* b : blocks_to_erase) {
-            deferred_blocks.erase(b);
-          }
-        }
-      }
-    }
-
     for (auto it = allocation_scopes_.begin(); it != allocation_scopes_.end();
          ++it) {
       if (it->first == mempool_id) {
@@ -3229,6 +3177,68 @@ class DeviceCachingAllocator {
         }
 
         allocation_scopes_.erase(it);
+
+        if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
+          // Pop this capture's id from the stack and clean up its reuse
+          // context. With nested captures (e.g. conditional nodes), the
+          // parent capture and each child capture share the same mempool_id
+          // but have distinct capture_ids, stacked in push order.
+          if (mempool_to_capture_ids.count(mempool_id) &&
+              !mempool_to_capture_ids[mempool_id].empty()) {
+            auto& id_stack = mempool_to_capture_ids[mempool_id];
+            auto cap_id = id_stack.back();
+            id_stack.pop_back();
+            graph_reuse_context.erase(cap_id);
+            if (id_stack.empty()) {
+              mempool_to_capture_ids.erase(mempool_id);
+            }
+          }
+
+          // Free deferred blocks associated with the ended pool, if any.
+          // cudaStreamEndCapture would have failed if any stream used during
+          // capture hadn't been joined back, so all stream uses on these
+          // blocks are known to be complete and we can safely clear them.
+          if (!deferred_blocks.empty()) {
+            auto pool_it = graph_pools.find(mempool_id);
+            if (pool_it != graph_pools.end()) {
+              auto* private_pool = pool_it->second.get();
+              auto context = maybeGatherContext(RecordContext::ALL);
+              std::vector<Block*> blocks_to_erase;
+              for (auto& [block, markers] : deferred_blocks) {
+                if (block->pool->owner_PrivatePool == private_pool) {
+                  // At capture end, handle blocks associated with
+                  // non-capturing streams. Remove only stream uses introduced
+                  // during capture (guaranteed complete), and for any
+                  // leftover pre-capture uses, insert events to track their
+                  // completion. This aligns with
+                  // insert_events_deferred_until_no_capture semantics.
+                  remove_cudagraph_stream_uses(block);
+                  if (block->stream_uses.empty()) {
+                    free_block(block, context);
+                  } else {
+                    // Pre-capture stream uses remain; record events so
+                    // process_events can free the block once they complete.
+                    insert_events(block);
+                    // block->event_count should likely be non-zero here
+                    // since block->stream_uses is not empty. Defensive:
+                    // still free if event_count is zero, but this should
+                    // be rare.
+                    if (block->event_count == 0) {
+                      free_block(block, context);
+                    }
+                  }
+                  // Must erase from deferred_blocks regardless of which
+                  // branch we took.
+                  blocks_to_erase.push_back(block);
+                }
+              }
+              for (auto* b : blocks_to_erase) {
+                deferred_blocks.erase(b);
+              }
+            }
+          }
+        }
+
         return;
       }
     }
