@@ -36,7 +36,6 @@ from .common import (
     infer_dense_strides,
     load_flex_template,
     maybe_realize,
-    precompile_single_flex_choice,
     realize_captures_for_cutedsl,
     set_head_dim_values,
     SubgraphResults,
@@ -440,7 +439,6 @@ def flex_attention(
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
     invalid_block_options: dict[str, Any] | None = None
-    selected_kernel_options: dict[str, Any] | None = None
 
     for conf in configs:
         cur_kernel_options = original_kernel_options.copy()
@@ -495,7 +493,6 @@ def flex_attention(
             if hasattr(conf, attrib):
                 cur_kernel_options[attrib] = getattr(conf, attrib)
 
-        previous_choice_count = len(choices)
         error = flex_attention_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -521,8 +518,6 @@ def flex_attention(
             call_sizes=query.get_size(),
             **cur_kernel_options,
         )
-        if len(choices) > previous_choice_count:
-            selected_kernel_options = cur_kernel_options
         if error is not None and len(configs) == 1:
             raise error
 
@@ -534,13 +529,6 @@ def flex_attention(
             SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE,
         )
-
-    precompile_single_flex_choice(
-        choices,
-        "forward",
-        selected_kernel_options,
-        ("BLOCK_M", "BLOCK_N", "num_stages", "num_warps"),
-    )
 
     inputs_for_autotuning = (
         [
@@ -990,7 +978,6 @@ def flex_attention_backward(*args, **kwargs):
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
     invalid_block_options: dict[str, Any] | None = None
-    selected_kernel_options: dict[str, Any] | None = None
 
     original_kernel_options = kernel_options.copy()
 
@@ -1058,7 +1045,6 @@ def flex_attention_backward(*args, **kwargs):
             if hasattr(conf, attrib):
                 cur_kernel_options[attrib] = getattr(conf, attrib)
 
-        previous_choice_count = len(choices)
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -1094,8 +1080,6 @@ def flex_attention_backward(*args, **kwargs):
             call_sizes=query.get_size() + key.get_size()[1:3],
             **cur_kernel_options,
         )
-        if len(choices) > previous_choice_count:
-            selected_kernel_options = cur_kernel_options
 
     if not choices and invalid_block_options is not None:
         raise_flex_kernel_options_error(
@@ -1105,20 +1089,6 @@ def flex_attention_backward(*args, **kwargs):
             SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE,
         )
-
-    precompile_single_flex_choice(
-        choices,
-        "backward",
-        selected_kernel_options,
-        (
-            "BLOCK_M1",
-            "BLOCK_N1",
-            "BLOCK_M2",
-            "BLOCK_N2",
-            "num_stages",
-            "num_warps",
-        ),
-    )
 
     inputs_for_autotuning = (
         [

@@ -24,11 +24,11 @@ from ...utils import can_use_tma
 from .common import (
     create_indices_fake,
     create_num_blocks_fake_generator,
+    flex_kernel_tuning_options,
     freeze_irnodes,
     get_fwd_subgraph_outputs,
     load_flex_template,
     maybe_realize,
-    precompile_single_flex_choice,
     set_head_dim_values,
 )
 
@@ -55,8 +55,7 @@ def _raise_flex_decoding_kernel_options_error(
         f"SPARSE_KV_BLOCK_SIZE={sparse_kv_block_size}, and "
         f"{_format_kernel_options(kernel_options, ('BLOCK_M', 'BLOCK_N'))}. "
         "Pass compatible values with kernel_options. Available decode tuning "
-        "options are BLOCK_M, BLOCK_N, num_warps, and num_stages; use the "
-        "fwd_ prefix to set decode-only options. For example: "
+        f"options are {flex_kernel_tuning_options('decode')}. For example: "
         "kernel_options={'fwd_BLOCK_M': 16, 'fwd_BLOCK_N': 128, "
         "'fwd_num_warps': 2, 'fwd_num_stages': 3}. If you did not pin "
         "these options, compiling with mode='max-autotune-no-cudagraphs' "
@@ -350,7 +349,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
     invalid_block_options: dict[str, Any] | None = None
-    selected_kernel_options: dict[str, Any] | None = None
 
     for conf in configs:
         cur_kernel_options = original_kernel_options.copy()
@@ -403,7 +401,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
             if hasattr(conf, attrib):
                 cur_kernel_options[attrib] = getattr(conf, attrib)
 
-        previous_choice_count = len(choices)
         flex_decoding_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -426,8 +423,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
             call_sizes=query.get_size(),
             **cur_kernel_options,
         )
-        if len(choices) > previous_choice_count:
-            selected_kernel_options = cur_kernel_options
 
     if not choices and invalid_block_options is not None:
         _raise_flex_decoding_kernel_options_error(
@@ -435,13 +430,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
             SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE,
         )
-
-    precompile_single_flex_choice(
-        choices,
-        "decode",
-        selected_kernel_options,
-        ("BLOCK_M", "BLOCK_N", "num_stages", "num_warps"),
-    )
 
     filtered_score_mod_buffers = [
         buf for buf in score_mod_other_buffers if not isinstance(buf, sympy.Expr)
