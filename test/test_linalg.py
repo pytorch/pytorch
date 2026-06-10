@@ -4354,6 +4354,19 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "qr received unrecognized mode 'hello'"):
             torch.linalg.qr(t2, mode='hello')
 
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float)
+    def test_linalg_qr_out_aliased_outputs_error(self, device, dtype):
+        # non-overlapping-tensors check for out=.
+        x = torch.randn(2, 2, device=device, dtype=dtype)
+        out = torch.zeros_like(x)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"linalg\.qr: Q and R in out=\(Q, R\) must be non-overlapping\.",
+        ):
+            torch.linalg.qr(x, out=(out, out))
+
     def _check_einsum(self, *args, np_args=None):
         if np_args is None:
             np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]

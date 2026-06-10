@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorOperators.h>
@@ -709,6 +710,23 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
   at::native::checkIsMatrix(A, "linalg.qr");
   at::native::checkFloatingOrComplex(A, "linalg.qr");
   auto [compute_q, reduced_mode] = at::native::_parse_qr_mode(mode);
+
+  if (compute_q) {
+    const auto& out_q = maybe_get_output(0);
+    const auto& out_r = maybe_get_output(1);
+    if (out_q.defined() && out_r.defined()) {
+      const auto lap = at::get_overlap_status(out_q, out_r);
+      if (lap == at::MemOverlapStatus::TooHard) {
+        TORCH_WARN_ONCE(
+            "linalg.qr: could not verify whether the out= tensors Q and R are "
+            "memory-disjoint.");
+      }
+      TORCH_CHECK(
+          lap != at::MemOverlapStatus::Partial &&
+              lap != at::MemOverlapStatus::Full,
+          "linalg.qr: Q and R in out=(Q, R) must be non-overlapping.");
+    }
+  }
 
   auto A_shape = A.sizes().vec();
   const auto m = A_shape.cend()[-2];
