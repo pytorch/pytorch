@@ -3154,6 +3154,11 @@ class FakeTensorMode(TorchDispatchMode):
                     else fake_tensor_tls.allow_non_fake_inputs_override
                 )
                 if not allow_non_fake_inputs:
+                    fake_view = _maybe_extract_fake_view_from_functional_base(x, self)
+                    if fake_view is not None:
+                        flat_arg_fake_tensors.append(fake_view)
+                        return fake_view
+
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError(
                             f"Mixing fake modes NYI x.fake_mode={x.fake_mode} vs self={self}"
@@ -3544,6 +3549,53 @@ def _device_handler(args: Sequence[object]) -> torch.device:
         return torch.device("meta")
     else:
         return args[0].fake_device
+
+
+def _maybe_extract_fake_view_from_functional_base(
+    x: Tensor, fake_mode: FakeTensorMode
+) -> FakeTensor | None:
+    """Recover fake views that bypassed FunctionalTensorMode wrapping.
+
+    The C++ autograd engine can produce a plain Tensor view whose base is a
+    FunctionalTensor. If that FunctionalTensor wraps one of our FakeTensors, the
+    plain view still represents fake data and should be validated as such.
+    """
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    base = x._base
+    if isinstance(base, FunctionalTensor):
+        functional_base = base.elem
+    elif isinstance(base, Tensor) and torch._is_functional_tensor(base):
+        functional_base = base
+    else:
+        return None
+    if not torch._is_functional_tensor(functional_base):
+        return None
+
+    inner = torch._from_functional_tensor(functional_base)
+    if not fake_mode.is_our_fake(inner):
+        return None
+
+    can_use_unsafe_view = (
+        inner.is_contiguous()
+        and x.is_contiguous()
+        and inner.numel() == x.numel()
+        and inner.storage_offset() == x.storage_offset()
+    )
+    out = (
+        torch.ops.aten._unsafe_view.default(inner, list(x.shape))
+        if can_use_unsafe_view
+        else torch.ops.aten.as_strided.default(
+            inner, x.shape, x.stride(), x.storage_offset()
+        )
+    )
+    if fake_mode.is_our_fake(out):
+        return out
+    if out.device.type == "meta":
+        return fake_mode.fake_tensor_converter.from_meta_and_device(
+            fake_mode, out, inner.fake_device
+        )
+    return None
 
 
 # [subclass inputs]
