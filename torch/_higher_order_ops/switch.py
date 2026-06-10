@@ -76,9 +76,10 @@ def switch(
         - Each branch must have the same signature as operands and return the same
           output structure (shape, dtype, etc.).
         - Branches cannot have in-place mutations on inputs or global variables.
-        - Autograd is not supported in this prototype: passing operands with
-          ``requires_grad=True`` raises ``NotImplementedError``. Full autograd
-          support is planned for a future release.
+        - Autograd is not supported in this prototype: the autograd dispatch
+          key is a no-op that redispatches below autograd, so gradients will
+          not flow through ``torch.switch``. Full autograd support is planned
+          for a future release.
     """
 
     # Flatten operands so the HOP only sees a flat list of tensors.
@@ -212,7 +213,7 @@ def switch_op_dense(index, branches, operands):
     mode = _get_current_dispatch_mode()
     if mode is not None:
         raise AssertionError("Mode should never be enabled for CPU/CUDA key")
-    idx: int = int(index.item() if isinstance(index, torch.Tensor) else int(index))
+    idx: int = int(index.item()) if isinstance(index, torch.Tensor) else int(index)
     # Clamp out-of-range indices rather than raising for consistency with compiled behavior.
     clamped_idx = min(max(0, idx), len(branches) - 1)
     return branches[clamped_idx](*operands)
@@ -220,11 +221,6 @@ def switch_op_dense(index, branches, operands):
 
 @switch_op.py_autograd_impl
 def switch_autograd(index, branches, operands):
-    # if any(isinstance(o, torch.Tensor) and o.requires_grad for o in pytree.tree_leaves(operands)):
-    #     raise NotImplementedError(
-    #         "torch.switch does not yet support autograd; see "
-    #         "https://github.com/pytorch/pytorch/issues/175891"
-    #     )
     with torch._C._AutoDispatchBelowAutograd():
         return switch_op(index, branches, operands)
 
