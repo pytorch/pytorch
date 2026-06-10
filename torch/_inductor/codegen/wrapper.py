@@ -1278,6 +1278,7 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
+        self.kernel_call_wrappers = IndentedBuffer()
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Map key is the kernel argument name; value is a tuple of the resulting example
         # tensor name with the kernel where that tensor was most recently used.
@@ -2158,6 +2159,16 @@ class PythonWrapperCodegen(CodeGen):
         finally:
             self.writeline = old  # type: ignore[method-assign]
 
+    def _emit_wrapper_lines(self, target: IndentedBuffer) -> None:
+        """Emit ``self.lines`` into ``target``; subclasses may override to
+        group spans of lines (e.g. outline kernel calls)."""
+        for line in self.lines:
+            if isinstance(line, WrapperLine):
+                # pyrefly: ignore [missing-attribute]
+                line.codegen(target)
+            else:
+                target.writeline(line)
+
     def _write_multi_kernel_defs(self) -> None:
         kernel_defs = self.multi_kernel_state.kernel_defs
         if config.triton.autotune_at_compile_time:
@@ -2184,12 +2195,7 @@ class PythonWrapperCodegen(CodeGen):
             # At this point, we shouldn't generate any new memory planning lines.
             # Override writeline to point at the wrapper call, in case it gets called.
             with self.set_writeline(self.wrapper_call, self.wrapper_call.writeline):
-                for line in self.lines:
-                    if isinstance(line, WrapperLine):
-                        # pyrefly: ignore [missing-attribute]
-                        line.codegen(self.wrapper_call)
-                    else:
-                        self.wrapper_call.writeline(line)
+                self._emit_wrapper_lines(self.wrapper_call)
 
             self._write_multi_kernel_defs()
 

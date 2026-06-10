@@ -1570,6 +1570,22 @@ class AOTInductorTestsTemplate:
         example_inputs = (x, y)
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
+    def test_kernel_call_outlining(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.nn.functional.relu(x + y)
+
+        inputs = (
+            torch.randn(8, 16, device=self.device),
+            torch.randn(8, 16, device=self.device),
+        )
+        _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, Model(), inputs)
+        # The per-kernel-call teardown should be lifted into an
+        # AOTI_NOINLINE helper and invoked from run_impl.
+        FileCheck().check("AOTI_NOINLINE static void free_after_").check(
+            "run_impl("
+        ).check("free_after_").run(code)
+
     @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
     def test_large_dynamic_dim(self):
         class Model(torch.nn.Module):
