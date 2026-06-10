@@ -17679,7 +17679,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch.testing.assert_close(out, fn(a, b), atol=0, rtol=0)
 
     @requires_gpu_and_triton
-    @config.patch(nan_asserts=True, runtime_triton_nan_asserts=True)
+    @config.patch(nan_asserts=True)
     def test_nan_asserts_in_launcher_wrapper_only(self):
         def fn(x):
             x = x - 1
