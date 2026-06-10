@@ -1087,6 +1087,10 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             def is_scalar_tensor_index(item):
                 if not isinstance(item, torch.Tensor) or item.ndim != 0:
                     return False
+                # vmap BatchedTensor scalar indices must remain tensor indices;
+                # calling item() on them is unsupported.
+                if torch._C._functorch.is_batchedtensor(item):
+                    return False
 
                 from torch._prims_common import is_integer_dtype
 
