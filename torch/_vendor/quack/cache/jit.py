@@ -19,7 +19,6 @@ import functools
 import hashlib
 import os
 import pickle
-import types
 import sys
 import tempfile
 import time
@@ -85,14 +84,7 @@ def _compute_source_fingerprint() -> str:
 
 
 def _canonicalize_cache_key_item(item):
-    """Convert cache-key inputs to stable, pickleable representations.
-
-    Generated Inductor/CuTeDSL epilogue functions are recreated in parent and
-    autotune worker processes. Their Python object identities/modules differ,
-    but they can carry a stable ``__quack_cache_key__`` attribute derived from
-    the generated source. Use it so worker precompilation warms the exact same
-    persistent cache entry that the parent later benchmarks.
-    """
+    """Convert cache-key inputs to stable, pickleable representations."""
     stable_key = getattr(item, "__quack_cache_key__", None)
     if stable_key is not None:
         return ("__quack_callable__", stable_key)
@@ -110,8 +102,6 @@ def _canonicalize_cache_key_item(item):
                 for k, v in item.items()
             )
         )
-    if isinstance(item, types.FunctionType):
-        return ("__python_function__", item.__module__, item.__qualname__)
     return item
 
 
