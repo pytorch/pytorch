@@ -88,6 +88,9 @@ def _install_parent_watchdog() -> None:
 # depth"). External callers should still use ``compile_only_mode()``.
 cache._COMPILE_ONLY_DEPTH.set(cache._COMPILE_ONLY_DEPTH.get() + 1)
 
+_TENSOR_META_TAG = "__quack_tensor_meta__"
+
+
 _dtype_map = {
     "torch.float16": torch.float16,
     "torch.bfloat16": torch.bfloat16,
@@ -106,6 +109,18 @@ def _make_fake_tensor(meta):
     stride = meta["stride"]
     dtype = _dtype_map[meta["dtype"]]
     return torch.empty_strided(shape, stride, dtype=dtype, device="cuda")
+
+
+def _deserialize_precompile_value(value):
+    if isinstance(value, dict):
+        if value.get(_TENSOR_META_TAG):
+            return _make_fake_tensor(value)
+        return {k: _deserialize_precompile_value(v) for k, v in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_deserialize_precompile_value(v) for v in value)
+    if isinstance(value, list):
+        return [_deserialize_precompile_value(v) for v in value]
+    return value
 
 
 def _recv(stream):
@@ -156,19 +171,15 @@ def main():
             fn_cache[fn_key] = getattr(obj, "fn", obj)
         fn = fn_cache[fn_key]
 
-        tensor_meta = payload["tensor_meta"]
+        serialized_args = payload["args"]
         kwargs = payload["kwargs"]
         config_kwargs = payload["config_kwargs"]
 
         with CompileOnlyFakeTensorMode():
-            fake_args = []
-            for meta in tensor_meta:
-                if isinstance(meta, dict) and "shape" in meta:
-                    fake_args.append(_make_fake_tensor(meta))
-                else:
-                    fake_args.append(meta)
+            fake_args = _deserialize_precompile_value(serialized_args)
+            fake_kwargs = _deserialize_precompile_value(kwargs)
             try:
-                fn(*fake_args, **kwargs, **config_kwargs)
+                fn(*fake_args, **fake_kwargs, **config_kwargs)
                 _send(stdout, "OK")
             except Exception as e:
                 _send(stdout, f"ERR:{e}")
