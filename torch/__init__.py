@@ -1716,6 +1716,12 @@ def _check_with(
     message: _Callable[[], str],
 ):
     if not isinstance(cond, (builtins.bool, SymBool)):
+        if isinstance(cond, torch.Tensor):
+            raise TypeError(
+                "cond must be a bool, but got a Tensor. "
+                "For tensor conditions, use torch._check_tensor_all() "
+                "to assert that all elements are true."
+            )
         raise TypeError(f"cond must be a bool, but got {type(cond)}")
 
     from torch.fx.experimental.symbolic_shapes import expect_true
@@ -2398,6 +2404,7 @@ from torch import masked as masked
 # Import removed ops with error message about removal
 from torch._linalg_utils import (  # type: ignore[misc]
     _symeig as symeig,
+    cholesky,
     eig,
     lstsq,
     matrix_rank,
