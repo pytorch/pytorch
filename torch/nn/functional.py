@@ -3355,15 +3355,14 @@ def gaussian_nll_loss(
         if input.size()[:-1] == var.size():
             var = torch.unsqueeze(var, -1)
 
-        # This checks if the var is broadcastable to the input and there is only one mismatched dimension.
-        # This is also a homoscedastic case.
+        # This checks if the var is broadcastable to the input, i.e. all mismatched
+        # dimensions in var are size 1.
         # e.g. input.size = (10, 2, 3), var.size = (10, 2, 1)
         # or  input.size = (4, 3, 32, 32), var.size = (4, 1, 32, 32)
-        elif (
-            input.ndim == var.ndim
-            and sum(y for x, y in zip(input.size(), var.size(), strict=True) if x != y)
-            == 1
-        ):  # Heteroscedastic case
+        # or  input.size = (4, 3, 2, 2), var.size = (4, 3, 1, 1)
+        elif input.ndim == var.ndim and all(
+            y == 1 for x, y in zip(input.size(), var.size(), strict=True) if x != y
+        ):
             pass
 
         # If none of the above pass, then the size of var is incorrect.

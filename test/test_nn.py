@@ -2731,6 +2731,29 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(component_wise_loss,
                          F.gaussian_nll_loss(input, target_part, var_part2, reduction='none'))
 
+    def test_gaussian_nll_loss_multi_dim_broadcasting(self):
+        input = torch.randn(4, 3, 2, 2)
+        target = torch.randn(4, 3, 2, 2)
+        var_full = torch.ones(4, 3, 2, 2)
+        expected = F.gaussian_nll_loss(input, target, var_full, reduction='none')
+
+        # var with two mismatched dims of size 1: (4, 3, 1, 1)
+        var_spatial = torch.ones(4, 3, 1, 1)
+        self.assertEqual(expected,
+                         F.gaussian_nll_loss(input, target, var_spatial, reduction='none'))
+
+        # var with three mismatched dims of size 1: (4, 1, 1, 1)
+        var_batch = torch.ones(4, 1, 1, 1)
+        expected_batch = F.gaussian_nll_loss(input, target, var_batch.expand_as(input), reduction='none')
+        self.assertEqual(expected_batch,
+                         F.gaussian_nll_loss(input, target, var_batch, reduction='none'))
+
+        # var with all dims size 1: (1, 1, 1, 1)
+        var_global = torch.ones(1, 1, 1, 1)
+        expected_global = F.gaussian_nll_loss(input, target, var_global.expand_as(input), reduction='none')
+        self.assertEqual(expected_global,
+                         F.gaussian_nll_loss(input, target, var_global, reduction='none'))
+
     def test_gaussian_nll_loss_args(self):
         input = torch.randn(3, 5)
         with self.assertRaisesRegex(ValueError, 'var is of incorrect size'):
