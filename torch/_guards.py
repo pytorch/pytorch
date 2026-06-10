@@ -1006,6 +1006,31 @@ class HopDispatchSetCache:
 
 _TLS = threading.local()
 
+
+def get_ambient_functorch_dynamic_layer_stack() -> list[Any] | None:
+    return getattr(_TLS, "functorch_dynamic_layer_stack", None)
+
+
+def get_ambient_functorch_interpreter_stack() -> list[Any] | None:
+    return getattr(_TLS, "functorch_interpreter_stack", None)
+
+
+@contextmanager
+def functorch_stack_context(
+    dynamic_layer_stack: list[Any] | None,
+    interpreter_stack: list[Any] | None,
+) -> Generator[None, None, None]:
+    prior_dynamic_layer_stack = getattr(_TLS, "functorch_dynamic_layer_stack", None)
+    prior_interpreter_stack = getattr(_TLS, "functorch_interpreter_stack", None)
+    _TLS.functorch_dynamic_layer_stack = dynamic_layer_stack
+    _TLS.functorch_interpreter_stack = interpreter_stack
+    try:
+        yield
+    finally:
+        _TLS.functorch_dynamic_layer_stack = prior_dynamic_layer_stack
+        _TLS.functorch_interpreter_stack = prior_interpreter_stack
+
+
 """
 TracingContext is the source of truth for all currently accumulated information
 needed to trace. Its lifecycle is kept 1:1 when using TorchDynamo, but other systems
@@ -1137,6 +1162,18 @@ class TracingContext:
         self.force_unspec_int_unbacked_size_like = False
         # See note [Tensor Fakification and Symbol Caching]
         self.tensor_to_context = WeakTensorKeyDictionary()
+        functorch_dynamic_layer_stack = get_ambient_functorch_dynamic_layer_stack()
+        self.functorch_dynamic_layer_stack = (
+            list(functorch_dynamic_layer_stack)
+            if functorch_dynamic_layer_stack is not None
+            else None
+        )
+        functorch_interpreter_stack = get_ambient_functorch_interpreter_stack()
+        self.functorch_interpreter_stack = (
+            list(functorch_interpreter_stack)
+            if functorch_interpreter_stack is not None
+            else None
+        )
 
         # If this true, Aot Autograd will return output Fake Tensors with appropriate
         # meta on the first invocation
