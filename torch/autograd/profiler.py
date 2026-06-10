@@ -716,6 +716,8 @@ class profile:
             src_event = uid_2_events[dst2src[compile_event["uid"]]]
             src_item = _EventItem(src_event)
             idx = bisect_left(compiled_event_starts, src_item.start) - 1
+            # Compiled regions are expected to be nearly nested around their
+            # source events, so the nearest preceding region usually matches.
             while idx >= 0:
                 region_item = compiled_event_items[idx]
                 if (
@@ -872,48 +874,53 @@ class profile:
         import torch._inductor.config as inductor_config
 
         if inductor_config.trace.provenance_tracking_to_timeline:
-            # Kineto owns the initial serialization path.  Re-read the exported
-            # trace here so timeline provenance stays decoupled from Kineto's
-            # JSON writer and remains a Python-only post-processing step.
-            with open(path) as f:
-                trace = json.load(f)
+            from torch._inductor.debug import get_kernel_information_jsons
 
-            num_events = len(trace.get("traceEvents", []))
-            max_events = inductor_config.trace.provenance_tracking_max_events
-            if max_events > 0 and num_events > max_events:
-                log.warning(
-                    "Skipping provenance tracking: trace has %d events "
-                    "(exceeds limit of %d). Set TORCH_COMPILE_DEBUG_MAX_EVENTS=0 "
-                    "to disable this protection or increase the limit.",
-                    num_events,
-                    max_events,
-                )
-                return
-
-            if not inductor_config.triton.unique_kernel_names:
-                log.warning(
-                    "Profiling trace does not contain Triton kernel stack traces "
-                    "because TORCHINDUCTOR_UNIQUE_KERNEL_NAMES=0."
-                )
-            if inductor_config.cpp_wrapper:
-                log.warning(
-                    "Profiling trace does not contain compiled kernel stack traces "
-                    "because cpp_wrapper is enabled."
-                )
-                return
             try:
-                log.info("Add stack trace to compiled kernel.")
-                trace = self.add_to_chrome_trace(trace)
-                with open(path, "w") as f:
-                    json.dump(trace, f, indent=1)
-            except MemoryError:
-                log.error(
-                    "MemoryError during add_to_chrome_trace. "
-                    "Try increasing TORCH_COMPILE_DEBUG_MAX_EVENTS or disable provenance tracking."
-                )
-                raise
-            except Exception:
-                log.exception("Failed to add stack trace to compiled kernel")
+                # Kineto owns the initial serialization path.  Re-read the exported
+                # trace here so timeline provenance stays decoupled from Kineto's
+                # JSON writer and remains a Python-only post-processing step.
+                with open(path) as f:
+                    trace = json.load(f)
+
+                num_events = len(trace.get("traceEvents", []))
+                max_events = inductor_config.trace.provenance_tracking_max_events
+                if max_events > 0 and num_events > max_events:
+                    log.warning(
+                        "Skipping provenance tracking: trace has %d events "
+                        "(exceeds limit of %d). Set TORCH_COMPILE_DEBUG_MAX_EVENTS=0 "
+                        "to disable this protection or increase the limit.",
+                        num_events,
+                        max_events,
+                    )
+                    return
+
+                if not inductor_config.triton.unique_kernel_names:
+                    log.warning(
+                        "Profiling trace does not contain Triton kernel stack traces "
+                        "because TORCHINDUCTOR_UNIQUE_KERNEL_NAMES=0."
+                    )
+                if inductor_config.cpp_wrapper:
+                    log.warning(
+                        "Profiling trace does not contain compiled kernel stack traces "
+                        "because cpp_wrapper is enabled."
+                    )
+                    return
+                try:
+                    log.info("Add stack trace to compiled kernel.")
+                    trace = self.add_to_chrome_trace(trace)
+                    with open(path, "w") as f:
+                        json.dump(trace, f, indent=1)
+                except MemoryError:
+                    log.error(
+                        "MemoryError during add_to_chrome_trace. "
+                        "Try increasing TORCH_COMPILE_DEBUG_MAX_EVENTS or disable provenance tracking."
+                    )
+                    raise
+                except Exception:
+                    log.exception("Failed to add stack trace to compiled kernel")
+            finally:
+                get_kernel_information_jsons().clear()
 
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 

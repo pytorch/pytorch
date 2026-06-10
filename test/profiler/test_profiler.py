@@ -171,6 +171,61 @@ class TestProfilerCUDA(TestCase):
             profiler_stats.function_events_build_tree_call_duration_us, 0
         )
 
+    @xfailIfNoAcceleratorTriton
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_compile_timeline_provenance_survives_reset_scope(self):
+        import torch._inductor.config as inductor_config
+        import torch._inductor.debug as inductor_debug
+
+        previous_kernel_information_jsons = copy.deepcopy(
+            inductor_debug.get_kernel_information_jsons()
+        )
+        inductor_debug.get_kernel_information_jsons().clear()
+
+        def fn(x):
+            return torch.sin(x + 1).relu()
+
+        try:
+            with (
+                inductor_config.patch(
+                    {
+                        "force_disable_caches": True,
+                        "trace.provenance_tracking_to_timeline": True,
+                        "triton.unique_kernel_names": True,
+                    }
+                ),
+                TemporaryFileName(mode="w+") as trace_path,
+            ):
+                compiled_fn = torch.compile(fn, backend="inductor")
+                x = torch.randn(64, 64, device="cuda")
+                with profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                ) as prof:
+                    compiled_fn(x)
+                    torch.cuda.synchronize()
+
+                prof.export_chrome_trace(trace_path)
+                with open(trace_path) as f:
+                    trace = json.load(f)
+
+            kernel_stacks = [
+                event.get("args", {}).get("stack")
+                for event in trace["traceEvents"]
+                if event.get("cat") == "kernel"
+                and event.get("name", "").startswith("triton_")
+            ]
+            self.assertTrue(
+                any(stack for stack in kernel_stacks),
+                "Expected a generated Triton kernel in the exported trace to "
+                "carry a stack",
+            )
+            self.assertEqual(inductor_debug.get_kernel_information_jsons(), {})
+        finally:
+            inductor_debug.get_kernel_information_jsons().clear()
+            inductor_debug.get_kernel_information_jsons().update(
+                previous_kernel_information_jsons
+            )
+
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/78457")
     def test_mem_leak(self):
         """Checks that there's no memory leak when using profiler with CUDA"""

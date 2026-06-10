@@ -853,16 +853,16 @@ class TestProvenanceTracingStackTraces(TestCase):
         self.assertIsInstance(result, dict)
         self.assertEqual(len(result), 0)  # Should be empty with no provenance data
 
-    def test_reset_provenance_globals_resets_kernel_information_jsons(self):
+    def test_reset_provenance_globals_preserves_kernel_information_jsons(self):
         kernel_information_jsons = get_kernel_information_jsons()
         previous = dict(kernel_information_jsons)
         kernel_information_jsons.clear()
         kernel_information_jsons["outer"] = {}
         try:
             with reset_provenance_globals():
-                self.assertEqual(get_kernel_information_jsons(), {})
+                self.assertEqual(get_kernel_information_jsons(), {"outer": {}})
                 get_kernel_information_jsons()["inner"] = {}
-            self.assertEqual(get_kernel_information_jsons(), {"outer": {}})
+            self.assertEqual(get_kernel_information_jsons(), {"outer": {}, "inner": {}})
         finally:
             get_kernel_information_jsons().clear()
             get_kernel_information_jsons().update(previous)
