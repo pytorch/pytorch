@@ -7090,6 +7090,23 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.compile(f, backend="eager", fullgraph=True)(x, out_res)
         self.assertEqual(out_ref, out_res)
 
+    def test_gather_out_dynamic_shapes(self):
+        def f(x, index, out):
+            torch.gather(x, 1, index, sparse_grad=False, out=out)
+            return out
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True, dynamic=True)
+        for width in (2, 3):
+            x = torch.randn(1, width)
+            index = torch.randint(width, (1, 1))
+            out_ref = torch.empty(1, 1)
+            out_res = torch.empty(1, 1)
+
+            f(x, index, out_ref)
+            res = opt_f(x, index, out_res)
+            self.assertEqual(out_ref, out_res)
+            self.assertEqual(out_ref, res)
+
     @skipIfNotPy312
     def test_sys_monitoring(self):
         found_dynamo = False
