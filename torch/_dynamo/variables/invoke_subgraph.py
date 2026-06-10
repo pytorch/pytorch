@@ -19,6 +19,7 @@ from torch._dynamo.guards import (
     extract_tensor_metadata,
     GUARD_VALUE_DISPATCH,
     GuardCheckSpec,
+    install_guard,
     SKIP_GUARD,
     UnsupportedGuardCheckSpec,
 )
@@ -288,6 +289,20 @@ def get_flat_proxies(fingerprint: InputFingerprint) -> list[Proxy]:
     return flat_proxies
 
 
+def build_input_aliases(fingerprint: InputFingerprint) -> list[int | None]:
+    """Record tensor/symnode aliasing by flattened input position."""
+    node_to_first_idx: dict[torch.fx.Node, int] = {}
+    aliases: list[int | None] = []
+    for idx, (tag, vt) in enumerate(fingerprint.flat_vts):
+        if tag in (InputTag.TENSOR, InputTag.SYMNODE):
+            node = vt.as_proxy().node
+            first_idx = node_to_first_idx.setdefault(node, idx)
+            aliases.append(first_idx)
+        else:
+            aliases.append(None)
+    return aliases
+
+
 @dataclass
 class LiftedUserArg:
     """Lifted arg that came from a user argument (intermediate activation or explicit input)."""
@@ -328,6 +343,17 @@ class LiftedBoundSymbol:
 LiftedArgOrigin = (
     LiftedUserArg | LiftedCapturedSource | LiftedSyntheticObject | LiftedBoundSymbol
 )
+
+
+def graph_has_free_unbacked_symbols(gm: torch.fx.GraphModule) -> bool:
+    from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+    for node in gm.graph.nodes:
+        for key in ("example_value", "val", "unbacked_bindings"):
+            value = node.meta.get(key)
+            if value is not None and has_free_unbacked_symbols(value):
+                return True
+    return False
 
 
 def get_fn_code(fn_var: Any) -> types.CodeType | None:
@@ -504,10 +530,14 @@ def build_reuse_condition(
     for source in all_sources:
         all_relevant_guards.update(tx.output.guards.get_guards_for_source(source))
 
+    explicit_arg_sources = {s for s in fingerprint.arg_sources if s is not None}
     guard_tuples: list[tuple[Source, GuardCheckSpec, object, Guard]] = []
     for guard in all_relevant_guards:
         source = guard.originating_source
         type_str = guard.create_fn_name()
+        if type_str == "TENSOR_MATCH" and source in explicit_arg_sources:
+            continue
+
         handler = GUARD_VALUE_DISPATCH.get(type_str)
 
         if handler is SKIP_GUARD:
@@ -540,6 +570,7 @@ def build_reuse_condition(
         input_checks=input_checks,
         guards=guard_tuples,
         treespec=fingerprint.treespec,
+        input_aliases=build_input_aliases(fingerprint),
         traced_sources=traced_sources,
     )
 
@@ -592,6 +623,11 @@ def is_reusable(
             len(condition.input_checks),
             len(fingerprint.flat_vts),
         )
+        return False
+
+    input_aliases = build_input_aliases(fingerprint)
+    if condition.input_aliases is not None and input_aliases != condition.input_aliases:
+        hc_log.debug("subgraph_reuse: reuse failed -- input aliasing mismatch")
         return False
 
     for i, ((cached_tag, cached_val), (cur_tag, cur_vt)) in enumerate(
@@ -673,11 +709,6 @@ def is_reusable(
     if has_mutated_vars(tx, remapped):
         return False
 
-    # If no sources changed, all guards were already checked during the
-    # original trace and will trivially pass again.
-    if not source_replacement:
-        return True
-
     # Shared resolution context so source.get_value memoizes intermediate
     # results (e.g. common base sources) across all guards in this check.
     resolve_globals: dict[str, Any] = {
@@ -686,13 +717,11 @@ def is_reusable(
     }
     resolve_locals: dict[str, Any] = {}
     resolve_cache: dict[Source, Any] = {}
+    guards_to_install: list[Guard] = []
 
     for source, handler, expected, guard in condition.guards:
         new_source = source.clone(replacement_fn)
-        # Source unchanged after replacement — guard already passed during
-        # the original trace, skip re-evaluation.
-        if new_source == source:
-            continue
+        guard_type = guard.create_fn_name()
 
         try:
             value = new_source.get_value(resolve_globals, resolve_locals, resolve_cache)
@@ -703,7 +732,7 @@ def is_reusable(
                 "  guard source: %s\n"
                 "  guard source name: %s\n"
                 "  user stack:\n%s",
-                guard.create_fn_name(),
+                guard_type,
                 new_source,
                 new_source.name,
                 "".join(guard.user_stack.format())
@@ -721,7 +750,7 @@ def is_reusable(
                 "  expected: %s\n"
                 "  got: %s\n"
                 "  user stack:\n%s",
-                guard.create_fn_name(),
+                guard_type,
                 new_source,
                 new_source.name,
                 expected,
@@ -731,6 +760,22 @@ def is_reusable(
                 else "<no stack>",
             )
             return False
+
+        # TENSOR_MATCH guards are validated above but not replayed here:
+        # explicit tensor inputs are covered by input_checks/input_aliases, and
+        # captured tensor sources are rewrapped by stamp_out_subgraph's
+        # VariableBuilder, which installs the current trace's tensor guard.
+        # Replaying the cached guard as well can duplicate no-alias sources.
+        if guard_type == "TENSOR_MATCH":
+            continue
+
+        new_guard = new_source.make_guard(guard.create_fn)
+        new_guard.stack = guard.stack
+        new_guard.user_stack = guard.user_stack
+        guards_to_install.append(new_guard)
+
+    if guards_to_install:
+        install_guard(*guards_to_install)
 
     return True
 
@@ -748,7 +793,7 @@ def has_reuse_entries(
     if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
         return False
     fn_code = get_fn_code(fn_var)
-    return fn_code is not None and fn_code in invoke_subgraph_cache.subgraph_reuse_cache
+    return fn_code is not None and invoke_subgraph_cache.has_reuse_entries(fn_code)
 
 
 def find_reuse_match(
@@ -859,6 +904,7 @@ def save_reuse_entry(
         # rewrite captured variable sources for the current invocation.
         arg_sources=fingerprint.arg_sources,
         num_user_outputs=num_user_outputs,
+        has_free_unbacked_symbols=graph_has_free_unbacked_symbols(body_gmod),
     )
     if condition is not None:
         invoke_subgraph_cache.add_reuse_entry(
@@ -933,6 +979,7 @@ def stamp_out_subgraph(
     """
     from torch._dynamo.variables.builder import VariableBuilder
     from torch._dynamo.variables.higher_order_ops import add_call_function, make_attr
+    from torch._guards import InvokeSubgraphCache
 
     flat_proxies = get_flat_proxies(fingerprint)
     new_arg_sources = fingerprint.arg_sources
@@ -1008,8 +1055,40 @@ def stamp_out_subgraph(
         )
 
     # Install the invoke_subgraph call
-    body_node = make_attr(tx, cached.body_name)
-    p_args = (body_node, cached.body_name, *new_lifted_args)
+    body_name = cached.body_name
+    invoke_subgraph_cache = tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
+        torch._higher_order_ops.invoke_subgraph
+    )
+    if isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
+        remapped_name = invoke_subgraph_cache.installed_reuse_subgraphs.get(
+            cached.reuse_id
+        )
+        # In the original trace the cached module may already be installed;
+        # in a later trace we register it under the cached name when possible
+        # so proxy-dispatch tracing can reuse its identifier-based cache.
+        # The GraphModule object is intentionally shared across traces rather
+        # than deep-copied. Registration stores the object by reference; later
+        # __name__ writes are only lookup bookkeeping for the active OutputGraph
+        # after a module has been registered.
+        if remapped_name is not None:
+            body_name = remapped_name
+        elif tx.output.nn_modules.get(body_name) is cached.body_gmod:
+            invoke_subgraph_cache.installed_reuse_subgraphs[cached.reuse_id] = body_name
+        elif body_name not in tx.output.nn_modules:
+            cached.body_gmod.__name__ = body_name  # type: ignore[assignment]
+            cached.body_gmod.torchdynamo_force_dynamic = False  # type: ignore[assignment]
+            tx.output.register_attr_or_module(cached.body_gmod, body_name, source=None)
+            for name, mod in tx.output.nn_modules.items():
+                if mod is cached.body_gmod:
+                    body_name = name
+                    break
+            invoke_subgraph_cache.installed_reuse_subgraphs[cached.reuse_id] = body_name
+        else:
+            body_name = tx.output.install_subgraph(cached.body_name, cached.body_gmod)
+            invoke_subgraph_cache.installed_reuse_subgraphs[cached.reuse_id] = body_name
+
+    body_node = make_attr(tx, body_name)
+    p_args = (body_node, body_name, *new_lifted_args)
     flat_variable = add_call_function(
         tx,
         torch._higher_order_ops.invoke_subgraph,

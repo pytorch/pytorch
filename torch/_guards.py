@@ -4,6 +4,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import itertools
 import logging
 import re
 import sys
@@ -27,6 +28,13 @@ from torch.utils.weak import WeakTensorKeyDictionary
 
 
 log = logging.getLogger(__name__)
+
+
+_invoke_subgraph_reuse_entry_counter = itertools.count()
+
+
+def _next_invoke_subgraph_reuse_entry_id() -> int:
+    return next(_invoke_subgraph_reuse_entry_counter)
 
 
 if TYPE_CHECKING:
@@ -813,6 +821,15 @@ class InvokeSubgraphReuseEntry:
     # The graph may have additional outputs from side-effect intermediates;
     # stamp_out_subgraph uses this to return only the user-visible slice.
     num_user_outputs: int = 0
+    # Stable identity for per-trace remapping of a persistent cache entry.
+    # Avoids using id(entry), whose value can be reused after object deletion.
+    reuse_id: int = dataclasses.field(
+        default_factory=_next_invoke_subgraph_reuse_entry_id
+    )
+    # GraphModules carrying unbacked symbols in FX metadata are tied to the
+    # ShapeEnv that created those symbols, so they cannot be reused across
+    # tracing contexts without retracing.
+    has_free_unbacked_symbols: bool = False
 
 
 @dataclass
@@ -836,6 +853,11 @@ class InvokeSubgraphReuseCondition:
     # On cache hit, we verify the new call has the same treespec.
     treespec: pytree.TreeSpec | None = None
 
+    # Per flattened input VT: first flattened index with the same proxy node, or
+    # None for non-proxy inputs. This preserves tensor/symnode aliasing
+    # contracts without replaying TENSOR_MATCH guards for explicit inputs.
+    input_aliases: list[int | None] | None = None
+
     # All sources accessed via VariableBuilder during the subgraph trace.
     # On cache hit, we check if any modified VT's source is a base of one
     # of these to detect mutations on captured variables.
@@ -843,7 +865,32 @@ class InvokeSubgraphReuseCondition:
 
 
 class InvokeSubgraphCache(HopSubgraphCache):
+    # Runtime types:
+    # ExactWeakKeyDictionary[
+    #     CodeType,
+    #     list[tuple[InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry]],
+    # ]
+    # ExactWeakKeyDictionary[
+    #     CodeType, dict[int, InvokeSubgraphReuseEntry]
+    # ]
+    _persistent_subgraph_reuse_cache: Any = None
+    _persistent_subgraph_reuse_key_cache: Any = None
+
+    @staticmethod
+    def _new_code_cache() -> Any:
+        from torch._dynamo.utils import ExactWeakKeyDictionary
+
+        return ExactWeakKeyDictionary()
+
+    @classmethod
+    def _ensure_reuse_caches(cls) -> None:
+        if cls._persistent_subgraph_reuse_cache is None:
+            cls._persistent_subgraph_reuse_cache = cls._new_code_cache()
+        if cls._persistent_subgraph_reuse_key_cache is None:
+            cls._persistent_subgraph_reuse_key_cache = cls._new_code_cache()
+
     def __init__(self) -> None:
+        self._ensure_reuse_caches()
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
         self.functionalize_schema_cache: dict[object, torch._C.FunctionSchema] = {}
@@ -854,17 +901,30 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self.effects_cache: dict[
             str, set
         ] = {}  # Maps identifier -> set of effect types
-        # fn.__code__ → list of (condition, cache_entry) pairs. Walked linearly
-        # on lookup; first matching condition wins.
-        self.subgraph_reuse_cache: dict[
+        # ShapeEnv-scoped entries, such as graphs with unbacked symbols, stay
+        # local to the tracing context. Process-persistent entries live below.
+        self.local_subgraph_reuse_cache: dict[
             CodeType,
             list[tuple[InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry]],
         ] = defaultdict(list)
-        # fn_code → {hash_key → cache_entry}. Used by user-provided
-        # reuse_hash_fn for O(1) subgraph reuse lookup.
-        self.subgraph_reuse_key_cache: dict[
+        self.local_subgraph_reuse_key_cache: dict[
             CodeType, dict[int, InvokeSubgraphReuseEntry]
         ] = defaultdict(dict)
+        # Process-persistent fn.__code__ → list of (condition, cache_entry)
+        # pairs. Walked linearly on lookup; first matching condition wins.
+        self.subgraph_reuse_cache = self._persistent_subgraph_reuse_cache
+        # Process-persistent fn_code → {hash_key → cache_entry}. Used by
+        # user-provided reuse_hash_fn for O(1) subgraph reuse lookup.
+        self.subgraph_reuse_key_cache = self._persistent_subgraph_reuse_key_cache
+        # Per tracing context remap from persistent cache entries to the subgraph
+        # name installed in the current OutputGraph.
+        self.installed_reuse_subgraphs: dict[int, str] = {}
+
+    @classmethod
+    def reset_reuse_cache(cls) -> None:
+        cls._ensure_reuse_caches()
+        cls._persistent_subgraph_reuse_cache.clear()
+        cls._persistent_subgraph_reuse_key_cache.clear()
 
     def add_dynamo_installed_submodule(
         self, fn_code: CodeType, identifier: str
@@ -938,7 +998,15 @@ class InvokeSubgraphCache(HopSubgraphCache):
         entry: InvokeSubgraphReuseEntry,
         max_reuse_entries: int = 8,
     ) -> None:
-        entries = self.subgraph_reuse_cache[fn_code]
+        cache = (
+            self.local_subgraph_reuse_cache
+            if entry.has_free_unbacked_symbols
+            else self.subgraph_reuse_cache
+        )
+        entries = cache.get(fn_code)
+        if entries is None:
+            entries = []
+            cache[fn_code] = entries
         if len(entries) >= max_reuse_entries:
             raise RuntimeError(
                 f"invoke_subgraph: exceeded maximum reuse entries "
@@ -959,18 +1027,22 @@ class InvokeSubgraphCache(HopSubgraphCache):
             [InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry], bool
         ],
     ) -> InvokeSubgraphReuseEntry | None:
-        entries = self.subgraph_reuse_cache.get(fn_code, [])
-        for i, (condition, entry) in enumerate(entries):
-            if evaluator(condition, entry):
-                # MRU: move the hit entry to the front for faster future lookups
-                if i > 0:
-                    entries.insert(0, entries.pop(i))
-                return entry
+        for cache in (self.local_subgraph_reuse_cache, self.subgraph_reuse_cache):
+            entries = cache.get(fn_code, [])
+            for i, (condition, entry) in enumerate(entries):
+                if evaluator(condition, entry):
+                    # MRU: move the hit entry to the front for faster future lookups
+                    if i > 0:
+                        entries.insert(0, entries.pop(i))
+                    return entry
         return None
 
     def find_reuse_entry_by_key(
         self, fn_code: CodeType, hash_key: int
     ) -> InvokeSubgraphReuseEntry | None:
+        local_entry = self.local_subgraph_reuse_key_cache.get(fn_code, {}).get(hash_key)
+        if local_entry is not None:
+            return local_entry
         return self.subgraph_reuse_key_cache.get(fn_code, {}).get(hash_key)
 
     def add_reuse_entry_by_key(
@@ -980,7 +1052,15 @@ class InvokeSubgraphCache(HopSubgraphCache):
         entry: InvokeSubgraphReuseEntry,
         max_reuse_entries: int = 8,
     ) -> None:
-        key_cache = self.subgraph_reuse_key_cache[fn_code]
+        cache = (
+            self.local_subgraph_reuse_key_cache
+            if entry.has_free_unbacked_symbols
+            else self.subgraph_reuse_key_cache
+        )
+        key_cache = cache.get(fn_code)
+        if key_cache is None:
+            key_cache = {}
+            cache[fn_code] = key_cache
         if len(key_cache) >= max_reuse_entries and hash_key not in key_cache:
             raise RuntimeError(
                 f"invoke_subgraph: exceeded maximum reuse entries "
@@ -989,6 +1069,16 @@ class InvokeSubgraphCache(HopSubgraphCache):
                 f"nested_compile_region()."
             )
         key_cache[hash_key] = entry
+
+    def has_reuse_entries(self, fn_code: CodeType) -> bool:
+        return bool(
+            self.local_subgraph_reuse_cache.get(fn_code)
+            or self.subgraph_reuse_cache.get(fn_code)
+        )
+
+
+def reset_invoke_subgraph_reuse_cache() -> None:
+    InvokeSubgraphCache.reset_reuse_cache()
 
 
 class HopDispatchSetCache:

@@ -205,6 +205,9 @@ def reset_code_caches() -> None:
             if code:
                 reset_code(code)
         code_context.clear()
+        from torch._guards import reset_invoke_subgraph_reuse_cache
+
+        reset_invoke_subgraph_reuse_cache()
 
 
 def get_recursion_limit() -> int:

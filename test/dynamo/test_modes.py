@@ -1032,6 +1032,51 @@ class outer_fn(torch.nn.Module):
 """,
         )
 
+    def test_nested_compile_region_cache_persists_across_traces(self):
+        from torch._dynamo.testing import CompileCounter
+        from torch._dynamo.variables.invoke_subgraph import (
+            InvokeSubgraphHigherOrderVariable,
+        )
+
+        @torch.compiler.nested_compile_region
+        def helper(x):
+            return x.sin() * 2
+
+        def outer1(x, y):
+            return helper(x) + helper(y)
+
+        def outer2(x, y):
+            return helper(x) + helper(y)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+        cnt = CompileCounter()
+        trace_count = 0
+        original = InvokeSubgraphHigherOrderVariable.create_wrapped_node
+
+        def counted_create_wrapped_node(self, *args, **kwargs):
+            nonlocal trace_count
+            trace_count += 1
+            return original(self, *args, **kwargs)
+
+        with patch.object(
+            InvokeSubgraphHigherOrderVariable,
+            "create_wrapped_node",
+            counted_create_wrapped_node,
+        ):
+            actual1 = torch.compile(outer1, backend=cnt, fullgraph=True)(x, y)
+            self.assertEqual(trace_count, 1)
+            actual2 = torch.compile(outer2, backend=cnt, fullgraph=True)(x, y)
+            self.assertEqual(trace_count, 1)
+            torch._dynamo.reset()
+            actual3 = torch.compile(outer2, backend=cnt, fullgraph=True)(x, y)
+
+        expected = x.sin() * 2 + y.sin() * 2
+        self.assertEqual(actual1, expected)
+        self.assertEqual(actual2, expected)
+        self.assertEqual(actual3, expected)
+        self.assertEqual(trace_count, 2)
+
     @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
     def test_invoke_subgraph_seq_nr(self):
