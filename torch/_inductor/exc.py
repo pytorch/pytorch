@@ -75,7 +75,7 @@ class LoweringException(OperatorIssue):
         root_cause = textwrap.indent(
             textwrap.fill(f"{type(exc).__name__}: {exc}", width=100), "  "
         )
-        msg += f"\n\nWhile lowering, an exception was raised:\n{root_cause}"
+        msg += f"\nWhile lowering, an exception was raised:\n{root_cause}"
         super().__init__(msg)
 
 
