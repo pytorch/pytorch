@@ -745,7 +745,10 @@ Constant constantToValue(
     case torch::_export::Argument::Tag::AS_STRING_TO_ARGUMENT:
       return None();
     default:
-      TORCH_CHECK(false, "Got unknown json argument");
+      TORCH_CHECK(
+          false,
+          "Got unknown json argument with tag ",
+          static_cast<int>(jsonArg.tag()));
   }
 }
 
