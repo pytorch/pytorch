@@ -7,6 +7,10 @@ from typing import Any
 import sympy
 
 import torch
+from torch._inductor._flex_attention_config import (
+    flex_kernel_options_example,
+    flex_kernel_tuning_options,
+)
 from torch._inductor.virtualized import V
 from torch.utils._sympy.functions import FloorDiv, Mod
 
@@ -21,8 +25,6 @@ from ...select_algorithm import (
 )
 from ...utils import can_use_tma
 from .common import (
-    _flex_kernel_options_example,
-    _flex_kernel_tuning_options,
     create_indices_fake,
     create_num_blocks_fake_generator,
     freeze_irnodes,
@@ -54,8 +56,8 @@ def raise_flex_decoding_kernel_options_error(
         f"SPARSE_KV_BLOCK_SIZE={sparse_kv_block_size}, and "
         f"{formated_kernel_options}. "
         "Pass compatible values with kernel_options. Available decode tuning "
-        f"options are {_flex_kernel_tuning_options('decode')}. For example: "
-        f"{_flex_kernel_options_example('decode')}. If you did not pin "
+        f"options are {flex_kernel_tuning_options('decode')}. For example: "
+        f"{flex_kernel_options_example('decode')}. If you did not pin "
         "these options, compiling with mode='max-autotune-no-cudagraphs' "
         "can also fix this by trying more FlexAttention configs."
     )
@@ -208,6 +210,14 @@ def create_flex_decoding_kernel(*args, **kwargs):
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
+    # Decode uses forward-prefixed options, so normalize before deriving buffer
+    # sizes or safety flags from options such as BLOCK_M and SPLIT_KV.
+    for k in list(kernel_options.keys()):
+        if k.startswith("fwd_"):
+            v = kernel_options.pop(k)
+            kernel_options[k[4:]] = v
+        elif k.startswith("bwd_"):
+            kernel_options.pop(k)
 
     seq_q_divisible = V.graph.sizevars.statically_known_true(
         sympy.Eq(Mod(seq_len_q, 128), 0)
@@ -350,13 +360,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     for conf in configs:
         cur_kernel_options = original_kernel_options.copy()
-        # Remove prefix for forward kernels options and delete backward kernel options.
-        for k in list(cur_kernel_options.keys()):
-            if k.startswith("fwd_"):
-                v = cur_kernel_options.pop(k)
-                cur_kernel_options[k[4:]] = v
-            if k.startswith("bwd_"):
-                cur_kernel_options.pop(k)
         # Performance tuning
         cur_kernel_options.setdefault(
             "BLOCK_N", min(conf.block_n, SPARSE_KV_BLOCK_SIZE)

@@ -12,6 +12,10 @@ from typing import Any, cast, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._inductor._flex_attention_config import (
+    flex_kernel_options_example,
+    flex_kernel_tuning_options,
+)
 from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv, Mod
@@ -25,8 +29,6 @@ from ...select_algorithm import (
 )
 from ...utils import can_use_tma
 from .common import (
-    _flex_kernel_options_example,
-    _flex_kernel_tuning_options,
     build_subgraph_buffer,
     create_indices_fake,
     create_num_blocks_fake_generator,
@@ -88,8 +90,8 @@ def raise_flex_kernel_options_error(
         f"SPARSE_Q_BLOCK_SIZE={sparse_q_block_size}, "
         f"SPARSE_KV_BLOCK_SIZE={sparse_kv_block_size}, and {option_values}. "
         f"Pass compatible values with kernel_options. Available {kernel_name} "
-        f"tuning options are {_flex_kernel_tuning_options(kernel_name)}. For example: "
-        f"{_flex_kernel_options_example(kernel_name)}. If you did not pin "
+        f"tuning options are {flex_kernel_tuning_options(kernel_name)}. For example: "
+        f"{flex_kernel_options_example(kernel_name)}. If you did not pin "
         f"these options, and the default choice errors, compiling with "
         f"mode='max-autotune-no-cudagraphs' can also fix this by trying more "
         f"FlexAttention configs."
