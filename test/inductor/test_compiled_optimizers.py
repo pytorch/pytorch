@@ -1016,6 +1016,42 @@ class CompiledOptimizerBitwiseTests(TestCase):
     to the eager optimizer step.
     """
 
+    @config.patch(
+        {
+            "score_fusion_memory_threshold": 1,
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.use_pytorch_libdevice": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_foreach_lerp_scalar_high_weight_bitwise(self):
+        cases = [
+            (0.9, (torch.float32, torch.float32)),
+            (0.1, (torch.float32, torch.float32)),
+            (0.9, (torch.float32, torch.float64)),
+            (0.49999999, (torch.float32, torch.float64)),
+            (0.9, (torch.float16, torch.float16)),
+        ]
+
+        for weight, dtypes in cases:
+            with self.subTest(weight=weight, dtypes=dtypes):
+
+                def fn(start, end):
+                    return torch._foreach_lerp(start, end, weight)
+
+                torch.manual_seed(42)
+                start = [
+                    torch.randn(32, device=GPU_TYPE, dtype=dtypes[0]),
+                    torch.randn(16, device=GPU_TYPE, dtype=dtypes[1]),
+                ]
+                end = [
+                    torch.randn(32, device=GPU_TYPE, dtype=dtypes[0]),
+                    torch.randn(16, device=GPU_TYPE, dtype=dtypes[1]),
+                ]
+                expected = fn(start, end)
+                actual = torch.compile(fn)(start, end)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+
     @staticmethod
     def _test_optimizer_bitwise(
         test_case,
