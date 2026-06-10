@@ -4,6 +4,7 @@ import contextlib
 import copy
 import dataclasses
 import functools
+import json
 import multiprocessing
 import operator
 import os
@@ -3383,6 +3384,78 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 4)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @functorch_config.patch({"enable_autograd_cache": True, "autograd_cache_guards_debug_info": True})
+    def test_guards_expr_debug_info_on_save(self):
+        """
+        Verify that saving a compiled graph with dynamic shapes emits
+        fx_graph_cache_guards_expr via trace_structured with symint provenance.
+        """
+        import torch._logging
+
+        def fn(x, y):
+            return x + y
+
+        a = torch.rand(5, 6)
+        b = torch.rand(5, 6)
+
+        with patch.object(torch._logging, "trace_structured") as mock_trace:
+            compiled_fn = torch.compile(fn, dynamic=True)
+            compiled_fn(a, b)
+
+        # Find the call with fx_graph_cache_guards_expr
+        guards_expr_calls = [
+            call
+            for call in mock_trace.call_args_list
+            if call[0][0] == "artifact"
+            and call[1].get("metadata_fn", dict)().get("name")
+            == "fx_graph_cache_guards_expr"
+        ]
+        self.assertGreater(len(guards_expr_calls), 0)
+        payload = json.loads(guards_expr_calls[0][1]["payload_fn"]())
+        self.assertIn("key", payload)
+        self.assertIn("guards_expr", payload)
+        self.assertIn("symint_provenance", payload)
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @functorch_config.patch({"autograd_cache_guards_debug_info": True})
+    def test_guards_expr_debug_info_on_guard_miss(self):
+        """
+        Verify that on guard_miss, find_guarded_entry returns the persisted
+        guards_expr_debug_info so it can flow to trace_structured logging.
+        """
+        from types import SimpleNamespace
+
+        from torch._inductor.codecache import FxGraphCache
+
+        mock_debug_info = {"t0": {"symbol": "s0", "sources": ["L['x'].size()[0]"]}}
+        candidate = SimpleNamespace(
+            guards_expr="L['t0'] > 100",
+            guards_expr_debug_info=mock_debug_info,
+        )
+
+        def mock_iterate(*args, **kwargs):
+            yield candidate, b"content", True
+
+        with patch.object(
+            FxGraphCache, "iterate_over_candidates", side_effect=mock_iterate
+        ):
+            graph, content, info = FxGraphCache.find_guarded_entry(
+                key="test_key",
+                local=True,
+                remote_cache=None,
+                evaluate_guards=lambda expr, hints: False,
+                hints=[5],
+            )
+
+        self.assertIsNone(graph)
+        self.assertEqual(info["cache_status_detailed"], "guard_miss")
+        self.assertEqual(info["cache_status_guard_expr"], "L['t0'] > 100")
+        self.assertEqual(info["cache_status_guard_expr_debug_info"], mock_debug_info)
 
 
 @functorch_config.patch({"bundled_autograd_cache": True})

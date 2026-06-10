@@ -500,6 +500,7 @@ class CompiledFxGraph(OutputCode):
     guards_expr_with_source: list[_ShapeGuardExpression] | None
     guards_expr_with_source_arg_count: int | None
     extern_libs_key: str | None
+    guards_expr_debug_info: Optional[dict[str, Any]]
     inductor_provenance_mapping_str: str | None
     inductor_provenance_stack_traces_str: str | None
 
@@ -594,6 +595,7 @@ class CompiledFxGraph(OutputCode):
         self.guards_expr_with_source = None
         self.guards_expr_with_source_arg_count = None
         self.extern_libs_key = None
+        self.guards_expr_debug_info = None
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
         self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)

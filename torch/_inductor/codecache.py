@@ -1754,6 +1754,7 @@ class GuardedCache(Generic[T]):
         Returns:
             A tuple of (graph, pickled_content) if found, or (None, None) if not found
         """
+        import torch._functorch.config as functorch_config
         graph = None
         pickled_content = None
         result_status = "full_miss"
@@ -1793,6 +1794,10 @@ class GuardedCache(Generic[T]):
         info: CacheInfo = {"cache_status_detailed": result_status}
         if sample_guards_expr is not None:
             info["cache_status_guard_expr"] = sample_guards_expr
+            if functorch_config.autograd_cache_guards_debug_info:
+                debug_info = getattr(candidate, "guards_expr_debug_info", None)
+                if debug_info is not None:
+                    info["cache_status_guard_expr_debug_info"] = debug_info
 
         # Record hits/misses for compilation event logging. The tricky part is that a
         # remote hit would imply a local miss (if local caching is enabled).
@@ -2190,6 +2195,38 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             )
         except Exception:
             pass
+
+        import sympy
+
+        import torch._functorch.config as functorch_config
+
+        if functorch_config.autograd_cache_guards_debug_info:
+            guards_expr_debug_info = {
+                f"t{i}": {
+                    "symbol": str(s.node.expr),
+                    "sources": [
+                        src.name
+                        for src in shape_env.var_to_sources.get(s.node.expr, [])
+                    ],
+                }
+                for i, s in enumerate(symints)
+                if isinstance(s.node.expr, sympy.Symbol)
+            }
+            compiled_graph.guards_expr_debug_info = guards_expr_debug_info
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "fx_graph_cache_guards_expr",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(
+                    {
+                        "key": key,
+                        "guards_expr": compiled_graph.guards_expr,
+                        "symint_provenance": guards_expr_debug_info,
+                    }
+                ),
+            )
         disk_compiled_graph = copy(compiled_graph)
         disk_compiled_graph.prepare_for_serialization()
 

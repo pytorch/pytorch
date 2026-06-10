@@ -527,7 +527,9 @@ def _cache_inference_info(
     entry: GenericAOTAutogradResult[Any, Any] | None = None
     if cache_info is not None and _should_save_cache(compiled_fw):
         time_taken_ns = time.time_ns() - cache_info.start_time_ns
-        guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
+        guards_expr, guards_expr_debug_info = (
+            AOTAutogradCache.generate_guards_expression(cache_info)
+        )
         entry = AOTAutogradCache.make_entry(
             compiled_fw_func=compiled_fw,  # type: ignore[arg-type]
             compiled_bw_func=None,
@@ -543,6 +545,7 @@ def _cache_inference_info(
             backward_time_taken_ns=0,
             sanitized_aot_config=aot_config.to_cacheable(),
             guards_expr=guards_expr,
+            guards_expr_debug_info=guards_expr_debug_info,
             backward_state_indices=None,
             num_symints_saved_for_bw=None,
             serialized_bw_module=None,
@@ -2644,7 +2647,9 @@ def _cache_autograd_info(
                 aot_forward_graph_str: str | None = fw_module_str
                 aot_backward_graph_str: str | None = bw_module_str
                 aot_joint_graph_str: str | None = joint_graph_str
-                guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
+                guards_expr, guards_expr_debug_info = (
+                    AOTAutogradCache.generate_guards_expression(cache_info)
+                )
 
                 entry = AOTAutogradCache.make_entry(
                     compiled_fw_func,  # type: ignore[arg-type]
@@ -2661,6 +2666,7 @@ def _cache_autograd_info(
                     backward_time_taken_ns,
                     sanitized_aot_config=aot_config.to_cacheable(),
                     guards_expr=guards_expr,
+                    guards_expr_debug_info=guards_expr_debug_info,
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
                     serialized_bw_module=serialize_graph_module(bw_module),

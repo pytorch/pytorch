@@ -442,6 +442,12 @@ joint_custom_pass: Callable = None  # type: ignore[assignment]
 
 force_autograd_cache = False
 
+# When enabled, generate and persist debug info (symint provenance) alongside
+# guards expressions in the autograd / FX graph caches.  This adds a small
+# amount of overhead to cache save paths but makes guard-miss diagnostics
+# available via trace_structured logging and tlparse.
+autograd_cache_guards_debug_info: bool = False
+
 # Note [Selective Decomposition]
 # This config allows selective decomposition of certain operators in the graph.
 # When True, it does NOT decompose any nodes, except those nodes that users explicitly

@@ -1141,15 +1141,62 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @classmethod
     def generate_guards_expression(
         cls: type[AOTAutogradCache], cache_info: AOTAutogradCacheInfo
-    ) -> str | None:
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        """
+        Generate guards expression and debug info for cache validation.
+
+        Returns:
+            A tuple of (guards_expr, guards_expr_debug_info).
+            guards_expr: String representation of guard expression for validation.
+            guards_expr_debug_info: Dict mapping symint placeholders to their symbols and sources.
+        """
+        import torch._functorch.config as functorch_config
+
         shape_env = cls._get_shape_env()
 
         if shape_env is None:
-            return None
+            return None, None
 
         symints = cache_info.forward_symints
         guards = shape_env.get_pruned_guards(symints)
-        return shape_env.produce_guards_expression(placeholders=symints, guards=guards)
+        guards_expr = shape_env.produce_guards_expression(
+            placeholders=symints, guards=guards
+        )
+
+        guards_expr_debug_info = None
+        if functorch_config.autograd_cache_guards_debug_info:
+            import sympy
+
+            from torch._logging import trace_structured
+
+            guards_expr_debug_info = {
+                f"t{i}": {
+                    "symbol": str(s.node.expr),
+                    "sources": [
+                        src.name
+                        for src in shape_env.var_to_sources.get(s.node.expr, [])
+                    ],
+                }
+                for i, s in enumerate(symints)
+                if isinstance(s.node.expr, sympy.Symbol)
+            }
+
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "fx_graph_cache_guards_expr",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(
+                    {
+                        "key": cache_info.cache_key,
+                        "guards_expr": guards_expr,
+                        "symint_provenance": guards_expr_debug_info,
+                    }
+                ),
+            )
+
+        return guards_expr, guards_expr_debug_info
 
     @classmethod
     def _get_tmp_dir(cls: type[AOTAutogradCache]) -> str:
@@ -1416,6 +1463,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         backward_time_taken_ns: int,
         sanitized_aot_config: CacheableAOTConfig,
         guards_expr: str | None,
+        guards_expr_debug_info: dict[str, Any] | None,
         backward_state_indices: list[int] | None,
         num_symints_saved_for_bw: int | None,
         serialized_bw_module: SerializedGraphModule | None,
@@ -1460,6 +1508,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 backward_time_taken_ns=backward_time_taken_ns,
                 sanitized_aot_config=sanitized_aot_config,
                 guards_expr=guards_expr,
+                guards_expr_debug_info=guards_expr_debug_info,
                 serialized_bw_module=serialized_bw_module,
             )
 
@@ -1510,5 +1559,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 backward_time_taken_ns=backward_time_taken_ns,
                 sanitized_aot_config=sanitized_aot_config,
                 guards_expr=guards_expr,
+                guards_expr_debug_info=guards_expr_debug_info,
                 serialized_bw_module=serialized_bw_module,
             )
