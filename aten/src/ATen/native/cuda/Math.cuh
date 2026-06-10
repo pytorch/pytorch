@@ -361,10 +361,10 @@ const auto zeta_string = jiterator_stringify(
     s -= half * b;
     a = one;
     k = zero;
-    for (int i = 0; i < 12; i++) {
+    for (int j = 0; j < 12; j++) {
       a *= x + k;
       b /= w;
-      t = a * b / A[i];
+      t = a * b / A[j];
       s = s + t;
       t = fabs(t / s);
 
