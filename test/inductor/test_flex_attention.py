@@ -4443,6 +4443,174 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     @skip_on_mps
+    @skip_on_xpu
+    def test_backward_kernel_options_filtering(self, device):
+        if not PLATFORM_SUPPORTS_BF16:
+            self.skipTest("bf16 is required for this regression test")
+
+        b, h, n, c = 1, 8, 234, 16
+        block_size = 32
+
+        def mask_mod(b, h, q, kv):
+            return q > kv
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=n,
+            KV_LEN=n,
+            device=device,
+            BLOCK_SIZE=block_size,
+        )
+        kernel_options = {
+            "BLOCK_M": block_size,
+            "BLOCK_M1": block_size,
+            "BLOCK_M2": block_size,
+            "BLOCK_N": block_size,
+            "BLOCK_N1": block_size,
+            "BLOCK_N2": block_size,
+        }
+        make_tensor = functools.partial(
+            torch.randn,
+            (b, h, n, c),
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        out = torch.compile(flex_attention)(
+            query, key, value, block_mask=block_mask, kernel_options=kernel_options
+        )
+        out.mean().backward()
+
+        self.assertEqual(query.grad.shape, query.shape)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    def test_invalid_forward_kernel_options_error(self, device):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=64,
+            KV_LEN=64,
+            device=device,
+            BLOCK_SIZE=32,
+        )
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 1, 64, 16),
+            device=device,
+            dtype=torch.float16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        with self.assertRaisesRegex(
+            (InductorError, ValueError),
+            "Invalid FlexAttention forward kernel options.*fwd_BLOCK_M.*fwd_num_stages",
+        ):
+            torch.compile(flex_attention)(
+                query,
+                key,
+                value,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "TRITON", "BLOCK_M": 64, "BLOCK_N": 32},
+            )
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    def test_invalid_backward_kernel_options_error(self, device):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=64,
+            KV_LEN=64,
+            device=device,
+            BLOCK_SIZE=32,
+        )
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 1, 64, 16),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        out = torch.compile(flex_attention)(
+            query,
+            key,
+            value,
+            block_mask=block_mask,
+            kernel_options={
+                "BLOCK_M": 32,
+                "BLOCK_N": 32,
+                "bwd_BLOCK_M1": 64,
+                "bwd_BLOCK_N1": 64,
+                "bwd_BLOCK_M2": 64,
+                "bwd_BLOCK_N2": 64,
+            },
+        )
+        with self.assertRaisesRegex(
+            (InductorError, ValueError),
+            "Invalid FlexAttention backward kernel options.*"
+            "bwd_BLOCK_M1.*bwd_num_stages",
+        ):
+            out.mean().backward()
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    def test_invalid_decode_kernel_options_error(self, device):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=1,
+            KV_LEN=256,
+            device=device,
+            BLOCK_SIZE=128,
+        )
+        query = torch.randn(1, 2, 1, 64, device=device, dtype=torch.float16)
+        key = torch.randn(1, 2, 256, 64, device=device, dtype=torch.float16)
+        value = torch.randn(1, 2, 256, 64, device=device, dtype=torch.float16)
+
+        with self.assertRaisesRegex(
+            (InductorError, ValueError),
+            "Invalid FlexAttention decode kernel options.*fwd_BLOCK_M.*fwd_num_stages",
+        ):
+            torch.compile(flex_attention)(
+                query,
+                key,
+                value,
+                block_mask=block_mask,
+                kernel_options={
+                    "BACKEND": "TRITON_DECODE",
+                    "fwd_BLOCK_M": 96,
+                    "fwd_BLOCK_N": 64,
+                },
+            )
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
     def test_backend_auto_matches_triton_large(self, device):
         """BACKEND='AUTO' should follow Triton heuristics on large shapes."""
         make_tensor = functools.partial(
