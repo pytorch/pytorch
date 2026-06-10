@@ -5312,6 +5312,8 @@ class Scheduler:
 
         from triton.compiler.errors import CompilationError
 
+        from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
+
         why = WhyNoFuse(node1, node2)
 
         device = node_list_fused[0].get_device()
@@ -5539,7 +5541,18 @@ class Scheduler:
                         continue
 
             if len(future_choices) == 0:
-                return FusionResult.fuse(False)
+                # If bench_epilogue is enabled and there are CUTLASS choices
+                # that support epilogue fusion, don't bail out early.
+                if bench_epilogue and epilogue_fusion:
+                    has_cutlass_epilogue_choices = any(
+                        isinstance(c, CUTLASSTemplateCaller)
+                        and c.supports_epilogue_fusion
+                        for c in multi_node.choices
+                    )
+                    if not has_cutlass_epilogue_choices:
+                        return FusionResult.fuse(False)
+                else:
+                    return FusionResult.fuse(False)
 
             def benchmark_when_ready() -> bool:
                 nonlocal choice_timings, future_choices, ms1, min_choice, multi_node
@@ -5626,13 +5639,65 @@ class Scheduler:
                                 ms_fused_choice = choice
                                 break
 
+                # Benchmark CUTLASS choices with fused epilogue
+                if bench_epilogue and epilogue_fusion:
+                    epilogue_scheduler_nodes = list(node_list_2)
+                    cutlass_choices_attempted = 0
+                    for (
+                        choice
+                    ) in multi_node.choices:  # pyrefly: ignore[missing-attribute]
+                        if not isinstance(choice, CUTLASSTemplateCaller):
+                            continue
+                        if not choice.supports_epilogue_fusion:
+                            continue
+                        if (
+                            cutlass_choices_attempted
+                            >= config.max_epilogue_benchmarked_choices
+                        ):
+                            break
+                        cutlass_choices_attempted += 1
+
+                        # Use multi_node directly as template_buffer so its name
+                        # matches what the epilogue nodes reference (required for
+                        # EVT to identify the accumulator correctly).
+                        try:
+                            ms_cutlass = choice.benchmark_fused(
+                                multi_node,  # pyrefly: ignore[bad-argument-type]
+                                epilogue_scheduler_nodes,
+                            )
+                        except Exception as e:
+                            if fusion_log.isEnabledFor(logging.DEBUG):
+                                fusion_log.debug(
+                                    "Exception benchmarking CUTLASS fused: %s", e
+                                )
+                            continue
+
+                        new_timings[choice] = ms_cutlass
+                        if ms_cutlass < min_ms_fused:
+                            min_ms_fused = ms_cutlass
+                            ms_fused_choice = choice
+
                 if bench_epilogue:
                     log_fusion(min_ms_fused, ms1, ms2)
 
                 if (
                     not bench_epilogue or min_ms_fused < (ms1 + ms2)
                 ) and ms_fused_choice is not None:
-                    if config.multi_kernel_hints:
+                    if isinstance(ms_fused_choice, CUTLASSTemplateCaller):
+                        # CUTLASS choice won: replace MTB with CUTLASSTemplateBuffer
+                        # pyrefly: ignore[missing-attribute]
+                        with ir.IRNode.current_origins(multi_node.origins):
+                            out_tensorbox = ms_fused_choice.output_node()
+                        out_storage = out_tensorbox.data
+                        assert isinstance(out_storage, ir.StorageBox)
+                        cutlass_buffer = out_storage.data
+                        assert isinstance(cutlass_buffer, ir.CUTLASSTemplateBuffer)
+                        # pyrefly: ignore[missing-attribute]
+                        cutlass_buffer.layout = multi_node.layout
+                        # pyrefly: ignore[bad-argument-type]
+                        _replace_operation_buffer(multi_node, cutlass_buffer)
+                        node1.node = cutlass_buffer
+                    elif config.multi_kernel_hints:
                         hint_override_best_fusion_choice[None] = ms_fused_choice
                         # pyrefly: ignore [missing-attribute]
                         multi_node.finalize_as_triton_callers(
@@ -5642,7 +5707,9 @@ class Scheduler:
                         # pyrefly: ignore [missing-attribute]
                         multi_node.finalize_as_triton_caller(ms_fused_choice)
 
-                    if bench_epilogue:
+                    if bench_epilogue and not isinstance(
+                        ms_fused_choice, CUTLASSTemplateCaller
+                    ):
                         # pyrefly: ignore [missing-attribute]
                         multi_node._choice_timings[None] = new_timings
                     return True
@@ -5650,7 +5717,8 @@ class Scheduler:
                     return False
 
             return FusionResult.from_callable(
-                benchmark_when_ready, future_choices[0][1]
+                benchmark_when_ready,
+                future_choices[0][1] if future_choices else None,
             )
 
         else:
