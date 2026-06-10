@@ -365,8 +365,7 @@ class FSDPParam:
           - dp_axis = MeshAxis for the flattened process group over those dims
 
         The returned names are DTensor mesh dims used for FSDP storage, while
-        dp_axis is the single spmd_types axis used for compute-time metadata on
-        the unsharded plain parameter.
+        dp_axis is the flattened PG for them.
         """
         dp_names = tuple(
             itertools.chain(dp_dim_names.shard_names, dp_dim_names.replicate_names)
