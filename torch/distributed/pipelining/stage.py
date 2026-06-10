@@ -1410,11 +1410,12 @@ class _PipelineStage(_PipelineStageBase):
             src_stage = self.get_stage_index_of_submod(arg_node.name)
 
             # Create metadata directly with correct requires_grad.
+            # Guard for non-float tensors.
             tensor_meta = _TensorMeta(
                 shape=example_value.shape,
                 stride=example_value.stride(),
                 dtype=example_value.dtype,
-                requires_grad=self.has_backward,
+                requires_grad=self.has_backward and example_value.is_floating_point(),
             )
 
             logger.debug(
@@ -1425,7 +1426,7 @@ class _PipelineStage(_PipelineStageBase):
                 tensor_meta.dtype,
             )
             buffer = _make_tensor_from_meta(tensor_meta, self.device)
-            if self.has_backward:
+            if self.has_backward and example_value.is_floating_point():
                 buffer.requires_grad_(True)
 
             return _RecvInfo(
@@ -1516,7 +1517,7 @@ class _PipelineStage(_PipelineStageBase):
                     shape=val.shape,
                     stride=val.stride(),
                     dtype=val.dtype,
-                    requires_grad=self.has_backward,
+                    requires_grad=self.has_backward and val.is_floating_point(),
                 )
             )
         self._stage_meta.outputs = tuple(output_metas)
