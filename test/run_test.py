@@ -1733,6 +1733,7 @@ def get_selected_tests(options) -> list[str]:
             "nn/test_pooling",
             "test_view_ops",
             "test_nn",
+            "distributions/test_distributions",
             "inductor/test_mps_basic",
             "inductor/test_torchinductor",
             "inductor/test_aot_inductor",
