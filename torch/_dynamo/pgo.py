@@ -48,7 +48,7 @@ from torch.utils._ordered_set import OrderedSet
 if TYPE_CHECKING:
     import types
 
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
 
 
@@ -57,6 +57,7 @@ class ReservedWorkflowIdUserError(ValueError):
 
 
 log = logging.getLogger(__name__)
+symbolic_shape_log = logging.getLogger("torch.fx.experimental.symbolic_shapes")
 
 LOCK_TIMEOUT = 10
 
@@ -423,7 +424,7 @@ class FrameStateSizeEntry:
 
 
 def update_automatic_dynamic(
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     name: str,
     entry: FrameStateSizeEntry,
     *,
@@ -440,6 +441,10 @@ def update_automatic_dynamic(
         # Do some logs (damn, I spend more code logging than I do actually doing
         # the updates lol)
         if is_update and old_entry.scalar != mut_entry.scalar:
+            symbolic_shape_log.info(
+                "marking %s as dynamic (from automatic dynamic/PGO)",
+                name,
+            )
             log.debug(
                 "automatic dynamic int %s val %s != %s",
                 name,
@@ -474,6 +479,10 @@ def update_automatic_dynamic(
                 getattr(old_entry, tup_name)
                 if i is None
                 else getattr(old_entry, tup_name)[i]
+            )
+            symbolic_shape_log.info(
+                "marking %s as dynamic (from automatic dynamic/PGO)",
+                name,
             )
             log.debug(
                 "automatic dynamic %s %s %s %s != %s",
@@ -531,7 +540,7 @@ def update_automatic_dynamic(
 
 
 def process_automatic_dynamic(
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     name: str,
     entry: FrameStateSizeEntry,
     *,
