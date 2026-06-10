@@ -834,6 +834,7 @@ class FakeTensorTest(TestCase):
         self.assertTrue(y.requires_grad)
         self.assertIsNotNone(y.grad_fn)
 
+    @skipIfTorchDynamo("dynamo-wrapped tests compile explicit FakeTensor inputs")
     def test_custom_op_backend_autograd_kernel_not_redirected_for_fake(self):
         calls = []
 
