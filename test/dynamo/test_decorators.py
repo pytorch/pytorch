@@ -1145,10 +1145,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
     def test_substitute_in_graph(self):
         counters.clear()
 
-        # NB: Choose another C function for test when we support operator.indexOf
-        #     out of the box
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = operator.indexOf
+        fn = operator.delitem
         opt_fn = torch.compile(fn, backend=cnts)
         out = fn([1, 2, 3, 4, 5], 3)
         opt_out = opt_fn([1, 2, 3, 4, 5], 3)
@@ -1161,22 +1159,16 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         with self.assertRaisesRegex(TypeError, "Signature mismatch"):
 
-            @torch._dynamo.substitute_in_graph(operator.indexOf)
+            @torch._dynamo.substitute_in_graph(operator.delitem)
             def _(sequence, x):
-                for i, item in enumerate(sequence):
-                    if item is x or item == x:
-                        return i
-                raise ValueError("sequence.index(x): x not in sequence")
+                raise NotImplementedError
 
-        @torch._dynamo.substitute_in_graph(operator.indexOf)
+        @torch._dynamo.substitute_in_graph(operator.delitem)
         def polyfill(a, b):
-            for i, item in enumerate(a):
-                if item is b or item == b:
-                    return i
-            raise ValueError("sequence.index(x): x not in sequence")
+            del a[b]
 
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = operator.indexOf
+        fn = operator.delitem
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         out = fn([1, 2, 3, 4, 5], 3)
         opt_out = opt_fn([1, 2, 3, 4, 5], 3)

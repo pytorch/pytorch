@@ -16,7 +16,15 @@ if TYPE_CHECKING:
 
 
 # Most unary and binary operators are handled by BuiltinVariable (e.g., `pos`, `add`)
-__all__ = ["attrgetter", "concat", "countOf", "iconcat", "itemgetter", "methodcaller"]
+__all__ = [
+    "attrgetter",
+    "concat",
+    "countOf",
+    "iconcat",
+    "indexOf",
+    "itemgetter",
+    "methodcaller",
+]
 
 
 _T = TypeVar("_T")
@@ -86,6 +94,15 @@ def countOf(a: Iterable[_T], b: _T, /) -> int:
 def iconcat(a: Sequence[_T], b: Sequence[_T2], /) -> Sequence[_T | _T2]:
     a += b  # type: ignore[operator]
     return a  # type: ignore[return-value]
+
+
+# Reference: https://docs.python.org/3/library/operator.html#operator.indexOf
+@substitute_in_graph(operator.indexOf, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def indexOf(a: Iterable[_T], b: _T, /) -> int:
+    for i, item in enumerate(a):
+        if item is b or item == b:
+            return i
+    raise ValueError("sequence.index(x): x not in sequence")
 
 
 @overload

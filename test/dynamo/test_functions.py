@@ -3762,6 +3762,18 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, fullgraph=True)
         self.assertEqual(opt_fn([1, 2, 3], [4, 5, 6]), [1, 2, 3, 4, 5, 6])
 
+    def test_operator_indexOf(self):
+        for seq_type in (list, tuple):
+            with self.subTest(seq_type=seq_type):
+
+                def fn(a, b):
+                    return operator.indexOf(a, b)
+
+                opt_fn = torch.compile(fn, fullgraph=True)
+                a = seq_type([4, 3, 2, 1])
+                self.assertEqual(opt_fn(a, 3), 1)
+                self.assertEqual(opt_fn(a, 4), 0)
+
     def test_attrgetter(self):
         for attrs in (
             ("shape",),
