@@ -4088,14 +4088,20 @@ class PythonWrapperCodegen(CodeGen):
 
         try:
             self.push_codegened_graph(subgraph.graph)
-            self.writeline(f"{self.comment} subgraph: {subgraph.name}")
-            _codegen_subgraph_prefix()
-            parent_graph = V.graph
-            with V.set_graph_handler(subgraph.graph):
-                subgraph.graph.codegen_subgraph(
-                    parent_graph=parent_graph,
-                )
-            _codegen_subgraph_suffix()
+            ctx = (
+                config.patch(subgraph.inductor_config_patches)
+                if subgraph.inductor_config_patches
+                else contextlib.nullcontext()
+            )
+            with ctx:
+                self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+                _codegen_subgraph_prefix()
+                parent_graph = V.graph
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.codegen_subgraph(
+                        parent_graph=parent_graph,
+                    )
+                _codegen_subgraph_suffix()
         finally:
             self.pop_codegened_graph()
 
@@ -4132,8 +4138,13 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(f"del partition{partition_id}_args")
 
+    def get_partition_name(self, partition_id: int) -> str:
+        return f"partition_{partition_id}"
+
     def set_all_partition_names(self, num_partitions: int):
-        self.all_partition_names = [f"partition_{idx}" for idx in range(num_partitions)]
+        self.all_partition_names = [
+            self.get_partition_name(idx) for idx in range(num_partitions)
+        ]
 
     def codegen_subgraph_call_with_flattened_outputs(
         self, subgraph, outer_inputs, outer_flattened_outputs
@@ -4182,11 +4193,18 @@ class PythonWrapperCodegen(CodeGen):
         if subgraph.graph.name not in self.already_codegened_subgraphs:
             # If it is already codegened, the parent wrapper already has
             # subgraph fn by name subgraph.graph.name
-            with V.set_graph_handler(subgraph.graph):
-                # do not graph partition for subgraph
-                with config.patch("graph_partition", False):
-                    # Call the codegen of subgraph recursively
-                    subgraph_code, _ = subgraph.graph.codegen()
+            ctx = (
+                config.patch(subgraph.inductor_config_patches)
+                if subgraph.inductor_config_patches
+                else contextlib.nullcontext()
+            )
+            graph_partition_ctx = (
+                contextlib.nullcontext()
+                if subgraph.inductor_config_patches
+                else config.patch("graph_partition", False)
+            )
+            with ctx, graph_partition_ctx, V.set_graph_handler(subgraph.graph):
+                subgraph_code, _ = subgraph.graph.codegen()
             subgraph_name = subgraph.graph.name
             self.already_codegened_subgraphs.add(subgraph_name)
             self.define_subgraph_launcher_fn(subgraph_name, subgraph_code)
@@ -4468,8 +4486,40 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # Ensures that subgraphs kernels do not clash with each other
         return self.parent_wrapper.next_kernel_suffix()
 
+    def get_partition_name(self, partition_id: int) -> str:
+        return f"{self.launcher_fn_name}_partition_{partition_id}"
+
     def generate_after_suffix(self, result: IndentedBuffer) -> None:
         return
+
+    def codegen_partition_call(
+        self,
+        partition_id: int,
+        partition_signatures: ir.GraphPartitionSignature,
+    ):
+        input_deallocation = partition_signatures.input_deallocation
+        output_nodes = partition_signatures.output_nodes
+
+        input_names = list(input_deallocation.keys()) + [
+            symbol_input.name for symbol_input in partition_signatures.symbol_inputs
+        ]
+
+        inputs = ", ".join(input_names) + ("," if len(input_names) == 1 else "")
+
+        output_names = [node.get_name() for node in output_nodes]
+        outputs = ", ".join(output_names) + ("," if len(output_nodes) == 1 else "")
+
+        self.writeline(f"partition{partition_id}_args = [{inputs}]")
+
+        names_to_del = [
+            name for name, deallocate in input_deallocation.items() if deallocate
+        ]
+        if names_to_del:
+            self.writeline(f"del {', '.join(names_to_del)}")
+
+        partition_name = self.get_partition_name(partition_id)
+        self.writeline(f"({outputs}) = {partition_name}(partition{partition_id}_args)")
+        self.writeline(f"del partition{partition_id}_args")
 
     def write_launcher_fn_call_get_indent(self) -> int:
         self.prefix.splice(

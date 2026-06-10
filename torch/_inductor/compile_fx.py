@@ -503,6 +503,42 @@ def _get_subgraph_names(
     yield from fx_subgraph_names
 
 
+def _get_nested_region_inductor_config_patches(
+    gm: GraphModule,
+) -> dict[str, Any] | None:
+    nested_config = getattr(gm, "meta", {}).get("nested_region_config")
+    patches = getattr(nested_config, "inductor_config_patches", None)
+    return patches or None
+
+
+def _patch_nested_region_inductor_config(
+    gm: GraphModule,
+) -> AbstractContextManager[None]:
+    patches = _get_nested_region_inductor_config_patches(gm)
+    if patches is None:
+        return contextlib.nullcontext()
+    return config.patch(patches)
+
+
+def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        nested_config = node.meta.get("custom", {}).get("nested_region_config")
+        if nested_config is None:
+            continue
+        subgraph_node = node.args[0]
+        if (
+            not isinstance(subgraph_node, torch.fx.Node)
+            or subgraph_node.op != "get_attr"
+            or not isinstance(subgraph_node.target, str)
+        ):
+            continue
+        subgraph = getattr(gm, subgraph_node.target, None)
+        if isinstance(subgraph, GraphModule):
+            subgraph.meta.setdefault("nested_region_config", nested_config)
+
+
 def _recursive_pre_grad_passes(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -512,17 +548,19 @@ def _recursive_pre_grad_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
-        if not config.use_pre_grad_passes:
-            return gm
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_pre_grad_passes:
+                return gm
 
-        add_passes = config.add_pre_grad_passes
-        remove_passes = config.remove_pre_grad_passes
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            # as we don't have recursive example inputs, passing empty set here
-            new_subgraph = _recursive_pre_grad_passes(subgraph, ())
-            setattr(gm, subgraph_name, new_subgraph)
-        return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
+            add_passes = config.add_pre_grad_passes
+            remove_passes = config.remove_pre_grad_passes
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                # as we don't have recursive example inputs, passing empty set here
+                new_subgraph = _recursive_pre_grad_passes(subgraph, ())
+                setattr(gm, subgraph_name, new_subgraph)
+            return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
 def _recursive_joint_graph_passes(
@@ -542,29 +580,35 @@ def _recursive_joint_graph_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="joint_graph_pass_time_us",
     ):
-        if not config.use_joint_graph_passes:
-            return gm
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_joint_graph_passes:
+                return gm
 
-        # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
-        # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
-        # invoke_subgraph HOP before calling the partitioner on the outer graph.
-        # AOTAutograd has access to partition_fn, which internally calls the
-        # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
-        # skip_invoke_subgraph.
-        old_subgraph_names = OrderedSet(_get_subgraph_names(gm, skip_invoke_subgraph))
-        for subgraph_name in old_subgraph_names:
-            _run_on_sub_graph_module(subgraph_name)
-
-        out_gm = joint_graph_passes(gm, input_device)
-
-        # Some joint graph passes may create new sub graph module. Run one round
-        # for the newly created graph modules.
-        # We should not skip graphs for invoke_subgraph HOPs for newly
-        # generated subgraphs.
-        for subgraph_name in _get_subgraph_names(out_gm, skip_invoke_subgraph=False):
-            if subgraph_name not in old_subgraph_names:
+            # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
+            # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
+            # invoke_subgraph HOP before calling the partitioner on the outer graph.
+            # AOTAutograd has access to partition_fn, which internally calls the
+            # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
+            # skip_invoke_subgraph.
+            old_subgraph_names = OrderedSet(
+                _get_subgraph_names(gm, skip_invoke_subgraph)
+            )
+            for subgraph_name in old_subgraph_names:
                 _run_on_sub_graph_module(subgraph_name)
-        return out_gm
+
+            out_gm = joint_graph_passes(gm, input_device)
+
+            # Some joint graph passes may create new sub graph module. Run one round
+            # for the newly created graph modules.
+            # We should not skip graphs for invoke_subgraph HOPs for newly
+            # generated subgraphs.
+            for subgraph_name in _get_subgraph_names(
+                out_gm, skip_invoke_subgraph=False
+            ):
+                if subgraph_name not in old_subgraph_names:
+                    _run_on_sub_graph_module(subgraph_name)
+            return out_gm
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
@@ -573,13 +617,15 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         log_pt2_compile_event=True,
         dynamo_compile_column_us="post_grad_pass_time_us",
     ):
-        if not config.use_post_grad_passes:
-            return
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_post_grad_passes:
+                return
 
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            _recursive_post_grad_passes(subgraph, is_inference)
-        post_grad_passes(gm, is_inference)
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                _recursive_post_grad_passes(subgraph, is_inference)
+            post_grad_passes(gm, is_inference)
 
 
 def split_const_gm(
@@ -898,6 +944,8 @@ def _compile_fx_inner(
     assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
         f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
     )
+
+    _propagate_invoke_subgraph_nested_region_config(gm)
 
     if graph_kwargs.get("cudagraphs") is None:
         graph_kwargs["cudagraphs"] = BoxedBool(config.triton.cudagraphs)
