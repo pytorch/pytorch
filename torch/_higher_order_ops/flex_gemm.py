@@ -9,10 +9,10 @@ from torch._higher_order_ops.utils import (
     _check_alias_and_mutation,
     autograd_not_implemented,
     reenter_make_fx,
+    register_fake,
     unique_graph_id,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
@@ -132,10 +132,9 @@ flex_gemm_hop.py_autograd_impl(
 )
 
 
-@flex_gemm_hop.py_impl(FakeTensorMode)
-def flex_gemm_fake_tensor_mode(mode, gemm_op, body_fn, args, kwargs, kernel_options):
-    with mode:
-        return body_fn(*args)
+@register_fake(flex_gemm_hop)
+def flex_gemm_fake_tensor_mode(gemm_op, body_fn, args, kwargs, kernel_options):
+    return body_fn(*args)
 
 
 @flex_gemm_hop.py_functionalize_impl
