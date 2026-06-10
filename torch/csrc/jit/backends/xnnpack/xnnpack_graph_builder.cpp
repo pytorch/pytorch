@@ -206,7 +206,7 @@ void XNNGraph::defineAllTensorValues() {
   uint32_t external_id =
       std::numeric_limits<decltype(XNN_INVALID_VALUE_ID)>::min();
   for (auto val : _intermediate_tensors) {
-    if (_val_to_ids.find(val) == _val_to_ids.end()) {
+    if (!_val_to_ids.contains(val)) {
       uint32_t id = XNN_INVALID_VALUE_ID;
 
       // cast value to tensortype
