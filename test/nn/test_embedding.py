@@ -1971,6 +1971,26 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         w = torch.rand(3, 4, device=device, requires_grad=per_sample_weights_use_grad)
         bag(x, per_sample_weights=F.softmax(w, dim=-1))
 
+    @onlyOn(["cuda", "xpu"])
+    @dtypes(torch.float, torch.double)
+    def test_embedding_bag_include_last_offset_device(self, device, dtype):
+        # Regression test: CUDA/XPU kernels must respect include_last_offset
+        # when offsets[-1] < len(input) (trailing indices must not leak into the last bag)
+        torch.manual_seed(0)
+        weight = torch.randn(10, 4, dtype=dtype, device=device)
+        indices = torch.tensor([0, 1, 2, 3, 4, 5], device=device, dtype=torch.long)
+        # offsets[-1]=5, len(indices)=6: index 5 must be excluded from all bags
+        offsets = torch.tensor([0, 2, 5], device=device, dtype=torch.long)
+        for mode in ("sum", "mean", "max"):
+            result = F.embedding_bag(
+                indices, weight, offsets, mode=mode, include_last_offset=True
+            )
+            expected = self._embedding_bag_reference_impl(
+                indices.cpu(), weight.cpu(), offsets.cpu(),
+                mode=mode, include_last_offset=True,
+            )
+            self.assertEqual(result.cpu(), expected)
+
 
 instantiate_device_type_tests(TestEmbeddingNNDeviceType, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestEmbeddingNN)
