@@ -184,8 +184,7 @@ class DeferredCpuTritonCallWrapper:
         # `std::call_once` keeps init thread-safe under concurrent first calls.
         kernel_member = f"kernels_.{self.kernel_name}_kernel_fn"
         launcher_member = f"kernels_.{self.kernel_name}_launcher_fn"
-        prefix.splice(
-            f"""
+        prefix.splice(f"""
             using namespace torch::aot_inductor;
             static std::once_flag {self.kernel_name}_init_flag;
             std::call_once({self.kernel_name}_init_flag, [&]() {{
@@ -194,8 +193,7 @@ class DeferredCpuTritonCallWrapper:
                 {launcher_member} = loadCpuTritonLauncher(
                     "{launcher_so}", cubin_dir_);
             }});
-            """
-        )
+            """)
 
     def _generate_launch(
         self,
@@ -226,8 +224,7 @@ class DeferredCpuTritonCallWrapper:
         grid_z = grid_arg_names[2] if len(grid_arg_names) > 2 else "1"
 
         # TODO: thread `num_cpu_threads` from inductor_meta (autotune support).
-        prefix.splice(
-            f"""
+        prefix.splice(f"""
             void* args_arr[] = {{ {args_arr_str} }};
             {launcher_member}(
                 static_cast<uint32_t>({grid_x}),
@@ -236,8 +233,7 @@ class DeferredCpuTritonCallWrapper:
                 /*num_cpu_threads=*/1,
                 args_arr,
                 {kernel_member});
-            """
-        )
+            """)
 
     def generate(self, wrapper: CppWrapperCpu) -> None:
         from torch._inductor.codecache import CpuTritonKernelCache
@@ -553,15 +549,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
 
         if not V.graph.aot_mode:
-            self.header.splice(
-                '''
+            self.header.splice('''
                 import torch
                 from torch._inductor.codecache import CppWrapperCodeCache
 
                 cpp_wrapper_src = (
                 r"""
-                '''
-            )
+                ''')
 
         for device in V.graph.device_types:
             if device != "meta":
@@ -585,13 +579,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.header.splice(
                 "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
             )
-            self.header.splice(
-                """
+            self.header.splice("""
                 namespace torch::aot_inductor {
                 thread_local KernelContext* tls_kernel_context = nullptr;
                 }
-                """
-            )
+                """)
 
     def include_extra_header(self, header: str):
         # This is needed for cpp to python dtype conversion
@@ -626,13 +618,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             declarations = "\n".join(
                 [f"extern {textwrap.dedent(shim)};" for shim in custom_c_shims]
             )
-            self.prefix.splice(
-                f"""
+            self.prefix.splice(f"""
                 extern "C" {{
                     {declarations}
                 }}
-                """
-            )
+                """)
         self.prefix.writeline_aot("namespace torch::aot_inductor {")
         if not V.graph.is_const_graph:
             self.codegen_input_size_and_nan_asserts()
@@ -763,8 +753,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             expected_dtype_name = DTYPE_TO_ATEN[tensor.dtype]
             dtype_str = str(tensor.dtype).split(".")[-1]
-            self.prefix.splice_aot(
-                f"""
+            self.prefix.splice_aot(f"""
                     int32_t {name}_expected_dtype = aoti_torch_dtype_{dtype_str}();
                     if ({name}_expected_dtype != {name}_dtype) {{
                         std::stringstream ss;
@@ -773,13 +762,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
                            << "but got: " << {name}_dtype << "\\n";
                         throw std::runtime_error(std::move(ss).str());
                     }}
-                """
-            )
+                """)
             self.prefix.writeline_aot(f"auto {name}_size = {name}.sizes();")
             for dim_idx, d in enumerate(tensor.get_size()):
                 if isinstance(d, (int, sympy.Integer)):
-                    self.prefix.splice_aot(
-                        f"""
+                    self.prefix.splice_aot(f"""
                             if ({d} != {name}_size[{dim_idx}]) {{
                                 std::stringstream ss;
                                 ss << "{handle_kind}[{idx}]: unmatched dim value at {dim_idx}, "
@@ -787,8 +774,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                    << "\\n";
                                 throw std::runtime_error(std::move(ss).str());
                             }}
-                        """
-                    )
+                        """)
                 else:
                     from torch.utils._sympy.value_ranges import bound_sympy
 
@@ -796,8 +782,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     if config.aot_inductor.check_lowerbound and not math.isinf(
                         sym_range.lower
                     ):
-                        self.prefix.splice_aot(
-                            f"""
+                        self.prefix.splice_aot(f"""
                                 if ({name}_size[{dim_idx}] < {sym_range.lower}) {{
                                     std::stringstream ss;
                                     ss << "{handle_kind}[{idx}]: dim value is too small at {dim_idx}, "
@@ -805,14 +790,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                        << {name}_size[{dim_idx}] << "\\n";
                                     throw std::runtime_error(std::move(ss).str());
                                 }}
-                            """
-                        )
+                            """)
                     if not math.isinf(sym_range.upper):
                         # Limit upper bound to max C long long value (2^63 - 1)
                         max_long_long = ctypes.c_longlong(2**63 - 1).value
                         upper_bound = min(sym_range.upper, max_long_long)
-                        self.prefix.splice_aot(
-                            f"""
+                        self.prefix.splice_aot(f"""
                                 if ({name}_size[{dim_idx}] > {upper_bound}) {{
                                     std::stringstream ss;
                                     ss << "{handle_kind}[{idx}]: dim value is too large at {dim_idx}, "
@@ -820,15 +803,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                        << {name}_size[{dim_idx}] << "\\n";
                                     throw std::runtime_error(std::move(ss).str());
                                 }}
-                            """
-                        )
+                            """)
 
             self.prefix.writeline_aot(f"auto {name}_stride = {name}.strides();")
             for stride_idx, s in enumerate(tensor.get_stride()):
                 if not isinstance(s, (int, sympy.Integer)):
                     continue
-                self.prefix.splice_aot(
-                    f"""
+                self.prefix.splice_aot(f"""
                         if ({s} != {name}_stride[{stride_idx}]) {{
                             std::stringstream ss;
                             ss << "{handle_kind}[{idx}]: unmatched stride value at {stride_idx}, "
@@ -836,8 +817,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                << "\\n";
                             throw std::runtime_error(std::move(ss).str());
                         }}
-                    """
-                )
+                    """)
 
             # check input device type
             if isinstance(tensor, ir.TensorBox):
@@ -850,8 +830,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type({name}, &{name}_device_type));"
                         )
                         device_type_str = str(tensor_device.type)
-                        self.prefix.splice_aot(
-                            f"""
+                        self.prefix.splice_aot(f"""
                                 int32_t {name}_expected_device_type = {expected_device_type};
                                 if ({name}_expected_device_type != {name}_device_type) {{
                                     std::stringstream ss;
@@ -860,26 +839,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                     << "but got: " << {name}_device_type << "\\n";
                                     throw std::runtime_error(std::move(ss).str());
                                 }}
-                            """
-                        )
+                            """)
 
         # Create a separate function for each input check to avoid "too big to optimize" error
         for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
-            self.prefix.splice_aot(
-                f"""
+            self.prefix.splice_aot(f"""
                 AOTI_NOINLINE static void check_input_{idx}(
                     AtenTensorHandle* input_handles
                 ) {{
-                """
-            )
+                """)
             with self.prefix.indent():
                 gen_check("input_handles", idx, name, tensor)
             self.prefix.writeline_aot("}")
 
         # force noinline to avoid any potential compilation slowdown due to aggressive
         # inline done by the host compiler
-        self.prefix.splice_aot(
-            """
+        self.prefix.splice_aot("""
             static bool _check_aoti_runtime_check_inputs_env() {
                 const static char* env_var_value = getenv("AOTI_RUNTIME_CHECK_INPUTS");
                 const static bool result = env_var_value != nullptr && env_var_value[0] != '0';
@@ -892,8 +867,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 if (!_check_aoti_runtime_check_inputs_env()){
                     return;
                 }
-            """
-        )
+            """)
         with self.prefix.indent():
             for idx in range(len(V.graph.graph_inputs)):
                 self.prefix.writeline_aot(f"check_input_{idx}(input_handles);")
@@ -916,29 +890,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.kernel_declarations.splice(V.graph.const_kernel_code)
 
         if V.graph.is_const_graph:
-            self.prefix.splice_aot(
-                f"""
+            self.prefix.splice_aot(f"""
                 void {self.aoti_model_class_name}::_const_run_impl(
                     std::vector<AtenTensorHandle>& output_handles,
                     DeviceStreamType stream,
                     AOTIProxyExecutorHandle proxy_executor
                 ) {{
-                """
-            )
+                """)
         else:
             if not config.aot_inductor.use_runtime_constant_folding:
                 # If we do not split the constant graph, we'll just create
                 # an empty implementation when wrapping the main module.
-                self.prefix.splice_aot(
-                    f"""
+                self.prefix.splice_aot(f"""
                     void {self.aoti_model_class_name}::_const_run_impl(
                         std::vector<AtenTensorHandle>& output_handles,
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
                     ) {{}}
 
-                    """
-                )
+                    """)
 
             run_impl_proto = f"""
                 void {self.aoti_model_class_name}::run_impl(
@@ -960,8 +930,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def _write_jit_entry_point_signature(self):
         """Emit the JIT entry point: inductor_entry_impl free function."""
-        self.prefix.splice_jit(
-            """
+        self.prefix.splice_jit("""
             void inductor_entry_impl(
                 AtenTensorHandle*
                     input_handles, // array of input AtenTensorHandle; handles
@@ -971,8 +940,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                     // will be stolen by the caller; the array itself is
                                     // borrowed)
             ) {
-            """
-        )
+            """)
 
     def _write_entry_point_signature(self):
         """Emit the entry point function/method signature.
@@ -1204,8 +1172,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             and config.aot_inductor.package_constants_on_disk_format != "binary_blob"
             else "false"
         )
-        self.prefix.splice(
-            f"""
+        self.prefix.splice(f"""
             {self.aoti_model_class_name}::{self.aoti_model_class_name}(std::shared_ptr<ConstantMap> constants_map,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
                                                const std::string& device_str,
@@ -1216,8 +1183,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                        device_str,
                                        std::move(cubin_dir),
                                        {include_weights}) {{
-            """
-        )
+            """)
 
         with self.prefix.indent():
             for idx, (name, inp) in enumerate(V.graph.graph_inputs.items()):
@@ -1379,26 +1345,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
         }
         """
 
-        self.prefix.splice(
-            f"""
+        self.prefix.splice(f"""
             std::unordered_map<std::string, AtenTensorHandle> {self.aoti_model_class_name}::const_run_impl(
                 DeviceStreamType stream,
                 AOTIProxyExecutorHandle proxy_executor,
                 bool initialization
             ) {{
-            """
-        )
+            """)
         if not config.aot_inductor.use_runtime_constant_folding:
-            self.prefix.splice(
-                """
+            self.prefix.splice("""
                     if (!initialization) {
                         std::cerr << "[WARNING] Calling constant_folding in model, but compiled with config: "
                                   << "aot_inductor.use_runtime_constant_folding=False\\n";
                     }
                     return {};
                 }
-                """
-            )
+                """)
             return
 
         with self.prefix.indent():
@@ -1413,20 +1375,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 "Not all constant gets mapped for constant folding graph."
             )
 
-            self.prefix.writeline(
-                f"""
+            self.prefix.writeline(f"""
                 std::unordered_map<std::string, AtenTensorHandle> folded_constants_map;
                 folded_constants_map.reserve({len(const_index_mapping)});
                 std::vector<AtenTensorHandle> output_handles({len(const_index_mapping)});
-                """
-            )
+                """)
 
-            self.prefix.splice(
-                """
+            self.prefix.splice("""
                 // The below assignment of output_handles to constants is not used directly.
                 // It's only used to memo the correspondence of handle and constants.
-                """
-            )
+                """)
 
             for output_idx, (const_idx, _) in enumerate(const_index_mapping):  # type: ignore[misc]
                 self.prefix.writeline(
@@ -1674,11 +1632,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 result.splice(self.kernel_declarations.getvalue())
                 result.splice('"""\n)')
             else:
-                result.splice(
-                    """
+                result.splice("""
                     kernel_src = ''
-                    """
-                )
+                    """)
         else:
             # Merge main code and kernel code
             result.splice(self.kernel_declarations.getvalue())
@@ -1701,8 +1657,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # mechanism HalideCodeCache uses for its standalone runtime).
         extra_flags_repr = repr(tuple(self.external_kernel_libs))
         # Cpp entry function for JIT with cpp wrapper
-        result.splice(
-            f"""
+        result.splice(f"""
             inductor_entry = CppWrapperCodeCache.load_pybinding(
                 argtypes=["std::vector<AtenTensorHandle>"],
                 main_code=cpp_wrapper_src,
@@ -1713,8 +1668,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 kernel_code={kernel_code},
                 extra_flags={extra_flags_repr},
             )
-            """
-        )
+            """)
 
         wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu') for arg in args]"
         if V.graph.constants:
@@ -1762,16 +1716,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """
 
         # Wrap the func to support setting result._boxed_call = True
-        result.splice(
-            f"""
+        result.splice(f"""
             def _wrap_func(f):
                 def g(args):
                     {wrapper_body}
                 return g
 
             call = _wrap_func(inductor_entry)
-            """
-        )
+            """)
 
     def generate_end(self, result):
         """Generates the end of the code block, and any code needed to call it."""
@@ -2266,6 +2218,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_devices.add(device_str)
         return f"cached_torch_device_type_{device_str}, {device.index if device.index else 0}"
 
+    def codegen_device_idx(self, device, device_id):
+        device_id = device_id.strip()
+        if not V.graph.aot_mode:
+            return device_id
+
+        if device.type == V.graph.device_type and device.index is not None:
+            # The primary compile-time device is relocatable via device_index at load.
+            # Other explicit device indices must stay intact for cross-device copies.
+            primary_device_idx = next(iter(V.graph.device_idxs), None)
+            if primary_device_idx is not None and device.index != primary_device_idx:
+                return device_id
+
+        return "this->device_idx_"
+
     def codegen_dtype(self, dtype):
         dtype_str = str(dtype).split(".")[-1]
         self.used_cached_dtypes.add(dtype_str)
@@ -2417,11 +2383,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             return f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided{pinned_str}({args}));"
 
-        # AOTI side uses this->device_idx_ so the model honors runtime device
-        # assignment; JIT side (pure or dual mode's JIT) has no
-        # this->device_idx_ in scope, so use the concrete graph device id.
-        aoti_device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
-        self.wrapper_call.writeline_aot(_alloc_line(aoti_device_idx))
+        # AOTI side: codegen_device_idx returns this->device_idx_ for the
+        # primary device so the model honors runtime device assignment, but
+        # keeps concrete indices for non-primary (cross-device) allocations.
+        # JIT side (pure or dual mode's JIT) has no this->device_idx_ in scope,
+        # so use the concrete graph device id.
+        self.wrapper_call.writeline_aot(
+            _alloc_line(self.codegen_device_idx(device, device_id))
+        )
         self.wrapper_call.writeline_jit(_alloc_line(device_id))
 
         if allocation_size != size:
@@ -3821,15 +3790,13 @@ if (!custom_op_wrapper) {
         num_args = len(raw_args)
         py_args_var = f"py_args_{next(self.arg_var_id)}"
         # First arg is always the python op name
-        lines = textwrap.dedent(
-            f"""
+        lines = textwrap.dedent(f"""
             RAIIPyObject {py_args_var}(PyTuple_New({num_args + 1}));
             if (!{py_args_var}) {{
                 throw std::runtime_error("PyTuple_New {py_args_var} failed");
             }}
             PyTuple_SetItem({py_args_var}, 0, PyUnicode_FromString("{python_kernel_name}"));
-            """
-        )
+            """)
 
         for idx, (raw_arg, schema_arg) in enumerate(
             zip(raw_args, op_overload._schema.arguments)
@@ -3838,8 +3805,7 @@ if (!custom_op_wrapper) {
                 py_args_var, idx + 1, raw_arg, schema_arg.real_type
             )
 
-        lines += textwrap.dedent(
-            f"""
+        lines += textwrap.dedent(f"""
             // Call the custom op in Python
             RAIIPyObject py_{buf_name}(PyObject_CallObject(custom_op_wrapper, {py_args_var}));
             if (!py_{buf_name}) {{
@@ -3848,8 +3814,7 @@ if (!custom_op_wrapper) {
                 }}
                 throw std::runtime_error("PyObject_CallObject {python_kernel_name} failed");
             }}
-            """
-        )
+            """)
 
         if len(output_args) == 1 and (output := output_args[0]) is not None:
             # result is a single tensor
