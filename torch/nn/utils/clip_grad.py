@@ -102,10 +102,7 @@ def _get_total_norm(
                 [torch.linalg.vector_norm(g, norm_type) for g in device_tensors]
             )
 
-    # When all tensors share the same device (the typical single-GPU or CPU-only
-    # case), the [norm.to(first_device) for norm in norms] list comprehension is
-    # a no-op but still dispatches N Python calls. Skip it when no cross-device
-    # movement is actually needed (issue #133586).
+    # Skip the no-op .to(first_device) when all tensors share a device (#133586)
     if any(device != first_device for (device, _) in grouped_tensors):
         norms = [norm.to(first_device) for norm in norms]
     total_norm = torch.linalg.vector_norm(torch.stack(norms), norm_type)
