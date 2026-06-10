@@ -7,8 +7,7 @@
 # This is the minimal upstream-QuACK delta currently applied by vendor.sh for
 # the PyTorch FlexGEMM adapter: generic tensor epilogues, C/alpha/beta, row/col/tile
 # captured tensor args, source-stable epilogue compile payloads, and related review
-# fixes needed by that path. Scaled, grouped, and blockscaled follow-ups are kept
-# unapplied under tools/vendoring/quack/flex_gemm_future_patches.
+# fixes needed by that path.
 #
 # Included rebased QuACK commits:
 # 4751cd2 Make GEMM epilogues generic
