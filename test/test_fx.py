@@ -1376,6 +1376,30 @@ class TestFX(JitTestCase):
                 f"Expected 2 occurrences of '_torch__ops_aten_aten_relu_', got {count}"
             )
 
+    def test_print_graph_stream_annotation(self):
+        op = torch.ops.aten.relu.default
+
+        graph = torch.fx.Graph()
+        x = graph.create_node("placeholder", "x")
+        with_stream = graph.create_node("call_function", op, (x,))
+        with_stream.meta["custom"] = {"stream": 2}
+        without_stream = graph.create_node("call_function", op, (with_stream,))
+        graph.output(without_stream)
+        graph.lint()
+
+        text = str(graph)
+        with_stream_line = next(
+            line for line in text.splitlines() if f"%{with_stream.name} " in line
+        )
+        without_stream_line = next(
+            line for line in text.splitlines() if f"%{without_stream.name} " in line
+        )
+        self.assertTrue(
+            with_stream_line.rstrip().endswith(", stream=2)"),
+            with_stream_line,
+        )
+        self.assertNotIn("stream=", without_stream_line)
+
     def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
         # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
         # print_readable() should not produce lines with trailing whitespace.
