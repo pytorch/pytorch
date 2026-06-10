@@ -1300,6 +1300,117 @@ class TestMPS(TestCaseMPS):
         result_cpu = torch.addmm(bias.cpu().conj(), a.cpu(), b.cpu())
         self.assertEqual(result_cpu, result_mps)
 
+    @staticmethod
+    def _gemv_tol(dtype):
+        if dtype == torch.float16:
+            return dict(atol=1e-2, rtol=1e-2)
+        if dtype == torch.bfloat16:
+            return dict(atol=2e-2, rtol=2e-2)
+        return dict(atol=1e-3, rtol=1e-4)
+
+    def _gemv_mat(self, rows, cols, dtype, transpose):
+        if transpose:
+            return torch.randn(cols, rows, device="mps", dtype=dtype).t()
+        return torch.randn(rows, cols, device="mps", dtype=dtype)
+
+    def _gemv_check(self, a, b, **tol):
+        out_mps = a @ b
+        out_cpu = a.cpu() @ b.cpu()
+        self.assertEqual(out_cpu, out_mps.cpu(), **tol)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("transpose", [False, True])
+    def test_gemv_mm(self, dtype, transpose):
+        tol = self._gemv_tol(dtype)
+        # M==1: (1,K) @ (K,N), matrix operand is B. Shapes hit vec=1/2/4/8 and
+        # outlen not divisible by 4 (exercises the kernel's row-bounds guard).
+        for K, N in [(1, 1), (7, 16), (64, 17), (512, 1000), (2048, 4096), (8192, 256)]:
+            a = torch.randn(1, K, device="mps", dtype=dtype)
+            b = self._gemv_mat(K, N, dtype, transpose)
+            self._gemv_check(a, b, **tol)
+        # N==1: (M,K) @ (K,1), matrix operand is A. Regression guard: a prior bug
+        # passed outlen=N=1 here and computed only the first output row.
+        for M, K in [(1, 1), (16, 7), (17, 64), (1000, 512), (4096, 2048), (256, 8192)]:
+            a = self._gemv_mat(M, K, dtype, transpose)
+            b = torch.randn(K, 1, device="mps", dtype=dtype)
+            self._gemv_check(a, b, **tol)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("beta", [0.0, 0.5, 1.0])
+    def test_gemv_addmm(self, dtype, beta):
+        tol = self._gemv_tol(dtype)
+        alpha = 0.75
+        for M, K, N in [(1, 512, 1000), (1000, 512, 1)]:
+            a = torch.randn(M, K, device="mps", dtype=dtype)
+            b = torch.randn(K, N, device="mps", dtype=dtype)
+            bias = torch.randn(M, N, device="mps", dtype=dtype)
+            out_mps = torch.addmm(bias, a, b, alpha=alpha, beta=beta)
+            out_cpu = torch.addmm(bias.cpu(), a.cpu(), b.cpu(), alpha=alpha, beta=beta)
+            self.assertEqual(out_cpu, out_mps.cpu(), **tol)
+
+    def test_gemv_addmm_beta_zero_ignores_bias(self):
+        # beta==0 must not read the bias (may hold NaN), matching addmm semantics.
+        for dtype in (torch.float32, torch.bfloat16):
+            a = torch.randn(1, 512, device="mps", dtype=dtype)
+            b = torch.randn(512, 1000, device="mps", dtype=dtype)
+            bias = torch.full((1, 1000), float("nan"), device="mps", dtype=dtype)
+            out = torch.addmm(bias, a, b, beta=0)
+            self.assertFalse(out.isnan().any().item())
+
+    def test_gemv_addmm_broadcast_bias(self):
+        # Bias broadcasts over the output (scalar / vector) for both directions.
+        for dtype in (torch.float32, torch.bfloat16):
+            tol = self._gemv_tol(dtype)
+            a = torch.randn(1, 512, device="mps", dtype=dtype)
+            b = torch.randn(512, 1000, device="mps", dtype=dtype)
+            for bias_shape in [(), (1000,), (1, 1000)]:
+                bias = torch.randn(bias_shape, device="mps", dtype=dtype)
+                out = torch.addmm(bias, a, b)
+                out_cpu = torch.addmm(bias.cpu(), a.cpu(), b.cpu())
+                self.assertEqual(out_cpu, out.cpu(), **tol)
+
+    def test_gemv_noncontiguous_matrix(self):
+        # A matrix that is neither row- nor column-major forces a contiguous copy.
+        for dtype in (torch.float32, torch.bfloat16):
+            tol = self._gemv_tol(dtype)
+            b = torch.randn(512, 2 * 1000, device="mps", dtype=dtype)[:, ::2]
+            a = torch.randn(1, 512, device="mps", dtype=dtype)
+            self._gemv_check(a, b, **tol)
+            a2 = torch.randn(1000, 2 * 512, device="mps", dtype=dtype)[:, ::2]
+            b2 = torch.randn(512, 1, device="mps", dtype=dtype)
+            self._gemv_check(a2, b2, **tol)
+
+    def test_gemv_strided_output_falls_back(self):
+        # Non-unit-stride output is rejected by the gemv gate; the fallback path
+        # must still be correct.
+        a = torch.randn(1, 512, device="mps")
+        b = torch.randn(512, 64, device="mps")
+        out = torch.empty(64, 2, device="mps")[:, 0].unsqueeze(0)  # (1,64), stride(1)=2
+        torch.mm(a, b, out=out)
+        self.assertEqual(a.cpu() @ b.cpu(), out.cpu(), atol=1e-3, rtol=1e-4)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_gemv_mv_addmv(self, dtype):
+        tol = self._gemv_tol(dtype)
+        A = torch.randn(1000, 512, device="mps", dtype=dtype)
+        x = torch.randn(512, device="mps", dtype=dtype)
+        self.assertEqual(A.cpu() @ x.cpu(), torch.mv(A, x).cpu(), **tol)
+        bias = torch.randn(1000, device="mps", dtype=dtype)
+        out = torch.addmv(bias, A, x, alpha=0.5, beta=0.7)
+        out_cpu = torch.addmv(bias.cpu(), A.cpu(), x.cpu(), alpha=0.5, beta=0.7)
+        self.assertEqual(out_cpu, out.cpu(), **tol)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_gemv_linear(self, dtype):
+        # Batch-1 nn.Linear lowers to addmm GEMV with a transposed weight.
+        tol = self._gemv_tol(dtype)
+        x = torch.randn(1, 512, device="mps", dtype=dtype)
+        w = torch.randn(1000, 512, device="mps", dtype=dtype)
+        bias = torch.randn(1000, device="mps", dtype=dtype)
+        out = torch.nn.functional.linear(x, w, bias)
+        out_cpu = torch.nn.functional.linear(x.cpu(), w.cpu(), bias.cpu())
+        self.assertEqual(out_cpu, out.cpu(), **tol)
+
     @xfailIf(MACOS_VERSION < 15.0)
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_large_bmm(self, dtype):
