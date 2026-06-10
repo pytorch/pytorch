@@ -26,7 +26,7 @@ jobs:
     with:
       # When building vLLM, uv doesn't like that we rename wheel without changing the wheel metadata
       allow-reuse-old-whl: false
-      build-additional-packages: "vision audio"
+      build-additional-packages: "vision audio torchao"
       build-external-packages: "vllm"
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm
@@ -39,18 +39,19 @@ jobs:
           { config: "vllm_entrypoints_test", shard: 1, num_shards: 1,runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_regression_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_multi_model_processor_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "vllm_pytorch_compilation_unit_tests", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "vllm_pytorch_compilation_unit_tests", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "vllm_compile_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_compile_distributed_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200.8" },
+          { config: "vllm_compile_distributed_test", shard: 1, num_shards: 1, runner: "linux.aws.h100.4" },
+          { config: "vllm_standalone_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_quantization_torchao_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_lora_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_multi_model_test_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu"},
           { config: "vllm_language_model_test_extended_generation_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu"},
-          { config: "vllm_distributed_test_2_gpu_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_lora_test", shard: 0, num_shards: 4, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_lora_test", shard: 1, num_shards: 4, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_lora_test", shard: 2, num_shards: 4,  runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_lora_test", shard: 3, num_shards: 4,  runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_lora_tp_test_distributed", shard: 1, num_shards: 1, runner: "linux.g6.12xlarge.nvidia.gpu"},
-          { config: "vllm_distributed_test_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.12xlarge.nvidia.gpu"}
         ]}
     secrets: inherit
 
