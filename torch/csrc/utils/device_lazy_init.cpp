@@ -1,5 +1,4 @@
 #include <c10/core/impl/TorchDispatchModeTLS.h>
-#include <c10/util/CallOnce.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
 #include <torch/csrc/Exceptions.h>
@@ -80,7 +79,7 @@ void set_device_in_bad_fork(at::DeviceType device_type, bool value) {
 void register_fork_handler_for_device_init(at::DeviceType device_type) {
 #ifndef WIN32
   at_fork_registered[static_cast<int>(device_type)] = true;
-  c10::call_once(at_fork_register_once, []() {
+  static bool atfork_handler_registered [[maybe_unused]] = [] {
     pthread_atfork(nullptr, nullptr, []() {
       for (int i = 0; i < static_cast<int>(at::COMPILE_TIME_MAX_DEVICE_TYPES);
            ++i) {
@@ -94,7 +93,8 @@ void register_fork_handler_for_device_init(at::DeviceType device_type) {
         }
       }
     });
-  });
+    return true;
+  }();
 #endif
 }
 

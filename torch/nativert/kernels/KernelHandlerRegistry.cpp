@@ -4,7 +4,6 @@
 #include <fmt/format.h>
 
 #include <ATen/core/ivalue.h>
-#include <c10/util/CallOnce.h>
 
 #include <torch/nativert/graph/Graph.h>
 #include <torch/nativert/graph/GraphPasses.h>
@@ -52,8 +51,7 @@ std::unique_ptr<torch::aot_inductor::ProxyExecutor> make_proxy_executor(
 } // namespace
 
 void register_kernel_handlers() {
-  static c10::once_flag flag;
-  c10::call_once(flag, []() {
+  static bool handlers_registered [[maybe_unused]] = [] {
     using OpKernelPtr = KernelFactoryHandler::OpKernelPtr;
     using DelegateExecutorPtr = KernelFactoryHandler::DelegateExecutorPtr;
     KernelFactory::registerHandler(
@@ -111,7 +109,8 @@ void register_kernel_handlers() {
                       &node, *delegateExecutor),
                   std::move(delegateExecutor)};
             }));
-  });
+    return true;
+  }();
 }
 
 } // namespace torch::nativert
