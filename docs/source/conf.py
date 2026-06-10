@@ -2372,27 +2372,279 @@ def coverage_post_process(app, exception):
                 f.write(o)
 
 
+def _is_markdown_docstring(lines):
+    """Detect whether a docstring uses MyST Markdown syntax."""
+    md_indicators = [
+        re.compile(r"^#{1,6}\s"),  # Markdown headings
+        re.compile(r"^\s*```\{[\w:./-]+\}"),  # MyST backtick directives
+        re.compile(r"^\s*:::\{[\w:./-]+\}"),  # MyST colon-fence directives
+        re.compile(r"\{[\w:./-]+\}`[^`]+`"),  # MyST roles like {py:class}`X`
+        re.compile(r"^\s*\([\w-]+\)=\s*$"),  # MyST section labels
+        re.compile(r"^\s*%\s"),  # MyST comments
+        re.compile(r"\[([^\]]+)\]\(([^)]+)\)"),  # Markdown links
+        re.compile(r"!\[([^\]]*)\]\(([^)]+)\)"),  # Markdown images
+        re.compile(r"(?<!\$)\$(?!\$)([^$\n]+)\$(?!\$)"),  # Inline math $...$
+        re.compile(r"^\s*\$\$"),  # Display math $$
+        re.compile(r"\\\(.+?\\\)"),  # LaTeX inline math \(...\)
+        re.compile(r"^\s*\\\["),  # LaTeX display math \[
+        re.compile(r"^\s*- \[[ x]\]"),  # Task lists
+    ]
+    rst_indicators = [
+        re.compile(r"^\.\.\s+[\w-]+::"),  # RST directives
+        re.compile(r":[\w-]+:`[^`]+`"),  # RST roles like :class:`...`
+    ]
+    md_score = 0
+    rst_score = 0
+    for line in lines:
+        for pat in md_indicators:
+            if pat.search(line):
+                md_score += 1
+        for pat in rst_indicators:
+            if pat.search(line):
+                rst_score += 1
+    return md_score > 0 and md_score > rst_score
+
+
+def _collect_directive_body(lines, i, indent, closing_pattern, raw=False):
+    """Collect directive body lines and extract options from the content."""
+    rst_lines = []
+    options = []
+    body = []
+    phase = "yaml_or_options"
+
+    # Check for YAML option block (--- delimited)
+    if i < len(lines) and re.match(r"^\s*---\s*$", lines[i]):
+        i += 1  # skip opening ---
+        while i < len(lines) and not re.match(r"^\s*---\s*$", lines[i]):
+            yaml_match = re.match(r"^\s*([\w-]+):\s*(.*)", lines[i])
+            if yaml_match:
+                options.append((yaml_match.group(1), yaml_match.group(2)))
+            i += 1
+        if i < len(lines):
+            i += 1  # skip closing ---
+        phase = "body"
+
+    while i < len(lines) and not closing_pattern.match(lines[i]):
+        line = lines[i]
+        if phase in ("yaml_or_options", "options"):
+            opt_match = re.match(r"^\s*:([\w-]+):\s*(.*)", line)
+            if opt_match:
+                options.append((opt_match.group(1), opt_match.group(2)))
+                phase = "options"
+            elif line.strip() == "" and not body:
+                pass
+            else:
+                phase = "body"
+                body.append(line)
+        else:
+            body.append(line)
+        i += 1
+
+    for key, val in options:
+        rst_lines.append(f"{indent}   :{key}: {val}")
+    if options:
+        rst_lines.append("")
+    for bline in body:
+        if raw:
+            rst_lines.append(bline)
+        else:
+            rst_lines.append(f"{indent}   {_convert_inline_myst(bline)}")
+
+    if i < len(lines):
+        i += 1  # skip closing fence/marker
+    return rst_lines, i
+
+
+def _convert_inline_myst(line):
+    """Apply inline MyST-to-RST conversions to a single line."""
+    # MyST roles: {role}`target` or {py:class}`target` -> :role:`target`
+    line = re.sub(r"\{([\w:./-]+)\}`([^`]+)`", r":\1:`\2`", line)
+    # Markdown links: [text](url) -> `text <url>`__
+    line = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"`\1 <\2>`__", line)
+    # Inline math: $expr$ -> :math:`expr` (skip escaped \$)
+    line = re.sub(r"(?<![\$\\])\$(?!\$)([^$\n]+)\$(?!\$)", r":math:`\1`", line)
+    # LaTeX-style inline math: \(expr\) -> :math:`expr`
+    line = re.sub(r"\\\((.+?)\\\)", r":math:`\1`", line)
+    return line
+
+
+def _myst_to_rst(lines):
+    """Convert MyST Markdown docstring lines to RST."""
+    result = []
+    i = 0
+    in_code_block = False
+    code_indent = ""
+
+    # Strip YAML front matter (--- delimited block at start of docstring)
+    first_nonblank = next((j for j, l in enumerate(lines) if l.strip()), None)
+    if first_nonblank is not None and re.match(r"^---\s*$", lines[first_nonblank]):
+        i = first_nonblank + 1
+        while i < len(lines) and not re.match(r"^---\s*$", lines[i]):
+            i += 1
+        if i < len(lines):
+            i += 1  # skip closing ---
+
+    while i < len(lines):
+        line = lines[i]
+
+        # Inside a plain code block, pass through until closing ```
+        if in_code_block:
+            if re.match(r"^\s*```\s*$", line):
+                in_code_block = False
+                result.append("")
+            else:
+                result.append(f"{code_indent}   {line}")
+            i += 1
+            continue
+
+        # MyST backtick-fenced directive: ```{directive} args
+        # Supports dotted/colon names like {py:class}, {code-block}
+        bt_dir = re.match(r"^(\s*)```\{([\w:./-]+)\}\s*(.*?)\s*$", line)
+        if bt_dir:
+            indent = bt_dir.group(1)
+            directive = bt_dir.group(2)
+            arg = bt_dir.group(3)
+            is_eval_rst = directive == "eval-rst"
+            if is_eval_rst:
+                body_lines, i = _collect_directive_body(
+                    lines, i + 1, indent, re.compile(r"^\s*```\s*$"),
+                    raw=True,
+                )
+                result.append("")
+                result.extend(body_lines)
+                result.append("")
+            else:
+                result.append("")
+                if arg:
+                    result.append(f"{indent}.. {directive}:: {arg}")
+                else:
+                    result.append(f"{indent}.. {directive}::")
+                body_lines, i = _collect_directive_body(
+                    lines, i + 1, indent, re.compile(r"^\s*```\s*$")
+                )
+                result.extend(body_lines)
+                result.append("")
+            continue
+
+        # MyST colon-fenced directive: :::{directive} args
+        co_dir = re.match(r"^(\s*):::\{([\w:./-]+)\}\s*(.*?)\s*$", line)
+        if co_dir:
+            indent = co_dir.group(1)
+            directive = co_dir.group(2)
+            arg = co_dir.group(3)
+            is_eval_rst = directive == "eval-rst"
+            if is_eval_rst:
+                body_lines, i = _collect_directive_body(
+                    lines, i + 1, indent, re.compile(r"^\s*:::\s*$"),
+                    raw=True,
+                )
+                result.append("")
+                result.extend(body_lines)
+                result.append("")
+            else:
+                result.append("")
+                if arg:
+                    result.append(f"{indent}.. {directive}:: {arg}")
+                else:
+                    result.append(f"{indent}.. {directive}::")
+                body_lines, i = _collect_directive_body(
+                    lines, i + 1, indent, re.compile(r"^\s*:::\s*$")
+                )
+                result.extend(body_lines)
+                result.append("")
+            continue
+
+        # Plain fenced code block: ```python ... ```
+        fence_match = re.match(r"^(\s*)```(\w*)\s*$", line)
+        if fence_match:
+            code_indent = fence_match.group(1)
+            lang = fence_match.group(2) or "python"
+            result.append("")
+            result.append(f"{code_indent}.. code-block:: {lang}")
+            result.append("")
+            in_code_block = True
+            i += 1
+            continue
+
+        # MyST section label: (my-label)=
+        label_match = re.match(r"^(\s*)\(([\w-]+)\)=\s*$", line)
+        if label_match:
+            indent = label_match.group(1)
+            label = label_match.group(2)
+            result.append(f"{indent}.. _{label}:")
+            result.append("")
+            i += 1
+            continue
+
+        # MyST comment: % comment text
+        comment_match = re.match(r"^(\s*)%\s?(.*)", line)
+        if comment_match:
+            indent = comment_match.group(1)
+            text = comment_match.group(2)
+            result.append(f"{indent}.. {text}")
+            i += 1
+            continue
+
+        # Markdown headings -> RST underlines
+        heading_match = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if heading_match:
+            level = len(heading_match.group(1))
+            text = heading_match.group(2)
+            underline_chars = "=-~^\"'"
+            char = underline_chars[min(level - 1, len(underline_chars) - 1)]
+            result.append("")
+            result.append(text)
+            result.append(char * len(text))
+            result.append("")
+            i += 1
+            continue
+
+        # Markdown images (must check before links): ![alt](url)
+        img_match = re.match(r"^(\s*)!\[([^\]]*)\]\(([^)]+)\)\s*$", line)
+        if img_match:
+            indent = img_match.group(1)
+            alt = img_match.group(2)
+            url = img_match.group(3)
+            result.append("")
+            result.append(f"{indent}.. image:: {url}")
+            if alt:
+                result.append(f"{indent}   :alt: {alt}")
+            result.append("")
+            i += 1
+            continue
+
+        # Display math: $$ ... $$ or \[ ... \]
+        display_math_open = re.match(r"^\s*\$\$\s*$", line)
+        latex_display_open = re.match(r"^\s*\\\[\s*$", line)
+        if display_math_open or latex_display_open:
+            close_pat = (
+                re.compile(r"^\s*\$\$\s*$")
+                if display_math_open
+                else re.compile(r"^\s*\\\]\s*$")
+            )
+            result.append("")
+            result.append(".. math::")
+            result.append("")
+            i += 1
+            while i < len(lines) and not close_pat.match(lines[i]):
+                result.append(f"   {lines[i]}")
+                i += 1
+            result.append("")
+            if i < len(lines):
+                i += 1
+            continue
+
+        line = _convert_inline_myst(line)
+        result.append(line)
+        i += 1
+
+    return result
+
+
 def process_docstring(app, what_, name, obj, options, lines):
     """
-    Custom process to transform docstring lines Remove "Ignore" blocks
-
-    Args:
-        app (sphinx.application.Sphinx): the Sphinx application object
-
-        what (str):
-            the type of the object which the docstring belongs to (one of
-            "module", "class", "exception", "function", "method", "attribute")
-
-        name (str): the fully qualified name of the object
-
-        obj: the object itself
-
-        options: the options given to the directive: an object with
-            attributes inherited_members, undoc_members, show_inheritance
-            and noindex that are true if the flag option of same name was
-            given to the auto directive
-
-        lines (List[str]): the lines of the docstring, see above
+    Custom process to transform docstring lines. Removes xdoctest directives
+    and converts MyST Markdown docstrings to RST for Sphinx processing.
 
     References:
         https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
@@ -2407,6 +2659,11 @@ def process_docstring(app, what_, name, obj, options, lines):
     filtered_lines = [
         line for line in lines if not any(pat.match(line) for pat in remove_directives)
     ]
+
+    # Convert MyST Markdown to RST if the docstring uses Markdown syntax
+    if _is_markdown_docstring(filtered_lines):
+        filtered_lines = _myst_to_rst(filtered_lines)
+
     # Modify the lines inplace
     lines[:] = filtered_lines
 

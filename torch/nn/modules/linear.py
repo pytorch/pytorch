@@ -20,15 +20,20 @@ __all__ = [
 
 
 class Identity(Module):
-    r"""A placeholder identity operator that is argument-insensitive.
+    """A placeholder identity operator that is argument-insensitive.
 
     Args:
         args: any argument (unused)
         kwargs: any keyword argument (unused)
 
     Shape:
-        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
-        - Output: :math:`(*)`, same shape as the input.
+        - Input: $(*)$, where $*$ means any number of dimensions.
+        - Output: $(*)$, same shape as the input.
+
+    ```{note}
+    This module is useful as a no-op replacement for other layers.
+    See {class}`torch.nn.Linear` for a non-trivial transformation.
+    ```
 
     Examples::
 
