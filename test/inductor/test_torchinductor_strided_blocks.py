@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     MI200_ARCH,
     NAVI_ARCH,
     parametrize,
+    skipIfRocm,
     skipIfRocmArch,
     subtest,
 )
@@ -318,6 +319,7 @@ class CommonTemplate:
             config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/161095")
     def test_broadcast_with_singleton_dims(self):
         # This tests the case when the input / output contains both zero strides
         # and singleton dimensions. In this case the broadcasting dimensions
@@ -1028,6 +1030,7 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/158328")
     @parametrize("reduction_op", [torch.sum, torch.argmax])
     def test_2d_reductions_mixed_indexing(
         self,
@@ -1680,6 +1683,29 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         result, (code,) = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(result, fn(x))
         self.assertIn("tl.load", code)
+
+    def test_slice_view_dtype_unaligned_buffer(self):
+        offset = 1
+
+        def f(x):
+            return x[2:].view(dtype=torch.float32) + 1
+
+        x = torch.randn((128 + offset) * 2, dtype=torch.bfloat16, device=GPU_TYPE)
+        expected = f(x)
+        actual = torch.compile(f)(x)
+        self.assertEqual(actual, expected)
+
+    def test_bool_dtype_skips_tma(self):
+        """
+        torch.bool maps to Triton tl.int1 which has no CUtensorMapDataType
+        entry, so it should skip TMA.
+        """
+
+        def fn(a):
+            return torch.cumsum(a, -1)
+
+        inp = torch.zeros(16, dtype=torch.bool, device=GPU_TYPE)
+        self._run_and_compare(fn, inp, expected_num_block_pointers=0)
 
 
 test_torchinductor.copy_tests(

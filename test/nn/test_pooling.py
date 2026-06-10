@@ -480,6 +480,56 @@ class TestPoolingNN(NNTestCase):
             )
             gradcheck(F.max_unpool3d, (output, indices, 2), check_forward_ad=True)
 
+    def test_max_unpool_invalid_output_size(self):
+        x = torch.randn(1, 1, 2, 2)
+        idx = torch.zeros(1, 1, 2, 2, dtype=torch.long)
+
+        with self.assertRaisesRegex(ValueError, "non-negative spatial dimensions"):
+            F.max_unpool2d(x, idx, [1, 1], stride=5, padding=[3, 4])
+        with self.assertRaisesRegex(ValueError, "non-negative spatial dimensions"):
+            nn.MaxUnpool2d([1, 1], stride=5, padding=[3, 4])(x, idx)
+        with self.assertRaisesRegex(ValueError, "non-negative spatial dimensions"):
+            F.max_unpool2d(
+                x, idx, [1, 1], stride=5, padding=[3, 4], output_size=[-1, 1]
+            )
+
+        self.assertEqual(
+            F.max_unpool2d(
+                x, idx, [1, 1], stride=5, padding=[3, 4], output_size=[1, 1]
+            ).shape,
+            (1, 1, 1, 1),
+        )
+        self.assertEqual(
+            F.max_unpool2d(
+                x, idx, [1, 1], stride=5, padding=[3, 4], output_size=[0, 1]
+            ).shape,
+            (1, 1, 0, 1),
+        )
+
+        x1d = torch.randn(1, 1, 2)
+        idx1d = torch.zeros(1, 1, 2, dtype=torch.long)
+        with self.assertRaisesRegex(ValueError, "non-negative spatial dimensions"):
+            F.max_unpool1d(x1d, idx1d, 1, stride=5, padding=4)
+
+        x3d = torch.randn(1, 1, 2, 2, 2)
+        idx3d = torch.zeros(1, 1, 2, 2, 2, dtype=torch.long)
+        with self.assertRaisesRegex(ValueError, "non-negative spatial dimensions"):
+            F.max_unpool3d(x3d, idx3d, 1, stride=5, padding=4)
+
+        def call_func(kernel_size, stride, x, idx, padding):
+            return torch.nn.MaxUnpool2d(kernel_size, stride, padding)(x, idx)
+
+        compiled_call_func = torch.compile(call_func, backend="aot_eager", dynamic=True)
+        with self.assertRaisesRegex(RuntimeError, "non-negative spatial dimensions"):
+            compiled_call_func([1, 1], 5, x, idx, [3, 4])
+
+        def aten_call(x, idx):
+            return torch.ops.aten.max_unpool2d.default(x, idx, [0, -2])
+
+        compiled_aten_call = torch.compile(aten_call, backend="aot_eager", dynamic=True)
+        with self.assertRaisesRegex(RuntimeError, "non-negative spatial dimensions"):
+            compiled_aten_call(x, idx)
+
     def test_max_unpool3d_input_check(self):
         x = torch.ones(1, 3, 1, 1, 1)
         with self.assertRaises(RuntimeError):
@@ -1812,7 +1862,6 @@ torch.cuda.synchronize()
         if adaptive:
             cls_name = f"AdaptiveMaxPool{num_dim}d"
         else:
-            # FIXME(#105716): Test fails when using f-string
             cls_name = f"MaxPool{num_dim}d"
         module_cls = getattr(nn, cls_name)
         module = module_cls(2, return_indices=True).to(device, dtype=dtype)
