@@ -94,10 +94,8 @@ class TestExportDynamicSpec(TestCase):
         _reset_uid_counter()
 
     def test_unbacked_graph_has_unbacked_symbol(self):
-        """Tensor dim marked with ShapeVar shows up as an unbacked SymInt
-        in the exported graph, and the export accepts varying inputs."""
         B = ShapeVar("batch")
-        x_spec = TensorSpec([B, None])
+        x_spec = TensorSpec([B, STATIC])
         ep = export(
             _ModX(),
             (torch.randn(8, 3),),
@@ -131,7 +129,6 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep.module()(torch.randn(32, 3))
 
     def test_static_int_spec_mismatch_raises(self):
-        """Declaring a scalar int as static=10 but passing 42 should error."""
         with self.assertRaisesRegex(
             ValueError,
             r"shapes_spec declares L\['flat_args'\]\[1\] as static with value 10, but got 42",
@@ -139,12 +136,11 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 _ModXN(),
                 (torch.randn(4), 42),
-                dynamic_shapes=ShapesSpec(params=ParamsSpec({"n": 10})),
+                dynamic_shapes=ParamsSpec({"n": 10}),
                 strict=True,
             )
 
     def test_static_tensor_dim_mismatch_raises(self):
-        """Declaring dim 1 as static=3 but passing dim 1=5 should error."""
         with self.assertRaisesRegex(
             ValueError,
             r"shapes_spec declares dim 1 as static with value 3, but got 5",
@@ -152,18 +148,15 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 _ModXPlus(),
                 (torch.randn(4, 5),),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), 3])})
-                ),
+                dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), 3])}),
                 strict=True,
             )
 
     def test_params_spec_shorthand(self):
-        """dynamic_shapes=ParamsSpec(...) is auto-wrapped into ShapesSpec."""
         ep = export(
             _ModX(),
             (torch.randn(8, 3),),
-            dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])}),
+            dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), STATIC])}),
             strict=True,
         )
         shape = _first_tensor_placeholder_shape(ep.graph_module)
@@ -171,15 +164,12 @@ Range constraints: {u0: VR[0, int_oo]}""",
 
     @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
     def test_min_max_bypasses_dde_on_branching(self):
-        """Setting min/max on ShapeVar lets a branch resolve statically."""
         # min=10 > 5 → branch resolves statically, no DDE.
         export(
             _ModBranch(),
             (torch.randn(20, 3),),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {"x": TensorSpec([ShapeVar("batch", min=10, max=100), None])}
-                )
+            dynamic_shapes=ParamsSpec(
+                {"x": TensorSpec([ShapeVar("batch", min=10, max=100), STATIC])}
             ),
             strict=True,
         )
@@ -195,19 +185,16 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 _ModBranch(),
                 (torch.randn(10, 3),),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec({"x": TensorSpec([ShapeVar(), None])})
-                ),
+                dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar(), STATIC])}),
                 strict=True,
             )
 
     def test_tensor_dim_optimization_hint_in_shape_env(self):
-        """ShapeVar's optimization_hint propagates to var_to_hint_override."""
         b = ShapeVar("batch", optimization_hint=32)
         ep = export(
             _ModX(),
             (torch.randn(8, 3),),
-            dynamic_shapes=ShapesSpec(params=ParamsSpec({"x": TensorSpec([b, None])})),
+            dynamic_shapes=ParamsSpec({"x": TensorSpec([b, STATIC])}),
             strict=True,
         )
         shape = _first_tensor_placeholder_shape(ep.graph_module)
@@ -216,43 +203,68 @@ Range constraints: {u0: VR[0, int_oo]}""",
         expr = sym.node.expr
         self.assertEqual(sym.node.shape_env.var_to_hint_override.get(expr), 32)
 
-    def test_params_spec_keys_match_forward_args_for_mixed_positional_and_kwargs(
+    def test_params_spec_matched_by_name_across_positional_kwargs_and_call_order(
         self,
     ):
-        """A spec entry is matched to an input by name (the forward parameter
-        name), regardless of whether the value is passed positionally (in
-        ``args``) or as a keyword (in ``kwargs``). Inputs not in the spec stay
-        static (a scalar arg stays specialized to its literal value)."""
+        """Spec entries bind by forward-param *name* — for positional and
+        kwarg inputs alike, and regardless of kwarg order (placeholders
+        follow call order). Inputs not in the spec stay static."""
 
         class M(torch.nn.Module):
-            def forward(self, x, y, z=None):
-                return x.sum(0) + y.sum(0) * (z if z is not None else 1)
+            def forward(self, x, y, z, n):
+                return x.sum(0) + y.sum(0) + z.sum(0) * n
 
         ep = export(
             M(),
-            args=(torch.randn(8, 3),),
-            kwargs={"y": torch.randn(5, 3), "z": 7},
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "x": TensorSpec([ShapeVar("A"), None]),
-                        "y": TensorSpec([ShapeVar("B"), None]),
-                    }
-                )
+            args=(torch.randn(8, 3),),  # x positional
+            # kwargs in non-signature order (z, n before y):
+            kwargs={"z": torch.randn(7, 3), "n": 2, "y": torch.randn(5, 3)},
+            dynamic_shapes=ParamsSpec(
+                {
+                    "x": TensorSpec([ShapeVar("X"), STATIC]),
+                    "y": TensorSpec([ShapeVar("Y"), STATIC]),
+                }
             ),
             strict=True,
         )
-        ep_str = str(ep)
-        self.assertRegex(ep_str, r'x: "f32\[u\d+, 3\]"')
-        self.assertRegex(ep_str, r'y: "f32\[u\d+, 3\]"')
-        # z (scalar int kwarg, not in spec) gets specialized to literal 7.
-        self.assertIn("mul.Tensor", ep_str)
-        ep.module()(torch.randn(20, 3), y=torch.randn(99, 3), z=7)
+        # Placeholders follow call order (x, z, n, y), not signature order:
+        # x and y are spec'd by name → unbacked (u0, u1); z (kwarg, no spec)
+        # keeps its literal shape; n (scalar, no spec) stays a plain input
+        # with its value 2 baked into the math (mul by 2).
+        self.assertExpectedInline(
+            str(ep).strip(),
+            """\
+ExportedProgram:
+    class GraphModule(torch.nn.Module):
+        def forward(self, x: "f32[u0, 3]", z: "f32[7, 3]", n, y: "f32[u1, 3]"):
+            sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(x, 0)
+            ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
+            _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
+            sym_size_int_1: "Sym(u1)" = torch.ops.aten.sym_size.int(y, 0)
+            ge_1: "Sym(u1 >= 0)" = sym_size_int_1 >= 0;  sym_size_int_1 = None
+            _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
+            sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
+            sum_2: "f32[3]" = torch.ops.aten.sum.dim_IntList(y, [0]);  y = None
+            add: "f32[3]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+            sum_3: "f32[3]" = torch.ops.aten.sum.dim_IntList(z, [0]);  z = None
+            mul: "f32[3]" = torch.ops.aten.mul.Tensor(sum_3, 2);  sum_3 = None
+            add_1: "f32[3]" = torch.ops.aten.add.Tensor(add, mul);  add = mul = None
+            return (add_1,)
+Graph signature:
+    x: USER_INPUT
+    z: USER_INPUT
+    n: USER_INPUT
+    y: USER_INPUT
+    add_1: USER_OUTPUT
+Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+        ep.module()(
+            torch.randn(20, 3), z=torch.randn(7, 3), n=2, y=torch.randn(99, 3)
+        )
 
     def test_scalar_int_input_via_int_var(self):
-        """A positional scalar int input marked dynamic via ``IntVar``
-        becomes an unbacked SymInt in the exported program."""
-
         class M(torch.nn.Module):
             def forward(self, x, n):
                 return x.sum(0) * n
@@ -260,13 +272,11 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             M(),
             (torch.randn(8, 3), 5),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "x": TensorSpec([ShapeVar("B"), None]),
-                        "n": IntVar("n_size"),
-                    }
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "x": TensorSpec([ShapeVar("B"), STATIC]),
+                    "n": IntVar("n_size"),
+                }
             ),
             strict=True,
         )
@@ -275,55 +285,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep.module()(torch.randn(20, 3), 42)
         ep.module()(torch.randn(50, 3), 99)
 
-    def test_kwarg_in_non_signature_order_uses_call_order(self):
-        """A spec entry is matched to an input by name, not by position. So
-        even when kwargs are passed in a different order than the forward
-        signature, the spec'd dim still lands on the correct input."""
-
-        class M(torch.nn.Module):
-            def forward(self, x, y, z):
-                return x.sum(0) + y.sum(0) + z.sum(0)
-
-        ep = export(
-            M(),
-            args=(torch.randn(8, 3),),
-            kwargs={"z": torch.randn(7, 3), "y": torch.randn(5, 3)},
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec({"y": TensorSpec([ShapeVar("Y"), None])})
-            ),
-            strict=True,
-        )
-        # y dim 0 is unbacked (u0); x and z keep their static literal sizes.
-        self.assertExpectedInline(
-            str(ep).strip(),
-            """\
-ExportedProgram:
-    class GraphModule(torch.nn.Module):
-        def forward(self, x: "f32[8, 3]", z: "f32[7, 3]", y: "f32[u0, 3]"):
-            sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(y, 0)
-            ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
-            _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-            sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
-            sum_2: "f32[3]" = torch.ops.aten.sum.dim_IntList(y, [0]);  y = None
-            add: "f32[3]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
-            sum_3: "f32[3]" = torch.ops.aten.sum.dim_IntList(z, [0]);  z = None
-            add_1: "f32[3]" = torch.ops.aten.add.Tensor(add, sum_3);  add = sum_3 = None
-            return (add_1,)
-Graph signature:
-    x: USER_INPUT
-    z: USER_INPUT
-    y: USER_INPUT
-    add_1: USER_OUTPUT
-Range constraints: {u0: VR[0, int_oo]}""",
-            ignore_comments=True,
-            ignore_empty_lines=True,
-        )
-
     def test_multi_leaf_arg_with_leaf_spec_raises(self):
-        """Multi-leaf arg (e.g. ``list[Tensor]``) with a leaf spec
-        (``TensorSpec``) is structurally incompatible.
-        """
-
         class M(torch.nn.Module):
             def forward(self, xs):
                 return xs[0] + xs[1]
@@ -335,17 +297,11 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 M(),
                 args=([torch.randn(8, 3), torch.randn(8, 3)],),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec({"xs": TensorSpec([ShapeVar("B"), None])})
-                ),
+                dynamic_shapes=ParamsSpec({"xs": TensorSpec([ShapeVar("B"), STATIC])}),
                 strict=True,
             )
 
     def test_multi_leaf_arg_no_spec_stays_static(self):
-        """No spec entry for a multi-leaf arg → all flat slots stay static
-        (per 'anything not expressible in ParamsSpec is static').
-        """
-
         class M(torch.nn.Module):
             def forward(self, xs):
                 return xs[0] + xs[1]
@@ -364,9 +320,6 @@ Range constraints: {u0: VR[0, int_oo]}""",
         self.assertEqual(out.shape, torch.Size([8, 3]))
 
     def test_spec_entry_for_omitted_default_raises(self):
-        """A spec entry for a defaulted param the caller omits matches no
-        passed argument, so it raises rather than being silently ignored."""
-
         class M(torch.nn.Module):
             def forward(self, x, y=None):
                 if y is None:
@@ -380,13 +333,11 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 M(),
                 args=(torch.randn(8, 3),),  # y not passed
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec(
-                        {
-                            "x": TensorSpec([ShapeVar("B"), None]),
-                            "y": TensorSpec([ShapeVar("Y"), None]),  # no such arg
-                        }
-                    )
+                dynamic_shapes=ParamsSpec(
+                    {
+                        "x": TensorSpec([ShapeVar("B"), STATIC]),
+                        "y": TensorSpec([ShapeVar("Y"), STATIC]),  # no such arg
+                    }
                 ),
                 strict=True,
             )
@@ -408,7 +359,6 @@ Range constraints: {u0: VR[0, int_oo]}""",
         self.assertEqual(tuple(shape), (8, 3))
 
     def test_non_strict_raises_not_implemented(self):
-        """Non-strict export does not yet support ShapesSpec/ParamsSpec."""
         with self.assertRaisesRegex(
             NotImplementedError,
             r"ShapesSpec/ParamsSpec in dynamic_shapes is not yet supported "
@@ -417,8 +367,8 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 _ModX(),
                 (torch.randn(8, 3),),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
+                dynamic_shapes=ParamsSpec(
+                    {"x": TensorSpec([ShapeVar("batch"), STATIC])}
                 ),
                 strict=False,
             )
@@ -439,9 +389,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep_new = export(
             M(),
             (torch.randn(8, 3),),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec([ShapeVar("B"), None])})
-            ),
+            dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("B"), STATIC])}),
             strict=True,
         )
 
@@ -512,8 +460,8 @@ Range constraints: {u0: VR[0, int_oo]}""",
             kwargs={"y": torch.randn(5, 3)},
             dynamic_shapes=ParamsSpec(
                 {
-                    "x": TensorSpec([ShapeVar("X"), None]),
-                    "y": TensorSpec([ShapeVar("Y"), None]),
+                    "x": TensorSpec([ShapeVar("X"), STATIC]),
+                    "y": TensorSpec([ShapeVar("Y"), STATIC]),
                 }
             ),
             strict=True,
@@ -572,7 +520,6 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
             ep.module()(torch.randn(20, 3), y=torch.randn(99, 3))
 
     def test_legacy_parity_default_kwarg_omitted(self):
-        """Parity: optional kwarg `y` not passed → not in graph either way."""
         from torch.export import Dim
 
         class M(torch.nn.Module):
@@ -590,9 +537,7 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
         ep_new = export(
             M(),
             args=(torch.randn(8, 3),),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec([ShapeVar("X"), None])})
-            ),
+            dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("X"), STATIC])}),
             strict=True,
         )
 
@@ -633,10 +578,6 @@ Range constraints: {u0: VR[0, int_oo]}""",
         )
 
     def test_user_varargs_in_forward_marked_dynamic_via_varargs_spec(self):
-        """User's `def forward(*args)` with ``ParamsSpec({"*args": [...]})`` —
-        each varargs position can be marked dynamic independently. This
-        exercises the translator's user-`_varargs` plumbing."""
-
         class M(torch.nn.Module):
             def forward(self, *args):
                 return args[0].sum() + args[1].sum()
@@ -644,15 +585,13 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             M(),
             args=(torch.randn(8, 3), torch.randn(5, 3)),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "*args": [
-                            TensorSpec([ShapeVar("A"), None]),
-                            TensorSpec([ShapeVar("B"), None]),
-                        ]
-                    }
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "*args": [
+                        TensorSpec([ShapeVar("A"), STATIC]),
+                        TensorSpec([ShapeVar("B"), STATIC]),
+                    ]
+                }
             ),
             strict=True,
         )
@@ -663,9 +602,6 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep.module()(torch.randn(20, 3), torch.randn(99, 3))
 
     def test_user_varargs_with_named_arg_before(self):
-        """Mixed: `def forward(self, x, *args)` — `x` named, the rest
-        captured by `*args`. User passes spec for both."""
-
         class M(torch.nn.Module):
             def forward(self, x, *args):
                 return x.sum() + args[0].sum() + args[1].sum()
@@ -673,16 +609,14 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             M(),
             args=(torch.randn(4, 3), torch.randn(8, 3), torch.randn(5, 3)),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "x": TensorSpec([ShapeVar("X"), None]),
-                        "*args": [
-                            TensorSpec([ShapeVar("A"), None]),
-                            TensorSpec([ShapeVar("B"), None]),
-                        ],
-                    },
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "x": TensorSpec([ShapeVar("X"), STATIC]),
+                    "*args": [
+                        TensorSpec([ShapeVar("A"), STATIC]),
+                        TensorSpec([ShapeVar("B"), STATIC]),
+                    ],
+                },
             ),
             strict=True,
         )
@@ -693,10 +627,6 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep.module()(torch.randn(7, 3), torch.randn(20, 3), torch.randn(99, 3))
 
     def test_user_varargs_partial_spec_leaves_remainder_static(self):
-        """User specifies only the first ``*args`` slot; remaining slots
-        stay static (per "anything not expressible in ParamsSpec is
-        static")."""
-
         class M(torch.nn.Module):
             def forward(self, *args):
                 return args[0].sum() + args[1].sum() + args[2].sum()
@@ -704,14 +634,12 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             M(),
             args=(torch.randn(8, 3), torch.randn(5, 3), torch.randn(6, 3)),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "*args": [
-                            TensorSpec([ShapeVar("A"), None]),
-                        ]
-                    }
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "*args": [
+                        TensorSpec([ShapeVar("A"), STATIC]),
+                    ]
+                }
             ),
             strict=True,
         )
@@ -722,10 +650,6 @@ Range constraints: {u0: VR[0, int_oo]}""",
         self.assertIn('args_2: "f32[6, 3]"', ep_str)
 
     def test_user_varkw_in_forward_marked_dynamic_via_varkw_spec(self):
-        """When ``forward`` accepts ``**kwargs``, a kwarg can be marked
-        dynamic by putting it under the reserved ``"**kwargs"`` key, e.g.
-        ``ParamsSpec({"**kwargs": {"foo": TensorSpec(...)}})``."""
-
         class M(torch.nn.Module):
             def forward(self, **kwargs):
                 return kwargs["foo"].sum() + kwargs["bar"].sum()
@@ -734,15 +658,13 @@ Range constraints: {u0: VR[0, int_oo]}""",
             M(),
             args=(),
             kwargs={"foo": torch.randn(8, 3), "bar": torch.randn(5, 3)},
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "**kwargs": {
-                            "foo": TensorSpec([ShapeVar("F"), None]),
-                            "bar": TensorSpec([ShapeVar("B"), None]),
-                        }
+            dynamic_shapes=ParamsSpec(
+                {
+                    "**kwargs": {
+                        "foo": TensorSpec([ShapeVar("F"), STATIC]),
+                        "bar": TensorSpec([ShapeVar("B"), STATIC]),
                     }
-                )
+                }
             ),
             strict=True,
         )
@@ -763,8 +685,8 @@ Range constraints: {u0: VR[0, int_oo]}""",
             export(
                 _ModX(),
                 (torch.randn(8, 3),),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
+                dynamic_shapes=ParamsSpec(
+                    {"x": TensorSpec([ShapeVar("batch"), STATIC])}
                 ),
                 strict=True,
                 prefer_deferred_runtime_asserts_over_guards=True,
@@ -788,13 +710,11 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             M(),
             (torch.randn(4, 3), torch.randn(8, 5)),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "x": TensorSpec([B, STATIC]),
-                        "y": TensorSpec([B * 2, STATIC]),
-                    }
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "x": TensorSpec([B, STATIC]),
+                    "y": TensorSpec([B * 2, STATIC]),
+                }
             ),
             strict=True,
         )
@@ -810,8 +730,6 @@ Range constraints: {u0: VR[0, int_oo]}""",
             ep.module()(torch.randn(4, 3), torch.randn(7, 5))
 
     def test_multi_var_derived_runtime_enforced(self):
-        """Composite derived dim ``z dim0 = A * B + 1`` is enforced at
-        runtime: correct input runs, violating input raises."""
         A = ShapeVar("a")
         B = ShapeVar("b")
 
@@ -822,14 +740,12 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             M(),
             (torch.randn(3, 2), torch.randn(4, 2), torch.randn(13, 2)),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "x": TensorSpec([A, STATIC]),
-                        "y": TensorSpec([B, STATIC]),
-                        "z": TensorSpec([A * B + 1, STATIC]),
-                    }
-                )
+            dynamic_shapes=ParamsSpec(
+                {
+                    "x": TensorSpec([A, STATIC]),
+                    "y": TensorSpec([B, STATIC]),
+                    "z": TensorSpec([A * B + 1, STATIC]),
+                }
             ),
             strict=True,
         )
@@ -841,8 +757,6 @@ Range constraints: {u0: VR[0, int_oo]}""",
             ep.module()(torch.randn(3, 2), torch.randn(4, 2), torch.randn(99, 2))
 
     def test_assumption_runtime_enforced(self):
-        """Relational assumption ``A > B`` is enforced at runtime: correct
-        input (``a > b``) runs, violating input (``a <= b``) raises"""
         A = ShapeVar("a")
         B = ShapeVar("b")
 
@@ -876,15 +790,11 @@ Range constraints: {u0: VR[0, int_oo]}""",
             ep.module()(torch.randn(2, 2), torch.randn(3, 2))
 
     def test_min_max_in_range_constraints(self):
-        """``ShapeVar(min=10, max=100)`` propagates to ``ep.range_constraints``
-        via the inline-constraints channel."""
         ep = export(
             _ModX(),
             (torch.randn(20, 3),),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {"x": TensorSpec([ShapeVar("b", min=10, max=100), None])}
-                )
+            dynamic_shapes=ParamsSpec(
+                {"x": TensorSpec([ShapeVar("b", min=10, max=100), STATIC])}
             ),
             strict=True,
         )
@@ -906,13 +816,9 @@ class TestExportDynamicSpecInternalAPIs(TestCase):
         _reset_uid_counter()
 
     def _spec(self):
-        return ShapesSpec(
-            params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
-        )
+        return ParamsSpec({"x": TensorSpec([ShapeVar("batch"), STATIC])})
 
     def test_export_to_torch_ir_shapes_spec_direct(self):
-        """`_export_to_torch_ir` accepts a ShapesSpec (new tracer) and produces
-        a torch-IR GraphModule whose user placeholder has an unbacked dim."""
         gm = _export_to_torch_ir(
             _ModX(), (torch.randn(8, 3),), {}, dynamic_shapes=self._spec()
         )
@@ -933,8 +839,6 @@ class GraphModule(torch.nn.Module):
         )
 
     def test_export_to_torch_ir_legacy_v1_shapes_spec_raises(self):
-        """The legacy v1 dynamo.export path (use_new_tracer_experimental=False)
-        does not support ShapesSpec and must raise NotImplementedError."""
         with mock.patch.object(
             torch._export.config, "use_new_tracer_experimental", False
         ):
@@ -947,8 +851,6 @@ class GraphModule(torch.nn.Module):
                 )
 
     def test_strict_export_shapes_spec_direct(self):
-        """`_strict_export` in isolation produces an aten artifact whose graph
-        carries the unbacked-input runtime assert."""
         args = (torch.randn(8, 3),)
         _, in_spec = pytree.tree_flatten((args, {}))
         artifact = _strict_export(
@@ -976,7 +878,6 @@ class <lambda>(torch.nn.Module):
         )
 
     def test_non_strict_export_shapes_spec_raises_direct(self):
-        """`_non_strict_export` rejects ShapesSpec up front."""
         args = (torch.randn(8, 3),)
         _, in_spec = pytree.tree_flatten((args, {}))
         with self.assertRaisesRegex(

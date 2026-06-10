@@ -276,9 +276,9 @@ class TensorSpec:
     Example::
 
         B = ShapeVar("batch")
-        TensorSpec([B, None])  # rank 2, dim 0 dynamic
+        TensorSpec([B, STATIC])  # rank 2, dim 0 dynamic
         TensorSpec([B, 10])  # rank 2, dim 0 dynamic, dim 1 static=10
-        TensorSpec([B * 2 + 1, None])  # rank 2, dim 0 derived from B
+        TensorSpec([B * 2 + 1, STATIC])  # rank 2, dim 0 derived from B
     """
 
     def __init__(self, dims: Sequence[LeafIntSpec]) -> None:
@@ -328,7 +328,7 @@ class ObjectSpec:
 
     Example::
 
-        ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})
+        ObjectSpec({"weight": TensorSpec([ShapeVar("h"), STATIC])})
         ObjectSpec({"inner": ObjectSpec({"weight": TensorSpec([ShapeVar("h")])})})
     """
 
@@ -380,9 +380,9 @@ class DictSpec:
 
     Example::
 
-        DictSpec({"x": TensorSpec([ShapeVar("h"), None])})
+        DictSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
         DictSpec({"config": DictSpec({"batch": IntVar()})})
-        DictSpec({0: TensorSpec([ShapeVar("h"), None])})
+        DictSpec({0: TensorSpec([ShapeVar("h"), STATIC])})
     """
 
     def __init__(
