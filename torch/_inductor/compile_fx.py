@@ -1246,6 +1246,195 @@ class FxCompile(ABC):
         cls._compile_stats.clear()
 
 
+def _codegen_aot(graph: GraphLowering, const_graph: GraphLowering | None) -> Any:
+    compiled_artifact: Any
+    if graph.fx_wrapper:
+        assert not graph.cpp_wrapper
+        compiled_artifact = graph.codegen()[0].gm  # type: ignore[attr-defined]
+        output_code_log.debug(
+            "Output graph module: \n%s",
+            compiled_artifact.print_readable(print_output=False),
+        )
+    else:
+        from .codecache import AotCodeCompiler
+
+        assert graph.cpp_wrapper, "AOT mode only supports C++ wrapper"
+        wrapper_code, kernel_code = graph.codegen_with_cpp_wrapper()
+        output_code_log.debug("Output wrapper code: \n%s", wrapper_code.value)
+        if kernel_code.value:
+            output_code_log.debug("Output kernel code:\n%s", kernel_code.value)
+
+        serialized_extern_kernel_nodes = None
+        if V.extern_kernel_nodes:
+            serialized_extern_kernel_nodes = graph.extern_node_serializer(
+                V.extern_kernel_nodes
+            )
+            output_code_log.debug(
+                "Serialized Extern Kernel Nodes: \n%s",
+                serialized_extern_kernel_nodes,
+            )
+
+        additional_files = graph.wrapper_code.additional_files
+        if const_graph is not None:
+            additional_files = (
+                additional_files + const_graph.wrapper_code.additional_files
+            )
+
+        with dynamo_timed("AotCodeCompiler.compile", log_pt2_compile_event=True):
+            compiled_artifact = AotCodeCompiler.compile(
+                graph,
+                wrapper_code.value,
+                kernel_code.value,
+                serialized_extern_kernel_nodes,
+                device_type=graph.device_type,
+                additional_files=[*dict.fromkeys(additional_files)],
+            )
+
+    assert isinstance(
+        compiled_artifact,
+        (str, list, torch.fx.GraphModule),
+    ), type(compiled_artifact)
+    return compiled_artifact
+
+
+def _codegen_jit(graph: GraphLowering) -> tuple[Any, Any | None]:
+    compiled_module = graph.compile_to_module()
+    return compiled_module.call, getattr(compiled_module, "runner", None)
+
+
+def _finalize_common_codegen(
+    graph: GraphLowering,
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    cudagraphs: BoxedBool,
+) -> tuple[str | None, str | None]:
+    # Dump provenance artifacts for debugging trace
+    inductor_provenance_tracking_node_mappings = None
+    inductor_kernel_stack_trace_str = None
+    if config.trace.provenance_tracking_level != 0:
+        inductor_provenance_tracking_node_mappings = json.dumps(
+            torch._inductor.debug.dump_inductor_provenance_info()
+        )
+        inductor_kernel_stack_trace_str = json.dumps(
+            torch._inductor.debug._inductor_kernel_stack_trace
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_node_mappings",
+                "encoding": "json",
+            },
+            payload_fn=lambda: inductor_provenance_tracking_node_mappings,
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_kernel_stack_traces",
+                "encoding": "json",
+            },
+            payload_fn=lambda: inductor_kernel_stack_trace_str,
+        )
+        if inductor_kernel_stack_trace_str:
+            metrics_context = get_metrics_context()
+            if metrics_context.in_progress():
+                metrics_context.add_to_set(
+                    "inductor_provenance",
+                    inductor_kernel_stack_trace_str,
+                )
+
+    node_runtimes = None
+    if inductor_metrics_log.isEnabledFor(logging.INFO):
+        num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
+        # pyrefly: ignore [bad-assignment]
+        metrics.num_bytes_accessed += num_bytes
+        metrics.node_runtimes += node_runtimes
+        metrics.nodes_num_elem += nodes_num_elem
+        inductor_metrics_log.info(
+            "Graph Metrics:\n%s",
+            {
+                "num_bytes_accessed": num_bytes,
+                "nodes_num_elem": nodes_num_elem,
+                "node_runtimes": node_runtimes,
+            },
+        )
+
+    # Collect and dump op runtimes and tensor metadata for TLParse
+    if config.log_tlparse:
+        _, _, node_runtimes = graph.count_bytes()
+        torch._inductor.debug.log_runtime_and_tensor_meta(node_runtimes)
+
+    # Collect and dump collective-op schedule for external diagnostics
+    torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
+
+    _maybe_disable_cudagraphs_for_codegen(graph, gm, example_inputs, cudagraphs)
+    return (
+        inductor_provenance_tracking_node_mappings,
+        inductor_kernel_stack_trace_str,
+    )
+
+
+def _maybe_disable_cudagraphs_for_codegen(
+    graph: GraphLowering,
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    cudagraphs: BoxedBool,
+) -> None:
+    # When graph_partition is enabled, skip this check - partitioning handles dynamic shapes
+    if (
+        cudagraphs
+        and config.triton.cudagraph_skip_dynamic_graphs
+        and not config.graph_partition
+        and not graph.disable_cudagraphs_reason
+        and torch._inductor.utils.any_is_symbolic(*example_inputs)
+    ):
+        stack_trace = None
+        for node in gm.graph.nodes:
+            meta_val = node.meta.get("val", None)
+            if (
+                node.op == "placeholder"
+                or not isinstance(meta_val, torch.Tensor)
+                or not torch._inductor.utils.any_is_symbolic(meta_val)
+            ):
+                continue
+
+            if stack_trace := node.meta.get("stack_trace", None):
+                break
+        disable = (
+            "graph with symbolic shapes inputs and "
+            "config.triton.cudagraph_skip_dynamic_graphs=True."
+        )
+        if stack_trace:
+            disable = f"{disable} Found from {stack_trace}\n"
+        else:
+            disable = f"{disable}\n"
+        graph.disable_cudagraphs_reason = disable
+
+    # When graph_partition is enabled, skip this check - partitioning handles incompatible ops
+    if (
+        cudagraphs
+        and not config.graph_partition
+        and not graph.disable_cudagraphs_reason
+    ):
+        maybe_incompat_node = get_first_incompatible_cudagraph_node(gm)
+        if maybe_incompat_node:
+            disable = (
+                f"disabling cudagraphs due to incompatible op "
+                f"{maybe_incompat_node.target}"
+            )
+            if stack_trace := maybe_incompat_node.meta.get("stack_trace", None):
+                disable = f"{disable} Found from {stack_trace}\n"
+            graph.disable_cudagraphs_reason = disable
+
+
+def _finalize_jit_codegen(graph: GraphLowering, cudagraphs: BoxedBool) -> None:
+    if cudagraphs and not graph.disable_cudagraphs_reason:
+        from torch._inductor.cudagraph_utils import check_lowering_disable_cudagraph
+
+        graph.disable_cudagraphs_reason = check_lowering_disable_cudagraph(
+            graph.device_node_mapping
+        )
+
+
 class _InProcessFxCompile(FxCompile):
     @override
     def codegen_and_compile(
@@ -1541,206 +1730,28 @@ class _InProcessFxCompile(FxCompile):
 
                     _check_triton_bf16_support(graph)
 
-                    # TODO: The switching between AOT mode and not here is a bit
-                    # messy, but it's localized to the block of code below so I'm
-                    # not going to touch it for now
+                    if graph.aot_mode:
+                        with dynamo_timed(
+                            "GraphLowering.compile_to_fn", log_pt2_compile_event=True
+                        ):
+                            compiled_aot_artifact = _codegen_aot(graph, const_graph)
 
-                    compiled_fn: Any
-                    compiled_fn_runner = None
+                        _finalize_common_codegen(graph, gm, example_inputs, cudagraphs)
+                        return CompiledAOTI(
+                            filename=compiled_aot_artifact,
+                            device_type=graph.device_type,
+                        )
+
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
-                        if graph.aot_mode and graph.fx_wrapper:
-                            assert not graph.cpp_wrapper
-                            compiled_fn = graph.codegen()[0].gm  # type: ignore[attr-defined]
-                            output_code_log.debug(
-                                "Output graph module: \n%s",
-                                compiled_fn.print_readable(print_output=False),
-                            )
+                        compiled_fn, compiled_fn_runner = _codegen_jit(graph)
 
-                        elif graph.aot_mode:
-                            from .codecache import AotCodeCompiler
-
-                            assert graph.cpp_wrapper, (
-                                "AOT mode only supports C++ wrapper"
-                            )
-                            wrapper_code, kernel_code = graph.codegen_with_cpp_wrapper()
-                            output_code_log.debug(
-                                "Output wrapper code: \n%s", wrapper_code.value
-                            )
-                            if kernel_code.value:
-                                output_code_log.debug(
-                                    "Output kernel code:\n%s", kernel_code.value
-                                )
-
-                            serialized_extern_kernel_nodes = None
-                            if V.extern_kernel_nodes:
-                                serialized_extern_kernel_nodes = (
-                                    graph.extern_node_serializer(V.extern_kernel_nodes)
-                                )
-                                output_code_log.debug(
-                                    "Serialized Extern Kernel Nodes: \n%s",
-                                    serialized_extern_kernel_nodes,
-                                )
-
-                            with dynamo_timed(
-                                "AotCodeCompiler.compile", log_pt2_compile_event=True
-                            ):
-                                # Directly return the file path with the compiled code
-                                compiled_fn = AotCodeCompiler.compile(
-                                    graph,
-                                    wrapper_code.value,
-                                    kernel_code.value,
-                                    serialized_extern_kernel_nodes,
-                                    device_type=graph.device_type,
-                                    additional_files=[
-                                        *dict.fromkeys(
-                                            graph.wrapper_code.additional_files
-                                            + (
-                                                const_graph.wrapper_code.additional_files
-                                                if const_graph
-                                                else []
-                                            )
-                                        )
-                                    ],
-                                )
-                        else:
-                            compiled_module = graph.compile_to_module()
-                            compiled_fn = compiled_module.call
-                            compiled_fn_runner = getattr(
-                                compiled_module, "runner", None
-                            )
-
-                    # Dump provenance artifacts for debugging trace
-                    inductor_provenance_tracking_node_mappings = None
-                    inductor_kernel_stack_trace_str = None
-                    if config.trace.provenance_tracking_level != 0:
-                        inductor_provenance_tracking_node_mappings = json.dumps(
-                            torch._inductor.debug.dump_inductor_provenance_info()
-                        )
-                        inductor_kernel_stack_trace_str = json.dumps(
-                            torch._inductor.debug._inductor_kernel_stack_trace
-                        )
-                        trace_structured(
-                            "artifact",
-                            metadata_fn=lambda: {
-                                "name": "inductor_provenance_tracking_node_mappings",
-                                "encoding": "json",
-                            },
-                            payload_fn=lambda: inductor_provenance_tracking_node_mappings,
-                        )
-                        trace_structured(
-                            "artifact",
-                            metadata_fn=lambda: {
-                                "name": "inductor_provenance_tracking_kernel_stack_traces",
-                                "encoding": "json",
-                            },
-                            payload_fn=lambda: inductor_kernel_stack_trace_str,
-                        )
-                        if inductor_kernel_stack_trace_str:
-                            metrics_context = get_metrics_context()
-                            if metrics_context.in_progress():
-                                metrics_context.add_to_set(
-                                    "inductor_provenance",
-                                    inductor_kernel_stack_trace_str,
-                                )
-
-                    node_runtimes = None
-                    if inductor_metrics_log.isEnabledFor(logging.INFO):
-                        num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
-                        # pyrefly: ignore [bad-assignment]
-                        metrics.num_bytes_accessed += num_bytes
-                        metrics.node_runtimes += node_runtimes
-                        metrics.nodes_num_elem += nodes_num_elem
-                        inductor_metrics_log.info(
-                            "Graph Metrics:\n%s",
-                            {
-                                "num_bytes_accessed": num_bytes,
-                                "nodes_num_elem": nodes_num_elem,
-                                "node_runtimes": node_runtimes,
-                            },
-                        )
-
-                    # Collect and dump op runtimes and tensor metadata for TLParse
-                    if config.log_tlparse:
-                        _, _, node_runtimes = graph.count_bytes()
-                        torch._inductor.debug.log_runtime_and_tensor_meta(node_runtimes)
-
-                    # Collect and dump collective-op schedule for external diagnostics
-                    torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
-
-                    # When graph_partition is enabled, skip this check - partitioning handles dynamic shapes
-                    if (
-                        cudagraphs
-                        and config.triton.cudagraph_skip_dynamic_graphs
-                        and not config.graph_partition
-                        and not V.graph.disable_cudagraphs_reason
-                        and torch._inductor.utils.any_is_symbolic(*example_inputs)
-                    ):
-                        stack_trace = None
-                        for node in gm.graph.nodes:
-                            meta_val = node.meta.get("val", None)
-                            if (
-                                node.op == "placeholder"
-                                or not isinstance(meta_val, torch.Tensor)
-                                or not torch._inductor.utils.any_is_symbolic(meta_val)
-                            ):
-                                continue
-
-                            if stack_trace := node.meta.get("stack_trace", None):
-                                break
-                        disable = "graph with symbolic shapes inputs and config.triton.cudagraph_skip_dynamic_graphs=True."
-                        if stack_trace:
-                            disable = f"{disable} Found from {stack_trace}\n"
-                        else:
-                            disable = f"{disable}\n"
-                        # pyrefly: ignore [unbound-name]
-                        V.graph.disable_cudagraphs_reason = disable
-
-                    # pyrefly: ignore [unbound-name]
-                    # When graph_partition is enabled, skip this check - partitioning handles incompatible ops
-                    if (
-                        cudagraphs
-                        # pyrefly: ignore [unbound-name]
-                        and not config.graph_partition
-                        # pyrefly: ignore [unbound-name]
-                        and not V.graph.disable_cudagraphs_reason
-                    ):
-                        maybe_incompat_node = get_first_incompatible_cudagraph_node(gm)
-                        if maybe_incompat_node:
-                            disable = f"disabling cudagraphs due to incompatible op {maybe_incompat_node.target}"
-                            if stack_trace := maybe_incompat_node.meta.get(
-                                "stack_trace", None
-                            ):
-                                disable = f"{disable} Found from {stack_trace}\n"
-                            # pyrefly: ignore [unbound-name]
-                            V.graph.disable_cudagraphs_reason = disable
-
-                    # pyrefly: ignore [unbound-name]
-                    if V.aot_compilation:
-                        assert isinstance(
-                            compiled_fn,
-                            # pyrefly: ignore [unbound-name]
-                            (str, list, torch.fx.GraphModule),
-                        ), type(compiled_fn)
-                        return CompiledAOTI(
-                            filename=compiled_fn, device_type=graph.device_type
-                        )
-
-                    # TODO: Hoist this above V.aot_compilation
-                    # pyrefly: ignore [unbound-name]
-                    if cudagraphs and not V.graph.disable_cudagraphs_reason:
-                        from torch._inductor.cudagraph_utils import (
-                            check_lowering_disable_cudagraph,
-                        )
-
-                        # pyrefly: ignore [unbound-name]
-                        V.graph.disable_cudagraphs_reason = (
-                            check_lowering_disable_cudagraph(
-                                # pyrefly: ignore [unbound-name]
-                                V.graph.device_node_mapping
-                            )
-                        )
+                    (
+                        inductor_provenance_tracking_node_mappings,
+                        inductor_kernel_stack_trace_str,
+                    ) = _finalize_common_codegen(graph, gm, example_inputs, cudagraphs)
+                    _finalize_jit_codegen(graph, cudagraphs)
 
                     if (
                         cudagraphs
@@ -1774,8 +1785,7 @@ class _InProcessFxCompile(FxCompile):
                         graph,
                         gm,
                         output_strides,
-                        # pyrefly: ignore [unbound-name]
-                        V.graph.disable_cudagraphs_reason,
+                        graph.disable_cudagraphs_reason,
                         metrics_helper.get_deltas(),
                         counters["inductor"] - inductor_counters,
                         cudagraphs,
