@@ -86,7 +86,7 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
     Tensor mask = _triu_mask(std::move(num_elements), r, with_replacement, self.options());
     indices = at::nonzero_static_symint(mask, num_combinations);
   }
-  return self.index({indices});
+  return self.index({indices}).contiguous();
 }
 
 }  // namespace at::native
