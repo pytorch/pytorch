@@ -262,6 +262,7 @@ struct GuardLastSuccessStats {
   std::atomic<uint64_t> actual_miss{0};
   std::atomic<uint64_t> actual_enable{0};
   std::atomic<uint64_t> actual_disabled{0};
+  std::atomic<uint64_t> actual_hot_token_count_sum{0};
   std::atomic<uint64_t> actual_token_check_ns{0};
   std::atomic<uint64_t> actual_train_ns{0};
   std::atomic<uint64_t> actual_partial_attempt{0};
@@ -270,6 +271,7 @@ struct GuardLastSuccessStats {
   std::atomic<uint64_t> actual_partial_enable{0};
   std::atomic<uint64_t> actual_partial_disabled{0};
   std::atomic<uint64_t> actual_partial_residual_fail{0};
+  std::atomic<uint64_t> actual_partial_hot_token_count_sum{0};
   std::atomic<uint64_t> actual_partial_token_check_ns{0};
   std::atomic<uint64_t> actual_partial_residual_ns{0};
   std::atomic<uint64_t> actual_partial_train_ns{0};
@@ -553,7 +555,10 @@ static bool guard_subtree_probe_detail_enabled() {
 bool unsafe_mock_guard_bypass_enabled() {
   static const bool env_enabled =
       c10::utils::check_env("TORCHDYNAMO_UNSAFE_MOCK_GUARD_BYPASS") == true;
-  return C10_UNLIKELY(env_enabled);
+  // This bypass is an unsafe measurement aid. Keep it tied to the guard lookup
+  // stats path so accidentally exporting the env var does not skip guards in a
+  // normal performance run.
+  return C10_UNLIKELY(env_enabled) && C10_UNLIKELY(guard_lookup_stats_enabled());
 }
 
 static bool guard_fast_plan_enabled() {
@@ -673,6 +678,7 @@ void reset_guard_lookup_stats() {
   store_zero(last_success_stats.actual_miss);
   store_zero(last_success_stats.actual_enable);
   store_zero(last_success_stats.actual_disabled);
+  store_zero(last_success_stats.actual_hot_token_count_sum);
   store_zero(last_success_stats.actual_token_check_ns);
   store_zero(last_success_stats.actual_train_ns);
   store_zero(last_success_stats.actual_partial_attempt);
@@ -681,6 +687,7 @@ void reset_guard_lookup_stats() {
   store_zero(last_success_stats.actual_partial_enable);
   store_zero(last_success_stats.actual_partial_disabled);
   store_zero(last_success_stats.actual_partial_residual_fail);
+  store_zero(last_success_stats.actual_partial_hot_token_count_sum);
   store_zero(last_success_stats.actual_partial_token_check_ns);
   store_zero(last_success_stats.actual_partial_residual_ns);
   store_zero(last_success_stats.actual_partial_train_ns);
@@ -945,6 +952,8 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(last_success_stats.actual_enable);
   result["guard_last_success_actual_disabled"] =
       load_relaxed(last_success_stats.actual_disabled);
+  result["guard_last_success_actual_hot_token_count_sum"] =
+      load_relaxed(last_success_stats.actual_hot_token_count_sum);
   result["guard_last_success_actual_token_check_ns"] =
       load_relaxed(last_success_stats.actual_token_check_ns);
   result["guard_last_success_actual_train_ns"] =
@@ -961,6 +970,8 @@ py::dict get_guard_lookup_stats() {
       load_relaxed(last_success_stats.actual_partial_disabled);
   result["guard_last_success_actual_partial_residual_fail"] =
       load_relaxed(last_success_stats.actual_partial_residual_fail);
+  result["guard_last_success_actual_partial_hot_token_count_sum"] =
+      load_relaxed(last_success_stats.actual_partial_hot_token_count_sum);
   result["guard_last_success_actual_partial_token_check_ns"] =
       load_relaxed(last_success_stats.actual_partial_token_check_ns);
   result["guard_last_success_actual_partial_residual_ns"] =
@@ -1691,6 +1702,14 @@ static void record_guard_last_success_actual_disabled() {
   add_relaxed(guard_last_success_stats().actual_disabled, 1);
 }
 
+static void record_guard_last_success_actual_hot_tokens(size_t token_count) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(
+      guard_last_success_stats().actual_hot_token_count_sum, token_count);
+}
+
 static void record_guard_last_success_actual_train(uint64_t train_ns) {
   if (!guard_lookup_stats_enabled()) {
     return;
@@ -1739,6 +1758,16 @@ static void record_guard_last_success_actual_partial_disabled() {
     return;
   }
   add_relaxed(guard_last_success_stats().actual_partial_disabled, 1);
+}
+
+static void record_guard_last_success_actual_partial_hot_tokens(
+    size_t token_count) {
+  if (!guard_lookup_stats_enabled()) {
+    return;
+  }
+  add_relaxed(
+      guard_last_success_stats().actual_partial_hot_token_count_sum,
+      token_count);
 }
 
 static void record_guard_last_success_actual_partial_residual_fail(
@@ -2814,6 +2843,9 @@ struct GuardSubtreeEntryToken {
     for (auto i : c10::irange(expected_sizes.size())) {
       const auto& expected_size = expected_sizes[i];
       if (expected_size.has_value()) {
+        // Dynamic dimensions are represented as nullopt by TensorCheck and are
+        // deliberately not tokenized. Fast-path tensor tokens must not make a
+        // dynamic dimension more static than the original guard.
         token->tensor_size_indices.push_back(static_cast<int64_t>(i));
         token->tensor_size_values.push_back(expected_size.value());
       }
@@ -2825,6 +2857,8 @@ struct GuardSubtreeEntryToken {
     for (auto i : c10::irange(expected_strides.size())) {
       const auto& expected_stride = expected_strides[i];
       if (expected_stride.has_value()) {
+        // Same rule as sizes: only original static stride guards become token
+        // checks; dynamic stride entries stay unchecked here.
         token->tensor_stride_indices.push_back(static_cast<int64_t>(i));
         token->tensor_stride_values.push_back(expected_stride.value());
       }
@@ -3091,6 +3125,34 @@ static bool guard_subtree_token_vectors_match(
   return true;
 }
 
+static bool guard_subtree_hot_token_needed(
+    const GuardSubtreeEntryToken& token,
+    size_t index) {
+  if (index == 0) {
+    return true;
+  }
+  if (token.kind == GuardSubtreeProbeTokenKind::ObjectOnly ||
+      token.kind == GuardSubtreeProbeTokenKind::BoundMethod) {
+    // Parent container tokens prove reachability for these tokens. The hot
+    // matcher already skips them, so keeping them only adds runtime loop
+    // overhead. Stability is still proven with the full uncompressed receipt.
+    return false;
+  }
+  return true;
+}
+
+static std::vector<GuardSubtreeEntryToken> guard_subtree_make_hot_tokens(
+    const std::vector<GuardSubtreeEntryToken>& tokens) {
+  std::vector<GuardSubtreeEntryToken> hot_tokens;
+  hot_tokens.reserve(tokens.size());
+  for (size_t i = 0; i < tokens.size(); ++i) {
+    if (guard_subtree_hot_token_needed(tokens[i], i)) {
+      hot_tokens.push_back(tokens[i]);
+    }
+  }
+  return hot_tokens;
+}
+
 static bool guard_subtree_token_vectors_match(
     const std::vector<GuardSubtreeEntryToken>& lhs,
     const std::vector<GuardSubtreeEntryToken>& rhs,
@@ -3181,6 +3243,7 @@ struct GuardLastSuccessReceipt {
     actual_requires_self = false;
     actual_self_object = nullptr;
     actual_self_type = nullptr;
+    actual_stability_tokens.clear();
     actual_tokens.clear();
   }
 
@@ -3192,6 +3255,7 @@ struct GuardLastSuccessReceipt {
     actual_partial_disabled = false;
     actual_partial_self_object = nullptr;
     actual_partial_self_type = nullptr;
+    actual_partial_stability_tokens.clear();
     actual_partial_tokens.clear();
   }
 
@@ -3273,6 +3337,11 @@ struct GuardLastSuccessReceipt {
   bool actual_requires_self{false};
   PyObject* actual_self_object{nullptr};
   PyTypeObject* actual_self_type{nullptr};
+  // Full token vector used only to prove consecutive slow-guard receipts are
+  // stable enough to enable the fast path.
+  std::vector<GuardSubtreeEntryToken> actual_stability_tokens;
+  // Compacted token vector used by the runtime fast path after stability is
+  // proven. This may omit tokens that are redundant for hot matching.
   std::vector<GuardSubtreeEntryToken> actual_tokens;
 
   void* actual_partial_entry_key{nullptr};
@@ -3282,6 +3351,7 @@ struct GuardLastSuccessReceipt {
   bool actual_partial_disabled{false};
   PyObject* actual_partial_self_object{nullptr};
   PyTypeObject* actual_partial_self_type{nullptr};
+  std::vector<GuardSubtreeEntryToken> actual_partial_stability_tokens;
   std::vector<GuardSubtreeEntryToken> actual_partial_tokens;
 };
 
@@ -9519,15 +9589,20 @@ bool run_root_guard_manager_with_last_success_receipt(
           actual_disabled_reason,
           actual_disabled_path);
   if (actual_supported) {
+    std::vector<GuardSubtreeEntryToken> actual_hot_tokens =
+        guard_subtree_make_hot_tokens(tokens);
+    record_guard_last_success_actual_hot_tokens(actual_hot_tokens.size());
     if (state->actual_entry_key == entry_key &&
         state->actual_root_key == root &&
-        !state->actual_tokens.empty() &&
-        guard_subtree_token_vectors_match(tokens, state->actual_tokens)) {
+        !state->actual_stability_tokens.empty() &&
+        guard_subtree_token_vectors_match(
+            tokens, state->actual_stability_tokens)) {
       state->actual_shadow_passes += 1;
     } else {
       state->actual_entry_key = entry_key;
       state->actual_root_key = root;
-      state->actual_tokens = tokens;
+      state->actual_stability_tokens = tokens;
+      state->actual_tokens = std::move(actual_hot_tokens);
       state->actual_shadow_passes = 1;
       state->actual_enabled = false;
     }
@@ -9563,15 +9638,22 @@ bool run_root_guard_manager_with_last_success_receipt(
           partial_disabled_reason,
           partial_disabled_path);
   if (actual_partial_supported) {
+    std::vector<GuardSubtreeEntryToken> partial_stability_tokens =
+        partial_tokens;
+    partial_tokens = guard_subtree_make_hot_tokens(partial_tokens);
+    record_guard_last_success_actual_partial_hot_tokens(partial_tokens.size());
     if (state->actual_partial_entry_key == entry_key &&
         state->actual_partial_root_key == root &&
-        !state->actual_partial_tokens.empty() &&
+        !state->actual_partial_stability_tokens.empty() &&
         guard_subtree_token_vectors_match(
-            partial_tokens, state->actual_partial_tokens)) {
+            partial_stability_tokens,
+            state->actual_partial_stability_tokens)) {
       state->actual_partial_shadow_passes += 1;
     } else {
       state->actual_partial_entry_key = entry_key;
       state->actual_partial_root_key = root;
+      state->actual_partial_stability_tokens =
+          std::move(partial_stability_tokens);
       state->actual_partial_tokens = std::move(partial_tokens);
       state->actual_partial_shadow_passes = 1;
       state->actual_partial_enabled = false;

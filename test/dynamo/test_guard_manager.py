@@ -1060,6 +1060,31 @@ print(json.dumps({
         self.assertGreater(stats["unsafe_mock_guard_bypass_count"], 0)
         self.assertEqual(stats["slow_guard_ns"], 0)
 
+    def test_unsafe_mock_guard_bypass_requires_stats_collection(self):
+        script = r"""
+import json
+from torch._C._dynamo import guards
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "unsafe_mock_guard_bypass_enabled": stats[
+        "unsafe_mock_guard_bypass_enabled"
+    ],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_UNSAFE_MOCK_GUARD_BYPASS"] = "1"
+        env.pop("TORCHDYNAMO_GUARD_LOOKUP_STATS", None)
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertFalse(stats["unsafe_mock_guard_bypass_enabled"])
+
     def test_guard_subtree_probe_is_off_by_default(self):
         guards.reset_guard_lookup_stats()
         stats = guards.get_guard_lookup_stats()
@@ -2354,6 +2379,204 @@ print(json.dumps({
         self.assertEqual(stats["partial_miss"], 0)
         self.assertEqual(stats["partial_disabled"], 0)
         self.assertEqual(stats["partial_residual_fail"], 0)
+
+    def test_guard_last_success_actual_hits_with_stable_global_dict(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+GLOBAL_DICT = {"used": 1}
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("bias", torch.ones(4))
+
+    def forward(self):
+        return self.bias + GLOBAL_DICT["used"]
+
+m = Mod()
+compiled = torch.compile(m, backend="eager")
+expected = m.bias + GLOBAL_DICT["used"]
+assert torch.equal(compiled(), expected)
+
+guards.reset_guard_lookup_stats()
+for _ in range(8):
+    out = compiled()
+    assert torch.equal(out, expected)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "actual_attempt": stats["guard_last_success_actual_attempt"],
+    "actual_enable": stats["guard_last_success_actual_enable"],
+    "actual_hit": stats["guard_last_success_actual_hit"],
+    "actual_miss": stats["guard_last_success_actual_miss"],
+    "actual_disabled": stats["guard_last_success_actual_disabled"],
+    "actual_hot_token_count_sum": stats[
+        "guard_last_success_actual_hot_token_count_sum"
+    ],
+    "partial_hit": stats["guard_last_success_actual_partial_hit"],
+    "disabled_reasons": stats["guard_last_success_disabled_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["actual_attempt"], 0)
+        self.assertGreater(stats["actual_enable"], 0)
+        self.assertGreater(stats["actual_hit"], 0)
+        self.assertEqual(stats["actual_miss"], 0)
+        self.assertEqual(stats["actual_disabled"], 0, stats["disabled_reasons"])
+        self.assertGreater(stats["actual_hot_token_count_sum"], 0)
+
+    def test_guard_last_success_respects_global_tensor_replacement(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+GLOBAL_TENSOR = torch.ones(4)
+
+def fn(x):
+    return x + GLOBAL_TENSOR
+
+compiled = torch.compile(fn, backend="eager")
+x = torch.zeros(4)
+assert torch.equal(compiled(x), torch.ones(4))
+
+guards.reset_guard_lookup_stats()
+for value in (2.0, 3.0, 4.0):
+    GLOBAL_TENSOR = torch.full((4,), value)
+    out = compiled(x)
+    assert torch.equal(out, torch.full((4,), value)), out
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "actual_hit": stats["guard_last_success_actual_hit"],
+    "actual_miss": stats["guard_last_success_actual_miss"],
+    "partial_hit": stats["guard_last_success_actual_partial_hit"],
+    "partial_residual_fail": stats[
+        "guard_last_success_actual_partial_residual_fail"
+    ],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreaterEqual(stats["actual_hit"], 0)
+        self.assertGreaterEqual(stats["actual_miss"], 0)
+        self.assertGreaterEqual(stats["partial_hit"], 0)
+        self.assertEqual(stats["partial_residual_fail"], 0)
+
+    def test_guard_last_success_respects_module_buffer_replacement(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("bias", torch.ones(4))
+
+    def forward(self, x):
+        return x + self.bias
+
+m = Mod()
+compiled = torch.compile(m, backend="eager")
+x = torch.zeros(4)
+assert torch.equal(compiled(x), torch.ones(4))
+
+guards.reset_guard_lookup_stats()
+for value in (2.0, 3.0, 4.0):
+    m.bias = torch.full((4,), value)
+    out = compiled(x)
+    assert torch.equal(out, torch.full((4,), value)), out
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "actual_hit": stats["guard_last_success_actual_hit"],
+    "actual_miss": stats["guard_last_success_actual_miss"],
+    "partial_hit": stats["guard_last_success_actual_partial_hit"],
+    "partial_residual_fail": stats[
+        "guard_last_success_actual_partial_residual_fail"
+    ],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreaterEqual(stats["actual_hit"], 0)
+        self.assertGreaterEqual(stats["actual_miss"], 0)
+        self.assertGreaterEqual(stats["partial_hit"], 0)
+        self.assertEqual(stats["partial_residual_fail"], 0)
+
+    def test_guard_last_success_dynamic_shape_inputs_keep_working(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+def fn(x):
+    return x.sin() + 1
+
+compiled = torch.compile(fn, backend="eager", dynamic=True)
+guards.reset_guard_lookup_stats()
+for batch in (2, 5, 3, 7):
+    x = torch.randn(batch, 4)
+    out = compiled(x)
+    expected = fn(x)
+    assert out.shape == (batch, 4)
+    assert torch.allclose(out, expected)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "actual_hit": stats["guard_last_success_actual_hit"],
+    "actual_miss": stats["guard_last_success_actual_miss"],
+    "partial_hit": stats["guard_last_success_actual_partial_hit"],
+    "tensor_miss_reasons": stats["guard_fastplan_tensor_token_miss_reasons"],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreaterEqual(stats["actual_hit"], 0)
+        self.assertGreaterEqual(stats["actual_miss"], 0)
+        self.assertGreaterEqual(stats["partial_hit"], 0)
+        self.assertIsInstance(stats["tensor_miss_reasons"], dict)
 
     def test_guard_last_success_global_dict_ignores_unrelated_version(self):
         script = r"""
