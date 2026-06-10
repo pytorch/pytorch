@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import warnings
 from types import ModuleType, SimpleNamespace
 from typing_extensions import ParamSpec
 from unittest.mock import patch
@@ -9,6 +10,7 @@ import torch._dynamo.test_case
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list, reset_code
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import CleanupHook, CleanupManager, counters
+from torch.testing._internal.common_utils import AlwaysWarnTypedStorageRemoval
 
 
 _variable = 0
@@ -278,6 +280,17 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         self.assertNotIn("__tmp_cleanup", scope)
         self.assertEqual(CleanupManager.count, cleanup_count)
 
+    def test_reset_inside_compiled_frame_preserves_resume_globals(self):
+        def fn(x):
+            torch._dynamo.reset()
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(3)
+
+        self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(opt_fn(x), x + 1)
+
     def test_explicit_skip_frame_cleans_failed_trace_globals(self):
         def fn(x):
             try:
@@ -344,6 +357,112 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(opt_fn(1), torch.ones(3) + 1)
         self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_other_torch_factory(self):
+        def fn(n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+                return torch.empty_strided((3,), (1,)) - 1
+            if torch.compiler.is_compiling():
+                return torch.empty_strided((3,), (1,)) + 1
+            return torch.empty_strided((3,), (1,)) - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        self.assertEqual(opt_fn(0).shape, (3,))
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(1).shape, (3,))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_tensor_constructor(self):
+        def fn(n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+                return torch.Tensor([1.0]) - 1
+            if torch.compiler.is_compiling():
+                return torch.Tensor([1.0]) + 1
+            return torch.Tensor([1.0]) - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        self.assertEqual(opt_fn(0), torch.zeros(1))
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(1), torch.full((1,), 2.0))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_legacy_tensor_constructor(self):
+        def fn(n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+                return torch.FloatTensor([1.0]) - 1
+            if torch.compiler.is_compiling():
+                return torch.FloatTensor([1.0]) + 1
+            return torch.FloatTensor([1.0]) - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        self.assertEqual(opt_fn(0), torch.zeros(1))
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(1), torch.full((1,), 2.0))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_direct_torch_import(self):
+        from torch import ones
+        from torch._dynamo import graph_break
+        from torch.compiler import is_compiling
+
+        def fn(n):
+            if n == 0:
+                try:
+                    graph_break()
+                finally:
+                    pass
+                return ones(3) - 1
+            if is_compiling():
+                return ones(3) + 1
+            return ones(3) - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        self.assertEqual(opt_fn(0), torch.zeros(3))
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(1), torch.ones(3) + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_ignores_storage_factory(self):
+        def fn(n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            return torch.FloatStorage(1)
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+
+        with AlwaysWarnTypedStorageRemoval(True):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.resetwarnings()
+                opt_fn(0)
+                self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
+                self.assertIn("TypedStorage is deprecated", str(w[0].message))
 
     def test_condition_dependent_skip_with_sequence_length_guard(self):
         def fn(xs):
@@ -461,6 +580,29 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x_no_grad), x_no_grad + 1)
         self.assertEqual(counter.frame_count, 1)
 
+    def test_condition_dependent_skip_with_tensor_predicate_guard(self):
+        def fn(x):
+            if x.is_complex():
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+                return x.real - 1
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        x_complex = torch.ones(3, dtype=torch.complex64)
+        x_float = torch.ones(3)
+        self.assertEqual(opt_fn(x_complex), x_complex.real - 1)
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(x_float), x_float + 1)
+        self.assertEqual(counter.frame_count, 1)
+
     def test_condition_dependent_graph_break_after_call_does_not_poison_code(self):
         def fn(x, n):
             y = x + 10
@@ -479,6 +621,20 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(opt_fn(x, 1), x + 11)
         self.assertEqual(counter.frame_count, 3)
+
+    def test_nested_explicit_graph_break_counted_once(self):
+        def inner(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        def outer(x):
+            return inner(x + 1) + 1
+
+        opt_fn = torch.compile(outer, backend="eager")
+        counters.clear()
+
+        self.assertEqual(opt_fn(torch.ones(2)), torch.ones(2) + 3)
+        self.assertEqual(sum(counters["graph_break"].values()), 1)
 
     def test_backend_skip_frame_preserves_fullgraph_failure(self):
         def backend(gm, args):

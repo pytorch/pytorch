@@ -413,26 +413,11 @@ def _has_condition_dependent_skip_guards(
     if not _has_tensor_related_state(code, output):
         return False
 
-    tensor_state_names = (
-        "shape",
-        "size",
-        "stride",
-        "dim",
-        "ndim",
-        "dtype",
-        "device",
-        "len",
-        "requires_grad",
-    )
     for guard in output.guards:
         guard_create_fn_name = guard.create_fn_name()
-        if guard_create_fn_name == "SHAPE_ENV" and any(
-            name in code.co_names for name in tensor_state_names
-        ):
+        if guard_create_fn_name == "SHAPE_ENV":
             return True
-        if guard_create_fn_name == "TENSOR_MATCH" and any(
-            name in code.co_names for name in tensor_state_names
-        ):
+        if guard_create_fn_name == "TENSOR_MATCH":
             name = guard.name
             if name.startswith(("L[", "G[")):
                 return True
@@ -480,6 +465,7 @@ def _guard_targets_paramspec_attr(name: str, output: OutputGraphCommon) -> bool:
 
 
 def _has_tensor_related_state(code: CodeType, output: OutputGraphCommon) -> bool:
+    co_names = set(code.co_names)
     torch_skip_only_names = {
         "torch",
         "_dynamo",
@@ -496,13 +482,30 @@ def _has_tensor_related_state(code: CodeType, output: OutputGraphCommon) -> bool
             if isinstance(obj, ModuleType) and (
                 obj.__name__.startswith("torch.") or obj is torch
             ):
-                return any(name not in torch_skip_only_names for name in code.co_names)
+                if any(
+                    _is_torch_tensor_related_callable(vars(obj).get(name))
+                    for name in co_names - torch_skip_only_names
+                ):
+                    return True
+                continue
+            if _is_torch_tensor_related_callable(obj):
+                return True
             if np and config.trace_numpy and (obj is np or is_numpy(obj)):
                 return True
 
     return any(
-        _contains_tensor_related_value(value) for value in output.local_scope.values()
+        _contains_tensor_related_value(value)
+        or _is_torch_tensor_related_callable(value)
+        for value in output.local_scope.values()
     )
+
+
+def _is_torch_tensor_related_callable(value: object) -> bool:
+    if not callable(value) or getattr(value, "__module__", None) != "torch":
+        return False
+    if not inspect.isclass(value):
+        return True
+    return issubclass(value, torch.Tensor) or value.__name__.endswith("Tensor")
 
 
 def _contains_tensor_related_value(value: object, seen: set[int] | None = None) -> bool:
@@ -2421,8 +2424,10 @@ def _compile(
                     f"Dynamo decided to skip the frame while tracing: {e}",
                     package,
                 )
-                if guarded_code.guarded_code is not None:
-                    if isinstance(e, Unsupported) and e.category == "graph_break":
+                if isinstance(e, Unsupported) and e.category == "graph_break":
+                    if guarded_code.guarded_code is not None:
+                        e.remove_from_stats()
+                    elif counters[e.category][e.msg] > 1:
                         e.remove_from_stats()
                 return guarded_code
             if (

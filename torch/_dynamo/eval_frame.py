@@ -382,7 +382,9 @@ def reset_code(code: types.CodeType) -> None:
         if entry.code in guarded_eager_fallback_codes:
             CleanupManager.instance.cleanup(entry.code)
             guarded_eager_fallback_codes._remove_id(id(entry.code))
-    CleanupManager.instance.cleanup(code)
+    if code in guarded_eager_fallback_codes:
+        CleanupManager.instance.cleanup(code)
+        guarded_eager_fallback_codes._remove_id(id(code))
     _reset_code(code)
 
 
