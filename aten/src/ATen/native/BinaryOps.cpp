@@ -536,10 +536,42 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& other, const Tensor
 CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_and_out, bitwise_and_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_or_out, bitwise_or_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_xor_out, bitwise_xor_stub)
-CREATE_BINARY_TORCH_IMPL_FUNC(maximum_out, maximum_stub)
-CREATE_BINARY_TORCH_IMPL_FUNC(minimum_out, minimum_stub)
-CREATE_BINARY_TORCH_IMPL_FUNC(fmax_out, fmax_stub)
-CREATE_BINARY_TORCH_IMPL_FUNC(fmin_out, fmin_stub)
+// maximum/minimum/fmax/fmin: On non-CPU devices, TensorIterator does not
+// create a temporary output tensor when cast_common_dtype_to_outputs is set
+// and the output dtype differs from the compute (common) dtype. The device
+// kernel's internal dynamic-casting path can produce wrong results because
+// inputs get cast to the narrower output dtype before the comparison.
+// Work around this by computing into a temporary of the correct dtype and
+// copying back when a mismatch is detected on non-CPU devices.
+// See https://github.com/pytorch/pytorch/issues/181805
+#define CREATE_MINMAX_TORCH_IMPL_FUNC(func_out, func_stub)                   \
+TORCH_IMPL_FUNC(func_out)                                                    \
+(const Tensor& self, const Tensor& other, const Tensor& result) {            \
+  if (device_type() != c10::DeviceType::CPU &&                                \
+      result.scalar_type() != this->common_dtype()) {                         \
+    auto tmp = at::empty_like(result,                                         \
+        result.options().dtype(this->common_dtype()));                         \
+    auto iter = at::TensorIteratorConfig()                                    \
+        .set_check_mem_overlap(true)                                          \
+        .allow_cpu_scalars(true)                                              \
+        .promote_inputs_to_common_dtype(true)                                 \
+        .cast_common_dtype_to_outputs(true)                                   \
+        .enforce_safe_casting_to_output(true)                                 \
+        .add_owned_output(tmp)                                                \
+        .add_owned_const_input(self)                                          \
+        .add_owned_const_input(other)                                         \
+        .build();                                                             \
+    func_stub(device_type(), iter);                                           \
+    result.copy_(tmp);                                                        \
+  } else {                                                                    \
+    func_stub(device_type(), *this);                                          \
+  }                                                                           \
+}
+
+CREATE_MINMAX_TORCH_IMPL_FUNC(maximum_out, maximum_stub)
+CREATE_MINMAX_TORCH_IMPL_FUNC(minimum_out, minimum_stub)
+CREATE_MINMAX_TORCH_IMPL_FUNC(fmax_out, fmax_stub)
+CREATE_MINMAX_TORCH_IMPL_FUNC(fmin_out, fmin_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(fmod_out, fmod_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp_out, logaddexp_stub)
 CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2_out, logaddexp2_stub)
