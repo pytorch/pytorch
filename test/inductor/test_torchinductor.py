@@ -2730,7 +2730,6 @@ class CommonTemplate:
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu_no_avx512_bf16
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
-    @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
     # Pallas codegen doesn't handle reduction axis after FloorDiv(ModularIndexing) simplification
     @xfail_if_pallas
     def test__dyn_quant_pack_4bit_weight_fp32(self):
@@ -2767,7 +2766,6 @@ class CommonTemplate:
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu_no_avx512_bf16
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
-    @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
     @skip_if_halide  # bf16
     # Pallas codegen doesn't handle reduction axis after FloorDiv(ModularIndexing) simplification
     @xfail_if_pallas
@@ -2812,7 +2810,6 @@ class CommonTemplate:
     # Pallas codegen doesn't handle reduction axis after FloorDiv(ModularIndexing) simplification
     @xfail_if_pallas
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
-    @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
     def test__dyn_quant_matmul_4bit_fp32_input(self):
         q_group = 32
         m = 32
@@ -2859,7 +2856,6 @@ class CommonTemplate:
         IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED
     )  # see https://github.com/pytorch/pytorch/issues/170787
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
-    @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
     @skip_if_halide  # bf16
     def test__dyn_quant_matmul_4bit_bf16_input(self):
         m = 32
@@ -8167,7 +8163,7 @@ for dtype in (torch.int32, torch.int64):
         self.assertTrue(same_meta(n1, n2))
 
     @unittest.skipIf(
-        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM,
+        TEST_WITH_ASAN or (IS_LINUX and GPU_TYPE != "xpu") or IS_MACOS or TEST_WITH_ROCM,
         "https://github.com/pytorch/pytorch/issues/151384",
     )
     def test_remove_noop_slice(self):
@@ -8198,11 +8194,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/151381",
     )
     @unittest.skipIf(
-        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM,
+        TEST_WITH_ASAN or (IS_LINUX and GPU_TYPE != "xpu") or IS_MACOS or TEST_WITH_ROCM,
         "https://github.com/pytorch/pytorch/issues/151379",
     )
     def test_remove_noop_slice1(self):
@@ -8230,11 +8226,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
         )
 
     @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/151378",
     )
     @unittest.skipIf(
-        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM,
+        TEST_WITH_ASAN or (IS_LINUX and GPU_TYPE != "xpu") or IS_MACOS or TEST_WITH_ROCM,
         "https://github.com/pytorch/pytorch/issues/151382",
     )
     def test_remove_noop_slice_scatter(self):
@@ -17149,11 +17145,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/151511",
     )
     @unittest.skipIf(
-        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        TEST_WITH_ASAN or (IS_LINUX and GPU_TYPE != "xpu") or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/151512",
     )
     def test_remove_noop_view_default(self):
@@ -17195,11 +17191,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.dev
         )
 
     @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        (IS_LINUX and GPU_TYPE != "xpu") or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/151541",
     )
     @unittest.skipIf(
-        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        TEST_WITH_ASAN or (IS_LINUX and GPU_TYPE != "xpu") or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/151540",
     )
     def test_remove_noop_view_dtype(self):

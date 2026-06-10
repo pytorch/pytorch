@@ -339,7 +339,7 @@ def check_multiple_devices_or_any_cpu_nodes(
 
     if (
         len(device_node_mapping) == 1
-        and next(iter(device_node_mapping.keys())).type == "cuda"
+        and next(iter(device_node_mapping.keys())).type in ("cuda", "xpu")
     ):
         return None
 
