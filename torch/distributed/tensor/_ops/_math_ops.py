@@ -1459,7 +1459,6 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
 
 _LINALG_NUM_PLACEMENTS = {
     # 1 in 1 out
-    aten.cholesky.default: 2,
     aten.cholesky_inverse.default: 2,
     aten.linalg_matrix_exp.default: 2,
     # 2 in 1 out
@@ -1515,7 +1514,6 @@ def _get_ndim(tensor_meta: Any) -> int:
 
 @register_single_dim_strategy(
     [
-        aten.cholesky.default,
         aten.cholesky_inverse.default,
         aten.linalg_matrix_exp.default,
         aten.cholesky_solve.default,
@@ -1795,9 +1793,9 @@ def _adjust_group_norm_scalars(
     for d in local_shape[2:]:
         hxw_local *= d
     args = list(schema.args_schema)
-    # Find scalar arg positions: first 1-3 args are tensors (input, weight?, bias?),
-    # then N, C, HxW, group, eps. Count tensor args to find the offset.
-    num_tensor_args = sum(isinstance(a, DTensorSpec) for a in args)
+    # Find scalar arg positions: tensor slots (DTensorSpec or None for optionals)
+    # precede N, C, HxW. Count both to find the offset.
+    num_tensor_args = sum(isinstance(a, (DTensorSpec, type(None))) for a in args)
     args[num_tensor_args] = n_local
     args[num_tensor_args + 1] = c_local
     args[num_tensor_args + 2] = hxw_local
