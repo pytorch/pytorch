@@ -588,7 +588,7 @@ class TestOperators(TestCase):
                 # Tensor-likes are not close
                 xfail("native_batch_norm"),
                 # Tensor-likes are not close
-                xfail("_native_batch_norm_legit"),
+                xfail("_native_batch_norm_legit", device_type="cpu"),
                 xfail("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
