@@ -21,14 +21,24 @@ from _pytest.terminal import _get_raw_skip_reason
 from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
 
 
-try:
-    from torch.testing._internal.common_utils import parse_cmd_line_args
-except ImportError:
-    # Temporary workaround needed until parse_cmd_line_args makes it into a nightlye because
-    # main / PR's tests are sometimes run against the previous day's nightly which won't
-    # have this function.
-    def parse_cmd_line_args():
-        pass
+def _call_parse_cmd_line_args():
+    # Called from pytest_sessionstart rather than pytest_configure to avoid
+    # importing common_utils too early. common_utils triggers GPU runtime
+    # initialization as an import side effect (for example via
+    # device-availability queries), which may install signal handlers
+    # (e.g., custom runtimes, profilers, or simulators relying on SIGSEGV
+    # for managed memory page faults). conftest's pytest_configure runs
+    # before built-in plugins, so importing there would race with pytest's
+    # faulthandler plugin — faulthandler.enable() would overwrite the
+    # runtime's handlers.
+    try:
+        from torch.testing._internal.common_utils import parse_cmd_line_args
+    except ImportError:
+        # torch may not be importable in lint-only CI environments where
+        # PyTorch hasn't been built.
+        return
+
+    parse_cmd_line_args()
 
 
 if TYPE_CHECKING:
@@ -92,8 +102,11 @@ def pytest_addoption(parser: Parser) -> None:
     shard_addoptions(parser)
 
 
+def pytest_sessionstart(session):
+    _call_parse_cmd_line_args()
+
+
 def pytest_configure(config: Config) -> None:
-    parse_cmd_line_args()
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
     if xmlpath and not hasattr(config, "workerinput"):
