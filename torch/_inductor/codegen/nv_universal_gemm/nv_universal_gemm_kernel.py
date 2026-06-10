@@ -96,9 +96,10 @@ class NVUniversalGemmKernel(Kernel):
         from torch._inductor.codegen.common import jinja2_env
 
         env = jinja2_env()
-        assert env is not None, (
-            "jinja2 is required for NV Universal GEMM code generation"
-        )
+        if env is None:
+            raise AssertionError(
+                "jinja2 is required for NV Universal GEMM code generation"
+            )
         source = load_kernel_template("nv_universal_gemm")
         return env.from_string(source)
 
