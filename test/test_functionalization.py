@@ -1482,7 +1482,8 @@ def forward(self, arg0_1):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
+    add = torch.ops.aten.add.Tensor(diagonal_1, arg0_1);  arg0_1 = None
+    copy_1 = torch.ops.aten.copy_.default(diagonal_1, add);  diagonal_1 = add = copy_1 = None
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
@@ -1524,7 +1525,8 @@ def forward(self, arg0_1):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
+    add = torch.ops.aten.add.Tensor(diagonal_1, arg0_1);  arg0_1 = None
+    copy_1 = torch.ops.aten.copy_.default(diagonal_1, add);  diagonal_1 = add = copy_1 = None
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
@@ -1566,7 +1568,8 @@ def forward(self, arg0_1):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
+    add = torch.ops.aten.add.Tensor(diagonal_1, arg0_1);  arg0_1 = None
+    copy_1 = torch.ops.aten.copy_.default(diagonal_1, add);  diagonal_1 = add = copy_1 = None
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
@@ -1608,7 +1611,8 @@ def forward(self, arg0_1):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
+    add = torch.ops.aten.add.Tensor(diagonal_1, arg0_1);  arg0_1 = None
+    copy_1 = torch.ops.aten.copy_.default(diagonal_1, add);  diagonal_1 = add = copy_1 = None
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,

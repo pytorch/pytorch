@@ -650,11 +650,35 @@ Tensor maybe_preserve_strides(const Tensor& old_value, const Tensor& new_value) 
   if (!old_value.has_storage()) {
     return new_value;
   }
-  if (!old_value.sym_sizes().equals(new_value.sym_sizes())) {
+  auto old_sizes = old_value.sym_sizes();
+  auto new_sizes = new_value.sym_sizes();
+  if (old_sizes.size() != new_sizes.size()) {
     return new_value;
   }
-  if (old_value.sym_strides().equals(new_value.sym_strides()) &&
-      old_value.sym_storage_offset() == new_value.sym_storage_offset()) {
+  for (const auto dim : c10::irange(old_sizes.size())) {
+    if (TORCH_STATICALLY_KNOWN_TRUE(sym_ne(old_sizes[dim], new_sizes[dim]))) {
+      return new_value;
+    }
+  }
+
+  bool needs_preserve_strides = false;
+  auto old_strides = old_value.sym_strides();
+  auto new_strides = new_value.sym_strides();
+  if (old_strides.size() != new_strides.size()) {
+    return new_value;
+  }
+  for (const auto dim : c10::irange(old_strides.size())) {
+    if (TORCH_STATICALLY_KNOWN_TRUE(
+            sym_ne(old_strides[dim], new_strides[dim]))) {
+      needs_preserve_strides = true;
+      break;
+    }
+  }
+  if (TORCH_STATICALLY_KNOWN_TRUE(sym_ne(
+          old_value.sym_storage_offset(), new_value.sym_storage_offset()))) {
+    needs_preserve_strides = true;
+  }
+  if (!needs_preserve_strides) {
     return new_value;
   }
   return at::_ops::copy::call(

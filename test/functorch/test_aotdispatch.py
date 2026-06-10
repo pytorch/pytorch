@@ -2500,9 +2500,10 @@ def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     t = torch.ops.aten.t.default(clone)
     select = torch.ops.aten.select.int(t, 0, 0);  t = None
-    mul = torch.ops.aten.mul.Tensor(select, 2);  select = None
+    mul = torch.ops.aten.mul.Tensor(select, 2)
+    copy = torch.ops.aten.copy.default(select, mul);  select = mul = None
     t_1 = torch.ops.aten.t.default(clone);  clone = None
-    select_scatter = torch.ops.aten.select_scatter.default(t_1, mul, 0, 0);  t_1 = mul = None
+    select_scatter = torch.ops.aten.select_scatter.default(t_1, copy, 0, 0);  t_1 = copy = None
     t_2 = torch.ops.aten.t.default(select_scatter);  select_scatter = None
     t_4 = torch.ops.aten.t.default(t_2)
     t_6 = torch.ops.aten.t.default(t_2);  t_2 = None
