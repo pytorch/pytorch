@@ -334,6 +334,58 @@ class TestConvolutionNN(NNTestCase):
                 output_mask,
             )
 
+    def test_conv_meta_invalid_groups(self):
+        # groups=0
+        with self.assertRaisesRegex(
+            RuntimeError, "expected groups to be greater than 0, but got groups=0"
+        ):
+            F.conv1d(
+                torch.randn(2, 4, 8, device="meta"),
+                torch.randn(4, 4, 3, device="meta"),
+                groups=0,
+            )
+
+        # weight.shape[0] not divisible by groups
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"expected weight to be divisible by 2 at dimension 0",
+        ):
+            F.conv1d(
+                torch.randn(2, 4, 8, device="meta"),
+                torch.randn(3, 4, 3, device="meta"),
+                groups=2,
+            )
+
+        # weight.shape[0] not divisible by groups (conv2d)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"expected weight to be divisible by 2 at dimension 0",
+        ):
+            F.conv2d(
+                torch.randn(1, 4, 8, 8, device="meta"),
+                torch.randn(3, 4, 3, 3, device="meta"),
+                groups=2,
+            )
+
+        # weight.shape[0] < groups
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"expected weight to be at least 4 at dimension 0",
+        ):
+            F.conv1d(
+                torch.randn(2, 8, 8, device="meta"),
+                torch.randn(2, 2, 3, device="meta"),
+                groups=4,
+            )
+
+        # valid grouped conv on meta should succeed
+        result = F.conv1d(
+            torch.randn(2, 4, 8, device="meta"),
+            torch.randn(4, 2, 3, device="meta"),
+            groups=2,
+        )
+        self.assertEqual(result.shape, torch.Size([2, 4, 6]))
+
     def test_conv3d_overflow_values(self):
         input = torch.full(
             (
