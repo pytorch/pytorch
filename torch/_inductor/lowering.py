@@ -8682,6 +8682,46 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
 from torch._inductor.fx_passes.control_dependencies import control_deps
 
 
+def _add_passthrough_barriers(output, args, subgraph_ops):
+    """Create identity Pointwise barriers for pass-through outputs.
+
+    When a subgraph returns an input unchanged (pass-through), downstream
+    consumers see the original buffer and have no scheduling dependency on
+    the subgraph operations (e.g. wait_event).  Wrapping each pass-through
+    in an identity Pointwise that is realized creates a new buffer name.
+    Adding additional_buffer_deps from the barrier to the subgraph ops
+    forces the barrier (and therefore its consumers) after the subgraph.
+    """
+    input_ids = OrderedSet([id(a) for a in args])
+
+    subgraph_buf_names = [
+        op.get_name() for op in subgraph_ops if isinstance(op, ir.OperationBuffer)
+    ]
+    if not subgraph_buf_names:
+        return output
+
+    def maybe_barrier(val):
+        if id(val) not in input_ids or not hasattr(val, "make_loader"):
+            return val
+        barrier = Pointwise.create(
+            device=val.get_device(),
+            dtype=val.get_dtype(),
+            inner_fn=val.make_loader(),
+            ranges=list(val.get_size()),
+        )
+        op_count = len(V.graph.operations)
+        barrier.realize()
+        for barrier_op in V.graph.operations[op_count:]:
+            assert barrier_op.operation_name is not None
+            for buf_name in subgraph_buf_names:
+                V.graph.additional_buffer_deps[barrier_op.operation_name].add(buf_name)
+        return barrier
+
+    if isinstance(output, (list, tuple)):
+        return type(output)(maybe_barrier(v) for v in output)
+    return maybe_barrier(output)
+
+
 @register_lowering(control_deps, type_promotion_kind=None)
 def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     """
@@ -8698,7 +8738,7 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     original_dep_nodes = V.graph.current_node.args[0]
     assert isinstance(original_dep_nodes, tuple)
 
-    dep_names = []
+    dep_names: list[str] = []
     for dep, orig_node in zip(additional_deps, original_dep_nodes, strict=True):
         dep_ir_nodes = [
             dep_leaf
@@ -8756,49 +8796,18 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     # b = control_deps(a, mm, ...)
     # c = control_deps(b, wait, ...)
     # if c == a, then you have a cycle.
-    for op in new_ops:
+    subgraph_ops = V.graph.operations[operation_len:]
+    for op in subgraph_ops:
         for dep_name in dep_names:
             op_name = op.operation_name
             assert op_name is not None
             V.graph.additional_buffer_deps[op_name].add(dep_name)
 
-    # For void ops (e.g. wait_stream) that don't produce tensor outputs,
-    # passthrough args returned by control_deps are the same IR nodes as
-    # their inputs. This means downstream consumers have no scheduling
-    # dependency on the void op. Create MutationOutput entries to force
-    # the scheduler to order subsequent readers after the void op.
-    # Only apply this for wait_stream, which needs forward ordering on the
-    # waiting stream. Other sync ops (synchronize_stream, record_event) are
-    # full barriers or have event-based cross-sync tracking.
-    void_ops = [
-        op
-        for op in new_ops
-        if isinstance(op, ir.Buffer)
-        and op.name is not None
-        and isinstance(op.layout, ir.NoneLayout)
-        and not isinstance(op, ir.MutationOutput)
-    ]
-    if void_ops and args:
-        # Check if the subgraph contains a wait_stream call
-        has_wait_stream = any(
-            n.op == "call_function"
-            and n.target is torch.ops.streams.wait_stream.default
-            for n in subgraph_fn.graph_module.graph.nodes
-        )
-        if has_wait_stream:
-            for void_op in void_ops:
-                assert isinstance(void_op, ir.ExternKernel)
-                for arg in args:
-                    for arg_leaf in pytree.tree_leaves(arg):
-                        if not isinstance(arg_leaf, IRNode):
-                            continue
-                        device = arg_leaf.get_device()
-                        if device is None:
-                            continue
-                        mut_out = ir.MutationOutput(
-                            ir.NoneLayout(device=device), arg_leaf, void_op
-                        )
-                        void_op.mutation_outputs.append(mut_out)
+    # Pass-through outputs are the same IR nodes as inputs, so downstream
+    # consumers would have no scheduling dependency on the subgraph ops
+    # (e.g. wait_event).  Interpose identity barriers to fix ordering.
+    if subgraph_ops:
+        output = _add_passthrough_barriers(output, args, subgraph_ops)
 
     return output
 
