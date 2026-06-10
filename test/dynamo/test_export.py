@@ -2557,6 +2557,35 @@ def forward(self, x):
         ):
             torch.export.export(qux, (t,), dynamic_shapes=dynamic_shapes, strict=True)
 
+    def test_export_error_preserves_traceback(self):
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] == 5:
+                    return x + 1
+                else:
+                    return x + 2
+
+        bar = Bar()
+
+        t = torch.zeros([5])
+        dim0 = torch.export.Dim("dim0", min=3, max=8)
+        dynamic_shapes = {"x": (dim0,)}
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "replace your `export\\(\\)` call with `draft_export\\(\\)`",
+        ) as exc:
+            torch.export.export(bar, (t,), dynamic_shapes=dynamic_shapes, strict=True)
+
+        tb = exc.exception.__traceback__
+        while tb.tb_next is not None:
+            tb = tb.tb_next
+
+        filename = os.path.normpath(tb.tb_frame.f_code.co_filename)
+        self.assertFalse(
+            filename.endswith(os.path.normpath("torch/export/__init__.py")),
+            msg=f"traceback incorrectly ends at {filename}:{tb.tb_lineno}",
+        )
+
     def test_untracked_inputs_in_constraints(self):
         from copy import copy
 
