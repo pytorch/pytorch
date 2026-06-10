@@ -586,7 +586,7 @@ class TestOperators(TestCase):
                 ),  # fails everywhere except on windows
                 skip("nn.functional.max_unpool3d"),  # fails everywhere except on mac
                 # Tensor-likes are not close
-                xfail("native_batch_norm"),
+                xfail("native_batch_norm", device_type="cpu"),
                 # Tensor-likes are not close
                 xfail("_native_batch_norm_legit", device_type="cpu"),
                 xfail("nn.functional.scaled_dot_product_attention"),
