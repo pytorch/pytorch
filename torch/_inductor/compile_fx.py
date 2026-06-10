@@ -1566,11 +1566,11 @@ class _InProcessFxCompile(FxCompile):
                             )
                             wrapper_code, kernel_code = graph.codegen_with_cpp_wrapper()
                             output_code_log.debug(
-                                "Output wrapper code: \n%s", wrapper_code.value
+                                "AOT wrapper code: \n%s", wrapper_code.value
                             )
                             if kernel_code.value:
                                 output_code_log.debug(
-                                    "Output kernel code:\n%s", kernel_code.value
+                                    "AOT kernel code:\n%s", kernel_code.value
                                 )
 
                             serialized_extern_kernel_nodes = None
