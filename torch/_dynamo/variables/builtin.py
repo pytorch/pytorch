@@ -97,13 +97,7 @@ from .dicts import (
     DictViewVariable,
 )
 from .hashable import is_hashable
-from .lists import (
-    BaseListVariable,
-    ListIteratorVariable,
-    ListVariable,
-    TupleIteratorVariable,
-    TupleVariable,
-)
+from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
 from .misc import NullVariable, StringFormatVariable
 from .object_protocol import (
     binary_iop,
@@ -120,6 +114,7 @@ from .object_protocol import (
     generic_pos,
     generic_repr,
     maybe_get_python_type,
+    pycallable_check,
     pysequence_check,
     vt_add,
     vt_getitem,
@@ -614,7 +609,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         from .nn_module import NNModuleVariable
         from .tensor import supported_const_comparison_ops
         from .torch import BaseTorchVariable
-        from .user_defined import UserDefinedVariable
 
         # Override table contains: op_fn -> [list of handlers]
         op_handlers: dict[Any, list[Any]] = {}
@@ -2077,37 +2071,15 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_callable(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
-    ) -> VariableTracker | None:
-        from .functions import BaseUserFunctionVariable, FunctoolsPartialVariable
-        from .nn_module import NNModuleVariable
-
-        if isinstance(
-            arg,
-            (
-                variables.UserDefinedClassVariable,
-                BaseUserFunctionVariable,
-                FunctoolsPartialVariable,
-                NNModuleVariable,
-            ),
-        ):
-            return variables.ConstantVariable.create(True)
-        elif isinstance(arg, UserDefinedVariable):
-            return VariableTracker.build(tx, callable(arg.value))
-        elif isinstance(
-            arg,
-            (
-                ConstantVariable,
-                SymNodeVariable,
-                StringFormatVariable,
-                TensorVariable,
-                ListVariable,
-                TupleVariable,
-                ListIteratorVariable,
-            ),
-        ):
-            return variables.ConstantVariable.create(False)
-        else:
-            return None
+    ) -> VariableTracker:
+        # PyCallable_Check: callable(x) is type(x)->tp_call != NULL. Dispatch on
+        # the arg's Python type slot rather than enumerating callable VTs.
+        # callable() is the only handler for this builtin, so always return a
+        # result (or graph break via maybe_get_python_type) -- never None, which
+        # would signal "try another handler" that does not exist.
+        return variables.ConstantVariable.create(
+            pycallable_check(maybe_get_python_type(arg))
+        )
 
     def call_cast(
         self, _: Any, *args: VariableTracker, **kwargs: VariableTracker

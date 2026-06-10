@@ -281,6 +281,12 @@ def type_implements_tp_repr(obj_type: type) -> bool:
     return has_slot(type_slot, PyTypeSlots.TP_REPR)
 
 
+def type_implements_tp_call(obj_type: type) -> bool:
+    """Check whether obj_type implements the tp_call slot."""
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_CALL)
+
+
 def pyiter_check(obj_type: type) -> bool:
     # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L2891-L2897
     # CPython checks if tp_iternext != _PyObject_NextNotImplemented
@@ -300,6 +306,40 @@ def pyindex_check(obj_type: type) -> bool:
     """Implements _PyIndex_Check semantics for VariableTracker objects."""
     # ref: https://github.com/python/cpython/blob/3.13/Include/internal/pycore_abstract.h#L11-L17
     return type_implements_nb_index(obj_type)
+
+
+def pycallable_check(obj_type: type) -> bool:
+    """Implements PyCallable_Check: type(x)->tp_call != NULL.
+
+    obj_type is the object's Python type (Py_TYPE(x)); a non-NULL tp_call
+    slot on it means instances are callable.
+
+    ref: https://github.com/python/cpython/blob/v3.13.0/Objects/call.c#L52-L57
+    """
+    return type_implements_tp_call(obj_type)
+
+
+def generic_call(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    """Mirrors CPython's PyObject_Call: invoke the tp_call slot.
+
+    ref: https://github.com/python/cpython/blob/v3.13.0/Objects/call.c#L361-L391
+
+    Dynamo models the tp_call slot via VariableTracker.call_function, which
+    every callable VT already implements, so this routes straight to it.  The
+    ``tp_call == NULL`` -> ``TypeError: 'X' object is not callable`` case is
+    enforced in the base ``VariableTracker.call_function`` fallback, which is
+    reached only by VTs with no call override -- i.e. objects that genuinely
+    cannot be called.  Applying PyCallable_Check here instead would
+    false-positive on VTs whose ``python_type()`` lacks tp_call yet are
+    invocable in Dynamo (e.g. ``classmethod``/``staticmethod`` descriptors,
+    which Dynamo resolves before calling).
+    """
+    return obj.call_function(tx, args, kwargs)
 
 
 def maybe_get_python_type(obj: VariableTracker) -> type:
