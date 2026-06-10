@@ -6716,6 +6716,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/175482")
     def test_index_put_error(self, device):
         import subprocess
 
@@ -8373,6 +8374,39 @@ torch.cuda.synchronize()
         self.assertEqual(nt.shape[:-1], output.shape[:-1])
         for nt_component, output_component in zip(nt.unbind(), output.unbind()):
             self.assertEqual(nt_component.shape, output_component.shape)
+
+    @skipIfTorchDynamo("compiles internally")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @dtypes(torch.float32)
+    @parametrize("scalar_input", ["self", "other"])
+    def test_where_scalar_broadcast_on_in_graph_constructed_njt(
+        self, device, dtype, scalar_input
+    ):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+            ],
+            layout=torch.jagged,
+            device=device,
+            dtype=dtype,
+        )
+
+        values = nt._values.detach().clone()
+        offsets = nt._offsets.detach().clone()
+
+        def f(values, offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            condition = nt > 0.0
+            if scalar_input == "self":
+                return torch.where(condition, 1, torch.zeros_like(nt))
+            return torch.where(condition, torch.ones_like(nt), 0)
+
+        expected = f(values, offsets)
+        output = torch.compile(f, fullgraph=True)(values, offsets)
+        self.assertEqual(output, expected)
 
 
 # The following lists specify skips and xfails for particular SampleInputs. Note that
