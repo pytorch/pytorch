@@ -244,7 +244,7 @@ static PyObject* THPStream_record_event(
   if (!Py_IsNone(_event)) {
     // We expect it to be an explicit torch.Event instance.
     TORCH_CHECK(
-        Py_TYPE(_event) == THPEventClass,
+        PyObject_IsInstance(_event, (PyObject*)THPEventClass),
         "expected event to be a torch.Event object");
     // Increase the refcount of the event to avoid it being destroyed.
     Py_INCREF(_event);
