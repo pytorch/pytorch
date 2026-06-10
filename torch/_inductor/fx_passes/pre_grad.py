@@ -328,12 +328,13 @@ def pre_grad_passes(
                 example_inputs is not None
                 and "batch_linear_lhs" not in fusion_options
                 and any(
-                    getattr(t, "device", None) is not None
-                    and t.device.type in ("cuda", "xpu")
+                    t.device.type in ("cuda", "xpu")
                     for t in example_inputs
                     if isinstance(t, torch.Tensor)
                 )
             ):
+                # min_fuse_set_size=2 targets pairs like gate_proj+up_proj in MLP;
+                # the default is 5, which would never fuse just 2 linears
                 fusion_options = {
                     **fusion_options,
                     "batch_linear_lhs": {"min_fuse_set_size": 2},
