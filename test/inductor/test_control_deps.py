@@ -673,6 +673,36 @@ class TestControlDeps(InductorTestCase):
         expected = fn(torch.ones(4, 4, device=GPU_TYPE))
         torch.testing.assert_close(result, expected)
 
+    @requires_cuda_triton
+    def test_restore_external_objects_before_backward(self):
+        """The forward epilogue snapshots the external object registry into
+        ctx._external_objects, and backward restores it before calling the
+        compiled backward. This protects against another torch.compile frame's
+        store_user_object_weakrefs clobbering the registry.
+
+        We compile a multi-stream function, run forward, clobber the global
+        registry (simulating a second frame), then run backward. Without the
+        snapshot/restore, backward fails."""
+        from torch._dynamo.graph_bytecode_inputs import store_user_object_weakrefs
+
+        def fn(x):
+            s = torch.Stream(device=GPU_TYPE)
+            with s:
+                return x * 2 + 1
+
+        compiled_fn = torch.compile(fn)
+        x = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
+        out = compiled_fn(x)
+
+        # Clobber the global registry as a second compile frame would.
+        store_user_object_weakrefs(torch.cuda.Stream())
+
+        # Without ctx._external_objects snapshot/restore, backward crashes
+        # with "Index not registered in index_to_external_object_weakref".
+        out.sum().backward()
+        self.assertIsNotNone(x.grad)
+        torch.testing.assert_close(x.grad, torch.full_like(x, 2.0))
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU_AND_TRITON:
