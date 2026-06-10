@@ -12,72 +12,14 @@
 
 diff --git a/_compile_payload.py b/_compile_payload.py
 new file mode 100644
-index 0000000..20e130d
+index 0000000..e59b0d3
 --- /dev/null
 +++ b/_compile_payload.py
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,18 @@
 +from __future__ import annotations
 +
-+import fcntl
 +import hashlib
-+import importlib.util
-+import os
-+import sys
-+import tempfile
 +from typing import Any
-+
-+import torch
-+from torch import Tensor
-+
-+
-+TENSOR_META_TAG = "__quack_tensor_meta__"
-+EPILOGUE_SOURCE_TAG = "__quack_epilogue_from_source__"
-+
-+_DTYPE_MAP = {
-+    "torch.float16": torch.float16,
-+    "torch.bfloat16": torch.bfloat16,
-+    "torch.float32": torch.float32,
-+    "torch.float64": torch.float64,
-+    "torch.float8_e4m3fn": torch.float8_e4m3fn,
-+    "torch.float8_e5m2": torch.float8_e5m2,
-+    "torch.float8_e8m0fnu": torch.float8_e8m0fnu,
-+    "torch.int32": torch.int32,
-+    "torch.int64": torch.int64,
-+    "torch.int8": torch.int8,
-+    "torch.uint8": torch.uint8,
-+    "torch.bool": torch.bool,
-+}
-+
-+
-+def serialize_worker_value(value: Any) -> Any:
-+    if isinstance(value, Tensor):
-+        return {
-+            TENSOR_META_TAG: True,
-+            "shape": list(value.shape),
-+            "stride": list(value.stride()),
-+            "dtype": str(value.dtype),
-+        }
-+    if isinstance(value, tuple):
-+        return tuple(serialize_worker_value(v) for v in value)
-+    if isinstance(value, list):
-+        return [serialize_worker_value(v) for v in value]
-+    if isinstance(value, dict):
-+        return {k: serialize_worker_value(v) for k, v in value.items()}
-+    return value
-+
-+
-+def deserialize_worker_value(value: Any) -> Any:
-+    if isinstance(value, dict) and value.get(TENSOR_META_TAG):
-+        return torch.empty_strided(
-+            value["shape"], value["stride"], dtype=_DTYPE_MAP[value["dtype"]], device="cuda"
-+        )
-+    if isinstance(value, tuple):
-+        return tuple(deserialize_worker_value(v) for v in value)
-+    if isinstance(value, list):
-+        return [deserialize_worker_value(v) for v in value]
-+    if isinstance(value, dict):
-+        return {k: deserialize_worker_value(v) for k, v in value.items()}
-+    return value
 +
 +
 +def epilogue_source_digest(source: str) -> str:
@@ -92,98 +34,16 @@ index 0000000..20e130d
 +    cache_key = make_epilogue_cache_key(epilogue_fn.__name__, source)
 +    setattr(epilogue_fn, "__quack_cache_key__", cache_key)
 +    return cache_key
-+
-+
-+def make_epilogue_source_marker(
-+    symbol_name: str,
-+    epilogue_key: str | None,
-+    source: str,
-+) -> dict[str, Any]:
-+    return {
-+        EPILOGUE_SOURCE_TAG: True,
-+        "symbol_name": symbol_name,
-+        "epilogue_key": epilogue_key,
-+        "source": source,
-+        "source_digest": epilogue_source_digest(source),
-+        "cache_key": make_epilogue_cache_key(symbol_name, source),
-+    }
-+
-+
-+def is_epilogue_source_marker(value: Any) -> bool:
-+    return isinstance(value, dict) and value.get(EPILOGUE_SOURCE_TAG)
-+
-+
-+def _write_epilogue_module_if_needed(module_path: str, source: str) -> None:
-+    source_bytes = source.encode()
-+    lock_fd = os.open(f"{module_path}.lock", os.O_RDWR | os.O_CREAT, 0o666)
-+    try:
-+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
-+        if os.path.exists(module_path):
-+            with open(module_path, "rb") as f:
-+                if f.read() == source_bytes:
-+                    return
-+        tmp_fd, tmp_path = tempfile.mkstemp(
-+            prefix=f".{os.path.basename(module_path)}.",
-+            suffix=".tmp",
-+            dir=os.path.dirname(module_path),
-+        )
-+        try:
-+            with os.fdopen(tmp_fd, "wb") as f:
-+                f.write(source_bytes)
-+                f.flush()
-+                os.fsync(f.fileno())
-+            os.replace(tmp_path, module_path)
-+        finally:
-+            if os.path.exists(tmp_path):
-+                os.unlink(tmp_path)
-+    finally:
-+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-+        os.close(lock_fd)
-+
-+
-+def load_epilogue_from_source(marker: dict[str, Any]) -> Any:
-+    source = marker["source"]
-+    symbol_name = marker["symbol_name"]
-+    digest = epilogue_source_digest(source)
-+    module_name = f"quack_generated_epilogue_{digest[:16]}"
-+    module_dir = os.path.join(tempfile.gettempdir(), "quack_generated_epilogues")
-+    os.makedirs(module_dir, exist_ok=True)
-+    module_path = os.path.join(module_dir, f"{module_name}.py")
-+    _write_epilogue_module_if_needed(module_path, source)
-+    spec = importlib.util.spec_from_file_location(module_name, module_path)
-+    if spec is None or spec.loader is None:
-+        raise ImportError(f"could not load generated epilogue module {module_path}")
-+    mod = importlib.util.module_from_spec(spec)
-+    sys.modules[module_name] = mod
-+    spec.loader.exec_module(mod)
-+    epilogue_fn = getattr(mod, symbol_name)
-+    setattr(epilogue_fn, "__quack_cache_key__", make_epilogue_cache_key(symbol_name, source))
-+    return epilogue_fn
 diff --git a/cache/jit.py b/cache/jit.py
-index 0d7802b..d8807f7 100644
+index 0d7802b..217c57e 100644
 --- a/cache/jit.py
 +++ b/cache/jit.py
-@@ -19,6 +19,7 @@ import functools
- import hashlib
- import os
- import pickle
-+import types
- import sys
- import tempfile
- import time
-@@ -83,8 +84,39 @@ def _compute_source_fingerprint() -> str:
+@@ -83,8 +83,30 @@ def _compute_source_fingerprint() -> str:
      return h.hexdigest()
 
 
 +def _canonicalize_cache_key_item(item):
-+    """Convert cache-key inputs to stable, pickleable representations.
-+
-+    Generated Inductor/CuTeDSL epilogue functions are recreated in parent and
-+    autotune worker processes. Their Python object identities/modules differ,
-+    but they can carry a stable ``__quack_cache_key__`` attribute derived from
-+    the generated source. Use it so worker precompilation warms the exact same
-+    persistent cache entry that the parent later benchmarks.
-+    """
++    """Convert cache-key inputs to stable, pickleable representations."""
 +    stable_key = getattr(item, "__quack_cache_key__", None)
 +    if stable_key is not None:
 +        return ("__quack_callable__", stable_key)
@@ -201,8 +61,6 @@ index 0d7802b..d8807f7 100644
 +                for k, v in item.items()
 +            )
 +        )
-+    if isinstance(item, types.FunctionType):
-+        return ("__python_function__", item.__module__, item.__qualname__)
 +    return item
 +
 +
@@ -440,7 +298,7 @@ index a02a4e7..9633276 100644
  def vec_multiply(gemm, tRS_rD, tDrColVec, tDrRowVec):
      """Multiply tRS_rD by colvec and/or rowvec in-place. Uses packed f32x2 on SM100."""
 diff --git a/gemm_act.py b/gemm_act.py
-index f2bf896..1f6b451 100644
+index f2bf896..696435c 100644
 --- a/gemm_act.py
 +++ b/gemm_act.py
 @@ -20,7 +20,15 @@ from quack.cute_dsl_utils import (
@@ -460,15 +318,7 @@ index f2bf896..1f6b451 100644
  from quack.gemm_sm80 import GemmSm80
  from quack.gemm_sm90 import GemmSm90
  from quack.gemm_sm100 import GemmSm100
-@@ -28,6 +36,7 @@ from quack.gemm_sm120 import GemmSm120
- from quack.gemm_default_epi import GemmDefaultEpiMixin
- from quack.gemm_tvm_ffi_utils import (
-     get_major,
-+    perm3d,
-     perm3d_single,
-     make_scheduler_args,
-     make_varlen_args,
-@@ -52,18 +61,32 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -52,18 +60,32 @@ class GemmActMixin(ComposableEpiMixin):
          Scalar("sr_seed", dtype=Int32),
          RowVecLoad("mRowVecBroadcast"),
          ColVecLoad("mColVecBroadcast"),
@@ -481,7 +331,7 @@ index f2bf896..1f6b451 100644
 +    _extra_param_fields = (
 +        ("act_fn", cutlass.Constexpr, None),
 +        ("tensor_epilogue_fn", cutlass.Constexpr, None),
-+        ("tensor_epilogue_uses_c", cutlass.Constexpr, False),
++        ("tensor_epilogue_has_aux_args", cutlass.Constexpr, False),
 +        ("tensor_epilogue_arg_kinds", cutlass.Constexpr, ()),
 +    )
 
@@ -490,7 +340,7 @@ index f2bf896..1f6b451 100644
          mAuxOut: cute.Tensor
          act_fn: cutlass.Constexpr[Optional[Callable]] = None
 +        tensor_epilogue_fn: cutlass.Constexpr[Optional[Callable]] = None
-+        tensor_epilogue_uses_c: cutlass.Constexpr[bool] = False
++        tensor_epilogue_has_aux_args: cutlass.Constexpr[bool] = False
 +        tensor_epilogue_arg_kinds: cutlass.Constexpr[tuple] = ()
          alpha: Optional[Float32 | cute.Tensor] = None
          beta: Optional[Float32 | cute.Tensor] = None
@@ -502,17 +352,17 @@ index f2bf896..1f6b451 100644
          rounding_mode: cutlass.Constexpr[int] = RoundingMode.RN
          sr_seed: Optional[Int32 | cute.Tensor] = None
 
-@@ -76,6 +99,9 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -76,6 +98,9 @@ class GemmActMixin(ComposableEpiMixin):
          self.cta_tile_shape_aux_out_mn = self.cta_tile_shape_mnk[:2]
          d = self._epi_ops_to_params_dict(args)
          d["act_fn"] = args.act_fn
 +        d["tensor_epilogue_fn"] = args.tensor_epilogue_fn
-+        d["tensor_epilogue_uses_c"] = args.tensor_epilogue_uses_c
++        d["tensor_epilogue_has_aux_args"] = args.tensor_epilogue_has_aux_args
 +        d["tensor_epilogue_arg_kinds"] = args.tensor_epilogue_arg_kinds
          for key in ("mRowVecBroadcast", "mColVecBroadcast"):
              if key in self.concat_layout and key in d:
                  d[key] = layout_utils.concat_to_interleave(d[key], 1)
-@@ -165,10 +191,41 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -165,10 +190,41 @@ class GemmActMixin(ComposableEpiMixin):
          tRS_rD: cute.Tensor,
          tRS_rC: Optional[cute.Tensor] = None,
      ) -> Optional[cute.Tensor]:
@@ -520,12 +370,12 @@ index f2bf896..1f6b451 100644
 -        # Apply activation function if provided
 -        # If we don't have .shape here, the compiler generates local stores and loads
 -        if const_expr(params.act_fn is not None):
-+        if const_expr(params.tensor_epilogue_fn is None or not params.tensor_epilogue_uses_c):
++        if const_expr(params.tensor_epilogue_fn is None or not params.tensor_epilogue_has_aux_args):
 +            GemmDefaultEpiMixin.epi_visit_subtile(self, params, epi_loop_tensors, tRS_rD, tRS_rC)
 +        if const_expr(params.tensor_epilogue_fn is not None):
 +            tRS_rEpilogueIn = cute.make_rmem_tensor_like(tRS_rD, self.acc_dtype)
 +            tRS_rEpilogueIn.store(tRS_rD.load())
-+            if const_expr(params.tensor_epilogue_uses_c):
++            if const_expr(params.tensor_epilogue_has_aux_args):
 +                tDrRowVecs = epi_loop_tensors.get("mTensorEpilogueRowVecBroadcasts")
 +                tDrColVecs = epi_loop_tensors.get("mTensorEpilogueColVecBroadcasts")
 +                tRsTileAuxes = epi_loop_tensors.get("mTensorEpilogueTiles")
@@ -558,7 +408,7 @@ index f2bf896..1f6b451 100644
              tRS_rAuxOut = cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype)
              if const_expr(self.arch != 100):
                  for i in cutlass.range(cute.size(tRS_rAuxOut), unroll_full=True):
-@@ -206,6 +263,7 @@ def _gated_epi_tile_fn(gemm, epi_tile):
+@@ -206,6 +262,7 @@ def _gated_epi_tile_fn(gemm, epi_tile):
      return (epi_tile[0], epi_tile[1] // 2)
 
 
@@ -566,13 +416,13 @@ index f2bf896..1f6b451 100644
  class GemmGatedMixin(GemmActMixin):
      _epi_ops = (
          Scalar("alpha"),
-@@ -348,10 +406,22 @@ def _compile_gemm_act(
+@@ -348,6 +405,17 @@ def _compile_gemm_act(
      persistent,
      is_dynamic_persistent,
      activation,
 +    tensor_epilogue_fn,
 +    tensor_epilogue_key,
-+    tensor_epilogue_uses_c,
++    tensor_epilogue_has_aux_args,
 +    tensor_epilogue_arg_kinds,
 +    tensor_epilogue_rowvec_dtypes,
 +    tensor_epilogue_colvec_dtypes,
@@ -584,20 +434,7 @@ index f2bf896..1f6b451 100644
      rowvec_dtype,
      colvec_dtype,
      colvec_ndim,
-     varlen_m,
-+    varlen_k,
-     gather_A,
-     concat_layout,
-     device_capacity,
-@@ -388,6 +458,7 @@ def _compile_gemm_act(
-         d_major,
-         c_major,
-         varlen_m=varlen_m,
-+        varlen_k=varlen_k,
-         gather_A=gather_A,
-     )
-     pa_n = cute.sym_int() if gemm_cls_name == "gated" else n
-@@ -397,14 +468,38 @@ def _compile_gemm_act(
+@@ -397,14 +465,38 @@ def _compile_gemm_act(
      mAuxOut = fake_tensor(postact_dtype, pa_shape, leading_dim=pa_leading_dim, divisibility=div_pa)
 
      mRowVec = fake_tensor(rowvec_dtype, (l, n), leading_dim=1, divisibility=4)
@@ -637,12 +474,12 @@ index f2bf896..1f6b451 100644
 
      def fake_scalar(mode, dtype=Int32):
          if mode == 0:
-@@ -417,15 +512,25 @@ def _compile_gemm_act(
+@@ -417,15 +509,25 @@ def _compile_gemm_act(
      epi_args = GemmCls.EpilogueArguments(
          mAuxOut,
          act_fn,
 +        tensor_epilogue_fn,
-+        tensor_epilogue_uses_c,
++        tensor_epilogue_has_aux_args,
 +        tensor_epilogue_arg_kinds,
 +        alpha=fake_scalar(alpha_mode, Float32),
 +        beta=fake_scalar(beta_mode, Float32),
@@ -659,25 +496,18 @@ index f2bf896..1f6b451 100644
      )
 -    varlen_args = make_fake_varlen_args(varlen_m, False, gather_A, m if varlen_m else None)
 +    varlen_args = make_fake_varlen_args(
-+        varlen_m, varlen_k, gather_A, m if varlen_m else (k if varlen_k else None)
++        varlen_m, False, gather_A, m if varlen_m else None
 +    )
      return compile_gemm_kernel(
          GemmCls,
          a_dtype,
-@@ -468,19 +573,34 @@ def gemm_act(
-     rowvec_bias: Optional[Tensor] = None,  # (l, n)
-     colvec_bias: Optional[Tensor] = None,  # (l, m), or (total_m,) if varlen_m
-     cu_seqlens_m: Optional[Tensor] = None,  # (l+1,) cumulative sum of m values for variable length
--    A_idx: Optional[Tensor] = None,  # (total_m,) if gather_A with varlen_m
-+    cu_seqlens_k: Optional[Tensor] = None,  # (l+1,) cumulative sum of k values for variable length
-+    A_idx: Optional[Tensor] = None,  # (total_m,) or (total_k,) if gather_A with varlen
-     rounding_mode: int = RoundingMode.RN,
+@@ -473,8 +575,20 @@ def gemm_act(
      sr_seed: int | Tensor = 0,
      use_tma_gather: bool = False,
      concat_layout: tuple | None = None,
 +    tensor_epilogue_fn: Optional[Callable] = None,
 +    tensor_epilogue_key: Optional[str] = None,
-+    tensor_epilogue_uses_c: bool = False,
++    tensor_epilogue_has_aux_args: bool = False,
 +    tensor_epilogue_arg_kinds: tuple[str, ...] = (),
 +    tensor_epilogue_rowvec_biases: tuple[Tensor, ...] = (),
 +    tensor_epilogue_colvec_biases: tuple[Tensor, ...] = (),
@@ -693,31 +523,18 @@ index f2bf896..1f6b451 100644
          gemm_cls_name = "gated"
      else:
          assert activation in act_fn_map, f"Unsupported activation {activation}"
-         gemm_cls_name = "act"
-
-     varlen_m = cu_seqlens_m is not None
-+    varlen_k = cu_seqlens_k is not None
-+    assert not (varlen_m and varlen_k), "Only one of cu_seqlens_m and cu_seqlens_k"
-     gather_A = A_idx is not None
-     if varlen_m:
-         assert persistent, "varlen_m requires persistent=True"
-@@ -488,15 +608,18 @@ def gemm_act(
-         if D is not None:
+@@ -489,7 +603,7 @@ def gemm_act(
              assert D.stride(-1) == 1, "varlen_m requires D to be n-major"
          assert PostAct.stride(-1) == 1, "varlen_m requires PostAct to be n-major"
-+    if varlen_k:
-+        assert A.stride(-2) == 1, "varlen_k requires A to be m-major"
-+        assert B.stride(-2) == 1, "varlen_k requires B to be n-major"
      if gather_A:
 -        assert cu_seqlens_m is not None, "gather_A requires varlen"
-+        assert varlen_m or varlen_k, "gather_A requires varlen"
++        assert varlen_m, "gather_A requires varlen_m"
          assert cluster_N == 1, "gather_A requires cluster_N=1"
 
--    A_p = perm3d_single(A, varlen_m)
--    B_p = perm3d_single(B)
--    D_p = perm3d_single(D, varlen_m)
--    C_p = perm3d_single(C, varlen_m)
-+    A_p, B_p, D_p, C_p = perm3d(A, B, D, C, varlen_m=varlen_m, varlen_k=varlen_k)
+     A_p = perm3d_single(A, varlen_m)
+@@ -497,6 +611,9 @@ def gemm_act(
+     D_p = perm3d_single(D, varlen_m)
+     C_p = perm3d_single(C, varlen_m)
      PostAct_p = perm3d_single(PostAct, varlen_m)
 +    tensor_epilogue_tile_biases_p = tuple(
 +        perm3d_single(tensor, varlen_m) for tensor in tensor_epilogue_tile_biases
@@ -725,7 +542,7 @@ index f2bf896..1f6b451 100644
 
      a_major = get_major(A_p, "m", "k")
      b_major = get_major(B_p, "n", "k")
-@@ -509,6 +632,13 @@ def gemm_act(
+@@ -509,6 +626,30 @@ def gemm_act(
      d_dtype = torch2cute_dtype_map[D.dtype] if D is not None else None
      c_dtype = torch2cute_dtype_map[C.dtype] if C is not None else None
      postact_dtype = torch2cute_dtype_map[PostAct.dtype]
@@ -733,28 +550,49 @@ index f2bf896..1f6b451 100644
 +        raise NotImplementedError(
 +            f"QUACK tensor epilogues support only tile/row/col aux tensors, got {tensor_epilogue_arg_kinds}"
 +        )
++    expected_tensor_epilogue_arg_counts = {
++        "row": len(tensor_epilogue_rowvec_biases),
++        "col": len(tensor_epilogue_colvec_biases),
++        "tile": len(tensor_epilogue_tile_biases),
++    }
++    actual_tensor_epilogue_arg_counts = {
++        kind: tensor_epilogue_arg_kinds.count(kind)
++        for kind in expected_tensor_epilogue_arg_counts
++    }
++    if actual_tensor_epilogue_arg_counts != expected_tensor_epilogue_arg_counts:
++        raise RuntimeError(
++            "tensor_epilogue_arg_kinds must match row/col/tile tensor epilogue args"
++        )
++    if tensor_epilogue_has_aux_args != bool(tensor_epilogue_arg_kinds):
++        raise RuntimeError(
++            "tensor_epilogue_has_aux_args must match tensor_epilogue_arg_kinds"
++        )
 +    tensor_epilogue_arg_kind_codes = tuple(
 +        {"tile": 1, "row": 2, "col": 3}[kind] for kind in tensor_epilogue_arg_kinds
 +    )
      colvec_ndim = colvec_bias.ndim if colvec_bias is not None else 0
 
      device_capacity = get_device_capacity(A.device)
-@@ -526,6 +656,8 @@ def gemm_act(
+@@ -526,6 +667,12 @@ def gemm_act(
      sr_seed_mode = (
          2 if isinstance(sr_seed, Tensor) else (1 if rounding_mode == RoundingMode.RS else 0)
      )
 +    alpha_mode = 2 if isinstance(alpha, Tensor) else (1 if alpha != 1.0 else 0)
 +    beta_mode = 2 if isinstance(beta, Tensor) else (1 if beta != 1.0 else 0)
++    if tensor_epilogue_has_aux_args and (C is not None or alpha_mode != 0 or beta_mode != 0):
++        raise NotImplementedError(
++            "QUACK tensor epilogue aux args cannot be combined with C/alpha/beta yet"
++        )
      concat_layout = tuple(sorted(concat_layout)) if concat_layout else ()
      compiled_fn = _compile_gemm_act(
          a_dtype,
-@@ -544,10 +676,22 @@ def gemm_act(
+@@ -544,6 +691,17 @@ def gemm_act(
          persistent,
          is_dynamic_persistent,
          activation,
 +        tensor_epilogue_fn,
 +        tensor_epilogue_key if tensor_epilogue_key is not None else repr(tensor_epilogue_fn),
-+        tensor_epilogue_uses_c,
++        tensor_epilogue_has_aux_args,
 +        tensor_epilogue_arg_kind_codes,
 +        tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_rowvec_biases),
 +        tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_colvec_biases),
@@ -766,12 +604,7 @@ index f2bf896..1f6b451 100644
          torch2cute_dtype_map[rowvec_bias.dtype] if rowvec_bias is not None else None,
          torch2cute_dtype_map[colvec_bias.dtype] if colvec_bias is not None else None,
          colvec_ndim,
-         varlen_m,
-+        varlen_k,
-         gather_A,
-         concat_layout,
-         device_capacity,
-@@ -574,9 +718,17 @@ def gemm_act(
+@@ -574,9 +732,17 @@ def gemm_act(
 
      epi_args = GemmActMixin.EpilogueArguments(
          PostAct_p,
@@ -790,15 +623,6 @@ index f2bf896..1f6b451 100644
          rounding_mode=None,  # Constexpr, pass None at call time
          sr_seed=scalar_arg(sr_seed, sr_seed_mode),
      )
-@@ -585,7 +737,7 @@ def gemm_act(
-         max_swizzle_size,
-         tile_count_semaphore,
-     )
--    varlen_args = make_varlen_args(cu_seqlens_m, None, A_idx)
-+    varlen_args = make_varlen_args(cu_seqlens_m, cu_seqlens_k, A_idx)
-
-     if device_capacity[0] in [10, 11]:
-         compiled_fn(A_p, B_p, D_p, C_p, epi_args, scheduler_args, varlen_args, None, None, None)
 diff --git a/gemm_sm100.py b/gemm_sm100.py
 index 3219e9d..f3f99cd 100644
 --- a/gemm_sm100.py

@@ -36,7 +36,6 @@ from .gemm_sm120 import GemmSm120
 from .gemm_default_epi import GemmDefaultEpiMixin
 from .gemm_tvm_ffi_utils import (
     get_major,
-    perm3d,
     perm3d_single,
     make_scheduler_args,
     make_varlen_args,
@@ -69,7 +68,7 @@ class GemmActMixin(ComposableEpiMixin):
     _extra_param_fields = (
         ("act_fn", cutlass.Constexpr, None),
         ("tensor_epilogue_fn", cutlass.Constexpr, None),
-        ("tensor_epilogue_uses_c", cutlass.Constexpr, False),
+        ("tensor_epilogue_has_aux_args", cutlass.Constexpr, False),
         ("tensor_epilogue_arg_kinds", cutlass.Constexpr, ()),
     )
 
@@ -78,7 +77,7 @@ class GemmActMixin(ComposableEpiMixin):
         mAuxOut: cute.Tensor
         act_fn: cutlass.Constexpr[Optional[Callable]] = None
         tensor_epilogue_fn: cutlass.Constexpr[Optional[Callable]] = None
-        tensor_epilogue_uses_c: cutlass.Constexpr[bool] = False
+        tensor_epilogue_has_aux_args: cutlass.Constexpr[bool] = False
         tensor_epilogue_arg_kinds: cutlass.Constexpr[tuple] = ()
         alpha: Optional[Float32 | cute.Tensor] = None
         beta: Optional[Float32 | cute.Tensor] = None
@@ -100,7 +99,7 @@ class GemmActMixin(ComposableEpiMixin):
         d = self._epi_ops_to_params_dict(args)
         d["act_fn"] = args.act_fn
         d["tensor_epilogue_fn"] = args.tensor_epilogue_fn
-        d["tensor_epilogue_uses_c"] = args.tensor_epilogue_uses_c
+        d["tensor_epilogue_has_aux_args"] = args.tensor_epilogue_has_aux_args
         d["tensor_epilogue_arg_kinds"] = args.tensor_epilogue_arg_kinds
         for key in ("mRowVecBroadcast", "mColVecBroadcast"):
             if key in self.concat_layout and key in d:
@@ -191,12 +190,12 @@ class GemmActMixin(ComposableEpiMixin):
         tRS_rD: cute.Tensor,
         tRS_rC: Optional[cute.Tensor] = None,
     ) -> Optional[cute.Tensor]:
-        if const_expr(params.tensor_epilogue_fn is None or not params.tensor_epilogue_uses_c):
+        if const_expr(params.tensor_epilogue_fn is None or not params.tensor_epilogue_has_aux_args):
             GemmDefaultEpiMixin.epi_visit_subtile(self, params, epi_loop_tensors, tRS_rD, tRS_rC)
         if const_expr(params.tensor_epilogue_fn is not None):
             tRS_rEpilogueIn = cute.make_rmem_tensor_like(tRS_rD, self.acc_dtype)
             tRS_rEpilogueIn.store(tRS_rD.load())
-            if const_expr(params.tensor_epilogue_uses_c):
+            if const_expr(params.tensor_epilogue_has_aux_args):
                 tDrRowVecs = epi_loop_tensors.get("mTensorEpilogueRowVecBroadcasts")
                 tDrColVecs = epi_loop_tensors.get("mTensorEpilogueColVecBroadcasts")
                 tRsTileAuxes = epi_loop_tensors.get("mTensorEpilogueTiles")
@@ -408,7 +407,7 @@ def _compile_gemm_act(
     activation,
     tensor_epilogue_fn,
     tensor_epilogue_key,
-    tensor_epilogue_uses_c,
+    tensor_epilogue_has_aux_args,
     tensor_epilogue_arg_kinds,
     tensor_epilogue_rowvec_dtypes,
     tensor_epilogue_colvec_dtypes,
@@ -421,7 +420,6 @@ def _compile_gemm_act(
     colvec_dtype,
     colvec_ndim,
     varlen_m,
-    varlen_k,
     gather_A,
     concat_layout,
     device_capacity,
@@ -458,7 +456,6 @@ def _compile_gemm_act(
         d_major,
         c_major,
         varlen_m=varlen_m,
-        varlen_k=varlen_k,
         gather_A=gather_A,
     )
     pa_n = cute.sym_int() if gemm_cls_name == "gated" else n
@@ -513,7 +510,7 @@ def _compile_gemm_act(
         mAuxOut,
         act_fn,
         tensor_epilogue_fn,
-        tensor_epilogue_uses_c,
+        tensor_epilogue_has_aux_args,
         tensor_epilogue_arg_kinds,
         alpha=fake_scalar(alpha_mode, Float32),
         beta=fake_scalar(beta_mode, Float32),
@@ -529,7 +526,7 @@ def _compile_gemm_act(
         (is_dynamic_persistent and device_capacity[0] == 9), False, l
     )
     varlen_args = make_fake_varlen_args(
-        varlen_m, varlen_k, gather_A, m if varlen_m else (k if varlen_k else None)
+        varlen_m, False, gather_A, m if varlen_m else None
     )
     return compile_gemm_kernel(
         GemmCls,
@@ -573,15 +570,14 @@ def gemm_act(
     rowvec_bias: Optional[Tensor] = None,  # (l, n)
     colvec_bias: Optional[Tensor] = None,  # (l, m), or (total_m,) if varlen_m
     cu_seqlens_m: Optional[Tensor] = None,  # (l+1,) cumulative sum of m values for variable length
-    cu_seqlens_k: Optional[Tensor] = None,  # (l+1,) cumulative sum of k values for variable length
-    A_idx: Optional[Tensor] = None,  # (total_m,) or (total_k,) if gather_A with varlen
+    A_idx: Optional[Tensor] = None,  # (total_m,) if gather_A with varlen_m
     rounding_mode: int = RoundingMode.RN,
     sr_seed: int | Tensor = 0,
     use_tma_gather: bool = False,
     concat_layout: tuple | None = None,
     tensor_epilogue_fn: Optional[Callable] = None,
     tensor_epilogue_key: Optional[str] = None,
-    tensor_epilogue_uses_c: bool = False,
+    tensor_epilogue_has_aux_args: bool = False,
     tensor_epilogue_arg_kinds: tuple[str, ...] = (),
     tensor_epilogue_rowvec_biases: tuple[Tensor, ...] = (),
     tensor_epilogue_colvec_biases: tuple[Tensor, ...] = (),
@@ -599,8 +595,6 @@ def gemm_act(
         gemm_cls_name = "act"
 
     varlen_m = cu_seqlens_m is not None
-    varlen_k = cu_seqlens_k is not None
-    assert not (varlen_m and varlen_k), "Only one of cu_seqlens_m and cu_seqlens_k"
     gather_A = A_idx is not None
     if varlen_m:
         assert persistent, "varlen_m requires persistent=True"
@@ -608,14 +602,14 @@ def gemm_act(
         if D is not None:
             assert D.stride(-1) == 1, "varlen_m requires D to be n-major"
         assert PostAct.stride(-1) == 1, "varlen_m requires PostAct to be n-major"
-    if varlen_k:
-        assert A.stride(-2) == 1, "varlen_k requires A to be m-major"
-        assert B.stride(-2) == 1, "varlen_k requires B to be n-major"
     if gather_A:
-        assert varlen_m or varlen_k, "gather_A requires varlen"
+        assert varlen_m, "gather_A requires varlen_m"
         assert cluster_N == 1, "gather_A requires cluster_N=1"
 
-    A_p, B_p, D_p, C_p = perm3d(A, B, D, C, varlen_m=varlen_m, varlen_k=varlen_k)
+    A_p = perm3d_single(A, varlen_m)
+    B_p = perm3d_single(B)
+    D_p = perm3d_single(D, varlen_m)
+    C_p = perm3d_single(C, varlen_m)
     PostAct_p = perm3d_single(PostAct, varlen_m)
     tensor_epilogue_tile_biases_p = tuple(
         perm3d_single(tensor, varlen_m) for tensor in tensor_epilogue_tile_biases
@@ -635,6 +629,23 @@ def gemm_act(
     if not set(tensor_epilogue_arg_kinds) <= {"tile", "row", "col"}:
         raise NotImplementedError(
             f"QUACK tensor epilogues support only tile/row/col aux tensors, got {tensor_epilogue_arg_kinds}"
+        )
+    expected_tensor_epilogue_arg_counts = {
+        "row": len(tensor_epilogue_rowvec_biases),
+        "col": len(tensor_epilogue_colvec_biases),
+        "tile": len(tensor_epilogue_tile_biases),
+    }
+    actual_tensor_epilogue_arg_counts = {
+        kind: tensor_epilogue_arg_kinds.count(kind)
+        for kind in expected_tensor_epilogue_arg_counts
+    }
+    if actual_tensor_epilogue_arg_counts != expected_tensor_epilogue_arg_counts:
+        raise RuntimeError(
+            "tensor_epilogue_arg_kinds must match row/col/tile tensor epilogue args"
+        )
+    if tensor_epilogue_has_aux_args != bool(tensor_epilogue_arg_kinds):
+        raise RuntimeError(
+            "tensor_epilogue_has_aux_args must match tensor_epilogue_arg_kinds"
         )
     tensor_epilogue_arg_kind_codes = tuple(
         {"tile": 1, "row": 2, "col": 3}[kind] for kind in tensor_epilogue_arg_kinds
@@ -658,6 +669,10 @@ def gemm_act(
     )
     alpha_mode = 2 if isinstance(alpha, Tensor) else (1 if alpha != 1.0 else 0)
     beta_mode = 2 if isinstance(beta, Tensor) else (1 if beta != 1.0 else 0)
+    if tensor_epilogue_has_aux_args and (C is not None or alpha_mode != 0 or beta_mode != 0):
+        raise NotImplementedError(
+            "QUACK tensor epilogue aux args cannot be combined with C/alpha/beta yet"
+        )
     concat_layout = tuple(sorted(concat_layout)) if concat_layout else ()
     compiled_fn = _compile_gemm_act(
         a_dtype,
@@ -678,7 +693,7 @@ def gemm_act(
         activation,
         tensor_epilogue_fn,
         tensor_epilogue_key if tensor_epilogue_key is not None else repr(tensor_epilogue_fn),
-        tensor_epilogue_uses_c,
+        tensor_epilogue_has_aux_args,
         tensor_epilogue_arg_kind_codes,
         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_rowvec_biases),
         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_colvec_biases),
@@ -691,7 +706,6 @@ def gemm_act(
         torch2cute_dtype_map[colvec_bias.dtype] if colvec_bias is not None else None,
         colvec_ndim,
         varlen_m,
-        varlen_k,
         gather_A,
         concat_layout,
         device_capacity,
@@ -737,7 +751,7 @@ def gemm_act(
         max_swizzle_size,
         tile_count_semaphore,
     )
-    varlen_args = make_varlen_args(cu_seqlens_m, cu_seqlens_k, A_idx)
+    varlen_args = make_varlen_args(cu_seqlens_m, None, A_idx)
 
     if device_capacity[0] in [10, 11]:
         compiled_fn(A_p, B_p, D_p, C_p, epi_args, scheduler_args, varlen_args, None, None, None)
