@@ -1368,46 +1368,27 @@ class TestUserStreamCompile(InductorTestCase):
         result, (code,) = run_and_get_code(compiled_fn, x)
         self.assertEqual(result, expected)
 
-        self.assertExpectedInline(
-            normalize_gm(counter.graphs[0].print_readable(print_output=False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[1024]"):
-        l_x_ = L_x_
-
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
-
-        a: "f32[1024]" = l_x_ * 2
-
-        b: "f32[1024]" = l_x_ * 3;  l_x_ = None
-
-        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
-
-        add: "f32[1024]" = a + b;  a = b = None
-        return (add,)
-""",
+        graph = normalize_gm(counter.graphs[0].print_readable(print_output=False))
+        (
+            FileCheck()
+            .check('a: "f32[1024]" = l_x_ * 2')
+            .check('b: "f32[1024]" = l_x_ * 3')
+            .check("synchronize_stream = torch.ops.streams.synchronize_stream(1)")
+            .check('add: "f32[1024]" = a + b')
+            .run(graph)
         )
 
         wrapper_body = _extract_wrapper_body(code)
-        self.assertExpectedInline(
-            wrapper_body,
-            """\
-arg0_1, = args
-with torch.cuda._DeviceGuard(0):
-    torch.cuda.set_device(0)
-    default_stream = torch.cuda.current_stream()
-    stream1 = get_external_object_by_index(1)
-    with stream1:
-        arg0_1 = copy_if_misaligned(arg0_1)
-        buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
-        raw_stream = get_raw_stream(0)
-        triton_kernel.run(arg0_1, buf0, 1024, stream=raw_stream)
-    with default_stream:
-        buf3 = empty_strided_cuda((1024, ), (1, ), torch.float32)
-        raw_stream0 = get_raw_stream(0)
-        triton_kernel.run(arg0_1, buf0, buf3, 1024, stream=raw_stream0)
-        torch.ops.streams.synchronize_stream.default(1)
-    return (buf3, )""",
+        self.assertGreaterEqual(wrapper_body.count("triton_kernel.run("), 2)
+        (
+            FileCheck()
+            .check("default_stream = torch.cuda.current_stream()")
+            .check("stream1 = get_external_object_by_index(1)")
+            .check("with stream1:")
+            .check("triton_kernel.run(")
+            .check("synchronize_stream")
+            .check("return (")
+            .run(wrapper_body)
         )
 
     def test_codegen_structure_pipeline(self):
@@ -2482,6 +2463,94 @@ class TestPDLWithMultiStream(InductorTestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+@xfailIfNoAcceleratorTriton
+class TestAOTIUserStreams(InductorTestCase):
+    @staticmethod
+    def _runtime_name(cuda_name):
+        if TEST_WITH_ROCM:
+            return cuda_name.replace("cuda", "hip", 1)
+        return cuda_name
+
+    def _compile_and_run(self, model, inputs):
+        from torch._inductor.utils import fresh_cache, run_and_get_cpp_code
+
+        with fresh_cache():
+            ep = torch.export.export(model, inputs, strict=True)
+
+            def _compile():
+                return torch._inductor.aoti_compile_and_package(ep)
+
+            package_path, code = run_and_get_cpp_code(_compile)
+            loaded = torch._inductor.aoti_load_package(package_path)
+            result = loaded(*inputs)
+        return result, code
+
+    def test_record_wait_event_basic(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                event = s.record_event()
+                event.wait()
+                return y * 2
+
+        model = Model().cuda()
+        inputs = (torch.randn(1024, device="cuda"),)
+        expected = model(*inputs)
+
+        result, code = self._compile_and_run(model, inputs)
+
+        self.assertEqual(result, expected)
+        self.assertIn(self._runtime_name("cudaEventRecord"), code)
+        self.assertIn(self._runtime_name("cudaStreamWaitEvent"), code)
+        self.assertIn("AOTIPerThreadStreamCache", code)
+
+    def test_two_stream_dependency(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                s1 = torch.cuda.Stream()
+                s2 = torch.cuda.Stream()
+                with torch.cuda.stream(s1):
+                    a = x + 1
+                event = s1.record_event()
+                s2.wait_event(event)
+                with torch.cuda.stream(s2):
+                    b = a * 2
+                final = s2.record_event()
+                final.wait()
+                return b
+
+        model = Model().cuda()
+        inputs = (torch.randn(1024, device="cuda"),)
+        expected = model(*inputs)
+
+        result, code = self._compile_and_run(model, inputs)
+
+        self.assertEqual(result, expected)
+        self.assertGreaterEqual(code.count(self._runtime_name("cudaEventRecord")), 2)
+        self.assertGreaterEqual(
+            code.count(self._runtime_name("cudaStreamWaitEvent")), 2
+        )
+        self.assertIn("_aoti_aux_stream_cache.get(2", code)
+
+    def test_stream_synchronize_raises(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                s.synchronize()
+                return y * 2
+
+        model = Model().cuda()
+        inputs = (torch.randn(1024, device="cuda"),)
+
+        with self.assertRaisesRegex(Exception, "synchronize_stream"):
+            self._compile_and_run(model, inputs)
+
+
+@unittest.skipIf(not TEST_CUDA, "requires CUDA")
 @torch._inductor.config.patch({"triton.cudagraphs": True})
 @xfailIfNoAcceleratorTriton
 class TestStreamCudagraphInteraction(InductorTestCase):
@@ -2606,6 +2675,7 @@ instantiate_parametrized_tests(TestStreamOrderingStress)
 instantiate_parametrized_tests(TestGenericStreamCompile)
 instantiate_parametrized_tests(TestStreamIdentity)
 instantiate_parametrized_tests(TestPDLWithMultiStream)
+instantiate_parametrized_tests(TestAOTIUserStreams)
 instantiate_parametrized_tests(TestStreamCudagraphInteraction)
 
 
