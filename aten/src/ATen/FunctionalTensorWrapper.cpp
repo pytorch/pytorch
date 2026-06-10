@@ -434,6 +434,8 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
     bool allow_tensor_metadata_change) const {
   c10::impl::PyInterpreter* interpreter = nullptr;
   if (!c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::Python)) {
+    // FunctionalTensorWrapper skips the normal mode stack here; routing
+    // functionalized FakeTensor detach through normal modes can recurse.
     if (c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::PreDispatch) &&
         !c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::PreDispatch) &&
         c10::impl::hasGlobalPyInterpreter()) {

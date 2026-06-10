@@ -427,8 +427,11 @@ c10::Device TensorImpl::device_custom() const {
   if (C10_UNLIKELY(python_custom_device_)) {
     return (*c10::impl::getGlobalPyInterpreter())->device(this);
   }
-  if (C10_UNLIKELY(extra_meta_ && extra_meta_->fake_device_.has_value())) {
-    const auto fake_device = extra_meta_->fake_device_;
+  if (C10_UNLIKELY(extra_meta_)) {
+    const auto& fake_device = extra_meta_->fake_device_;
+    if (!fake_device.has_value()) {
+      return device_default();
+    }
     if (c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
       return device_default();
     }
