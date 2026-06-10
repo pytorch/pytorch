@@ -1613,10 +1613,8 @@ def multi_device_op_default(
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
 
 
-# _set_data copies all tensor metadata (storage, device, sizes, strides, dtype)
-# from source to self via shallow_copy_from, matching eager tensor.data = behavior.
 @register_op_impl(aten.shallow_copy_data_.default)
-def _set_data_fake(
+def _(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> FakeTensor:
     _, new_kwargs = _normalize_function_or_error(

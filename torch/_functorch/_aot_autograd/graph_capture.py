@@ -123,12 +123,13 @@ def _create_graph(
             _allow_token_discovery=True,
         )
 
-    # TODO: revisit once shallow_copy_data_ FakeTensor semantics are
-    # fully correct and no longer mutate placeholder devices during tracing.
-    # Save original FakeTensor devices before make_fx, which may mutate
-    # them via in-graph shallow_copy_data_ / set_() for cross-device
-    # tensor.data = ... After tracing, we restore them so the backend
-    # compiler sees the correct input devices on placeholder nodes.
+    # TODO(#<shallow_copy_data_ ProxyTensor>): The long-term fix is to
+    # handle shallow_copy_data_ correctly in ProxyTensor, following how
+    # t_() works: ProxyTensor snapshots placeholder meta["val"] via
+    # fast_detach so in-place metadata mutations don't corrupt them.
+    # The placeholder snapshots should already be protected, but the arg
+    # FakeTensors themselves get mutated and are used later, so we
+    # save/restore their devices here.
     original_fake_devices = {
         i: arg.fake_device
         for i, arg in enumerate(args)
@@ -147,8 +148,8 @@ def _create_graph(
             _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
         )(*args)
 
-        # Restore FakeTensor devices on both args and placeholder nodes
-        # that may have been mutated by in-graph set_().
+        # Restore FakeTensor devices on args and placeholder nodes that
+        # may have been mutated by in-graph shallow_copy_data_().
         if original_fake_devices:
             for i, device in original_fake_devices.items():
                 if args[i].fake_device != device:  # pyrefly: ignore[missing-attribute]
