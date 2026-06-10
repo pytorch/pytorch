@@ -17,6 +17,7 @@ from subprocess import CalledProcessError, check_call, check_output, DEVNULL
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
 from .env import (
     BUILD_DIR,
+    check_env_flag,
     check_negative_env_flag,
     CMAKE_MINIMUM_VERSION_STRING,
     IS_64BIT,
@@ -50,9 +51,19 @@ eprint = functools.partial(print, file=sys.stderr, flush=True)
 
 
 # Ninja
-# Use ninja if it is on the PATH. Previous version of PyTorch required the
-# ninja python package, but we no longer use it, so we do not have to import it
-USE_NINJA = bool(not check_negative_env_flag("USE_NINJA") and shutil.which("ninja"))
+# USE_NINJA=1 opts in to ninja (error if not found), USE_NINJA=0 opts out,
+# unset means auto-detect from PATH. CMAKE_GENERATOR overrides everything.
+if check_env_flag("USE_NINJA"):
+    if not shutil.which("ninja"):
+        raise RuntimeError(
+            "USE_NINJA=1 is set but ninja could not be found on PATH. "
+            "Install it with: pip install ninja"
+        )
+    USE_NINJA = True
+else:
+    USE_NINJA = bool(
+        not check_negative_env_flag("USE_NINJA") and shutil.which("ninja")
+    )
 if "CMAKE_GENERATOR" in os.environ:
     USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
 
