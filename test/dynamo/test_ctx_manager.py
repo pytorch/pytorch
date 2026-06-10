@@ -2052,6 +2052,17 @@ class GraphModule(torch.nn.Module):
         retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
         self.assertEqual(first_graph, retraced_graph)
 
+    def test_context_wrapping_variable_rejects_dict_target_values(self):
+        # target_values must be None or a Sequence; a dict silently iterates
+        # only its keys, which is the bug pattern we want to catch early.
+        from torch._dynamo.variables.ctx_manager import ContextWrappingVariable
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "ContextWrappingVariable.target_values must be None or a Sequence",
+        ):
+            ContextWrappingVariable(target_values={"key": "val"})
+
 
 class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
