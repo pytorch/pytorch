@@ -222,7 +222,7 @@ def gemm_epilogue(
         is_dynamic_persistent=False,
         tensor_epilogue_fn=epilogue_fn,
         tensor_epilogue_key=epilogue_key,
-        tensor_epilogue_uses_c=bool(epilogue_args),
+        tensor_epilogue_has_aux_args=bool(epilogue_args),
         tensor_epilogue_arg_kinds=inferred_arg_kinds,
         tensor_epilogue_rowvec_biases=row_args,
         tensor_epilogue_colvec_biases=col_args,
