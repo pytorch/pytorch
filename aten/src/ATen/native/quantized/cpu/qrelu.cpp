@@ -84,7 +84,7 @@ static Tensor qnnpack_relu(Tensor input) {
       input_contig.size(0) /* batch size */,
       (uint8_t*)input_contig.const_data_ptr<c10::quint8>() /* input data */,
       num_elems /* input stride */,
-      (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
+      reinterpret_cast<uint8_t*>(qy.mutable_data_ptr<c10::quint8>()) /* output data */,
       num_elems /* output stride */);
   TORCH_INTERNAL_ASSERT(
       setupStatus == pytorch_qnnp_status_success,

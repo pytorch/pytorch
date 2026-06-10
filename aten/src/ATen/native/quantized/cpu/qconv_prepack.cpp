@@ -117,7 +117,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   const at::Tensor weight_nhwc =
       at::native::fbgemm_utils::ConvertConvWeightsToChannelLastTensor<kSpatialDim>(weight, groups, transpose);
   const int8_t* weight_data_int8 =
-          reinterpret_cast<int8_t*>(weight_nhwc.data_ptr<c10::qint8>());
+          reinterpret_cast<int8_t*>(weight_nhwc.mutable_data_ptr<c10::qint8>());
   std::vector<int32_t> col_offsets(output_channels);
   // compute column offsets (Similar to
   // fbgemm::col_offsets_with_zero_pt_s8acc32_ref) please note that offsets

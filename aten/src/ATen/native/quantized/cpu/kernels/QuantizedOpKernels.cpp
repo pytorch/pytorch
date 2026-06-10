@@ -2424,8 +2424,8 @@ void q_batch_norm_kernel(
     Tensor& output) {
 
   AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qbatch_norm", [&]() {
-    float* alpha = a.data_ptr<float>();
-    float* beta = b.data_ptr<float>();
+    float* alpha = a.mutable_data_ptr<float>();
+    float* beta = b.mutable_data_ptr<float>();
     auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
     auto maximum = std::numeric_limits<scalar_t::underlying>::max();
     scalar_t::underlying* X =
@@ -2642,11 +2642,11 @@ void q_batch_norm_cpu_kernel(
     const Tensor& b,
     Tensor& output) {
   auto in_ptr = input.const_data_ptr<uint8_t>();
-  float* alpha_ptr = a.data_ptr<float>();
-  float* beta_ptr = b.data_ptr<float>();
+  float* alpha_ptr = a.mutable_data_ptr<float>();
+  float* beta_ptr = b.mutable_data_ptr<float>();
   AT_DISPATCH_FLOATING_TYPES_AND3(
       at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Byte, output.scalar_type(), "int8_batch_norm2d_cpu", [&] {
-        auto out_ptr = output.data_ptr<scalar_t>();
+        auto out_ptr = output.mutable_data_ptr<scalar_t>();
         q_batch_norm_cpu_kernel_impl<scalar_t>(
             N, C, HxW, in_zero_point, out_zero_point, in_ptr, alpha_ptr, beta_ptr, out_ptr);
       });
@@ -2940,7 +2940,7 @@ void quantized_normalize_kernel(
         (affine_per_channel && beta.numel() == num_channels),
         "Unexpected size of beta");
 
-    scalar_t* X_data = X.data_ptr<scalar_t>();
+    scalar_t* X_data = X.mutable_data_ptr<scalar_t>();
     const float* gamma_data = gamma.defined() ? gamma.const_data_ptr<float>() : nullptr;
     const float* beta_data = beta.defined() ? beta.const_data_ptr<float>() : nullptr;
     scalar_t* Y_data = Y->data_ptr<scalar_t>();
@@ -3113,8 +3113,8 @@ void qmean_inner_dim_kernel(
       std::nullopt);
 
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_mean_kernel_impl_cpu", [&]() {
-    scalar_t* X_data = self.data_ptr<scalar_t>();
-    scalar_t* Y_data = result.data_ptr<scalar_t>();
+    scalar_t* X_data = self.mutable_data_ptr<scalar_t>();
+    scalar_t* Y_data = result.mutable_data_ptr<scalar_t>();
 
     at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
       for (const auto i : c10::irange(start, end)) {
@@ -3167,8 +3167,8 @@ void qstd_inner_dim_kernel(
       std::nullopt);
 
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_std_kernel_impl_cpu", [&]() {
-    scalar_t* X_data = self.data_ptr<scalar_t>();
-    scalar_t* Y_data = result.data_ptr<scalar_t>();
+    scalar_t* X_data = self.mutable_data_ptr<scalar_t>();
+    scalar_t* Y_data = result.mutable_data_ptr<scalar_t>();
 
     at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
       for (const auto i : c10::irange(start, end)) {
@@ -3228,7 +3228,7 @@ void quantized_groupnorm_nhwc_kernel(
         (affine_per_channel && beta.numel() == C),
         "Unexpected size of beta");
 
-    scalar_t* X_data = X.data_ptr<scalar_t>();
+    scalar_t* X_data = X.mutable_data_ptr<scalar_t>();
     const float* gamma_data = gamma.defined() ? gamma.const_data_ptr<float>() : nullptr;
     const float* beta_data = beta.defined() ? beta.const_data_ptr<float>() : nullptr;
     scalar_t* Y_data = Y->data_ptr<scalar_t>();
@@ -3481,7 +3481,7 @@ void quantize_tensor_per_tensor_affine_cpu(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
         check_tensor_memory_format(rtensor, qtensor);
         const float* rd = rtensor.const_data_ptr<float>();
-        auto qd = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+        auto qd = reinterpret_cast<underlying_t*>(qtensor.mutable_data_ptr<scalar_t>());
         fbgemm::TensorQuantizationParams qparams{};
         qparams.scale = scale;
         qparams.zero_point = zero_point;
@@ -3515,7 +3515,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
         qparams.scale = scale;
         qparams.zero_point = zero_point;
         qparams.precision = CHAR_BIT * sizeof(underlying_t);
-        float* rd = rtensor.data_ptr<float>();
+        float* rd = rtensor.mutable_data_ptr<float>();
         int num_tasks = at::get_num_threads();
         at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
           for (const auto task_id : c10::irange(begin, end)) {
@@ -3808,7 +3808,7 @@ void quantize_tensor_per_tensor_affine_cpu(
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        scalar_t* qdata = qtensor.data_ptr<scalar_t>();
+        scalar_t* qdata = qtensor.mutable_data_ptr<scalar_t>();
         auto quantize_range = [&](int64_t begin, int64_t end) {
           quantize_tensor_arm<scalar_t>(
             rdata + begin, qdata + begin, end - begin, scale, zero_point);
@@ -3823,7 +3823,7 @@ void quantize_tensor_per_tensor_affine_cpu(
   // Fallback path
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        scalar_t* qdata = qtensor.data_ptr<scalar_t>();
+        scalar_t* qdata = qtensor.mutable_data_ptr<scalar_t>();
         for (const auto i : c10::irange(numel)) {
           qdata[i] = quantize_val<scalar_t>(scale, zero_point, rdata[i]);
         }
@@ -3837,7 +3837,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
     double scale,
     int64_t zero_point) {
   check_tensor_memory_format(qtensor, rtensor);
-  float* rdata = rtensor.data_ptr<float>();
+  float* rdata = rtensor.mutable_data_ptr<float>();
   int numel = qtensor.numel();
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
@@ -3888,7 +3888,7 @@ void quantize_tensor_per_channel_impl(
   auto scales_data = scales.const_data_ptr<double>();
   auto zero_points_data = zero_points.const_data_ptr<int64_t>();
   const float* in = rtensor.const_data_ptr<float>();
-  auto out = qtensor.data_ptr<T>();
+  auto out = qtensor.mutable_data_ptr<T>();
   if (axis == 1 &&
       (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
        rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
@@ -3940,7 +3940,7 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
   auto scales_data = scales.const_data_ptr<double>();
   auto zero_points_data = zero_points.const_data_ptr<int64_t>();
   const float* in = rtensor.const_data_ptr<float>();
-  auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>();
+  auto out = reinterpret_cast<uint8_t*>(qtensor.mutable_data_ptr<c10::quint8>());
 #if defined(__ARM_NEON__)
   // magic float and magic int to take care of rounding
   // int magic_round(float f): interpret_int32(f + 12582912.0f) - 0x4B400000
@@ -4158,7 +4158,7 @@ void dequantize_per_channel_affine_kernel(
   auto zero_points_data = zero_points.const_data_ptr<N>();
   check_tensor_memory_format(qtensor, rtensor);
   const auto* qd = qtensor.const_data_ptr<Q>();
-  float* rd = rtensor.data_ptr<float>();
+  float* rd = rtensor.mutable_data_ptr<float>();
   const auto elem_per_byte = 8 / bit_width;
   if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
       rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
@@ -4234,7 +4234,7 @@ void quantize_tensor_per_channel_float_qparams_cpu(
         auto zero_points_data = zero_points.const_data_ptr<float>();
         check_tensor_memory_format(rtensor, qtensor);
         const float* rdata = rtensor.const_data_ptr<float>();
-        auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+        auto qdata = reinterpret_cast<underlying_t*>(qtensor.mutable_data_ptr<scalar_t>());
         const auto elem_per_byte = CHAR_BIT / bit_width;
         int qvalue = 0;
         if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
@@ -4295,7 +4295,7 @@ void quantize_tensor_per_tensor_affine_sub_byte_cpu(
     qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_sub_byte_cpu", [&]() {
       check_tensor_memory_format(rtensor, qtensor);
       const float* const rdata = rtensor.const_data_ptr<float>();
-      auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+      auto qdata = reinterpret_cast<underlying_t*>(qtensor.mutable_data_ptr<scalar_t>());
       auto numel = rtensor.numel();
       const auto elem_per_byte = CHAR_BIT / bit_width;
       for (const auto i : c10::irange(numel)) {
@@ -4324,7 +4324,7 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
     qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_sub_byte_cpu", [&]() {
       check_tensor_memory_format(rtensor, qtensor);
-      auto rdata = rtensor.data_ptr<float>();
+      auto rdata = rtensor.mutable_data_ptr<float>();
       const underlying_t* qdata = reinterpret_cast<const underlying_t*>(qtensor.const_data_ptr<scalar_t>());
       auto numel = rtensor.numel();
       const auto elem_per_byte = CHAR_BIT / bit_width;
@@ -4487,7 +4487,7 @@ void qmul_tensor_cpu_kernel(
       "qmul_cpu: Expect qx, qy and out to have the same number of elements");
   AT_DISPATCH_FLOATING_TYPES_AND3(
       at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Byte, out.scalar_type(), "int8_mul_cpu", [&] {
-        auto out_ptr = out.data_ptr<scalar_t>();
+        auto out_ptr = out.mutable_data_ptr<scalar_t>();
         _qmul_tensor_cpu_impl<scalar_t>(
             out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point);
       });
@@ -4614,7 +4614,7 @@ void qadd_tensor_cpu_kernel(
       "qadd_cpu: Expect qx, qy and out to have the same number of elements");
   AT_DISPATCH_FLOATING_TYPES_AND3(
       at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Byte, out.scalar_type(), "int8_add_cpu", [&] {
-        auto out_ptr = out.data_ptr<scalar_t>();
+        auto out_ptr = out.mutable_data_ptr<scalar_t>();
         _qadd_tensor_cpu_impl<scalar_t, ReLUFused>(
             out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point);
       });

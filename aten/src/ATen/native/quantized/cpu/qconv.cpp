@@ -299,7 +299,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
       ? act.contiguous(c10::MemoryFormat::ChannelsLast)
       : at::native::fbgemm_utils::ConvertToChannelsLast3dTensor(act);
   const uint8_t* act_data =
-      reinterpret_cast<uint8_t*>(act_ndhwc.data_ptr<c10::quint8>());
+      reinterpret_cast<uint8_t*>(act_ndhwc.mutable_data_ptr<c10::quint8>());
   auto* pack_w = w.get();
 
   const int M = pack_w->outputChannels();
@@ -499,8 +499,8 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
             conv_p,
             act_data,
             *pack_w,
-            reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-            buffer.data_ptr<int32_t>(),
+            reinterpret_cast<uint8_t*>(output.mutable_data_ptr<c10::quint8>()),
+            buffer.mutable_data_ptr<int32_t>(),
             output_proc_obj,
             task_id /* thread_id*/,
             num_tasks /* num_threads */);
@@ -526,8 +526,8 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
             conv_p,
             act_data,
             *pack_w,
-            reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-            buffer.data_ptr<int32_t>(),
+            reinterpret_cast<uint8_t*>(output.mutable_data_ptr<c10::quint8>()),
+            buffer.mutable_data_ptr<int32_t>(),
             output_proc_obj,
             task_id /* thread_id*/,
             num_tasks /* num_threads */);
@@ -900,7 +900,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     int8_t* w_data =
         reinterpret_cast<int8_t*>(weight_contig.template data_ptr<c10::qint8>());
 
-    float* weight_scales_data = w_scales.data_ptr<float>();
+    float* weight_scales_data = w_scales.mutable_data_ptr<float>();
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
     generate_requantization_scales(
@@ -1672,7 +1672,7 @@ static at::Tensor _quantized_convolution_onednn(
     weight_scales.ndimension() == 0 ||
     (weight_scales.strides().size() == 1 || weight_scales.stride(0) == 1),
     "weight_scales should be scalar tensor or contiguous 1D tensor.");
-  ideep::scale_t weights_scales(weight_scales.data_ptr<float>(), weight_scales.data_ptr<float>()+weight_scales.numel());
+  ideep::scale_t weights_scales(weight_scales.mutable_data_ptr<float>(), weight_scales.mutable_data_ptr<float>()+weight_scales.numel());
 #elif IDEEP_PREREQ(3, 1, 0, 0)
   // TODO (leslie): optimize the performance here:
   // 1. Remove the reciprocal of weight scale, we have done the reciprocal of weight scale back in Ideep:
