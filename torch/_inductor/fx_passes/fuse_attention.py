@@ -437,11 +437,24 @@ def _sfdp_pattern_16(query, key, value, attn_mask, inv_scale, dropout_p):
 
 def _sfdp_replacement_16(query, key, value, attn_mask, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+    if query.device.type == "cuda" and torch.version.hip is None:
+        # Keep the Bert CUDA pattern on its original math path; generic SDPA can
+        # pick fused backends whose scaling/dropout numerics fail tight checks.
+        attn_weight = torch.matmul(query, key.transpose(-2, -1))
+        attn_weight = attn_weight.div(inv_scale) + attn_mask
+        attn_weight = attn_weight.softmax(dim=-1)
+        if dropout_p != 0.0:
+            attn_weight = torch.nn.functional.dropout(attn_weight, p=dropout_p)
+        return attn_weight.to(dtype=query.dtype).matmul(value)
+    attn_mask = attn_mask.to(dtype=query.dtype)
     return _scaled_dot_product_attention(
-        query.transpose(1, 2),
-        key.transpose(1, 2),
-        value.transpose(1, 2),
-        attn_mask=attn_mask.to(dtype=query.dtype),
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
         dropout_p=dropout_p,
         is_causal=False,
         scale=1.0 / inv_scale,
@@ -1213,24 +1226,19 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
             ),
-            # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g(), g(), g(), m(), c()],
                 d,
-                _sfdp_extra_check(
-                    aten.div.Tensor, disable_cuda=torch.version.hip is None
-                ),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1(), c()],
                 d,
-                _sfdp_extra_check(
-                    aten.div.Tensor, disable_cuda=torch.version.hip is None
-                ),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
             (
                 _sfdp_pattern_17,
@@ -1403,7 +1411,6 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     _sfdp_replacement_16,
                     [g(), g(), g(), m_float(), c()],
                     d,
-                    # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
                     _sfdp_extra_check(
                         aten.div.Tensor, disable_cuda=torch.version.hip is None
                     ),
@@ -1415,7 +1422,6 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     _sfdp_replacement_16,
                     [g_bs1(), g_bs1(), g_bs1(), m_bs1_float(), c()],
                     d,
-                    # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
                     _sfdp_extra_check(
                         aten.div.Tensor, disable_cuda=torch.version.hip is None
                     ),
