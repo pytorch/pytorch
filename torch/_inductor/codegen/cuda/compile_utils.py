@@ -241,6 +241,14 @@ def _cuda_multi_arch_gencode_options(current_arch: str | None = None) -> list[st
                 arch, current_arch
             ):
                 options.add((kind, arch))
+            elif kind == "sm":
+                log.warning(
+                    "Ignoring TORCH_CUDA_ARCH_LIST entry sm_%s for AOTI CUDA "
+                    "multi-arch packaging because it is not compatible with "
+                    "target arch %s.",
+                    arch,
+                    current_arch,
+                )
 
     if not any(
         kind == "sm" and _cuda_arch_same_generation(arch, current_arch)

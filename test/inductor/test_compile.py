@@ -290,15 +290,19 @@ class TestStandaloneInductor(TestCase):
     def test_aoti_cuda_multi_arch_gencode_options(self):
         from torch._inductor.codegen.cuda import compile_utils
 
-        self.assertEqual(
-            compile_utils._cuda_multi_arch_gencode_options("80"),
-            [
-                "arch=compute_80,code=sm_80",
-                "arch=compute_80,code=compute_80",
-                "arch=compute_86,code=sm_86",
-                "arch=compute_90,code=sm_90",
-            ],
-        )
+        with self.assertLogs(
+            "torch._inductor.codegen.cuda.compile_utils", level="WARNING"
+        ) as log_ctx:
+            self.assertEqual(
+                compile_utils._cuda_multi_arch_gencode_options("80"),
+                [
+                    "arch=compute_80,code=sm_80",
+                    "arch=compute_80,code=compute_80",
+                    "arch=compute_86,code=sm_86",
+                    "arch=compute_90,code=sm_90",
+                ],
+            )
+        self.assertIn("Ignoring TORCH_CUDA_ARCH_LIST entry sm_70", log_ctx.output[0])
 
     @mock.patch.dict(
         os.environ,
@@ -438,6 +442,36 @@ class TestStandaloneInductor(TestCase):
         self.assertEqual(cubin, b"target cubin")
         self.assertEqual(bin_type, "cubin")
         self.assertEqual(asm, "target ptx")
+        self.assertEqual(asm_type, "ptx")
+
+        with (
+            config.patch(
+                {
+                    "aot_inductor.emit_multi_arch_kernel": True,
+                    "cuda.arch": None,
+                }
+            ),
+            mock.patch(
+                "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",
+                return_value="100a",
+            ),
+            mock.patch.object(
+                CachingAutotuner,
+                "_precompile_config",
+                return_value=target_result,
+            ) as precompile_config,
+            mock.patch(
+                "torch._inductor.codecache.CudaKernelParamCache.set"
+            ) as cache_set,
+        ):
+            autotuner.save_gpu_kernel("stream", launcher)
+
+        precompile_config.assert_not_called()
+        _, params, cubin, bin_type, asm, asm_type = cache_set.call_args.args
+        self.assertEqual(params["cuda_arch"], "100")
+        self.assertEqual(cubin, b"current cubin")
+        self.assertEqual(bin_type, "cubin")
+        self.assertEqual(asm, "current ptx")
         self.assertEqual(asm_type, "ptx")
 
 
