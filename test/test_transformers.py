@@ -1554,6 +1554,36 @@ class TestTransformers(NNTestCase):
         _test_te_fastpath_called(t, (src, tgt), return_value=t_return_value, is_called=True)
         _test_mha_fastpath_called(mha, (q, q, q,), return_value=mha_return_value, is_called=True)
 
+    def test_transformerencoder_all_masked_fails(self, device):
+        """Test that all-masked src_key_padding_mask raises error in both eager and compiled."""
+        d_model = 64
+        nhead = 4
+        batch_size = 2
+        seq_len = 8
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead,
+            dim_feedforward=128, dropout=0.0, batch_first=True
+        )
+        transformer = nn.TransformerEncoder(encoder_layer, num_layers=1).to(device)
+        transformer.eval()
+
+        src = torch.randn(batch_size, seq_len, d_model, device=device)
+        # All positions masked, edge case
+        mask = torch.ones(batch_size, seq_len, dtype=torch.bool, device=device)
+
+        # Eager mode should raise error
+        with self.assertRaisesRegex(RuntimeError, "src_key_padding_mask has all positions masked"):
+            with torch.no_grad():
+                transformer(src, src_key_padding_mask=mask)
+
+        # torch.compile should also raise error (was silently succeeding before fix)
+        torch._dynamo.reset()
+        compiled = torch.compile(transformer, backend="eager")
+        with self.assertRaisesRegex(RuntimeError, "src_key_padding_mask has all positions masked"):
+            with torch.no_grad():
+                compiled(src, src_key_padding_mask=mask)
+
 
 class TestSDPAFailureModes(NNTestCase):
     """ Used to test the failure modes of scaled_dot_product_attention

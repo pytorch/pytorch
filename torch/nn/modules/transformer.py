@@ -443,6 +443,13 @@ class TransformerEncoder(Module):
             check_other=False,
         )
 
+        # Validate that src_key_padding_mask doesn't mask all positions
+        if src_key_padding_mask is not None and src_key_padding_mask.all():
+            raise RuntimeError(
+                "src_key_padding_mask has all positions masked (all True values). "
+                "At least one position must be unmasked for the transformer to process."
+            )
+
         output = src
         convert_to_nested = False
         first_layer = self.layers[0]
