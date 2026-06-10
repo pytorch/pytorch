@@ -34,6 +34,26 @@ PACKAGE_NAME = "torch_vendor_quack"
 VERSION = __version__
 
 
+_TENSOR_META_TAG = "__quack_tensor_meta__"
+
+
+def _serialize_precompile_value(value: Any) -> Any:
+    if isinstance(value, Tensor):
+        return {
+            _TENSOR_META_TAG: True,
+            "shape": list(value.shape),
+            "stride": list(value.stride()),
+            "dtype": str(value.dtype),
+        }
+    if isinstance(value, tuple):
+        return tuple(_serialize_precompile_value(v) for v in value)
+    if isinstance(value, list):
+        return [_serialize_precompile_value(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _serialize_precompile_value(v) for k, v in value.items()}
+    return value
+
+
 def _get_current_cuda_device() -> str | None:
     """Return the physical CUDA device identifier for the current process.
 
@@ -386,19 +406,8 @@ class Autotuner:
             stream.write(data)
             stream.flush()
 
-        # Serialize tensor metadata
-        tensor_meta = []
-        for arg in args:
-            if isinstance(arg, Tensor):
-                tensor_meta.append(
-                    {
-                        "shape": list(arg.shape),
-                        "stride": list(arg.stride()),
-                        "dtype": str(arg.dtype),
-                    }
-                )
-            else:
-                tensor_meta.append(arg)
+        serialized_args = [_serialize_precompile_value(arg) for arg in args]
+        serialized_kwargs = _serialize_precompile_value(kwargs)
 
         fn_module = self.fn.__module__
         fn_qualname = self.fn.__qualname__
@@ -449,8 +458,8 @@ class Autotuner:
                     {
                         "fn_module": fn_module,
                         "fn_qualname": fn_qualname,
-                        "tensor_meta": tensor_meta,
-                        "kwargs": kwargs,
+                        "args": serialized_args,
+                        "kwargs": serialized_kwargs,
                         "config_kwargs": config.all_kwargs(),
                     },
                 )
