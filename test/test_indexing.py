@@ -2149,7 +2149,9 @@ class TestIndexing(TestCase):
         # prod shape (small D + high M_src) at the index_add layer so a
         # future refactor of the delegation re-exposing the same shape
         # class is caught here, not in prod.
-        sm = torch.cuda.get_device_properties(0).multi_processor_count
+        device_type = torch.device(device).type
+        props = getattr(torch, device_type).get_device_properties(0)
+        sm = getattr(props, "multi_processor_count", None) or getattr(props, "max_compute_units", 128)
         # D=8 fp32 -> chunk_bytes=32 (< 128). M_src > sm*64 forces every
         # CTA into >= 2 iterations -> stage 1 used. Prod fault was at
         # sm*64=8448 (H100); sm*64 + 256 exposes the regime on any GPU.
