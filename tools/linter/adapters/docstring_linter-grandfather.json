@@ -145,6 +145,9 @@
   "torch/_inductor/fx_passes/binary_folding.py": {
     "def binary_folding_init()": 417
   },
+  "torch/_inductor/fx_passes/efficient_conv_bn_eval.py": {
+    "def efficient_conv_bn_eval_graph_transform_decomposed()": 83
+  },
   "torch/_inductor/fx_passes/group_batch_fusion.py": {
     "def BatchLayernormFusion.fuse()": 136,
     "def PostGradBatchLinearFusion.fuse()": 82,
