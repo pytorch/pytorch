@@ -222,7 +222,8 @@ def replicate(
         root_mesh = device_mesh._get_root_mesh()
         # if a root mesh is not the same as device_mesh,
         # meaning the device_mesh is sliced out from the root mesh.
-        if root_mesh != device_mesh:
+        # exclude scenarios where the root mesh has only one effective dim.
+        if root_mesh != device_mesh and sum(1 for s in root_mesh.shape if s > 1) > 1:
             # TODO: This is a temporary work around to enable DDP + TP.
             # We should do the logic in DDP so that the 2D implementation is
             # sound and the state_dict works out of the box.
