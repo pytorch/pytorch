@@ -855,8 +855,41 @@ TEST(IValueTest, UseCountCornerCases) {
   ASSERT_EQ(0, ivEmptyTensor.use_count());
 }
 
-// TODO(gmagogsfm): Add type conversion test?
+// TODO(gmagogsfm): Add type conversion test? 
+// Type conversion test added below
+TEST(IValueTest, TypeConversion){
+  IValue intVal(42);
+  ASSERT_TRUE(intVal.isScalar());
+  Scalar intScalar = intVal.toScalar();
+  ASSERT_TRUE(intScalar.isIntegral(false));
+  ASSERT_EQ(intScalar.toInt(), 42);
+  ASSERT_EQ(intScalar.toDouble(), 42.0);
+  ASSERT_TRUE(intScalar.toBool());
 
+  IValue doubleVal(5.23);
+  ASSERT_TRUE(doubleVal.isScalar());
+  Scalar doubleScalar = doubleVal.toScalar();
+  ASSERT_TRUE(doubleScalar.isFloatingPoint());
+  ASSERT_EQ(doubleScalar.toDouble(), 5.23);
+  ASSERT_EQ(doubleScalar.toInt(), 5);
+  
+  IValue boolValTrue(true);
+  IValue boolValFalse(false);
+  Scalar boolScalarTrue = boolValTrue.toScalar();
+  Scalar boolScalarFalse = boolValFalse.toScalar();
+  ASSERT_TRUE(boolScalarTrue.isBoolean());
+  ASSERT_TRUE(boolScalarTrue.toBool());
+  ASSERT_FALSE(boolScalarFalse.toBool());
+  ASSERT_EQ(boolScalarTrue.toInt(), 1);
+  ASSERT_EQ(boolScalarFalse.toInt(), 0);
+
+  auto complexNum = c10::complex<double>(3.0, 4.0);
+  IValue complexVal(complexNum);
+  ASSERT_TRUE(complexVal.isScalar());
+  Scalar complexScalar = complexVal.toScalar();
+  ASSERT_TRUE(complexScalar.isComplex());
+  ASSERT_EQ(complexScalar.toComplexDouble(), complexNum);
+}
 using ivalue::TupleElements;
 
 namespace {
