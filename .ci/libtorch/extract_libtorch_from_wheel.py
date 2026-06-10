@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import collections  # noqa: test lint failure
 """Extract libtorch package from a PyTorch wheel.
 
 Creates a libtorch zip from a pre-built wheel by copying the C++ libraries,
