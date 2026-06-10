@@ -2,6 +2,7 @@
 import re
 import unittest
 import weakref
+from typing import Any
 from unittest.mock import patch
 
 import torch
@@ -88,7 +89,6 @@ class <lambda>(torch.nn.Module):
         )
 
     @requires_cuda
-    @unittest.skip("Needs graph break support with annotation context")
     def test_stream_context_graph_break(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -113,8 +113,85 @@ class <lambda>(torch.nn.Module):
         ) = extract_graph(fn, *inp)
         self.assertEqual(expected, actual)
         self.assertEqual(len(fw_graphs), 2)
-        self.assertExpectedInline(print_graph(fw_graphs[0]), """""")
-        self.assertExpectedInline(print_graph(fw_graphs[1]), """""")
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2, 2]"):
+        # Annotation: {'stream': 2}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
+
+        # Annotation: {'stream': 1}
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+
+        # Annotation: {'stream': 1}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_2, add);  add_2 = add = None
+        return (add_3,)
+""",
+        )
+        self.assertExpectedInline(
+            print_graph(fw_graphs[1]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+        return (add,)
+""",
+        )
+
+    @requires_cuda
+    def test_target_values_dict_round_trips_through_graph_break(self):
+        # Regression test for a dict-vs-tuple issue interpreting
+        # `target_values`. This was initially a tuple and got repurposed as a
+        # dict, but some oft-unexecuted paths still assumed it was a tuple.
+        # Here we ensure that an in-use stream gets properly reconstructed on
+        # the other side of a graph break.
+        def fn(x):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                z = x + 1
+                torch._dynamo.graph_break()
+                z = z + 2
+            return z
+
+        inp = (torch.ones(2, 2, device="cuda"),)
+        expected = fn(*inp)
+        actual, _, fw_graphs, _ = extract_graph(fn, *inp)
+        self.assertEqual(expected, actual)
+        # A graceful graph break inside with torch.cuda.stream(s):
+        # should split into two graph fragments.  Without the fix the
+        # post-break code is dropped and only the pre-break fragment is
+        # captured (or the whole frame falls back to eager and zero are
+        # captured).
+        self.assertEqual(
+            len(fw_graphs),
+            2,
+            f"expected 2 graph fragments after a graceful graph break "
+            f"inside 'with torch.cuda.stream(s):', got {len(fw_graphs)} "
+            f"-- the post-break body was likely dropped",
+        )
+
+        # Both halves of the round-trip should carry a stream annotation
+        # referring to the one and only stream `s` entered via
+        # `with torch.cuda.stream(s):`.  We do not pin the exact index, only
+        # that both adds are annotated with the same stream (i.e. `s`).
+        def add_node_stream(gm) -> int:
+            adds: list[torch.fx.Node] = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function" and n.target is torch.ops.aten.add.Tensor
+            ]
+            self.assertEqual(len(adds), 1)
+            custom: dict[str, Any] = adds[0].meta.get("custom", {})
+            self.assertIn("stream", custom)
+            return custom["stream"]
+
+        pre_break_stream = add_node_stream(fw_graphs[0])
+        post_break_stream = add_node_stream(fw_graphs[1])
+        # The same stream `s` annotates the add on both sides of the break.
+        self.assertEqual(pre_break_stream, post_break_stream)
 
     @requires_cuda
     def test_stream_input(self):
