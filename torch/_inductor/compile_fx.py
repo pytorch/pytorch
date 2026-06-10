@@ -2944,7 +2944,7 @@ def _compile_fx_main(
         )
         fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
 
-        if config.freezing and not torch.is_grad_enabled():
+        if config.freezing:
             inference_compiler: Callable[..., Any] = functools.partial(
                 fw_compiler_freezing,
                 dynamo_model=model_,

@@ -143,7 +143,7 @@ def _freeze(
 class ErasedTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem, name, owning_mod):
-        return super().__new__(cls, elem.to(device="meta"))
+        return super().__new__(cls, elem.detach().to(device="meta"))
 
     def __init__(self, elem, name: str | None, mod) -> None:
         self.erased_name = name
