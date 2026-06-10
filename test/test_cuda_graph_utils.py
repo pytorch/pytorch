@@ -8,6 +8,7 @@ import torch
 from torch.cuda._graph_annotations import (
     _get_stream_id,
     _is_tools_id_unavailable,
+    _rekey_annotations,
     clear_kernel_annotations,
     enable_annotations,
     get_kernel_annotations,
@@ -634,6 +635,43 @@ class TestGetGraphData(TestCase):
 
         with self.assertRaises(RuntimeError):
             g.get_graph_data()
+
+
+# Pure keying logic, exercised without a live capture so it runs on all of CI
+# (TestMarkKernels skips unless cuda-bindings/driver >= 13.1). A toolsId packs
+# the graph id in the upper 32 bits and the node id in the lower 32.
+class TestRekeyAnnotations(TestCase):
+    @staticmethod
+    def _tools_id(graph_id, node_id):
+        return (graph_id << 32) | node_id
+
+    def test_rekeys_matching_graph(self):
+        annotations = {self._tools_id(1, 10): ["a"], self._tools_id(1, 20): ["b"]}
+        remapped = _rekey_annotations(annotations, capture_graph_id=1, exec_graph_id=2)
+        self.assertEqual(
+            remapped,
+            {self._tools_id(2, 10): ["a"], self._tools_id(2, 20): ["b"]},
+        )
+
+    def test_leaves_other_graphs_untouched(self):
+        other = self._tools_id(9, 10)
+        annotations = {self._tools_id(1, 10): ["a"], other: ["x"]}
+        remapped = _rekey_annotations(annotations, capture_graph_id=1, exec_graph_id=2)
+        self.assertEqual(
+            remapped,
+            {self._tools_id(2, 10): ["a"], other: ["x"]},
+        )
+
+    def test_empty(self):
+        self.assertEqual(
+            _rekey_annotations({}, capture_graph_id=1, exec_graph_id=2), {}
+        )
+
+    def test_does_not_mutate_input_lists(self):
+        original = ["a"]
+        annotations = {self._tools_id(1, 10): original}
+        _rekey_annotations(annotations, capture_graph_id=1, exec_graph_id=2)
+        self.assertEqual(original, ["a"])
 
 
 if __name__ == "__main__":
