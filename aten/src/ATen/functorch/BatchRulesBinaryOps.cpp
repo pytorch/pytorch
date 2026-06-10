@@ -166,7 +166,7 @@ static std::tuple<Tensor, std::optional<int64_t>> gelu_backward_batch_rule(
   auto [grad_out_, input_]= _binary_pointwise_helper(grad_out, grad_out_bdim, input, input_bdim);
 
   // gelu_backward doesn't broadcast well so we need to insist all inputs have a bdim
-  const auto batch_size = get_bdim_size2(grad_out, grad_out_bdim, input, input_bdim);
+  const auto batch_size = get_bdim_size(grad_out, grad_out_bdim, input, input_bdim);
   grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), batch_size);
   input_ = ensure_has_bdim(input_, input_bdim.has_value(), batch_size);
 
@@ -209,7 +209,7 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_r
 
   self_ = maybePadToLogicalRank(self_, self_bdim, max_logical_rank);
 
-  const auto batch_size = get_bdim_size2(grad, grad_bdim, self, self_bdim);
+  const auto batch_size = get_bdim_size(grad, grad_bdim, self, self_bdim);
   self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
   grad_ = ensure_has_bdim(grad_, grad_bdim.has_value(), batch_size);
 
@@ -243,7 +243,7 @@ static std::tuple<Tensor, std::optional<int64_t>> cdist_backward_batch_rule(
     // We need to make sure that grad has batch dim if x1 or x2 have one
     // Probably, there is an assumption on the strides.
     // Otherwise grad input contains thrash values, e.g. -7.0816e+29, 7.0816e+29
-    auto bs = get_bdim_size2(x1, 0, x2, 0);
+    auto bs = get_bdim_size(x1, 0, x2, 0);
     grad_ = ensure_has_bdim(grad_, grad_bdim.has_value(), bs);
     grad_ = grad_.contiguous();
   }

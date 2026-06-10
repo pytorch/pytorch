@@ -38,7 +38,7 @@ static std::tuple<Tensor, std::optional<int64_t>> glu_backward_batch_rule(
   const auto rank = rankWithoutBatchDim(self, self_bdim);
   const auto dim_ = maybe_wrap_dim(dim, rank) + 1;
 
-  const auto batch_size = get_bdim_size2(grad_output, grad_output_bdim, self, self_bdim);
+  const auto batch_size = get_bdim_size(grad_output, grad_output_bdim, self, self_bdim);
   const auto grad_output_ = ensure_has_bdim(moveBatchDimToFront(grad_output, grad_output_bdim), grad_output_bdim.has_value(), batch_size);
   const auto self_ = ensure_has_bdim(moveBatchDimToFront(self, self_bdim), self_bdim.has_value(), batch_size);
 

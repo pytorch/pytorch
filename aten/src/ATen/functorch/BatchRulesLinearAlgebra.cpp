@@ -166,7 +166,7 @@ householder_product_batch_rule(const Tensor &input, std::optional<int64_t> input
   auto input_ = moveBatchDimToFront(input, input_bdim);
   auto tau_ = moveBatchDimToFront(tau, tau_bdim);
 
-  auto batch_size = get_bdim_size2(input, input_bdim, tau, tau_bdim);
+  auto batch_size = get_bdim_size(input, input_bdim, tau, tau_bdim);
 
   input_ = ensure_has_bdim(input_, input_bdim.has_value(), batch_size);
   tau_ = ensure_has_bdim(tau_, tau_bdim.has_value(), batch_size);
@@ -274,7 +274,7 @@ threeOutputs linalg_lu_unpack_batch_rule(
   // match So if only one of them is being vmapped over, we must expand out that
   // dimension.
   if (LU_bdim.has_value() != pivots_bdim.has_value()) {
-    auto bdim_size = get_bdim_size2(LU, LU_bdim, pivots, pivots_bdim);
+    auto bdim_size = get_bdim_size(LU, LU_bdim, pivots, pivots_bdim);
     LU_ = ensure_has_bdim(LU_, LU_bdim.has_value(), bdim_size);
     pivots_ = ensure_has_bdim(pivots_, pivots_bdim.has_value(), bdim_size);
     pivots_bdim = 0;
@@ -305,7 +305,7 @@ oneOutput linalg_lu_solve_batch_rule(
   // LU and pivots's first {N-2} (for LU), {N-1} (for pivots) dimensions must match
   // So if only one of them is being vmapped over, we must expand out that dimension.
   if (LU_bdim.has_value() ^ pivots_bdim.has_value()) {
-    auto bdim_size = get_bdim_size2(LU, LU_bdim, pivots, pivots_bdim);
+    auto bdim_size = get_bdim_size(LU, LU_bdim, pivots, pivots_bdim);
     LU_ = ensure_has_bdim(LU_, LU_bdim.has_value(), bdim_size);
     pivots_ = ensure_has_bdim(pivots_, pivots_bdim.has_value(), bdim_size);
     pivots_bdim = 0;
@@ -358,7 +358,7 @@ fourOutputs solve_ex_batch_rule(
     const Tensor& A, std::optional<int64_t> A_bdim,
     const Tensor& B, std::optional<int64_t> B_bdim,
     bool left, bool check_errors) {
-  auto batch_size = get_bdim_size2(A, A_bdim, B, B_bdim);
+  auto batch_size = get_bdim_size(A, A_bdim, B, B_bdim);
   const auto A_logical_rank = rankWithoutBatchDim(A, A_bdim);
   const auto B_logical_rank = rankWithoutBatchDim(B, B_bdim);
   const auto max_logical_rank = std::max(A_logical_rank, B_logical_rank);
@@ -395,7 +395,7 @@ oneOutput cross_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim,
     "linalg.cross: inputs must have the same number of dimensions."
   );
 
-  const auto batch_size = get_bdim_size2(self, self_bdim, other, other_bdim);
+  const auto batch_size = get_bdim_size(self, self_bdim, other, other_bdim);
   auto [self_, other_]= _binary_pointwise_helper(self, self_bdim, other, other_bdim, false);
 
   self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
@@ -419,7 +419,7 @@ fourOutputs linalg_lstsq_batch_rule(
   TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) >= 2, "torch.linalg.lstsq: input must have at least 2 dimensions.");
   TORCH_CHECK(rankWithoutBatchDim(b, b_bdim) >= 1, "torch.linalg.lstsq: other must have at least 1 dimension.");
 
-  const auto batch_size = get_bdim_size2(self, self_bdim, b, b_bdim);
+  const auto batch_size = get_bdim_size(self, self_bdim, b, b_bdim);
   auto [self_, other] = _binary_pointwise_helper(self, self_bdim, b, b_bdim, /*do_type_promotion=*/false);
 
   // because of ambiguity with vector case, lstsq can broadcast [1, 2] -> [batch_size, 2] but not [2] -> [batch_size, 2]
@@ -490,7 +490,7 @@ _scaled_dot_product_flash_attention_batch_rule(
     RandomnessType randomness = maybe_layer->randomness();
     check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
   }
-  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto batch_size = get_bdim_size(query, query_bdim, key, key_bdim, value, value_bdim);
   auto query_ = moveBatchDimToFront(query, query_bdim);
   auto key_ = moveBatchDimToFront(key, key_bdim);
   auto value_ = moveBatchDimToFront(value, value_bdim);
@@ -545,7 +545,7 @@ _scaled_dot_product_flash_attention_quantized_batch_rule(
     RandomnessType randomness = maybe_layer->randomness();
     check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
   }
-  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto batch_size = get_bdim_size(query, query_bdim, key, key_bdim, value, value_bdim);
   auto query_ = moveBatchDimToFront(query, query_bdim);
   auto key_ = moveBatchDimToFront(key, key_bdim);
   auto value_ = moveBatchDimToFront(value, value_bdim);
@@ -615,7 +615,7 @@ fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
     RandomnessType randomness = maybe_layer->randomness();
     check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
   }
-  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto batch_size = get_bdim_size(query, query_bdim, key, key_bdim, value, value_bdim);
   auto query_ = moveBatchDimToFront(query, query_bdim);
   auto key_ = moveBatchDimToFront(key, key_bdim);
   auto value_ = moveBatchDimToFront(value, value_bdim);
@@ -658,7 +658,7 @@ _scaled_dot_product_cudnn_attention_batch_rule(
     RandomnessType randomness = maybe_layer->randomness();
     check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
   }
-  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto batch_size = get_bdim_size(query, query_bdim, key, key_bdim, value, value_bdim);
   auto query_ = moveBatchDimToFront(query, query_bdim);
   auto key_ = moveBatchDimToFront(key, key_bdim);
   auto value_ = moveBatchDimToFront(value, value_bdim);
