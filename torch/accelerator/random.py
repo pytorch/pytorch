@@ -4,17 +4,21 @@ from torch import Tensor
 from ._utils import _device_t, _get_device_index
 
 
-def initial_seed() -> int:
+def initial_seed(device: _device_t = None, /) -> int:
     r"""Return the initial seed of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
-    on the current device (:func:`torch.accelerator.current_device_index`).
+    on the specified device.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): The device to return the initial seed of.
+            If not given, uses :func:`torch.accelerator.current_device_index` by default.
 
     Returns:
-        int: the initial seed of the default generator for the current device.
+        int: the initial seed of the default generator for the specified device.
 
     .. warning::
         This function eagerly initializes the accelerator runtime.
     """
-    device_index = torch.accelerator.current_device_index()
+    device_index = _get_device_index(device, optional=True)
     default_generator = torch._C._accelerator_getDefaultGenerator(device_index)
     return default_generator.initial_seed()
 
@@ -33,7 +37,7 @@ def get_rng_state(device: _device_t = None, /) -> Tensor:
     .. warning::
         This function eagerly initializes the accelerator runtime.
     """
-    device_index = _get_device_index(device)
+    device_index = _get_device_index(device, optional=True)
     default_generator = torch._C._accelerator_getDefaultGenerator(device_index)
     return default_generator.get_state()
 
