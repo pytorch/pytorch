@@ -203,7 +203,8 @@ class IterationRangesRoot(IterationRanges):
         # True if the dimension is implemented as a single program looping over
         # the full dimension (currently only used for non-persistent reduction)
 
-        assert not is_loop or (self.is_reduction and grid_dim is None)
+        if is_loop and not (self.is_reduction and grid_dim is None):
+            raise AssertionError("loop ranges must be reduction with no grid_dim")
         self.is_loop = is_loop
         # Index of corresponding dimension on triton tensors
         self.tensor_dim = tensor_dim
@@ -386,7 +387,8 @@ class IterationRangesEntry(IterationRanges):
         precomputed_args: list[sympy.Expr] = []
         if isinstance(self.expr, sympy.Symbol):
             return precomputed_args
-        assert isinstance(self.expr, (FloorDiv, ModularIndexing)), type(self.expr)
+        if not isinstance(self.expr, (FloorDiv, ModularIndexing)):
+            raise AssertionError(type(self.expr))
         for arg in self.expr.args[1:]:
             if not isinstance(arg, (sympy.Integer, sympy.Symbol)):
                 symbols = arg.free_symbols
@@ -400,7 +402,8 @@ class IterationRangesEntry(IterationRanges):
         return hash(self.name)
 
     def __eq__(self, other: object) -> bool:
-        assert isinstance(other, IterationRangesEntry)
+        if not isinstance(other, IterationRangesEntry):
+            raise AssertionError(f"expected IterationRangesEntry, got {type(other)}")
         return self.name == other.name
 
 
@@ -790,7 +793,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         @contextlib.contextmanager
         def ctx():
             if not self.features.is_reduction():
-                assert not self.inside_reduction
+                if self.inside_reduction:
+                    raise AssertionError("expected not self.inside_reduction")
                 yield
                 return
             if should_flush:
@@ -809,7 +813,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         return ctx()
 
     def set_ranges(self, *lengths: sympy.Expr) -> list[sympy.Symbol]:
-        assert len(lengths) == len(self.range_trees)
+        if len(lengths) != len(self.range_trees):
+            raise AssertionError(
+                f"expected len(lengths) == len(self.range_trees), "
+                f"got {len(lengths)} and {len(self.range_trees)}"
+            )
         return [
             ranges.construct(length)
             for length, ranges in zip(lengths, self.range_trees)
@@ -846,7 +854,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             Builds the nested expression:
               ((...((s1*v[i1] + v[i2]) * s2 + v[i3]) ... ) * sk + v[i(k+1)])
             """
-            assert len(idxs) == len(sizes) + 1
+            if len(idxs) != len(sizes) + 1:
+                raise AssertionError(
+                    f"expected len(idxs) == len(sizes) + 1, "
+                    f"got {len(idxs)} and {len(sizes) + 1}"
+                )
 
             def getter(flat_vars: list[sympy.Expr]) -> sympy.Expr:
                 expr = flat_vars[idxs[0]]
@@ -948,9 +960,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(
-            V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining
-        ), f"failed to set ranges {remaining} {lengths}"
+        if not all(V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining):
+            raise AssertionError(f"failed to set ranges {remaining} {lengths}")
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
@@ -1068,7 +1079,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if entry is None:
                 # Non-iterated variables, e.g. strides
                 continue
-            assert isinstance(entry.parent, IterationRangesRoot)
+            if not isinstance(entry.parent, IterationRangesRoot):
+                raise AssertionError(
+                    f"expected entry.parent to be IterationRangesRoot, "
+                    f"got {type(entry.parent)}"
+                )
             # Find which active tree this entry belongs to (identity check
             # because derived trees may shadow the same prefix).
             tree_pos = next(
@@ -1556,9 +1571,13 @@ class _GroupedReductionLayout:
         local_reduction_size: sympy.Integer,
         local_reduction_in_r: bool,
     ) -> _GroupedReductionLayout:
-        assert len(kernel.range_trees) == 2
+        if len(kernel.range_trees) != 2:
+            raise AssertionError(
+                f"expected exactly 2 range trees, got {len(kernel.range_trees)}"
+            )
         x_tree, r_tree = kernel.range_trees
-        assert x_tree.prefix == "x"
+        if x_tree.prefix != "x":
+            raise AssertionError(f"expected x range tree, got {x_tree.prefix!r}")
         return cls(
             x_tree=x_tree,
             r_tree=r_tree,
@@ -1784,7 +1803,8 @@ class _GroupedReductionLayout:
         kernel: TritonKernel,
         value: CSEVariable,
     ) -> CSEVariable:
-        assert value.dtype is not None
+        if value.dtype is None:
+            raise AssertionError("value must have a known dtype")
         if value.shape is None or len(value.shape) < 2:
             # Some scalar or opaque CSE values do not carry block-shape
             # metadata. Pointwise consumers can still rely on Triton
@@ -1802,10 +1822,12 @@ class _GroupedReductionLayout:
         kernel: TritonKernel,
         value: CSEVariable,
     ) -> CSEVariable:
-        assert value.dtype is not None
-        assert value.shape is not None and len(value.shape) >= 2, (
-            "grouped reduction input must have a known parent-tile shape"
-        )
+        if value.dtype is None:
+            raise AssertionError("value must have a known dtype")
+        if not (value.shape is not None and len(value.shape) >= 2):
+            raise AssertionError(
+                "grouped reduction input must have a known parent-tile shape"
+            )
 
         return self._broadcast_value_to_parent_resolution(
             kernel,
@@ -1820,8 +1842,10 @@ class _GroupedReductionLayout:
         *,
         materialize_singleton: bool,
     ) -> CSEVariable:
-        assert value.dtype is not None
-        assert value.shape is not None and len(value.shape) >= 2
+        if value.dtype is None:
+            raise AssertionError("value must have a known dtype")
+        if not (value.shape is not None and len(value.shape) >= 2):
+            raise AssertionError("value must have a known parent-tile shape")
         parent_dim = str(value.shape[self.parent_axis])
         if parent_dim == self.parent_block or (
             parent_dim == "1" and not materialize_singleton
@@ -2139,7 +2163,11 @@ class SIMDScheduling(BaseScheduling):
             return True
 
         if not node1.is_reduction() and node2.is_reduction():
-            assert rnumel1 == 1 and rnumel2 != 1
+            if not (rnumel1 == 1 and rnumel2 != 1):
+                raise AssertionError(
+                    f"expected rnumel1 == 1 and rnumel2 != 1, "
+                    f"got {rnumel1} and {rnumel2}"
+                )
             if numel1 == numel2 * rnumel2:
                 if not all(
                     SIMDKernel.is_compatible((numel2, rnumel2), n.get_ranges())
@@ -2166,7 +2194,10 @@ class SIMDScheduling(BaseScheduling):
                 why("nodes numel incompatibility")
             return numel1 == numel2
 
-        assert node1.is_reduction() and not node2.is_reduction()
+        if not node1.is_reduction() or node2.is_reduction():
+            raise AssertionError(
+                "expected node1 to be a reduction and node2 not a reduction"
+            )
         # swap args to hit the case above
         return self.can_fuse_horizontal(node2, node1)
 
@@ -2236,9 +2267,15 @@ class SIMDScheduling(BaseScheduling):
                 return False
             if not not_ready_yet_nodes & node.ancestors:
                 return False
-            assert node_schedule and not isinstance(
-                node_schedule[-1], (EnableReduction, DisableReduction)
-            )
+            if not (
+                node_schedule
+                and not isinstance(
+                    node_schedule[-1], (EnableReduction, DisableReduction)
+                )
+            ):
+                raise AssertionError(
+                    "expected non-empty node_schedule not ending in a reduction toggle"
+                )
             return bool(not_ready_yet_nodes)
 
         for node in nodes:
@@ -2273,9 +2310,11 @@ class SIMDScheduling(BaseScheduling):
         node1, node2 = node.node1, node.node2
 
         # Make sure there are no producer/consumer relationship
-        assert not (node1.ancestors & node2.get_operation_names()) and not (
-            node2.ancestors & node1.get_operation_names()
-        )
+        if not (
+            not (node1.ancestors & node2.get_operation_names())
+            and not (node2.ancestors & node1.get_operation_names())
+        ):
+            raise AssertionError("node1 and node2 must not be ancestors of each other")
 
         self._codegen_mix_order_reduction(node1, node2)
 
@@ -2312,8 +2351,10 @@ class SIMDScheduling(BaseScheduling):
                 "override_persistent_reduction": True,
             },
         )[0]
-        assert kernel.persistent_reduction
-        assert kernel.mix_order_reduction
+        if not kernel.persistent_reduction:
+            raise AssertionError("expected kernel.persistent_reduction")
+        if not kernel.mix_order_reduction:
+            raise AssertionError("expected kernel.mix_order_reduction")
         kernel.rsplit_size = split_size
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
@@ -2325,7 +2366,8 @@ class SIMDScheduling(BaseScheduling):
             False,
             dtype=torch.float,
         )
-        assert ws_off == 0, f"{ws_off=}"
+        if ws_off != 0:
+            raise AssertionError(f"{ws_off=}")
         with kernel:
             kernel.codegen_body()
 
@@ -2438,7 +2480,8 @@ class SIMDScheduling(BaseScheduling):
                     .node.get_name()
                 )
                 rename[bufname] = username
-                assert self.scheduler
+                if not self.scheduler:
+                    raise AssertionError("expected self.scheduler to be set")
                 self.scheduler.removed_ops.add(
                     subnode.get_outputs()[0].users[0].node.get_name()
                 )
@@ -2469,7 +2512,12 @@ class SIMDScheduling(BaseScheduling):
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
         # an extra round of reduction
-        assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
+        if len(converted_nodes) != len(kernel.saved_partial_accumulate):
+            raise AssertionError(
+                f"expected len(converted_nodes) == "
+                f"len(kernel.saved_partial_accumulate), got "
+                f"{len(converted_nodes)} and {len(kernel.saved_partial_accumulate)}"
+            )
         nsplit = V.graph.wrapper_code.codegen_python_sizevar(
             (numel + split_size - 1) // split_size
         )
@@ -2540,7 +2588,8 @@ class SIMDScheduling(BaseScheduling):
                 node.domain_context,
             )
         )
-        assert nested_pointwise_domains is not None
+        if nested_pointwise_domains is None:
+            raise AssertionError("expected nested pointwise domains to be classified")
         pointwise_domain_by_node: dict[
             BaseSchedulerNode, scheduler.NestedReduction.PointwiseDomain
         ] = dict(nested_pointwise_domains)
@@ -2566,7 +2615,8 @@ class SIMDScheduling(BaseScheduling):
             grouped_numel,
             grouped_rnumel,
         )
-        assert any(sn is grouped_reduction for sn in grouped_schedule)
+        if not any(sn is grouped_reduction for sn in grouped_schedule):
+            raise AssertionError("grouped reduction must appear in grouped schedule")
         grouped_reduction_body = grouped_reduction._body
 
         combined_schedule = self.generate_node_schedule(
@@ -2594,9 +2644,8 @@ class SIMDScheduling(BaseScheduling):
             outer_rnumel,
             coalesce_analysis,
         )
-        assert "y" not in tiling and "z" not in tiling, (
-            "nested reduction does not support tiled reductions"
-        )
+        if "y" in tiling or "z" in tiling:
+            raise AssertionError("nested reduction does not support tiled reductions")
 
         metrics.codegen_nested_reduction += 1
         kernel_kwargs: dict[str, Any] = {
@@ -2755,7 +2804,8 @@ class SIMDScheduling(BaseScheduling):
                 # local reshape+reduce inside the outer kernel, so there is no
                 # grouped loop to close or reopen here.
                 continue
-            assert isinstance(sn, scheduler.SchedulerNode)
+            if not isinstance(sn, scheduler.SchedulerNode):
+                raise AssertionError(f"expected SchedulerNode, got {type(sn)}")
             if sn is grouped_reduction:
                 self._codegen_grouped_reduction(
                     kernel,
@@ -2767,7 +2817,8 @@ class SIMDScheduling(BaseScheduling):
                 )
                 continue
             domain = pointwise_domain_by_node.get(sn)
-            assert domain is not None
+            if domain is None:
+                raise AssertionError(f"no pointwise domain classified for {sn}")
             if domain is scheduler.NestedReduction.PointwiseDomain.REDUCED:
                 self._codegen_remapped_pointwise(
                     kernel,
@@ -2864,7 +2915,10 @@ class SIMDScheduling(BaseScheduling):
     ) -> list[list[sympy.Expr]]:
         groups = source.groups
         values = source.values
-        assert len(groups) == len(values)
+        if len(groups) != len(values):
+            raise AssertionError(
+                f"groups/values length mismatch: {len(groups)} != {len(values)}"
+            )
 
         def split_values_by_ranges(
             *new_ranges: Sequence[sympy.Expr],
@@ -2910,7 +2964,10 @@ class SIMDScheduling(BaseScheduling):
                     source,
                     sn.get_ranges(),
                 )
-                assert not reduction_vars
+                if reduction_vars:
+                    raise AssertionError(
+                        f"pointwise node must have no reduction vars, got {reduction_vars}"
+                    )
                 handler = _PointwiseRemapHandler(
                     V.get_ops_handler(),
                     kernel=kernel,
@@ -2925,7 +2982,8 @@ class SIMDScheduling(BaseScheduling):
         nodes: Sequence[scheduler.SchedulerNode],
         coalesce_analysis: CoalesceVarAnalysis | None = None,
     ):
-        assert self.scheduler
+        if not self.scheduler:
+            raise AssertionError("expected self.scheduler to be set")
         nodes = [
             node for node in nodes if node.get_name() not in self.scheduler.removed_ops
         ]
@@ -2946,7 +3004,8 @@ class SIMDScheduling(BaseScheduling):
         """
         Given a set of pre-fused nodes, generate a SIMD kernel.
         """
-        assert self.scheduler
+        if not self.scheduler:
+            raise AssertionError("expected self.scheduler to be set")
         nodes = [
             node
             for node in node.get_nodes()
@@ -2957,7 +3016,8 @@ class SIMDScheduling(BaseScheduling):
 
         if torch._inductor.config.triton.coalesce_tiling_analysis:
             if len(nodes) != len(node.get_nodes()):
-                assert self.scheduler
+                if not self.scheduler:
+                    raise AssertionError("expected self.scheduler to be set")
                 node = scheduler.FusedSchedulerNode(self.scheduler, nodes)
             coalesce_analysis = node.get_coalesce_analysis()
         else:
@@ -3098,7 +3158,8 @@ class SIMDScheduling(BaseScheduling):
                 name = node.get_name()
                 if name not in live_outs:
                     continue
-                assert node.node is not None
+                if node.node is None:
+                    raise AssertionError("expected node.node to not be None")
                 origin_node = node.node.get_origin_node()
                 if origin_node is not None:
                     counters["inductor"]["intermediate_hooks"] += 1
@@ -3204,13 +3265,17 @@ class SIMDScheduling(BaseScheduling):
             prologue_group.append(prologue)
             # this must be the end of a prologue group
             if names & template_reads:
-                assert len(names) == 1
+                if len(names) != 1:
+                    raise AssertionError(f"expected len(names) == 1, got {len(names)}")
                 buf_name_to_prologue_group[next(iter(names))] = prologue_group
                 kernel.prologue_fused_inputs.add(next(iter(names)))
                 prologue_group = []
 
         # all prologue groups should have finalized with use in template
-        assert len(prologue_group) == 0
+        if len(prologue_group) != 0:
+            raise AssertionError(
+                f"expected empty prologue_group, got {len(prologue_group)}"
+            )
 
         # Remove prologue-fused inputs from input_buffers so that
         # remove_kernel_local_buffers can remove them.
@@ -3324,7 +3389,8 @@ class SIMDScheduling(BaseScheduling):
         """
 
         _, (_numel, rnumel) = template_node.group
-        assert rnumel == 1
+        if rnumel != 1:
+            raise AssertionError(f"expected rnumel == 1, got {rnumel}")
 
         if (
             isinstance(template_node.node, MultiTemplateBuffer)
@@ -3352,7 +3418,10 @@ class SIMDScheduling(BaseScheduling):
                         prologue_nodes,
                         only_gen_src_code=True,
                     )
-                    assert isinstance(src_code, str)
+                    if not isinstance(src_code, str):
+                        raise AssertionError(
+                            f"expected src_code to be a str, got {type(src_code)}"
+                        )
                     # pyrefly: ignore [bad-argument-type]
                     src_codes.append(src_code)
                 else:
@@ -3569,7 +3638,11 @@ class SIMDScheduling(BaseScheduling):
         from .triton_combo_kernel import ComboKernel
 
         # This is currently the only type supported by this method
-        assert issubclass(self.kernel_type, TritonKernel)
+        if not issubclass(self.kernel_type, TritonKernel):
+            raise AssertionError(
+                f"expected self.kernel_type to subclass TritonKernel, "
+                f"got {self.kernel_type}"
+            )
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
         node_schedule_map: dict[Any, NodeInfo] = {}
@@ -3579,9 +3652,13 @@ class SIMDScheduling(BaseScheduling):
             tiling_scores = None
             if per_subkernel_blocks:
                 if torch._inductor.config.triton.coalesce_tiling_analysis:
-                    assert isinstance(
+                    if not isinstance(
                         pn, (scheduler.FusedSchedulerNode, scheduler.SchedulerNode)
-                    )
+                    ):
+                        raise AssertionError(
+                            f"expected pn to be FusedSchedulerNode or "
+                            f"SchedulerNode, got {type(pn)}"
+                        )
                     coalesce_analysis = pn.get_coalesce_analysis()
                 else:
                     coalesce_analysis = None
@@ -3749,17 +3826,19 @@ class SIMDScheduling(BaseScheduling):
             """
             Compute tiling candidates by dividing up the iteration ranges.
             """
-            assert len(rw.range_vars) == len(ranges), f"{rw.range_vars=} {ranges=}"
+            if len(rw.range_vars) != len(ranges):
+                raise AssertionError(f"{rw.range_vars=} {ranges=}")
 
             # isinstance(dep, MemoryDep): this filters out StarDeps. StarDeps refer to reads
             # that need to access the entire tensor; they don't contribute read indexing
             # information (and practically, they don't have dep.index so they can't be used
             # for stride_hints below
             dep_sources = [rw.reads, rw.writes]
-            assert all(
+            if not all(
                 isinstance(dep, (MemoryDep, StarDep))
                 for dep in itertools.chain.from_iterable(dep_sources)
-            )
+            ):
+                raise AssertionError("expected all deps to be MemoryDep or StarDep")
             deps = [
                 dep
                 for dep in itertools.chain.from_iterable(dep_sources)
@@ -3785,7 +3864,11 @@ class SIMDScheduling(BaseScheduling):
             # Find non-trivial tiling candidates.
             for dep in deps:
                 strides = V.graph.sizevars.stride_hints(dep.index, rw.range_vars)
-                assert len(strides) == len(ranges)
+                if len(strides) != len(ranges):
+                    raise AssertionError(
+                        f"expected len(strides) == len(ranges), "
+                        f"got {len(strides)} and {len(ranges)}"
+                    )
                 try:
                     split = strides.index(1) + 1
                     if split == len(ranges):
@@ -3878,8 +3961,16 @@ class SIMDScheduling(BaseScheduling):
         """
         pw_prefixes = ("z", "y", "x")
         reduction_prefixes = ("r0_", "r1_")
-        assert len(pw_tiling) <= len(pw_prefixes)
-        assert len(reduction_tiling) <= len(reduction_prefixes)
+        if len(pw_tiling) > len(pw_prefixes):
+            raise AssertionError(
+                f"expected len(pw_tiling) <= len(pw_prefixes), "
+                f"got {len(pw_tiling)} and {len(pw_prefixes)}"
+            )
+        if len(reduction_tiling) > len(reduction_prefixes):
+            raise AssertionError(
+                f"expected len(reduction_tiling) <= len(reduction_prefixes), "
+                f"got {len(reduction_tiling)} and {len(reduction_prefixes)}"
+            )
 
         return immutable_dict(
             [
@@ -4153,7 +4244,8 @@ class SIMDScheduling(BaseScheduling):
 
                 if use_split_var and v == tiling_var:
                     var_tiling = coalesce_analysis.suggested_split
-                    assert var_tiling is not None
+                    if var_tiling is None:
+                        raise AssertionError("expected var_tiling to not be None")
 
                     tile = var_tiling.tiling_factor
                     remainder = FloorDiv(v_range, var_tiling.tiling_factor)
@@ -4298,7 +4390,8 @@ class SIMDScheduling(BaseScheduling):
         reduction_numel: sympy.Expr,
         tiling: dict[str, sympy.Expr],
     ):
-        assert isinstance(tiling, dict)
+        if not isinstance(tiling, dict):
+            raise AssertionError(f"expected tiling to be a dict, got {type(tiling)}")
         return all(
             SIMDKernel.is_compatible(
                 tiling.values(), node.get_ranges(), reduction_numel=reduction_numel
@@ -4444,7 +4537,10 @@ class SIMDScheduling(BaseScheduling):
                     # swap so a0 is bigger
                     (a0, a1), (b0, b1) = (b0, b1), (a0, a1)
 
-                assert hint(a1 - b1) > 0
+                if not (hint(a1 - b1) > 0):
+                    raise AssertionError(
+                        f"expected hint(a1 - b1) > 0, got {hint(a1 - b1)}"
+                    )
                 if not V.graph.sizevars.statically_known_multiple_of(a1, b1):
                     return None
 
