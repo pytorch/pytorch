@@ -390,6 +390,7 @@ def register_onednn_fusion_ops():
             if config.max_autotune or config.max_autotune_gemm:
                 *_, layout, x, w = mm_args(x, w, layout=layout)
                 if use_cpp_gemm_template(layout, x, w):
+
                     def epilogue_creator(buf):
                         return create_epilogue_with_attr(
                             buf, attr, scalars=scalars, algorithm=algorithm

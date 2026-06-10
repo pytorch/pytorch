@@ -59,9 +59,7 @@ if torch._C._has_mkldnn:
         ):
             raise NotImplementedError
 
-        def pack_linear_weight(
-            self, graph, is_lp_weight, weight_node, batch_size
-        ):
+        def pack_linear_weight(self, graph, is_lp_weight, weight_node, batch_size):
             raise NotImplementedError
 
         def pack_linear(
@@ -70,7 +68,6 @@ if torch._C._has_mkldnn:
             raise NotImplementedError
 
     class CpuMkldnnDeviceOp(MkldnnDeviceOpBase):
-
         def pack_conv_weight(
             self,
             graph,
@@ -1087,6 +1084,8 @@ if torch._C._has_mkldnn:
             )
 
         def is_linear_add_bias(match):
+            if mkldnn._is_mkldnn_acl_supported():
+                return False
             add_node = match.output_node()
             linear_node = add_node.args[0]
             packed_weight_node = linear_node.args[1]
@@ -1492,14 +1491,24 @@ if torch._C._has_mkldnn:
                 )
                 compute_with_lp = is_lp_weight or use_reduced_f32_for_fp32_weight
                 batch_size = input.meta.get("val").shape[0]
+                use_mkldnn_packed_linear = (
+                    compute_with_lp
+                    or mkldnn._is_mkldnn_acl_supported()
+                    or V.aot_compilation
+                    or has_free_symbols(batch_size)
+                )
+
+                linear_weight = weight
+                if (
+                    isinstance(weight, torch.fx.Node)
+                    and weight.target is aten.permute.default
+                    and tuple(weight.args[1]) == (1, 0)
+                ):
+                    linear_weight = weight.args[0]
+
                 weight_node = (
-                    weight
-                    if (
-                        compute_with_lp
-                        or mkldnn._is_mkldnn_acl_supported()
-                        or V.aot_compilation
-                        or has_free_symbols(batch_size)
-                    )
+                    linear_weight
+                    if use_mkldnn_packed_linear
                     else graph.create_node(
                         "call_function", aten.permute.default, (weight, (1, 0))
                     )
