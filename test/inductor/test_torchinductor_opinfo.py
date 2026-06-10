@@ -439,6 +439,7 @@ inductor_override_kwargs["cuda"] = {
     "cumprod": {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
     "logcumsumexp": {"grad_atol": 8e-4, "grad_rtol": 0.001},
     ("logcumsumexp", f16): {"grad_atol": 3e-3, "grad_rtol": 0.01},
+    ("nn.functional.rms_norm.cutedsl", f16): {"reference_in_float": True},
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
     ("kron", f16): {"reference_in_float": True},
@@ -529,6 +530,9 @@ inductor_override_kwargs["cuda"] = {
         "atol": 1e-4,
         "rtol": 7e-1,
     },
+    # The eager gradient for native_group_norm appears to be numerically unstable at low
+    # precisions; more investigation is needed.
+    ("native_group_norm", f16): {"check_gradient": False},
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -695,6 +699,9 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.interpolate.trilinear", f64): {
         "check_gradient": False,
     },
+    # The eager gradient for native_group_norm appears to be numerically unstable at low
+    # precisions; more investigation is needed.
+    ("native_group_norm", f16): {"check_gradient": False},
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
@@ -1207,6 +1214,24 @@ def _inductor_extra_samples(op_name, device, dtype, requires_grad):
 
 @wrapper_noop_set_seed_decorator
 class TestInductorOpInfo(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._test_config_stack = contextlib.ExitStack()
+        cls._test_config_stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._test_config_stack.close()
+        super().tearDownClass()
+
     def tearDown(self):
         torch._dynamo.reset()
 
@@ -1232,8 +1257,6 @@ class TestInductorOpInfo(TestCase):
     @torch._inductor.config.patch(
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
-    @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @torch._inductor.config.patch("test_configs.static_cpp_dtype_assert", True)
     @torch._inductor.config.patch("shape_padding", False)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):

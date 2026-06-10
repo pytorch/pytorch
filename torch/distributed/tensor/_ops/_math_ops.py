@@ -1652,6 +1652,8 @@ def linalg_cross_strategy(
         aten._upsample_nearest_exact2d.default,
         aten._upsample_nearest_exact3d.default,
         aten._upsample_bilinear2d_aa.default,
+        aten._upsample_bicubic2d_aa.default,
+        aten._upsample_lanczos2d_aa.default,
         aten.upsample_bicubic2d.default,
         aten.upsample_bilinear2d.default,
         aten.upsample_linear1d.default,
@@ -1664,6 +1666,8 @@ def linalg_cross_strategy(
         aten._upsample_nearest_exact2d_backward.default,
         aten._upsample_nearest_exact3d_backward.default,
         aten._upsample_bilinear2d_aa_backward.default,
+        aten._upsample_bicubic2d_aa_backward.default,
+        aten._upsample_lanczos2d_aa_backward.default,
         aten.upsample_bicubic2d_backward.default,
         aten.upsample_bilinear2d_backward.default,
         aten.upsample_linear1d_backward.default,
@@ -1791,9 +1795,9 @@ def _adjust_group_norm_scalars(
     for d in local_shape[2:]:
         hxw_local *= d
     args = list(schema.args_schema)
-    # Find scalar arg positions: first 1-3 args are tensors (input, weight?, bias?),
-    # then N, C, HxW, group, eps. Count tensor args to find the offset.
-    num_tensor_args = sum(isinstance(a, DTensorSpec) for a in args)
+    # Find scalar arg positions: tensor slots (DTensorSpec or None for optionals)
+    # precede N, C, HxW. Count both to find the offset.
+    num_tensor_args = sum(isinstance(a, (DTensorSpec, type(None))) for a in args)
     args[num_tensor_args] = n_local
     args[num_tensor_args + 1] = c_local
     args[num_tensor_args + 2] = hxw_local

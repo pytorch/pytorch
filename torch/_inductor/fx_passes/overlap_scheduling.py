@@ -24,7 +24,9 @@ from torch._inductor.fx_passes.bucketing import (
     is_wait_tensor,
 )
 from torch._inductor.fx_passes.memory_estimator import MemoryTracker
+from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._logging import trace_structured
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
@@ -302,6 +304,12 @@ def benchmark_node_with_cache_key(
             (args, kwargs),
         )
 
+        args, kwargs = torch.utils._pytree.tree_map_only(
+            torch.SymInt,
+            lambda s: optimization_hint(s, fallback=config.unbacked_symint_fallback),
+            (args, kwargs),
+        )
+
         if val := get_cached_node_time(key):
             return val, key
 
@@ -486,9 +494,7 @@ class OverlapScheduler:
         self._parent_lists: list[list[fx.Node]] = [
             list(n._input_nodes) for n in self.nodes
         ]
-        self.node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = (
-            self._collect_node_ancestors()
-        )
+        self.node_ancestors: BitsetAncestors = self._collect_node_ancestors()
 
         # Identify collectives and compute nodes
         self.collective_info: dict[fx.Node, CollectiveInfo] = {}
@@ -532,6 +538,19 @@ class OverlapScheduler:
         self.wait_to_start: dict[fx.Node, fx.Node] = {}
         self._identify_collectives()
         self.wasted_compute = 0.0
+
+        # Bitset masks for O(N/64) pre-filtering in _find_schedulable_path.
+        #
+        # _scheduled_bits: bit i is set when node i has been scheduled.
+        #   Updated incrementally in _schedule() via: _scheduled_bits |= 1 << idx
+        #
+        # _compute_bits: bit i is set for every compute node (fixed at init).
+        #   Used to detect "is any unscheduled ancestor a compute node?" in O(N/64)
+        #   instead of doing a full BFS + per-node is_compute_node() check.
+        self._scheduled_bits: int = 0
+        self._compute_bits: int = 0
+        for n in self.compute_nodes:
+            self._compute_bits |= self.node_ancestors.node_bit(n)
 
         # Calculate domination indices for both compute and reduce_scatter nodes
         self.reduce_scatter_nodes = self.graph.find_nodes(
@@ -577,15 +596,9 @@ class OverlapScheduler:
             score = self._compute_on_path_score(node)
             heapq.heappush(self.on_path_ready, (score, node))
 
-    def _collect_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
-        """Collect all ancestors for each node."""
-        ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
-        for node in self.nodes:
-            for input_node in node.all_input_nodes:
-                ancestors[node].add(input_node)
-                ancestors[node] |= ancestors[input_node]
-
-        return ancestors
+    def _collect_node_ancestors(self) -> BitsetAncestors:
+        """Collect all ancestors for each node using int-bitset representation."""
+        return BitsetAncestors(self.nodes)
 
     def _compute_baseline_memory(self) -> int:
         """
@@ -1119,6 +1132,7 @@ class OverlapScheduler:
         assert node not in self.scheduled
         assert all(n in self.scheduled for n in node.all_input_nodes)
         self.scheduled.add(node)
+        self._scheduled_bits |= self.node_ancestors.node_bit(node)
         self.memory_tracker.schedule_node(node)
 
         log.debug(
@@ -1269,14 +1283,18 @@ class OverlapScheduler:
         ):
             return
 
-        # Compile candidates - limit by distance to bound compile time
+        # Compile candidates - limit by number of plausible candidates to bound
+        # compile time.  Do not stop after seeing max_node_distance raw entries:
+        # early entries may be filtered by PG/prefetch distance, while later
+        # entries can still use the current overlap window.
         candidates = []
-        for i, collective in enumerate(self.unscheduled_collectives):
-            if i > self.max_node_distance:
-                break
-
+        for collective in self.unscheduled_collectives:
             pg_name = get_group_name(collective)
             if pg_name == exclude_pg:
+                continue
+
+            pg_available_time = remaining_time_per_pg.get(pg_name, 0.0)
+            if pg_available_time <= 0:
                 continue
 
             if (
@@ -1288,6 +1306,8 @@ class OverlapScheduler:
                 continue
 
             candidates.append(collective)
+            if len(candidates) >= self.max_node_distance:
+                break
 
         def get_priority(n: fx.Node) -> int:
             dominates_next_compute = (
@@ -1302,13 +1322,18 @@ class OverlapScheduler:
             else:
                 return 3  # Off-path, doesn't block reduce_scatter
 
-        candidates.sort(
-            key=lambda n: (
+        def overlap_priority(n: fx.Node) -> tuple[int, int, float, int]:
+            return (
                 get_priority(n),
                 self.compute_index_domination[n],
+                -min(
+                    remaining_time_per_pg.get(get_group_name(n), 0.0),
+                    self.collective_info[n].exposed_time_ms,
+                ),
                 self.node_idx[n],
-            ),
-        )
+            )
+
+        candidates.sort(key=overlap_priority)
 
         if self.prioritize_bucketing_during_scheduling:
             # group candidates by bucket key first so same-bucket
@@ -1318,11 +1343,12 @@ class OverlapScheduler:
                 key = get_full_bucket_key(coll, self.bucket_mode)
                 bucket_groups[key].append(coll)
 
-            # Sort bucket groups by minimum domination index, larger groups first as tiebreaker
+            # Sort bucket groups by the best candidate priority in each group,
+            # with larger groups first as tiebreaker.
             sorted_bucket_keys = sorted(
                 bucket_groups.keys(),
                 key=lambda k: (
-                    min(self.compute_index_domination[c] for c in bucket_groups[k]),
+                    min(overlap_priority(c) for c in bucket_groups[k]),
                     -len(bucket_groups[k]),
                 ),
             )
@@ -1331,9 +1357,7 @@ class OverlapScheduler:
             candidates = []
             for b_key in sorted_bucket_keys:
                 group = bucket_groups[b_key]
-                group.sort(
-                    key=lambda n: (self.compute_index_domination[n], self.node_idx[n])
-                )
+                group.sort(key=overlap_priority)
                 candidates.extend(group)
 
         for collective in candidates:
@@ -1346,10 +1370,7 @@ class OverlapScheduler:
             why = WhyNoOverlap(overlap_node, collective)
             info = self.collective_info[collective]
 
-            if (
-                collective in self.node_ancestors[overlap_node]
-                or overlap_node in self.node_ancestors[collective]
-            ):
+            if self.node_ancestors.has_dep(overlap_node, collective):
                 why("dependency conflict")
                 continue
 
@@ -1410,13 +1431,35 @@ class OverlapScheduler:
     def _find_schedulable_path(
         self, target: fx.Node, curr_overlap_node: fx.Node | None, why: WhyNoOverlap
     ) -> OrderedSet[fx.Node] | None:
-        """Find path to target by collecting unscheduled dependencies."""
+        """Find path to target by collecting unscheduled dependencies.
+
+        Called O(C * K) times where C = compute nodes and K = unscheduled
+        collectives. Most calls return None because the collective has
+        unscheduled compute ancestors. The bitset pre-filter below answers
+        this in O(N/64) using three bitwise operations, avoiding a full
+        backward BFS in the majority of cases.
+        """
+        # Bitset pre-filter: O(N/64) check that avoids BFS in most cases.
+        ancestor_bits = self.node_ancestors.get_ancestor_bits(target)
+        unscheduled_bits = ancestor_bits & ~self._scheduled_bits
+        if unscheduled_bits & self._compute_bits:
+            why("bitset: unscheduled compute ancestor")
+            return None
+
+        # No unscheduled ancestors at all -- path is trivially clear.
+        if not unscheduled_bits:
+            return OrderedSet()
+
+        # Pre-filter passed (rare): fall through to BFS for exact check
+        # (the pre-filter only checks compute nodes; BFS also checks for
+        # unscheduled collectives and wait-node conflicts).
+
         # Backward BFS from target; stops at scheduled nodes.
+        target_idx = self.node_idx[target]
         unscheduled_ancestors: OrderedSet[fx.Node] = OrderedSet()
         seen: OrderedSet[fx.Node] = OrderedSet()
         parent_lists = self._parent_lists
         node_idx = self.node_idx
-        target_idx = node_idx[target]
         stack = parent_lists[target_idx][:]
         scheduled = self.scheduled
         while stack:
@@ -1604,10 +1647,7 @@ class OverlapScheduler:
 
         def could_be_hidden(start: fx.Node) -> fx.Node | None:
             for compute_node in self.compute_nodes:
-                if (
-                    start not in self.node_ancestors[compute_node]
-                    and compute_node not in self.node_ancestors[start]
-                ):
+                if not self.node_ancestors.has_dep(compute_node, start):
                     return compute_node
 
             return None
