@@ -3150,6 +3150,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.has_load_with_contiguous_rdim = False
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
+        self._loop_peeling: bool = False
 
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
@@ -5877,14 +5878,49 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
 
         elif self.inside_reduction and len(loop_trees) > 0:
+            peeling = self._loop_peeling
+            if peeling:
+                tree = loop_trees[0]
+                prefix = tree.prefix
+                block_var = f"{prefix.upper()}BLOCK"
+                aligned_var = f"{prefix}numel_aligned"
+                if torch.version.hip and get_triton_version() > (3, 2):
+                    num_stages = ", num_stages = 2"
+                else:
+                    num_stages = ""
+                self.body.writeline(
+                    f"{aligned_var} = ({prefix}numel // {block_var}) * {block_var}"
+                )
+                self.body.writeline(
+                    f"for {prefix}offset in tl.range(0, {aligned_var}, {block_var}{num_stages}):"
+                )
+                with self.body.indent():
+                    self.body.writeline(f"{tree.name} = {prefix}offset + {prefix}base")
+                    self.body.writeline(f"{tree.mask_name()} = True")
+                    self.codegen_reduction_indices(self.body)
+                    self.body.splice(self.indexing_code)
+                    self.body.splice(self.loads)
+                    self.body.splice(self.compute)
+                    self.body.splice(self.stores)
+                self.cse.invalidate(self.outside_loop_vars)
+                tree.cache_clear()
+
             # Write the loop headers.
             for level, tree in enumerate(loop_trees):
                 with self.body.indent(offset=level):
                     prefix = tree.prefix
-                    loop_start = "rsplit_start" if self.cooperative_reduction else "0"
-                    loop_end = (
-                        "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
-                    )
+                    if peeling:
+                        loop_start = f"{prefix}numel_aligned"
+                        loop_end = f"{prefix}numel"
+                    else:
+                        loop_start = (
+                            "rsplit_start" if self.cooperative_reduction else "0"
+                        )
+                        loop_end = (
+                            "rsplit_end"
+                            if self.cooperative_reduction
+                            else f"{prefix}numel"
+                        )
                     # Conditionalize pipelining on HIP for Triton due to
                     # reports of numerical inaccuracies on older Triton
                     if torch.version.hip and get_triton_version() > (3, 2):
@@ -6814,6 +6850,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.fixed_config:
             return self.fixed_config[f"{prefix.upper()}BLOCK"]
         return TRITON_MAX_BLOCK[prefix.upper()]
+
+    def _should_peel_reduction_loop(self, loop_trees):
+        return (
+            config.triton.loop_peeling
+            and len(loop_trees) == 1
+            and not self.cooperative_reduction
+            and not config.triton.use_block_ptr
+            and not config.triton.use_tensor_descriptor
+            and not self._has_constant_mask(loop_trees[0])
+            and not self.pointer_advancements.get(loop_trees[0].symt)
+        )
 
     def _has_constant_mask(self, tree: IterationRangesRoot) -> bool:
         if not tree.supports_constant_mask():

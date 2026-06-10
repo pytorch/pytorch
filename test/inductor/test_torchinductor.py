@@ -18980,6 +18980,7 @@ if RUN_GPU:
         # only uncoalesced without this :)
         @config.patch("triton.coalesce_tiling_analysis", False)
         @config.patch("triton.use_block_ptr", False)
+        @config.patch("triton.loop_peeling", False)
         def test_evict_last_non_coalesced_loads(self):
             @torch.compile
             def f(a, b):

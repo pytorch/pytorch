@@ -730,6 +730,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def should_use_persistent_reduction(self) -> bool:
         return False  # defined in subclass
 
+    def _should_peel_reduction_loop(
+        self, loop_trees: list[IterationRangesRoot]
+    ) -> bool:
+        return False  # defined in subclass
+
     def var_ranges(self) -> dict[sympy.Symbol, sympy.Expr]:
         return dict(
             itertools.chain.from_iterable(
@@ -3168,6 +3173,10 @@ class SIMDScheduling(BaseScheduling):
                     )
 
             kernel.finalize_indexing(all_indexing.keys())
+
+            loop_trees = [t for t in kernel.range_trees if t.is_loop]
+            if kernel._should_peel_reduction_loop(loop_trees):
+                kernel._loop_peeling = True
 
             # Second pass to do codegen
             for node in node_schedule:

@@ -514,6 +514,106 @@ class TestCodegenTriton(InductorTestCase):
         self.assertNotIn("tt.pointer_range", code_str)
 
 
+@unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+@inductor_config.patch("triton.loop_peeling", True)
+class TestLoopPeeling(InductorTestCase):
+    """Tests for reduction loop peeling optimization."""
+
+    def _check_peeling(self, fn, *inputs):
+        compiled = torch.compile(fn)
+        result, codes = run_and_get_code(compiled, *inputs)
+        self.assertIn("r0_numel_aligned", "\n".join(codes))
+        expected = fn(*inputs)
+        torch.testing.assert_close(result, expected)
+
+    def test_inner_reduction(self):
+        def fn(x):
+            return torch.sum(x, dim=-1)
+
+        self._check_peeling(fn, torch.randn(32, 1027, device=GPU_TYPE))
+
+    def test_outer_reduction(self):
+        def fn(x):
+            return torch.sum(x, dim=0)
+
+        self._check_peeling(fn, torch.randn(1027, 32, device=GPU_TYPE))
+
+    def test_two_inner_reductions(self):
+        def fn(x):
+            a = torch.max(x, dim=-1, keepdim=True).values
+            return torch.sum(x - a, dim=-1)
+
+        self._check_peeling(fn, torch.randn(32, 1027, device=GPU_TYPE))
+
+    def test_one_inner_one_outer_reduction(self):
+        def fn(x):
+            return torch.sum(x, dim=-1), torch.sum(x, dim=0)
+
+        self._check_peeling(fn, torch.randn(32, 1027, device=GPU_TYPE))
+
+    @inductor_config.patch("combo_kernels", True)
+    def test_combo_kernel_two_reductions(self):
+        def fn(x1, x2):
+            return torch.sum(x1, dim=-1), torch.sum(x2, dim=-1)
+
+        self._check_peeling(
+            fn,
+            torch.randn(32, 1027, device=GPU_TYPE),
+            torch.randn(64, 1027, device=GPU_TYPE),
+        )
+
+    def test_argmax(self):
+        def fn(x):
+            return torch.argmax(x, dim=-1)
+
+        self._check_peeling(fn, torch.randn(32, 1027, device=GPU_TYPE))
+
+    def test_argmin(self):
+        def fn(x):
+            return torch.argmin(x, dim=-1)
+
+        self._check_peeling(fn, torch.randn(32, 1027, device=GPU_TYPE))
+
+    def test_softmax(self):
+        def fn(x):
+            return torch.softmax(x, dim=-1)
+
+        self._check_peeling(fn, torch.randn(32, 1027, device=GPU_TYPE))
+
+    def test_log_softmax(self):
+        def fn(x):
+            return torch.log_softmax(x, dim=-1)
+
+        self._check_peeling(fn, torch.randn(32, 1027, device=GPU_TYPE))
+
+    def test_var(self):
+        def fn(x):
+            return torch.var(x, dim=-1)
+
+        self._check_peeling(fn, torch.randn(32, 1027, device=GPU_TYPE))
+
+    def test_std(self):
+        def fn(x):
+            return torch.std(x, dim=-1)
+
+        self._check_peeling(fn, torch.randn(32, 1027, device=GPU_TYPE))
+
+    def test_dynamic_shapes(self):
+        def fn(x):
+            return torch.softmax(x, dim=-1)
+
+        compiled = torch.compile(fn, dynamic=True)
+        # First call triggers compilation
+        inp1 = torch.randn(32, 1027, device=GPU_TYPE)
+        result1, codes = run_and_get_code(compiled, inp1)
+        self.assertIn("r0_numel_aligned", "\n".join(codes))
+        torch.testing.assert_close(result1, fn(inp1))
+        # Second call with different shape reuses the compiled kernel
+        inp2 = torch.randn(64, 2053, device=GPU_TYPE)
+        result2 = compiled(inp2)
+        torch.testing.assert_close(result2, fn(inp2))
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
