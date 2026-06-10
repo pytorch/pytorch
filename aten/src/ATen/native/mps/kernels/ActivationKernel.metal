@@ -20,7 +20,8 @@ struct softshrink_functor {
     } else if (x < -lambda) {
       return x + lambda;
     } else {
-      return T(0);
+      // multiplication to propagate Nan, Nan * 0 = Nan.
+      return x * T(0);
     }
   }
 };
@@ -47,7 +48,7 @@ REGISTER_BINARY_ALPHA_OP(shrink_backward, bfloat, bfloat, bfloat);
 struct relu_functor {
   template <typename T>
   inline T operator()(const T x) {
-    return x > T(0) ? x : T(0);
+    return x < T(0) ? T(0) : x;
   }
 };
 
@@ -64,7 +65,8 @@ REGISTER_UNARY_OP(relu, bool, bool);
 struct hardsigmoid_functor {
   template <typename T>
   inline T operator()(const T x) {
-    return static_cast<T>(min(max(x + 3.0f, .0f), 6.f) / 6.f);
+    const auto r = (x + 3.0f) / 6.0f;
+    return static_cast<T>(r > 1.0f ? 1.0f : (r < 0.0f ? 0.0f : r));
   }
 };
 
@@ -233,7 +235,9 @@ static inline float gelu_dispatch_tanh(float x) {
   if IF_CONSTEXPR (::metal::is_same_v<T, float>) {
     return ::metal::tanh(x);
   } else {
-    return ::metal::fast::tanh(x);
+    // Clamp to avoid fast::tanh's internals overflowing to NaN,
+    // tanh is already saturated here.
+    return ::metal::fast::tanh(::metal::clamp(x, -10.0f, 10.0f));
   }
 }
 

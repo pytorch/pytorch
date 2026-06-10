@@ -228,9 +228,7 @@ size_t parseCUDABlasLtWorkspaceSize() {
   }
   size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
 #else
-  /* use CUDABlas default workspace size if unified */
-  /* otherwise, use default size in KiB according to #73328 */
-  size_t workspace_size = unified_cublas_and_lt_workspaces() ? parseChosenWorkspaceSize() / 1024 : 1024;
+  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
 #endif
 
   if (val.has_value()) {
