@@ -1418,6 +1418,40 @@ class TestReductions(TestCase):
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0), 0.03125)
 
+    @onlyCUDA
+    def test_std_var_large_float32_no_overflow(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180156
+        # CUDA kernel accumulated M2 in float32, causing overflow to inf for inputs
+        # where M2 ~ N * (std)^2 ~ 1000 * (1e19)^2 = 1e41 > float32 max (~3.4e38).
+        torch.manual_seed(0)
+        x = torch.randn(1000, dtype=torch.float32) * 1e19 + 1e20
+
+        # 1D: global reduce
+        ref_std = torch.std(x.double()).item()
+        ref_var = torch.var(x.double()).item()
+        device_std = torch.std(x.to(device)).cpu().item()
+        device_var = torch.var(x.to(device)).cpu().item()
+
+        self.assertFalse(math.isinf(device_std), "std overflowed to inf on large float32 input")
+        self.assertFalse(math.isinf(device_var), "var overflowed to inf on large float32 input")
+        self.assertAlmostEqual(device_std / ref_std, 1.0, places=3)
+        self.assertAlmostEqual(device_var / ref_var, 1.0, places=3)
+
+        # 2D: reduce along dim, exercises parallel combine() across thread blocks
+        x2d = x.reshape(10, 100)
+        ref_std_dim = torch.std(x2d.double(), dim=1)
+        device_std_dim = torch.std(x2d.to(device), dim=1).cpu()
+        self.assertFalse(device_std_dim.isinf().any(), "std with dim overflowed to inf")
+        self.assertTrue(
+            ((device_std_dim - ref_std_dim.float()).abs() / ref_std_dim.float().abs()).max() < 1e-3
+        )
+
+        # correction=0 (biased): correction is stored as accscalar_t, verify path works
+        ref_var_biased = torch.var(x.double(), correction=0).item()
+        device_var_biased = torch.var(x.to(device), correction=0).cpu().item()
+        self.assertFalse(math.isinf(device_var_biased), "biased var overflowed to inf")
+        self.assertAlmostEqual(device_var_biased / ref_var_biased, 1.0, places=3)
+
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float16)
     def test_sum_noncontig_lowp(self, device, dtype) -> None:
