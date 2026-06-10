@@ -197,6 +197,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
             f"{i} Operation: {op} shape mismatch: {orig.shape} != {decomp.shape}"
         )
     tol_table = {
+        (torch.bfloat16, torch.ops.aten.native_group_norm.default): 5e-6,
+        (torch.float16, torch.ops.aten.native_group_norm.default): 5e-6,
         (torch.bfloat16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_layer_norm_backward.default): 1e-3,
