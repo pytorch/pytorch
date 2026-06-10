@@ -31,6 +31,10 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(detach);
   }
 
+  bool has_pre_dispatch_torch_dispatch_mode() const override {
+    return false;
+  }
+
   void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const override {
     PANIC(dispatch);

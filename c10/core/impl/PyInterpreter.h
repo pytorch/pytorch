@@ -142,6 +142,8 @@ struct C10_API PyInterpreterVTable {
   virtual c10::intrusive_ptr<TensorImpl> detach(
       const TensorImpl* self) const = 0;
 
+  virtual bool has_pre_dispatch_torch_dispatch_mode() const = 0;
+
   // Invoke the Python boxed fallback dispatch to go back into Python
   virtual void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const = 0;

@@ -932,13 +932,16 @@ class FakeTensor(Tensor):
                 "'device' (or 'fake_device')"
             )
 
-        self = Tensor._make_subclass(
-            cls,
-            elem,
-            elem.requires_grad if requires_grad is None else requires_grad,
-            dispatch_device=True,
-            device_for_backend_keys=device,
-        )
+        with torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.PreDispatch)
+        ):
+            self = Tensor._make_subclass(
+                cls,
+                elem,
+                elem.requires_grad if requires_grad is None else requires_grad,
+                dispatch_device=True,
+                device_for_backend_keys=device,
+            )
         if not fake_mode._allow_unsafe_data_ptr_access:
             torch._C._set_throw_on_mutable_data_ptr(self)
         else:
