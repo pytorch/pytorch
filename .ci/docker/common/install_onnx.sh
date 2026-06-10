@@ -22,8 +22,10 @@ pip_install \
 IMPORT_SCRIPT_FILENAME="/tmp/onnx_import_script.py"
 as_jenkins echo 'import transformers; transformers.GPTJForCausalLM.from_pretrained("hf-internal-testing/tiny-random-gptj");' > "${IMPORT_SCRIPT_FILENAME}"
 
-# Need a PyTorch version for transformers to work
-pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
+# Need a PyTorch version for transformers to work.
+# Use --extra-index-url so previously pip-installed packages (e.g.
+# transformers) remain resolvable from PyPI during dependency resolution.
+pip_install --pre torch --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 # Very weird quoting behavior here https://github.com/conda/conda/issues/10972,
 # so echo the command to a file and run the file instead
 conda_run python "${IMPORT_SCRIPT_FILENAME}"

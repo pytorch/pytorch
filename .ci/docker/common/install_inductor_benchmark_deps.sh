@@ -44,8 +44,11 @@ else
   echo "DESIRED_CUDA=${DESIRED_CUDA}, using cu128 wheels"
 fi
 
-# Stable packages are ok here, just to satisfy TorchBench check
-pip_install torch torchvision torchaudio --index-url "${CUDA_INDEX_URL}"
+# Stable packages are ok here, just to satisfy TorchBench check.
+# Use --extra-index-url (not --index-url) so PyPI remains available for
+# transitive dependencies like numpy/pillow that the PyTorch wheel index
+# may carry at stale versions.
+pip_install torch torchvision torchaudio --extra-index-url "${CUDA_INDEX_URL}"
 
 # Pin setuptools<82 to avoid breaking visdom install (setuptools 82 removed
 # pkg_resources which visdom's setup.py depends on)
