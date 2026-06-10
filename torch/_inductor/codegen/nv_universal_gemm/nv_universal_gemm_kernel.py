@@ -94,14 +94,6 @@ def _create_gemm_arguments(
     if variant_name == "SCALED_GEMM":
         from cutlass_api.arguments import ScaledTensor
 
-        if any(
-            mode is None
-            for mode in (scale_mode_a, swizzle_mode_a, scale_mode_b, swizzle_mode_b)
-        ):
-            raise NotImplementedError(
-                "Scaled GEMM requires supported scale and swizzle modes"
-            )
-
         a, b, scale_a, scale_b = input_tensors
         scaled_a = ScaledTensor(a, scale_a, scale_mode_a, swizzle_mode_a)
         scaled_b = ScaledTensor(b, scale_b, scale_mode_b, swizzle_mode_b)
@@ -114,10 +106,13 @@ def _create_gemm_arguments(
 
     if variant_name == "GEMM":
         a, b = input_tensors
-        kwargs = {"accumulator_type": accumulator_type}
         if epilogue is not None:
-            kwargs["epilogue"] = epilogue
-        return cutlass_api.arguments.GemmArguments(a, b, out, **kwargs)
+            return cutlass_api.arguments.GemmArguments(
+                a, b, out, accumulator_type=accumulator_type, epilogue=epilogue
+            )
+        return cutlass_api.arguments.GemmArguments(
+            a, b, out, accumulator_type=accumulator_type
+        )
 
     raise NotImplementedError(f"Unsupported NVGEMM variant: {variant_name}")
 
@@ -128,62 +123,41 @@ def _lookup_gemm_kernel(
     epilogue_args: Any | None = None,
     epilogue_source: str = "",
 ):
-    if epilogue_args is None:
-        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
-            get_kernel_by_name,
-        )
+    from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+        get_efc_kernel_with_epilogue,
+        get_kernel_by_name,
+    )
 
+    if epilogue_args is None:
         kernel = get_kernel_by_name(kernel_name)
         if kernel is None:
             raise RuntimeError(f"Could not find kernel: {kernel_name}")
         return kernel
 
-    from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
-        get_efc_kernel_with_epilogue,
-    )
-
     kernel = get_efc_kernel_with_epilogue(
-        kernel_name,
-        epilogue_args,
-        epilogue_source=epilogue_source,
+        kernel_name, epilogue_args, epilogue_source=epilogue_source
     )
     if kernel is None:
         raise RuntimeError(f"Could not find EFC kernel: {kernel_name}")
     return kernel
 
 
+def _tensor_sig(t):
+    return (t.shape, t.stride(), t.dtype, t.device)
+
+
 def _create_gemm_cache_key(
-    variant_name: str,
     input_tensors,
     out,
     *,
     has_epilogue: bool = False,
     aux_tensors: tuple = (),
 ):
-    def _tensor_sig(t):
-        return (t.shape, t.stride(), t.dtype, t.device)
-
-    if variant_name == "GROUPED_GEMM":
-        a, b, offsets = input_tensors
-        cache_key = (*_tensor_sig(a), *_tensor_sig(b), *_tensor_sig(offsets))
-    elif variant_name == "SCALED_GEMM":
-        a, b, scale_a, scale_b = input_tensors
-        cache_key = (
-            *_tensor_sig(a),
-            *_tensor_sig(b),
-            *_tensor_sig(scale_a),
-            *_tensor_sig(scale_b),
-        )
-    elif variant_name == "GEMM":
-        a, b = input_tensors
-        cache_key = (*_tensor_sig(a), *_tensor_sig(b))
-    else:
-        raise NotImplementedError(f"Unsupported NVGEMM variant: {variant_name}")
-
+    cache_key = tuple(s for t in input_tensors for s in _tensor_sig(t))
     cache_key = (*cache_key, *_tensor_sig(out))
 
     if has_epilogue:
-        aux_sig = tuple((t.shape, t.stride(), t.dtype) for t in aux_tensors)
+        aux_sig = tuple(_tensor_sig(t) for t in aux_tensors)
         return (*cache_key, "epilogue", aux_sig)
     return cache_key
 
@@ -226,7 +200,6 @@ def _nvgemm_run(
     )
 
     cache_key = _create_gemm_cache_key(
-        variant_name,
         input_tensors,
         out,
         has_epilogue=has_epilogue,
@@ -305,12 +278,11 @@ def _nvgemm_precompile(
     with FakeTensorMode():
         tensors = {}
         for name in [*input_param_names, "output"]:
-            key = name if name != "output" else "output"
             tensors[name] = torch.empty_strided(
-                tuple(precompile_shapes[key]),
-                tuple(precompile_strides[key]),
+                tuple(precompile_shapes[name]),
+                tuple(precompile_strides[name]),
                 device=device,
-                dtype=getattr(torch, precompile_dtypes[key]),
+                dtype=getattr(torch, precompile_dtypes[name]),
             )
 
     input_tensors = tuple(tensors[n] for n in input_param_names)
@@ -336,9 +308,7 @@ def _nvgemm_precompile(
             **(variant_kwargs or {}),
         )
         kernel = _lookup_gemm_kernel(kernel_name)
-        if kernel is None:
-            return
-        cache_key = _create_gemm_cache_key(variant_name, input_tensors, out)
+        cache_key = _create_gemm_cache_key(input_tensors, out)
         mem_key = (cache_key, device_index)
         if mem_key not in compiled_cache:
             artifact = kernel.compile(args)
@@ -494,7 +464,6 @@ class NVUniversalGemmKernel(Kernel):
         code.writeline("")
 
         # -- Epilogue function definition (must be module-level for cutlass_api) --
-        epilogue_source_hash = ""
         if has_epilogue:
             assert self.epilogue_fn_code is not None
             code.splice(self.epilogue_fn_code, strip=True)
@@ -511,7 +480,7 @@ class NVUniversalGemmKernel(Kernel):
         code.writeline("_disk_fn_cache = {}")
         code.writeline(f"_VARIANT_KWARGS = {variant_kwargs_expr}")
         code.writeline(f"_ACC_TYPE = {acc_dtype_str}")
-        input_param_names_repr = repr([n for n in input_tensor_names])
+        input_param_names_repr = repr(input_tensor_names)
         code.writeline(f"_INPUT_PARAM_NAMES = {input_param_names_repr}")
         code.writeline("")
 
