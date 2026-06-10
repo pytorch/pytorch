@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+from unittest import mock
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
@@ -16,6 +18,43 @@ class ExplainTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(explain_output.graph_count, 1)
         self.assertIn("torch.SymInt", explain_output.graphs[0].code)
+
+    def test_other_optimize_kwargs_are_passed_to_optimize(self):
+        def fn(x):
+            return x + 1
+
+        with mock.patch("torch._dynamo.eval_frame.optimize") as optimize_mock:
+            optimize_mock.return_value.return_value = lambda *args, **kwargs: None
+            torch._dynamo.explain(
+                fn,
+                isolate_recompiles=True,
+                recompile_limit=1,
+            )(torch.randn(4))
+
+        self.assertEqual(optimize_mock.call_count, 1)
+        self.assertEqual(
+            optimize_mock.call_args.kwargs,
+            {
+                "nopython": False,
+                "guard_export_fn": mock.ANY,
+                "isolate_recompiles": True,
+                "recompile_limit": 1,
+            },
+        )
+
+    def test_shapes_spec_option_is_passed_to_optimize(self):
+        def fn(x):
+            return x + 1
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "`dynamic` and `shapes_spec` cannot both be set",
+        ):
+            torch._dynamo.explain(
+                fn,
+                dynamic=True,
+                shapes_spec={},
+            )(torch.randn(4))
 
     def test_deprecated_direct_invocation_still_accepts_model_args(self):
         def fn(x, scale=1):
