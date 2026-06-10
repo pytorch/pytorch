@@ -257,10 +257,66 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
     }
   }
 
+  // Decide on the small-K batched-dot fast path BEFORE the reshape consumes
+  // the SymInt sizes. See issue #101249: for "Nc,Nc->N" and similar diag-of-bmm
+  // patterns, lo_size == 1 AND ro_size == 1 means bmm degenerates to
+  // (B, 1, K) @ (B, K, 1). On CUDA at small K, cuBLAS dispatches a batched-GEMV
+  // that launches one chunk per ~64K-batch slice; per-launch overhead dominates.
+  // Replace with elementwise mul + sum-reduction (two kernels, no per-batch
+  // amortization tax). Constraints:
+  //   * CUDA only -- the cliff is a cuBLAS dispatch artifact.
+  //   * Small sum_size (K) -- bmm catches up at K >= 64 on RTX 4080 (sm_89).
+  //   * Bounded intermediate memory -- the elementwise product materializes
+  //     lro_size * sum_size * itemsize bytes; cap at 256 MB to avoid OOM.
+  //   * Eager-only (no torch.compile) -- use maybe_as_int() to avoid baking
+  //     shape guards into the trace. For dynamic shapes, fall back to bmm.
+  constexpr int64_t kSmallKBatchedDotThreshold = 32;
+  constexpr int64_t kIntermediateMemoryBudgetBytes = 256 * 1024 * 1024;
+
+  // For fp16/bf16, the fast path upcasts to fp32 before multiply, allocating:
+  //   - a (fp32): lro_size * sum_size * 4 bytes
+  //   - b (fp32): lro_size * sum_size * 4 bytes
+  //   - a * b (fp32): lro_size * sum_size * 4 bytes
+  // Total: 12 bytes per element. For other dtypes, only the product materializes.
+  bool is_low_precision = (left.scalar_type() == kHalf || left.scalar_type() == kBFloat16);
+  int64_t bytes_per_elem = is_low_precision ? 12 : std::max<int64_t>(left.element_size(), 1);
+  const int64_t mem_budget_elems = kIntermediateMemoryBudgetBytes / bytes_per_elem;
+
+  auto lo_int = lo_size.maybe_as_int();
+  auto ro_int = ro_size.maybe_as_int();
+  auto sum_int = sum_size.maybe_as_int();
+  auto lro_int = lro_size.maybe_as_int();
+
+  bool small_k_batched_dot = left.is_cuda() &&
+      lo_int.has_value() && *lo_int == 1 &&
+      ro_int.has_value() && *ro_int == 1 &&
+      sum_int.has_value() && *sum_int <= kSmallKBatchedDotThreshold &&
+      lro_int.has_value() && sum_int.has_value() &&
+      (*lro_int * *sum_int) <= mem_budget_elems;
+
   // now we can execute the operations above
   left = left.permute(lpermutation).reshape_symint({lro_size, std::move(lo_size), sum_size});
   right = right.permute(rpermutation).reshape_symint({std::move(lro_size), std::move(sum_size), std::move(ro_size)});
-  Tensor result = at::bmm(left, right);
+
+  Tensor result;
+  if (small_k_batched_dot) {
+    // For fp16/bf16, upcast operands BEFORE multiplying to match cuBLAS
+    // Tensor Core accumulator behavior: TC keeps the full-precision product
+    // in 32-bit registers throughout. Casting only the sum accumulator would
+    // truncate the product first and silently underflow values like
+    // 0.001 * 0.0001 (= 1e-7, below fp16 normal range) before they can sum.
+    Tensor a, b;
+    if (left.scalar_type() == kHalf || left.scalar_type() == kBFloat16) {
+      a = left.squeeze(-2).to(kFloat);
+      b = right.squeeze(-1).to(kFloat);
+    } else {
+      a = left.squeeze(-2);
+      b = right.squeeze(-1);
+    }
+    result = (a * b).sum(-1, /*keepdim=*/true).to(left.scalar_type()).unsqueeze(-1);
+  } else {
+    result = at::bmm(left, right);
+  }
   result = result.view_symint(out_size).permute(opermutation);
 
   // finally squeeze summed dimensions if desired

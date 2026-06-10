@@ -4668,6 +4668,85 @@ class TestLinalg(TestCase):
         check(x, [-1], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
         check(x, [52], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
 
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_einsum_small_k_batched_dot(self, device, dtype):
+        # Issue #101249: einsum patterns where every non-summed dim is shared
+        # between operands (lo_size == 1 AND ro_size == 1 in sumproduct_pair)
+        # take a small-K fast path that avoids cuBLAS bmm's per-batch launch
+        # overhead at small contracted dim. Verify output matches the
+        # equivalent (a*b).sum(-1) lowering at and around the threshold.
+        if dtype in (torch.float16, torch.bfloat16):
+            tol = {'rtol': 5e-2, 'atol': 5e-2}
+        else:
+            tol = {'rtol': 1e-4, 'atol': 1e-5}
+
+        # 2D batched-dot: 'Nc,Nc->N' across cliff sizes K = {1, 2, 4, 8, 16, 32}
+        # plus K = {64, 256} which fall back to bmm (still must be correct).
+        for N, c in [(1024, 1), (1024, 2), (1024, 4), (1024, 8), (1024, 16),
+                     (1024, 32), (1024, 64), (1024, 256)]:
+            a = make_tensor((N, c), dtype=dtype, device=device)
+            b = make_tensor((N, c), dtype=dtype, device=device)
+            ref = (a.float() * b.float()).sum(-1).to(dtype)
+            got = torch.einsum('Nc,Nc->N', a, b)
+            self.assertEqual(got, ref, **tol,
+                             msg=f"Nc,Nc->N N={N} c={c} dtype={dtype}")
+
+        # 4D diag-of-attention pattern: 'bhij,bhij->bhi'
+        for B, H, T, d in [(2, 8, 64, 4), (4, 16, 32, 8), (1, 16, 128, 16)]:
+            a = make_tensor((B, H, T, d), dtype=dtype, device=device)
+            b = make_tensor((B, H, T, d), dtype=dtype, device=device)
+            ref = (a.float() * b.float()).sum(-1).to(dtype)
+            got = torch.einsum('bhij,bhij->bhi', a, b)
+            self.assertEqual(got, ref, **tol,
+                             msg=f"bhij,bhij->bhi B={B} H={H} T={T} d={d} dtype={dtype}")
+
+        # 1D dot: 'i,i->' with small i
+        for k in [1, 2, 8, 32]:
+            a = make_tensor((k,), dtype=dtype, device=device)
+            b = make_tensor((k,), dtype=dtype, device=device)
+            ref = (a.float() * b.float()).sum().to(dtype)
+            got = torch.einsum('i,i->', a, b)
+            self.assertEqual(got, ref, **tol, msg=f"i,i-> k={k} dtype={dtype}")
+
+        # Memory-budget guard: very large lro_size * sum_size should fall back
+        # to bmm (no OOM). fp16/bf16 allocate 12 bytes/elem (upcast overhead),
+        # fp32 allocates 4 bytes/elem. Test both to ensure budget accounts for
+        # upcasting. Skip if not enough VRAM.
+        if device == 'cuda':
+            if torch.cuda.mem_get_info()[0] > 4 * 1024 * 1024 * 1024:  # >4GB free
+                if dtype == torch.float32:
+                    # 256MB / 4 bytes = 64M elements, use 128M to exceed budget
+                    large_N = 32 * 1024 * 1024  # 32M rows × 4 cols = 128M elems
+                    a = make_tensor((large_N, 4), dtype=dtype, device=device)
+                    b = make_tensor((large_N, 4), dtype=dtype, device=device)
+                elif dtype in (torch.float16, torch.bfloat16):
+                    # 256MB / 12 bytes = 21M elements, use 42M to exceed budget
+                    large_N = 10 * 1024 * 1024  # 10M rows × 4 cols = 40M elems
+                    a = make_tensor((large_N, 4), dtype=dtype, device=device)
+                    b = make_tensor((large_N, 4), dtype=dtype, device=device)
+                else:
+                    return  # unsupported dtype
+                ref = (a.float() * b.float()).sum(-1).to(dtype)
+                got = torch.einsum('Nc,Nc->N', a, b)
+                self.assertEqual(got, ref, **tol,
+                                 msg=f"large-N memory budget fallback dtype={dtype}")
+
+        # torch.compile dynamic shapes: fast path should fall back gracefully
+        # when sizes are symbolic, without inserting shape guards or crashing
+        # the ShapeEnv solver.
+        if device == 'cuda':
+            def einsum_wrapper(a, b):
+                return torch.einsum('Nc,Nc->N', a, b)
+
+            compiled = torch.compile(einsum_wrapper, dynamic=True)
+            for N, c in [(128, 2), (256, 4), (512, 8)]:
+                a = make_tensor((N, c), dtype=dtype, device=device)
+                b = make_tensor((N, c), dtype=dtype, device=device)
+                ref = (a.float() * b.float()).sum(-1).to(dtype)
+                got = compiled(a, b)
+                self.assertEqual(got, ref, **tol,
+                                 msg=f"torch.compile dynamic N={N} c={c} dtype={dtype}")
+
     def _gen_shape_inputs_linalg_triangular_solve(self, shape, dtype, device, well_conditioned=False):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
         make_fullrank = partial(make_fullrank_matrices_with_distinct_singular_values, dtype=dtype, device=device)
