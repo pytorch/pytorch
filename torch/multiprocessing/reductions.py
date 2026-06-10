@@ -152,17 +152,26 @@ def rebuild_meta_tensor(
 
 def rebuild_xpu_tensor(
     tensor_cls,
-    storage,
+    raw_bytes,
     metadata,
 ):
     """
-    Rebuild a tensor that was originally on XPU from CPU storage.
+    Rebuild a tensor that was originally on XPU from serialized raw bytes.
 
     XPU lacks IPC support (no cudaIpcMemHandle equivalent), so XPU tensors
-    are copied to CPU before serialization and copied back to XPU here.
+    are serialized as raw bytes (via memoryview of the CPU storage) and
+    reconstructed here before being copied back to XPU.
+
+    We avoid fd-based storage sharing because the DupFd / SCM_RIGHTS fd
+    transfer can fail in spawn child processes (EINVAL on ftruncate).
+    The tensor is always reconstructed as contiguous — strides may differ
+    from the original if it was a view, but the data is identical.
     """
-    storage_offset, size, stride, requires_grad, device = metadata
-    t = torch._utils._rebuild_tensor(storage, storage_offset, size, stride)
+    size, requires_grad, device, dtype_str = metadata
+    # Parse dtype from string like "torch.int64"
+    dtype = getattr(torch, dtype_str.rsplit(".", 1)[-1])
+    # Reconstruct from raw bytes via uint8 intermediate to support all dtypes
+    t = torch.frombuffer(raw_bytes, dtype=torch.uint8).view(dtype).reshape(size)
     t = t.to(device)
     if tensor_cls == torch.nn.parameter.Parameter:
         # It is crucial for integer tensors to receive
@@ -413,16 +422,23 @@ def reduce_tensor(tensor):
         # XPU lacks IPC support (no shareIpcHandle equivalent).
         # Copy the tensor to CPU for serialization; the receiving end
         # will copy it back to XPU in rebuild_xpu_tensor.
-        cpu_tensor = tensor.cpu()
-        cpu_storage = cpu_tensor._typed_storage()
+        #
+        # IMPORTANT: We serialize the raw bytes directly instead of passing
+        # the CPU storage object.  Passing a storage would trigger the
+        # standard CPU fd-sharing path (_share_fd_cpu_ / _new_shared_fd_cpu)
+        # which can fail with EINVAL in spawn child processes when the
+        # shm fd is transferred via SCM_RIGHTS and then ftruncate'd.
+        # Always contiguous after .contiguous(), so we don't need
+        # storage_offset or stride in metadata.
+        cpu_tensor = tensor.detach().cpu().contiguous()
+        raw_bytes = memoryview(cpu_tensor.untyped_storage()).tobytes()
         metadata = (
-            cpu_tensor.storage_offset(),
-            cpu_tensor.size(),
-            cpu_tensor.stride(),
+            tuple(cpu_tensor.size()),
             tensor.requires_grad,
             tensor.device,
+            str(cpu_tensor.dtype),
         )
-        return (rebuild_xpu_tensor, (type(tensor), cpu_storage, metadata))
+        return (rebuild_xpu_tensor, (type(tensor), raw_bytes, metadata))
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
     metadata = (
