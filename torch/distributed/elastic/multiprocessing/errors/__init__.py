@@ -257,7 +257,7 @@ class ChildFailedError(Exception):
         other_failures_fmt: list[str] = []
         width = len(title)
         for idx, (rank, failure) in enumerate(self.failures.items()):
-            fmt, w = self._format_failure(idx, rank, failure)
+            fmt, w = self._format_failure(idx, rank, failure, rank == root_rank)
             width = max(width, w)
             if rank == root_rank:
                 root_failure_fmt = fmt
@@ -276,7 +276,7 @@ class ChildFailedError(Exception):
         )
 
     def _format_failure(
-        self, idx: int, rank: int, failure: ProcessFailure
+        self, idx: int, rank: int, failure: ProcessFailure, is_root: bool = False
     ) -> tuple[str, int]:
         # failure.message is either a str (when the failure does not generate a traceback - e.g. signals)
         # or a dict (json) of the form
@@ -293,6 +293,19 @@ class ChildFailedError(Exception):
                 .get("py_callstack", failure.message.get("message", "<N/A>"))
                 .replace("\n", "\n  ")  # to properly indent the traceback
             )
+
+        # For the root signal failure, let the (build-swapped) handler append
+        # device-fault context (e.g. ROCm GPU faults) to the rendered message.
+        # Works on the local string, so error_file_data is never mutated, and it
+        # is a no-op in OSS (the base handler returns the message unchanged).
+        # Best-effort: never let a handler override break failure rendering.
+        if is_root and failure.exitcode < 0:
+            try:
+                msg = get_error_handler().maybe_enrich_signal_failure_message(
+                    msg, failure.error_file
+                )
+            except Exception:
+                logger.warning("Failed to enrich signal failure message", exc_info=True)
 
         signal_name = failure.signal_name()
         signal_name_str = f" ({signal_name})" if signal_name != _NOT_AVAILABLE else ""

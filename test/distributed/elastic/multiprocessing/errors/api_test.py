@@ -125,6 +125,24 @@ class ApiTest(unittest.TestCase):
             f"Signal {signal.SIGSEGV} (SIGSEGV) received by PID {pf.pid}", pf.message
         )
 
+    def test_format_msg_enriches_root_signal_failure(self):
+        # The root signal failure's rendered message is passed through the
+        # handler's enrichment seam at format time (no-op base; a build-swapped
+        # handler may append device-fault context). The seam works on the local
+        # rendered string, so the failure's stored message is not mutated.
+        handler = mock.MagicMock()
+        handler.maybe_enrich_signal_failure_message.side_effect = (
+            lambda message, error_file: message + "\n[device fault context]"
+        )
+        with mock.patch(
+            "torch.distributed.elastic.multiprocessing.errors.get_error_handler",
+            return_value=handler,
+        ):
+            pf = self.failure_without_error_file(exitcode=-signal.SIGABRT)
+            rendered = str(ChildFailedError("trainer", {0: pf}))
+        self.assertIn("[device fault context]", rendered)
+        self.assertNotIn("[device fault context]", pf.message)
+
     def test_process_failure_no_error_file(self):
         pf = self.failure_without_error_file(exitcode=138)
         self.assertEqual("<N/A>", pf.signal_name())
