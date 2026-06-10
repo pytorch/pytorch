@@ -13,12 +13,9 @@ import sys
 import threading
 import time
 
+import torch
+
 from . import cache
-from ._compile_payload import (
-    deserialize_worker_value,
-    is_epilogue_source_marker,
-    load_epilogue_from_source,
-)
 from .cache import CompileOnlyFakeTensorMode
 
 
@@ -91,6 +88,26 @@ def _install_parent_watchdog() -> None:
 # depth"). External callers should still use ``compile_only_mode()``.
 cache._COMPILE_ONLY_DEPTH.set(cache._COMPILE_ONLY_DEPTH.get() + 1)
 
+_dtype_map = {
+    "torch.float16": torch.float16,
+    "torch.bfloat16": torch.bfloat16,
+    "torch.float32": torch.float32,
+    "torch.float64": torch.float64,
+    "torch.int32": torch.int32,
+    "torch.int64": torch.int64,
+    "torch.int8": torch.int8,
+    "torch.uint8": torch.uint8,
+    "torch.bool": torch.bool,
+}
+
+
+def _make_fake_tensor(meta):
+    shape = meta["shape"]
+    stride = meta["stride"]
+    dtype = _dtype_map[meta["dtype"]]
+    return torch.empty_strided(shape, stride, dtype=dtype, device="cuda")
+
+
 def _recv(stream):
     """Read a length-prefixed pickled message. Returns None on EOF."""
     header = stream.read(4)
@@ -141,19 +158,20 @@ def main():
 
         tensor_meta = payload["tensor_meta"]
         kwargs = payload["kwargs"]
-        epilogue_marker = kwargs.get("tensor_epilogue_fn")
-        if is_epilogue_source_marker(epilogue_marker):
-            kwargs["tensor_epilogue_fn"] = load_epilogue_from_source(epilogue_marker)
         config_kwargs = payload["config_kwargs"]
 
         with CompileOnlyFakeTensorMode():
-            fake_args = [deserialize_worker_value(meta) for meta in tensor_meta]
-            kwargs = deserialize_worker_value(kwargs)
+            fake_args = []
+            for meta in tensor_meta:
+                if isinstance(meta, dict) and "shape" in meta:
+                    fake_args.append(_make_fake_tensor(meta))
+                else:
+                    fake_args.append(meta)
             try:
                 fn(*fake_args, **kwargs, **config_kwargs)
                 _send(stdout, "OK")
             except Exception as e:
-                _send(stdout, f"ERR:{type(e).__name__}: {e}")
+                _send(stdout, f"ERR:{e}")
 
 
 if __name__ == "__main__":
