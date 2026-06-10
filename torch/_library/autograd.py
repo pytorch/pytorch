@@ -101,7 +101,17 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
                     f"inputs that do not require a gradient."
                 )
             if isinstance(result, tuple):
-                return (*result[:num_actual_inputs], None)
+                extra_grads = result[num_actual_inputs:]
+                if any(grad is not None for grad in extra_grads):
+                    raise RuntimeError(
+                        f"The backward formula for {op} returned a non-None "
+                        f"gradient for an input that was not passed to the "
+                        f"operator. Defaulted inputs that were not passed "
+                        f"through autograd must return None."
+                    )
+                if has_tensorlist_like_args:
+                    result = result[:num_actual_inputs]
+                return (*result, None)
             return result, None
         raise RuntimeError(
             f"Trying to backward through {op} but no autograd "
