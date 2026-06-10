@@ -15,7 +15,6 @@ import types
 import unittest
 import warnings
 from collections import namedtuple, OrderedDict
-from unittest.case import skipIf
 
 from common_utils import (
     check_vmap_fallback,
@@ -28,6 +27,7 @@ from common_utils import (
     is_valid_inplace_sample_input,
     opsToleranceOverride,
     skip,
+    skipIf,
     tol1,
     xfail,
     xfailIf,
@@ -1223,7 +1223,7 @@ class TestVmapAPI(TestCase):
     def test_vmap_autocast_cpu(self):
         self._test_vmap_autocast("cpu")
 
-    @skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_vmap_autocast_cuda(self):
         self._test_vmap_autocast("cuda")
 
@@ -4439,6 +4439,8 @@ class TestVmapOperatorsOpInfo(TestCase):
                     ),
                 ),
                 xfail("native_group_norm"),
+                # https://github.com/pytorch/pytorch/issues/164556
+                skipIf("cholesky_solve", lambda *args: TEST_WITH_ROCM),
             }
         ),
     )

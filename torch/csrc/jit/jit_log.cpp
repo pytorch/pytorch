@@ -84,7 +84,7 @@ std::ostream& get_jit_logging_output_stream() {
 std::string getHeader(const Node* node) {
   std::stringstream ss;
   node->print(ss, 0, {}, false, false, false, false);
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void JitLoggingConfig::parse() {
@@ -149,7 +149,7 @@ std::string jit_log_prefix(
     out_ss << prefix << line << '\n';
   }
 
-  return out_ss.str();
+  return std::move(out_ss).str();
 }
 
 std::string jit_log_prefix(
@@ -164,7 +164,7 @@ std::string jit_log_prefix(
   prefix_ss << std::setfill('0') << std::setw(3) << l;
   prefix_ss << "] ";
 
-  return jit_log_prefix(prefix_ss.str(), in_str);
+  return jit_log_prefix(std::move(prefix_ss).str(), in_str);
 }
 
 std::ostream& operator<<(std::ostream& out, JitLoggingLevels level) {

@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import warnings
 from abc import ABC, abstractmethod
@@ -19,7 +20,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -1565,11 +1566,11 @@ class _InProcessFxCompile(FxCompile):
                             )
                             wrapper_code, kernel_code = graph.codegen_with_cpp_wrapper()
                             output_code_log.debug(
-                                "Output wrapper code: \n%s", wrapper_code.value
+                                "AOT wrapper code: \n%s", wrapper_code.value
                             )
                             if kernel_code.value:
                                 output_code_log.debug(
-                                    "Output kernel code:\n%s", kernel_code.value
+                                    "AOT kernel code:\n%s", kernel_code.value
                                 )
 
                             serialized_extern_kernel_nodes = None
@@ -1740,6 +1741,14 @@ class _InProcessFxCompile(FxCompile):
                                 V.graph.device_node_mapping
                             )
                         )
+
+                    if (
+                        cudagraphs
+                        and not V.graph.disable_cudagraphs_reason
+                        and graph.scheduler.count_kernel_nodes(graph.scheduler.nodes)
+                        == 0
+                    ):
+                        V.graph.disable_cudagraphs_reason = "no CUDA kernel invocations"
 
                     self._compile_stats[type(self)].codegen_and_compile += 1
 
@@ -1913,13 +1922,14 @@ def cudagraphify(
     else:
         cudagraphify_fn = cudagraphify_impl
 
-    compiled_fn = None
+    thread_local = threading.local()
 
     def run(new_inputs: Sequence[InputType]) -> Any:
-        nonlocal compiled_fn
+        compiled_fn = getattr(thread_local, "compiled_fn", None)
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)  # type: ignore[arg-type]
+            thread_local.compiled_fn = compiled_fn
         return compiled_fn(new_inputs)  # type: ignore[arg-type]
 
     return run
@@ -2665,6 +2675,21 @@ def run_pre_grad_passes(
     return model_
 
 
+@dataclass(frozen=True)
+class _ConstantDecompTable(Generic[_P, _T]):
+    """
+    Picklable wrapper around a user-supplied decomposition dict.
+
+    This module-level class is addressable as (module, qualname), so pickle can
+    serialize an instance by reducing its single field.
+    """
+
+    table: dict[OpOverload, Callable[_P, _T]]
+
+    def __call__(self) -> dict[OpOverload, Callable[_P, _T]]:
+        return self.table
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -2686,9 +2711,9 @@ def compile_fx(
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
     if decompositions is not None:
-
-        def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
-            return decompositions  # pyrefly: ignore[bad-return]
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = (
+            _ConstantDecompTable(decompositions)
+        )
     else:
         get_decomp_fn = select_decomp_table
 
@@ -3130,7 +3155,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         from torch._dynamo.exc import SkipFrame
 
         assert device is not None
-
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
         warnings.warn(
@@ -3148,8 +3172,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
             or node.get_dtype() != torch.bfloat16
         ):
             continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
         device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return
