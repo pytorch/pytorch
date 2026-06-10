@@ -888,6 +888,77 @@ class ComboKernelTests(TestCase):
         # 1 combo (b*2, c+1) + 1 standalone (bucketize) = 2 real kernels.
         self.assertEqual(combined.count("async_compile.triton("), 2)
 
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernel_per_subkernel_blocks": True,
+        }
+    )
+    def test_combo_kernel_dynamic_scale_rblock(self):
+        # A combo kernel with per-subkernel blocks carries size_hints=None at the
+        # autotuner level (per-subkernel hints live in combo_grid_meta), so
+        # _dynamic_scale_rblock used to skip it entirely. A register-heavy,
+        # occupancy-limited combo reduction should now participate in the same
+        # occupancy-driven R0_BLOCK scaling as a standalone reduction.
+        def fn(a, b, c, d):
+            r1 = (a * torch.sigmoid(a) + b).sum(dim=1)
+            r2 = (c * torch.sigmoid(c) + d).sum(dim=1)
+            return r1, r2
+
+        inps = [torch.randn(8192, 2560, device=GPU_TYPE) for _ in range(4)]
+        out_eager = fn(*inps)
+
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        autotuners: list[CachingAutotuner] = []
+        scaled_candidates = []
+        orig_init = CachingAutotuner.__init__
+        orig_iter = CachingAutotuner._iter_rblock_scale_candidates
+
+        def capture_init(self, *args, **kwargs):
+            orig_init(self, *args, **kwargs)
+            if (getattr(self, "inductor_meta", {}) or {}).get("combo_grid_meta"):
+                autotuners.append(self)
+
+        def capture_iter(self):
+            for cfg in orig_iter(self):
+                # combo per-subkernel autotuners carry size_hints=None
+                if self.size_hints is None:
+                    scaled_candidates.append(cfg)
+                yield cfg
+
+        with (
+            fresh_cache(),  # isolate from cache so a re-run (inherited subclass) recompiles
+            patch.object(CachingAutotuner, "__init__", capture_init),
+            patch.object(
+                CachingAutotuner,
+                "_iter_rblock_scale_candidates",
+                capture_iter,
+            ),
+        ):
+            torch._dynamo.reset()
+            out_compiled = torch.compile(fn)(*inps)
+
+        torch.testing.assert_close(out_eager, out_compiled, atol=1e-3, rtol=1e-3)
+
+        combo_reductions = [
+            au for au in autotuners if au._combo_has_reduction_subkernel
+        ]
+        self.assertTrue(
+            combo_reductions,
+            "expected a combo reduction kernel with per-subkernel blocks",
+        )
+
+        self.assertTrue(
+            any(au._could_rblock_scale for au in combo_reductions),
+            "_could_rblock_scale should be True for a combo reduction",
+        )
+        self.assertTrue(
+            scaled_candidates,
+            "_dynamic_scale_rblock should generate a scaled R0_BLOCK candidate "
+            "for the combo reduction",
+        )
+
 
 class ComboKernelBenchmarkTests(TestCase):
     check_model_gpu = check_model_gpu
