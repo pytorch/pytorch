@@ -2093,8 +2093,18 @@ except RuntimeError as e:
             "^The size of tensor a \\(\\d\\) must match the size of "
             "tensor b \\(\\d\\) at non-singleton dimension \\d.*"
         )
-        # Verify that an operation using STABLE_TORCH_ERROR_CHECK provides detailed errors.
-        self.assertRaisesRegex(RuntimeError, expect_re, make_exception_stable)
+        # Verify that an operation using STABLE_TORCH_ERROR_CODE_CHECK provides the
+        # detailed error AND wraps it with the "(originally from ...)" annotation
+        # naming the failing shim call and its source location.
+        with self.assertRaises(RuntimeError) as cm:
+            make_exception_stable()
+        stable_msg = str(cm.exception)
+        self.assertRegex(stable_msg, expect_re)
+        self.assertRegex(
+            stable_msg,
+            r" \(originally from aoti_torch_aten_subtract_Tensor\(.*\) "
+            r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$",
+        )
 
         # Retrieve the exception message directly.
         self.assertEqual(
@@ -2146,12 +2156,21 @@ except RuntimeError as e:
             self.assertRaisesRegex(RuntimeError, simple_re, make_exception_stable)
         else:
             # Runtime has the shim: the dynamic lookup succeeds and we get the
-            # detailed error retrieved across the C ABI boundary.
+            # detailed error retrieved across the C ABI boundary, wrapped with the
+            # "(originally from ...)" annotation naming the failing shim call.
             detailed_re = (
                 "^The size of tensor a \\(\\d\\) must match the size of "
                 "tensor b \\(\\d\\) at non-singleton dimension \\d.*"
             )
-            self.assertRaisesRegex(RuntimeError, detailed_re, make_exception_stable)
+            with self.assertRaises(RuntimeError) as cm:
+                make_exception_stable()
+            stable_msg = str(cm.exception)
+            self.assertRegex(stable_msg, detailed_re)
+            self.assertRegex(
+                stable_msg,
+                r" \(originally from aoti_torch_aten_subtract_Tensor\(.*\) "
+                r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$",
+            )
 
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)

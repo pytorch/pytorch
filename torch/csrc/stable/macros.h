@@ -111,7 +111,7 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
 // version expectation in the macro lets us bypass the symbol lookup entirely
 // when the target version already includes the shim and call it directly;
 // otherwise we fall through to the runtime lookup.
-#if TORCH_TARGET_VERSION >= TORCH_VERSION_2_13_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 // Target version already includes the shim, call it directly.
 #define TORCH_DYNAMIC_VERSION_CALL_2_13_0( \
     SHIM_FUNCTION, FALLBACK_FUNCTION, ...) \
@@ -122,7 +122,7 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
     SHIM_FUNCTION, FALLBACK_FUNCTION, ...) \
   TORCH_DYNAMIC_VERSION_CALL(              \
       TORCH_VERSION_2_13_0, SHIM_FUNCTION, FALLBACK_FUNCTION, __VA_ARGS__)
-#endif
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 [[maybe_unused]] C10_NOINLINE static void throw_exception(
@@ -147,7 +147,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
     std::tm tm = *std::localtime(&t);
     std::cerr << "[" << std::put_time(&tm, "%H:%M:%S") << " " << file << ":"
               << line
-              << "] Exception across libtorch C API boundary:" << error_msg;
+              << "] Exception across libtorch C API boundary: " << error_msg;
   }
 
   throw std::runtime_error(ss.str());
