@@ -4183,6 +4183,55 @@ class TestMPS(TestCaseMPS):
         x_cpu[2:4] = update_mps  # implicit device moving and copy
         self.assertEqual(x_cpu, x_mps)
 
+
+    def test_mps_to_cpu_zero_copy(self):
+        # Correctness for the UMA zero-copy MPS->CPU fast path (getSharedBufferPtr).
+        # Covers: all float/int dtypes contiguous, non-contiguous (blit fallback),
+        # storage_offset > 0, zero-size, and non_blocking=True (blit path).
+        dtypes = [
+            torch.float32, torch.float16, torch.bfloat16,
+            torch.int32, torch.int64, torch.int8, torch.uint8, torch.bool,
+        ]
+        for dtype in dtypes:
+            if dtype.is_floating_point:
+                cpu_ref = torch.randn(128, 128).to(dtype)
+            elif dtype == torch.bool:
+                cpu_ref = torch.randint(0, 2, (128, 128), dtype=dtype)
+            else:
+                cpu_ref = torch.randint(0, 10, (128, 128), dtype=dtype)
+
+            mps_t = cpu_ref.to("mps")
+
+            # Contiguous, same dtype: fast path (getSharedBufferPtr)
+            result = mps_t.to("cpu")
+            self.assertEqual(cpu_ref, result, msg=f"contiguous {dtype}")
+
+            # Non-contiguous: must fall through to blit and still be correct
+            mps_nc = mps_t[:, ::2]
+            self.assertFalse(mps_nc.is_contiguous())
+            self.assertEqual(cpu_ref[:, ::2], mps_nc.to("cpu"), msg=f"non-contiguous {dtype}")
+
+            # storage_offset > 0: sliced view (still contiguous, fast path)
+            mps_sl = mps_t[1:, 1:]
+            self.assertGreater(mps_sl.storage_offset(), 0)
+            self.assertEqual(cpu_ref[1:, 1:], mps_sl.to("cpu"), msg=f"storage_offset {dtype}")
+
+            # dtype mismatch: falls through to cast+blit path
+            if dtype != torch.float32 and dtype.is_floating_point:
+                result_cast = mps_t.to("cpu", dtype=torch.float32)
+                self.assertEqual(cpu_ref.float(), result_cast, msg=f"cast {dtype}->float32")
+
+        # zero-size tensor (no data, must not crash)
+        z = torch.empty(0, device="mps")
+        self.assertEqual(z.to("cpu"), torch.empty(0))
+
+        # non_blocking=True falls through to blit; result is still correct after sync
+        cpu_ref2 = torch.randn(64, 64)
+        mps2 = cpu_ref2.to("mps")
+        result_nb = mps2.to("cpu", non_blocking=True)
+        torch.mps.synchronize()
+        self.assertEqual(cpu_ref2, result_nb, msg="non_blocking=True")
+
     def test_copy_broadcasting(self):
         def helper(src_shape, dst_shape, src_dtype, dst_dtype):
             cpu_src = torch.randint(0, 127, src_shape).to(src_dtype)
