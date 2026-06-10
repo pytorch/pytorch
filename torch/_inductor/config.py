@@ -2069,7 +2069,7 @@ class triton:
     #   assume_aligned_inputs to also be enabled
     # TMA descriptors are only going to be generated if the above conditions
     # can be satisfied, along with any existing requirements for index expressions
-    use_tensor_descriptor = False
+    use_tensor_descriptor = True
 
     # (Experimental)
     # Whether to allow reordering tensor descriptor matches with descending
