@@ -254,12 +254,16 @@ static void index_copy_kernel(
   // See note [Writing Nondeterministic Operations]
   // Nondeterministic when index contains duplicate entries
   // this kernel will not be called when torch.use_deterministic_algorithms(True)
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, kComplexHalf,
-    iter.dtype(), "index_copy_cuda", [&] {
-    using dtype = OpaqueType<sizeof(scalar_t)>;
-    index_copy_kernel_impl<dtype>(iter, dim, self_dim_size, self_dim_stride);
-  });
+  AT_DISPATCH_V2(
+    iter.dtype(),
+    "index_copy_cuda",
+    AT_WRAP([&] {
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      index_copy_kernel_impl<dtype>(iter, dim, self_dim_size, self_dim_stride);
+    }),
+    AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+    kComplexHalf, kHalf, kBool, kBFloat16,
+    AT_EXPAND(AT_FLOAT8_TYPES));
 }
 
 
