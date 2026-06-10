@@ -3732,7 +3732,7 @@ def _is_valid_concat_linear_woq_int4_fusion(computation_nodes):
     computation_op = torch.ops.aten._weight_int4pack_mm_for_cpu.default
     act = computation_nodes[0].args[0]
     wgt = computation_nodes[0].args[1]
-    in_feature_size = wgt.meta.get("val").size(1)
+    in_feature_size = wgt.meta.get("val").size(1)  # type: ignore[union-attr]
     group_size = computation_nodes[0].args[2]
     return len(computation_nodes) >= 2 and all(
         (
@@ -3961,8 +3961,8 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
 
                     new_args = map_arg(new_quant_node.args, maybe_replace_node)
                     new_kwargs = map_arg(new_quant_node.kwargs, maybe_replace_node)
-                    new_quant_node.args = new_args
-                    new_quant_node.kwargs = new_kwargs
+                    new_quant_node.args = new_args  # type: ignore[assignment]
+                    new_quant_node.kwargs = new_kwargs  # type: ignore[assignment]
                     graph_module.graph.erase_node(quant_node)
 
     graph_module.graph.lint()

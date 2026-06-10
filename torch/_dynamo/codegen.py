@@ -46,7 +46,6 @@ from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
-from .variables.lazy import ComputedLazyConstantVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import TorchScriptObjectVariable
 from .variables.tensor import (
@@ -305,16 +304,7 @@ class PyCodegen:
             ):
                 return self(value.source)
 
-        # ComputedLazyConstantVariable with a non-trivial reconstruct_fn should
-        # use reconstruct() to generate bytecode that recomputes the value.
-        # This allows the function to be called with different input values
-        # without recompiling.
-        if isinstance(value, ComputedLazyConstantVariable) and not value.is_realized():
-            self.uses[value] += 1
-            self.call_reconstruct(value)
-        elif value.is_python_constant() and is_safe_constant(
-            value.as_python_constant()
-        ):
+        if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
@@ -435,6 +425,13 @@ class PyCodegen:
         var = self.new_var()
         self.tempvars[value] = var
         self._output.append(self.create_store(var))
+
+    def clear_tempvars(self) -> None:
+        for key, var in list(self.tempvars.items()):
+            if var is not None:
+                self._output.append(self.create_delete(var))
+            del self.tempvars[key]
+        self.top_of_stack = None
 
     def foreach(self, items: Iterable[VariableTracker | Source]) -> None:
         for i in items:
@@ -686,7 +683,7 @@ class PyCodegen:
                 if current_source in seen_sources:
                     # This source is used at least twice, so it can be reused
                     codegen.mark_source_temp(current_source)
-                    # Dont trace source further. This prevents us from marking too
+                    # Don't trace source further. This prevents us from marking too
                     # many nodes as temp sources.
                     continue
                 seen_sources.add(current_source)
@@ -745,6 +742,7 @@ class PyCodegen:
             self.pop_top()
 
         self.extend_output(create_call_function(len(graphargs), False))
+        self.clear_tempvars()
         self.add_pycode(
             f"__graph_out = {fn_name}({', '.join(arg_varnames)})",
         )

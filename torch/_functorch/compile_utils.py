@@ -63,7 +63,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
         same_mutation_regions,
     )
 
-    compute_mutation_region_ids(fx_g)
+    compute_mutation_region_ids(fx_g)  # type: ignore[arg-type]
 
     # Make a set of separate storages returned from the output, which will be preserved
     # when pruning.  This prevents us from deduplicating returned tensors which have

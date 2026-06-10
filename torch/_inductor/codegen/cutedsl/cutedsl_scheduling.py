@@ -62,11 +62,14 @@ class CuteDSLScheduling(BaseScheduling):
         """CuteDSL doesn't support horizontal fusion yet."""
         return False
 
-    def define_kernel(self, src_code_str: str, node_schedule) -> str:
+    def define_kernel(
+        self, src_code_str: str, node_schedule, precompile_metadata=None
+    ) -> str:
         """Produce the kernel string
         Args:
             src_code_str: The finalized kernel code string
             node_schedule: List of nodes in the schedule
+            precompile_metadata: Optional dict with shapes/dtypes for subprocess precompilation
 
         Note:
             This is a little weird since async_compile.cutedsl() has to write the string to
@@ -99,7 +102,12 @@ class CuteDSLScheduling(BaseScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.cutedsl({kernel_name!r}, r'''")
             compile_wrapper.splice(src_code_str, strip=True)
-            compile_wrapper.writeline("''')")
+            if precompile_metadata is not None:
+                compile_wrapper.writeline(
+                    f"''', precompile_metadata={precompile_metadata!r})"
+                )
+            else:
+                compile_wrapper.writeline("''')")
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
@@ -138,10 +146,104 @@ class CuteDSLScheduling(BaseScheduling):
         else:
             src_code_str = src_code
 
+        precompile_metadata = self._build_precompile_metadata(kernel, ctb)
+
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
-            kernel_name = self.define_kernel(src_code_str, node_schedule)
+            kernel_name = self.define_kernel(
+                src_code_str, node_schedule, precompile_metadata
+            )
         self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
+
+    def _build_precompile_metadata(self, kernel, ctb):
+        """Extract shapes and dtypes from kernel inputs/output for subprocess precompilation.
+
+        Returns None if shapes are symbolic (dynamic shapes), in which case the
+        subprocess will skip precompilation and the kernel compiles lazily on first call.
+        """
+        if not hasattr(kernel, "_template_input_args"):
+            return None
+
+        precompile_shapes = {}
+        precompile_strides = {}
+        precompile_dtypes = {}
+
+        try:
+            for arg_name, input_node in kernel._template_input_args:
+                template_name = arg_name.removeprefix("arg_")
+                size = input_node.get_size()
+                precompile_shapes[template_name] = [int(s) for s in size]
+                stride = input_node.get_stride()
+                precompile_strides[template_name] = [int(s) for s in stride]
+                precompile_dtypes[template_name] = str(
+                    input_node.get_dtype()
+                ).removeprefix("torch.")
+
+            output_size = ctb.layout.size
+            precompile_shapes["output"] = [int(s) for s in output_size]
+            output_stride = ctb.layout.stride
+            precompile_strides["output"] = [int(s) for s in output_stride]
+            precompile_dtypes["output"] = str(ctb.layout.dtype).removeprefix("torch.")
+        except (TypeError, RuntimeError, ValueError):
+            log.debug(
+                "Skipping CuteDSL precompile metadata: symbolic sizes cannot be "
+                "resolved to concrete values"
+            )
+            return None
+
+        device = ctb.layout.device
+        device_index = device.index if device.index is not None else 0
+
+        import torch
+
+        device_capability = None
+        if torch.cuda.is_available():
+            device_capability = torch.cuda.get_device_capability(device_index)
+
+        metadata: dict[str, object] = {
+            "precompile_shapes": precompile_shapes,
+            "precompile_strides": precompile_strides,
+            "precompile_dtypes": precompile_dtypes,
+            "device_index": device_index,
+            "device_capability": device_capability,
+        }
+
+        hw_info = self._build_hw_info(kernel)
+        if hw_info is not None:
+            metadata["hw_info"] = hw_info
+
+        return metadata
+
+    @staticmethod
+    def _build_hw_info(kernel) -> tuple[int, int] | None:
+        """Compute (sm_count, max_active_clusters) in the main process.
+
+        Reads CLUSTER_M/N from kernel template kwargs and queries
+        HardwareInfo so subprocess workers never touch CUDA driver APIs.
+        Returns None if CUTLASS is unavailable or the template has no cluster config.
+        """
+        template_kwargs = getattr(kernel, "_template_kwargs", None)
+        if template_kwargs is None:
+            return None
+
+        cluster_m = template_kwargs.get("CLUSTER_M")
+        cluster_n = template_kwargs.get("CLUSTER_N")
+        if cluster_m is None or cluster_n is None:
+            return None
+
+        try:
+            import cutlass.utils
+
+            cluster_product = int(cluster_m) * int(cluster_n)
+            hw = cutlass.utils.HardwareInfo()
+            sm_count = hw.get_max_active_clusters(1)
+            max_active_clusters = hw.get_max_active_clusters(cluster_product)
+            return (sm_count, max_active_clusters)
+        except Exception:
+            log.debug(
+                "Could not compute hw_info for CuTe DSL precompile", exc_info=True
+            )
+            return None

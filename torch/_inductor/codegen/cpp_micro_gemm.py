@@ -16,7 +16,7 @@ from ..cpu_vec_isa import (
     VecAVX512VNNI,
     VecISA,
     VecNEON,
-    VecSVE256,
+    VecSVE,
 )
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
@@ -426,7 +426,7 @@ def do_not_use_with_small_m_for_int8_woq(config, m, n, k, alpha, num_threads, **
         compute_dtype=torch.float,
     ),
     *generate_gemm_config(
-        VecSVE256,
+        VecSVE,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.float,
         input2_dtype=torch.float,
@@ -1021,7 +1021,7 @@ class CppMicroGemmAVX512VNNI(CppMicroGemm):
                 break;
 {%- endfor %}
             default:
-                {{kernel.assert_function}}(false, "Unsupported M_TAIL: {}", M_TAIL);
+                {{kernel.assert_function}}(false, "Unsupported M_TAIL");
         } // switch M_TAIL
     } // if M_TAIL
 }
@@ -1659,7 +1659,7 @@ class CppMicroGemmWoQInt4Avx512(CppMicroGemmFP32Vec):
                     break;
                 {%- endfor %}
                 default:
-                    {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
+                    {{kernel.assert_function}}(false, "Unsupported block_m");
                 }
             }
         }

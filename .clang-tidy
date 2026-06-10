@@ -57,6 +57,7 @@ modernize-*,
 -modernize-use-nodiscard,
 performance-*,
 -performance-enum-size,
+readability-container-contains,
 readability-container-size-empty,
 readability-delete-null-pointer,
 readability-duplicate-include,
@@ -72,8 +73,6 @@ readability-string-compare,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 WarningsAsErrors: '*'
-LineFilter:
-  - name: '/usr/include/.*'
 CheckOptions:
   cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
   cppcoreguidelines-special-member-functions.AllowImplicitlyDeletedCopyOrMove: true

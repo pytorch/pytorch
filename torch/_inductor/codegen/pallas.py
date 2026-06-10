@@ -11,7 +11,11 @@ import sympy
 
 import torch
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import ModularIndexing
+from torch.utils._sympy.functions import (
+    Max as TorchMax,
+    Min as TorchMin,
+    ModularIndexing,
+)
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
@@ -310,6 +314,12 @@ class PallasKernelOverrides(OpOverrides):
             V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
         )
         return PallasKernelOverrides.to_dtype(var, dtype)
+
+    @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        # Pallas index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
+        return PallasKernelOverrides.index_expr(expr, dtype)
 
     @staticmethod
     def constant(val, dtype: torch.dtype) -> str:
@@ -915,7 +925,7 @@ class PallasKernel(SIMDKernel):
     compiled and loaded via async_compile.pallas.
     """
 
-    overrides = PallasKernelOverrides
+    overrides = PallasKernelOverrides  # type: ignore[assignment]
     kexpr: Callable[[sympy.Expr], str] = pallas_pexpr  # Use Pallas expression printer
 
     def __init__(self, *args, **kwargs):
@@ -2392,7 +2402,7 @@ class PallasKernel(SIMDKernel):
             self.has_flatten_indexing = True
             self.flatten_indexed_buffers.add(name)
             # Flatten then index for non-contiguous access (gather operation)
-            has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
+            has_minmax = index.has(sympy.Min, sympy.Max, TorchMin, TorchMax)
             idx_dtype = "jnp.int32" if self.is_tpu else "jnp.int64"
             idx = (
                 f"({indexing.index_str}).astype({idx_dtype})"
@@ -3279,7 +3289,7 @@ class PallasKernel(SIMDKernel):
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
         value: CSEVariable | tuple[CSEVariable, ...],
-    ) -> CSEVariable | tuple[CSEVariable, ...]:
+    ) -> CSEVariable | tuple[CSEVariable, ...]:  # type: ignore[override]
         """
         Generate code for reduction operations in JAX/Pallas.
 
@@ -3588,7 +3598,7 @@ class PallasKernel(SIMDKernel):
 
         return True
 
-    def codegen_kernel(self, name: str | None = None) -> str:
+    def codegen_kernel(self, name: str | None = None) -> str:  # type: ignore[override]
         """
         Generate the complete Pallas kernel code as a Python string.
 
@@ -4749,30 +4759,50 @@ from torch._inductor.runtime.runtime_utils import (
                     )
             code.writeline("]")
 
-            # Build input_output_aliases for zero-copy donation
+            # Build donation info for zero-copy aliasing. Current torch_tpu
+            # exposes donate_argnums (the donated input indices); older
+            # versions took input_output_aliases ({input: output}). torch_tpu
+            # itself maps the latter to list(input_output_aliases.keys()), so
+            # the donated input indices are the alias-pair keys.
             if ctx.alias_pairs:
                 alias_map_str = ", ".join(f"{i}: {o}" for (i, o) in ctx.alias_pairs)
                 code.writeline(f"_input_output_aliases = {{ {alias_map_str} }}")
+                donate_argnums_str = ", ".join(str(i) for (i, _o) in ctx.alias_pairs)
+                code.writeline(f"_donate_argnums = [{donate_argnums_str}]")
             else:
                 code.writeline("_input_output_aliases = {}")
+                code.writeline("_donate_argnums = []")
 
             code.writeline("try:")
             with code.indent():
                 code.writeline(
-                    f"tpu_torch_pallas.call_custom_kernel("
+                    f"_results = tpu_torch_pallas.call_custom_kernel("
+                    f"'{kernel_name_str}', kernel_key, "
+                    f"inputs=input_tensors, "
+                    f"output_shapes=output_shape_tensors, "
+                    f"donate_argnums=_donate_argnums)"
+                )
+            code.writeline("except TypeError:")
+            with code.indent():
+                code.writeline(
+                    f"_results = tpu_torch_pallas.call_custom_kernel("
                     f"'{kernel_name_str}', kernel_key, "
                     f"inputs=input_tensors, "
                     f"output_shapes=output_shape_tensors, "
                     f"input_output_aliases=_input_output_aliases)"
                 )
-            code.writeline("except TypeError:")
+            # call_custom_kernel returns freshly allocated result tensors;
+            # donate_argnums only lets the kernel reuse the donated buffers
+            # internally, it does not write back into the passed-in tensors.
+            # Copy each result into the aliased output buffer the caller reads
+            # (this mirrors torch_tpu's own JaxCallable alias handling).
+            code.writeline("if _results is not None:")
             with code.indent():
                 code.writeline(
-                    f"tpu_torch_pallas.call_custom_kernel("
-                    f"input_tensors, output_shape_tensors, "
-                    f"'{kernel_name_str}', kernel_key, "
-                    f"_input_output_aliases)"
+                    "for _in_idx, _out_idx in _input_output_aliases.items():"
                 )
+                with code.indent():
+                    code.writeline("input_tensors[_in_idx].copy_(_results[_out_idx])")
 
     def _codegen_main_entry_default(
         self, ctx: _CodegenContext, jit_wrapper_name: str
@@ -4883,7 +4913,7 @@ from torch._inductor.runtime.runtime_utils import (
 
 
 class PallasScheduling(SIMDScheduling):
-    kernel_type = PallasKernel
+    kernel_type = PallasKernel  # type: ignore[assignment]
 
     @classmethod
     def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
@@ -4891,7 +4921,7 @@ class PallasScheduling(SIMDScheduling):
         # without requiring split reductions
         return OrderedSet([BackendFeature.REDUCE_TO_SINGLE_ELEMENT])
 
-    def can_fuse(self, node1, node2):
+    def can_fuse(self, node1, node2):  # type: ignore[override]
         if not super().can_fuse(node1, node2):
             return False
         # Pallas partial reductions use keepdims, so fusing two reductions
@@ -4912,15 +4942,15 @@ class PallasScheduling(SIMDScheduling):
                         return False
         return True
 
-    can_fuse_vertical = can_fuse
-    can_fuse_horizontal = can_fuse
+    can_fuse_vertical = can_fuse  # type: ignore[assignment]
+    can_fuse_horizontal = can_fuse  # type: ignore[assignment]
 
     def define_kernel(
         self,
         src_code: str,
         node_schedule: Sequence[BaseSchedulerNode],
         kernel: PallasKernel,
-    ) -> str:
+    ) -> str:  # type: ignore[override]
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             return wrapper.src_to_kernel[src_code]

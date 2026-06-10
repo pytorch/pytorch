@@ -331,8 +331,10 @@ class BasicEvaluation:
                 [self.metrics[event].fraction_idle_time for event in event_list],
                 dtype=torch.float32,
             )
-            normalized_gain = (idle_time - torch.mean(idle_time)) / torch.std(idle_time)
-            normalized_self = (self_time - torch.mean(self_time)) / torch.std(self_time)
+            idle_std, idle_mean = torch.std_mean(idle_time)
+            self_std, self_mean = torch.std_mean(self_time)
+            normalized_gain = (idle_time - idle_mean) / idle_std
+            normalized_self = (self_time - self_mean) / self_std
             heuristic_score_list = normalized_gain + 0.6 * normalized_self
 
             # Sort events by heuristic

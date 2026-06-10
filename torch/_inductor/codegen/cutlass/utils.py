@@ -80,7 +80,7 @@ def try_import_cutlass() -> bool:
     if config.is_fbcode():
         try:
             import cutlass_cppgen  # type: ignore[import-not-found]
-            import cutlass_library
+            import cutlass_library  # type: ignore[import-not-found]
         except ImportError as e:
             log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
@@ -373,7 +373,7 @@ def torch_dtype_to_cutlass_type(
 ) -> "cutlass_library.library.DataType":  # type: ignore[name-defined] # noqa: F821
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import cutlass_library
+    import cutlass_library  # type: ignore[import]
 
     if torch_dtype == torch.float:
         return cutlass_library.library.DataType.f32
@@ -566,7 +566,7 @@ class CUTLASSCompileSourceCapturingContext:
         self._compile_patch = mock.patch(
             f"torch._inductor.codecache.{codecache_cls.__name__}.compile", my_compile
         )
-        self._compile_patch.__enter__(*args, **kwargs)
+        self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
         return self
 
     def __exit__(self, *args, **kwargs):
