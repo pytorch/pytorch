@@ -50,6 +50,7 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
+from torch._subclasses.fake_impls_registry import register_op_impl
 from torch.testing._internal.common_dtype import highest_precision_float
 
 
@@ -3508,7 +3509,7 @@ def native_layer_norm(
     return (out, mean, rstd)
 
 
-@torch._subclasses.fake_impls.register_op_impl(aten.native_layer_norm.default)
+@register_op_impl(aten.native_layer_norm.default)
 def native_layer_norm_fake(fake_mode, func, *args, **kwargs):
     return native_layer_norm(*args)
 

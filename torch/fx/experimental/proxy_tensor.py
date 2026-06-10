@@ -50,7 +50,6 @@ from torch._library.opaque_object import (
 )
 from torch._logging import trace_structured
 from torch._ops import HigherOrderOperator, OpOverload
-from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
@@ -678,6 +677,8 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # but this saves us a full trip into __torch_dispatch__
     # (snapshot_fake is called a lot)
     if isinstance(val, FakeTensor):
+        from torch._subclasses.fake_impls import fast_detach
+
         return fast_detach(val.fake_mode, val, include_real)
     else:
         return val.detach()

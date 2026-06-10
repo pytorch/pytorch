@@ -3046,7 +3046,7 @@ class FakeTensorMode(TorchDispatchMode):
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
         # and then afterwards wrapping them to a FakeTensor
-        for run_impl_check, op_impl in op_implementations_checks:
+        for run_impl_check, op_impl in get_op_implementations_checks():
             if run_impl_check(func):
                 # pyrefly: ignore [bad-argument-count]
                 op_impl_out = op_impl(self, func, *args, **kwargs)
@@ -3606,14 +3606,14 @@ _DISPATCH_HANDLE_DIRECTLY = ordered_set(
     torch.ops.profiler._record_function_exit._RecordFunction,
 )
 
-from torch._subclasses.fake_impls import (  # noqa: F401
+from torch._subclasses.fake_impls_registry import (  # noqa: F401
     _device_not_kwarg_ops,
     _is_tensor_constructor,
     _like_tensor_constructors,
     contains_tensor_types,
     get_fast_op_impls,
+    get_op_implementations_checks,
     has_meta,
-    op_implementations_checks,
     stride_incorrect_op,
 )
 

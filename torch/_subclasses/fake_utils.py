@@ -6,6 +6,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
+from torch._subclasses.fake_impls_registry import has_meta
 from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
@@ -254,10 +255,7 @@ class CrossRefFakeMode(TorchDispatchMode):
                 aten.set_.source_Storage_storage_offset,
             )
             and not self.ignore_op_fn(func)
-            and (
-                not self.only_check_ops_with_meta
-                or torch._subclasses.fake_impls.has_meta(func)
-            )
+            and (not self.only_check_ops_with_meta or has_meta(func))
             and torch.Tag.dynamic_output_shape not in func.tags
             and torch.Tag.inplace_view not in func.tags
             and torch.Tag.data_dependent_output not in func.tags

@@ -14,7 +14,6 @@ import torch._custom_op
 import torch._logging
 import torch._prims_common as utils
 from torch._dispatch.python import no_python_dispatcher
-from torch._ops import OpOverload
 from torch._prims_common import (
     canonicalize_dim,
     elementwise_dtypes,
@@ -27,6 +26,20 @@ from torch._prims_common import (
     is_integer_dtype,
     make_contiguous_strides_for,
     ShapeType,
+)
+from torch._subclasses.fake_impls_registry import (  # noqa: F401
+    _deregister_op_impl,
+    _device_not_kwarg_ops,
+    _is_op_registered_to_fake_rule,
+    _is_tensor_constructor,
+    _like_tensor_constructors,
+    contains_tensor_types,
+    has_meta,
+    op_implementations_checks,
+    op_implementations_dict,
+    ordered_set,
+    register_op_impl,
+    stride_incorrect_op,
 )
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
@@ -43,6 +56,7 @@ from torch.utils._stats import count_label
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from torch._ops import OpOverload
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.types import IntLikeType
 
@@ -50,7 +64,6 @@ if TYPE_CHECKING:
 FakeTensorLike = FakeTensor | torch.Tensor
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
-_T = TypeVar("_T")
 
 pytree = torch.utils._pytree
 
@@ -61,17 +74,7 @@ __all__ = [
     "has_meta",
 ]
 
-# pyrefly: ignore [implicit-any]
-op_implementations_dict = {}
-# pyrefly: ignore [implicit-any]
-op_implementations_checks = []
-
-
 aten = torch._ops.ops.aten
-
-
-def ordered_set(*items: _T) -> dict[_T, bool]:
-    return dict.fromkeys(items, True)
 
 
 # This function indicates if the backend device
@@ -80,122 +83,8 @@ def is_noncontiguous_supported(device: torch.device) -> bool:
     return device.type != "hpu"
 
 
-_like_tensor_constructors = ordered_set(
-    aten.empty_like.default,
-    aten.empty_like.out,
-    aten.full_like.default,
-    aten.full_like.out,
-    aten.ones_like.default,
-    aten.ones_like.out,
-    aten.rand_like.default,
-    aten.rand_like.generator,
-    aten.rand_like.out,
-    aten.rand_like.generator_out,
-    aten.randn_like.default,
-    aten.randn_like.generator,
-    aten.randn_like.out,
-    aten.randn_like.generator_out,
-    aten.randint_like.default,
-    aten.randint_like.generator,
-    aten.randint_like.Tensor,
-    aten.randint_like.Tensor_generator,
-    aten.randint_like.Tensor_out,
-    aten.randint_like.Tensor_generator_out,
-    aten.randint_like.out,
-    aten.randint_like.generator_out,
-    aten.randint_like.low_dtype,
-    aten.randint_like.low_generator_dtype,
-    aten.randint_like.low_dtype_out,
-    aten.randint_like.low_generator_dtype_out,
-    aten.zeros_like.default,
-    aten.zeros_like.out,
-    aten.new_empty.default,
-    aten.new_empty.out,
-    aten.new_empty_strided.default,
-    aten.new_empty_strided.out,
-    aten.new_full.default,
-    aten.new_full.out,
-    aten.new_zeros.default,
-    aten.new_zeros.out,
-    aten.new_ones.default,
-    aten.new_ones.out,
-)
-
-
-_device_not_kwarg_ops = ordered_set(
-    aten._resize_output_.default,
-    aten._nested_tensor_from_tensor_list.default,
-    aten._nested_tensor_from_tensor_list.out,
-    aten.pin_memory.default,
-    aten.to.device,
-    aten.to.prim_Device,
-    aten.is_pinned.default,
-    aten._pin_memory.default,
-    aten._pin_memory.out,
-    aten._resize_output.default,
-    aten._resize_output.out,
-)
-
 # this op is never actually used
 _non_kwarg_device_constructors = (aten._list_to_tensor,)
-
-
-def contains_tensor_types(type_: Any) -> bool:
-    tensor_type = torch._C.TensorType.get()
-    return type_.isSubtypeOf(tensor_type) or any(
-        contains_tensor_types(e) for e in type_.containedTypes()
-    )
-
-
-@functools.cache
-def _is_tensor_constructor(func: OpOverload) -> bool:
-    if not isinstance(func, OpOverload):
-        raise AssertionError(f"func must be an OpOverload, got {type(func)}")
-    schema = func._schema
-    if any(contains_tensor_types(arg.type) for arg in schema.arguments):
-        return False
-    # TODO: no real reason to restrict multiple outputs
-    return (
-        len(schema.returns) == 1 and schema.returns[0].type is torch._C.TensorType.get()
-    )
-
-
-def register_op_impl(
-    run_impl_check: Callable[[OpOverload], bool]
-    | OpOverload
-    | list[OpOverload]
-    | tuple[OpOverload, ...],
-) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
-    def impl_decorator(op_impl: Callable[_P, _R]) -> Callable[_P, _R]:
-        if isinstance(run_impl_check, OpOverload):
-            if run_impl_check in op_implementations_dict:
-                raise AssertionError(f"duplicate registration: {run_impl_check}")
-            op_implementations_dict[run_impl_check] = op_impl
-        elif isinstance(run_impl_check, (list, tuple)):
-            for op in run_impl_check:
-                register_op_impl(op)(op_impl)
-        else:
-            if not callable(run_impl_check):
-                raise AssertionError(
-                    f"run_impl_check must be callable, got {type(run_impl_check)}"
-                )
-            op_implementations_checks.append((run_impl_check, op_impl))
-
-        return op_impl
-
-    return impl_decorator
-
-
-def _is_op_registered_to_fake_rule(op: OpOverload) -> bool:
-    return op in op_implementations_dict
-
-
-def _deregister_op_impl(op: OpOverload) -> None:
-    op_implementations_dict.pop(op, None)
-    for check, impl in op_implementations_checks:
-        if check is op:
-            op_implementations_checks.remove((check, impl))
-            break
 
 
 @register_op_impl(op_implementations_dict.__contains__)
@@ -303,10 +192,6 @@ def non_kwarg_to(
     return fake_mode.fake_tensor_converter.from_meta_and_device(
         fake_mode, r, out_device
     )
-
-
-def stride_incorrect_op(op: OpOverload) -> bool:
-    return False
 
 
 # These operators have meta implementations with incorrect strides
@@ -1564,10 +1449,6 @@ def is_builtin(op: OpOverload) -> bool:
     return op.namespace in _is_builtin_namespaces
 
 
-def has_meta(func: OpOverload) -> bool:
-    return torch._C._dispatch_has_computed_kernel_for_dispatch_key(func.name(), "Meta")
-
-
 # These are for the `torch._foreach_...` ops like `torch._foreach_add`.
 @register_op_impl(
     lambda func: is_builtin(func)
@@ -2129,6 +2010,8 @@ def fast_detach(
 
 @functools.cache
 def get_fast_op_impls() -> dict[OpOverload, Callable[..., Any]]:
+    # fake_impls_registry.get_fast_op_impls delegates here after lazy-loading
+    # this module; keep the fast-op table construction local to fake_impls.
     import torch._refs
 
     register_fast_op_impl(torch.ops.aten.add.Tensor)(

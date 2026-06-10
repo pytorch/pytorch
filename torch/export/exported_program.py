@@ -15,7 +15,7 @@ from typing import Any, final, NamedTuple, TYPE_CHECKING
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._subclasses.fake_impls import (
+from torch._subclasses.fake_impls_registry import (
     _deregister_op_impl,
     _is_op_registered_to_fake_rule,
     register_op_impl,

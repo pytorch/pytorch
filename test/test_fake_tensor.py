@@ -1879,6 +1879,115 @@ def forward(self, x_1):
         y = fast_div(mode, x, 2)
         self.assertEqual(y.dtype, torch.float32)
 
+    def test_fake_tensor_import_does_not_import_fake_impls(self):
+        script = """\
+import sys
+import torch
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+if "torch._subclasses.fake_impls" in sys.modules:
+    raise AssertionError("fake_impls imported with fake_tensor")
+
+with FakeTensorMode():
+    x = torch.empty(2, 2)
+
+if not isinstance(x, FakeTensor):
+    raise AssertionError(type(x))
+
+if "torch._subclasses.fake_impls" not in sys.modules:
+    raise AssertionError("fake_impls were not loaded for dispatch")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"subprocess failed:\n{result.stderr.decode()}",
+        )
+
+    def test_concurrent_fake_impls_load_waits_for_registrations(self):
+        script = """\
+import builtins
+import sys
+import threading
+
+import torch
+from torch._subclasses import fake_impls_registry
+
+if "torch._subclasses.fake_impls" in sys.modules:
+    raise AssertionError("fake_impls imported before the test")
+
+original_import = builtins.__import__
+import_started = threading.Event()
+release_import = threading.Event()
+
+
+def slow_fake_impls_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name == "torch._subclasses.fake_impls" and not import_started.is_set():
+        import_started.set()
+        if not release_import.wait(timeout=60):
+            raise AssertionError("timed out waiting to release fake_impls import")
+    return original_import(name, globals, locals, fromlist, level)
+
+
+builtins.__import__ = slow_fake_impls_import
+try:
+    first_error = []
+    second_error = []
+    second_returned = threading.Event()
+
+    def first_load():
+        try:
+            fake_impls_registry.ensure_fake_impls_loaded()
+        except Exception as exc:
+            first_error.append(exc)
+
+    def second_load():
+        try:
+            fake_impls_registry.get_op_implementations_checks()
+        except Exception as exc:
+            second_error.append(exc)
+        finally:
+            second_returned.set()
+
+    first_thread = threading.Thread(target=first_load)
+    first_thread.start()
+    if not import_started.wait(timeout=60):
+        raise AssertionError("fake_impls import did not start")
+
+    second_thread = threading.Thread(target=second_load)
+    second_thread.start()
+    if second_returned.wait(timeout=1):
+        raise AssertionError("concurrent fake_impls load returned partial registry state")
+
+    release_import.set()
+    first_thread.join(timeout=60)
+    second_thread.join(timeout=60)
+
+    if first_thread.is_alive() or second_thread.is_alive():
+        raise AssertionError("fake_impls loader threads did not finish")
+    if first_error:
+        raise first_error[0]
+    if second_error:
+        raise second_error[0]
+finally:
+    release_import.set()
+    builtins.__import__ = original_import
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            timeout=120,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"subprocess failed:\n{result.stderr.decode()}",
+        )
+
     def test_nanmean_out(self):
         # Regression test to ensure we don't error out.
         with torch._subclasses.fake_tensor.FakeTensorMode() as mode:
