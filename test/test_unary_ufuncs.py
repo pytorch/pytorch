@@ -227,6 +227,19 @@ class TestUnaryUfuncs(TestCase):
                     rtol=1.2e-03,
                     atol=1e-03,
                 )
+            elif dtype is torch.complex64 and "tan" in op.name:
+                self.assertEqualHelper(
+                    actual,
+                    expected,
+                    msg,
+                    dtype=dtype,
+                    exact_dtype=exact_dtype,
+                    equal_nan=equal_nan,
+                    # Overriding for complex64 due to precision issues in
+                    # std::tanh/tan near poles
+                    rtol=1e-05,
+                    atol=1e-02,
+                )
             else:
                 self.assertEqualHelper(
                     actual,
