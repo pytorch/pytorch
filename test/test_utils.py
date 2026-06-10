@@ -318,14 +318,14 @@ class TestCheckpoint(TestCase):
             def run_fn(input):
                 return phase2(input)
 
-            state = torch.get_device_module(device_type).get_rng_state()
+            state = torch.accelerator.get_rng_state()
 
             out = phase1(inp)
             out = checkpoint(run_fn, out, use_reentrant=True)
             out.sum().backward()
             grad_with_checkpointing = inp.grad
 
-            torch.get_device_module(device_type).set_rng_state(state)
+            torch.accelerator.set_rng_state(state)
 
             inp.grad = None
 

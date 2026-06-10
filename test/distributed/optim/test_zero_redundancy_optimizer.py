@@ -940,7 +940,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         LR = 0.01
         torch.manual_seed(0)
         if "cpu" not in device:
-            torch.get_device_module(device).manual_seed(0)
+            torch.accelerator.manual_seed(0)
 
         rank = self.rank
         world_size = self.world_size
@@ -1105,7 +1105,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         LR = 0.01
         torch.manual_seed(0)
         if "cpu" not in device:
-            torch.get_device_module(device).manual_seed(0)
+            torch.accelerator.manual_seed(0)
 
         class ModelParallelModel(torch.nn.Module):
             def __init__(self, dev0, dev1):
@@ -1228,7 +1228,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         NUM_INPUTS = 5
         torch.manual_seed(0)
         if "cpu" not in device:
-            torch.get_device_module(device).manual_seed(0)
+            torch.accelerator.manual_seed(0)
 
         rank = self.rank
         models_to_test = [
