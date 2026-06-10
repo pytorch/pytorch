@@ -3906,8 +3906,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         has_cutlass = any(isinstance(c, CUTLASSTemplateCaller) for c in choices)
         if config.autotune_in_subproc or has_cutlass:
-            # Warmup the subprocess pool early so it's ready for benchmarking
-            torch._inductor.autotune_process.get_tuning_process_pool()
+            # Initialize the worker pool (subprocess or thread) so it will warmup early.
+            torch._inductor.autotune_process.get_tuning_pool()
 
         precompile_fn = self.make_precompile_fn(
             choices,

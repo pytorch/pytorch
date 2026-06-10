@@ -212,3 +212,54 @@ def _worker_compile_triton(
             raise
         finally:
             log_triton_builds(fail=fail)
+
+
+def _worker_compile_triton_thread(
+    load_kernel: Callable[[], CachingAutotuner],
+    extra_env: dict[str, str],
+    extra_config: dict[str, Any],
+) -> tuple[CachingAutotuner, int]:
+    """
+    Thread-mode worker for Triton compilation (nogil).
+
+    Unlike _worker_compile_triton, this doesn't need to:
+    - Prepare kernel for pickling (threads share memory)
+    - Handle subprocess-specific setup
+
+    But still needs to:
+    - Set TRITON_PTXAS_PATH
+    - Update environment (threads share environment, but updates persist)
+    - Patch config temporarily
+    """
+    _set_triton_ptxas_path()
+
+    # Environment updates in threads are shared across the process,
+    # but that's okay - these are compilation settings
+    if extra_env:
+        os.environ.update(extra_env)
+        # Set libdevice path if passed via env from main process
+        libdevice_path = extra_env.get("TRITON_LIBDEVICE_PATH")
+        if libdevice_path:
+            try:
+                from triton import knobs
+
+                knobs.nvidia.libdevice_path = libdevice_path
+            except ImportError:
+                pass
+
+    from torch._inductor import config
+
+    with config.patch(extra_config):
+        fail = None
+        try:
+            start_ns = time.time_ns()
+            kernel = load_kernel()
+            kernel.precompile(warm_cache_only=True)
+            elapsed_ns = time.time_ns() - start_ns
+            # No need for prepare_for_pickle() - threads share memory
+            return kernel, elapsed_ns // 1000
+        except Exception as e:
+            fail = str(e)
+            raise
+        finally:
+            log_triton_builds(fail=fail)

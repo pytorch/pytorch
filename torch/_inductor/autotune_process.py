@@ -373,6 +373,87 @@ class TuningProcessPool:
         return results
 
 
+class TuningThreadPool:
+    """
+    Thread-based version of TuningProcessPool for nogil Python.
+
+    Simpler than process-based version since threads share memory:
+    - No subprocess management
+    - No pickling overhead
+    - No pipe communication
+    - Thread-safe device locking instead of process isolation
+    """
+
+    def __init__(self) -> None:
+        """
+        Initialize the thread pool with per-device locks.
+        """
+        import threading
+
+        devices = TuningProcessPool.get_device_list()
+        autotuning_log.debug("Thread-pool autotune device list: %s", devices)
+
+        # Create locks for thread-safe device access
+        self.device_locks = {device: threading.Lock() for device in devices}
+
+        # Use a thread pool with one worker per device
+        self.executor = ThreadPoolExecutor(max_workers=len(devices))
+
+        # Track which device each thread should use
+        self.device_queue: queue.Queue[int | None] = queue.Queue()
+        for device in devices:
+            self.device_queue.put(device)
+
+    def shutdown(self) -> None:
+        """
+        Shutdown the thread pool.
+        """
+        self.executor.shutdown(wait=True)
+
+    def target(self, choice: TritonTemplateCaller) -> float:
+        """
+        Benchmark a single choice in a worker thread.
+        Acquires device lock to ensure thread-safe execution.
+        """
+        assert choice.bmreq is not None
+
+        # Get an available device
+        device = self.device_queue.get()
+        try:
+            # Acquire lock for this device
+            lock = self.device_locks[device]
+            with lock:
+                # Set device if specified
+                if device is not None:
+                    gpu_type = get_gpu_type()
+                    device_interface = get_interface_for_device(gpu_type)
+                    device_interface.set_device(device)
+
+                # Run benchmark directly (no subprocess, no pickling)
+                try:
+                    return choice.bmreq.benchmark()
+                except Exception:
+                    warnings.warn(
+                        f"Failed to benchmark choice '{choice}'. It will be ignored. "
+                        "Please debug the root cause in case the choice can bring perf gains."
+                    )
+                    # Set to INF so this choice will be ignored
+                    return float("inf")
+        finally:
+            # Return device to queue
+            self.device_queue.put(device)
+
+    def benchmark(
+        self,
+        choices: list[TritonTemplateCaller],
+    ) -> dict[TritonTemplateCaller, float]:
+        """
+        Benchmark each choice using the thread pool.
+        """
+        results = dict(zip(choices, self.executor.map(self.target, choices)))
+        return results
+
+
 LayoutOrBuffer = ir.Layout | ir.Buffer
 
 
@@ -1217,19 +1298,48 @@ def get_tuning_process_pool() -> TuningProcessPool:
     return pool
 
 
+@functools.cache
+def get_tuning_thread_pool() -> TuningThreadPool:
+    """
+    Get the singleton TuningThreadPool for nogil autotuning.
+    """
+    pool = TuningThreadPool()
+    atexit.register(pool.shutdown)
+    return pool
+
+
+def get_tuning_pool() -> TuningThreadPool | TuningProcessPool:
+    """
+    Get the appropriate tuning pool based on compile_worker_mode.
+
+    Returns TuningThreadPool for thread mode, TuningProcessPool otherwise.
+    """
+    from torch._inductor.utils import should_use_thread_workers
+
+    if should_use_thread_workers():
+        return get_tuning_thread_pool()
+    else:
+        return get_tuning_process_pool()
+
+
 def benchmark_in_sub_process(
     choices: list[TritonTemplateCaller],
 ) -> dict[TritonTemplateCaller, float]:
     """
-    Do benchmarking in a subprocess and return the perf number (latency).
+    Do benchmarking in a worker (subprocess or thread) and return the perf number (latency).
+
+    Uses subprocess pool in process mode, thread pool in thread mode.
     """
-    return get_tuning_process_pool().benchmark(choices)
+    return get_tuning_pool().benchmark(choices)
 
 
 class AutotuneProcessPool:
     """
     Singleton pool manager for running autotuning (precompilation + benchmarking)
-    in a separate process.
+    in a separate worker.
+
+    Uses a subprocess pool by default and a thread pool when
+    `should_use_thread_workers()` is true (e.g. free-threaded Python).
     """
 
     _instance: AutotuneProcessPool | None = None
@@ -1237,7 +1347,7 @@ class AutotuneProcessPool:
     _shutdown_for_inactivity: bool = False
 
     def __init__(self):
-        self._pool: ProcessPoolExecutor | None = self._init_pool()
+        self._pool: ProcessPoolExecutor | ThreadPoolExecutor | None = self._init_pool()
         self._warmup_future: Future[Any] | None = None
         self._warmup_start_time: float | None = None
         self._timer: Timer | None = self._init_timer()
@@ -1254,7 +1364,7 @@ class AutotuneProcessPool:
 
     @property
     def pool(self):
-        """Get the process pool."""
+        """Get the worker pool (process or thread)."""
         assert config.pipeline_max_autotune_gemm, (
             "To use AutotuneProcessPool, pipeline_max_autotune_gemm must be enabled"
         )
@@ -1291,22 +1401,31 @@ class AutotuneProcessPool:
 
     def _init_pool(self):
         """
-        Get or create the process pool.
+        Get or create the worker pool.
 
-        Uses ProcessPoolExecutor with 'spawn' context for CUDA safety.
-        ProcessPoolExecutor is lazily initialized - workers are not spawned
-        until the first submit() call, making this property non-blocking.
+        On free-threaded Python (or when thread workers are explicitly enabled
+        via TORCHINDUCTOR_COMPILE_THREADS) returns a ThreadPoolExecutor so
+        autotuning runs in-process without subprocess/spawn overhead.
+        Otherwise returns a ProcessPoolExecutor with 'spawn' context for CUDA
+        safety. Workers are spawned lazily on first submit().
         """
-        # Use 'spawn' context to avoid CUDA fork issues
-        # Workers are spawned lazily on first submit(), not here
-        ctx = mp.get_context("spawn")
-        pool = ProcessPoolExecutor(
-            max_workers=1,
-            mp_context=ctx,
-        )
-        atexit.register(self._shutdown)
-        autotuning_log.info("AutotuneProcessPool created (workers spawn lazily)")
+        from torch._inductor.utils import should_use_thread_workers
 
+        if should_use_thread_workers():
+            pool: ProcessPoolExecutor | ThreadPoolExecutor = ThreadPoolExecutor(
+                max_workers=1,
+            )
+            autotuning_log.info("AutotuneProcessPool created (thread mode)")
+        else:
+            # Use 'spawn' context to avoid CUDA fork issues
+            ctx = mp.get_context("spawn")
+            pool = ProcessPoolExecutor(
+                max_workers=1,
+                mp_context=ctx,
+            )
+            autotuning_log.info("AutotuneProcessPool created (workers spawn lazily)")
+
+        atexit.register(self._shutdown)
         return pool
 
     def warm_up(self) -> Future[Any]:
