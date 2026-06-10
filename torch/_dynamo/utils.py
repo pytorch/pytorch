@@ -3296,8 +3296,7 @@ def iter_contains(
     if search.is_python_constant() and all(x.is_python_constant() for x in items):
         search_val = search.as_python_constant()
         found_const = any(
-            x.as_python_constant() is search_val
-            or x.as_python_constant() == search_val
+            x.as_python_constant() is search_val or x.as_python_constant() == search_val
             for x in items
         )
         return ConstantVariable.create(found_const)
