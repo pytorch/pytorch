@@ -3816,7 +3816,9 @@ class FakeTensorViewCopy(TestCase):
                     output.view(output.size(0), -1)
             for clone in (
                 lambda: torch.clone(fake_x),
+                lambda: torch.clone(fake_x, memory_format=None),
                 lambda: torch.ops.aten.clone.default(fake_x),
+                lambda: torch.ops.aten.clone.default(fake_x, memory_format=None),
             ):
                 output = clone()
                 self.assertTrue(output.is_mkldnn)
@@ -3826,6 +3828,44 @@ class FakeTensorViewCopy(TestCase):
                 fake_x.clone(memory_format=torch.preserve_format)
             with self.assertRaisesRegex(NotImplementedError, "aten::as_strided"):
                 fake_x.permute(0, 2, 1)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_mkldnn_is_contiguous_matches_eager(self):
+        x = torch.randn(2, 3, 4, 5, dtype=torch.float32).to_mkldnn()
+
+        with FakeTensorMode() as fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+            for memory_format in (
+                torch.contiguous_format,
+                torch.channels_last,
+                torch.channels_last_3d,
+                torch.preserve_format,
+            ):
+                self.assertEqual(
+                    fake_x.is_contiguous(memory_format=memory_format),
+                    x.is_contiguous(memory_format=memory_format),
+                )
+
+        def branch_on_contiguous(x):
+            if x.is_contiguous():
+                return x.to_dense() + 1
+            return x.to_dense() + 2
+
+        torch._dynamo.reset()
+        self.assertEqual(
+            torch.compile(branch_on_contiguous, backend="eager", fullgraph=True)(x),
+            branch_on_contiguous(x),
+        )
+
+    def test_fake_tensor_torch_function_mixed_subclass_falls_through(self):
+        with FakeTensorMode() as fake_mode:
+            fake_x = fake_mode.from_tensor(torch.ones(2))
+            two_tensor = TwoTensor(torch.ones(2), torch.ones(2))
+            result = torch.add(fake_x, two_tensor)
+
+        self.assertIsInstance(result, TwoTensor)
+        self.assertIsInstance(result.a, FakeTensor)
+        self.assertIsInstance(result.b, FakeTensor)
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_mkldnn_reshape_and_to_dense_match_eager(self):

@@ -1388,14 +1388,15 @@ def _mkldnn_max_pool2d(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     input_ = new_kwargs["self"] if "self" in new_kwargs else new_kwargs["input"]
+    if not input_.is_mkldnn:
+        return NotImplemented
+
     _check_mkldnn_max_pool(
         input_,
         new_kwargs["dilation"],
         new_kwargs["stride"],
         dim=2,
     )
-    if not input_.is_mkldnn:
-        return NotImplemented
 
     return _mkldnn_pool_meta(
         fake_mode,
@@ -1462,14 +1463,15 @@ def _mkldnn_max_pool3d(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     input_ = new_kwargs["self"] if "self" in new_kwargs else new_kwargs["input"]
+    if not input_.is_mkldnn:
+        return NotImplemented
+
     _check_mkldnn_max_pool(
         input_,
         new_kwargs["dilation"],
         new_kwargs["stride"],
         dim=3,
     )
-    if not input_.is_mkldnn:
-        return NotImplemented
 
     return _mkldnn_pool_meta(
         fake_mode,

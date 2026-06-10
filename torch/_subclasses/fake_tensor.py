@@ -1215,7 +1215,7 @@ class FakeTensor(Tensor):
             if func in (torch.Tensor.clone, torch.clone, aten.clone.default):
                 explicit_memory_format = len(args) > 1 or "memory_format" in kwargs
                 memory_format = get_arg(1, ("memory_format",), None)
-                if explicit_memory_format:
+                if explicit_memory_format and memory_format is not None:
                     memory_format_name = cast(
                         dict[object, str],
                         {
@@ -1237,11 +1237,26 @@ class FakeTensor(Tensor):
             if func in (torch.Tensor.permute, torch.permute, aten.permute.default):
                 raise NotImplementedError("aten::as_strided")
 
+            if func is torch.Tensor.is_contiguous:
+                memory_format = get_arg(1, ("memory_format",), torch.contiguous_format)
+                return memory_format in (
+                    torch.contiguous_format,
+                    torch.preserve_format,
+                )
+
+        if any(
+            torch_function_type is not torch.Tensor
+            and not issubclass(torch_function_type, cls)
+            for torch_function_type in types
+        ):
+            return NotImplemented
+
         if isinstance(func, torch._ops.OpOverload):
             with torch._C.DisableTorchFunctionSubclass():
                 return cast(Any, func)(*args, **kwargs)
 
-        return super().__torch_function__(func, types, args, kwargs)
+        with torch._C.DisableTorchFunctionSubclass():
+            return cast(Any, func)(*args, **kwargs)
 
     @classmethod
     @count
