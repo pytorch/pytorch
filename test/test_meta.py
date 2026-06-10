@@ -1830,6 +1830,28 @@ class TestMeta(TestCase):
         elif cpu_err is not None and meta_err is None:
             raise RuntimeError("cpu failed, but meta didn't.") from cpu_err
 
+    def test_functional_conv_meta_errors_invalid_groups_weight_shape(self):
+        groups = 6
+        in_channel = 12
+        out_channel = 3
+        # test 1d
+        input_tensor = torch.randn(2, in_channel, 15, device="meta")
+        weight_tensor = torch.randn(out_channel, in_channel // groups, 3, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "Invalid channel dimensions"):
+            torch.nn.functional.conv1d(input_tensor, weight_tensor, groups=6)
+
+        # test 2d
+        input_tensor = torch.randn(2, in_channel, 15, 15, device="meta")
+        weight_tensor = torch.randn(out_channel, in_channel // groups, 3, 3, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "Invalid channel dimensions"):
+            torch.nn.functional.conv2d(input_tensor, weight_tensor, groups=6)
+
+        # test 3d
+        input_tensor = torch.randn(2, in_channel, 15, 15, 15, device="meta")
+        weight_tensor = torch.randn(out_channel, in_channel // groups, 3, 3, 3, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "Invalid channel dimensions"):
+            torch.nn.functional.conv3d(input_tensor, weight_tensor, groups=6)
+
     def test_nonzero(self):
         t = torch.randn(2, 3, 4, device='meta')
         with exp_config.patch(meta_nonzero_assume_all_nonzero=True):

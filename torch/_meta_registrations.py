@@ -2609,7 +2609,9 @@ def calc_conv_nd_return_shape(
     else:
         out_channels = weight.shape[0]
         torch._check(
-            weight.shape[1] * groups == input_tensor.shape[1],
+            weight.shape[1] * groups == input_tensor.shape[1]
+            and out_channels >= groups
+            and out_channels % groups == 0,
             lambda: "Invalid channel dimensions",
         )
 
