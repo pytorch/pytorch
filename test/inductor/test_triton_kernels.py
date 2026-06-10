@@ -2672,6 +2672,8 @@ def forward(self, arg0_1, arg1_1):
 
     @requires_gpu
     def test_triton_kernel_backend_options_without_signature(self):
+        # A launch kwarg that is not in the kernel signature should be kept as
+        # a backend option and emitted in the generated Triton metadata.
         @triton.jit
         def add_kernel(
             in_ptr0,
@@ -2709,6 +2711,8 @@ def forward(self, arg0_1, arg1_1):
 
     @requires_gpu
     def test_triton_kernel_backend_options_also_used_as_kernel_kwarg(self):
+        # Triton exposes keyword args to backend option parsing even when the
+        # same name also binds a kernel parameter; preserve both meanings.
         @triton.jit
         def add_kernel(
             in_ptr0,
@@ -2752,6 +2756,8 @@ def forward(self, arg0_1, arg1_1):
 
     @requires_gpu
     def test_triton_kernel_backend_options_with_autotune(self):
+        # Backend options passed at launch should survive through the
+        # user-defined Triton autotune wrapper as compile metadata.
         @triton.autotune(
             configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
             key=[],
@@ -2793,6 +2799,8 @@ def forward(self, arg0_1, arg1_1):
 
     @requires_gpu
     def test_triton_kernel_special_kwargs_with_autotune_use_configs(self):
+        # SPECIAL_CONFIG_NAMES keep the existing behavior: they update Triton
+        # configs instead of being preserved as generic backend options.
         @triton.autotune(
             configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
             key=[],

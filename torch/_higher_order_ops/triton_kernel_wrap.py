@@ -1408,6 +1408,9 @@ def triton_kernel_wrapper_mutation_dense(
             break
 
     backend_options = {} if backend_options is None else backend_options
+    # This path directly calls the original Triton kernel. If a backend option
+    # name also binds a kernel argument, it is already in kwargs/constant_args,
+    # so do not pass the same name again as an extra launch kwarg.
     launch_backend_options = {
         k: v
         for k, v in backend_options.items()
