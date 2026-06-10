@@ -9356,6 +9356,108 @@ class TestMPS(TestCaseMPS):
         y = x / 64
         self.assertEqual(y, torch.tensor([0., 1023.9844], device="mps"))
 
+    @parametrize(
+        "op_name",
+        [
+            "add", "sub", "mul", "div", "div_trunc", "floor_divide",
+            "fmod", "remainder", "maximum", "minimum", "gcd", "lcm",
+            "bitwise_and", "bitwise_or", "bitwise_xor", "atan2",
+            "copysign", "xlogy", "eq", "ne", "lt", "le", "gt", "ge",
+        ],
+    )
+    @parametrize("dtype", [torch.uint16, torch.uint32, torch.uint64])
+    def test_unsigned_binary_op(self, op_name, dtype):
+        # See https://github.com/pytorch/pytorch/issues/176296
+        if op_name == "div_trunc":
+            def op(x, y):
+                return torch.div(x, y, rounding_mode="trunc")
+        else:
+            op = getattr(torch, op_name)
+        comparison_ops = {"eq", "ne", "lt", "le", "gt", "ge"}
+        float_ops = {"div", "atan2", "copysign", "xlogy"}
+        out_dtype = (
+            torch.bool if op_name in comparison_ops
+            else torch.float32 if op_name in float_ops
+            else dtype
+        )
+        # Keep values int64-safe so results can be validated against the same
+        # op on int64 upcasts; integer wraparound matches via .to(dtype)
+        hi = 1000 if op_name in ["lcm", "copysign", "xlogy"] else min(torch.iinfo(dtype).max, 2**31)
+        a = torch.randint(0, hi, (64,), device="mps", dtype=dtype)
+        b = torch.randint(1, hi, (64,), device="mps", dtype=dtype)
+
+        def check(x, y):
+            res = op(x, y)
+            self.assertEqual(res.dtype, out_dtype)
+            y_ref = y.cpu().to(torch.int64) if isinstance(y, torch.Tensor) else y
+            ref = op(x.cpu().to(torch.int64), y_ref)
+            self.assertEqual(res.cpu(), ref.to(out_dtype))
+            if op_name in comparison_ops and isinstance(y, torch.Tensor):
+                out = torch.empty(x.shape, device="mps", dtype=torch.float32)
+                getattr(torch, op_name)(x, y, out=out)
+                self.assertEqual(out.cpu(), ref.to(torch.float32))
+
+        check(a, b)
+        check(a[::2], b[::2])
+        if op_name not in ["maximum", "minimum", "gcd", "lcm", "atan2", "copysign", "xlogy"]:
+            check(a, 7)
+
+    @parametrize("op_name", ["bitwise_left_shift", "bitwise_right_shift"])
+    @parametrize("dtype", [torch.uint16, torch.uint32, torch.uint64])
+    def test_unsigned_binary_shift_op(self, op_name, dtype):
+        # See https://github.com/pytorch/pytorch/issues/176296
+        op = getattr(torch, op_name)
+        a = torch.randint(0, 1000, (64,), device="mps", dtype=dtype)
+        b = torch.randint(0, 4, (64,), device="mps", dtype=dtype)
+
+        def check(x, y):
+            res = op(x, y)
+            self.assertEqual(res.dtype, dtype)
+            y_ref = y.cpu().to(torch.int64) if isinstance(y, torch.Tensor) else y
+            ref = op(x.cpu().to(torch.int64), y_ref)
+            self.assertEqual(res.cpu(), ref.to(dtype))
+
+        check(a, b)
+        check(a[::2], b[::2])
+        check(a, 2)
+
+    @parametrize("op_name", ["add", "sub"])
+    @parametrize("dtype", [torch.uint16, torch.uint32, torch.uint64])
+    def test_unsigned_binary_op_alpha(self, op_name, dtype):
+        # See https://github.com/pytorch/pytorch/issues/176296
+        op = getattr(torch, op_name)
+        a = torch.randint(0, 1000, (64,), device="mps", dtype=dtype)
+        b = torch.randint(0, 1000, (64,), device="mps", dtype=dtype)
+
+        def check(x, other):
+            res = op(x, other, alpha=3)
+            self.assertEqual(res.dtype, dtype)
+            other_ref = other.cpu().to(torch.int64) if isinstance(other, torch.Tensor) else other
+            ref = op(x.cpu().to(torch.int64), other_ref, alpha=3)
+            self.assertEqual(res.cpu(), ref.to(dtype))
+
+        check(a, b)
+        check(a[::2], b[::2])
+        check(a, 7)
+
+    @parametrize("dtype", [torch.uint16, torch.uint32, torch.uint64])
+    def test_unsigned_lerp_scalar_weight(self, dtype):
+        # See https://github.com/pytorch/pytorch/issues/176296
+        # CPU does not implement integer lerp, so compute the int64 reference
+        # manually; .to(dtype) truncation matches Metal modular wraparound.
+        a = torch.randint(0, 1000, (64,), device="mps", dtype=dtype)
+        b = torch.randint(0, 1000, (64,), device="mps", dtype=dtype)
+
+        def check(x, y):
+            res = torch.lerp(x, y, 3)
+            self.assertEqual(res.dtype, dtype)
+            x64, y64 = x.cpu().to(torch.int64), y.cpu().to(torch.int64)
+            ref = x64 + 3 * (y64 - x64)
+            self.assertEqual(res.cpu(), ref.to(dtype))
+
+        check(a, b)
+        check(a[::2], b[::2])
+
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)
