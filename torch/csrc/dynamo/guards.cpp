@@ -546,6 +546,13 @@ bool guard_lookup_stats_enabled() {
   return C10_UNLIKELY(env_enabled) || C10_UNLIKELY(force_enabled);
 }
 
+static bool guard_last_success_shadow_full_enabled() {
+  static const bool env_enabled =
+      c10::utils::check_env("TORCHDYNAMO_GUARD_LAST_SUCCESS_SHADOW_FULL") ==
+      true;
+  return C10_UNLIKELY(env_enabled) && C10_UNLIKELY(guard_lookup_stats_enabled());
+}
+
 static GuardSubtreeProbeMode guard_subtree_probe_mode() {
   static const GuardSubtreeProbeMode mode = [] {
     const auto env = c10::utils::get_env("TORCHDYNAMO_GUARD_SUBTREE_PROBE");
@@ -9848,7 +9855,8 @@ bool run_root_guard_manager_with_last_success_receipt(
         record_guard_last_success_actual_partial_residual_fail(
             token_check_ns, residual_ns);
       }
-      if (residual_result && C10_UNLIKELY(guard_lookup_stats_enabled())) {
+      if (residual_result &&
+          C10_UNLIKELY(guard_last_success_shadow_full_enabled())) {
         const uint64_t shadow_full_start_ns = guard_lookup_time_ns();
         bool shadow_full_result = false;
         {

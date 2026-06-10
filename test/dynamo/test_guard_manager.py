@@ -2406,15 +2406,11 @@ print(json.dumps({
         self.assertEqual(stats["partial_miss"], 0)
         self.assertEqual(stats["partial_disabled"], 0)
         self.assertEqual(stats["partial_residual_fail"], 0)
-        self.assertGreater(stats["partial_shadow_full_pass"], 0)
+        self.assertEqual(stats["partial_shadow_full_pass"], 0)
         self.assertEqual(stats["partial_shadow_full_fail"], 0)
-        self.assertEqual(
-            stats["partial_shadow_full_pass"] + stats["partial_shadow_full_fail"],
-            stats["partial_hit"],
-        )
-        self.assertGreaterEqual(stats["partial_shadow_full_ns"], 0)
-        self.assertIsInstance(stats["partial_shadow_fail_reasons"], dict)
-        self.assertIsInstance(stats["partial_shadow_fail_top_paths"], dict)
+        self.assertEqual(stats["partial_shadow_full_ns"], 0)
+        self.assertEqual(stats["partial_shadow_fail_reasons"], {})
+        self.assertEqual(stats["partial_shadow_fail_top_paths"], {})
         self.assertGreater(stats["partial_hot_tokens"], 0)
         self.assertGreater(stats["partial_hot_token_unique"], 0)
         self.assertLessEqual(
@@ -2425,6 +2421,76 @@ print(json.dumps({
             stats["partial_hot_tokens"],
         )
         self.assertIsInstance(stats["partial_hot_token_duplicate_kinds"], dict)
+
+    def test_guard_last_success_partial_shadow_full_requires_env(self):
+        script = r"""
+import json
+import torch
+from torch._C._dynamo import guards
+
+GLOBAL_DICT = {"used": 1, "noise": [0]}
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("bias", torch.ones(4))
+
+    def forward(self):
+        return self.bias + GLOBAL_DICT["used"]
+
+m = Mod()
+compiled = torch.compile(m, backend="eager")
+expected = m.bias + 1
+assert torch.equal(compiled(), expected)
+
+guards.reset_guard_lookup_stats()
+for _ in range(8):
+    GLOBAL_DICT["noise"] = [1]
+    out = compiled()
+    assert torch.equal(out, expected)
+
+stats = guards.get_guard_lookup_stats()
+print(json.dumps({
+    "partial_hit": stats["guard_last_success_actual_partial_hit"],
+    "partial_shadow_full_pass": stats[
+        "guard_last_success_actual_partial_shadow_full_pass"
+    ],
+    "partial_shadow_full_fail": stats[
+        "guard_last_success_actual_partial_shadow_full_fail"
+    ],
+    "partial_shadow_full_ns": stats[
+        "guard_last_success_actual_partial_shadow_full_ns"
+    ],
+    "partial_shadow_fail_reasons": stats[
+        "guard_last_success_actual_partial_shadow_fail_reasons"
+    ],
+    "partial_shadow_fail_top_paths": stats[
+        "guard_last_success_actual_partial_shadow_fail_top_paths"
+    ],
+}))
+"""
+        env = os.environ.copy()
+        env["TORCHDYNAMO_GUARD_FAST_PLAN"] = "1"
+        env["TORCHDYNAMO_GUARD_LOOKUP_STATS"] = "1"
+        env["TORCHDYNAMO_GUARD_LAST_SUCCESS_SHADOW_FULL"] = "1"
+        out = subprocess.check_output(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            env=env,
+            text=True,
+        )
+        stats = json.loads(out.splitlines()[-1])
+
+        self.assertGreater(stats["partial_hit"], 0)
+        self.assertGreater(stats["partial_shadow_full_pass"], 0)
+        self.assertEqual(stats["partial_shadow_full_fail"], 0)
+        self.assertEqual(
+            stats["partial_shadow_full_pass"] + stats["partial_shadow_full_fail"],
+            stats["partial_hit"],
+        )
+        self.assertGreaterEqual(stats["partial_shadow_full_ns"], 0)
+        self.assertIsInstance(stats["partial_shadow_fail_reasons"], dict)
+        self.assertIsInstance(stats["partial_shadow_fail_top_paths"], dict)
 
     def test_guard_last_success_full_actual_disabled_with_stable_global_dict(self):
         script = r"""
