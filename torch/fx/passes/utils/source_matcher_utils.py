@@ -128,22 +128,23 @@ def get_source_partitions(
                 add_to_partition(source_fn[1], source_fn[0], node)
 
     def make_partition(nodes: list[Node], module_type: type) -> SourcePartition:
-        input_nodes = set()
-        output_nodes = set()
-        params = set()
+        input_nodes: dict[Node, None] = {}
+        output_nodes: dict[Node, None] = {}
+        params: dict[Node, None] = {}
+        nodes_set = set(nodes)
         for node in nodes:
             for arg in node.args:
-                if isinstance(arg, Node) and arg not in nodes and arg.op != "get_attr":
-                    input_nodes.add(arg)
+                if isinstance(arg, Node) and arg not in nodes_set and arg.op != "get_attr":
+                    input_nodes.setdefault(arg)
 
             if node.op == "get_attr":
-                params.add(node)
-                # get_attr nodes won't be output nodes
+                params.setdefault(node)
                 continue
 
             for user in node.users:
-                if user not in nodes:
-                    output_nodes.add(node)
+                if user not in nodes_set:
+                    output_nodes.setdefault(node)
+                    break
 
         return SourcePartition(
             nodes,

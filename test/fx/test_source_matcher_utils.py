@@ -530,6 +530,57 @@ class TestSourceMatcher(JitTestCase):
             )
         )
 
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    def test_get_source_partitions_input_nodes_deterministic_order(self):
+        """Reproduces the bug where input_nodes order was non-deterministic for ops
+        with multiple inputs (e.g. torch.gather). Verifies that input_nodes order
+        follows the order of Node args as they appear in node.args."""
+
+        class GatherLayer(torch.nn.Module):
+            def forward(self, x):
+                return torch.gather(
+                    x, dim=0, index=torch.tensor([[0, 0], [1, 0]], device=x.device)
+                )
+
+        example_inputs = (torch.tensor([[0, 1], [0, 1]]),)
+        model = GatherLayer()
+        model.eval()
+        gm = torch.export.export(model, example_inputs).module()
+        gm.graph.eliminate_dead_code()
+
+        partitions = get_source_partitions(gm.graph, [torch.gather])
+        self.assertIn(torch.gather, partitions)
+        self.assertEqual(len(partitions[torch.gather]), 1)
+
+        partition = partitions[torch.gather][0]
+        gather_node = partition.output_nodes[0]
+
+        self.assertEqual(
+            len(partition.input_nodes),
+            2,
+            "gather has 2 node inputs: input tensor and index",
+        )
+
+        input_node_order = [n.name for n in partition.input_nodes]
+        args_node_order = [
+            arg.name for arg in gather_node.args if isinstance(arg, torch.fx.Node)
+        ]
+        self.assertEqual(
+            input_node_order,
+            args_node_order,
+            "input_nodes order must match node.args order (deterministic)",
+        )
+
+        for _ in range(10):
+            partition_repeat = get_source_partitions(gm.graph, [torch.gather])[
+                torch.gather
+            ][0]
+            self.assertEqual(
+                [n.name for n in partition_repeat.input_nodes],
+                input_node_order,
+                "input_nodes order must be deterministic across repeated calls",
+            )
+
 
 instantiate_parametrized_tests(TestSourceMatcher)
 
