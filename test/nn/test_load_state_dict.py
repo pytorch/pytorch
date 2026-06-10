@@ -62,6 +62,38 @@ class TestLoadStateDict(NNTestCase):
 
     @swap([True, False])
     @skipIfTorchDynamo("dynamo installs weakrefs on some params")
+    def test_load_state_dict_partitions_child_keys_once(self):
+        class CountingKey(str):
+            startswith_calls = []
+
+            def startswith(self, prefix, *args):
+                type(self).startswith_calls.append((str(self), prefix))
+                return super().startswith(prefix, *args)
+
+        class Root(nn.Module):
+            def __init__(self):
+                super().__init__()
+                for idx in range(4):
+                    self.add_module(f"child{idx}", nn.Linear(2, 2))
+
+        model = Root()
+        state_dict = {
+            CountingKey(key): value.clone()
+            for key, value in model.state_dict().items()
+        }
+
+        model.load_state_dict(state_dict)
+
+        child_prefixes = {f"child{idx}." for idx in range(4)}
+        cross_child_prefix_checks = [
+            (key, prefix)
+            for key, prefix in CountingKey.startswith_calls
+            if prefix in child_prefixes and not str(key).startswith(prefix)
+        ]
+        self.assertEqual(cross_child_prefix_checks, [])
+
+    @swap([True, False])
+    @skipIfTorchDynamo("dynamo installs weakrefs on some params")
     def test_scalar_param_1d_tensor_raises(self):
         class SimpleModule(nn.Module):
             def __init__(self):
