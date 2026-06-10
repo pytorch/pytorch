@@ -1022,9 +1022,8 @@ def _dynamo_graph_capture_for_export(
                     graph.recompile()
                     fake_mode = None
 
-                # ShapesSpec has its own export-time soundness check and uses
-                # unbacked SymInts, so the legacy guard-based violation
-                # detection / prettifier is not applicable on this path.
+                # ShapesSpec is unbacked based, constraint violations are not
+                # relevant.
                 if not shapes_spec_in_use:
                     _suggest_or_raise_constraint_violation(
                         module_to_trace,
