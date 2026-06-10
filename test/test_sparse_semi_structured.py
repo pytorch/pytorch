@@ -1423,10 +1423,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
     @unittest.skip("cuSPARSELt v0.6.x does not support bfloat/float16 alpha scaling")
     @training_dtypes
-    @unittest.skipIf(
-        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
-        "HIPSPARSELt is not available for ROCm versions < 7.12"
-    )
+    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     def test_cslt_sparse_mm_alpha(self, dtype, device):
         A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(dtype).cuda()
         B = torch.ones((256, 128), device=device).to(dtype)
