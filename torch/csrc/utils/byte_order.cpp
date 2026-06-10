@@ -107,7 +107,7 @@ static uint64_t decodeUInt64ByteSwapped(const uint8_t* data) {
 
 namespace torch::utils {
 
-constexpr THPByteOrder THP_nativeByteOrder() {
+THPByteOrder THP_nativeByteOrder() {
   using enum std::endian;
   static_assert(
       native == little || native == big,
