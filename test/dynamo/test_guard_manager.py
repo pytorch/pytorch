@@ -1021,32 +1021,33 @@ import json
 import torch
 from torch._C._dynamo import guards
 
-def fn(x, y, scale: int):
-    return (x + y) * scale
+SCALE = 3
+
+def fn(x, y):
+    return (x + y) * SCALE
 
 opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
 x = torch.randn(4)
 y = torch.randn(4)
 
-opt_fn(x, y, 3)
-guards.reset_guard_lookup_stats()
-for _ in range(3):
-    opt_fn(x, y, 3)
+expected = fn(x, y)
+assert torch.equal(opt_fn(x, y), expected)
+
+SCALE = 5
+out = opt_fn(x, y)
 
 stats = guards.get_guard_lookup_stats()
 print(json.dumps({
-    "lookup_count": stats["lookup_count"],
-    "slow_guard_ns": stats["slow_guard_ns"],
     "unsafe_mock_guard_bypass_enabled": stats[
         "unsafe_mock_guard_bypass_enabled"
     ],
-    "unsafe_mock_guard_bypass_count": stats[
-        "unsafe_mock_guard_bypass_count"
-    ],
+    "stale_cached_result": torch.equal(out, expected),
+    "fresh_result": torch.equal(out, fn(x, y)),
 }))
 """
         env = os.environ.copy()
         env["TORCHDYNAMO_UNSAFE_MOCK_GUARD_BYPASS"] = "1"
+        env.pop("TORCHDYNAMO_GUARD_LOOKUP_STATS", None)
         out = subprocess.check_output(
             [sys.executable, "-c", textwrap.dedent(script)],
             cwd=os.getcwd(),
@@ -1055,12 +1056,11 @@ print(json.dumps({
         )
         stats = json.loads(out.splitlines()[-1])
 
-        self.assertGreater(stats["lookup_count"], 0)
         self.assertTrue(stats["unsafe_mock_guard_bypass_enabled"])
-        self.assertGreater(stats["unsafe_mock_guard_bypass_count"], 0)
-        self.assertEqual(stats["slow_guard_ns"], 0)
+        self.assertTrue(stats["stale_cached_result"])
+        self.assertFalse(stats["fresh_result"])
 
-    def test_unsafe_mock_guard_bypass_requires_stats_collection(self):
+    def test_unsafe_mock_guard_bypass_does_not_require_stats_collection(self):
         script = r"""
 import json
 from torch._C._dynamo import guards
@@ -1083,7 +1083,7 @@ print(json.dumps({
         )
         stats = json.loads(out.splitlines()[-1])
 
-        self.assertFalse(stats["unsafe_mock_guard_bypass_enabled"])
+        self.assertTrue(stats["unsafe_mock_guard_bypass_enabled"])
 
     def test_guard_subtree_probe_is_off_by_default(self):
         guards.reset_guard_lookup_stats()

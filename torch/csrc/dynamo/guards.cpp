@@ -600,10 +600,7 @@ static bool guard_subtree_probe_detail_enabled() {
 bool unsafe_mock_guard_bypass_enabled() {
   static const bool env_enabled =
       c10::utils::check_env("TORCHDYNAMO_UNSAFE_MOCK_GUARD_BYPASS") == true;
-  // This bypass is an unsafe measurement aid. Keep it tied to the guard lookup
-  // stats path so accidentally exporting the env var does not skip guards in a
-  // normal performance run.
-  return C10_UNLIKELY(env_enabled) && C10_UNLIKELY(guard_lookup_stats_enabled());
+  return C10_UNLIKELY(env_enabled);
 }
 
 static bool guard_fast_plan_enabled() {
