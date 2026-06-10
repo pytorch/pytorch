@@ -1014,8 +1014,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
             return (None, None, None)
 
         candidate_ols = []
-        for candidate_ol_name in olp.overloads():
-            candidate_ol = getattr(olp, candidate_ol_name)
+        for candidate_ol in olp.op_overloads():
             if any(arg.is_out for arg in candidate_ol._schema.arguments):
                 candidate_ols.append(candidate_ol)
 
@@ -2020,6 +2019,24 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(eigvecs.stride(), eigvecs_fake.stride())
         self.assertEqual(eigvecs.shape, eigvecs_fake.shape)
         self.assertEqual(eigvecs.dtype, eigvecs_fake.dtype)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_zero_preserves_input_strides(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        x = torch.randn(5, 4).t()
+        cpu_result = torch.ops.aten.zero.default(x)
+
+        meta_x = torch.empty_strided(x.shape, x.stride(), device="meta")
+        meta_result = torch.ops.aten.zero.default(meta_x)
+        self.assertEqual(cpu_result.shape, meta_result.shape)
+        self.assertEqual(cpu_result.stride(), meta_result.stride())
+
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(x)
+            fake_result = torch.ops.aten.zero.default(fake_x)
+        self.assertEqual(cpu_result.shape, fake_result.shape)
+        self.assertEqual(cpu_result.stride(), fake_result.stride())
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_randint_like_tensor_dtype_kwarg(self):
