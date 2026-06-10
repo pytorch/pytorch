@@ -1,7 +1,5 @@
 # mypy: allow-untyped-defs
-import inspect
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any, cast
 
 import torch
@@ -18,16 +16,9 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
-@dataclass(frozen=True)
-class FlexGemmOpInfo:
-    quack_name: str
-    mat1_index: int
-    mat2_index: int
-
-
-FLEX_GEMM_OPS = {
-    torch.ops.aten.mm.default: FlexGemmOpInfo("mm", 0, 1),
-    torch.ops.aten.addmm.default: FlexGemmOpInfo("addmm", 1, 2),
+FLEX_GEMM_OP_INPUT_INDICES = {
+    torch.ops.aten.mm.default: (0, 1),
+    torch.ops.aten.addmm.default: (1, 2),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,
@@ -37,7 +28,9 @@ _SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
 
 
 def supported_flex_gemm_op_names() -> str:
-    return "/".join(op.name().removeprefix("aten::") for op in FLEX_GEMM_OPS)
+    return "/".join(
+        op.name().removeprefix("aten::") for op in FLEX_GEMM_OP_INPUT_INDICES
+    )
 
 
 _SUPPORTED_FLEX_GEMM_OP_NAMES = supported_flex_gemm_op_names()
@@ -55,7 +48,7 @@ class FlexGemm(HigherOrderOperator):
         gemm_kwargs: dict[str, Any],
         kernel_options: dict[str, Any],
     ) -> Any:
-        if gemm_op not in FLEX_GEMM_OPS:
+        if gemm_op not in FLEX_GEMM_OP_INPUT_INDICES:
             raise RuntimeError(f"unsupported GEMM op for FlexGEMM: {gemm_op}")
         if not isinstance(gemm_args, (tuple, list)):
             raise RuntimeError(f"gemm_args must be a tuple/list, got {type(gemm_args)}")
@@ -92,7 +85,8 @@ class FlexGemm(HigherOrderOperator):
                 f"kernel_options must be a dict, got {type(kernel_options)}"
             )
 
-        kernel_options = {"backend": "TRITON", **kernel_options}
+        kernel_options = dict(kernel_options)
+        kernel_options.setdefault("backend", "TRITON")
         backend = kernel_options["backend"]
         if backend not in _SUPPORTED_BACKENDS:
             raise RuntimeError(
@@ -121,31 +115,16 @@ def flex_gemm(
         kernel_options = {}
     gemm_op = cast(torch._ops.OpOverload, FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op))
 
-    def body_fn(*args: Any, **body_kwargs: Any) -> Any:
-        return epilogue_fn(gemm_op(*args, **body_kwargs))
+    def body_fn(*args: Any) -> Any:
+        # Keep the traced body positional-only; the HOP carries gemm_kwargs for lowering.
+        return epilogue_fn(gemm_op(*args, **gemm_kwargs))
 
-    body_fn._flex_gemm_accepts_kwargs = True  # type: ignore[attr-defined]
     return flex_gemm_hop(gemm_op, body_fn, gemm_args, gemm_kwargs, kernel_options)
-
-
-def _body_accepts_kwargs(body_fn: Callable[..., Any], kwargs: Any) -> bool:
-    if not kwargs or isinstance(body_fn, torch.fx.GraphModule):
-        return False
-    if getattr(body_fn, "_flex_gemm_accepts_kwargs", False):
-        return True
-    signature = inspect.signature(body_fn)
-    return all(key in signature.parameters for key in kwargs)
-
-
-def _call_flex_gemm_body(body_fn: Callable[..., Any], args: Any, kwargs: Any) -> Any:
-    if _body_accepts_kwargs(body_fn, kwargs):
-        return body_fn(*args, **kwargs)
-    return body_fn(*args)
 
 
 @flex_gemm_hop.py_impl(DispatchKey.CompositeExplicitAutograd)
 def flex_gemm_dense(gemm_op, body_fn, args, kwargs, kernel_options):
-    return _call_flex_gemm_body(body_fn, args, kwargs)
+    return body_fn(*args)
 
 
 flex_gemm_hop.py_autograd_impl(
@@ -156,7 +135,7 @@ flex_gemm_hop.py_autograd_impl(
 @flex_gemm_hop.py_impl(FakeTensorMode)
 def flex_gemm_fake_tensor_mode(mode, gemm_op, body_fn, args, kwargs, kernel_options):
     with mode:
-        return _call_flex_gemm_body(body_fn, tuple(args), kwargs)
+        return body_fn(*args)
 
 
 @flex_gemm_hop.py_functionalize_impl
@@ -188,7 +167,7 @@ def flex_gemm_proxy_torch_dispatch_mode(
         flat_args = tuple(args)
 
         def tracing_body_fn(*flat_body_args):
-            return _call_flex_gemm_body(body_fn, flat_body_args, kwargs)
+            return body_fn(*flat_body_args)
 
         body_graph = reenter_make_fx(tracing_body_fn)(*flat_args)
         _, body_graph_name = unique_graph_id(proxy_mode, prefix="flex_gemm_body_graph")
@@ -205,7 +184,7 @@ def flex_gemm_proxy_torch_dispatch_mode(
             name="flex_gemm",
         )
         return track_tensor_tree(
-            _call_flex_gemm_body(body_fn, flat_args, kwargs),
+            body_fn(*flat_args),
             out_proxy,
             constant=None,
             tracer=proxy_mode.tracer,

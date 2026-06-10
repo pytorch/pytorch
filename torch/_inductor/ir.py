@@ -5864,6 +5864,7 @@ class FlexGemmEpilogueConfig:
     gemm_op: str
     alpha: float
     beta: float
+    tuned: bool = False
     out_dtype: Any | None = None
 
 

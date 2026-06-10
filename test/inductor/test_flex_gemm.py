@@ -363,6 +363,57 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_epilogue_alpha_clamp_compiled_matches_reference(self):
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+
+        def epilogue_fn(acc):
+            return torch.add(acc, 2.0, alpha=0.25).clamp(min=0.0)
+
+        actual = torch.compile(flex_gemm, backend="inductor", fullgraph=True)(
+            torch.mm,
+            (a, b),
+            epilogue_fn,
+            kernel_options={"backend": "QUACK"},
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            epilogue_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_dynamic_shapes_compiled_matches_reference(self):
+        def epilogue_fn(acc):
+            return (acc + 1).relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        for m in (128, 256):
+            a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+            b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+            actual = compiled(a, b)
+            self.assertMatchesLowPrecisionEager(
+                actual,
+                epilogue_fn(a @ b),
+                epilogue_fn(a.double() @ b.double()),
+                a.shape[1],
+            )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_addmm_compiled_matches_reference(self):
         bias = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)

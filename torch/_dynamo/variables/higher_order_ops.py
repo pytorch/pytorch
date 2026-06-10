@@ -3795,20 +3795,6 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_gemm"
     _ALLOW_FALLBACK_TO_EAGER = False
 
-    def install_subgraph_in_output_graph(
-        self,
-        tx: "InstructionTranslatorBase",
-        fn_vt: VariableTracker,
-        fn_args_vt: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-        body_gmod: GraphModule,
-        attr_name: str = "wrap_body",
-    ) -> str:
-        return tx.output.install_subgraph(
-            "flex_gemm_body",
-            body_gmod,
-        )
-
     def _call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -3843,7 +3829,6 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
 
         _check_supported_callable_arg(tx, args[1], "body_fn")
         operands = args[2].unpack_var_sequence(tx)
-        fn_kwargs_vt = args[3].keys_as_python_constant()
         fn_kwargs = args[3].as_python_constant()
         kernel_options = args[4].as_python_constant()
         if self._HOP_NAME is None:
@@ -3861,8 +3846,9 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
             tx,
             args[1],
             operands,
-            fn_kwargs_vt,
+            {},
             self._HOP_NAME,
+            subgraph_name="flex_gemm_body",
         )
 
         body_node = p_args[0]

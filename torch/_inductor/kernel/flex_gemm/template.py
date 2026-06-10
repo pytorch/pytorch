@@ -34,14 +34,16 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             [arg_name for arg_name, _ in self._template_input_args], config
         )
         call_kwargs += (
-            f", out={self.get_output()}, tuned=False, "
+            f", out={self.get_output()}, tuned={config.tuned!r}, "
             f"epilogue_source={config.epilogue_source!r}"
         )
 
         code = IndentedBuffer()
-        code.writeline("import torch")
-        code.writeline(
-            "from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue as flex_gemm_epilogue"
+        code.splice(
+            """
+            import torch
+            from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue as flex_gemm_epilogue
+            """
         )
         code.splice(config.epilogue_source)
         code.writeline(f"def {self.kernel_name}_main({', '.join(params)}):")

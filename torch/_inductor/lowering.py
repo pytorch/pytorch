@@ -31,7 +31,7 @@ from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.flex_gemm import (
     _SUPPORTED_FLEX_GEMM_OP_NAMES,
     flex_gemm_hop,
-    FLEX_GEMM_OPS,
+    FLEX_GEMM_OP_INPUT_INDICES,
 )
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
@@ -8685,13 +8685,15 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
 
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
 def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
+    """Lower FlexGEMM to the regular subgraph path or the QUACK template."""
     if kernel_options.get("backend", "TRITON") != "QUACK":
         return process_subgraph_nodes(subgraph.graph_module, list(args))
-    if gemm_op not in FLEX_GEMM_OPS:
+    if gemm_op not in FLEX_GEMM_OP_INPUT_INDICES:
         raise NotImplementedError(
             f"FlexGEMM QUACK backend currently supports only aten.{_SUPPORTED_FLEX_GEMM_OP_NAMES}"
         )
-    if kernel_options.get("tuned", False):
+    tuned = kernel_options.get("tuned", False)
+    if tuned:
         raise NotImplementedError(
             "FlexGEMM generated epilogues do not support tuned=True yet"
         )
@@ -8709,15 +8711,25 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     from torch._inductor.kernel.flex_gemm.template import flex_gemm_epilogue_template
     from torch._inductor.select_algorithm import autotune_select_algorithm
 
-    gemm_info = FLEX_GEMM_OPS[gemm_op]
+    mat1_index, _ = FLEX_GEMM_OP_INPUT_INDICES[gemm_op]
     unsupported_gemm_kwargs = OrderedSet(gemm_kwargs) - OrderedSet(["alpha", "beta"])
     if unsupported_gemm_kwargs:
         raise NotImplementedError(
             f"unsupported FlexGEMM GEMM kwargs: {sorted(unsupported_gemm_kwargs)}"
         )
-    gemm_node = flex_gemm_node(subgraph.graph_module, gemm_op)
-    alpha = gemm_node.kwargs.get("alpha", gemm_kwargs.get("alpha", 1.0))
-    beta = gemm_node.kwargs.get("beta", gemm_kwargs.get("beta", 1.0))
+    gemm_fx_node = flex_gemm_node(subgraph.graph_module, gemm_op)
+    placeholders = [
+        node for node in subgraph.graph_module.graph.nodes if node.op == "placeholder"
+    ]
+    placeholder_args = dict(zip(placeholders, args, strict=True))
+    gemm_args: list[TensorBox] = []
+    for arg in gemm_fx_node.args:
+        gemm_arg = placeholder_args[arg] if isinstance(arg, torch.fx.Node) else arg
+        if not isinstance(gemm_arg, TensorBox):
+            raise NotImplementedError("FlexGEMM lowering expects tensor GEMM operands")
+        gemm_args.append(gemm_arg)
+    alpha = gemm_fx_node.kwargs.get("alpha", gemm_kwargs.get("alpha", 1.0))
+    beta = gemm_fx_node.kwargs.get("beta", gemm_kwargs.get("beta", 1.0))
     if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
         raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
     output_meta = flex_gemm_output_node(subgraph.graph_module).meta.get("val")
@@ -8726,15 +8738,15 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             "FlexGEMM generated epilogues require output metadata"
         )
     layout = ir.FixedLayout(
-        args[gemm_info.mat1_index].get_device_or_error(),
+        gemm_args[mat1_index].get_device_or_error(),
         output_meta.dtype,
-        list(output_meta.shape),
-        list(output_meta.stride()),
+        ir.convert_shape_to_inductor(output_meta.shape),
+        ir.convert_shape_to_inductor(output_meta.stride()),
     )
     epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
         subgraph.graph_module, gemm_op
     )
-    input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
+    input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args]
     choices: list[Any] = []
     error = flex_gemm_epilogue_template.maybe_append_choice(
         choices,
@@ -8743,9 +8755,10 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         config=ir.FlexGemmEpilogueConfig(
             epilogue_name=epilogue_name,
             epilogue_source=epilogue_source,
-            gemm_op=gemm_info.quack_name,
+            gemm_op=gemm_op.name().removeprefix("aten::"),
             alpha=float(alpha),
             beta=float(beta),
+            tuned=tuned,
             out_dtype=output_meta.dtype,
         ),
     )
