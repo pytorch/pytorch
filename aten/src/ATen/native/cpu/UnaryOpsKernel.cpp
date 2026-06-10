@@ -301,14 +301,20 @@ static void sign_kernel(TensorIteratorBase& iter){
 
         cpu_kernel_vec(
           iter,
-          [=](scalar_t a) -> scalar_t { return (0 < a) - c10::is_negative(a); },
+          [=](scalar_t a) -> scalar_t {
+            if (at::_isnan(a)) {
+              return a;
+            }
+            return (static_cast<scalar_t>(0) < a) - c10::is_negative(a);
+          },
           [=](Vectorized<scalar_t> self_vec){
-
-              // Comparison operators returns bitmask.
-              auto left = Vectorized<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
-              auto right = Vectorized<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
-
-              return left - right;
+            // Intercept NaN lanes and preserve original NaN values.
+            auto nan_mask = self_vec.isnan();
+            // Comparison operators return bitmask.
+            auto left = Vectorized<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
+            auto right = Vectorized<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
+            auto result = left - right;
+            return Vectorized<scalar_t>::blendv(result, self_vec, nan_mask);
           });
     });
   }
