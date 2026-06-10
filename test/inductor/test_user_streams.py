@@ -1227,7 +1227,7 @@ with torch.cuda._DeviceGuard(0):
     default_stream = torch.cuda.current_stream()
     stream1 = get_external_object_by_index(1)
     with torch.cuda.stream(stream1):
-        arg0_1 = copy_misaligned(arg0_1)
+        arg0_1 = copy_if_misaligned(arg0_1)
         buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
         raw_stream = get_raw_stream(0)
         triton_kernel.run(arg0_1, buf0, 1024, stream=raw_stream)
@@ -1294,12 +1294,12 @@ class GraphModule(torch.nn.Module):
         FileCheck().run(
             """\
 # CHECK: with torch.cuda.stream(default_stream):
-# CHECK: copy_misaligned
+# CHECK: copy_if_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: record_event
 # CHECK: with torch.cuda.stream(stream1):
 # CHECK: wait_event
-# CHECK: copy_misaligned
+# CHECK: copy_if_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: with torch.cuda.stream(default_stream):
 # CHECK: synchronize_stream""",
@@ -1388,17 +1388,17 @@ class GraphModule(torch.nn.Module):
         FileCheck().run(
             """\
 # CHECK: with torch.cuda.stream(stream1):
-# CHECK: copy_misaligned
+# CHECK: copy_if_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: record_event
 # CHECK: with torch.cuda.stream(stream2):
 # CHECK: wait_event
-# CHECK: copy_misaligned
+# CHECK: copy_if_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: record_event
 # CHECK: with torch.cuda.stream(stream3):
 # CHECK: wait_event
-# CHECK: copy_misaligned
+# CHECK: copy_if_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: with torch.cuda.stream(default_stream):
 # CHECK: synchronize_stream
@@ -1480,11 +1480,11 @@ class GraphModule(torch.nn.Module):
         FileCheck().run(
             """\
 # CHECK: with torch.cuda.stream(stream1):
-# CHECK: copy_misaligned
+# CHECK: copy_if_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: record_event
 # CHECK: with torch.cuda.stream(stream2):
-# CHECK: copy_misaligned
+# CHECK: copy_if_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: record_event
 # CHECK: with torch.cuda.stream(default_stream):
