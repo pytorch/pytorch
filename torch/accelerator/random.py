@@ -6,17 +6,21 @@ from torch import Tensor
 from ._utils import _device_t, _get_device_index, _lazy_call
 
 
-def initial_seed() -> int:
+def initial_seed(device: _device_t = None, /) -> int:
     r"""Return the initial seed of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
-    on the current device (:func:`torch.accelerator.current_device_index`).
+    on the specified device.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): The device to return the initial seed of.
+            If not given, uses :func:`torch.accelerator.current_device_index` by default.
 
     Returns:
-        int: the initial seed of the default generator for the current device.
+        int: the initial seed of the default generator for the specified device.
 
     .. warning::
         This function eagerly initializes the accelerator runtime.
     """
-    device_index = torch.accelerator.current_device_index()
+    device_index = _get_device_index(device, optional=True)
     default_generator = torch._C._accelerator_getDefaultGenerator(device_index)
     return default_generator.initial_seed()
 
@@ -97,12 +101,14 @@ def set_rng_state_all(new_states: Iterable[Tensor]) -> None:
         set_rng_state(state, i)
 
 
-def manual_seed(seed: int) -> None:
+def manual_seed(seed: int, device: _device_t = None) -> None:
     r"""Set the seed for generating random numbers for the current :ref:`accelerator<accelerators>`
-    on the current device (:func:`torch.accelerator.current_device_index`).
+    on the specified device.
 
     Args:
         seed (int): The desired seed.
+        device (:class:`torch.device`, str, int, optional): The device to set the seed for.
+            If not given, uses :func:`torch.accelerator.current_device_index` by default
 
     .. warning::
         If you are working with a multi-device model, this function is insufficient
@@ -112,10 +118,15 @@ def manual_seed(seed: int) -> None:
         If the accelerator runtime is not yet initialized, the state is deferred
         and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
+    device_index = _get_device_index(device) if device is not None else None
 
     def cb() -> None:
-        device_index = torch.accelerator.current_device_index()
-        default_generator = torch._C._accelerator_getDefaultGenerator(device_index)
+        idx = (
+            device_index
+            if device_index is not None
+            else torch.accelerator.current_device_index()
+        )
+        default_generator = torch._C._accelerator_getDefaultGenerator(idx)
         default_generator.manual_seed(seed)
 
     _lazy_call(cb, seed=True)
@@ -140,9 +151,13 @@ def manual_seed_all(seed: int) -> None:
     _lazy_call(cb, seed_all=True)
 
 
-def seed() -> None:
+def seed(device: _device_t = None, /) -> None:
     r"""Set the seed for generating random numbers to a random number for the current :ref:`accelerator<accelerators>`
-    on the current device (:func:`torch.accelerator.current_device_index`).
+    on the specified device.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): The device to set the seed for.
+            If not given, uses :func:`torch.accelerator.current_device_index` by default.
 
     .. warning::
         If you are working with a multi-device model, this function is insufficient
@@ -152,10 +167,15 @@ def seed() -> None:
         If the accelerator runtime is not yet initialized, the state is deferred
         and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
+    device_index = _get_device_index(device) if device is not None else None
 
     def cb() -> None:
-        device_index = torch.accelerator.current_device_index()
-        default_generator = torch._C._accelerator_getDefaultGenerator(device_index)
+        idx = (
+            device_index
+            if device_index is not None
+            else torch.accelerator.current_device_index()
+        )
+        default_generator = torch._C._accelerator_getDefaultGenerator(idx)
         default_generator.seed()
 
     _lazy_call(cb)
