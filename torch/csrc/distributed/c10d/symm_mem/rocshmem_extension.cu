@@ -892,12 +892,13 @@ void all_to_all_vdev_2d_offset(
 } // namespace c10d::nvshmem_extension
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
-  m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
-  m.impl("nvshmem_put", c10d::nvshmem_extension::nvshmem_put);
-  m.impl("nvshmem_get", c10d::nvshmem_extension::nvshmem_get);
-  m.impl("nvshmem_wait_for_signal", c10d::nvshmem_extension::nvshmem_wait_for_signal);
-  m.impl("nvshmem_put_with_signal", c10d::nvshmem_extension::nvshmem_put_with_signal);
-  m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
+  // On ROCm, only register vendor-neutral shmem_* ops (not nvshmem_*).
+  m.impl("shmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
+  m.impl("shmem_put", c10d::nvshmem_extension::nvshmem_put);
+  m.impl("shmem_get", c10d::nvshmem_extension::nvshmem_get);
+  m.impl("shmem_wait_for_signal", c10d::nvshmem_extension::nvshmem_wait_for_signal);
+  m.impl("shmem_put_with_signal", c10d::nvshmem_extension::nvshmem_put_with_signal);
+  m.impl("shmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
   m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
   m.impl("all_to_all_vdev_2d_offset", c10d::nvshmem_extension::all_to_all_vdev_2d_offset);

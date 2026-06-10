@@ -1070,4 +1070,12 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("all_to_all_vdev_2d_offset", c10d::nvshmem_extension::all_to_all_vdev_2d_offset);
   m.impl("tile_reduce", c10d::nvshmem_extension::tile_reduce);
   m.impl("multi_root_tile_reduce", c10d::nvshmem_extension::multi_root_tile_reduce);
+
+  // Vendor-neutral shmem_* aliases.
+  m.impl("shmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
+  m.impl("shmem_put", c10d::nvshmem_extension::nvshmem_put);
+  m.impl("shmem_get", c10d::nvshmem_extension::nvshmem_get);
+  m.impl("shmem_wait_for_signal", c10d::nvshmem_extension::nvshmem_wait_for_signal);
+  m.impl("shmem_put_with_signal", c10d::nvshmem_extension::nvshmem_put_with_signal);
+  m.impl("shmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
 }

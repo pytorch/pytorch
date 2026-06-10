@@ -60,6 +60,7 @@ device_type = "cuda"
 device_module = torch.get_device_module(device_type)
 
 
+@instantiate_parametrized_tests
 @requires_nvshmem()
 @requires_cuda_p2p_access()
 class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
@@ -101,7 +102,11 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(out.device, self.device)
         symm_mem.rendezvous(out, group=group_name)
 
-    def test_mempool_tensor_factory(self) -> None:
+    @parametrize(
+        "broadcast_op",
+        [torch.ops.symm_mem.nvshmem_broadcast, torch.ops.symm_mem.shmem_broadcast],
+    )
+    def test_mempool_tensor_factory(self, broadcast_op) -> None:
         """
         Test the effectiveness of MemPool on tensor factory ops.
         """
@@ -122,7 +127,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
                 tensor = torch.zeros(numel, dtype=dtype, device=self.device)
 
         symm_mem.rendezvous(tensor, group=group_name)
-        torch.ops.symm_mem.nvshmem_broadcast(tensor, src_rank, group_name)
+        broadcast_op(tensor, src_rank, group_name)
         self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
 
     def test_mempool_tensor_w_collective(self) -> None:
@@ -147,7 +152,11 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             tensor, torch.ones(numel, dtype=dtype, device=self.device) * self.world_size
         )
 
-    def test_mempool_compute_ops(self) -> None:
+    @parametrize(
+        "broadcast_op",
+        [torch.ops.symm_mem.nvshmem_broadcast, torch.ops.symm_mem.shmem_broadcast],
+    )
+    def test_mempool_compute_ops(self, broadcast_op) -> None:
         """
         Apply MemPool context to a compute op that creates input to collective.
         """
@@ -167,7 +176,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             y = torch.mm(x, w)
 
         # y should be a symm tensor
-        torch.ops.symm_mem.nvshmem_broadcast(y, 0, group_name)
+        broadcast_op(y, 0, group_name)
         expected = torch.mm(x0, w)
         self.assertEqual(y, expected)
 
@@ -248,7 +257,20 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         else:
             self.assertEqual(handle.multicast_ptr, 0)
 
-    def test_nvshmem_put(self) -> None:
+    @parametrize(
+        "put_with_signal_op, wait_for_signal_op",
+        [
+            (
+                torch.ops.symm_mem.nvshmem_put_with_signal,
+                torch.ops.symm_mem.nvshmem_wait_for_signal,
+            ),
+            (
+                torch.ops.symm_mem.shmem_put_with_signal,
+                torch.ops.symm_mem.shmem_wait_for_signal,
+            ),
+        ],
+    )
+    def test_nvshmem_put(self, put_with_signal_op, wait_for_signal_op) -> None:
         self._init_device()
         group_name = dist.group.WORLD.group_name
 
@@ -260,16 +282,18 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         signal_val = 5
 
         if self.rank == 0:
-            torch.ops.symm_mem.nvshmem_put_with_signal(
-                tensor, signal_pad, signal_val, 1
-            )
+            put_with_signal_op(tensor, signal_pad, signal_val, 1)
         elif self.rank == 1:
-            torch.ops.symm_mem.nvshmem_wait_for_signal(signal_pad, signal_val, 0)
+            wait_for_signal_op(signal_pad, signal_val, 0)
             torch.testing.assert_close(
                 tensor, torch.zeros(numel, dtype=dtype, device=self.device)
             )
 
-    def test_nvshmem_get(self) -> None:
+    @parametrize(
+        "get_op",
+        [torch.ops.symm_mem.nvshmem_get, torch.ops.symm_mem.shmem_get],
+    )
+    def test_nvshmem_get(self, get_op) -> None:
         self._init_device()
         group_name = dist.group.WORLD.group_name
 
@@ -279,7 +303,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(tensor, group=group_name)
 
         if self.rank == 0:
-            torch.ops.symm_mem.nvshmem_get(tensor, 1)
+            get_op(tensor, 1)
             # TODO: remove after we have wait_signal
             dist.barrier()
             torch.testing.assert_close(
@@ -305,7 +329,11 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    def test_nvshmem_all_to_all(self) -> None:
+    @parametrize(
+        "all_to_all_op",
+        [torch.ops.symm_mem.nvshmem_all_to_all, torch.ops.symm_mem.shmem_all_to_all],
+    )
+    def test_nvshmem_all_to_all(self, all_to_all_op) -> None:
         self._init_device()
 
         group_name = dist.group.WORLD.group_name
@@ -318,7 +346,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
 
         symm_mem.rendezvous(inp, group=group_name)
         symm_mem.rendezvous(out, group=group_name)
-        torch.ops.symm_mem.nvshmem_all_to_all(inp, out, group_name)
+        all_to_all_op(inp, out, group_name)
 
         expected = torch.cat(
             [

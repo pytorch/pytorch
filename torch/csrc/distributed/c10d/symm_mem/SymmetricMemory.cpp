@@ -563,6 +563,17 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
+
+  // Vendor-neutral shmem_* aliases (e.g. for rocshmem compatibility).
+  m.def("shmem_put(Tensor(a!) tensor, int peer) -> ()");
+  m.def("shmem_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def(
+      "shmem_broadcast(Tensor(a!) input, int root, str group_name) -> Tensor(a!)");
+  m.def("shmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
+  m.def(
+      "shmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
+  m.def(
+      "shmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(
       "all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name) -> ()");
   m.def(
