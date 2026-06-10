@@ -107,13 +107,10 @@ def _create_gemm_arguments(
 
         case "GEMM":
             a, b = input_tensors
+            kwargs: dict[str, Any] = {"accumulator_type": accumulator_type}
             if epilogue is not None:
-                return cutlass_api.arguments.GemmArguments(
-                    a, b, out, accumulator_type=accumulator_type, epilogue=epilogue
-                )
-            return cutlass_api.arguments.GemmArguments(
-                a, b, out, accumulator_type=accumulator_type
-            )
+                kwargs["epilogue"] = epilogue
+            return cutlass_api.arguments.GemmArguments(a, b, out, **kwargs)
 
         case _:
             raise NotImplementedError(f"Unsupported NVGEMM variant: {variant_name}")
@@ -145,7 +142,7 @@ def _lookup_gemm_kernel(
 
 
 def _tensor_sig(t):
-    return (t.shape, t.stride(), t.dtype, t.device)
+    return (t.shape, t.stride(), t.dtype)
 
 
 def _create_gemm_cache_key(
@@ -392,12 +389,10 @@ class NVUniversalGemmKernel(Kernel):
         self.epilogue_var_renames = epilogue_var_renames or {}
 
         self._template_input_args: list[tuple[str, Buffer]] = []
-        self._seen_input_args: OrderedSet[str] = OrderedSet()
 
         for i, input_node in enumerate(input_nodes):
             param_name = f"in_ptr{i}"
             self._template_input_args.append((param_name, input_node))
-            self._seen_input_args.add(param_name)
 
     def render(self) -> str:
         """Render the Python source for the NVGEMM kernel wrapper."""
@@ -448,7 +443,6 @@ class NVUniversalGemmKernel(Kernel):
         code = IndentedBuffer()
 
         # -- Module-level imports and constants --
-        code.writeline("import torch")
         code.writeline("import cutlass")
         code.writeline(
             "from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import ("
