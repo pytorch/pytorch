@@ -2522,7 +2522,7 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
         from unittest import mock
 
         from torch._guards import detect_fake_mode
-        from torch._inductor.virtualized import V
+        from torch._inductor.compile_fx import compile_fx
 
         fake_mode = detect_fake_mode(inputs_)
         ctx = (
@@ -2530,12 +2530,15 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
             if fake_mode
             else nullcontext()
         )
-        with (
-            V.set_aot_compilation(True),
-            ctx,
-            torch._inductor.config.patch("enable_autograd_for_aot", True),
-        ):
-            return super().__call__(model_, inputs_, config_patches=config_patches)
+        all_patches = {**self.config, **(config_patches or {})}
+        with ctx, torch._inductor.config.patch("enable_autograd_for_aot", True):
+            return compile_fx(
+                model_,
+                inputs_,
+                config_patches=all_patches,
+                compile_region_name=self.name,
+                aot_mode=True,
+            )
 
 
 class _TorchCompileWrapper:

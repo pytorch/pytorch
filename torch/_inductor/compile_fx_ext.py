@@ -74,7 +74,6 @@ class _VirtualizedSerializer:
 
     # The values here get serialized. We don't grab everything because some of
     # the fields can't be serialized.
-    aot_compilation: Any = None
     choices: Any = None
     local_buffer_context: Any = None
     ops: Any = None

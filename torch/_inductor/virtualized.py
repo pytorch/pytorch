@@ -15,7 +15,7 @@ associated with a symbolic expression.
 
 There are a few distinct usage patterns for virtualized global variables:
 
-1. Implicit argument passing.  Examples: ``V.current_node``, ``V.aot_compilation``.
+1. Implicit argument passing.  Examples: ``V.current_node``, ``V.graph``.
    Use ``V.set_current_node`` to change what the current node is while we're
    executing some region of code, so code inside that region can query ``V.current_node``
    to find out what it is.  This is often more convenient than manually threading
@@ -198,7 +198,6 @@ _kernel: Virtualized[NullKernelHandler] = Virtualized(
 )  # TODO: improve type
 _debug: Virtualized[DebugContext] = Virtualized("debug", NullHandler)
 _interpreter: Virtualized[InterpreterShim] = Virtualized("interpreter", NullHandler)
-_aot_compilation: Virtualized[bool] = Virtualized("aot_compilation", NullHandler)
 _current_node: Virtualized[torch.fx.Node] = Virtualized("current_node", NullHandler)
 _local_buffer_context: Virtualized[LocalBufferContext] = Virtualized(
     "local_buffer_context", NullHandler
@@ -381,8 +380,6 @@ class _V:
     set_kernel_handler: Callable[[Any], Any] = _kernel._set_handler
     set_debug_handler: Callable[[Any], Any] = _debug._set_handler
     set_interpreter_handler: Callable[[Any], Any] = _interpreter._set_handler
-    set_aot_compilation: Callable[[bool], Any] = _aot_compilation._set_handler
-    get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
     set_current_node: Callable[[Any], Any] = _current_node._set_handler
     get_current_node: Callable[[], Any] = _current_node._get_handler
     set_local_buffer_context: Callable[[Any], Any] = _local_buffer_context._set_handler
@@ -442,10 +439,6 @@ class _V:
     @property
     def interpreter(self):
         return _interpreter._get_handler()
-
-    @property
-    def aot_compilation(self):
-        return _aot_compilation._get_handler() is True
 
     @property
     def current_node(self):

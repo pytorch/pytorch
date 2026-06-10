@@ -73,6 +73,15 @@ if torch._C._has_mkldnn:
             raise NotImplementedError
 
     class CpuMkldnnDeviceOp(MkldnnDeviceOpBase):
+        @staticmethod
+        def _graph_aot_mode(graph):
+            # Freezing weight-pack patterns run before GraphLowering exists.
+            owning_module = graph.owning_module
+            return bool(
+                owning_module is not None
+                and owning_module.meta.get("_inductor_aot_mode", False)
+            )
+
         def get_linear_transpose_weight(self, weight_node):
             packed_weight_node = weight_node
             assert packed_weight_node.target == mkldnn._reorder_linear_weight
@@ -120,7 +129,7 @@ if torch._C._has_mkldnn:
                 if (
                     is_lp_weight
                     or mkldnn._is_mkldnn_acl_supported()
-                    or V.aot_compilation
+                    or self._graph_aot_mode(graph)
                     or has_free_symbols(batch_size)
                 )
                 else torch.ops.mkl._mkl_reorder_linear_weight
@@ -137,7 +146,7 @@ if torch._C._has_mkldnn:
             if (
                 is_lp_weight
                 or mkldnn._is_mkldnn_acl_supported()
-                or V.aot_compilation
+                or self._graph_aot_mode(graph)
                 or has_free_symbols(batch_size)
             ):
                 packed_linear_inputs += (bias, "none", [], "")

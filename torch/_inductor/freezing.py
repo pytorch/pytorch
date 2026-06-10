@@ -75,6 +75,8 @@ def freeze(
     dynamo_gm: torch.fx.GraphModule,
     aot_autograd_gm: torch.fx.GraphModule,
     example_inputs: list[torch._subclasses.FakeTensor],
+    *,
+    aot_mode: bool = False,
 ) -> tuple[torch.fx.GraphModule, list[int]]:
     """
     Inlines parameters that are not mutated into constants and optimizes the graph through constant propagation
@@ -92,13 +94,15 @@ def freeze(
         of the inputs that were preserved (not turned into constants).
     """
     with enter_freezing():
-        return _freeze(dynamo_gm, aot_autograd_gm, example_inputs)
+        return _freeze(dynamo_gm, aot_autograd_gm, example_inputs, aot_mode=aot_mode)
 
 
 def _freeze(
     dynamo_gm: torch.fx.GraphModule,
     aot_autograd_gm: torch.fx.GraphModule,
     example_inputs: list[torch._subclasses.FakeTensor],
+    *,
+    aot_mode: bool = False,
 ) -> tuple[torch.fx.GraphModule, list[int]]:
     # We have convert conv's weight to channels last which may meet error for .view
     # when doing fake_tensor_prop. So we need to convert view to reshape first.
@@ -124,7 +128,7 @@ def _freeze(
     aot_autograd_gm.recompile()
 
     aot_example_inputs = [example_inputs[ind] for ind in preserved_arg_indices]
-    freezing_passes(aot_autograd_gm, aot_example_inputs)
+    freezing_passes(aot_autograd_gm, aot_example_inputs, aot_mode=aot_mode)
 
     constant_fold(aot_autograd_gm)
     # invalidate nn Modules

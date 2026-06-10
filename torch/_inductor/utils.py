@@ -2488,7 +2488,7 @@ def use_nv_universal_gemm_template(
 
     from .virtualized import V
 
-    if V.aot_compilation:
+    if V.graph.aot_mode:
         return False
 
     if layout.device.type != "cuda" or torch.version.hip:
@@ -3917,7 +3917,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     #   - If allowed range does have an upper bound, then obey the upper bound
     #       (check whether upper bound < int32_max) without checking the hint.
 
-    if V.aot_compilation:
+    if V.graph.aot_mode:
         # check whether value has an upper bound (1e20 is > INT64_MAX, assume
         # there is no upper bound if it can be larger than 1e20)
         if V.graph.sizevars.statically_known_true(e < 1e20):

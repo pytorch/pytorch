@@ -186,7 +186,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         Get the input nodes corresponding to FX graph placeholders.
         """
 
-        if V.aot_compilation and not self.is_subgraph:
+        if V.graph.aot_mode and not self.is_subgraph:
             # AOT graphs must match the signature of the input module.
             return {
                 node.name: V.graph.graph_inputs.get(node.name)
