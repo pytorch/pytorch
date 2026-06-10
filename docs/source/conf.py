@@ -679,23 +679,23 @@ coverage_ignore_functions = [
     # torch.nn.modules.rnn
     "apply_permutation",  # deprecated
     # torch.nn.parallel.comm
-    "broadcast",
-    "broadcast_coalesced",
-    "gather",
-    "reduce_add",
-    "reduce_add_coalesced",
-    "scatter",
+    # "broadcast",
+    # "broadcast_coalesced",
+    # "gather",
+    # "reduce_add",
+    # "reduce_add_coalesced",
+    # "scatter",
     # torch.nn.parallel.data_parallel
-    "data_parallel",
+    # "data_parallel",
     # torch.nn.parallel.parallel_apply
     "get_a_var",
-    "parallel_apply",
+    # "parallel_apply",
     # torch.nn.parallel.replicate
     "replicate",
     # torch.nn.parallel.scatter_gather
-    "gather",
+    # "gather",
     "is_namedtuple",
-    "scatter",
+    # "scatter",
     "scatter_kwargs",
     # torch.nn.utils.rnn
     "bind",  # looks unintentionally public

@@ -403,6 +403,80 @@ Global Hooks For Module
     nn.parallel.DistributedDataParallel
 ```
 
+Functional API:
+
+```{eval-rst}
+.. automodule:: torch.nn.parallel.data_parallel
+```
+
+```{eval-rst}
+.. currentmodule:: torch.nn.parallel.data_parallel
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    data_parallel
+```
+
+```{eval-rst}
+.. automodule:: torch.nn.parallel.parallel_apply
+```
+
+```{eval-rst}
+.. currentmodule:: torch.nn.parallel.parallel_apply
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    parallel_apply
+```
+
+```{eval-rst}
+.. automodule:: torch.nn.parallel.scatter_gather
+```
+
+```{eval-rst}
+.. currentmodule:: torch.nn.parallel.scatter_gather
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    scatter
+    gather
+```
+
+Primitive collectives used internally by :class:`nn.DataParallel`:
+
+```{eval-rst}
+.. automodule:: torch.nn.parallel.comm
+```
+
+```{eval-rst}
+.. currentmodule:: torch.nn.parallel.comm
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    broadcast
+    broadcast_coalesced
+    reduce_add
+    reduce_add_coalesced
+    scatter
+    gather
+```
+
 ## Utilities
 
 ```{eval-rst}
@@ -655,11 +729,8 @@ floating point precision. PyTorch supports both per tensor and per channel asymm
 .. py:module:: torch.nn.modules.transformer
 .. py:module:: torch.nn.modules.upsampling
 .. py:module:: torch.nn.modules.utils
-.. py:module:: torch.nn.parallel.comm
 .. py:module:: torch.nn.parallel.distributed
-.. py:module:: torch.nn.parallel.parallel_apply
 .. py:module:: torch.nn.parallel.replicate
-.. py:module:: torch.nn.parallel.scatter_gather
 .. py:module:: torch.nn.parameter
 .. py:module:: torch.nn.utils.clip_grad
 .. py:module:: torch.nn.utils.convert_parameters
