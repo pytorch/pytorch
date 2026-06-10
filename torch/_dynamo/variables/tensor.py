@@ -932,31 +932,6 @@ class TensorVariable(VariableTracker):
                 ),
             )
 
-        # For historical reasons, these ops decompose down to syntactically
-        # invalid aten ops because they contain the python keyword `from`, see
-        # discussions in #151432 for more details.
-        # We graph break for now since this use case is uncommon.
-        if name == "random_":
-            unimplemented(
-                gb_type="Tensor.random_ op",
-                context=f"Tensor.{name}({args=}, {kwargs=})",
-                explanation="This is currently not supported.",
-                hints=[
-                    "Use the out-of-place version of this op",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
-        elif name == "uniform_" and "from" in kwargs:
-            unimplemented(
-                gb_type="Tensor.uniform_ op called with `from` keyword",
-                context=f"Tensor.{name}({args=}, {kwargs=})",
-                explanation="This is currently not supported.",
-                hints=[
-                    "Avoid using the `from` keyword.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
-
         try:
             handler_method = getattr(self, f"method_{name}")
         except AttributeError:

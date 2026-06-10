@@ -130,37 +130,39 @@ inline void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
   }
 }
 
-template<template<typename> class random_from_to_kernel, typename RNG>
-at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, std::optional<int64_t> to_opt, std::optional<Generator> generator) {
-  uint64_t range = 0;
-  auto iter = at::TensorIterator::borrowing_nullary_op(self);
+struct RandomFromToRange {
+  uint64_t range;
+  int64_t from;
+  bool is_full_range;
+};
+
+inline RandomFromToRange check_random_from_to_args(const at::Tensor& self, int64_t from, std::optional<int64_t> to_opt) {
+  const auto dtype = self.scalar_type();
   if (to_opt.has_value()) {
     // [from, to)
     int64_t to = *to_opt;
     TORCH_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
-    if (isFloatingType(iter.dtype())) {
-      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "random_update_from_to", [&] {
+    if (isFloatingType(dtype)) {
+      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, dtype, "random_update_from_to", [&] {
         from = update_from<scalar_t>(from);
         to = update_to<scalar_t>(to);
         TORCH_CHECK(from < to, "random_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=", from, " >= to=", to);
       });
     }
     check_from_to_in_range(from, to - 1, self.dtype());
-    CHECK_EMPTY_AND_RETURN(self);
-    range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
-    random_from_to_kernel<RNG>()(iter, range, from, generator);
+    return {static_cast<uint64_t>(to) - static_cast<uint64_t>(from), from, false};
   } else if (from != std::numeric_limits<int64_t>::lowest()) {
     // [from, std::numeric_limits<int64_t>::max()]
     int64_t to_inc = 0;
-    if (isFloatingType(iter.dtype())) {
-      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "random_from_to_range_calc", [&] {
+    if (isFloatingType(dtype)) {
+      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, dtype, "random_from_to_range_calc", [&] {
         constexpr int64_t scalar_t_max = static_cast<int64_t>(1) << std::numeric_limits<scalar_t>::digits;
         to_inc = scalar_t_max > std::numeric_limits<int64_t>::max() ? std::numeric_limits<int64_t>::max() : static_cast<int64_t>(scalar_t_max);
         from = update_from<scalar_t>(from);
         TORCH_CHECK(from < to_inc, "random_ expects 'from' casted to dtype to be less than or equal to 'to_inc' casted to dtype, but got from=", from, " > to_inc=", to_inc);
       });
-    } else if (isIntegralType(iter.dtype(), /*includeBool=*/true)) {
-      AT_DISPATCH_V2(self.scalar_type(), "random_from_to_range_calc", AT_WRAP([&] {
+    } else if (isIntegralType(dtype, /*includeBool=*/true)) {
+      AT_DISPATCH_V2(dtype, "random_from_to_range_calc", AT_WRAP([&] {
         if constexpr (std::is_same_v<scalar_t, bool>) {
           to_inc = static_cast<int64_t>(true);
         } else {
@@ -171,14 +173,23 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, std::optional<in
       TORCH_CHECK(false, "random_from_to_impl handles only integral, floating-point and boolean types");
     }
     check_from_to_in_range(from, to_inc, self.dtype());
-    CHECK_EMPTY_AND_RETURN(self);
-    range = static_cast<uint64_t>(to_inc) - static_cast<uint64_t>(from) + 1;
-    random_from_to_kernel<RNG>()(iter, range, from, generator);
+    return {static_cast<uint64_t>(to_inc) - static_cast<uint64_t>(from) + 1, from, false};
   } else {
     // [std::numeric_limits<int64_t>::lowest(), std::numeric_limits<int64_t>::max()]
     // range = 2^64
-    CHECK_EMPTY_AND_RETURN(self);
+    return {0, from, true};
+  }
+}
+
+template<template<typename> class random_from_to_kernel, typename RNG>
+at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, std::optional<int64_t> to_opt, std::optional<Generator> generator) {
+  auto bounds = check_random_from_to_args(self, from, to_opt);
+  CHECK_EMPTY_AND_RETURN(self);
+  auto iter = at::TensorIterator::borrowing_nullary_op(self);
+  if (bounds.is_full_range) {
     random_from_to_kernel<RNG>()(iter, generator);
+  } else {
+    random_from_to_kernel<RNG>()(iter, bounds.range, bounds.from, generator);
   }
   return self;
 }
