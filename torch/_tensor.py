@@ -1248,15 +1248,21 @@ class Tensor(torch._C.TensorBase):
 
     # Wrap Numpy array again in a suitable tensor when done, to support e.g.
     # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
-    def __array_wrap__(self, array):
+    def __array_wrap__(self, array, context=None, return_scalar=False):
         if has_torch_function_unary(self):
             return handle_torch_function(
-                Tensor.__array_wrap__, (self,), self, array=array
+                Tensor.__array_wrap__,
+                (self,),
+                self,
+                array=array,
+                context=context,
+                return_scalar=return_scalar,
             )
         if array.dtype == bool:
             # Workaround, torch has no built-in bool tensor
             array = array.astype("uint8")
-        return torch.from_numpy(array)
+        result = torch.from_numpy(array)
+        return result.item() if return_scalar else result
 
     def __contains__(self, element: Any, /) -> bool:
         r"""Check if `element` is present in tensor
