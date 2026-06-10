@@ -56,11 +56,7 @@ class TestSubgraphChoice(TestCase):
 
             kPartitions = 256
 
-            decompose_k_subgraph_template = (
-                torch._inductor.kernel.mm.DecomposeKSugraphTemplate()
-            )
-
-            decompose_k_subgraph_template.maybe_append_choice(
+            torch._inductor.kernel.mm.decompose_k_subgraph_template.maybe_append_choice(
                 choices,
                 k_split=kPartitions,
                 input_nodes=(mat1, mat2),
@@ -125,11 +121,7 @@ class TestSubgraphChoice(TestCase):
 
             kPartitions = 2
 
-            decompose_k_subgraph_template = (
-                torch._inductor.kernel.mm.DecomposeKSugraphTemplate()
-            )
-
-            decompose_k_subgraph_template.maybe_append_choice(
+            torch._inductor.kernel.mm.decompose_k_subgraph_template.maybe_append_choice(
                 choices,
                 k_split=kPartitions,
                 input_nodes=(mat1, mat2),

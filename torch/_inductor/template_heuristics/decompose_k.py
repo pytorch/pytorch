@@ -5,7 +5,10 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 from ..ir import get_free_symbols
-from ..kernel.mm import decompose_k_subgraph_template
+from ..kernel.mm import (
+    decompose_k_addmm_subgraph_template,
+    decompose_k_subgraph_template,
+)
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import get_k_splits
 from ..virtualized import V
@@ -19,6 +22,9 @@ if TYPE_CHECKING:
 
 
 @register_template_heuristic(decompose_k_subgraph_template.uid, None, op_name="mm")
+@register_template_heuristic(
+    decompose_k_addmm_subgraph_template.uid, None, op_name="addmm"
+)
 class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
     """empty heuristics to skip decompose k on anything not cuda"""
 
@@ -35,23 +41,21 @@ class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
     "cuda",
     op_name="mm",
 )
-# TODO(coconutruben): enable decompose k on other devices (xpu, cpu, mps, mtia)
-# by either adding specific register_template_heuristic tags, or setting the
-# device to None (enabled on all devices)
+@register_template_heuristic(
+    decompose_k_addmm_subgraph_template.uid,
+    "cuda",
+    op_name="addmm",
+)
 class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
-        """
-        Get all the valid k_splits for the given m, n, k.
-        """
         assert isinstance(kernel_inputs, MMKernelInputs), (
             f"{self.__class__.__name__} requires MMKernelInputs"
         )
 
-        # Check for unbacked symbols - if found, yield nothing
         unbacked_symbols = any(
             len(get_free_symbols(itr, unbacked_only=True)) > 0
             for itr in (
@@ -70,3 +74,15 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             ):
                 continue
             yield {"k_split": k_split}
+
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> dict[str, Any]:
+        if op_name == "addmm":
+            return {
+                "alpha": kernel_inputs.get_scalar("alpha"),
+                "beta": kernel_inputs.get_scalar("beta"),
+            }
+        return {}

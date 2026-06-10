@@ -1794,9 +1794,15 @@ class TestMaxAutotune(TestCase):
                     "decompose_k"
                 ).run(code[0])
             else:
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
-                ).check("decompose_k").run(code[0])
+                fc = FileCheck()
+                # On ROCm the inner bmm in decompose_k uses a Triton
+                # template instead of the ATen extern kernel, and the
+                # fused kernel naming differs.
+                if not torch.version.hip:
+                    fc = fc.check("extern_kernels.bmm_dtype").check_regex(
+                        "triton_.*_fused_.*.run"
+                    )
+                fc.check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
 
@@ -1808,9 +1814,12 @@ class TestMaxAutotune(TestCase):
                     "decompose_k"
                 ).run(code[0])
             else:
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
-                ).check("decompose_k").run(code[0])
+                fc = FileCheck()
+                if not torch.version.hip:
+                    fc = fc.check("extern_kernels.bmm_dtype").check_regex(
+                        "triton_.*_fused_.*.run"
+                    )
+                fc.check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(
                     compiled_func(a, b), (a @ b).relu(), atol=atol, rtol=rtol
@@ -1828,9 +1837,12 @@ class TestMaxAutotune(TestCase):
                     "decompose_k"
                 ).run(code[0])
             else:
-                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*_0.run"
-                ).check("decompose_k").run(code[0])
+                fc = FileCheck()
+                if not torch.version.hip:
+                    fc = fc.check("extern_kernels.bmm_dtype").check_regex(
+                        "triton_.*_fused_.*_0.run"
+                    )
+                fc.check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(
                     compiled_func(a, b),
@@ -1844,6 +1856,57 @@ class TestMaxAutotune(TestCase):
             )
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
                 bf16_red_setting
+            )
+
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000)))
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        comprehensive_padding=False,
+        shape_padding=False,
+    )
+    def test_max_autotune_decompose_k_addmm(self, sizes, dtype):
+        with config.patch(_DECOMPOSE_K_PATCH_ROCM):
+            M, N, K = sizes
+
+            atol = 1e-2
+            rtol = 1e-2
+            a, b = self._make_matrices(
+                M,
+                K,
+                N,
+                dtype=dtype,
+                device=GPU_TYPE,
+                requires_grad=False,
+            )
+            bias = torch.randn(N, dtype=dtype, device=GPU_TYPE)
+
+            compiled_func = torch.compile(lambda a, b, bias: torch.addmm(bias, a, b))
+            out, code = run_and_get_code(compiled_func, a, b, bias)
+            FileCheck().check("decompose_k").run(code[0])
+            torch.testing.assert_close(
+                out, torch.addmm(bias, a, b), atol=atol, rtol=rtol
+            )
+
+            # Test with non-unit alpha/beta
+            compiled_func = torch.compile(
+                lambda a, b, bias: torch.addmm(bias, a, b, alpha=0.5, beta=2.0)
+            )
+            out, code = run_and_get_code(compiled_func, a, b, bias)
+            FileCheck().check("decompose_k").run(code[0])
+            torch.testing.assert_close(
+                out,
+                torch.addmm(bias, a, b, alpha=0.5, beta=2.0),
+                atol=atol,
+                rtol=rtol,
             )
 
     @unittest.skipIf(

@@ -208,7 +208,8 @@ def check_supported_striding(mat_a, mat_b) -> None:
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
 
-def decomposeK(a, b, k_splits):
+def _decomposeK_core(a, b, k_splits):
+    """Shared core: reshape, batched matmul, sum-reduce over the split dimension."""
     m = a.shape[0]
     n = b.shape[1]
     k = a.shape[1]
@@ -218,33 +219,43 @@ def decomposeK(a, b, k_splits):
     a_reshaped = torch.permute(a.reshape(m, B, k_parts), (1, 0, 2))
     b_reshaped = b.reshape(B, k_parts, n)
     result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
-    reduced_buf = torch.sum(result, 0)
-    return reduced_buf.to(a.dtype)
+    return torch.sum(result, 0)
 
 
-class DecomposeKSugraphTemplate(SubgraphTemplate):
-    def __init__(self):
-        super().__init__(
-            name="decompose_k",
-        )
+def decomposeK(a, b, k_splits):
+    return _decomposeK_core(a, b, k_splits).to(a.dtype)
+
+
+def decomposeK_addmm(bias, a, b, k_splits, alpha=1, beta=1):
+    reduced_buf = _decomposeK_core(a, b, k_splits)
+    out = reduced_buf * alpha + bias.float() * beta
+    return out.to(a.dtype)
+
+
+class DecomposeKSubgraphTemplate(SubgraphTemplate):
+    def __init__(self, name: str, op_name: str, fn: Any):
+        self.op_name = op_name
+        self.fn = fn
+        super().__init__(name=name)
 
     def generate(  # type: ignore[override]
         self,
         input_nodes: list[Buffer],
         layout: Layout,
         k_split: int,
+        **kwargs: Any,
     ) -> SubgraphChoiceCaller:
         from torch._dispatch.python import enable_python_dispatcher
 
         from ..decomposition import select_decomp_table
 
-        name = f"decompose_k_mm_{k_split}_split"
+        name = f"decompose_k_{self.op_name}_{k_split}_split"
         description = f"{k_split=}"
 
         with enable_python_dispatcher():
             decompositions = select_decomp_table()
             fn = make_fx(
-                functools.partial(decomposeK, k_splits=k_split),
+                functools.partial(self.fn, k_splits=k_split, **kwargs),
                 decompositions,
             )
 
@@ -257,7 +268,12 @@ class DecomposeKSugraphTemplate(SubgraphTemplate):
             )
 
 
-decompose_k_subgraph_template = DecomposeKSugraphTemplate()
+decompose_k_subgraph_template = DecomposeKSubgraphTemplate(
+    "decompose_k", "mm", decomposeK
+)
+decompose_k_addmm_subgraph_template = DecomposeKSubgraphTemplate(
+    "decompose_k_addmm", "addmm", decomposeK_addmm
+)
 
 
 class ContiguousTemplate(SubgraphTemplate):

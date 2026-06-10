@@ -204,11 +204,14 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         with V.set_graph_handler(bm_graph_lowering):
             # Apply config_patches during benchmarking (e.g., coordinate_descent_tuning)
-            # Also disable max_autotune to avoid nested autotuning
+            # Also disable max_autotune to avoid nested autotuning.
+            # On AMD/HIP only use Triton
+            # On NVIDIA, hard coded to ATen always
             benchmark_config: dict[str, Any] = {
                 "max_autotune": False,
-                "max_autotune_gemm": False,
-                "max_autotune_gemm_backends": "ATEN",
+                "max_autotune_gemm": bool(torch.version.hip),
+                "max_autotune_gemm_backends": "TRITON" if torch.version.hip else "ATEN",
+                **({"triton.num_decompose_k_splits": 0} if torch.version.hip else {}),
                 "benchmark_fusion": False,
                 "pipeline_max_autotune_gemm": False,
                 **self.config_patches,

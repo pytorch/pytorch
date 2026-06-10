@@ -7894,11 +7894,16 @@ class SubgraphBuffer(ExternKernel):
         import torch._inductor.config as inductor_config
 
         with V.set_graph_handler(self.subgraph):
-            # Base config: don't autotune Triton, but allow other optimizations
+            # Base config: don't autotune Triton, but allow other optimizations.
+            # On AMD/HIP, use Triton for the inner BMM as it outperforms
+            # cuBLAS-equivalent (rocBLAS) for the batched shapes produced by
+            # decompose_k. On NVIDIA, ATen (cuBLAS) is used instead.
+            # num_decompose_k_splits=0 prevents recursive decompose_k.
             base_patches = {
                 "max_autotune": False,
-                "max_autotune_gemm": False,
-                "max_autotune_gemm_backends": "ATEN",
+                "max_autotune_gemm": bool(torch.version.hip),
+                "max_autotune_gemm_backends": "TRITON" if torch.version.hip else "ATEN",
+                **({"triton.num_decompose_k_splits": 0} if torch.version.hip else {}),
             }
             # Merge with user config_patches (e.g., coordinate_descent_tuning)
             merged_patches: dict[str, Any] = {**base_patches, **(config_patches or {})}

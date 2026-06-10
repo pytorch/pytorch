@@ -2099,17 +2099,14 @@ class triton:
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
     # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
-    # Disabled on ROCm by default pending performance validation.
     num_decompose_k_splits = int(
-        os.environ.get(
-            "TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "0" if torch.version.hip else "10"
-        )
+        os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
     )
 
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
     # it as an autotuning choice for all matmuls
     decompose_k_threshold = int(
-        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "20")
     )
 
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
