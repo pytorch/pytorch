@@ -1552,8 +1552,7 @@ def pointwise_ops() -> list[torch._ops.OpOverloadPacket]:
         if not isinstance(opoverloadpacket, torch._ops.OpOverloadPacket):
             continue
 
-        for overload in opoverloadpacket.overloads():
-            op_overload = getattr(opoverloadpacket, overload)
+        for op_overload in opoverloadpacket.op_overloads():
             if torch.Tag.pointwise in op_overload.tags:
                 # currently aot autograd uses packet not overload
                 ops.append(opoverloadpacket)
@@ -2918,6 +2917,7 @@ def get_default_op_list() -> OpTypes:
     default_recomputable_ops += [
         prims.div,
         prims.convert_element_type,
+        prims.prepare_softmax_online,
         aten.clone,
         aten._to_copy,
         aten.full_like,
