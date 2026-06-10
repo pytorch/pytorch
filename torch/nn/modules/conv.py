@@ -365,7 +365,10 @@ class Conv1d(_ConvNd):
 
     def _conv_forward(self, input: Tensor, weight: Tensor, bias: Tensor | None):
         if self.padding_mode != "zeros":
-            return F.conv1d(
+            unbatched = input.dim() == 2
+            if unbatched:
+                input = input.unsqueeze(0)
+            out = F.conv1d(
                 F.pad(
                     input, self._reversed_padding_repeated_twice, mode=self.padding_mode
                 ),
@@ -376,6 +379,9 @@ class Conv1d(_ConvNd):
                 self.dilation,
                 self.groups,
             )
+            if unbatched:
+                out = out.squeeze(0)
+            return out
 
         return F.conv1d(
             input, weight, bias, self.stride, self.padding, self.dilation, self.groups
@@ -545,7 +551,10 @@ class Conv2d(_ConvNd):
 
     def _conv_forward(self, input: Tensor, weight: Tensor, bias: Tensor | None):
         if self.padding_mode != "zeros":
-            return F.conv2d(
+            unbatched = input.dim() == 3
+            if unbatched:
+                input = input.unsqueeze(0)
+            out = F.conv2d(
                 F.pad(
                     input, self._reversed_padding_repeated_twice, mode=self.padding_mode
                 ),
@@ -556,6 +565,9 @@ class Conv2d(_ConvNd):
                 self.dilation,
                 self.groups,
             )
+            if unbatched:
+                out = out.squeeze(0)
+            return out
 
         return F.conv2d(
             input, weight, bias, self.stride, self.padding, self.dilation, self.groups
@@ -715,7 +727,10 @@ class Conv3d(_ConvNd):
 
     def _conv_forward(self, input: Tensor, weight: Tensor, bias: Tensor | None):
         if self.padding_mode != "zeros":
-            return F.conv3d(
+            unbatched = input.dim() == 4
+            if unbatched:
+                input = input.unsqueeze(0)
+            out = F.conv3d(
                 F.pad(
                     input, self._reversed_padding_repeated_twice, mode=self.padding_mode
                 ),
@@ -726,6 +741,9 @@ class Conv3d(_ConvNd):
                 self.dilation,
                 self.groups,
             )
+            if unbatched:
+                out = out.squeeze(0)
+            return out
 
         return F.conv3d(
             input, weight, bias, self.stride, self.padding, self.dilation, self.groups

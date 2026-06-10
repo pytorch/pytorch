@@ -9417,6 +9417,28 @@ class TestNNDeviceType(NNTestCase):
             torch._C._nn.thnn_conv2d(torch.rand([1, 1, 1, 1]), kernel_size=[1, 1], padding=[], stride=[1, 1],
                                      weight=torch.rand([1, 1]))
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float)
+    def test_conv_non_zeros_padding_unbatched(self, device, dtype):
+        for padding_mode in ("reflect", "replicate", "circular"):
+            conv1d = nn.Conv1d(3, 4, 3, padding=1, padding_mode=padding_mode).to(device, dtype)
+            x1d = torch.randn(3, 8, device=device, dtype=dtype)
+            batched_1d = conv1d(x1d.unsqueeze(0)).squeeze(0)
+            unbatched_1d = conv1d(x1d)
+            self.assertEqual(batched_1d, unbatched_1d)
+
+            conv2d = nn.Conv2d(3, 4, 3, padding=1, padding_mode=padding_mode).to(device, dtype)
+            x2d = torch.randn(3, 8, 8, device=device, dtype=dtype)
+            batched_2d = conv2d(x2d.unsqueeze(0)).squeeze(0)
+            unbatched_2d = conv2d(x2d)
+            self.assertEqual(batched_2d, unbatched_2d)
+
+            conv3d = nn.Conv3d(3, 4, 3, padding=1, padding_mode=padding_mode).to(device, dtype)
+            x3d = torch.randn(3, 8, 8, 8, device=device, dtype=dtype)
+            batched_3d = conv3d(x3d.unsqueeze(0)).squeeze(0)
+            unbatched_3d = conv3d(x3d)
+            self.assertEqual(batched_3d, unbatched_3d)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_slow_conv3d_empty_stride(self, device, dtype):
