@@ -36,31 +36,35 @@ const uint32_t grid_size_bound = 4;
 // See: https://docs.nvidia.com/cuda/archive/11.8.0/curand/group__DEVICE.html
 const uint32_t max_generator_offsets_per_curand_call = 4;
 
-// utility function that calculates proper philox_offset
-// for distributions utilizing TensorIterator. For distributions using
-// TensorIterator, we are using a grid-stride loop with each
-// thread yielding one element per thread. For the edge of the grid-stride
-// loop, if the tensor size is large, the unroll loop will kick in and the float4
-// from curand4 will start getting utilized (for common tensor sizes, we end up
-// using rand.x from each thread). The philox_offset calculation was changed to
-// (number of elements per thread * maximum generator increment per "curand_*" call), which makes
-// sure that philox offset increment is not less than the number of randoms used
-// in each thread.
+// Calculates counter_offset and CUDA launch config for distribution kernels
+// utilizing TensorIterator with a grid-stride loop.
+//
+// Previously, each physical thread was assigned a unique Philox subsequence
+// (subsequence = thread_id), which made the RNG output dependent on the
+// GPU's SM count and thread topology.  To guarantee identical output across
+// devices with different hardware configurations, we now map each *element
+// group* (0 .. ceil(numel/unroll_factor)-1) to a unique subsequence instead.
+// Each element group makes exactly one curand call, so counter_offset is
+// simply max_generator_offsets_per_curand_call.
 std::tuple<uint64_t, dim3, dim3> calc_execution_policy(const int64_t total_elements, const uint32_t unroll_factor) {
   const uint64_t numel = static_cast<uint64_t>(total_elements);
   const uint32_t block_size = block_size_bound;
+  const uint64_t T = (numel + unroll_factor - 1) / unroll_factor;
   dim3 dim_block(block_size);
-  dim3 grid((numel + block_size - 1) / block_size);
+  dim3 grid((T + block_size - 1) / block_size);
   uint32_t blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / block_size;
   grid.x = std::min(
       static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->multiProcessorCount) * blocks_per_sm,
       grid.x);
-  //number of times random will be generated per thread, to offset philox counter in thc random state
-  uint64_t counter_offset = ((numel - 1) / (block_size * grid.x * unroll_factor) + 1) * max_generator_offsets_per_curand_call;
+  uint64_t counter_offset = max_generator_offsets_per_curand_call;
   return std::make_tuple(counter_offset, grid, dim_block);
 }
 
-// grid stride loop kernel for distributions
+// Grid-stride loop kernel for distributions.
+// T = ceil(numel/unroll_factor) element groups each map 1:1 to a Philox
+// subsequence (curand_init with subsequence = element_group_index), so the
+// output is deterministic across devices with different SM counts.  Physical
+// threads stride over element groups to maintain hardware utilization.
 template<typename accscalar_t, int unroll_factor, typename dist_t, typename transform_t>
 C10_LAUNCH_BOUNDS_2(block_size_bound, grid_size_bound)
 __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
@@ -68,22 +72,22 @@ __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
                                                             const dist_t dist_func,
                                                             const transform_t transform_func) {
   auto [seed, offset] = at::cuda::philox::unpack(philox_args);
-  int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
-  curandStatePhilox4_32_10_t state;
-  curand_init(seed, idx, offset, &state);
+  int64_t tid = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+  int64_t total_threads = ((int64_t) blockDim.x) * gridDim.x;
+  int64_t T = (numel + unroll_factor - 1) / unroll_factor;
 
-  int64_t rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
-      blockDim.x * gridDim.x * unroll_factor;
-  for(int64_t linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
+  for (int64_t idx = tid; idx < T; idx += total_threads) {
+    curandStatePhilox4_32_10_t state;
+    curand_init(seed, idx, offset, &state);
+
     auto rand = dist_func(&state);
     #pragma unroll
     for (int ii = 0; ii < unroll_factor; ii++) {
-      int64_t li = linear_index + blockDim.x * gridDim.x * ii;
+      int64_t li = idx + T * ii;
       if (li < numel) {
         transform_func(li, static_cast<accscalar_t>((&rand.x)[ii]));
       }
     }
-    __syncthreads();
   }
 }
 
