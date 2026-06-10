@@ -1046,9 +1046,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def codegen_additional_funcs(self):
         pass
 
-    def codegen_model_kernels(self):
-        self.prefix.writeline("namespace {")
-
+    def codegen_initialized_kernel_decls(self):
         # Tell compiler we need to link with the non-mangled symbols
         for kernel in self.initialized_kernels.values():
             assert hasattr(kernel, "get_signature"), (
@@ -1057,6 +1055,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             signature = kernel.get_signature()
             self.prefix.writeline(f'extern "C" {signature};')
 
+    def codegen_model_kernels(self):
+        self.prefix.writeline("namespace {")
+        self.codegen_initialized_kernel_decls()
         self.prefix.writeline(
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
@@ -1422,6 +1423,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.aot_mode and not V.graph.is_const_graph:
             with self._target_buf("prefix", aot_mode_decls):
                 self._codegen_aoti_model_class()
+        elif not V.graph.is_const_graph and self.initialized_kernels:
+            # JIT cpp_wrapper: emit extern "C" decls for kernels (CUTLASS,
+            # ROCm CK) whose precompiled .so files are linked into the
+            # wrapper via extra_flags.
+            self.codegen_initialized_kernel_decls()
 
         self.prefix = make_codegen_buffer()
         for dtype in self.used_cached_dtypes:
@@ -1623,6 +1629,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
             kernel_code = "None"
             needs_vec_isa = str(self.needs_vec_isa)
             kernel_needs_vec_isa = "None"
+        # Link any precompiled kernel .so files (CUTLASS, ROCm CK) into the
+        # wrapper. The .so files are built without -Wl,-soname, so passing
+        # their absolute paths positionally to the linker encodes them as
+        # absolute DT_NEEDED entries that resolve at module load (same
+        # mechanism HalideCodeCache uses for its standalone runtime).
+        extra_flags_repr = repr(tuple(self.external_kernel_libs))
         # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
@@ -1634,6 +1646,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 kernel_needs_vec_isa={kernel_needs_vec_isa},
                 num_outputs={len(V.graph.graph_outputs)},
                 kernel_code={kernel_code},
+                extra_flags={extra_flags_repr},
             )
             """
         )
@@ -2175,6 +2188,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_devices.add(device_str)
         return f"cached_torch_device_type_{device_str}, {device.index if device.index else 0}"
 
+    def codegen_device_idx(self, device, device_id):
+        device_id = device_id.strip()
+        if not V.graph.aot_mode:
+            return device_id
+
+        if device.type == V.graph.device_type and device.index is not None:
+            # The primary compile-time device is relocatable via device_index at load.
+            # Other explicit device indices must stay intact for cross-device copies.
+            primary_device_idx = next(iter(V.graph.device_idxs), None)
+            if primary_device_idx is not None and device.index != primary_device_idx:
+                return device_id
+
+        return "this->device_idx_"
+
     def codegen_dtype(self, dtype):
         dtype_str = str(dtype).split(".")[-1]
         self.used_cached_dtypes.add(dtype_str)
@@ -2302,7 +2329,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             graph=self.get_codegened_graph(),
         )
         device_type, device_id = device_str.split(",")
-        device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
+        device_idx = self.codegen_device_idx(device, device_id)
 
         handle_name = f"{name}_handle"
         args = [
