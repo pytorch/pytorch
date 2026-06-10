@@ -1944,10 +1944,92 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
         return test_times_file["default"]["default"]
 
 
+# Files whose runtime is well into multi-minute territory on any GPU CI
+# config. When the per-config estimate for one of these is suspiciously low
+# (e.g. stale data from before the config ran that file, or a single short
+# run that pulled the average down), the sharder under-shards the file and
+# the per-pytest 30-min cap fires mid-run. Fix up by taking the maximum of
+# the per-config estimate, the same job's `default` config estimate, and
+# the absolute `default["default"]` estimate. Self-corrects once fresh
+# green-run stats land in test-times.json.
+_SLOW_FILES_TO_FLOOR = frozenset(
+    {
+        "inductor/test_torchinductor_opinfo",
+        "inductor/test_torchinductor_opinfo_properties",
+        "inductor/test_torchinductor_dynamic_shapes",
+        "inductor/test_torchinductor_codegen_dynamic_shapes",
+        "inductor/test_flex_attention",
+        "test_decomp",
+        "test_ops",
+        "functorch/test_ops",
+        "inductor/test_control_flow",
+        "inductor/test_aot_inductor",
+        "functorch/test_control_flow",
+        "test_quantization",
+    }
+)
+
+
+# Configs that run the full set of tests in each file. Other configs
+# (crossref, dynamo_wrapped, nogpu_*, slow) legitimately run small subsets
+# and would be falsely over-sharded by the floor. Keep this conservative.
+_FULL_TEST_CONFIGS = frozenset({"default", "inductor"})
+
+
+def _apply_slow_file_floor(
+    file: str,
+    times: dict[str, float],
+) -> dict[str, float]:
+    """Floor each known-slow file's estimate at the max of the active
+    config's value, the same job's `default` config value, and the
+    absolute `default["default"]` value. Catches both:
+
+      - non-default configs that have wildly stale values (e.g.
+        inductor config reporting 11s for opinfo); and
+      - default configs whose per-build-env value drifted below the
+        cross-config baseline (e.g. ROCm test_decomp at 4011s vs 6351s).
+
+    Only applies to the `default` and `inductor` test configs, which run
+    the full file. Subset configs (crossref, dynamo_wrapped, slow) are
+    intentionally left alone — their lower estimates are accurate.
+    """
+    test_config = os.environ.get("TEST_CONFIG")
+    if not test_config or test_config not in _FULL_TEST_CONFIGS:
+        return times
+    path = os.path.join(str(REPO_ROOT), file)
+    if not os.path.exists(path):
+        return times
+    with open(path) as f:
+        test_times_file = cast(dict[str, Any], json.load(f))
+    raw_job_name = (
+        os.environ.get("JOB_NAME") or os.environ.get("BUILD_ENVIRONMENT") or ""
+    )
+    job_name = raw_job_name.split(" / test (")[0]
+    job_default_times = test_times_file.get(job_name, {}).get("default") or {}
+    abs_default_times = test_times_file.get("default", {}).get("default") or {}
+    out = dict(times)
+    for fname in _SLOW_FILES_TO_FLOOR:
+        cur = out.get(fname, 0.0)
+        floor = max(
+            job_default_times.get(fname, 0.0),
+            abs_default_times.get(fname, 0.0),
+        )
+        if floor <= cur:
+            continue
+        print_to_stderr(
+            f"::warning:: Flooring test time for {fname} under "
+            f"{job_name}/{test_config}: {cur:.1f}s -> {floor:.1f}s "
+            f"(was suspiciously below known-slow-file baseline)"
+        )
+        out[fname] = floor
+    return out
+
+
 def load_test_file_times(
     file: str = ADDITIONAL_CI_FILES_FOLDER / TEST_TIMES_FILE,
 ) -> dict[str, float]:
-    return cast(dict[str, float], load_test_times_from_file(file))
+    times = cast(dict[str, float], load_test_times_from_file(file))
+    return _apply_slow_file_floor(file, times)
 
 
 def load_test_class_times(
