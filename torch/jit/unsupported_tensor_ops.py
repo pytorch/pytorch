@@ -26,7 +26,6 @@ def _gen_unsupported_methods_properties():
         "new",
         "name",
         "map2_",
-        "has_names",
         "grad_fn",
         "resize_as",
     }

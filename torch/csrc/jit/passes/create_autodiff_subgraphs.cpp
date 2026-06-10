@@ -46,7 +46,7 @@ class SubgraphSlicer {
     GRAPH_DUMP("before unfuseAliasedOutputs", graph_);
     unfuseAliasedOutputs(block_);
     cleanupSubgraphs();
-    // Run CSE globally onceto eliminate duplicates that may have occurred
+    // Run CSE globally once to eliminate duplicates that may have occurred
     // while inlining subgraphs.
     EliminateCommonSubexpression(graph_);
   }

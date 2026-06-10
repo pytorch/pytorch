@@ -1354,6 +1354,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cudaEventCreateWithFlags", "hipEventCreateWithFlags"),
     ("cudaEventDestroy", "hipEventDestroy"),
     ("cudaEventRecord", "hipEventRecord"),
+    ("cudaEventRecordWithFlags", "hipEventRecordWithFlags"),
     ("cudaEventElapsedTime", "hipEventElapsedTime"),
     ("cudaEventSynchronize", "hipEventSynchronize"),
     ("cudaEventQuery", "hipEventQuery"),

@@ -25,6 +25,8 @@ from torch.testing._internal.common_utils import (
     decorateIf,
     parametrize,
     run_tests,
+    setSdpaBackendsToDefaultFinally,
+    skipIfRocm,
     TEST_WITH_ROCM,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -292,6 +294,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(
         "sdpa_backend",
@@ -370,6 +373,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
         ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
@@ -451,6 +455,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
         ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
@@ -521,6 +526,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
         ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
@@ -701,6 +707,7 @@ class TestVarlenAttention(NNTestCase):
 
             start_idx = end_idx
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -723,10 +730,9 @@ class TestVarlenAttention(NNTestCase):
         self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
     ):
         if TEST_WITH_ROCM:
+            if num_splits is not None:
+                self.skipTest("num_splits is not supported on ROCm")
             torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
-
-        split_kwargs = {"num_splits": num_splits} if backend != "fa2" else {}
-
         torch.manual_seed(42)
 
         num_heads, head_dim = 2, 128
@@ -777,7 +783,7 @@ class TestVarlenAttention(NNTestCase):
                 target_seq_len,
                 target_seq_len,
                 window_size=window_size,
-                **split_kwargs,
+                num_splits=num_splits,
             )
 
             batched_output = varlen_attn(
@@ -789,7 +795,7 @@ class TestVarlenAttention(NNTestCase):
                 extra_seq_len,
                 extra_seq_len,
                 window_size=window_size,
-                **split_kwargs,
+                num_splits=num_splits,
             )
 
             solo_out_buf = torch.empty_like(target_q)
@@ -803,7 +809,7 @@ class TestVarlenAttention(NNTestCase):
                 target_seq_len,
                 target_seq_len,
                 window_size=window_size,
-                **split_kwargs,
+                num_splits=num_splits,
             )
 
             batched_out_buf = torch.empty_like(all_q)
@@ -817,7 +823,7 @@ class TestVarlenAttention(NNTestCase):
                 extra_seq_len,
                 extra_seq_len,
                 window_size=window_size,
-                **split_kwargs,
+                num_splits=num_splits,
             )
             if num_splits == 1:
                 self.assertEqual(solo_output, batched_output[:target_seq_len])
@@ -831,12 +837,12 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support seqused_k")
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["backend"] != "fa2"
         and any(kv_len < 128 for kv_len in params["actual_kv_lens"]),
     )
+    @setSdpaBackendsToDefaultFinally
     @parametrize(
         "sdpa_backend",
         ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
@@ -857,6 +863,8 @@ class TestVarlenAttention(NNTestCase):
         self, device, dtype, actual_kv_lens, backend, sdpa_backend=None
     ):
         if TEST_WITH_ROCM:
+            if sdpa_backend == "ck":
+                self.skipTest("CK backend does not support seqused_k")
             torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
 
         torch.manual_seed(42)
@@ -961,7 +969,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support seqused_k")
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support block_table")
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("page_size", [32, 64, 128, 256])
     @parametrize("compile", [False, True])
@@ -1110,6 +1118,33 @@ class TestVarlenAttention(NNTestCase):
                     block_table=block_table,
                 )
             self.assertEqual(out_buf, output_reference)
+
+        # With num_splits=1, paged and contiguous must be bit-identical
+        if backend == "fa2":
+            with _use_backend(backend), torch.no_grad():
+                ref_num_splits = varlen_attn(
+                    q_packed,
+                    k_real_packed,
+                    v_real_packed,
+                    cu_seq_q,
+                    cu_seq_k_real,
+                    max_q,
+                    max_k_real,
+                    num_splits=1,
+                )
+                paged_num_splits = varlen_attn(
+                    q_packed,
+                    k_pages,
+                    v_pages,
+                    cu_seq_q,
+                    cu_seq_k_paged,
+                    max_q,
+                    cache_size,
+                    seqused_k=seqused_k,
+                    block_table=block_table,
+                    num_splits=1,
+                )
+            self.assertTrue(torch.equal(paged_num_splits, ref_num_splits))
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"

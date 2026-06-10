@@ -43,6 +43,7 @@ project-excludes = [
   "*/.*",
   "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**",
   "torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py",
+  "torch/_vendor/quack/**",
 ]
 ignore-missing-imports = [
     # XPU memory symbols not present for builds without XPU support
@@ -110,6 +111,7 @@ ignore-missing-imports = [
     "onnxruntime.*",
     "onnxscript.*",
     "redis.*",
+    "tabulate.*",
 ]
 # By default, mypy does not check untyped definitions.
 # However, mypy has a configuration called check_untyped_defs which is used
@@ -129,6 +131,7 @@ errors.deprecated = false # re-enable after we've fix import formatting
 permissive-ignores = true
 replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*", "networkx.*"]
 search-path = ["tools/experimental"]
+enable-fallback-search-path = true
 
 # Dynamo sub-config - note, we experiment with stricter typing here
 [[sub-config]]
@@ -158,3 +161,13 @@ matches = "torch/_functorch/**"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
+
+[[sub-config]]
+matches = "torch/fx/**"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true

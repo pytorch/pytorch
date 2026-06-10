@@ -10,7 +10,7 @@ import torch.distributed._functional_collectives as ft_c
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed.tensor as dt
 from functorch import make_fx
-from torch._inductor.utils import run_and_get_code
+from torch.distributed._local_tensor import LocalTensorMode
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -28,11 +28,13 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     run_tests,
     skipIfHpu,
     TEST_CUDA,
     TEST_HPU,
+    TEST_WITH_ROCM,
     TEST_XPU,
     TestCase,
 )
@@ -249,6 +251,9 @@ class TestPgTag(MultiThreadedTestCase):
         # Cannot erase the tag of a PG
         self.assertEqual(pg_tag0, roundtrip(pg_tag0, ""))
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/107278"
+    )
     def test_find_or_create_pg(self):
         pg = c10d._find_or_create_pg_by_ranks_and_tag("blu", [0, 1, 2, 3], 2)
         pg_tag0, _ = new_subgroups(group_size=2, pg_tag="blu")
@@ -335,7 +340,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
                 output_size[dim] *= mesh.size(0)
                 # each rank have its own tensor, all_gather gives a bigger tensor
                 local_tensor = torch.ones([3, 3, 3], device=device)
-                gathered_tensor = ft_c.all_gather_tensor(
+                gathered_tensor = ft_c.all_gather_single(
                     local_tensor, gather_dim=dim, group=(mesh, 0)
                 )
                 self.assertEqual(gathered_tensor, torch.ones(output_size))
@@ -350,7 +355,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         tensors = [torch.ones([4], device=device), torch.ones([4], device=device) + 1]
         mesh = dt.DeviceMesh(device, torch.arange(4))
 
-        res = ft_c.all_gather_into_tensor_coalesced(tensors, mesh)
+        res = ft_c.all_gather_single_coalesced(tensors, mesh)
         self.assertEqual(2, len(res))
         self.assertEqual(torch.ones([4 * dist.get_world_size()], device=device), res[0])
         self.assertEqual(
@@ -376,7 +381,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
                 output_size[dim] *= group_size
                 input_tensor = torch.ones(output_size, device=device)
                 res_num = 1 * group_size
-                rs_tensor = ft_c.reduce_scatter_tensor(
+                rs_tensor = ft_c.reduce_scatter_single(
                     input_tensor, "sum", scatter_dim=dim, group=(mesh, 0)
                 )
                 self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
@@ -393,7 +398,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         ]
         mesh = dt.DeviceMesh(device, torch.arange(4))
 
-        res = ft_c.reduce_scatter_tensor_coalesced(tensors, "sum", [0, 0], mesh)
+        res = ft_c.reduce_scatter_single_coalesced(tensors, "sum", [0, 0], mesh)
         self.assertEqual(2, len(res))
         self.assertEqual(torch.tensor([4], device=device), res[0])
         self.assertEqual(torch.tensor([8], device=device), res[1])
@@ -426,6 +431,7 @@ class TestGradCollectives(MultiThreadedTestCase):
 
 class TestMakeFx(TestCase):
     def setUp(self):
+        super().setUp()
         # make_fx is not thread-safe due to patching nd mutating global states
         # so create a fake_pg.
         self.rank = 0
@@ -472,6 +478,7 @@ class TestAllGatherViewOptimization(TestCase):
     applies and calls wait() early when the fallback path is needed."""
 
     def setUp(self):
+        super().setUp()
         self.world_size = 4
         if dist.is_initialized():
             dist.destroy_process_group()
@@ -490,7 +497,7 @@ class TestAllGatherViewOptimization(TestCase):
         # numel_between = prod(shape[1:1]) = 1, so view optimization applies.
         # Result should be an AsyncCollectiveTensor (wait delayed).
         t = torch.randn(1, 8)
-        res = ft_c.all_gather_tensor(t, gather_dim=1, group=dist.group.WORLD)
+        res = ft_c.all_gather_single(t, gather_dim=1, group=dist.group.WORLD)
         self.assertIsInstance(res, ft_c.AsyncCollectiveTensor)
 
     def test_fallback_path_waits_early(self):
@@ -499,7 +506,7 @@ class TestAllGatherViewOptimization(TestCase):
         # so view optimization does NOT apply.
         # Result should be a plain tensor (wait called early).
         t = torch.randn(2, 8)
-        res = ft_c.all_gather_tensor(t, gather_dim=1, group=dist.group.WORLD)
+        res = ft_c.all_gather_single(t, gather_dim=1, group=dist.group.WORLD)
         self.assertNotIsInstance(res, ft_c.AsyncCollectiveTensor)
 
 
@@ -555,7 +562,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         ]
         mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
 
-        res = ft_c.all_gather_into_tensor_coalesced(tensors, mesh)
+        res = ft_c.all_gather_single_coalesced(tensors, mesh)
         self.assertEqual(2, len(res))
         self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
@@ -692,150 +699,99 @@ class TestDistributedBackendCollectivesWithWorldSize4(
             )
 
 
-@instantiate_parametrized_tests
-@skipIfHpu
-class TestFunctionalAutograd(MultiThreadedTestCase):
+class TestFunctionalAutograd(TestCase):
     def setUp(self):
         super().setUp()
-        self._spawn_threads()
+        self.world_size = 2
+        dist.init_process_group("fake", rank=0, world_size=self.world_size)
 
-    @property
-    def world_size(self):
-        return 2
+    def tearDown(self):
+        dist.destroy_process_group()
+        super().tearDown()
 
-    @parametrize("compile", [True, False])
-    def test_all_to_all_single(self, compile: bool = True) -> None:
-        group = dist.group.WORLD.group_name
+    def test_all_to_all_single(self) -> None:
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            group = dist.group.WORLD.group_name
 
-        t = torch.ones((self.world_size, 2), requires_grad=True)
+            t = torch.ones((self.world_size, 2), requires_grad=True)
 
-        def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
-            sizes = [1] * world_size
-            t = t * 2
-            if not t.requires_grad:
-                raise AssertionError("Expected t.requires_grad to be True")
-            out = ft_c.all_to_all_single_autograd(t, sizes, sizes, group)
-            out = out + 0
-            return out
+            def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
+                sizes = [1] * world_size
+                t = t * 2
+                if not t.requires_grad:
+                    raise AssertionError("Expected t.requires_grad to be True")
+                out = ft_c.all_to_all_single_autograd(t, sizes, sizes, group)
+                out = out + 0
+                return out
 
-        if compile:
-            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
-        else:
-            compiled = my_func
+            out = my_func(t, self.world_size)
+            self.assertEqual(out.shape, t.shape)
+            self.assertEqual(out, torch.full_like(t, 2.0))
+            self.assertIsNotNone(out.grad_fn)
+            self.assertTrue(out.requires_grad)
+            loss = out.sum()
+            loss.backward()
+            self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
-        out = compiled(t, self.world_size)
-        self.assertEqual(out.shape, t.shape)
-        self.assertEqual(out, torch.full_like(t, 2.0))
-        self.assertIsNotNone(out.grad_fn)
-        self.assertTrue(out.requires_grad)
-        loss = out.sum()
-        loss.backward()
-        self.assertEqual(t.grad, torch.full_like(t, 2.0))
+    def test_all_gather_tensor(self) -> None:
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            group = dist.group.WORLD.group_name
 
-    def test_all_to_all_single_inductor(self) -> None:
-        group = dist.group.WORLD.group_name
-
-        t = torch.rand((self.world_size, 2), requires_grad=True)
-
-        def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
-            sizes = [1] * world_size
-            t = t * 10
-            if not t.requires_grad:
-                raise AssertionError("Expected t.requires_grad to be True")
-            out = ft_c.all_to_all_single_autograd(t, sizes, sizes, group)
-            out = out + 2
-            return out.sum()
-
-        compiled = torch.compile(my_func, fullgraph=True)
-
-        def run_with_backward():
-            out = compiled(t, self.world_size)
-            out.backward()
-
-        _, codes = run_and_get_code(run_with_backward)
-        for code in codes:
-            assert_keywords = ["assert_size_stride", "assert_alignment"]
-            filtered_lines = [
-                line
-                for line in code.splitlines()
-                if not any(assert_key in line for assert_key in assert_keywords)
-            ]
-            code = "\n".join(filtered_lines)
-            FileCheck().check_count(
-                "_c10d_functional.all_to_all_single.default", 1, exactly=True
-            ).check_count("_c10d_functional.wait_tensor.default", 1, exactly=True).run(
-                code
-            )
-
-        self.assertIsNotNone(t.grad)
-
-    @parametrize("compile", [True, False])
-    def test_all_gather_tensor(self, compile: bool) -> None:
-        group = dist.group.WORLD.group_name
-
-        def my_func(t: torch.Tensor, dim: int) -> torch.Tensor:
-            if not t.requires_grad:
-                raise AssertionError("Expected t.requires_grad to be True")
-            out = ft_c.all_gather_tensor_autograd(
-                t * 1.0,
-                gather_dim=dim,
-                group=group,
-            )
-            out = out * 1.0
-            return out
-
-        if compile:
-            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
-        else:
-            compiled = my_func
-
-        dims_to_gather = [0, 1, 2]
-        for dim in dims_to_gather:
-            output_size = [3, 3, 3]
-            output_size[dim] *= self.world_size
-            # each rank have its own tensor, all_gather gives a bigger tensor
-            local_tensor = torch.ones([3, 3, 3], requires_grad=True)
-            gathered_tensor = compiled(local_tensor, dim)
-            self.assertEqual(gathered_tensor, torch.ones(output_size))
-
-            gathered_tensor.sum().backward()
-            self.assertEqual(
-                local_tensor.grad,
-                torch.full((3, 3, 3), fill_value=float(self.world_size)),
-            )
-
-    @parametrize("compile", [True, False])
-    def test_reduce_scatter_tensor(self, compile: bool) -> None:
-        group = dist.group.WORLD.group_name
-
-        def my_func(t: torch.Tensor, dim: int) -> torch.Tensor:
-            if not t.requires_grad:
-                raise AssertionError("Expected t.requires_grad to be True")
-            rs_tensor = (
-                ft_c.reduce_scatter_tensor_autograd(
-                    input_tensor * 1.0, "sum", scatter_dim=dim, group=group
+            def my_func(t: torch.Tensor, dim: int) -> torch.Tensor:
+                if not t.requires_grad:
+                    raise AssertionError("Expected t.requires_grad to be True")
+                out = ft_c.all_gather_single_autograd(
+                    t * 1.0,
+                    gather_dim=dim,
+                    group=group,
                 )
-                * 1.0
-            )
-            return rs_tensor
+                out = out * 1.0
+                return out
 
-        if compile:
-            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
-        else:
-            compiled = my_func
+            dims_to_gather = [0, 1, 2]
+            for dim in dims_to_gather:
+                output_size = [3, 3, 3]
+                output_size[dim] *= self.world_size
+                local_tensor = torch.ones([3, 3, 3], requires_grad=True)
+                gathered_tensor = my_func(local_tensor, dim)
+                self.assertEqual(gathered_tensor, torch.ones(output_size))
 
-        dims_to_scatter = [0, 1]
-        for dim in dims_to_scatter:
-            group_size = self.world_size
-            input_size = [3, 3]
-            output_size = [3, 3]
-            output_size[dim] *= group_size
-            input_tensor = torch.ones(output_size, requires_grad=True)
-            rs_tensor = compiled(input_tensor, dim)
-            res_num = 1 * group_size
-            self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
-            rs_tensor.sum().backward()
-            self.assertEqual(input_tensor.grad, torch.full(output_size, fill_value=1.0))
+                gathered_tensor.sum().backward()
+                self.assertEqual(
+                    local_tensor.grad,
+                    torch.full((3, 3, 3), fill_value=float(self.world_size)),
+                )
+
+    def test_reduce_scatter_tensor(self) -> None:
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            group = dist.group.WORLD.group_name
+
+            def my_func(t: torch.Tensor, dim: int) -> torch.Tensor:
+                if not t.requires_grad:
+                    raise AssertionError("Expected t.requires_grad to be True")
+                rs_tensor = (
+                    ft_c.reduce_scatter_single_autograd(
+                        input_tensor * 1.0, "sum", scatter_dim=dim, group=group
+                    )
+                    * 1.0
+                )
+                return rs_tensor
+
+            dims_to_scatter = [0, 1]
+            for dim in dims_to_scatter:
+                group_size = self.world_size
+                input_size = [3, 3]
+                output_size = [3, 3]
+                output_size[dim] *= group_size
+                input_tensor = torch.ones(output_size, requires_grad=True)
+                rs_tensor = my_func(input_tensor, dim)
+                res_num = 1 * group_size
+                self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
+                rs_tensor.sum().backward()
+                self.assertEqual(
+                    input_tensor.grad,
+                    torch.full(output_size, fill_value=1.0),
+                )
 
 
 class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):

@@ -38,12 +38,12 @@ class DelegateExecutor {
   // affect the weight tensors in the delegate backend.
   // When a weight tensor is no longer used by the delegate backend, the backend
   // must release it by decreasing a refcount. Runtime would
-  // also release the refcount for weight tensor if it's no longer activate. The
+  // also release the refcount for weight tensor if it's no longer active. The
   // underlying storage for weight tensors will be freed when the refcount
   // reaches 0.
   virtual void processWeights(std::shared_ptr<Weights> weights) = 0;
 
-  // This call activate the processed weights.
+  // This call activates the processed weights.
   virtual void commitWeights() = 0;
 
   virtual void initWeights(std::shared_ptr<Weights> weights) = 0;

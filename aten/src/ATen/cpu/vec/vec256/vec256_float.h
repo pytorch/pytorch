@@ -112,27 +112,23 @@ class Vectorized<float> {
     return b;
   }
   static Vectorized<float> loadu(const void* ptr, int64_t count = size()) {
-    if (count == size())
+    if (count >= size())
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
-    __at_align__ float tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0.0;
-    }
-    std::memcpy(
-        tmp_values, reinterpret_cast<const float*>(ptr), count * sizeof(float));
-    return _mm256_loadu_ps(tmp_values);
+    // Masked load: lanes [0, count) are read, the rest are zero.
+    const __m256i mask = _mm256_cmpgt_epi32(
+        _mm256_set1_epi32(static_cast<int32_t>(count)),
+        _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
+    return _mm256_maskload_ps(reinterpret_cast<const float*>(ptr), mask);
   }
   void store(void* ptr, int64_t count = size()) const {
-    if (count == size()) {
+    if (count >= size()) {
       _mm256_storeu_ps(reinterpret_cast<float*>(ptr), values);
     } else if (count > 0) {
-      float tmp_values[size()];
-      _mm256_storeu_ps(reinterpret_cast<float*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(float));
+      // Masked store: only lanes [0, count) are written.
+      const __m256i mask = _mm256_cmpgt_epi32(
+          _mm256_set1_epi32(static_cast<int32_t>(count)),
+          _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
+      _mm256_maskstore_ps(reinterpret_cast<float*>(ptr), mask, values);
     }
   }
   const float& operator[](int idx) const = delete;

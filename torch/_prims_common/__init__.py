@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 
     import sympy
 
+    from torch.types import BoolLikeType
+
     class _WorksWithInt(typing.Protocol):
         def __add__(self, other: Any) -> typing.Self: ...
 
@@ -185,7 +187,7 @@ def compare_tensor_meta(
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
     if check_strides:
         same_strides, idx = check_significant_strides(
-            a, b, allow_rhs_unbacked=allow_rhs_unbacked
+            a, b, only_cuda=False, allow_rhs_unbacked=allow_rhs_unbacked
         )
         if not same_strides:
             msg = f"Stride mismatch! Strides are {a.stride()} and {b.stride()} (mismatched at {idx})!"
@@ -215,13 +217,16 @@ def _check_strides_helper(
     significant_only=True,
     allow_rhs_unbacked=False,
 ) -> tuple[bool, int | None]:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
     # See https://github.com/pytorch/pytorch/issues/77553
     # Only compares strides that are "meaningful" -- strides for dimensions with length > 1
-    # and for tensors with more than one element
+    # and for tensors with more than one element. Use guard_or_false on the
+    # numel gate so unbacked shapes don't trigger a data-dependent guard.
     if (
         not only_cuda or a.device.type == "cuda" or b.device.type == "cuda"
-    ) and a.numel() > 0:
+    ) and guard_or_false(a.numel() > 0):
         for idx in range(a.ndim):
             check = not significant_only or a.shape[idx] > 1
             # TODO: Check the symbols are consistent with each other
@@ -463,6 +468,32 @@ def is_channels_last_contiguous_or_false(a: Tensor) -> bool:
     ) or is_channels_last_contiguous_or_false_3d(a)
 
 
+# Defined at module scope so the class is built once, not rebuilt on every call.
+class K(NamedTuple):
+    size: int
+    stride: int
+
+    def __lt__(self, other):
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
+        # for backed symbols, this is practically a < operation
+        # for unbacked, we return True if < is statically known,
+        # then try to answer this symbolically, with stride ordering semantics
+        # (e.g. u0 < u0 is False, u0 < u1 is False with no axioms, u0 < 2 * u0 is True)
+        return (
+            guard_or_false(
+                self.stride < other.stride
+            )  # checks statically known inequality
+            or (
+                (
+                    guard_or_false(self.stride == 0)
+                    or guard_or_false(other.stride % self.stride == 0)
+                )
+                and guard_or_true(self.stride != other.stride)
+            )  # checks symbolic inequality (e.g. u0 < 2048 * u0)
+        )
+
+
 def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     """
     Helper function for is_non_overlapping_and_dense.
@@ -473,7 +504,7 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     this may be non-overlapping & dense at runtime, for values {u0: 4, u1: 4, u2: 4, u3: 1},
     but isn't true for all values.
     """
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
     from torch.utils._sympy.functions import Max
 
     # Short-circuits for 0/1-element tensors
@@ -491,28 +522,6 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     # This sort is done in a size-oblivious way, which helps if we do a
     # comparison like 2048*u0 > u0; we just want this to return True
     # (and not worry about what if u0 is zero).
-    class K(NamedTuple):
-        size: int
-        stride: int
-
-        def __lt__(self, other):
-            # for backed symbols, this is practically a < operation
-            # for unbacked, we return True if < is statically known,
-            # then try to answer this symbolically, with stride ordering semantics
-            # (e.g. u0 < u0 is False, u0 < u1 is False with no axioms, u0 < 2 * u0 is True)
-            return (
-                guard_or_false(
-                    self.stride < other.stride
-                )  # checks statically known inequality
-                or (
-                    (
-                        guard_or_false(self.stride == 0)
-                        or guard_or_false(other.stride % self.stride == 0)
-                    )
-                    and guard_or_true(self.stride != other.stride)
-                )  # checks symbolic inequality (e.g. u0 < 2048 * u0)
-            )
-
     lengths_and_strides = sorted(map(K, sizes, strides))
 
     # verify actual strides match the expected (composed sizes)
@@ -868,13 +877,18 @@ def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
     return isinstance(perm, Sequence) and sorted(perm) == list(range(rank))
 
 
-def is_same_shape(a: Sequence, b: Sequence) -> bool:
+def is_same_shape(a: Sequence, b: Sequence) -> BoolLikeType:
     """
     Compares two shapes a and b, returning True if they are the same
     (their ranks and corresponding lengths match) and False otherwise.
-    """
 
-    return tuple(a) == tuple(b)
+    Uses sym_eq for shape comparison so the result is safe to pass to
+    torch._check on tensors with unbacked SymInt dimensions; for backed
+    or concrete shapes the behaviour is unchanged.
+    """
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
+    return sym_eq(tuple(a), tuple(b))
 
 
 def is_cpu_scalar_tensor(a: object) -> TypeGuard[TensorLike]:
@@ -1537,7 +1551,7 @@ class REDUCTION_OUTPUT_TYPE_KIND(Enum):
 #   - VIEW, a view of an input tensor is returned
 #   - INPLACE, one or more input tensors is modified
 #
-# these descriptors are mututally exclusive and exhaustive.
+# these descriptors are mutually exclusive and exhaustive.
 class RETURN_TYPE(Enum):
     NEW = (0,)
     VIEW = (1,)
@@ -2065,6 +2079,17 @@ def are_strides_like_channels_last_or_false(
 
 
 def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
+    """DDE-safe Python equivalent of ``Tensor.suggest_memory_format()``.
+
+    Returns ``torch.channels_last`` for 4D tensors with NHWC-pattern strides,
+    ``torch.channels_last_3d`` for 5D NDHWC, otherwise ``torch.contiguous_format``.
+    Uses ``are_strides_like_channels_last_or_false`` internally — when
+    contiguity can't be statically decided (e.g., unbacked symbolic strides),
+    falls back to ``contiguous_format`` instead of raising a data-dependent
+    error. Mirrors eager ``Tensor.suggest_memory_format()`` (with the default
+    ``channels_last_strides_exact_match=false``) for inputs eager would also
+    classify the same way.
+    """
     if x.layout != torch.strided:
         return torch.contiguous_format
 

@@ -58,6 +58,7 @@ __all__ = [
     "is_tensor_method_or_property",
     "wrap_torch_function",
     "enable_reentrant_dispatch",
+    "redispatch_function",
 ]
 
 _P = ParamSpec("_P")
@@ -178,7 +179,6 @@ def get_ignored_functions() -> set[Callable]:
         torch.inference_mode,
         torch.is_inference_mode_enabled,
         torch.layout,
-        torch.align_tensors,
         torch.arange,
         torch.as_strided,
         torch.bartlett_window,
@@ -474,7 +474,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.any: lambda input, dim=None, keepdim=False, out=None: -1,
         torch.argmax: lambda input: -1,
         torch.argmin: lambda input: -1,
-        torch.argsort: lambda input, dim=None: -1,
+        torch.argsort: lambda input, dim=-1, descending=False, *, stable=False: -1,
         torch.asin: lambda input, out=None: -1,
         torch._assert_async: lambda input, msg: -1,
         torch.arcsin: lambda input, out=None: -1,
@@ -877,6 +877,9 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.cross_entropy: (
             lambda input, target, weight=None, size_average=None, ignore_index=-100, reduce=None, reduction="mean", label_smoothing=0.0: -1
         ),
+        torch.nn.functional.linear_cross_entropy: (
+            lambda input, linear_weight, target, linear_bias=None, weight=None, reduction="mean", ignore_index=None, label_smoothing=0.0, options=None: -1
+        ),
         torch.nn.functional.ctc_loss: (
             lambda log_probs, targets, input_lengths, target_lengths, blank=0, reduction="mean", zero_infinity=False: -1
         ),
@@ -1112,7 +1115,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.rsqrt: lambda input, out=None: -1,
         torch.rsub: lambda input, other, alpha=1: -1,
         torch.saddmm: lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1,
-        torch.scatter: lambda input, dim, index, src: -1,
+        torch.scatter: lambda input, dim, index, src=None, *, value=None, reduce=None: -1,
         torch.scatter_add: lambda input, dim, index, src: -1,
         torch.scatter_reduce: lambda input, dim, index, src, reduce, include_self=True: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
@@ -1258,7 +1261,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.true_divide: lambda input, other: -1,
         torch.trunc: lambda input, out=None: -1,
         torch.unbind: lambda input, dim=0: -1,
-        torch.unflatten: lambda input, dim, sizes, names: -1,
+        torch.unflatten: lambda input, dim, sizes: -1,
         torch.unique: lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unique_consecutive: lambda input, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unravel_index: lambda indices, shape: -1,
@@ -1389,7 +1392,6 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.itemsize.__get__: lambda self: -1,
         Tensor.layout.__get__: lambda self: -1,
         Tensor.name.__get__: lambda self: -1,
-        Tensor.names.__get__: lambda self: -1,
         Tensor.nbytes.__get__: lambda self: -1,
         Tensor.ndim.__get__: lambda self: -1,
         Tensor.output_nr.__get__: lambda self: -1,
@@ -1409,11 +1411,8 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.col_indices: lambda self: -1,
         Tensor.ccol_indices: lambda self: -1,
         Tensor.row_indices: lambda self: -1,
-        Tensor._update_names: lambda self, names, inplace: -1,
         Tensor._values: lambda self: -1,
         Tensor.adjoint: lambda self: -1,
-        Tensor.align_as: lambda self, other: -1,
-        Tensor.align_to: lambda self, order, ellipsis_idx: -1,
         Tensor.apply_: lambda self, callable: -1,
         Tensor.as_strided: lambda self, size, stride: -1,
         Tensor.as_strided_: lambda self, size, stride: -1,
@@ -1452,7 +1451,6 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.get_device: lambda self: -1,
         Tensor.half: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.chalf: lambda self, memory_format=torch.preserve_format: -1,
-        Tensor.has_names: lambda self: -1,
         Tensor.indices: lambda self: -1,
         Tensor.int: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.is_coalesced: lambda self: -1,
@@ -1483,10 +1481,8 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.qscheme: lambda self: -1,
         Tensor.random_: lambda self, from_=0, to=None, *, generator=None: -1,
         Tensor.record_stream: lambda self, stream: -1,
-        Tensor.refine_names: lambda self, names: -1,
         Tensor.register_hook: lambda self, hook: -1,
         Tensor.register_post_accumulate_grad_hook: lambda self, hook: -1,
-        Tensor.rename: lambda self, name: -1,
         Tensor.repeat: lambda self, *size: -1,
         Tensor.requires_grad_: lambda self, requires_grad=True: -1,
         Tensor.reshape_as: lambda self, other: -1,
@@ -1582,12 +1578,12 @@ def get_testing_overrides() -> dict[Callable, Callable]:
                 dist.reduce: lambda tensor, dst=None, op=None, group=None, async_op=False, group_dst=None: -1,
                 dist.all_reduce_coalesced: lambda tensors, op=None, group=None, async_op=False: -1,
                 dist.all_gather: lambda tensor_list, tensor, group=None, async_op=False: -1,
-                dist.all_gather_into_tensor: lambda output_tensor, input_tensor, group=None, async_op=False: -1,
+                dist.all_gather_single: lambda output_tensor, input_tensor, group=None, async_op=False: -1,
                 dist.all_gather_coalesced: lambda output_tensor_lists, input_tensor_list, group=None, async_op=False: -1,
                 dist.gather: lambda tensor, gather_list=None, dst=None, group=None, async_op=False, group_dst=None: -1,
                 dist.scatter: lambda tensor, scatter_list=None, src=None, group=None, async_op=False, group_src=None: -1,
                 dist.reduce_scatter: lambda output, input_list, op=None, group=None, async_op=False: -1,
-                dist.reduce_scatter_tensor: lambda output, input, op=None, group=None, async_op=False: -1,
+                dist.reduce_scatter_single: lambda output, input, op=None, group=None, async_op=False: -1,
                 dist.all_to_all_single: lambda output, input, output_split_sizes=None, input_split_sizes=None, group=None, async_op=False: -1,
                 dist.all_to_all: lambda output_tensor_list, input_tensor_list, group=None, async_op=False: -1,
                 dist.isend: lambda tensor, dst=None, group=None, tag=0, group_dst=None: -1,
@@ -2165,3 +2161,73 @@ def enable_reentrant_dispatch():
             yield
         finally:
             pass
+
+
+def redispatch_function(func, types, args, kwargs):
+    """Skip one level of ``__torch_function__`` dispatch and call the function.
+
+    This is primarily useful for **Tensor subclasses** that want to call into
+    a function's implementation while still intercepting PyTorch operations
+    inside that function.
+
+    Example with Tensor subclass. Only ops whose inputs include a
+    ``LoggingTensor`` are intercepted; once ``redispatch_function`` returns
+    a plain ``torch.Tensor``, subsequent ops (here ``+ 1``) are not logged.
+
+        >>> from torch.overrides import has_torch_function, handle_torch_function
+        >>> class LoggingTensor(torch.Tensor):
+        ...     depth = 0
+        ...
+        ...     @classmethod
+        ...     def __torch_function__(cls, func, types, args, kwargs=None):
+        ...         print(f"{'  ' * cls.depth}Calling {func.__name__}")
+        ...         cls.depth += 1
+        ...         r = torch.overrides.redispatch_function(func, types, args, kwargs)
+        ...         cls.depth -= 1
+        ...         return r
+        >>> def scaled_mul(a, b):
+        ...     if has_torch_function((a, b)):
+        ...         return handle_torch_function(scaled_mul, (a, b), a, b)
+        ...     return a * b + 1
+        >>> x = LoggingTensor(torch.tensor([3.0]))
+        >>> y = LoggingTensor(torch.tensor([4.0]))
+        >>> result = scaled_mul(x, y)
+        Calling scaled_mul
+          Calling mul
+        >>> result
+        tensor([13.])
+
+    Note that only ``mul`` is logged, not ``add``: ``redispatch_function``
+    returns a plain ``torch.Tensor``, so the ``+ 1`` inside ``scaled_mul``
+    no longer sees a ``LoggingTensor`` input and ``__torch_function__`` is
+    not triggered.
+
+    With ``TorchFunctionMode`` the mode stays active across all inner ops,
+    so the ``+ 1`` is now visible too.  Use ``with self:`` after
+    ``redispatch_function`` to re-enable the mode for those inner calls.
+
+        >>> from torch.overrides import TorchFunctionMode
+        >>> class LoggingMode(TorchFunctionMode):
+        ...     def __init__(self):
+        ...         self.depth = 0
+        ...
+        ...     def __torch_function__(self, func, types, args, kwargs=None):
+        ...         print(f"{'  ' * self.depth}Calling {func.__name__}")
+        ...         self.depth += 1
+        ...         with self:
+        ...             r = torch.overrides.redispatch_function(
+        ...                 func, types, args, kwargs
+        ...             )
+        ...         self.depth -= 1
+        ...         return r
+        >>> a = torch.tensor([3.0])
+        >>> b = torch.tensor([4.0])
+        >>> with LoggingMode():
+        ...     result = scaled_mul(a, b)
+        Calling scaled_mul
+          Calling mul
+          Calling add
+        >>> result
+        tensor([13.])
+    """
+    return torch._C._skip_one_hop_torch_function(func, types, args, kwargs)

@@ -180,10 +180,7 @@ def _maybe_get_inplace_op(op: object) -> torch._ops.OpOverload | None:
     if maybe_inplace_op is None:
         return None
 
-    inplace_overloads = [
-        getattr(maybe_inplace_op, overload_name)
-        for overload_name in maybe_inplace_op.overloads()
-    ]
+    inplace_overloads = maybe_inplace_op.op_overloads()
     inplace_overloads_with_matching_schemas = [
         f for f in inplace_overloads if _schemas_match(op._schema, f._schema)
     ]
@@ -289,7 +286,7 @@ def _get_view_inverse_node_usages(
                 continue
             self_alias_base = self_alias.meta["view_of"]
             try:
-                # The we're trying to reuse the args from the view_scatter call inside of the corresponding
+                # We're trying to reuse the args from the view_scatter call inside of the corresponding
                 # view op, which might throw. This just indicates that view_scatter op isn't a valid inverse
                 # of the current alias we're looking at.
                 view_replay_metadata = original_view(
@@ -308,9 +305,7 @@ def _get_view_inverse_node_usages(
 
 
 @compatibility(is_backward_compatible=True)
-def reinplace(
-    gm, *sample_args
-):  # pyrefly: ignore[unannotated-parameter, unannotated-return]
+def reinplace(gm: torch.fx.GraphModule, *sample_args: Any) -> torch.fx.GraphModule:
     r"""
     Given an fx.GraphModule, modifies it to perform "reinplacing",
     mutating the nodes of the graph.

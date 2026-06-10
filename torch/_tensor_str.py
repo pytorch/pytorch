@@ -291,7 +291,7 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
 
 # formatter2 is only used for printing complex tensors.
 # For complex tensors, formatter1 and formatter2 are the formatters for tensor.real
-# and tensor.imag respesectively
+# and tensor.imag respectively
 def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=None):
     dim = self.dim()
 
@@ -332,14 +332,6 @@ def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=N
 def _tensor_str(self, indent):
     if self.numel() == 0:
         return "[]"
-
-    if self.has_names():
-        # There are two main codepaths (possibly more) that tensor printing goes through:
-        # - tensor data can fit comfortably on screen
-        # - tensor data needs to be summarized
-        # Some of the codepaths don't fully support named tensors, so we send in
-        # an unnamed tensor to the formatting code as a workaround.
-        self = self.rename(None)
 
     summarize = self.numel() > PRINT_OPTS.threshold
 
@@ -667,9 +659,6 @@ def _str_intern(inp, *, tensor_contents=None):
         suffixes.append(f"grad_fn=<{grad_fn_name}>")
     elif inp.requires_grad:
         suffixes.append("requires_grad=True")
-
-    if self.has_names():
-        suffixes.append(f"names={self.names}")
 
     if tangent is not None:
         suffixes.append(f"tangent={tangent}")

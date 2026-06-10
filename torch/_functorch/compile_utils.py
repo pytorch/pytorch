@@ -219,7 +219,7 @@ def strip_overloads(gm: fx.GraphModule) -> None:
     gm.recompile()
 
 
-def get_placeholders(graph: fx.Graph) -> fx.graph._node_list:
+def get_placeholders(graph: fx.Graph) -> list[Any]:
     return graph.find_nodes(op="placeholder")
 
 

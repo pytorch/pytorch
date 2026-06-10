@@ -26,6 +26,11 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 - [ ] **Testing implications** - Does this pattern require awkward test patterns? Internal-only flags often lead to tests that use "forbidden" parameters
 - [ ] **UX implications** - Is this pattern discoverable and understandable to users? Will it appear in autocomplete, type hints, or docs in confusing ways?
 
+### Public API Documentation
+
+- [ ] **`__all__` requires docs** - Any callable added to a module's `__all__` must have a corresponding entry in the module's `.rst`/`.md` doc file (typically in an `autosummary` block). CI enforces this via `docs/source/conf.py`'s `coverage_post_process`
+- [ ] **Never add to coverage ignore lists** - `coverage_ignore_functions` and `coverage_ignore_classes` in `docs/source/conf.py` are legacy allowlists. Never add new entries. Instead, either properly document the API or remove it from `__all__`
+
 ### Code Clarity
 
 - [ ] **Self-explanatory code** - Variable and function names convey intent; minimal comments needed
@@ -188,6 +193,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 - [ ] **Edge cases covered** - Tests include boundary conditions, empty inputs, error cases
 - [ ] **Error conditions tested** - Expected exceptions are tested with `assertRaisesRegex`, not bare `assertRaises`. `assertRaisesRegex` verifies both the exception type and message, catching cases where the right exception is raised for the wrong reason. Bare `assertRaises` should be flagged — always require a message pattern match
 - [ ] **No duplicated test logic** - Similar tests share a private helper method called from individual tests with different configs
+- [ ] **Prefer xfail over skip** - PR disables a test on a platform/config with `skip` (e.g. `@skipIf`, `@unittest.skip`, `self.skipTest`, `DecorateInfo(unittest.skip, ...)`) when the test merely fails rather than crashing. Prefer expected-failure (`@unittest.expectedFailure`, `DecorateInfo(unittest.expectedFailure, ...)`, or PyTorch's `xfailIf`/`expectedFailure*` helpers) instead. A skip silently hides the test forever — once the underlying bug is fixed or the platform gains support, the test stays disabled and the new coverage is lost. An xfail flips to a hard failure the moment the test starts passing, forcing the author to remove the marker and re-enable the test. Only accept a `skip` when the test would hard-crash the process (segfault, fatal abort that takes down the whole test binary), hang, or is genuinely flaky (non-deterministic pass/fail); in those cases the author should say so explicitly. A plain deterministic assertion failure or unsupported-op error is always an xfail, never a skip
 - [ ] **Use weakref for lifetime testing** - PR uses `sys.getrefcount()` to test whether objects are kept alive. Use `weakref.ref()` instead — create a weak reference, delete the strong references, then check if the weakref is dead (`wr() is None`). `sys.getrefcount` is a CPython implementation detail that varies across versions and is fragile
 
 ## Security
