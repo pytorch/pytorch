@@ -490,9 +490,16 @@ print(t.is_pinned())
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
         cudart = torch.cuda.cudart()
-        r = cudart.cudaHostRegister(t.data_ptr(), t.numel() * t.element_size(), 0)
+        cudaHostRegisterMapped = 2
+        r = cudart.cudaHostRegister(
+            t.data_ptr(), t.numel() * t.element_size(), cudaHostRegisterMapped
+        )
         self.assertEqual(r, 0)
         self.assertTrue(t.is_pinned())
+        r, device_ptr = cudart.cudaHostGetDevicePointer(t.data_ptr(), 0)
+        self.assertEqual(r, 0)
+        self.assertIsInstance(device_ptr, int)
+        self.assertNotEqual(device_ptr, 0)
         r = cudart.cudaHostUnregister(t.data_ptr())
         self.assertEqual(r, 0)
         self.assertFalse(t.is_pinned())

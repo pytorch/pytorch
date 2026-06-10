@@ -75,6 +75,19 @@ void initCudartBindings(PyObject* module) {
       });
   cudart.def(
       "cuda"
+      "HostGetDevicePointer",
+      [](uintptr_t ptr,
+         unsigned int flags) -> std::pair<cudaError_t, uintptr_t> {
+        void* device_ptr = nullptr;
+        py::gil_scoped_release no_gil;
+        const auto error = C10_CUDA_ERROR_HANDLED(
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            cudaHostGetDevicePointer(&device_ptr, (void*)ptr, flags));
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        return {error, (uintptr_t)device_ptr};
+      });
+  cudart.def(
+      "cuda"
       "StreamCreate",
       [](uintptr_t ptr) -> cudaError_t {
         py::gil_scoped_release no_gil;
