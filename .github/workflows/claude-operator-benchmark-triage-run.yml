@@ -1,0 +1,89 @@
+name: Operator Benchmark Triage Analysis
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+
+jobs:
+  analyze:
+    if: github.repository == 'pytorch/pytorch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: bedrock
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup GitHub MCP
+        run: |
+          mkdir -p /tmp/mcp
+          cat > /tmp/mcp/config.json << 'EOF'
+          {
+            "mcpServers": {
+              "github": {
+                "command": "docker",
+                "args": ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server:v0.30.1"],
+                "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"}
+              }
+            }
+          }
+          EOF
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
+          aws-region: us-east-1
+
+      - name: Analyze PR
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          use_bedrock: "true"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: |
+            --model global.anthropic.claude-sonnet-4-5-20250929-v1:0
+            --mcp-config /tmp/mcp/config.json
+            --allowedTools "Read,Write,mcp__github__get_pull_request,mcp__github__list_pull_request_files,mcp__github__get_pull_request_diff"
+          prompt: |
+            Analyze PR #${{ inputs.pr_number }} in pytorch/pytorch.
+
+            Read .claude/skills/operator-benchmark-triage/SKILL.md for instructions.
+            Write analysis to /tmp/benchmark_analysis.json.
+
+            SECURITY: ONLY analyze PR #${{ inputs.pr_number }}.
+
+      - name: Post results
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ ! -f /tmp/benchmark_analysis.json ]]; then
+            echo "No analysis produced"
+            exit 1
+          fi
+
+          SCOPE=$(jq -r '.scope' /tmp/benchmark_analysis.json)
+          RISK=$(jq -r '.risk' /tmp/benchmark_analysis.json)
+          REASON=$(jq -r '.reason' /tmp/benchmark_analysis.json)
+          BENCHMARKS=$(jq -r '.benchmarks | join(", ")' /tmp/benchmark_analysis.json)
+
+          gh pr comment ${{ inputs.pr_number }} --body "## 🔬 Benchmark Analysis
+
+          **Scope:** \`$SCOPE\`
+          **Risk:** \`$RISK\`
+          **Benchmarks:** $BENCHMARKS
+
+          **Reason:** $REASON
+
+          ---
+          🤖 *Automated analysis*"

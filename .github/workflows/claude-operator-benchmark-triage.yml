@@ -1,0 +1,32 @@
+name: Operator Benchmark Triage
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - 'aten/src/ATen/**'
+      - 'torch/**'
+      - 'c10/**'
+
+jobs:
+  notify:
+    if: github.repository == 'pytorch/pytorch'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Post analysis comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --body "## 🔬 Operator Benchmark Analysis Available
+
+          This PR modifies operator code. Run analysis to see which benchmarks should be tested:
+
+          \`\`\`bash
+          gh workflow run claude-operator-benchmark-triage-run.yml -f pr_number=${{ github.event.pull_request.number }}
+          \`\`\`
+
+          Or trigger via [Actions](https://github.com/${{ github.repository }}/actions/workflows/claude-operator-benchmark-triage-run.yml)"
