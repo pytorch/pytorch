@@ -8662,8 +8662,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 "Suggested fixes(.*\n)*.*"
                 "_dx = Dim\(\\'_dx\\', max=12\)(.*\n)*.*"
                 "dx = 3\*_dx - 1(.*\n)*.*"
-                "dy = 3\*_dx(.*\n)*.*"
-                "dz = 3\*_dx \+ 2"
+                "dy = 3\*_dx"
             ),
         ):
             export(Foo(), inputs, dynamic_shapes=dynamic_shapes)

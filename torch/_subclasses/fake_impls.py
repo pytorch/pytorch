@@ -1373,6 +1373,13 @@ def _compute_slice_index(size: IntLikeType, index: IntLikeType) -> IntLikeType |
     return None
 
 
+def _is_plain_symbol(index: IntLikeType | None) -> bool:
+    if not isinstance(index, torch.SymInt):
+        return False
+
+    return index.node.expr.is_Symbol
+
+
 @register_op_impl(torch.ops.aten.slice.Tensor)
 def slice_forward(
     fake_mode: FakeTensorMode,
@@ -1410,7 +1417,7 @@ def slice_forward(
     # size
     new_size: IntLikeType | None = None
     if start_index is not None and end_index is not None:
-        if isinstance(start, torch.SymInt) or isinstance(end, torch.SymInt):
+        if _is_plain_symbol(start) or _is_plain_symbol(end):
             if guard_or_false(end_index >= start_index):
                 new_size = (end_index - start_index + step - 1) // step
             elif guard_or_false(start_index >= end_index):
@@ -1662,6 +1669,28 @@ def embedding_bag(
 
     with fake_mode:
         return meta_embedding_bag(*args, **kwargs)
+
+
+@register_op_impl(aten.embedding.default)
+def embedding(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> Any:
+    from torch._meta_registrations import embedding as meta_embedding
+
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    weight = new_kwargs["weight"]
+    indices = new_kwargs["indices"]
+    if (
+        weight.device != indices.device
+        and weight.device.type != "meta"
+        and indices.device.type != "meta"
+    ):
+        return NotImplemented
+
+    with fake_mode:
+        return typing_cast(FakeTensor, meta_embedding(*args, **kwargs))
 
 
 # takes in multiple-devices, don't default to default device handling
