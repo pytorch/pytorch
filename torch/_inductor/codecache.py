@@ -2210,10 +2210,12 @@ class CudaKernelParamCache:
         basename, _ = get_name_and_dir_from_output_file_path(bin_path)
 
         if config.aot_inductor.emit_multi_arch_kernel:
+            # Distinct from the single-arch .hsaco the JIT pass reloads, so
+            # the multi-arch bundle doesn't clobber it.
             bin_type_to_ext = {
                 "cubin": ".fatbin",
                 XPU_KERNEL_FORMAT: ".spv",
-                "hsaco": ".hsaco",
+                "hsaco": "_multiarch.hsaco",
             }
             assert bin_type in bin_type_to_ext, (
                 "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
