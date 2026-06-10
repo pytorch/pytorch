@@ -3941,7 +3941,21 @@ def pointwise(
     )
 
     configs = None
-    if len(size_hints) == 1:
+    tiling_score_configs = pointwise_configs_from_tiling_scores(
+        size_hints,
+        inductor_meta.get("tiling_scores") or {},
+        triton_config_with_settings,
+    )
+    if tiling_score_configs:
+        if not inductor_meta.get("autotune_pointwise", True) and not (
+            inductor_meta.get("max_autotune")
+            or inductor_meta.get("max_autotune_pointwise")
+        ):
+            configs = tiling_score_configs[:1]
+        else:
+            configs = tiling_score_configs
+
+    if configs is None and len(size_hints) == 1:
         if not inductor_meta.get("autotune_pointwise", True) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
@@ -3992,7 +4006,7 @@ def pointwise(
                         triton_config_with_settings(size_hints, 32),
                     ]
                 )
-    if len(size_hints) == 2:
+    if configs is None and len(size_hints) == 2:
         # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
         # ROCm has observed improvement by diverging here
         if (
@@ -4044,7 +4058,7 @@ def pointwise(
                         triton_config_with_settings(size_hints, 4, 256),
                     ]
                 )
-    if len(size_hints) == 3:
+    if configs is None and len(size_hints) == 3:
         if not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
@@ -4460,6 +4474,56 @@ def adapt_config_for_tiling(
         waves_per_eu=waves_per_eu,
         warp_size=warp_size,
     )
+
+
+def pointwise_configs_from_tiling_scores(
+    size_hints,
+    tiling_scores,
+    make_config,
+) -> list[Config]:
+    if len(size_hints) != 3 or not all(dim in tiling_scores for dim in ("x", "y", "z")):
+        return []
+
+    # This path is for [outer, reuse, inner] pointwise tiling. Keep the
+    # coalesced inner dimension whole, then autotune a small reuse-dim tile.
+    if tiling_scores["x"] <= 0 or tiling_scores["y"] <= 0 or tiling_scores["z"] != 0:
+        return []
+
+    inner_block = min(size_hints["x"], TRITON_MAX_BLOCK["X"])
+    if inner_block < 64:
+        return []
+
+    total_numel = conditional_product(*size_hints.values())
+    target_products = [
+        max(1024, inner_block),
+        max(2048, inner_block),
+        max(512, inner_block),
+    ]
+
+    configs: list[Config] = []
+    seen: OrderedSet[tuple[tuple[tuple[str, int], ...], int, int]] = OrderedSet()
+    for target_product in target_products:
+        target_product = min(target_product, total_numel)
+        y_block = max(
+            1,
+            min(
+                size_hints["y"],
+                TRITON_MAX_BLOCK["Y"],
+                max(1, target_product // inner_block),
+            ),
+        )
+        cfg = make_config(
+            size_hints,
+            inner_block,
+            y_block,
+            1,
+        )
+        key = (tuple(sorted(cfg.kwargs.items())), cfg.num_warps, cfg.num_stages)
+        if key not in seen:
+            seen.add(key)
+            configs.append(cfg)
+
+    return configs
 
 
 def filter_reduction_configs_for_determinism(

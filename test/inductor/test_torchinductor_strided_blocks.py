@@ -1429,6 +1429,75 @@ class CommonTemplate:
         # Singleton splits should be discarded.
         self._assert_pointwise_ndims(triton_code, 2)
 
+    @requires_gpu()
+    def test_pointwise_interior_broadcast_reuse_tiling(self):
+        def foo(x, table):
+            factor = torch.sin(table) + torch.cos(table)
+            return x * factor[:, None, :]
+
+        x = torch.randn((4, 8, 64), device=self.device, dtype=torch.float32)
+        table = torch.randn((4, 64), device=self.device, dtype=torch.float32)
+        result, (triton_code,) = self._run_and_compare(
+            foo,
+            x,
+            table,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "triton.coalesce_tiling_analysis": True,
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": False,
+            },
+        )
+
+        self._assert_pointwise_ndims(triton_code, 3)
+        self.assertIn("znumel = 4", triton_code)
+        self.assertIn("ynumel = 8", triton_code)
+        self.assertIn("xnumel = 64", triton_code)
+
+    @requires_gpu()
+    def test_pointwise_interior_broadcast_reuse_small_inner_guard(self):
+        def foo(x, table):
+            factor = torch.sin(table) + torch.cos(table)
+            return x * factor[:, None, :]
+
+        x = torch.randn((4, 8, 32), device=self.device, dtype=torch.float32)
+        table = torch.randn((4, 32), device=self.device, dtype=torch.float32)
+        result, (triton_code,) = self._run_and_compare(
+            foo,
+            x,
+            table,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "triton.coalesce_tiling_analysis": True,
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": False,
+            },
+        )
+
+        self._assert_pointwise_ndims(triton_code, 1)
+
+    @requires_gpu()
+    def test_pointwise_interior_broadcast_reuse_requires_expensive_op(self):
+        def foo(x, table):
+            factor = table + 1.0
+            return x * factor[:, None, :]
+
+        x = torch.randn((4, 8, 64), device=self.device, dtype=torch.float32)
+        table = torch.randn((4, 64), device=self.device, dtype=torch.float32)
+        result, (triton_code,) = self._run_and_compare(
+            foo,
+            x,
+            table,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "triton.coalesce_tiling_analysis": True,
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": False,
+            },
+        )
+
+        self._assert_pointwise_ndims(triton_code, 1)
+
     # Integration test to ensure that matched dims & strides from match_mod_div_expr
     # are unsigned and signed integers respectively. This test case has the following
     # index:=(ModularIndexing(xindex, 4, 4)) + 4*(ModularIndexing(xindex, 32, 2))

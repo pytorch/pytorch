@@ -4069,6 +4069,136 @@ class SIMDScheduling(BaseScheduling):
 
         return ranked_tilings
 
+    @staticmethod
+    def _expensive_pointwise_origin_score(
+        node_schedule: list[NodeScheduleEntry],
+    ) -> int:
+        expensive_ops = {
+            "acos": 32,
+            "asin": 32,
+            "atan": 32,
+            "cos": 32,
+            "cosh": 32,
+            "div": 8,
+            "erf": 32,
+            "erfc": 32,
+            "exp": 32,
+            "expm1": 32,
+            "lgamma": 32,
+            "log": 32,
+            "log10": 32,
+            "log1p": 32,
+            "log2": 32,
+            "pow": 16,
+            "reciprocal": 8,
+            "rsqrt": 16,
+            "sin": 32,
+            "sinh": 32,
+            "sqrt": 16,
+            "tan": 32,
+            "tanh": 32,
+            "truediv": 8,
+        }
+
+        def get_target_name(origin: Any) -> str:
+            target = getattr(origin, "target", None)
+            if target is None:
+                return ""
+            overloadpacket = getattr(target, "overloadpacket", None)
+            if overloadpacket is not None:
+                return str(overloadpacket).rsplit(".", 1)[-1]
+            name = getattr(target, "__name__", None)
+            if name is not None:
+                return name
+            return str(target).rsplit(".", 1)[-1]
+
+        score = 0
+        seen_origin_ids: OrderedSet[int] = OrderedSet()
+        for schedule_entry in NodeScheduleMarker.only_nodes(node_schedule):
+            for node in schedule_entry.get_nodes():
+                if not isinstance(node, scheduler.SchedulerNode) or node.node is None:
+                    continue
+                for origin in node.node.get_origins():
+                    origin_id = id(origin)
+                    if origin_id in seen_origin_ids:
+                        continue
+                    seen_origin_ids.add(origin_id)
+                    score += expensive_ops.get(get_target_name(origin), 0)
+
+        return score
+
+    @classmethod
+    def maybe_interior_reuse_pointwise_tiling(
+        cls,
+        node_schedule: list[NodeScheduleEntry],
+        pointwise_numel: sympy.Expr,
+        reduction_numel: sympy.Expr,
+        coalesce_analysis: CoalesceVarAnalysis,
+    ) -> tuple[dict[str, sympy.Expr], dict[str, sympy.Expr]] | None:
+        """
+        Select 3D pointwise tiling for RoPE-like broadcast factor reuse.
+
+        This targets expressions shaped like [outer, reuse, inner] where
+        table/trig-factor loads depend on the inner dimension, but not on the
+        middle reuse dimension. A 1D tile recomputes those factors for every
+        head. A [Z, Y, X] tile lets Triton build [Z, 1, X] values and broadcast
+        them across Y.
+        """
+        if reduction_numel != 1 or get_max_tiles(default=3) < 3:
+            return None
+
+        norm_read_writes = coalesce_analysis.norm_read_writes
+        iter_vars = list(norm_read_writes.index_vars)
+        if len(iter_vars) != 3:
+            return None
+
+        ranges = norm_read_writes.var_ranges
+        pointwise_ranges = [ranges[v] for v in iter_vars]
+        if free_unbacked_symbols(pointwise_ranges):
+            return None
+
+        sizevars = V.graph.sizevars
+        outer_var, reuse_var, inner_var = iter_vars
+        outer_numel, reuse_numel, inner_numel = pointwise_ranges
+        if (
+            sizevars.optimization_hint(inner_numel, fallback=0) < 64
+            or sizevars.optimization_hint(reuse_numel, fallback=0) < 2
+            or sizevars.optimization_hint(outer_numel, fallback=0) < 2
+        ):
+            return None
+
+        inner_score = coalesce_analysis.coalesced_by_var.get(inner_var, 0)
+        if inner_score <= 0:
+            return None
+
+        expensive_score = cls._expensive_pointwise_origin_score(node_schedule)
+        repeated_read_score = 0
+        repeated_read_count = 0
+        for read_expr, buf_names in norm_read_writes.reads.items():
+            read_iter_vars = read_expr.free_symbols & OrderedSet(iter_vars)
+            if reuse_var in read_iter_vars or inner_var not in read_iter_vars:
+                continue
+            repeated_read_count += len(buf_names)
+            repeated_read_score += len(buf_names) * sizevars.optimization_hint(
+                inner_numel, fallback=1
+            )
+
+        if repeated_read_count == 0:
+            return None
+        # Pure load reuse was not enough to pay for the 3D tiling overhead in
+        # issue-27 RoPE variants; require expensive broadcast work.
+        if expensive_score == 0:
+            return None
+
+        tiling = cls.create_tiling(pointwise_ranges, [reduction_numel])
+        reuse_score = max(
+            repeated_read_score * expensive_score,
+            inner_score // 8,
+            1,
+        )
+        tiling_score = cls.create_tiling([0, reuse_score, inner_score], [0])
+        return tiling, tiling_score
+
     @classmethod
     def compute_tiling_strategy(
         cls,
@@ -4092,6 +4222,11 @@ class SIMDScheduling(BaseScheduling):
 
         pw_ranges = [ranges[v] for v in all_iter_vars]
         red_ranges = [ranges[v] for v in all_red_vars]
+
+        if interior_reuse_tiling := cls.maybe_interior_reuse_pointwise_tiling(
+            node_schedule, pointwise_numel, reduction_numel, coalesce_analysis
+        ):
+            return interior_reuse_tiling
 
         # Sometimes dynamic shapes is unable to prove equality without hint
         get_hint = V.graph.sizevars.optimization_hint

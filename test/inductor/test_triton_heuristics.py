@@ -60,6 +60,7 @@ from torch._inductor.runtime.triton_heuristics import (
     CachingAutotunerPlugin,
     DEFER,
     make_matmul_triton_config,
+    pointwise,
     template,
     triton_config,
 )
@@ -105,6 +106,21 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_pointwise_tiling_scores_keep_inner_dim_coalesced(self):
+        cfgs = pointwise(
+            {"z": 128, "y": 16, "x": 256},
+            triton_meta={"device": object()},
+            inductor_meta={
+                "tiling_scores": {"z": 0, "y": 128, "x": 1024},
+                "autotune_pointwise": True,
+            },
+            return_configs=True,
+        )
+
+        kwargs = [cfg.kwargs for cfg in cfgs]
+        self.assertIn({"XBLOCK": 256, "YBLOCK": 4, "ZBLOCK": 1}, kwargs)
+        self.assertIn({"XBLOCK": 256, "YBLOCK": 8, "ZBLOCK": 1}, kwargs)
 
     def test_native_matmul_config_block_numel_limit(self):
         device = DeviceProperties(
