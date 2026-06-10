@@ -25,6 +25,14 @@
 # guard. When absent, the declaration is emitted ungated, which would signify that the op was
 # available since torch 2.9. ALL NEWLY ADDED OPS MUST INCLUDE A "since" KEY WITH THE VALUE SET
 # TO THE CURRENT TORCH VERSION (the version when the op was added).
+#
+# Set "only_for_kernel_backends": True for ops whose CompositeExplicitAutograd
+# entry is just a privateuse1-override stub (it throws unconditionally). With this
+# flag, per-backend shims are only emitted for backends that have an explicit kernel
+# in native_functions.yaml (i.e. the codegen does NOT fall back to the throwing
+# CompositeExplicitAutograd implementation). The op must still stay in this list so
+# that the c_shim_extend mechanism can generate shims for out-of-tree privateuse1
+# backends.
 
 inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten._adaptive_avg_pool2d_backward.default": {},
@@ -80,8 +88,12 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten._scaled_dot_product_flash_attention.quantized": {
         "since": "TORCH_VERSION_2_11_0"
     },
-    "aten._scaled_dot_product_fused_attention_overrideable_backward.default": {},
-    "aten._scaled_dot_product_fused_attention_overrideable.default": {},
+    "aten._scaled_dot_product_fused_attention_overrideable_backward.default": {
+        "only_for_kernel_backends": True,
+    },
+    "aten._scaled_dot_product_fused_attention_overrideable.default": {
+        "only_for_kernel_backends": True,
+    },
     "aten._scaled_mm.default": {},
     "aten._scaled_grouped_mm.default": {"since": "TORCH_VERSION_2_10_0"},
     "aten._scaled_mm.out": {},
@@ -230,3 +242,47 @@ aten_shimified_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten.full.default": {"since": "TORCH_VERSION_2_10_0"},
     "aten.subtract.Tensor": {"since": "TORCH_VERSION_2_10_0"},
 }
+
+
+# For every op flagged "only_for_kernel_backends" in `inductor_fallback_ops`,
+# this dict records the set of in-tree backend device strings (lowercase) that
+# have an explicit kernel in native_functions.yaml. AOT Inductor uses this at
+# Python codegen time to raise a clear error instead of emitting a C shim call
+# for a device that has no real kernel (which would only have a throwing
+# CompositeExplicitAutograd stub). When you add a new op with
+# "only_for_kernel_backends": True above, you MUST add a matching entry here.
+only_for_kernel_backends_allowed_devices: dict[str, frozenset[str]] = {
+    "aten._scaled_dot_product_fused_attention_overrideable.default": frozenset({"xpu"}),
+    "aten._scaled_dot_product_fused_attention_overrideable_backward.default": frozenset(),
+}
+
+
+def _validate_only_for_kernel_backends_allowlist() -> None:
+    flagged = {
+        name
+        for name, meta in inductor_fallback_ops.items()
+        if meta.get("only_for_kernel_backends")
+    }
+    listed = set(only_for_kernel_backends_allowed_devices)
+    if flagged != listed:
+        missing_in_allowlist = flagged - listed
+        stale_in_allowlist = listed - flagged
+        parts = []
+        if missing_in_allowlist:
+            parts.append(
+                f"missing from only_for_kernel_backends_allowed_devices: "
+                f"{sorted(missing_in_allowlist)}"
+            )
+        if stale_in_allowlist:
+            parts.append(
+                f"present in only_for_kernel_backends_allowed_devices but not flagged: "
+                f"{sorted(stale_in_allowlist)}"
+            )
+        raise AssertionError(
+            "inductor_fallback_ops 'only_for_kernel_backends' and "
+            "only_for_kernel_backends_allowed_devices are out of sync: "
+            + "; ".join(parts)
+        )
+
+
+_validate_only_for_kernel_backends_allowlist()

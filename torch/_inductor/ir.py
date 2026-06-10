@@ -9166,11 +9166,19 @@ class FallbackKernel(ExternKernelAlloc):
         See https://github.com/pytorch/pytorch/issues/151692"""
         kernel = self.op_overload
         assert kernel is not None
+        # Tracks whether this op should be lowered through aoti_torch_call_dispatcher
+        # (rather than the proxy executor) because it's flagged
+        # only_for_kernel_backends and the target device has no in-tree kernel.
+        # See pytorch#184195.
+        route_through_call_dispatcher = False
         if kernel.namespace == "aten":
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload), type(kernel)
             if V.graph.cpp_wrapper:
-                from torchgen.aoti.fallback_ops import inductor_fallback_ops
+                from torchgen.aoti.fallback_ops import (
+                    inductor_fallback_ops,
+                    only_for_kernel_backends_allowed_devices,
+                )
 
                 if str(kernel) not in inductor_fallback_ops:
                     # C shim v2 is torchgen-ed, which should cover all aten ops.
@@ -9180,6 +9188,22 @@ class FallbackKernel(ExternKernelAlloc):
                         kernel,
                     )
                     self.use_runtime_dispatch = True
+                else:
+                    # Some ops (e.g. _scaled_dot_product_fused_attention_overrideable)
+                    # only have a throwing CompositeExplicitAutograd stub in ATen that
+                    # exists so out-of-tree privateuse1 backends can override via
+                    # TORCH_LIBRARY_IMPL. For devices without an explicit kernel, we
+                    # must route through the dispatcher (runtime lookup) so a
+                    # TORCH_LIBRARY_IMPL override can intercept the call. Calling
+                    # the per-backend C shim directly would bypass dispatch and hit
+                    # the throwing stub. See pytorch#184195.
+                    allowed = only_for_kernel_backends_allowed_devices.get(str(kernel))
+                    if allowed is not None:
+                        device = self.get_device()
+                        device_type = device.type if device is not None else None
+                        if device_type is not None and device_type not in allowed:
+                            self.use_runtime_dispatch = True
+                            route_through_call_dispatcher = True
         elif kernel.namespace == "_quantized":
             # Internal Quantized Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload), type(kernel)
@@ -9224,9 +9248,23 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.codegen_comment(wrapper)
         if self.use_runtime_dispatch:
-            exported_args = self.export_extern_kernel_node()
             assert self.python_kernel_name is not None
             assert self.op_overload is not None
+
+            if route_through_call_dispatcher:
+                # We're going to emit an aoti_torch_call_dispatcher call (not
+                # dispatch through the AOTI ProxyExecutor). Skip the proxy-executor
+                # serialization -- it would assert on Tensor returns that the op's
+                # meta impl leaves as None. The C++ wrapper only needs raw args to
+                # build the StableIValue dispatch stack. See pytorch#184195.
+                _args, _kwargs = self.unflatten_args(self.inputs, self.constant_args)
+                ordered_kwargs = [
+                    self.get_kwargs_value(k, **_kwargs)
+                    for k in self.ordered_kwargs_for_cpp_kernel
+                ]
+                exported_args = [*_args, *ordered_kwargs]
+            else:
+                exported_args = self.export_extern_kernel_node()
 
             wrapper.generate_fallback_kernel_with_runtime_lookup(
                 self.get_name(),

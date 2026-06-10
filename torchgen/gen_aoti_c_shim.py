@@ -343,10 +343,14 @@ def gen_declaration_and_definition(
     # Check the validity of op_metadata. Each "vN" entry is a dict
     # {"new_args": [...], "since": "TORCH_VERSION_X_Y_Z"} where "since" is optional;
     # op_metadata may also carry a top-level "since" key that would version-gate v1.
+    # "only_for_kernel_backends" is also a top-level flag handled in gen_c_shim.
     indexed_op_metadata: dict[int, list[str]] = {1: []}
     for ver_str, payload in sorted(op_metadata.items()):
         # since will get processed later per op
         if ver_str == "since":
+            continue
+        # consumed in gen_c_shim before we get here
+        if ver_str == "only_for_kernel_backends":
             continue
         if not ver_str.startswith("v"):
             raise AssertionError(
@@ -488,6 +492,7 @@ def get_backend_index_for_aoti(
     dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
     extend_aoti_c_shim: bool,
+    only_for_kernel_backends: bool = False,
 ) -> BackendIndex | None:
     backend_index = None
 
@@ -508,7 +513,15 @@ def get_backend_index_for_aoti(
         if extend_aoti_c_shim:
             return backend_index
 
-        elif backend_indices[DispatchKey.CompositeExplicitAutograd].has_kernel(func):
+        # Some ops (e.g. _scaled_dot_product_fused_attention_overrideable) only
+        # have a CompositeExplicitAutograd entry that throws and exists solely
+        # so privateuse1 backends can override via TORCH_LIBRARY_IMPL. In that
+        # case we don't want to emit a per-backend shim that bypasses dispatch
+        # and calls the throwing stub directly. See issue #184195.
+        if only_for_kernel_backends:
+            return backend_index
+
+        if backend_indices[DispatchKey.CompositeExplicitAutograd].has_kernel(func):
             # We need to create C shim wrappers for CompositeExplicitAutograd kernels
             backend_index = backend_indices[DispatchKey.CompositeExplicitAutograd]
         elif backend_indices[
@@ -530,9 +543,15 @@ def get_header_for_aoti(
     dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
     extend_aoti_c_shim: bool,
+    only_for_kernel_backends: bool = False,
 ) -> str | None:
     backend_index = get_backend_index_for_aoti(
-        func, func_group_mapping, dispatch_key, backend_indices, extend_aoti_c_shim
+        func,
+        func_group_mapping,
+        dispatch_key,
+        backend_indices,
+        extend_aoti_c_shim,
+        only_for_kernel_backends=only_for_kernel_backends,
     )
     if backend_index is None:
         if dispatch_key is None:
@@ -559,8 +578,14 @@ def gen_c_shim(
     header: bool,
     extend_aoti_c_shim: bool,
 ) -> str | None:
+    only_for_kernel_backends = bool(version_info.get("only_for_kernel_backends", False))
     backend_index = get_backend_index_for_aoti(
-        func, func_group_mapping, dispatch_key, backend_indices, extend_aoti_c_shim
+        func,
+        func_group_mapping,
+        dispatch_key,
+        backend_indices,
+        extend_aoti_c_shim,
+        only_for_kernel_backends=only_for_kernel_backends,
     )
     if backend_index is None and dispatch_key is not None:
         return None
@@ -803,12 +828,16 @@ https://github.com/pytorch/pytorch/pull/154848 as an example.
         def headers_for_aoti() -> str:
             headers = []
             for func in fallback_native_functions:
+                version_info = fallback_ops_dict.get(get_fallback_op_name(func), {})
                 header = get_header_for_aoti(
                     func,
                     structured_func_group_dict,
                     dispatch_key,
                     backend_indices,
                     extend_aoti_c_shim=extend_aoti_c_shim,
+                    only_for_kernel_backends=bool(
+                        version_info.get("only_for_kernel_backends", False)
+                    ),
                 )
                 if header is not None:
                     headers.append(header)

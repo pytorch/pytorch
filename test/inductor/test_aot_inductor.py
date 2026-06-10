@@ -9220,6 +9220,149 @@ class TestCheckLowerboundConfig(TestCase):
             ).run(code)
 
 
+class TestAOTInductorOnlyForKernelBackends(TestCase):
+    """Tests for ops flagged ``only_for_kernel_backends`` in
+    ``torchgen/aoti/fallback_ops.py``. These ops only have a throwing
+    CompositeExplicitAutograd stub in ATen that exists so out-of-tree
+    privateuse1 backends can override via TORCH_LIBRARY_IMPL. AOTInductor
+    must route such calls through the dispatcher (runtime lookup) rather
+    than emitting a direct per-backend C shim call, otherwise a backend's
+    ``TORCH_LIBRARY_IMPL(aten, MyKey, m)`` override cannot intercept them
+    under AOTI. See pytorch#184195.
+
+    The realistic user flow is ``F.scaled_dot_product_attention(q, k, v)``
+    where the SDPA backend chooser dispatches to the overrideable variant
+    on privateuse1-style backends. We simulate that here by forcing
+    ``SDPBackend.OVERRIDEABLE`` via ``sdpa_kernel(...)`` and registering an
+    override on the live ``aten`` library for the test's device.
+    """
+
+    SENTINEL_VALUE = 1.25
+
+    @classmethod
+    def _make_override(cls, device):
+        def overrideable_kernel(
+            query,
+            key,
+            value,
+            attn_bias=None,
+            dropout_p=0.0,
+            is_causal=False,
+            return_debug_mask=False,
+            *,
+            scale=None,
+        ):
+            # output filled with a sentinel so we can verify this kernel ran.
+            output = torch.full_like(query, cls.SENTINEL_VALUE)
+            log_sumexp = torch.zeros(query.shape[:-1], device=device, dtype=torch.float)
+            empty_i64 = torch.empty(0, device=device, dtype=torch.int64)
+            seed = torch.empty((), device=device, dtype=torch.int64)
+            offset = torch.empty((), device=device, dtype=torch.int64)
+            debug = torch.empty(0, device=device, dtype=query.dtype)
+            return (
+                output,
+                log_sumexp,
+                empty_i64,
+                empty_i64,
+                query.shape[2],
+                key.shape[2],
+                seed,
+                offset,
+                debug,
+            )
+
+        return overrideable_kernel
+
+    @staticmethod
+    def _build_module(device):
+        class M(torch.nn.Module):
+            def forward(self, q, k, v):
+                # In real usage, a privateuse1 user writes
+                # ``F.scaled_dot_product_attention(q, k, v)`` and the SDPA
+                # chooser dispatches to this op for their backend. We can't
+                # exercise the chooser path on CPU/CUDA (it refuses
+                # OVERRIDEABLE there), so call the op directly. The dispatch
+                # surface AOTI hits is identical either way.
+                return torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
+                    q, k, v
+                )
+
+        return M().to(device).eval()
+
+    def _run_one(self, device, dtype):
+        m = self._build_module(device)
+        q = torch.randn(1, 4, 8, 16, device=device, dtype=dtype)
+        k = torch.randn(1, 4, 8, 16, device=device, dtype=dtype)
+        v = torch.randn(1, 4, 8, 16, device=device, dtype=dtype)
+        dispatch_key = "CPU" if device == "cpu" else "CUDA"
+
+        with torch.library._scoped_library("aten", "IMPL") as lib:
+            lib.impl(
+                "_scaled_dot_product_fused_attention_overrideable",
+                self._make_override(device),
+                dispatch_key,
+            )
+            # Eager sanity: the override IS exercised through the dispatcher.
+            with torch.no_grad():
+                eager_out = m(q, k, v)
+            eager_output_tensor = (
+                eager_out[0] if isinstance(eager_out, (list, tuple)) else eager_out
+            )
+            self.assertTrue(
+                torch.allclose(
+                    eager_output_tensor, torch.full_like(q, self.SENTINEL_VALUE)
+                ),
+                f"eager override did not run; got {eager_output_tensor.flatten()[:5]}",
+            )
+
+            # Now go through AOTI compile + load + run.
+            with torch.no_grad():
+                ep = torch.export.export(m, (q, k, v))
+                package_path = torch._inductor.aoti_compile_and_package(ep)
+
+            # Codegen-level check: wrapper.cpp must route through the dispatcher
+            # and must NOT emit the per-backend shim symbol for the overrideable op.
+            with zipfile.ZipFile(package_path) as zf:
+                wrapper_srcs = [
+                    zf.read(n).decode()
+                    for n in zf.namelist()
+                    if n.endswith(".wrapper.cpp")
+                ]
+            self.assertTrue(wrapper_srcs, "expected wrapper.cpp in AOTI package")
+            for src in wrapper_srcs:
+                FileCheck().check(
+                    'aoti_torch_call_dispatcher("aten::_scaled_dot_product_fused_attention_overrideable"'
+                ).run(src)
+                shim_sym = (
+                    f"aoti_torch_{device}__scaled_dot_product_"
+                    f"fused_attention_overrideable("
+                )
+                self.assertNotIn(
+                    shim_sym,
+                    src,
+                    f"wrapper.cpp must not call {shim_sym!r}",
+                )
+
+            # Runtime check: load + run the package, the override must produce
+            # the sentinel value.
+            runner = torch._inductor.aoti_load_package(package_path)
+            with torch.no_grad():
+                aoti_out = runner(q, k, v)
+            if isinstance(aoti_out, (list, tuple)):
+                aoti_out = aoti_out[0]
+            self.assertTrue(
+                torch.allclose(aoti_out, torch.full_like(q, self.SENTINEL_VALUE)),
+                f"AOTI override did not run; got {aoti_out.flatten()[:5]}",
+            )
+
+    def test_overrideable_sdpa_routes_through_dispatcher_cpu(self):
+        self._run_one("cpu", torch.float32)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires CUDA")
+    def test_overrideable_sdpa_routes_through_dispatcher_cuda(self):
+        self._run_one("cuda", torch.float16)
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

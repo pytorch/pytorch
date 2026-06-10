@@ -60,6 +60,16 @@ if TYPE_CHECKING:
     from ..scheduler import BaseSchedulerNode
 
 
+@functools.cache
+def _is_only_for_kernel_backends(op_overload: torch._ops.OpOverload) -> bool:
+    """True iff ``op_overload`` is flagged ``only_for_kernel_backends`` in
+    ``torchgen/aoti/fallback_ops.py``. Such ops require dispatcher routing on
+    devices that don't have a real per-backend kernel; see pytorch#184195."""
+    from torchgen.aoti.fallback_ops import only_for_kernel_backends_allowed_devices
+
+    return str(op_overload) in only_for_kernel_backends_allowed_devices
+
+
 @dataclasses.dataclass
 class DeferredCpuTritonCallWrapper:
     """CPU counterpart of DeferredTritonCallWrapper in cpp_wrapper_gpu.py.
@@ -2994,7 +3004,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             output_args = output_name
 
         # In AOT mode, we use a ProxyExecutor to run fallback kernels.
-        if V.graph.aot_mode:
+        # Exception: when the op is flagged ``only_for_kernel_backends`` we must
+        # route through aoti_torch_call_dispatcher so a TORCH_LIBRARY_IMPL
+        # override can intercept; the ProxyExecutor path doesn't tolerate Tensor
+        # returns that the op's meta impl leaves as None. See pytorch#184195.
+        if V.graph.aot_mode and not (
+            isinstance(op_overload, torch._ops.OpOverload)
+            and _is_only_for_kernel_backends(op_overload)
+            and self._compatible_with_stableivalue(op_overload)
+        ):
             self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
                 raw_args,
@@ -3231,25 +3249,32 @@ if (!custom_op_wrapper) {
         output_args: Sequence[str | None],
         raw_outputs: Sequence[ir.Buffer],
     ) -> None:
-        """Generate fallback kernel calls with runtime (non-AOT) dispatch.  This can
-        only be called in cpp_wrapper mode, and assumes that the input is a non-None
-        OpOverload.
+        """Generate fallback kernel calls with runtime (non-AOT) dispatch via
+        ``aoti_torch_call_dispatcher``.  This can be called in cpp_wrapper mode
+        (JIT or AOT) and assumes the input is a non-None OpOverload.
 
         In the future, we may switch over to directly calling c10::Dispatcher if we need
         to support more datatypes."""
-        if raw_outputs:
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
-                if output_arg is not None
-                and not isinstance(raw_output_arg, ir.MutationOutput)
-            ]
-        else:
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args  # type: ignore[arg-type]
-                if output_arg is not None
-            ]
+
+        def _is_capturable_tensor_output(idx: int) -> bool:
+            """Whether output ``idx`` is a tensor whose handle should be captured
+            from the dispatcher stack into a RAIIAtenTensorHandle. Non-tensor
+            outputs (concrete int values from SymInt returns) and None outputs
+            (unused tensor slots dropped by the op's meta impl) are skipped --
+            their values are either statically known or never consumed."""
+            if output_args[idx] is None:
+                return False
+            if raw_outputs and isinstance(
+                raw_outputs[idx], (int, sympy.Expr, ir.MutationOutput)
+            ):
+                return False
+            return True
+
+        declarations_before_scope = [
+            f"RAIIAtenTensorHandle {output_args[idx]};"
+            for idx in range(len(output_args))
+            if _is_capturable_tensor_output(idx)
+        ]
 
         dispatch_lines = IndentedBuffer()
         dispatch_lines.writelines(declarations_before_scope)
@@ -3323,12 +3348,13 @@ if (!custom_op_wrapper) {
                 )
             dispatch_lines.writeline(");")
 
-            # assign result(s), ignoring None
-            for idx, output_arg in enumerate(output_args):
-                if output_arg is None:
+            # assign result(s); skip slots that aren't capturable tensor outputs
+            # (None or non-tensor scalars whose values are statically known).
+            for idx in range(len(output_args)):
+                if not _is_capturable_tensor_output(idx):
                     continue
                 dispatch_lines.writeline(
-                    f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
+                    f"{output_args[idx]} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
                 )
 
         dispatch_lines.writeline("}")

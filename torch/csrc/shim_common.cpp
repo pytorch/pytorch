@@ -420,11 +420,13 @@ AOTITorchError aoti_torch_call_dispatcher(
 
     op.callBoxed(ivalue_stack);
 
-    // there should then be num_returns IValues on the stack, which
-    // we will convert to StableIValue and repopulate user input stack
+    // There should then be num_returns IValues on the stack, which
+    // we will convert to StableIValue and repopulate the user input stack.
+    // pop() returns the top (last pushed) IValue, so we walk indices in
+    // reverse; ret_type must match the position we're popping from.
     for (const auto idx : c10::irange(num_returns)) {
       const auto stack_idx = num_returns - idx - 1;
-      const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
+      const c10::TypePtr& ret_type = schema.returns()[stack_idx].real_type();
       stack[stack_idx] = from_ivalue(
           ret_type, torch::jit::pop(ivalue_stack), TORCH_ABI_VERSION);
     }
