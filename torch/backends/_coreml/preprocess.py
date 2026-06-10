@@ -123,7 +123,6 @@ def preprocess(script_module: torch._C.ScriptObject, compile_spec: dict[str, tup
         shape, dtype = output
         name = spec.description.output[index].name  # type: ignore[attr-defined]
         outputs.append([name, str(dtype), str(shape)])
-    mlmodel = ct.models.model.MLModel(spec)
     print(mlmodel)
 
     if mlmodel_export_path is not None:
@@ -145,10 +144,10 @@ def preprocess(script_module: torch._C.ScriptObject, compile_spec: dict[str, tup
         "config": config,
         "metadata": metadata,
     }
-    mlmodel = spec.SerializeToString()  # type: ignore[attr-defined]
+    model_bytes = spec.SerializeToString()  # type: ignore[attr-defined]
 
     return {
-        "model": mlmodel,
-        "hash": str(hashlib.sha256(mlmodel).hexdigest()),
+        "model": model_bytes,
+        "hash": str(hashlib.sha256(model_bytes).hexdigest()),
         "extra": json.dumps(coreml_compile_spec),
     }
