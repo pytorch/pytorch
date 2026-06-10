@@ -3,6 +3,7 @@
 
 import itertools
 import math
+import os
 import unittest
 from typing import cast
 
@@ -1010,6 +1011,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @with_comms
     @skip_unless_torch_gpu
+    @parametrize("backend", ["cublaslt", "cutlass"])
     @parametrize(
         "kwargs",
         [
@@ -1039,7 +1041,12 @@ class DistMatrixOpsTest(DTensorTestBase):
             },
         ],
     )
-    def test_grouped_mm(self, kwargs):
+    def test_grouped_mm(self, backend, kwargs):
+        if backend == "cublaslt" and torch.cuda.get_device_capability()[0] not in [
+            10,
+            11,
+        ]:
+            self.skipTest("cublaslt grouped gemm requires SM 10.x or 11.0")
         # TODO: torch.nn.functional.grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
         # More tests need to be added.
         device_mesh = self.build_device_mesh()
@@ -1064,6 +1071,12 @@ class DistMatrixOpsTest(DTensorTestBase):
             requires_grad=True,
         )
         offs = torch.tensor([16, 64], device=self.device_type, dtype=torch.int32)
+
+        if backend == "cublaslt":
+            os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "1"
+        else:
+            os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "0"
+        self.addCleanup(os.environ.pop, "TORCH_GROUPED_MM_PREFER_CUBLASLT", None)
 
         h = F.grouped_mm(inp, w1, offs=offs)
         out = F.grouped_mm(h, w2, offs=offs)

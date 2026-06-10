@@ -18,6 +18,9 @@
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#include <ATen/native/cuda/CublasGroupedArgs.h>
+#endif
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
@@ -414,6 +417,140 @@ void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const in
 
 } // namespace
 
+static Tensor grouped_mm_cublaslt(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype) {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  // Validate inputs without the strict stride-alignment check from
+  // _grouped_mm_validate_inputs — cublasLt handles alignment via padding
+  // inside cublaslt_grouped_mm.
+  TORCH_CHECK(
+      mat_a.dtype() == at::kBFloat16 || mat_a.dtype() == at::kHalf,
+      "cublasLt grouped GEMM requires BFloat16 or Float16 input, got ", mat_a.scalar_type());
+  TORCH_CHECK(mat_b.dtype() == mat_a.dtype(),
+      "mat_a and mat_b must have the same dtype");
+  TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
+  TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  if (!a_is_2d || !b_is_2d) {
+    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2),
+        "contraction dimension of mat_a and mat_b must match");
+  }
+  TORCH_CHECK(offs.has_value() == (a_is_2d || b_is_2d),
+      "Must provide offsets iff at least one input is 2D");
+  if (offs.has_value()) {
+    TORCH_CHECK(offs->dim() == 1, "offs must be 1D");
+    TORCH_CHECK(offs->dtype() == at::kInt, "offs must be int32");
+  }
+  TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
+
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  cublasGroupedArgs args(mat_a, mat_b, offs, out);
+  at::cuda::blas::grouped_gemm(args.transa, args.transb,
+                               args.mArray, args.avgM,
+                               args.nArray, args.avgN,
+                               args.kArray, args.avgK,
+                               args.alphaPtrArray, args.A_dtype,
+                               args.APtrArray, args.ldaArray,
+                               args.BPtrArray, args.ldbArray,
+                               args.betaPtrArray, args.result_dtype,
+                               args.DPtrArray, args.lddArray,
+                               args.DPtrArray, args.lddArray, args.batchCount);
+  return out;
+#else
+  TORCH_CHECK(false, "cublasLt grouped GEMM requires CUDA >= 13.2 and is not supported on ROCm. Current build does not meet these requirements.");
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+}
+
+static Tensor scaled_grouped_mm_cublaslt(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<at::Tensor>& offs,
+    const std::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& scale_result,
+    std::optional<c10::ScalarType> out_dtype,
+    bool use_fast_accum) {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  TORCH_CHECK(
+      mat_a.dtype() == at::kFloat8_e4m3fn || mat_a.dtype() == at::kFloat8_e5m2,
+      "cublasLt scaled grouped GEMM requires Float8_e4m3fn or Float8_e5m2 input, got ", mat_a.scalar_type());
+  TORCH_CHECK(
+      mat_b.dtype() == at::kFloat8_e4m3fn || mat_b.dtype() == at::kFloat8_e5m2,
+      "cublasLt scaled grouped GEMM requires Float8_e4m3fn or Float8_e5m2 input, got ", mat_b.scalar_type());
+  TORCH_CHECK(
+    mat_a.dtype() == at::kFloat8_e4m3fn || mat_b.dtype() == at::kFloat8_e4m3fn,
+    "at least one input must be Float8_e4m3fn");
+  TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
+  TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  if (!a_is_2d || !b_is_2d) {
+    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2),
+        "contraction dimension of mat_a and mat_b must match");
+  }
+  TORCH_CHECK(offs.has_value() == (a_is_2d || b_is_2d),
+      "Must provide offsets iff at least one input is 2D");
+  if (offs.has_value()) {
+    TORCH_CHECK(offs->dim() == 1, "offs must be 1D");
+    TORCH_CHECK(offs->dtype() == at::kInt, "offs must be int32");
+  }
+  TORCH_CHECK(!bias.has_value(), "Bias not supported for scaled grouped GEMM");
+
+  TORCH_CHECK(
+      scale_a.dtype() == at::kFloat || scale_a.dtype() == at::kFloat8_e8m0fnu,
+      "scale_a must be float32 or float8_e8m0fnu, got ", scale_a.scalar_type());
+  TORCH_CHECK(
+      scale_b.dtype() == at::kFloat || scale_b.dtype() == at::kFloat8_e8m0fnu,
+      "scale_b must be float32 or float8_e8m0fnu, got ", scale_b.scalar_type());
+  const int batchCount = offs.has_value()
+      ? static_cast<int>(offs.value().size(0))
+      : static_cast<int>(mat_a.size(0));
+  if (scale_a.dtype() == at::kFloat) {
+    TORCH_CHECK(
+        scale_a.numel() == 1 || scale_a.numel() == batchCount,
+        "float32 scale_a must have 1 or batchCount (", batchCount, ") elements, got ", scale_a.numel());
+  }
+  if (scale_b.dtype() == at::kFloat) {
+    TORCH_CHECK(
+        scale_b.numel() == 1 || scale_b.numel() == batchCount,
+        "float32 scale_b must have 1 or batchCount (", batchCount, ") elements, got ", scale_b.numel());
+  }
+  TORCH_CHECK(!scale_result.has_value(), "scale_result is not supported yet for scaled grouped GEMM");
+
+  if (out_dtype.has_value()) {
+    TORCH_CHECK(
+      out_dtype.value() == at::kBFloat16 || out_dtype.value() == at::kHalf || out_dtype.value() == at::kFloat,
+      "Only bf16, fp16, and fp32 output types are supported for scaled grouped GEMM");
+  }
+
+  const auto out_dtype_ = out_dtype.value_or(at::kBFloat16);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  cublasGroupedArgs args(mat_a, mat_b, offs, out, scale_a, scale_b, scale_result);
+  at::cuda::blas::scaled_grouped_gemm(
+      args.transa, args.transb,
+      args.mArray, args.avgM,
+      args.nArray, args.avgN,
+      args.kArray, args.avgK,
+      args.alphaPtrArray,
+      args.A_dtype, args.APtrArray, args.scale_mata_ptr, args.ldaArray,
+      args.B_dtype, args.BPtrArray, args.scale_matb_ptr, args.ldbArray,
+      args.betaPtrArray, args.result_dtype,
+      args.DPtrArray, args.lddArray,
+      args.DPtrArray, args.scale_result_ptr, args.lddArray,
+      use_fast_accum, args.batchCount,
+      args.scale_mata_dtype, args.scale_matb_dtype,
+      args.scale_mata_scaling_type, args.scale_matb_scaling_type);
+  return out;
+#else
+  TORCH_CHECK(false, "cublasLt scaled grouped GEMM requires CUDA >= 13.2 and is not supported on ROCm. Current build does not meet these requirements.");
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+}
+
 Tensor
 _scaled_grouped_mm_cuda(
         const Tensor& mat_a,
@@ -427,6 +564,14 @@ _scaled_grouped_mm_cuda(
         bool use_fast_accum) {
   bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
   TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
+
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  if (at::globalContext().preferCublasltGroupedGemm()) {
+    return scaled_grouped_mm_cublaslt(
+        mat_a, mat_b, scale_a, scale_b, offs, bias,
+        scale_result, out_dtype, use_fast_accum);
+  }
+#endif
 
   TORCH_CHECK_VALUE(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
   TORCH_CHECK_VALUE(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
@@ -543,6 +688,23 @@ _scaled_grouped_mm_cuda_v2(
           bool use_fast_accum) {
   bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
   TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
+
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  if (at::globalContext().preferCublasltGroupedGemm()) {
+    auto recipe_a_enum = convert_int_to_enum<ScalingType>(scale_recipe_a);
+    if (recipe_a_enum.size() == 1) {
+      bool supported = recipe_a_enum[0] == ScalingType::TensorWise
+          || recipe_a_enum[0] == ScalingType::GroupWise
+          || recipe_a_enum[0] == ScalingType::BlockWise1x32;
+      if (supported) {
+        return scaled_grouped_mm_cublaslt(
+            mat_a, mat_b, scale_a[0], scale_b[0],
+            offs, bias, /*scale_result=*/std::nullopt,
+            out_dtype, use_fast_accum);
+      }
+    }
+  }
+#endif
 
   TORCH_CHECK_VALUE(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
   TORCH_CHECK_VALUE(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
@@ -691,6 +853,11 @@ const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  if (at::globalContext().preferCublasltGroupedGemm()) {
+    return grouped_mm_cublaslt(mat_a, mat_b, offs, bias, out_dtype);
+  }
+#endif
   bool a_b_and_out_are_bf16 = (
     mat_a.dtype() == at::kBFloat16 &&
     mat_b.dtype() == at::kBFloat16 &&

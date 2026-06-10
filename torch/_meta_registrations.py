@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import math
+import os
 from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import wraps
@@ -8834,6 +8835,10 @@ def meta_grouped_mm(
     bias: Tensor | None = None,
     out_dtype: torch.dtype | None = None,
 ) -> Tensor:
+    if os.environ.get("TORCH_GROUPED_MM_PREFER_CUBLASLT") == "1":
+        return _meta_grouped_mm_cublaslt(
+            mat_a, mat_b, offs=offs, bias=bias, out_dtype=out_dtype
+        )
     return _meta_grouped_mm_common(
         mat_a,
         mat_b,
@@ -8844,6 +8849,108 @@ def meta_grouped_mm(
         scale_result=None,
         out_dtype=out_dtype,
     )
+
+
+def _cublaslt_grouped_mm_validate_inputs(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    offs: Tensor | None = None,
+    bias: Tensor | None = None,
+) -> None:
+    torch._check(
+        mat_a.dim() in (2, 3) and mat_b.dim() in (2, 3),
+        lambda: f"Multiplicands must be 2D or 3D, got mat_a.dim()={mat_a.dim()} and mat_b.dim()={mat_b.dim()}.",
+    )
+    a_is_2d = mat_a.dim() == 2
+    b_is_2d = mat_b.dim() == 2
+    if not a_is_2d or not b_is_2d:
+        torch._check(
+            mat_a.size(-1) == mat_b.size(-2),
+            lambda: "contraction dimension of mat_a and mat_b must match",
+        )
+    torch._check(
+        (offs is not None) == (a_is_2d or b_is_2d),
+        lambda: "Must provide offsets iff at least one input is 2D",
+    )
+    if offs is not None:
+        torch._check(
+            offs.dim() == 1,
+            lambda: f"Offsets tensor must be 1D, but got offs.dim()={offs.dim()}.",
+        )
+        torch._check(
+            offs.dtype == torch.int32,
+            lambda: f"Offsets tensor must be int32, but got {offs.dtype}.",
+        )
+    torch._check(
+        bias is None,
+        lambda: "Bias not supported yet.",
+    )
+
+
+def _meta_grouped_mm_cublaslt(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    offs: Tensor | None = None,
+    bias: Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
+) -> Tensor:
+    # Standalone meta function matching the C++ validation in
+    # _grouped_mm_cublaslt_cuda (GroupedBlas.cpp). Unlike _grouped_mm, cuBLASLt
+    # handles stride alignment internally, so we skip check_valid_strides.
+    _allowed = (torch.bfloat16, torch.float16)
+    torch._check(
+        mat_a.dtype in _allowed and mat_b.dtype in _allowed,
+        lambda: f"Expected BF16 or FP16 input, got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+    )
+    out_dtype = out_dtype or mat_a.dtype
+    torch._check(
+        out_dtype == mat_a.dtype or out_dtype == torch.float32,
+        lambda: "If output dtype provided, it must be torch.float32 or match input dtype.",
+    )
+    _cublaslt_grouped_mm_validate_inputs(mat_a, mat_b, offs, bias)
+    return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
+
+
+def _meta_scaled_grouped_mm_cublaslt(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    scale_a: Tensor,
+    scale_b: Tensor,
+    offs: Tensor | None = None,
+    bias: Tensor | None = None,
+    scale_result: Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
+    use_fast_accum: bool = False,
+) -> Tensor:
+    torch._check(
+        mat_a.dtype == torch.float8_e4m3fn or mat_a.dtype == torch.float8_e5m2,
+        lambda: f"Expected float8_e4m3fn or float8_e5m2 input, got mat_a.dtype={mat_a.dtype}.",
+    )
+    torch._check(
+        mat_b.dtype == torch.float8_e4m3fn or mat_b.dtype == torch.float8_e5m2,
+        lambda: f"Expected float8_e4m3fn or float8_e5m2 input, got mat_b.dtype={mat_b.dtype}.",
+    )
+    torch._check(
+        mat_a.dtype == torch.float8_e4m3fn or mat_b.dtype == torch.float8_e4m3fn,
+        lambda: "at least one input must be Float8_e4m3fn",
+    )
+    torch._check(
+        scale_a.dtype == torch.float32 or scale_a.dtype == torch.float8_e8m0fnu,
+        lambda: f"scale_a must be float32 or float8_e8m0fnu, got {scale_a.dtype}.",
+    )
+    torch._check(
+        scale_b.dtype == torch.float32 or scale_b.dtype == torch.float8_e8m0fnu,
+        lambda: f"scale_b must be float32 or float8_e8m0fnu, got {scale_b.dtype}.",
+    )
+    out_dtype = out_dtype or torch.bfloat16
+    torch._check(
+        out_dtype == torch.bfloat16
+        or out_dtype == torch.float16
+        or out_dtype == torch.float32,
+        lambda: "If output dtype provided, it must be torch.bfloat16, torch.float16, or torch.float32.",
+    )
+    _cublaslt_grouped_mm_validate_inputs(mat_a, mat_b, offs, bias)
+    return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
 
 
 @register_meta([aten._scaled_grouped_mm])
@@ -8860,6 +8967,19 @@ def meta_scaled_grouped_mm(
 ):
     # matching _scaled_grouped_mm_cuda Blas.cpp implementation
     out_dtype = out_dtype or torch.bfloat16
+
+    if os.environ.get("TORCH_GROUPED_MM_PREFER_CUBLASLT") == "1":
+        return _meta_scaled_grouped_mm_cublaslt(
+            mat_a,
+            mat_b,
+            scale_a,
+            scale_b,
+            offs=offs,
+            bias=bias,
+            scale_result=scale_result,
+            out_dtype=out_dtype,
+            use_fast_accum=use_fast_accum,
+        )
 
     return _meta_grouped_mm_common(
         mat_a,
