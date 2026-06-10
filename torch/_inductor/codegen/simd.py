@@ -883,10 +883,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group] * remaining[current_group + 1]
                     ):
-                        raise CantSplit(
-                            size,
-                            remaining[current_group] * remaining[current_group + 1],
-                        )
+                        raise CantSplit(size, remaining[current_group] * remaining[current_group + 1])
 
                     size1 = remaining[current_group]
                     size2 = remaining[current_group + 1]
@@ -948,9 +945,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(
+        if not all(
             V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining
-        ), f"failed to set ranges {remaining} {lengths}"
+        ):
+            raise CantSplit(remaining, lengths)
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
