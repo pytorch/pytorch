@@ -604,6 +604,10 @@ Tensor& where_self_out(
   auto self_ = self.scalar_type() != result_type ? self.to(result_type) : self;
   auto other_ =
       other.scalar_type() != result_type ? other.to(result_type) : other;
+  TORCH_CHECK(
+      condition.scalar_type() == kBool,
+      "where expected condition to be a boolean tensor, but got a tensor with dtype ",
+      condition.scalar_type());
   auto condition_ = condition;
   auto device = out_device(condition, self_, other_);
   if (device != at::kCPU) { // allow CPU scalars on non-cpu device
@@ -617,15 +621,6 @@ Tensor& where_self_out(
       other_ = other_.to(device);
     }
   }
-  if (condition_.scalar_type() == ScalarType::Byte) {
-    TORCH_WARN_ONCE(
-        "where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
-    condition_ = condition_.to(kBool);
-  }
-  TORCH_CHECK(
-      condition_.scalar_type() == kBool,
-      "where expected condition to be a boolean tensor, but got a tensor with dtype ",
-      condition_.scalar_type());
   // if there's still a device mismatch, let tensoriterator error out with it
   auto iter = at::TensorIteratorConfig()
                   .check_all_same_dtype(false)
