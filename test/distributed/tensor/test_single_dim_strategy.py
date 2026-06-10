@@ -372,9 +372,11 @@ class TestExpandPlaceholder(TestCase):
             self.assertIsInstance(strategy, OpStrategy)
             return strategy
 
-        # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
-        # (S1, S2, Psum, R) ** mesh.ndim
-        expected_num_strategies = 4**3
+        # Note: using sizes that are multiples of mesh sizes so every sharding
+        # option is valid. Each mesh dim has non-partial options R/S1/S2 and
+        # partial options Psum/Pavg/Pmin/Pmax. Mixed partials are filtered out,
+        # except for Psum+Pavg.
+        expected_num_strategies = 199
         # Test Replicate + Shard gives Shard
         inputs = [torch.empty((8, 8, 8))] * 2
         placements = [
