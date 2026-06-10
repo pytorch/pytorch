@@ -778,7 +778,7 @@ def jacrev(
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
         flat_jacobians_per_input = [
-            result.split(flat_output_numels, dim=0)
+            torch.split(result, list(flat_output_numels), dim=0)
             for result in flat_jacobians_per_input
         ]
         flat_input_flat_output = [
@@ -897,10 +897,11 @@ def _chunked_standard_basis_for_(
         chunk_size = total_numel
         chunk_numels = [total_numel]
 
-    diag_start_indices = (
-        0,
-        *torch.tensor(tensor_numels).cumsum(dim=0)[:-1].neg().unbind(),
-    )
+    diag_start_indices = []
+    diag_start_idx = 0
+    for tensor_numel in tensor_numels:
+        diag_start_indices.append(diag_start_idx)
+        diag_start_idx -= tensor_numel
 
     for chunk_idx, total_numel in enumerate(chunk_numels):
         chunks = tuple(
@@ -1405,7 +1406,9 @@ def jacfwd(
                 safe_unflatten(jac_out_in, -1, primal.shape)
                 for primal, jac_out_in in zip(
                     flat_primals,
-                    jac_out.movedim(0, -1).split(flat_primals_numels, dim=-1),
+                    torch.split(
+                        jac_out.movedim(0, -1), list(flat_primals_numels), dim=-1
+                    ),
                 )
             )
             for jac_out in jac_outs
