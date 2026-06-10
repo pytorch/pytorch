@@ -26,6 +26,14 @@ set(XPU_HOST_CXX_FLAGS)
 find_package(SYCLToolkit REQUIRED)
 if(NOT SYCL_FOUND)
   set(PYTORCH_FOUND_XPU FALSE)
+  # If user explicitly set USE_XPU=1, error out instead of falling back
+  if(_USE_XPU_EXPLICITLY_SET AND USE_XPU)
+    message(FATAL_ERROR
+      "Pytorch: XPU was explicitly requested (USE_XPU=1) but could NOT find SYCL. "
+      "Please make sure Intel GPU requirements are met. "
+      "See: https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support for more details. "
+      "If you want to build without XPU, please set USE_XPU=0.")
+  endif()
   # Exit early to avoid populating XPU_HOST_CXX_FLAGS.
   return()
 endif()
