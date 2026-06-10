@@ -25,7 +25,7 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._opaque_base import OpaqueBase
-from torch._prims_common import CUDARngStateHelper
+from torch._prims_common import compute_required_storage_length, CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
     get_proxy_mode,
@@ -722,6 +722,18 @@ def _get_mutation_counters(t: torch.Tensor) -> MutationCounters:
     )
 
 
+def _resize_storage_if_needed(dst: Tensor, src: Tensor) -> None:
+    dst_storage = dst.untyped_storage()
+    required_nbytes = (
+        compute_required_storage_length(
+            src.size(), src.stride(), typing.cast(int, src.storage_offset())
+        )
+        * src.element_size()
+    )
+    if dst_storage.nbytes() < required_nbytes:
+        torch.ops.inductor.resize_storage_bytes_(dst, required_nbytes)
+
+
 def apply_in_graph_mutations(
     input_info: InputAliasInfo,
     inpt_old: Tensor,
@@ -801,6 +813,13 @@ def apply_in_graph_mutations(
         # (This check needs to be done after putting resize_() in the graph,
         # since a resize_(0) doesn't actually change the FunctionalTensor's inner tensor)
         return
+    if input_info.mutates_metadata and not input_info.mutates_storage_metadata:
+        _resize_storage_if_needed(inpt_old, inpt_new)
+        inpt_old.as_strided_(
+            inpt_new.size(),
+            inpt_new.stride(),
+            inpt_new.storage_offset(),
+        )
     # We found an input that had a (data-only) mutation.
     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
     # so the compiler will see the input mutation in the graph.
