@@ -164,6 +164,61 @@ void scaled_gemm(
     bool use_fast_accum,
     const std::optional<Tensor>& alpha);
 
+void grouped_gemm(
+      char transa,
+      char transb,
+      const int32_t* mArrayDev,
+      int64_t avgM,
+      const int32_t* nArrayDev,
+      int64_t avgN,
+      const int32_t* kArrayDev,
+      int64_t avgK,
+      const int64_t* alphaArrayDev,
+      ScalarType input_dtype,
+      const int64_t* APtrArrayDev,
+      const int32_t* ldaArrayDev,
+      const int64_t* BPtrArrayDev,
+      const int32_t* ldbArrayDev,
+      const int64_t* betaArrayDev,
+      ScalarType result_dtype,
+      const int64_t* CPtrArrayDev,
+      const int32_t* ldcArrayDev,
+      int64_t* DPtrArrayDev,
+      const int32_t* lddArrayDev,
+      int batchCount);
+
+void scaled_grouped_gemm(
+      char transa,
+      char transb,
+      const int32_t* mArrayDev,
+      int64_t avgM,
+      const int32_t* nArrayDev,
+      int64_t avgN,
+      const int32_t* kArrayDev,
+      int64_t avgK,
+      const int64_t* alphaArrayDev,
+      ScalarType A_dtype,
+      const int64_t* A,
+      const void* A_scale_ptr,
+      const int32_t* ldaArrayDev,
+      ScalarType B_dtype,
+      const int64_t* B,
+      const void* B_scale_ptr,
+      const int32_t* ldbArrayDev,
+      const int64_t* betaArrayDev,
+      ScalarType result_dtype,
+      const int64_t* C,
+      const int32_t* ldcArrayDev,
+      int64_t* D,
+      const void* D_scale_ptr,
+      const int32_t* lddArrayDev,
+      bool use_fast_accum,
+      int batchCount,
+      ScalarType A_scale_dtype,
+      ScalarType B_scale_dtype,
+      at::blas::ScalingType a_scaling_type,
+      at::blas::ScalingType b_scaling_type);
+
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)  CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
 
 #define CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)                                   \

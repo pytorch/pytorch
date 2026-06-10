@@ -27,6 +27,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
+    SM120OrLater,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -541,12 +542,26 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
 
+    def _setup_grouped_gemm_backend(self, backend, dtype):
+        if backend == "cublaslt":
+            if not SM100OrLater or SM120OrLater:
+                self.skipTest("cublaslt grouped gemm requires SM 10.x or 11.0")
+            if dtype == torch.float32:
+                self.skipTest("cublaslt grouped gemm does not support float32")
+            os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "1"
+        else:
+            os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "0"
+        self.addCleanup(os.environ.pop, "TORCH_GROUPED_MM_PREFER_CUBLASLT", None)
+
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
+    @parametrize("backend", ["cublaslt", "cutlass"])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major, dtype):
+    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major, backend, dtype):
+        self._setup_grouped_gemm_backend(backend, dtype)
+
         device = "cuda"
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -582,8 +597,11 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
+    @parametrize("backend", ["cublaslt", "cutlass"])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major, dtype):
+    def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major, backend, dtype):
+        self._setup_grouped_gemm_backend(backend, dtype)
+
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
@@ -637,8 +655,11 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
+    @parametrize("backend", ["cublaslt", "cutlass"])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major, dtype):
+    def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major, backend, dtype):
+        self._setup_grouped_gemm_backend(backend, dtype)
+
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
@@ -670,8 +691,11 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
+    @parametrize("backend", ["cublaslt", "cutlass"])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, dtype):
+    def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, backend, dtype):
+        self._setup_grouped_gemm_backend(backend, dtype)
+
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
@@ -836,6 +860,154 @@ class TestMatmulCuda(InductorTestCase):
         else:
             C = f(A, B.transpose(-2, -1), offs=offs)
             self.assertEqual(C, C_ref)
+
+    def grouped_gemm_cublaslt_common(self, op, jagged_size, a_row_major, b_row_major, dtype):
+        device = "cuda"
+        esz = dtype.itemsize
+        align = 16 // esz  # 8 for bf16
+
+        if op == "2d/2d":
+            # Jagged K with non-multiple-of-8 total, but all offsets
+            # are multiples of 8 so per-group pointers stay aligned.
+            m, n = 3, 7
+            m_align = (m + align - 1) // align * align
+            n_align = (n + align - 1) // align * align
+            offs = torch.tensor([0, 8, 16, 16, jagged_size], device=device, dtype=torch.int32)
+            k = jagged_size
+            k_align = (k + align - 1) // align * align
+
+            if a_row_major:
+                A = torch.randn(m, k_align, device=device, dtype=dtype)[:, :k]
+            else:
+                A = torch.randn(k, m_align, device=device, dtype=dtype).t()[:m, :]
+            if b_row_major:
+                B = torch.randn(n, k_align, device=device, dtype=dtype)[:, :k]
+            else:
+                B = torch.randn(k, n_align, device=device, dtype=dtype).t()[:n, :]
+
+            aligned = (jagged_size % align == 0) or (not a_row_major and not b_row_major)
+
+        elif op == "2d/3d":
+            # Jagged M with aligned offsets.
+            n, k = 7, 32
+            n_align = (n + align - 1) // align * align
+            k_align = (k + align - 1) // align * align
+            offs = torch.tensor([0, 8, 16, 16, jagged_size], device=device, dtype=torch.int32)
+            m = jagged_size
+            m_align = (m + align - 1) // align * align
+            ngroups = offs.shape[0]
+
+            if a_row_major:
+                A = torch.randn(m, k_align, device=device, dtype=dtype)[:, :k]
+            else:
+                A = torch.randn(k, m_align, device=device, dtype=dtype).t()[:m, :]
+            if b_row_major:
+                B = torch.randn(ngroups, n, k_align, device=device, dtype=dtype)[:, :, :k]
+            else:
+                B = torch.randn(ngroups, k, n_align, device=device, dtype=dtype).transpose(
+                    -2, -1
+                )[:, :n, :]
+
+            aligned = (jagged_size % align == 0) or not (not a_row_major and b_row_major)
+
+        elif op == "3d/2d":
+            # Jagged N with aligned offsets.
+            m, k = 3, 32
+            m_align = (m + align - 1) // align * align
+            k_align = (k + align - 1) // align * align
+            offs = torch.tensor([0, 8, 16, 16, jagged_size], device=device, dtype=torch.int32)
+            n = jagged_size
+            n_align = (n + align - 1) // align * align
+            ngroups = offs.shape[0]
+
+            if a_row_major:
+                A = torch.randn(ngroups, m, k_align, device=device, dtype=dtype)[:, :, :k]
+            else:
+                A = torch.randn(ngroups, k, m_align, device=device, dtype=dtype).transpose(
+                    -2, -1
+                )[:, :m, :]
+            if b_row_major:
+                B = torch.randn(n, k_align, device=device, dtype=dtype)[:, :k]
+            else:
+                B = torch.randn(k, n_align, device=device, dtype=dtype).t()[:n, :]
+
+            aligned = (jagged_size % align == 0) or not (a_row_major and not b_row_major)
+
+        elif op == "3d/3d":
+            # No jagged dimension, all dims fixed. Use non-multiple-of-8
+            # dimensions with padded strides.
+            ngroups = 5
+            m, n, k = 3, 7, jagged_size
+            m_align = (m + align - 1) // align * align
+            n_align = (n + align - 1) // align * align
+            k_align = (k + align - 1) // align * align
+            offs = None
+
+            if a_row_major:
+                A = torch.randn(ngroups, m, k_align, device=device, dtype=dtype)[:, :, :k]
+            else:
+                A = torch.randn(ngroups, k, m_align, device=device, dtype=dtype).transpose(
+                    -2, -1
+                )[:, :m, :]
+            if b_row_major:
+                B = torch.randn(ngroups, n, k_align, device=device, dtype=dtype)[:, :, :k]
+            else:
+                B = torch.randn(ngroups, k, n_align, device=device, dtype=dtype).transpose(
+                    -2, -1
+                )[:, :n, :]
+
+            aligned = (jagged_size % align == 0) or (not a_row_major and not b_row_major)
+
+        return A, B.transpose(-2, -1), offs, aligned
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
+    @unittest.skipIf(not SM100OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 10.x or 11.0")
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    @parametrize("jagged_size", [31, 32])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_grouped_gemm_cublaslt_alignment(self, op, jagged_size, a_row_major, b_row_major, dtype):
+        # Verify that cuBLASLt grouped GEMM succeeds with all expected combinations
+        # Always succeeds if jagged_size * sizeof(dtype) is divisible by 16
+        # Otherwise:
+        # For 2d/2d and 3d/3d, both inputs must be column major
+        # For 2d/3d, A needs to be row major or B needs to be column major
+        # For 3d/2d, A needs to be column major or B needs to be row major
+
+        A, B, offs, aligned = self.grouped_gemm_cublaslt_common(op, jagged_size, a_row_major, b_row_major, dtype)
+        # Skip for unaligned cases because passing them to cuBLASLt will cause a CUDA error
+        if not aligned:
+            self.skipTest("Arguments don't meet alignment requirements")
+
+        os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "0"
+        C_ref = torch.nn.functional.grouped_mm(A, B, offs=offs)
+        os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "1"
+        self.addCleanup(os.environ.pop, "TORCH_GROUPED_MM_PREFER_CUBLASLT", None)
+        C = torch._grouped_mm(A, B, offs=offs)
+        self.assertEqual(C, C_ref)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
+    @unittest.skipIf(not SM100OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 10.x or 11.0")
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    @parametrize("jagged_size", [31, 32])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("mode", ["default", "reduce-overhead"])
+    def test_grouped_gemm_cublaslt_compiled(self, op, jagged_size, a_row_major, b_row_major, dtype, mode):
+        os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "1"
+        self.addCleanup(os.environ.pop, "TORCH_GROUPED_MM_PREFER_CUBLASLT", None)
+        f_ref = torch._grouped_mm
+        f = torch.compile(f_ref, fullgraph=True, mode=mode)
+
+        A, B, offs, aligned = self.grouped_gemm_cublaslt_common(op, jagged_size, a_row_major, b_row_major, dtype)
+        if not aligned:
+            self.skipTest("Arguments don't meet alignment requirements")
+
+        C_ref = f_ref(A, B, offs=offs)
+        C = f(A, B, offs=offs)
+        self.assertEqual(C, C_ref)
 
     @skipCUDAIfNotRocm
     # Fails with triton 3.7
