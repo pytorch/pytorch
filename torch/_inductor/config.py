@@ -1167,6 +1167,12 @@ _fuse_ddp_communication_passes: list[Callable[..., None] | str] = [
 
 _micro_pipeline_tp: bool = False
 
+# Decompose all_gather + matmul into P2P irecv/isend + tiled matmul for
+# fine-grained compute/communication overlap. Unlike _micro_pipeline_tp
+# (which replaces with an opaque fused op requiring symmetric memory),
+# this keeps individual ops visible to the scheduler.
+_decompose_ag_matmul: bool = False
+
 
 # Enable/disable partitioned scatter optimization for atomic add kernels
 # this will improve kernel performance at cost of memory usage.

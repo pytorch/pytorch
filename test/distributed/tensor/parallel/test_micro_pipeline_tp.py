@@ -701,5 +701,194 @@ class MicroPipelineTP4GPUTest(TestCase):
         self.assertIn("reduce_scatter_tensor", code)
 
 
+@instantiate_parametrized_tests
+class DecomposeAllGatherMatmulTest(TestCase):
+    def setUp(self):
+        torch._inductor.config._decompose_ag_matmul = True
+        torch._inductor.config._micro_pipeline_tp = False
+
+        self.rank = 0
+        self.world_size = 2
+        torch.cuda.set_device("cuda:0")
+
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+    def tearDown(self):
+        dist.destroy_process_group()
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_decompose_basic(self):
+        """Verify that the decomposition pass replaces all_gather+mm with
+        isend/irecv + tiled mm + wait_tensor + cat."""
+        from torch._inductor.fx_passes.micro_pipeline_tp import (
+            decompose_all_gather_matmul_pass,
+        )
+
+        group = dist.group.WORLD
+
+        def func(inp: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            gathered = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
+            return gathered @ weight
+
+        inp = torch.rand(64, 32, device="cuda")
+        weight = torch.rand(32, 16, device="cuda")
+
+        gm = _make_post_grad_fx(func, inp, weight)
+        decompose_all_gather_matmul_pass(gm.graph)
+
+        node_targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        c10d_func = torch.ops._c10d_functional
+
+        self.assertIn(c10d_func.isend.default, node_targets)
+        self.assertIn(c10d_func.irecv.default, node_targets)
+        self.assertIn(c10d_func.wait_tensor.default, node_targets)
+        self.assertIn(torch.ops.aten.mm.default, node_targets)
+        self.assertIn(torch.ops.aten.cat.default, node_targets)
+        # The original all_gather should be gone
+        self.assertNotIn(c10d_func.all_gather_into_tensor.default, node_targets)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_decompose_correct_node_count(self):
+        """Verify the decomposition produces the right number of nodes for
+        world_size=2: 1 isend, 1 irecv, 1 empty_like, 1 wait, 2 mm, 1 cat."""
+        from torch._inductor.fx_passes.micro_pipeline_tp import (
+            decompose_all_gather_matmul_pass,
+        )
+
+        group = dist.group.WORLD
+
+        def func(inp: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            gathered = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
+            return gathered @ weight
+
+        inp = torch.rand(64, 32, device="cuda")
+        weight = torch.rand(32, 16, device="cuda")
+
+        gm = _make_post_grad_fx(func, inp, weight)
+        decompose_all_gather_matmul_pass(gm.graph)
+
+        c10d_func = torch.ops._c10d_functional
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+
+        self.assertEqual(targets.count(c10d_func.isend.default), 1)
+        self.assertEqual(targets.count(c10d_func.irecv.default), 1)
+        self.assertEqual(targets.count(c10d_func.wait_tensor.default), 1)
+        # 2 mm's: one for local shard, one for remote shard
+        self.assertEqual(targets.count(torch.ops.aten.mm.default), 2)
+        self.assertEqual(targets.count(torch.ops.aten.cat.default), 1)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_decompose_multiple_matmuls(self):
+        """Verify that multiple consumer matmuls each get their own tiled
+        computation."""
+        from torch._inductor.fx_passes.micro_pipeline_tp import (
+            decompose_all_gather_matmul_pass,
+        )
+
+        group = dist.group.WORLD
+
+        def func(
+            inp: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            gathered = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
+            return gathered @ w1, gathered @ w2
+
+        inp = torch.rand(64, 32, device="cuda")
+        w1 = torch.rand(32, 16, device="cuda")
+        w2 = torch.rand(32, 8, device="cuda")
+
+        gm = _make_post_grad_fx(func, inp, w1, w2)
+        decompose_all_gather_matmul_pass(gm.graph)
+
+        c10d_func = torch.ops._c10d_functional
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+
+        self.assertNotIn(c10d_func.all_gather_into_tensor.default, targets)
+        # 1 isend, 1 irecv (shared P2P)
+        self.assertEqual(targets.count(c10d_func.isend.default), 1)
+        self.assertEqual(targets.count(c10d_func.irecv.default), 1)
+        # 4 mm's: 2 matmuls x (1 local + 1 remote)
+        self.assertEqual(targets.count(torch.ops.aten.mm.default), 4)
+        # 2 cat's: one per matmul consumer
+        self.assertEqual(targets.count(torch.ops.aten.cat.default), 2)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_decompose_skips_non_zero_gather_dim(self):
+        """Verify that gather_dim != 0 is not decomposed (current limitation)."""
+        from torch._inductor.fx_passes.micro_pipeline_tp import (
+            decompose_all_gather_matmul_pass,
+        )
+
+        group = dist.group.WORLD
+
+        def func(inp: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            gathered = all_gather_tensor(inp, gather_dim=1, group=group.group_name)
+            return gathered @ weight
+
+        inp = torch.rand(64, 32, device="cuda")
+        weight = torch.rand(64, 16, device="cuda")
+
+        gm = _make_post_grad_fx(func, inp, weight)
+        decompose_all_gather_matmul_pass(gm.graph)
+
+        c10d_func = torch.ops._c10d_functional
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+
+        # all_gather should still be present (not decomposed)
+        self.assertIn(c10d_func.all_gather_into_tensor.default, targets)
+        self.assertNotIn(c10d_func.isend.default, targets)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    @parametrize("world_size", [2, 4])
+    def test_decompose_world_sizes(self, world_size):
+        """Test decomposition with different world sizes."""
+        dist.destroy_process_group()
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=world_size,
+            rank=0,
+            store=store,
+        )
+        from torch._inductor.fx_passes.micro_pipeline_tp import (
+            decompose_all_gather_matmul_pass,
+        )
+
+        group = dist.group.WORLD
+
+        def func(inp: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            gathered = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
+            return gathered @ weight
+
+        inp = torch.rand(64, 32, device="cuda")
+        weight = torch.rand(32, 16, device="cuda")
+
+        gm = _make_post_grad_fx(func, inp, weight)
+        decompose_all_gather_matmul_pass(gm.graph)
+
+        c10d_func = torch.ops._c10d_functional
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+
+        # world_size - 1 sends and receives
+        self.assertEqual(targets.count(c10d_func.isend.default), world_size - 1)
+        self.assertEqual(targets.count(c10d_func.irecv.default), world_size - 1)
+        # world_size - 1 waits (one per remote shard)
+        self.assertEqual(targets.count(c10d_func.wait_tensor.default), world_size - 1)
+        # world_size mm's: 1 local + (world_size - 1) remote
+        self.assertEqual(targets.count(torch.ops.aten.mm.default), world_size)
+        self.assertEqual(targets.count(torch.ops.aten.cat.default), 1)
+
+
 if __name__ == "__main__":
     run_tests()

@@ -63,7 +63,7 @@ from .b2b_gemm import B2B_GEMM_PASS
 from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
-from .micro_pipeline_tp import micro_pipeline_tp_pass
+from .micro_pipeline_tp import decompose_all_gather_matmul_pass, micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
@@ -240,6 +240,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config._micro_pipeline_tp:
         micro_pipeline_tp_pass(gm.graph)
+
+    if config._decompose_ag_matmul:
+        decompose_all_gather_matmul_pass(gm.graph)
 
     if config._fuse_ddp_communication:
         GraphTransformObserver(gm, "fuse_ddp_communication").apply_graph_pass(

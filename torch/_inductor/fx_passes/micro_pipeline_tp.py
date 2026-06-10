@@ -1286,3 +1286,187 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
 
     for reduce_scatter in reduce_scatters:
         fuse_matmul_reduce_scatter(reduce_scatter)
+
+
+def decompose_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
+    """
+    Decompose the pattern
+
+        A = all_gather_tensor(A_shard, gather_dim, group_name)
+        C = torch.matmul(A, B)
+
+    into individual P2P irecv/isend + tiled matmul + wait_tensor, enabling
+    fine-grained compute/communication overlap. Each rank sends its shard to
+    all other ranks, receives remote shards individually, and computes a tiled
+    matmul on each chunk as it arrives.
+
+    Unlike fuse_all_gather_matmul (which replaces with an opaque fused op),
+    this decomposition keeps all ops visible to the Inductor scheduler so
+    it can further optimize via reorder_for_compute_comm_overlap.
+    """
+    if (
+        not torch.distributed.is_available()
+        or not torch.distributed.is_nccl_available()
+    ):
+        return
+
+    import torch.distributed as dist
+    import torch.distributed.distributed_c10d as c10d
+
+    c10d_func = torch.ops._c10d_functional
+
+    shard_node, ag_node, ag_res_node, gather_dim, group_name = (
+        all_gather.shard_node,
+        all_gather.ag_node,
+        all_gather.res_node,
+        all_gather.gather_dim,
+        all_gather.group_name,
+    )
+
+    # Only support gather_dim == 0 for now; non-zero dims need reshuffling.
+    if gather_dim != 0:
+        log.debug(
+            "decompose_all_gather_matmul: skipping gather_dim=%d (only 0 supported)",
+            gather_dim,
+        )
+        return
+
+    # Find consumer matmuls (reuse existing infrastructure)
+    matmuls = _find_consumer_matmuls(ag_res_node)
+    matmuls = [
+        matmul
+        for matmul in matmuls
+        if all_gather.res_node not in matmul.arg_ancestor_nodes
+    ]
+    if len(matmuls) == 0:
+        log.debug("decompose_all_gather_matmul: no consumer matmuls found")
+        return
+
+    # Only handle simple _Matmul (not _ScaledMatmul) for now
+    if not all(type(m) is _Matmul for m in matmuls):
+        log.debug("decompose_all_gather_matmul: scaled matmul not yet supported")
+        return
+
+    group = c10d._resolve_process_group(group_name)
+    world_size = group.size()
+    rank = dist.get_rank(group)
+    global_ranks = c10d.get_process_group_ranks(group)
+
+    if world_size < 2:
+        return
+
+    graph = ag_node.graph
+    with graph.inserting_before(ag_node):
+        # -- (1) Fire-and-forget sends: broadcast local shard to all peers --
+        first_new_node: torch.fx.Node | None = None
+        for step in range(1, world_size):
+            dst_group_rank = (rank + step) % world_size
+            dst_global = global_ranks[dst_group_rank]
+            send_node = graph.call_function(
+                c10d_func.isend.default,
+                args=(shard_node, dst_global, 0, group_name),
+            )
+            if first_new_node is None:
+                first_new_node = send_node
+
+        # -- (2) Post all async receives --
+        recv_nodes: list[tuple[int, torch.fx.Node]] = []
+        for step in range(1, world_size):
+            src_group_rank = (rank + step) % world_size
+            src_global = global_ranks[src_group_rank]
+            recv_buf = graph.call_function(
+                aten.empty_like.default,
+                args=(shard_node,),
+            )
+            recv_result = graph.call_function(
+                c10d_func.irecv.default,
+                args=(recv_buf, src_global, 0, group_name),
+            )
+            recv_nodes.append((src_group_rank, recv_result))
+
+        # -- (3) For each matmul consumer, build tiled computation --
+        for matmul in matmuls:
+            B_node = matmul.B_node
+
+            # Local tile: mm on local shard (no wait needed)
+            local_tile = graph.call_function(
+                aten.mm.default,
+                args=(shard_node, B_node),
+            )
+
+            # Build tiles dict keyed by group rank for correct cat ordering
+            tiles: dict[int, torch.fx.Node] = {rank: local_tile}
+
+            for src_group_rank, recv_result in recv_nodes:
+                waited = graph.call_function(
+                    c10d_func.wait_tensor.default,
+                    args=(recv_result,),
+                )
+                tile = graph.call_function(
+                    aten.mm.default,
+                    args=(waited, B_node),
+                )
+                tiles[src_group_rank] = tile
+
+            # Reassemble in rank order
+            ordered_tiles = [tiles[r] for r in range(world_size)]
+            cat_node = graph.call_function(
+                aten.cat.default,
+                args=(ordered_tiles, 0),
+            )
+
+            matmul.replace_with(cat_node)
+
+        # After erasing the matmuls, the all-gather result node may still have
+        # users (e.g. saved for backward). Replace those with a reconstructed
+        # gathered tensor from the received chunks.
+        if len(ag_res_node.users) > 0:
+            all_chunks: dict[int, torch.fx.Node] = {rank: shard_node}
+            for src_group_rank, recv_result in recv_nodes:
+                waited = graph.call_function(
+                    c10d_func.wait_tensor.default,
+                    args=(recv_result,),
+                )
+                all_chunks[src_group_rank] = waited
+            ordered_chunks = [all_chunks[r] for r in range(world_size)]
+            gathered_node = graph.call_function(
+                aten.cat.default,
+                args=(ordered_chunks, 0),
+            )
+            all_gather.replace_with(gathered_node)
+        all_gather.erase()
+
+    # Raise B-side ancestors that ended up after our new nodes
+    if first_new_node is not None:
+        order = {node: idx for idx, node in enumerate(graph.nodes)}
+        all_ancestor_nodes = OrderedSet[torch.fx.Node]()
+        for matmul in matmuls:
+            all_ancestor_nodes |= matmul.arg_ancestor_nodes
+        nodes_to_raise = sorted(all_ancestor_nodes, key=lambda x: order.get(x, 0))
+        for node in nodes_to_raise:
+            if order.get(node, 0) > order.get(first_new_node, 0):
+                first_new_node.prepend(node)
+
+    log.debug(
+        "decompose_all_gather_matmul: decomposed AG+MM for %d ranks, %d matmuls",
+        world_size,
+        len(matmuls),
+    )
+
+
+def decompose_all_gather_matmul_pass(graph: torch.fx.Graph) -> None:
+    """
+    FX pass that decomposes all_gather + matmul patterns into P2P + tiled
+    matmul for fine-grained compute/communication overlap.
+    """
+    all_gathers = find_all_gather_patterns(graph)
+    if not all_gathers:
+        return
+
+    # When simple overlapping can already hide the collective, skip decomposition
+    if config.reorder_for_compute_comm_overlap:
+        unexposed = _get_unexposed_collectives(graph)
+        all_gathers = [x for x in all_gathers if x.ag_node not in unexposed]
+
+    for all_gather in all_gathers:
+        decompose_all_gather_matmul(all_gather)
