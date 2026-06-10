@@ -2255,7 +2255,7 @@ test_operator_microbenchmark() {
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export MIOPEN_FIND_MODE=FAST
     # Log hipBLASLt heuristic/kernel selection (see hipblaslt docs: HIPBLASLT_LOG_LEVEL).
-    export HIPBLASLT_LOG_LEVEL="${HIPBLASLT_LOG_LEVEL:-5}"
+    # export HIPBLASLT_LOG_LEVEL="${HIPBLASLT_LOG_LEVEL:-5}"
   fi
 
   # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
