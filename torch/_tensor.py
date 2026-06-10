@@ -897,7 +897,24 @@ class Tensor(torch._C.TensorBase):
             return handle_torch_function(
                 Tensor.norm, (self,), self, p=p, dim=dim, keepdim=keepdim, dtype=dtype
             )
-        return torch.norm(self, p, dim, keepdim, dtype=dtype)
+        # torch.norm: 'nuc' and 'fro' over a matrix dim are matrix norms;
+        # everything else (numeric p, 'fro' elsewhere) is the flat p-norm.
+        is_matrix_dim = isinstance(dim, (tuple, list)) and len(dim) == 2
+        if p == "nuc" or (p == "fro" and is_matrix_dim):
+            return torch.linalg.matrix_norm(
+                self,
+                ord=p,
+                dim=dim if is_matrix_dim else (-2, -1),
+                keepdim=keepdim,
+                dtype=dtype,
+            )
+        return torch.linalg.vector_norm(
+            self,
+            ord=2 if p == "fro" else p,
+            dim=dim,
+            keepdim=keepdim,
+            dtype=dtype,
+        )
 
     def solve(self, other):
         from torch._linalg_utils import solve

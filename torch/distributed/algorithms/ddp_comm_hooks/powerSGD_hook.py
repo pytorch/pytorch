@@ -59,7 +59,7 @@ def _orthogonalize_gram_schmidt(matrices, epsilon=0):
             # Note that col ** 2 can underflow/overflow if we use FP16.
             # May need to consider multiplying a scaling factor and dividing it later, or using bfloat16 instead.
             try:
-                col /= torch.norm(col, dim=1, keepdim=True)
+                col /= torch.linalg.vector_norm(col, dim=1, keepdim=True)
             except ZeroDivisionError:
                 logger.error(
                     "The matrices to be orthogonalized has at least a column of all 0s. Please set a small value such as 1e-8 "
@@ -68,7 +68,7 @@ def _orthogonalize_gram_schmidt(matrices, epsilon=0):
                 # Recover the values from NaNs to 0s.
                 col.fill_(0.0)
         else:
-            col /= torch.norm(col, dim=1, keepdim=True) + epsilon
+            col /= torch.linalg.vector_norm(col, dim=1, keepdim=True) + epsilon
         # Project it on the rest and remove it.
         if i + 1 < num_cols:
             rest = matrices[:, :, i + 1 :]
