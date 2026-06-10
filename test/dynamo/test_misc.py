@@ -103,6 +103,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_HPU,
     TEST_XPU,
+    TEST_Z3,
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -7067,7 +7068,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "addcmul_positional",
             "addcdiv",
             "addcdiv_positional",
-            subtest("baddbmm", decorators=[expectedFailureDynamic]),
+            # baddbmm under dynamic shapes only fails when Z3 translation
+            # validation is enabled (https://github.com/pytorch/pytorch/issues/162287);
+            # the dynamic_shapes test class enables translation_validation only
+            # when Z3 is available, so the test passes when Z3 is missing. Mark
+            # as expected-fail only when Z3 is present to avoid spurious
+            # unexpected-success failures in Z3-less environments.
+            subtest(
+                "baddbmm",
+                decorators=[expectedFailureDynamic] if TEST_Z3 else [],
+            ),
         ],
     )
     def test_scalar_arg_0d_tensor(self, op):
