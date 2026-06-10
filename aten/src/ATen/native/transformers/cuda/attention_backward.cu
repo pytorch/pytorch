@@ -589,6 +589,10 @@ _efficient_attention_backward(
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::cast_dtype;
     aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
+    const auto aotriton_philox_seed =
+        use_dropout ? philox_seed : at::zeros({}, at::dtype(at::kLong));
+    const auto aotriton_philox_offset =
+        use_dropout ? philox_offset : at::zeros({}, at::dtype(at::kLong));
     using aotriton::v3::flash::CausalType;
     using aotriton::v3::flash::VarlenType;
     using aotriton::v3::flash::WindowValue;
@@ -608,8 +612,8 @@ _efficient_attention_backward(
     params.Max_seqlen_q = max_seqlen_q;        // Unused if cu_seqlens_q is empty
     params.Max_seqlen_k = max_seqlen_k;        // Unused if cu_seqlens_k is empty
     params.dropout_p = float(dropout_p);
-    params.philox_seed_ptr = mk_aoscalartensor(philox_seed);
-    params.philox_offset1 = mk_aoscalartensor(philox_offset);
+    params.philox_seed_ptr = mk_aoscalartensor(aotriton_philox_seed);
+    params.philox_offset1 = mk_aoscalartensor(aotriton_philox_offset);
     params.philox_offset2 = 0;
     params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
     if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
