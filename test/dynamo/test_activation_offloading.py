@@ -356,12 +356,23 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
             self.assertEqual(cpu_result.device.type, "cpu")
             self.assertEqual(cpu_result.dtype, x_gpu.dtype)
 
-            # reload fake: CPU -> GPU with same shape/dtype
+            # reload fake: CPU -> GPU with original strides
             x_cpu = torch.randn(4, 8)
-            gpu_result = torch.ops.ao.reload.default(x_cpu, torch.device(GPU_TYPE))
+            gpu_result = torch.ops.ao.reload.default(
+                x_cpu, torch.device(GPU_TYPE), [4, 8], [8, 1]
+            )
             self.assertEqual(gpu_result.shape, (4, 8))
+            self.assertEqual(gpu_result.stride(), (8, 1))
             self.assertEqual(gpu_result.device.type, GPU_TYPE)
             self.assertEqual(gpu_result.dtype, x_cpu.dtype)
+
+            # reload fake: CPU -> GPU with non-contiguous strides (e.g. transpose)
+            gpu_result_t = torch.ops.ao.reload.default(
+                x_cpu, torch.device(GPU_TYPE), [8, 4], [1, 8]
+            )
+            self.assertEqual(gpu_result_t.shape, (8, 4))
+            self.assertEqual(gpu_result_t.stride(), (1, 8))
+            self.assertEqual(gpu_result_t.device.type, GPU_TYPE)
 
             # wait_tensor fake: returns same tensor (aliasing)
             wait_result = torch.ops.ao.wait_tensor.default(x_gpu)
@@ -468,6 +479,147 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         # 1 GB at 25 GB/s = 40 ms
         with torch._functorch.config.patch(activation_offload_cpu_gpu_bw=25.0):
             self.assertAlmostEqual(_estimate_transfer_time_in_ms(size_bytes), 40.0)
+
+    def test_pinned_pool_reuse(self):
+        """Pool returns cached buffers on second call with same size."""
+        from torch._functorch._activation_offloading.offload_ops import (
+            _maybe_pool_alloc,
+            _pinned_pool,
+            _pool_free,
+            pinned_memory_pool,
+        )
+
+        with pinned_memory_pool():
+            buf = _maybe_pool_alloc(1024, torch.float32)
+            self.assertTrue(buf.is_pinned())
+            self.assertEqual(buf.nelement(), 1024)
+
+            _pool_free(buf)
+            self.assertEqual(len(_pinned_pool[(1024, torch.float32)]), 1)
+
+            buf2 = _maybe_pool_alloc(1024, torch.float32)
+            self.assertIs(buf2, buf)  # same object reused
+            self.assertEqual(len(_pinned_pool.get((1024, torch.float32), [])), 0)
+
+    def test_pinned_pool_dtype_separation(self):
+        """Same nbytes but different dtypes must not share buffers."""
+        from torch._functorch._activation_offloading.offload_ops import (
+            _maybe_pool_alloc,
+            _pool_free,
+            pinned_memory_pool,
+        )
+
+        with pinned_memory_pool():
+            # 16 bytes: 4 float32 or 8 float16
+            f32 = _maybe_pool_alloc(16, torch.float32)
+            self.assertEqual(f32.dtype, torch.float32)
+            _pool_free(f32)
+
+            f16 = _maybe_pool_alloc(16, torch.float16)
+            # Must NOT return the float32 buffer
+            self.assertEqual(f16.dtype, torch.float16)
+            self.assertIsNot(f16, f32)
+
+    def test_pinned_pool_different_sizes(self):
+        """Pool buckets by size — different sizes don't share buffers."""
+        from torch._functorch._activation_offloading.offload_ops import (
+            _maybe_pool_alloc,
+            _pool_free,
+            pinned_memory_pool,
+        )
+
+        with pinned_memory_pool():
+            small = _maybe_pool_alloc(256, torch.float32)
+            large = _maybe_pool_alloc(1024, torch.float32)
+
+            _pool_free(small)
+            _pool_free(large)
+
+            got = _maybe_pool_alloc(1024, torch.float32)
+            self.assertIs(got, large)
+
+            got2 = _maybe_pool_alloc(256, torch.float32)
+            self.assertIs(got2, small)
+
+    def test_pinned_pool_disabled_outside_context(self):
+        """Without pinned_memory_pool(), alloc doesn't pool and free releases storage."""
+        from torch._functorch._activation_offloading.offload_ops import (
+            _maybe_pool_alloc,
+            _pinned_pool,
+            _pool_clear,
+            _pool_free,
+        )
+
+        _pool_clear()
+        buf = _maybe_pool_alloc(512, torch.float32)
+        self.assertEqual(buf.untyped_storage().size(), 512 * 4)
+
+        _pool_free(buf)
+        # Pool should be empty — buffer not cached
+        self.assertEqual(len(_pinned_pool), 0)
+        # Storage should be freed (resize_(0))
+        self.assertEqual(buf.untyped_storage().size(), 0)
+
+        buf2 = _maybe_pool_alloc(512, torch.float32)
+        self.assertIsNot(buf2, buf)  # fresh allocation
+        _pool_clear()
+
+    def test_pinned_pool_context_manager(self):
+        """pinned_memory_pool() enables pooling and clears on exit."""
+        from torch._functorch._activation_offloading.offload_ops import (
+            _maybe_pool_alloc,
+            _pinned_pool,
+            _pool_free,
+            pinned_memory_pool,
+        )
+
+        with pinned_memory_pool():
+            buf = _maybe_pool_alloc(1024, torch.float32)
+            _pool_free(buf)
+            self.assertEqual(len(_pinned_pool[(1024, torch.float32)]), 1)
+
+        # Pool cleared on exit
+        self.assertEqual(len(_pinned_pool), 0)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    def test_pinned_pool_offload_roundtrip(self):
+        """Offload/reload roundtrip reuses pooled buffers on second step."""
+        from torch._functorch._activation_offloading.offload_ops import (
+            _pinned_pool,
+            pinned_memory_pool,
+        )
+
+        with pinned_memory_pool():
+            x = torch.randn(64, 64, device=GPU_TYPE)
+            x_ref = x.clone().cpu()
+
+            # Step 1: cold — allocates new pinned buffer
+            cpu = torch.ops.ao.offload.default(x)
+            cpu = torch.ops.ao.wait_tensor.default(cpu, x)
+            gpu = torch.ops.ao.reload.default(
+                cpu, torch.device(GPU_TYPE), [64, 64], [64, 1]
+            )
+            gpu = torch.ops.ao.wait_tensor.default(gpu, cpu)
+            torch.testing.assert_close(gpu.cpu(), x_ref)
+
+            # Buffer returned to pool
+            pool_count = sum(len(v) for v in _pinned_pool.values())
+            self.assertEqual(pool_count, 1, "Buffer should be back in pool")
+
+            # Step 2: warm — reuses pooled buffer
+            x2 = torch.randn(64, 64, device=GPU_TYPE)
+            cpu2 = torch.ops.ao.offload.default(x2)
+            pool_count_during = sum(len(v) for v in _pinned_pool.values())
+            self.assertEqual(pool_count_during, 0, "Buffer taken from pool")
+
+            cpu2 = torch.ops.ao.wait_tensor.default(cpu2, x2)
+            gpu2 = torch.ops.ao.reload.default(
+                cpu2, torch.device(GPU_TYPE), [64, 64], [64, 1]
+            )
+            gpu2 = torch.ops.ao.wait_tensor.default(gpu2, cpu2)
+
+            pool_count_after = sum(len(v) for v in _pinned_pool.values())
+            self.assertEqual(pool_count_after, 1, "Buffer back in pool")
 
 
 @unittest.skipIf(not HAS_GPU, "requires GPU")
