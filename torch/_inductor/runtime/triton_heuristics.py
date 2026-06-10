@@ -143,6 +143,9 @@ log = logging.getLogger(__name__)
 
 triton_name_sub = re.compile(r"^def [^(]+\(")
 
+_user_autotune_keyed_config_cache: dict[tuple[Any, tuple[Any, ...]], Hashable] = {}
+_user_autotune_keyed_config_cache_lock = threading.Lock()
+
 
 def generate_lookup_hash_from_source_code(size_hints_str: str, source_code: str) -> str:
     # Name agnostic + strip white space
@@ -470,6 +473,15 @@ class CachingAutotuner(KernelInterface):
         self.optimize_mem = optimize_mem
         cached_config = lookup_autotune_config(size_hints, fn)
         self.configs = [cached_config] if cached_config else configs
+        self._autotuned_arg_names = OrderedSet(
+            name for cfg in configs for name in cfg.kwargs
+        )
+        self.user_autotune_keys = tuple(
+            self.inductor_meta.get("user_autotune_keys", ())
+        )
+        self.user_autotune_cache_key = self.inductor_meta.get("user_autotune_cache_key")
+        self._keyed_user_autotune_launchers: dict[tuple[Any, ...], LauncherType] = {}
+        self._keyed_user_autotune_lock = threading.Lock()
 
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
@@ -556,6 +568,55 @@ class CachingAutotuner(KernelInterface):
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
 
+    def _uses_user_autotune_key(self) -> bool:
+        return self.heuristic_type == HeuristicType.USER_AUTOTUNE and bool(
+            self.user_autotune_keys
+        )
+
+    def _user_autotune_runtime_arg_names(self) -> list[str]:
+        return list(self.inductor_meta.get("user_autotune_arg_names", ()))
+
+    @staticmethod
+    def _hashable_user_autotune_value(value: Any) -> Any:
+        try:
+            hash(value)
+        except TypeError:
+            return repr(value)
+        return value
+
+    def _make_user_autotune_key(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[Any, ...]:
+        runtime_args = dict(zip(self._user_autotune_runtime_arg_names(), args))
+        runtime_args.update(
+            {name: value for name, value in kwargs.items() if name in self.fn.arg_names}
+        )
+        all_args = {**runtime_args, **self.triton_meta.get("constants", {})}
+        key = [
+            self._hashable_user_autotune_value(all_args[name])
+            for name in self.user_autotune_keys
+            if name in all_args
+        ]
+        key.extend(
+            str(arg.dtype) for arg in runtime_args.values() if hasattr(arg, "dtype")
+        )
+        return tuple(key)
+
+    def _find_launcher_for_config_hash(
+        self, config_hash: Hashable
+    ) -> LauncherType | None:
+        for launcher in self.launchers:
+            if triton_config_to_hashable(launcher.config) == config_hash:
+                return launcher
+        return None
+
+    def _shared_user_autotune_cache_key(
+        self, key: tuple[Any, ...]
+    ) -> tuple[Any, tuple[Any, ...]] | None:
+        if self.user_autotune_cache_key is None:
+            return None
+        return (self.user_autotune_cache_key, key)
+
     @staticmethod
     def _close_compiled_kernel(kernel: Any) -> None:
         if kernel is None:
@@ -584,6 +645,14 @@ class CachingAutotuner(KernelInterface):
         self.launchers = []
         self.compile_results = []
         self.benchmark_failure_reasons.clear()
+        keyed_launchers = getattr(self, "_keyed_user_autotune_launchers", None)
+        if keyed_launchers is not None:
+            keyed_lock = getattr(self, "_keyed_user_autotune_lock", None)
+            if keyed_lock is None:
+                keyed_launchers.clear()
+            else:
+                with keyed_lock:
+                    keyed_launchers.clear()
         self._cached_launcher = None
         self._debug_call = None
 
@@ -986,12 +1055,17 @@ class CachingAutotuner(KernelInterface):
         return {
             **self.__dict__,
             "lock": None,
+            "_keyed_user_autotune_lock": None,
+            "_keyed_user_autotune_launchers": {},
             "_plugins": [],
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
         self.lock = threading.Lock()
+        self._keyed_user_autotune_lock = threading.Lock()
+        if not hasattr(self, "_keyed_user_autotune_launchers"):
+            self._keyed_user_autotune_launchers = {}
         self._plugins = get_caching_autotuner_plugins(self)
 
     def get_device_interface(self):
@@ -1474,7 +1548,9 @@ class CachingAutotuner(KernelInterface):
                         close()
             self.compile_results = keep_results
 
-    def benchmark_all_configs(self, *args, **kwargs):
+    def _benchmark_all_configs(
+        self, close_static_launchers: bool, *args, **kwargs
+    ) -> dict[LauncherType, float]:
         with (
             dynamo_timed(
                 "CachingAutotuner.benchmark_all_configs",
@@ -1498,15 +1574,18 @@ class CachingAutotuner(KernelInterface):
             for launcher in self.launchers:
                 timing = self.bench(launcher, *args, **kwargs)
                 timings[launcher] = timing
-                # Close losing static launchers eagerly so exhaustive autotuning
-                # keeps only the current winner and candidate modules loaded.
+                # In one-winner autotune, close losing static launchers eagerly
+                # so exhaustive autotuning keeps only the current winner and
+                # candidate modules loaded.
                 if best_launcher is None or timing < best_timing:
                     if best_launcher is not None:
-                        self._close_static_launcher(best_launcher)
+                        if close_static_launchers:
+                            self._close_static_launcher(best_launcher)
                     best_launcher = launcher
                     best_timing = timing
                 else:
-                    self._close_static_launcher(launcher)
+                    if close_static_launchers:
+                        self._close_static_launcher(launcher)
 
             for k, v in timings.items():
                 self.coordesc_tuner.cache_benchmark_result(k.config, v)
@@ -1536,6 +1615,9 @@ class CachingAutotuner(KernelInterface):
 
             self.reset_to_zero_args(*args, **kwargs)
             return timings
+
+    def benchmark_all_configs(self, *args, **kwargs):
+        return self._benchmark_all_configs(True, *args, **kwargs)
 
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
@@ -2056,6 +2138,74 @@ class CachingAutotuner(KernelInterface):
             self._debug_call = None
             debug_call.finalize(self.get_device_interface())
 
+    def _run_with_user_autotune_key(
+        self,
+        *args,
+        stream,
+        benchmark_run=False,
+        **kwargs,
+    ):
+        if len(self.launchers) == 0:
+            start_time = time.time_ns()
+            self.precompile()
+            self.precompile_time_taken_ns = time.time_ns() - start_time
+
+        if len(self.launchers) == 1:
+            launcher = self.launchers[0]
+        else:
+            key = self._make_user_autotune_key(args, kwargs)
+            with self._keyed_user_autotune_lock:
+                launcher = self._keyed_user_autotune_launchers.get(key)
+                if launcher is None:
+                    shared_key = self._shared_user_autotune_cache_key(key)
+                    config_hash = None
+                    if shared_key is not None:
+                        with _user_autotune_keyed_config_cache_lock:
+                            config_hash = _user_autotune_keyed_config_cache.get(
+                                shared_key
+                            )
+                    if config_hash is not None:
+                        launcher = self._find_launcher_for_config_hash(config_hash)
+
+                if launcher is None:
+                    start_time = time.time_ns()
+                    # Future runtime keys may need every candidate launcher again.
+                    # Static launchers are only pruned once a single global winner
+                    # is selected by the non-keyed autotune path.
+                    timings = self._benchmark_all_configs(False, *args, **kwargs)
+                    benchmark_time_taken_ns = time.time_ns() - start_time
+                    launcher = builtins.min(timings, key=timings.get)
+                    self.autotune_time_taken_ns = (
+                        self.precompile_time_taken_ns + benchmark_time_taken_ns
+                    )
+                    config_hash = triton_config_to_hashable(launcher.config)
+                    if shared_key := self._shared_user_autotune_cache_key(key):
+                        with _user_autotune_keyed_config_cache_lock:
+                            _user_autotune_keyed_config_cache[shared_key] = config_hash
+
+                self._keyed_user_autotune_launchers[key] = launcher
+
+        TritonBundler.put_winner(launcher.cache_hash)
+        if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
+            if self.device_props.type == "cpu":
+                if not self.cpu_kernel_saved:
+                    self.save_cpu_kernel(launcher)
+            else:
+                self.save_gpu_kernel(stream, launcher)
+
+        try:
+            self._pre_launch(launcher, *args, stream=stream, **kwargs)
+            try:
+                result = launcher(*args, **kwargs, stream=stream)
+            except Exception as e:
+                if isinstance(e, TypeError):
+                    self._check_launcher_call_args(launcher, args)
+                raise
+        finally:
+            self._post_launch()
+
+        return result
+
     def run(
         self,
         *args,
@@ -2078,6 +2228,7 @@ class CachingAutotuner(KernelInterface):
         fast = self._cached_launcher
         if (
             fast is not None
+            and not self._uses_user_autotune_key()
             and not benchmark_run
             and not kwargs
             and not autograd_profiler._is_profiler_enabled
@@ -2116,6 +2267,14 @@ class CachingAutotuner(KernelInterface):
                 result := plugin.pre_dispatch(self, *args, stream=stream, **kwargs)
             ) is not DEFER:
                 return result
+
+        if self._uses_user_autotune_key():
+            return self._run_with_user_autotune_key(
+                *args,
+                stream=stream,
+                benchmark_run=benchmark_run,
+                **kwargs,
+            )
 
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
@@ -2190,6 +2349,7 @@ class CachingAutotuner(KernelInterface):
             and self._cache_eligible
             and not benchmark_run
             and not debug_mode
+            and not self._uses_user_autotune_key()
             and not autograd_profiler._is_profiler_enabled
             and len(self.launchers) == 1
         ):
@@ -3061,9 +3221,18 @@ def cached_autotune(
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
 
-    configs, autotune_cache, autotune_cache_info = check_autotune_cache(
-        configs, filename, inductor_meta
+    has_user_autotune_key = heuristic_type == HeuristicType.USER_AUTOTUNE and bool(
+        inductor_meta.get("user_autotune_keys")
     )
+    if has_user_autotune_key:
+        # The file autotune cache stores one config per generated source, but
+        # Triton user autotune keys select configs from runtime arguments.
+        autotune_cache = None
+        autotune_cache_info = {"autotune_cache_state": "runtime user key"}
+    else:
+        configs, autotune_cache, autotune_cache_info = check_autotune_cache(
+            configs, filename, inductor_meta
+        )
     mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
     optimize_mem = inductor_meta.pop("optimize_mem", True)
 

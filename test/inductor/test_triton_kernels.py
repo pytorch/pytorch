@@ -1163,6 +1163,113 @@ def forward(self, x_1, output_1):
         output2 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, output2), torch_add)
 
+    def _check_triton_kernel_autotune_key_reused_across_constexprs(self):
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 2}, num_stages=3, num_warps=4),
+                triton.Config({"BLOCK_SIZE": 4}, num_stages=3, num_warps=4),
+            ],
+            key=["M"],
+        )
+        @triton.jit
+        def keyed_autotune_kernel(
+            out_ptr,
+            M,
+            n_elements,
+            TUNING: "tl.constexpr",
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            output = tl.full((BLOCK_SIZE,), BLOCK_SIZE, tl.float32)
+
+            if (M == 4 and TUNING and BLOCK_SIZE == 4) or (
+                M == 40 and BLOCK_SIZE == (2 if TUNING else 4)
+            ):
+                i = 0
+                acc = offsets.to(tl.float32)
+                while i < 4096:
+                    acc = tl.sin(acc + 0.125)
+                    i += 1
+                output += acc * 1.0e-20
+
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def call_triton(x: torch.Tensor, tuning: bool):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            keyed_autotune_kernel[grid](output, x.shape[0], n_elements, tuning)
+            return output
+
+        with fresh_cache():
+            compiled = torch.compile(call_triton, fullgraph=True)
+            small = torch.empty(4, device=GPU_TYPE)
+            large = torch.empty(40, device=GPU_TYPE)
+
+            self.assertEqual(int(compiled(small, True)[0].item()), 2)
+            self.assertEqual(int(compiled(large, True)[0].item()), 4)
+            self.assertEqual(int(compiled(large, False)[0].item()), 4)
+
+    @requires_gpu
+    def test_triton_kernel_autotune_key_reused_across_constexprs(self):
+        self._check_triton_kernel_autotune_key_reused_across_constexprs()
+
+    @requires_gpu
+    @inductor_config.patch(
+        {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
+    )
+    def test_triton_kernel_autotune_key_static_launchers_remain_usable(self):
+        self._check_triton_kernel_autotune_key_reused_across_constexprs()
+
+    @requires_gpu
+    def test_triton_kernel_autotune_key_after_constant_arg(self):
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 2}, num_stages=3, num_warps=4),
+                triton.Config({"BLOCK_SIZE": 4}, num_stages=3, num_warps=4),
+            ],
+            key=["M"],
+        )
+        @triton.jit
+        def keyed_autotune_kernel(
+            out_ptr,
+            STRIDE,
+            M,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            output = tl.full((BLOCK_SIZE,), BLOCK_SIZE, tl.float32)
+
+            if (M == 4 and BLOCK_SIZE == 4) or (M == 40 and BLOCK_SIZE == 2):
+                i = 0
+                acc = offsets.to(tl.float32) + STRIDE
+                while i < 4096:
+                    acc = tl.sin(acc + 0.125)
+                    i += 1
+                output += acc * 1.0e-20
+
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def call_triton(x: torch.Tensor):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            keyed_autotune_kernel[grid](output, 1, x.shape[0], n_elements)
+            return output
+
+        with fresh_cache():
+            compiled = torch.compile(call_triton, fullgraph=True)
+            small = torch.empty(4, device=GPU_TYPE)
+            large = torch.empty(40, device=GPU_TYPE)
+
+            self.assertEqual(int(compiled(small)[0].item()), 2)
+            self.assertEqual(int(compiled(large)[0].item()), 4)
+
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @inductor_config.patch("unsafe_ignore_unsupported_triton_autotune_args", True)

@@ -7924,16 +7924,20 @@ class UserDefinedTritonKernel(ExternKernel):
     A user-defined triton kernel (e.g. via @triton.jit).
     """
 
-    def get_kernel_and_metadata(self) -> tuple[Kernel, Any, list[str], list[str]]:
+    def get_kernel_and_metadata(
+        self,
+    ) -> tuple[Kernel, Any, list[str], list[str], list[str]]:
         from triton.runtime.autotuner import Autotuner
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
         configs = []
+        autotune_keys: list[str] = []
         restore_value_args: list[str] = []
         reset_to_zero_args: list[str] = []
         if isinstance(kernel, Autotuner):
+            autotune_keys.extend(kernel.keys)
             # https://github.com/triton-lang/triton/pull/5083
             # changes kernel.restore_idx to kernel.restore_value
             if hasattr(kernel, "restore_idx"):
@@ -7954,7 +7958,7 @@ class UserDefinedTritonKernel(ExternKernel):
             configs = kernel.configs
             kernel = kernel.fn
 
-        return kernel, configs, restore_value_args, reset_to_zero_args
+        return kernel, configs, autotune_keys, restore_value_args, reset_to_zero_args
 
     def can_fuse_epilogue(self) -> bool:
         """
@@ -8037,6 +8041,7 @@ class UserDefinedTritonKernel(ExternKernel):
         (
             kernel,
             configs,
+            autotune_keys,
             restore_value_args,
             reset_to_zero_args,
         ) = self.get_kernel_and_metadata()
@@ -8050,6 +8055,7 @@ class UserDefinedTritonKernel(ExternKernel):
         ) = wrapper.define_user_defined_triton_kernel(
             kernel,
             configs,
+            autotune_keys,
             self.kwargs,
             restore_value_args,
             reset_to_zero_args,
@@ -8177,7 +8183,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_idx = kernel_idx
         self.grid = grid
 
-        kernel, configs, _, _ = self.get_kernel_and_metadata()
+        kernel, configs, _, _, _ = self.get_kernel_and_metadata()
 
         # If we are autotuning, not all arguments will be passed
         assert hasattr(kernel, "arg_names")

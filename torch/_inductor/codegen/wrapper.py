@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import dis
 import functools
+import hashlib
 import inspect
 import logging
 import operator
@@ -2893,6 +2894,7 @@ class PythonWrapperCodegen(CodeGen):
         self,
         kernel,
         configs,
+        autotune_keys,
         kwargs,
         restore_value_args,
         reset_to_zero_args,
@@ -3112,6 +3114,46 @@ class PythonWrapperCodegen(CodeGen):
             inductor_meta["declared_constexpr_names"] = [
                 arg_names[i] for i in constexprs
             ]
+
+        if autotune_keys:
+            device_props = triton_meta["device"]
+            device_target_key = (
+                device_props.type,
+                device_props.index,
+                device_props.multi_processor_count,
+                device_props.cc,
+                device_props.major,
+                device_props.regs_per_multiprocessor,
+                device_props.max_threads_per_multi_processor,
+                device_props.max_threads_per_block,
+                device_props.warp_size,
+            )
+            kernel_cache_key = getattr(kernel, "cache_key", None)
+            if kernel_cache_key is None:
+                kernel_cache_key = hashlib.sha256(
+                    kernel.src.encode("utf-8")
+                ).hexdigest()
+            if epilogue_fusion is not None:
+                kernel_cache_key = hashlib.sha256(
+                    f"{kernel_cache_key}:{epilogue_fusion[1]}".encode()
+                ).hexdigest()
+            user_autotune_arg_names = []
+            for idx, name in enumerate(arg_names):
+                if name not in kwargs:
+                    continue
+                if idx in constexprs and triton_version_uses_attrs_dict():
+                    continue
+                if kwargs[name] is None and not triton_version_uses_attrs_dict():
+                    continue
+                user_autotune_arg_names.append(name)
+            inductor_meta["user_autotune_keys"] = tuple(autotune_keys)
+            inductor_meta["user_autotune_arg_names"] = tuple(user_autotune_arg_names)
+            inductor_meta["user_autotune_cache_key"] = (
+                kernel_cache_key,
+                device_target_key,
+                tuple(autotune_keys),
+                tuple(tuple(sorted(config_to_dict(cfg).items())) for cfg in configs),
+            )
 
         # Distinguish between different functions using function id
         cache_key: Any = [id(kernel.fn)]
