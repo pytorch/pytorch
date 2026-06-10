@@ -1702,6 +1702,29 @@ class CppWrapperCpu(PythonWrapperCodegen):
         shim_fn = f"aoti_torch_{device}_{kernel_suffix}"
         return shim_fn
 
+    def _get_profiling_input_handles(
+        self,
+        inputs: Sequence[ir.IRNode | Sequence[ir.IRNode]],
+        args: list[str],
+    ) -> list[str]:
+        """Build input handles for profiling: use codegen args for ReinterpretView
+        inputs (to capture logical view shapes) and get_name() for everything
+        else (to avoid issues with multi-token args like tensor lists)."""
+        handles = []
+        for i, inp in enumerate(inputs):
+            if isinstance(inp, ir.ReinterpretView):
+                handle = args[i]
+                # Strip RAII wrapper to get raw handle — avoids double-ownership
+                # when the expression is evaluated for profiling AND for the
+                # actual kernel call.
+                if handle.startswith("RAIIAtenTensorHandle(") and handle.endswith(")"):
+                    handle = handle[len("RAIIAtenTensorHandle(") : -1]
+                handles.append(handle)
+            else:
+                assert isinstance(inp, ir.IRNode)
+                handles.append(inp.get_name())
+        return handles
+
     def generate_c_shim_extern_kernel_call(
         self,
         kernel: str,
@@ -1710,6 +1733,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         *,
         debug_args: list[str] | None = None,
         stack_traces: OrderedSet[str] | None = None,
+        input_handles: list[str] | None = None,
+        num_scalars: int = 0,
+        output_handle: str | None = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
@@ -1738,13 +1764,72 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         stack_trace_str += "\n"
                 stack_trace_str += ')"'
 
-                shim_fn_codes = [
-                    "{",
-                    f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});""",
-                    f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);""",
-                    shim_fn_codes[0],
-                    "}",
-                ]
+                has_profiling_inputs = input_handles or num_scalars > 0 or output_handle
+                if has_profiling_inputs:
+                    # Generate IValue conversions so that tensor shapes
+                    # and scalar types are recorded by the profiler.
+                    ivalue_lines: list[str] = []
+                    ivalue_names: list[str] = []
+
+                    # Convert tensor input handles to IValues.
+                    if input_handles:
+                        for idx, handle in enumerate(input_handles):
+                            ivalue_var = f"tmp_{shim_fn}_input_{idx}"
+                            ivalue_lines.extend(
+                                [
+                                    f"C10IValueHandle {ivalue_var};",
+                                    f"aoti_torch_tensor_to_ivalue({handle}, &{ivalue_var});",
+                                    f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});",
+                                ]
+                            )
+                            ivalue_names.append(ivalue_var)
+
+                    # Generate dummy scalar IValues (we only care about
+                    # shapes, so use int64(0) as a placeholder).
+                    for idx in range(num_scalars):
+                        ivalue_var = f"tmp_{shim_fn}_scalar_{idx}"
+                        ivalue_lines.extend(
+                            [
+                                f"C10IValueHandle {ivalue_var};",
+                                f"aoti_torch_int64_to_ivalue(0, &{ivalue_var});",
+                                f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});",
+                            ]
+                        )
+                        ivalue_names.append(ivalue_var)
+
+                    # Convert output tensor handle to IValue.
+                    if output_handle:
+                        ivalue_var = f"tmp_{shim_fn}_output"
+                        ivalue_lines.extend(
+                            [
+                                f"C10IValueHandle {ivalue_var};",
+                                f"aoti_torch_tensor_to_ivalue({output_handle}, &{ivalue_var});",
+                                f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});",
+                            ]
+                        )
+                        ivalue_names.append(ivalue_var)
+
+                    inputs_vec_var = f"{shim_fn}_inputs_"
+                    ivalue_lines.append(
+                        f"std::vector<C10IValueHandle> {inputs_vec_var}({{{', '.join(ivalue_names)}}});"
+                    )
+
+                    shim_fn_codes = [
+                        "{",
+                        *ivalue_lines,
+                        f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});""",
+                        f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr, {inputs_vec_var});""",
+                        shim_fn_codes[0],
+                        "}",
+                    ]
+                else:
+                    shim_fn_codes = [
+                        "{",
+                        f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});""",
+                        f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);""",
+                        shim_fn_codes[0],
+                        "}",
+                    ]
             self.writelines(shim_fn_codes)
 
     def generate_c_shim_extern_kernel_alloc(
@@ -1764,8 +1849,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
 
+        num_kwargs = sum(
+            1 for key in extern_kernel.ordered_kwargs_for_cpp_kernel if key != "out"
+        )
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.get_kernel_name(), args, device
+            extern_kernel.get_kernel_name(),
+            args,
+            device,
+            input_handles=self._get_profiling_input_handles(extern_kernel.inputs, args),
+            num_scalars=len(extern_kernel.constant_args) + num_kwargs,
         )
 
         if extern_kernel.python_kernel_name in (
@@ -1791,6 +1883,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_c_shim_fallback_kernel(
         self, fallback_kernel: ir.FallbackKernel, args: list[str]
     ) -> None:
+        # FallbackKernel.codegen_args() interleaves tensors and constants
+        # via unflatten_args, so args[i] may not correspond to inputs[i].
+        # Use get_name() for all inputs here.
+        input_handles = []
+        for inp in fallback_kernel.inputs:
+            assert isinstance(inp, ir.IRNode)
+            input_handles.append(inp.get_name())
+
         output_args = []
         output_raii_handles = []
         output_name_base = fallback_kernel.get_name()
@@ -1823,10 +1923,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
         args = args + output_args
         device = d.type if (d := fallback_kernel.get_device()) else self.device
 
+        num_kwargs = sum(
+            1 for key in fallback_kernel.ordered_kwargs_for_cpp_kernel if key != "out"
+        )
         self.generate_c_shim_extern_kernel_call(
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
             device,
+            input_handles=input_handles,
+            num_scalars=len(fallback_kernel.constant_args) + num_kwargs,
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
@@ -1839,16 +1944,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
         args: list[str],
         device: str,
         stack_traces: OrderedSet[str] | None = None,
+        input_handles: list[str] | None = None,
+        num_scalars: int = 0,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
             self.writeline(f"auto {out_name} = {out_view};")
             args.insert(0, out_name)
         else:
+            out_name = out
             args.insert(0, out)
 
         self.generate_c_shim_extern_kernel_call(
-            kernel, args, device, stack_traces=stack_traces
+            kernel,
+            args,
+            device,
+            stack_traces=stack_traces,
+            input_handles=input_handles,
+            num_scalars=num_scalars,
+            output_handle=out_name,
         )
 
     def _get_scatter_reduce_enum(self, reduce):

@@ -647,6 +647,11 @@ class ExternKernelOutLine(WrapperLine):
         else:
             kernel_name = node.get_kernel_name()
         device = d.type if (d := node.get_device()) else V.graph.device_type
+        # Count scalar args from both constant_args and kwargs
+        # (e.g., addmm has alpha/beta in kwargs, not constant_args).
+        num_kwargs = sum(
+            1 for key in self.node.ordered_kwargs_for_cpp_kernel if key != "out"
+        )
         self.wrapper._generate_extern_kernel_out_helper(
             kernel_name,
             node.codegen_reference(),
@@ -654,7 +659,28 @@ class ExternKernelOutLine(WrapperLine):
             args,
             device,
             self.node.get_stack_traces(),
+            input_handles=self._get_profiling_input_handles(args),
+            num_scalars=len(self.node.constant_args) + num_kwargs,
         )
+
+    def _get_profiling_input_handles(self, args: list[str]) -> list[str]:
+        """Build input handles for profiling: use codegen args for ReinterpretView
+        inputs (to capture logical view shapes) and get_name() for everything
+        else (to avoid issues with multi-token args like tensor lists)."""
+        handles = []
+        for i, inp in enumerate(self.node.inputs):
+            if isinstance(inp, ReinterpretView):
+                handle = args[i]
+                # Strip RAII wrapper to get raw handle — avoids double-ownership
+                # when the expression is evaluated for profiling AND for the
+                # actual kernel call.
+                if handle.startswith("RAIIAtenTensorHandle(") and handle.endswith(")"):
+                    handle = handle[len("RAIIAtenTensorHandle(") : -1]
+                handles.append(handle)
+            else:
+                assert isinstance(inp, IRNode)
+                handles.append(inp.get_name())
+        return handles
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_extern_kernel_out
@@ -2015,6 +2041,8 @@ class PythonWrapperCodegen(CodeGen):
         args: list[str],
         device: str,
         stack_traces: OrderedSet[str] | None = None,
+        input_handles: list[str] | None = None,
+        num_scalars: int = 0,
     ) -> None:
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer

@@ -6081,6 +6081,54 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(N, K, self.device), example_inputs)
 
     @unittest.skipIf(
+        config.triton.native_matmul, "different kernel name when native matmul"
+    )
+    def test_aoti_profiler_input_shapes(self):
+        # Verify that kernel profiling records tensor input shapes,
+        # scalar args, output handles, and ReinterpretView logical shapes.
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                # addmm: exercises scalar args (alpha, beta) and output handle
+                out = torch.nn.functional.linear(a, self.weight, self.bias)
+                # mm with transposed view: exercises ReinterpretView input path
+                return torch.mm(out.t(), a)
+
+        if sys.platform not in ["linux", "win32"]:
+            raise unittest.SkipTest(
+                "enable_kernel_profile only supported on linux and win32"
+            )
+
+        M = 8
+        N = 6
+        K = 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            # Verify that tensor inputs are converted to IValues for
+            # shape recording (3-arg RAIIAtenRecordFunctionHandle form).
+            FileCheck().check("aoti_torch_tensor_to_ivalue").run(code)
+            # Verify dummy scalar IValues are generated for non-tensor args.
+            FileCheck().check("aoti_torch_int64_to_ivalue").run(code)
+            FileCheck().check("std::vector<C10IValueHandle>").run(code)
+            # Verify output tensor is included in IValues for out-variant
+            # kernels.
+            FileCheck().check_regex(r"tmp_.*_output\b").run(code)
+            # Verify ReinterpretView inputs use reinterpret_tensor_wrapper
+            # for correct logical shapes in profiling.
+            FileCheck().check("reinterpret_tensor_wrapper").run(code)
+
+            self.check_model(Model(N, K, self.device), example_inputs)
+
+    @unittest.skipIf(
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
