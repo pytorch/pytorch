@@ -1904,23 +1904,21 @@ def group_norm_backward_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
-) -> list[list[Placement | _ShardingPlaceholder]]:
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
     # native_group_norm_backward(grad_out, input, mean, rstd, weight?, N, C, HxW, group, output_mask)
     #   -> (grad_input, grad_weight, grad_bias)
-    # Batch-dim sharding: each sample is independent for grad_input, but
-    # grad_weight/grad_bias reduce over batch, so they need Partial().
-    num_tensor_inputs = sum(isinstance(a, TensorMeta) for a in args_schema)
-    placements: list[Placement | _ShardingPlaceholder] = [
+    weight_meta = args_schema[4]
+    placements: list[Placement | _ShardingPlaceholder | None] = [
         _ShardingPlaceholder(0),  # grad_input [N,C,*]
-        Partial("sum"),  # grad_weight [C] -- reduce over batch
-        Partial("sum"),  # grad_bias [C] -- reduce over batch
+        Partial("sum") if weight_meta is not None else None,  # grad_weight [C]
+        Partial("sum") if weight_meta is not None else None,  # grad_bias [C]
         _ShardingPlaceholder(0),  # grad_out [N,C,*]
         _ShardingPlaceholder(0),  # input [N,C,*]
         _ShardingPlaceholder(0),  # mean [N,groups]
         _ShardingPlaceholder(0),  # rstd [N,groups]
     ]
-    # weight (if present) must be Replicate
-    placements.extend([Replicate()] * (num_tensor_inputs - 4))
+    if weight_meta is not None:
+        placements.append(Replicate())
     return [placements]
 
 
