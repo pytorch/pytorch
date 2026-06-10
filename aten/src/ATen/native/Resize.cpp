@@ -202,6 +202,13 @@ static TensorImpl* _resize_impl_(
   const auto itemsize = self->dtype().itemsize();
   const auto storage_offset = self->generic_storage_offset<T>();
   T storage_size = T(1);
+
+  // Save old metadata so we can rollback if storage resize fails.
+  // This provides strong exception guarantee for non-resizable storage
+  // (e.g., numpy-backed tensors). See pytorch/pytorch#170298.
+  auto old_sizes = self->generic_sizes<T>().vec();
+  auto old_strides = self->generic_strides<T>().vec();
+
   if (stride) {
     self->set_sizes_and_strides(size, *stride);
     storage_size = at::detail::computeStorageNbytes(
@@ -213,7 +220,13 @@ static TensorImpl* _resize_impl_(
   }
 
   if (resize_storage) {
-    _maybe_resize_storage(self, std::move(storage_size));
+    try {
+      _maybe_resize_storage(self, std::move(storage_size));
+    } catch (...) {
+      // Rollback metadata to maintain strong exception guarantee
+      self->set_sizes_and_strides(old_sizes, old_strides);
+      throw;
+    }
   }
 
   return self;
