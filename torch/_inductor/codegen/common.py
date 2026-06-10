@@ -1290,6 +1290,7 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"calc_digamma({x})",
         cppvec=lambda x: f"{x}.digamma()",
+        triton=lambda x: f"libdevice.digamma({x})",
         name="digamma",
     ),
     # no cpp nor triton implementation for entr, it is defined as decomposition
@@ -1329,6 +1330,7 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     igamma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x, y: f"calc_igamma({x}, {y})",
+        triton=lambda x, y: f"libdevice.igamma({x}, {y})",
         name="igamma",
     ),
     igammac=OverridesData(
