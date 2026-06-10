@@ -465,8 +465,8 @@ void check_maxpool2d_params(
     IntArrayRef dilation) {
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
               "Expected 1d or 2d kernel size, got ", kernel_size.size());
-  TORCH_CHECK(stride.empty() || stride.size() == 2,
-              "Expected no strides or 2d strides, got", stride.size());
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
+              "Expected no strides or 1d or 2d strides, got ", stride.size());
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
               "Expected 1d or 2d padding, got ", padding.size());
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
@@ -629,23 +629,34 @@ Tensor quantized_max_pool2d(
   if (stride.empty()) {
     stride = kernel_size;
   }
+  // check_maxpool2d_params accepts 1d versions of each list; mirror the
+  // AveragePool2d convention of broadcasting the single value to both dims
+  // rather than unconditionally indexing [1] (gh-162476).
+  const int64_t kH = kernel_size[0];
+  const int64_t kW = kernel_size.size() == 1 ? kH : kernel_size[1];
+  const int64_t sH = stride[0];
+  const int64_t sW = stride.size() == 1 ? sH : stride[1];
+  const int64_t pH = padding[0];
+  const int64_t pW = padding.size() == 1 ? pH : padding[1];
+  const int64_t dH = dilation[0];
+  const int64_t dW = dilation.size() == 1 ? dH : dilation[1];
+  std::array<int64_t, 2> kernel_size_2d{kH, kW};
+  std::array<int64_t, 2> stride_2d{sH, sW};
+  std::array<int64_t, 2> padding_2d{pH, pW};
+  std::array<int64_t, 2> dilation_2d{dH, dW};
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8 && !ceil_mode) {
-    return qnnpack_maxpool2d(qx, kernel_size, stride, padding, dilation, ceil_mode);
+    return qnnpack_maxpool2d(qx, kernel_size_2d, stride_2d, padding_2d, dilation_2d, ceil_mode);
   }
 #endif
   Tensor qy;
   AT_DISPATCH_QINT_TYPES_AND(ScalarType::Byte, qx.scalar_type(), "max_pool2d", [&]() {
     qy = q_maxpool_2d<scalar_t>(
         qx,
-        kernel_size[0],
-        kernel_size[1],
-        stride[0],
-        stride[1],
-        padding[0],
-        padding[1],
-        dilation[0],
-        dilation[1],
+        kH, kW,
+        sH, sW,
+        pH, pW,
+        dH, dW,
         ceil_mode);
   });
   return qy;

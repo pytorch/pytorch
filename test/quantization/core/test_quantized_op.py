@@ -1734,6 +1734,53 @@ class TestQuantizedOps(TestCase):
                              msg="ops.quantized.max_pool2d results are off")
 
 
+    def test_quantized_max_pool2d_1d_params(self):
+        # Regression test for gh-162476: quantized_max_pool2d used to accept
+        # 1-element kernel_size / padding / dilation arrays but then read
+        # index [1] unconditionally, triggering an ASan heap-buffer-overflow.
+        # Broadcast the single value to both dims instead (same convention as
+        # AveragePool2d).
+        qx = torch.quantize_per_tensor(
+            torch.randn(1, 1, 4, 4),
+            scale=0.1,
+            zero_point=10,
+            dtype=torch.qint8,
+        )
+        ref = torch.ops.quantized.max_pool2d(
+            qx,
+            kernel_size=[2, 2],
+            stride=[2, 2],
+            padding=[0, 0],
+            dilation=[1, 1],
+            ceil_mode=False,
+        )
+        for kernel_size, stride, padding, dilation in (
+            ([2], [2, 2], [0, 0], [1, 1]),
+            ([2], [2], [0, 0], [1, 1]),
+            ([2], [2], [0], [1, 1]),
+            ([2], [2], [0], [1]),
+        ):
+            got = torch.ops.quantized.max_pool2d(
+                qx,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+                ceil_mode=False,
+            )
+            self.assertEqual(ref.dequantize(), got.dequantize())
+
+        # Original repro from the issue: a 1-element kernel_size and defaulted
+        # stride/padding/dilation would previously OOB-read on kernel_size[1].
+        q_tensor = torch.quantize_per_tensor(
+            torch.zeros((2, 2), dtype=torch.float),
+            scale=0.1,
+            zero_point=65,
+            dtype=torch.qint8,
+        )
+        with self.assertRaisesRegex(RuntimeError, "kernel_size should be greater than zero"):
+            torch.quantized_max_pool2d(q_tensor, [-576936867])
+
     """Tests 3D max pool operation on quantized tensors."""
     def test_max_pool3d(self):
         torch_types = [torch.qint8, torch.quint8]
