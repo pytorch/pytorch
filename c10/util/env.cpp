@@ -7,14 +7,25 @@
 
 namespace c10::utils {
 
-static std::shared_mutex& get_env_mutex() {
-  static std::shared_mutex env_mutex;
+namespace {
+// This is used to coordinate access to getenv/setenv calls,
+// which may not be thread-safe on certain platforms.
+//
+// Because get_env may be called in global destructors, we CANNOT use
+// std::mutex here, as it may get destructed before get_env is called.
+// Instead, we use a pointer to a mutex allocated on the heap.
+struct StaticEnvMutex {
+  std::shared_timed_mutex val;
+};
+StaticEnvMutex* get_static_env_mutex() {
+  static StaticEnvMutex* env_mutex = new StaticEnvMutex();
   return env_mutex;
 }
+} // namespace
 
 // Set an environment variable.
 void set_env(const char* name, const char* value, bool overwrite) {
-  std::lock_guard lk(get_env_mutex());
+  std::lock_guard lk(get_static_env_mutex()->val);
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4996)
@@ -49,7 +60,7 @@ void set_env(const char* name, const char* value, bool overwrite) {
 
 // Reads an environment variable and returns the content if it is set
 std::optional<std::string> get_env(const char* name) noexcept {
-  std::shared_lock lk(get_env_mutex());
+  std::shared_lock lk(get_static_env_mutex()->val);
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4996)
