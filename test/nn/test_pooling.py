@@ -2083,6 +2083,7 @@ torch.cuda.synchronize()
                 self.assertEqual(x.shape[2], res.shape[2])
 
     @onlyAccelerator
+    @expectedFailureMPS  # Not implemented
     @largeTensorTest("6GB")
     def test_pooling_large(self, device):
         def helper(pool):
