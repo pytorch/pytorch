@@ -174,6 +174,12 @@ use_lazy_graph_module = (
 # see [Note - on the state of mark_dynamic]
 assume_static_by_default = True
 
+# Whether symbolic shapes specialize tensor dimensions whose concrete value is 1.
+# torch.compile(dynamic=True) disables this for dynamic input dimensions so a
+# size-1 warmup can still produce a reusable symbolic graph. Zero remains
+# specialized because backed size symbols are not sound for zero-sized branches.
+specialize_one = True
+
 # Internal: Shape specification patched during tracing by enter_exit_hooks.
 # Set via torch.compile(shapes_spec=...), not directly by users.
 _shapes_spec = None

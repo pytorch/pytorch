@@ -67,6 +67,72 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(with_dynamic.frame_count, 1)
         self.assertEqual(with_dynamic.op_count, 1)
 
+    def test_dynamic_true_does_not_specialize_size_one(self):
+        def foo(guidance):
+            return torch.ones((guidance.size(0),), device=guidance.device) + guidance
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(foo, backend=cnt, dynamic=True)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            self.assertEqual(opt(torch.ones(1)), torch.full((1,), 2.0))
+            self.assertEqual(opt(torch.ones(2)), torch.full((2,), 2.0))
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
+    def test_dynamic_true_preserves_zero_size_branch(self):
+        def foo(x):
+            if x.size(0) == 0:
+                return x.new_full((1,), 123)
+            return x.new_full((1,), 456)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(foo, backend=cnt, dynamic=True, fullgraph=True)
+
+        x = torch.empty(0)
+        self.assertEqual(opt(x), foo(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    def test_dynamic_true_size_one_branch_excludes_zero(self):
+        def foo(x):
+            if x.size(0) == 0:
+                return x.new_full((1,), 123)
+            return x.new_full((1,), 456)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(foo, backend=cnt, dynamic=True, fullgraph=True)
+
+        self.assertEqual(opt(torch.empty(1)), torch.full((1,), 456.0))
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            with self.assertRaises(torch._dynamo.exc.RecompileError):
+                opt(torch.empty(0))
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    def test_dynamic_true_allows_singleton_broadcast(self):
+        def foo(x, y):
+            return x + y
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(foo, backend=cnt, dynamic=True, fullgraph=True)
+
+        self.assertEqual(
+            opt(torch.ones(1, 3), torch.ones(2, 3)), torch.full((2, 3), 2.0)
+        )
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    def test_dynamic_true_singleton_nonstandard_stride_to_preserves_stride(self):
+        def foo(x):
+            return x.to(torch.float64).stride()
+
+        x = torch.empty_strided((1,), (5,))
+        opt = torch.compile(foo, dynamic=True, fullgraph=True)
+        self.assertEqual(opt(x), foo(x))
+
     @patch.object(torch._dynamo.config, "assume_static_by_default", True)
     def test_recompiles_true_false_flop(self):
         # Test the counterfactual, lots of recompiles without this config

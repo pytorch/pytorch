@@ -4548,6 +4548,7 @@ def _automatic_dynamic(
             dynamic_strides=outer_context.dynamic_strides,
             constraint_sizes=outer_context.constraint_sizes,
             constraint_strides=outer_context.constraint_strides,
+            specialize_one=outer_context.specialize_one,
             view_base_context=view_base_context,
             tensor_source=outer_context.tensor_source,
             shape_env_to_source_to_symbol_cache=outer_context.shape_env_to_source_to_symbol_cache,
@@ -4575,6 +4576,7 @@ def _automatic_dynamic(
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
             constraint_sizes=[None] * e.dim(),
             constraint_strides=[None] * e.dim(),
+            specialize_one=[config.specialize_one] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
             shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
@@ -4650,6 +4652,7 @@ def _automatic_dynamic(
     dynamic_strides = []
     constraint_sizes = []
     constraint_strides = []
+    specialize_one = []
     specialize_on = []
 
     for i in range(e.dim()):
@@ -4802,6 +4805,9 @@ def _automatic_dynamic(
 
         dynamic_sizes.append(dynamic_size)
         dynamic_strides.append(dynamic_stride)
+        specialize_one.append(
+            config.specialize_one or dynamic_size is DimDynamic.STATIC
+        )
 
     return StatefulSymbolicContext(
         dynamic_sizes=dynamic_sizes,
@@ -4809,6 +4815,7 @@ def _automatic_dynamic(
         constraint_sizes=constraint_sizes,
         # pyrefly: ignore [bad-argument-type]
         constraint_strides=constraint_strides,
+        specialize_one=specialize_one,
         specialize_on=specialize_on,
         view_base_context=view_base_context,
         tensor_source=source,

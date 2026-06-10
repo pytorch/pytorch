@@ -268,6 +268,7 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
         guard_or_false,
         guard_or_true,
         is_nested_int,
+        statically_known_true,
     )
 
     def eval_eager(x):
@@ -281,8 +282,13 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
 
     # pyrefly: ignore [bad-assignment]
     for x, y in reversed(tuple(zip(sizes, strides))):
-        # Skips checking strides when a dimension has length 1.
-        if maybe_guard_or_false(x == 1):
+        # Skips checking strides when a dimension has length 1.  Avoid guarding
+        # on size-1 dimensions when the stride already matches the contiguous
+        # layout, so dynamic=True can keep a size-1 warmup reusable.
+        stride_statically_matches = statically_known_true(
+            y == expected_stride
+        ) or statically_known_true(y == expected_stride_max)
+        if not stride_statically_matches and maybe_guard_or_false(x == 1):
             continue
 
         if maybe_guard_or_true(y != expected_stride) and maybe_guard_or_true(
@@ -309,17 +315,9 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     Tensors are contiguous when they have no elements,
     one element, or when they have "nested" strides.
     """
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_size_oblivious,
-    )
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-    def eval_eager(x):
-        return bool(x)
-
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
-
-    if maybe_guard_or_false(a.numel() < 2):
+    if statically_known_true(a.numel() < 2):
         return True
 
     return check_contiguous_sizes_strides(
@@ -478,17 +476,25 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     this may be non-overlapping & dense at runtime, for values {u0: 4, u1: 4, u2: 4, u3: 1},
     but isn't true for all values.
     """
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        statically_known_true,
+    )
     from torch.utils._sympy.functions import Max
 
     # Short-circuits for 0/1-element tensors
-    if guard_or_false(prod(sizes) < 2):  # type: ignore[operator]
+    if statically_known_true(prod(sizes) < 2):  # type: ignore[operator]
         return True
 
     # Short-circuits for tensors of rank one, which are
-    # non-overlapping and "dense" if their stride is one
+    # non-overlapping and "dense" if their stride is one.  Rank-one singleton
+    # tensors are also dense regardless of stride; keep that guard after the
+    # stride check so normal contiguous size-1 warmups can still generalize.
     if len(sizes) == 1:
-        return guard_or_false(strides[0] == 1)
+        if guard_or_false(strides[0] == 1):
+            return True
+        return guard_or_false(sizes[0] < 2)
 
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride

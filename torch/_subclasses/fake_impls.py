@@ -1933,7 +1933,10 @@ def register_fast_op_impl(
 def infer_size(
     a: Sequence[IntLikeType], b: Sequence[IntLikeType]
 ) -> tuple[IntLikeType, ...]:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        statically_known_true,
+    )
 
     dimsA = len(a)
     dimsB = len(b)
@@ -1945,6 +1948,10 @@ def infer_size(
         dimB = dimsB - 1 - offset
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
+
+        if statically_known_true(sizeA == sizeB):
+            expandedSizes[i] = sizeA
+            continue
 
         # NB: It is very important to test for broadcasting, before testing
         # sizeA == sizeB.  This is because the broadcasting tests are likely
