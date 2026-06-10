@@ -356,6 +356,9 @@ select = [
 
 # torch/ folders still needing S101 migration
 "torch/_inductor/**" = ["S101"]
+"torch/comms/**" = ["S101"]
+# torch.comms tests use assert-based validation helpers (ported code).
+"test/comms/**" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"

@@ -141,6 +141,10 @@
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
 #endif
+
+#ifdef USE_TORCH_COMMS
+#include <torch/csrc/comms/comms.h>
+#endif
 #endif
 
 #if defined(USE_VALGRIND)
@@ -2416,6 +2420,10 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::rpc::testing::python_functions());
 #endif
+#endif
+
+#ifdef USE_TORCH_COMMS
+  THPUtils_addPyMethodDefs(methods, torch::comms::python_functions());
 #endif
 
   static struct PyModuleDef torchmodule = {

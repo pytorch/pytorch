@@ -1101,6 +1101,16 @@ def configure_extension_build() -> tuple[
         entry_points["console_scripts"].append(
             "torchfrtrace = torch.distributed.flight_recorder.fr_trace:main",
         )
+
+    if cmake_cache_vars.get("USE_TORCH_COMMS"):
+        # torch.comms backend discovery. The in-tree backends are registered in
+        # C++ at import; these entries let torch.comms.built_backends() report
+        # availability and let out-of-tree backends register under the same
+        # group.
+        comms_backends = ["gloo = torch.comms._comms_gloo"]
+        if cmake_cache_vars["USE_NCCL"]:
+            comms_backends.append("nccl = torch.comms._comms_nccl")
+        entry_points["torch.comms.backends"] = comms_backends
     return ext_modules, cmdclass, packages, entry_points, extra_install_requires
 
 

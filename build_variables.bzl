@@ -806,6 +806,22 @@ libtorch_nvshmem_sources = [
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
 
+# torch.comms (USE_TORCH_COMMS): CUDA backend implementation + device helpers.
+# These are built into torch_cuda; the nccl backend self-registration is invoked
+# explicitly from torch/csrc/comms/init.cpp (in torch_python).
+libtorch_cuda_comms_sources = [
+    "torch/csrc/comms/nccl/NcclApi.cpp",
+    "torch/csrc/comms/nccl/TorchCommNCCL.cpp",
+    "torch/csrc/comms/nccl/TorchCommNCCLBootstrap.cpp",
+    "torch/csrc/comms/nccl/TorchCommNCCLCCA.cpp",
+    "torch/csrc/comms/nccl/TorchCommNCCLReconfigure.cpp",
+    "torch/csrc/comms/nccl/TorchCommNCCLUtils.cpp",
+    "torch/csrc/comms/nccl/TorchCommWindowNCCL.cpp",
+    "torch/csrc/comms/nccl/TorchWorkNCCL.cpp",
+    "torch/csrc/comms/nccl/TorchWorkNCCLQueue.cpp",
+    "torch/csrc/comms/device/cuda/CudaApi.cpp",
+]
+
 libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [
     "torch/csrc/cuda/nccl.cpp",
 ] + libtorch_nativert_cuda_sources
@@ -1073,6 +1089,49 @@ libtorch_python_distributed_sources = libtorch_python_distributed_core_sources +
     "torch/csrc/distributed/rpc/unpickled_python_remote_call.cpp",
     "torch/csrc/jit/runtime/register_distributed_ops.cpp",
     "torch/csrc/distributed/c10d/control_plane/PythonHandlers.cpp",
+]
+
+# torch.comms (USE_TORCH_COMMS): core + gloo (CPU) library sources. Built into
+# torch_cpu (libtorch) so both torch_cuda (nccl backend) and torch_python
+# (bindings) can link them -- mirrors how ProcessGroupGloo / the c10d core live
+# in torch_cpu while ProcessGroupNCCL lives in torch_cuda.
+libtorch_comms_sources = [
+    "torch/csrc/comms/BackendWrapper.cpp",
+    "torch/csrc/comms/TorchComm.cpp",
+    "torch/csrc/comms/TorchCommFactory.cpp",
+    "torch/csrc/comms/TorchCommOptions.cpp",
+    "torch/csrc/comms/TorchCommTypes.cpp",
+    "torch/csrc/comms/TorchWork.cpp",
+    "torch/csrc/comms/fake/TorchCommFake.cpp",
+    "torch/csrc/comms/gloo/TorchCommGloo.cpp",
+    "torch/csrc/comms/gloo/TorchCommGlooReconfigure.cpp",
+    "torch/csrc/comms/gloo/TorchWorkGloo.cpp",
+    "torch/csrc/comms/utils/StoreManager.cpp",
+    "torch/csrc/comms/utils/TracingGuard.cpp",
+    "torch/csrc/comms/utils/Utils.cpp",
+]
+
+# torch.comms python bindings + hooks -> torch_python. The hooks are only used
+# via the python bindings (not by the core), so they live here where USE_CUDA is
+# defined on CUDA builds (ClogHook's optional CUDA graph-capture detection
+# compiles and links c10_cuda) and is absent on CPU-only builds. These reference
+# the core/gloo symbols from torch_cpu and the nccl symbols from torch_cuda.
+libtorch_python_comms_sources = [
+    "torch/csrc/comms/TorchCommPy.cpp",
+    "torch/csrc/comms/TorchCommBackendPy.cpp",
+    "torch/csrc/comms/init.cpp",
+    "torch/csrc/comms/gloo/TorchCommGlooPy.cpp",
+    "torch/csrc/comms/hooks/clog/ClogHook.cpp",
+    "torch/csrc/comms/hooks/clog/ClogHookPy.cpp",
+    "torch/csrc/comms/hooks/common/SignatureBuilder.cpp",
+    "torch/csrc/comms/hooks/fr/FlightRecorder.cpp",
+    "torch/csrc/comms/hooks/fr/FlightRecorderPy.cpp",
+]
+
+# nccl python bindings glue. Compiled into torch_python only on CUDA builds
+# (references the CUDA TorchCommNCCL class).
+libtorch_python_comms_nccl_sources = [
+    "torch/csrc/comms/nccl/TorchCommNCCLPy.cpp",
 ]
 
 def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):

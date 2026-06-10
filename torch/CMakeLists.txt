@@ -288,6 +288,18 @@ if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
 endif()
 
+# torch.comms python bindings compiled into libtorch_python. The core + gloo
+# library sources live in torch_cpu (libtorch_comms_sources) and the nccl backend
+# implementation in torch_cuda (libtorch_cuda_comms_sources); only the pybind
+# glue is added here, with the nccl glue added on CUDA builds.
+if(USE_TORCH_COMMS)
+    append_filelist("libtorch_python_comms_sources" TORCH_PYTHON_SRCS)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_TORCH_COMMS)
+    if(USE_CUDA AND USE_NCCL)
+      append_filelist("libtorch_python_comms_nccl_sources" TORCH_PYTHON_SRCS)
+    endif()
+endif()
+
 # coreml
 if(USE_COREML_DELEGATE)
   list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/backend.cpp)

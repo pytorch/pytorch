@@ -519,13 +519,13 @@ class TorchCommsFlightRecorderHandler(DebugHandler):
 
     def _handle_torchcomms_fr_trace(self, req: HTTPRequestHandler) -> bytes:
         addrs, resps = fetch_all(
-            "torchcomms_fr_trace_json", "onlyactive=true", timeout=self.fetch_timeout
+            "torch_comms_fr_trace_json", "onlyactive=true", timeout=self.fetch_timeout
         )
         return self._render_tables(req.frontend, addrs, list(resps))
 
     def _handle_torchcomms_fr_trace_json(self, req: HTTPRequestHandler) -> bytes:
         addrs, resps = fetch_all(
-            "torchcomms_fr_trace_json", "onlyactive=true", timeout=self.fetch_timeout
+            "torch_comms_fr_trace_json", "onlyactive=true", timeout=self.fetch_timeout
         )
         return req.frontend.render_template(
             "json_resp.html",
@@ -553,7 +553,9 @@ class TorchCommsFlightRecorderHandler(DebugHandler):
         )
 
     def dump(self) -> str | None:
-        addrs, resps = fetch_all("torchcomms_fr_trace_json", timeout=self.fetch_timeout)
+        addrs, resps = fetch_all(
+            "torch_comms_fr_trace_json", timeout=self.fetch_timeout
+        )
         parts: list[str] = []
         summary = format_fetch_summary(addrs, resps)
         if summary:

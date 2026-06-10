@@ -542,6 +542,22 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
       append_filelist("libtorch_distributed_extra_sources" TORCH_SRCS)
     endif()
   endif()
+  # torch.comms core + gloo (CPU) sources live in torch_cpu so torch_cuda and
+  # torch_python can both link them.
+  if(USE_TORCH_COMMS)
+    append_filelist("libtorch_comms_sources" TORCH_SRCS)
+    # torch.comms classes/functions are not TORCH_API-annotated. libtorch is
+    # built with -fvisibility=hidden, so build the comms C++/CUDA host sources
+    # with default visibility to export the symbols that the nccl backend
+    # (torch_cuda) and the python bindings (torch_python) link across the
+    # shared-library boundary. .cu files are excluded (nvcc rejects the host
+    # flag and their device symbols stay intra-library).
+    file(GLOB_RECURSE _torch_comms_visibility_srcs
+      "${TORCH_SRC_DIR}/csrc/comms/*.cpp"
+      "${TORCH_SRC_DIR}/csrc/comms/*.cc")
+    set_source_files_properties(${_torch_comms_visibility_srcs}
+      PROPERTIES COMPILE_OPTIONS "-fvisibility=default")
+  endif()
 endif()
 
 if(USE_CUDA OR USE_ROCM)
@@ -565,6 +581,12 @@ if(USE_CUDA)
   if(USE_NCCL)
     list(APPEND Caffe2_GPU_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
+  endif()
+  # torch.comms nccl backend implementation + CUDA device helpers. CUDA-only:
+  # the nccl backend uses CUDA-specific APIs (e.g. CUDART_CB) that do not hipify,
+  # and rccl is out of scope, so it is not built for ROCm.
+  if(USE_TORCH_COMMS AND USE_NCCL AND NOT USE_ROCM)
+    append_filelist("libtorch_cuda_comms_sources" Caffe2_GPU_SRCS)
   endif()
   if(USE_DISTRIBUTED)
     append_filelist("libtorch_cuda_distributed_base_sources" Caffe2_GPU_SRCS)

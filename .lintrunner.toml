@@ -210,6 +210,10 @@ exclude_patterns = [
     'c10/test/**/*.h',
     'c10/test/**/*.cpp',
     'third_party/**/*',
+    # torch.comms is not part of the clang-tidy compile_commands build (the
+    # nccl/device sources are CUDA-only), so clang-tidy cannot resolve their
+    # includes here. Excluded like other subsystems (e.g. torch/csrc/jit).
+    'torch/csrc/comms/**',
     'torch/csrc/distributed/**/*.cu',
     'torch/csrc/distributed/c10d/WinSockUtils.hpp',
     'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
@@ -539,6 +543,7 @@ exclude_patterns = [
     'torch/csrc/*.h',
     'torch/csrc/api/**',
     'torch/csrc/autograd/**',
+    'torch/csrc/comms/**',
     'torch/csrc/cuda/**',
     'torch/csrc/distributed/**',
     'torch/csrc/dynamo/**',
