@@ -1349,6 +1349,17 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
     The output is of size :math:`H_{out} \times W_{out}`, for any input size.
     The number of output features is equal to the number of input planes.
 
+    For each output element at position :math:`(i, j)`, the pooling region in the
+    input is computed as:
+
+    .. math::
+
+        \text{input}[\ \lfloor i \cdot H_{in} / H_{out} \rfloor : \lfloor (i+1) \cdot H_{in} / H_{out} \rfloor, \
+                       \lfloor j \cdot W_{in} / W_{out} \rfloor : \lfloor (j+1) \cdot W_{in} / W_{out} \rfloor\ ]
+
+    When :math:`H_{in}` is not divisible by :math:`H_{out}` (or likewise for width),
+    different output elements may pool over regions of different sizes.
+
     Args:
         output_size: the target output size of the image of the form :math:`H_{out} \times W_{out}`.
                      Can be a tuple :math:`(H_{out}, W_{out})` or a single :math:`H_{out}` for a
