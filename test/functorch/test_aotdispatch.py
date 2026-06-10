@@ -7233,6 +7233,55 @@ def forward(self, primals_1, tangents_1):
         finally:
             handle.destroy()
 
+    def test_force_save_multi_output_must_save_ops(self):
+        """Test that tuple-returning MUST_SAVE ops save tensor getitem leaves."""
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            force_save_multi_output_must_save_ops,
+        )
+
+        def fn(x):
+            var, mean = torch.var_mean(x, dim=0)
+            return var.sum() + mean.sum()
+
+        gm = make_fx(fn)(torch.randn(4, 4))
+
+        multi_output_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function"
+            and n.target == torch.ops.aten.var_mean.correction
+        ]
+        self.assertEqual(
+            len(multi_output_nodes),
+            1,
+            f"expected one var_mean node, got {len(multi_output_nodes)}",
+        )
+        multi_output_node = multi_output_nodes[0]
+        multi_output_node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
+        getitem_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function"
+            and n.target == operator.getitem
+            and n.args[0] == multi_output_node
+        ]
+        self.assertEqual(len(getitem_nodes), 2, "expected two tensor getitem leaves")
+
+        force_save_multi_output_must_save_ops(gm)
+
+        must_save_count = sum(
+            1
+            for node in getitem_nodes
+            if node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
+        )
+        self.assertEqual(
+            must_save_count,
+            len(getitem_nodes),
+            f"all {len(getitem_nodes)} getitem leaves should be MUST_SAVE, got {must_save_count}",
+        )
+
     def test_static_input_indices_with_effect_tokens(self):
         """Test that static_input_indices are correctly offset when effect tokens are prepended."""
         from torch._functorch._aot_autograd.descriptors import PlainAOTInput

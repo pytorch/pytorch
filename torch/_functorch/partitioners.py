@@ -1315,6 +1315,7 @@ def default_partition(
         force_save_collectives(joint_module)
 
     force_save_effectful_ops(joint_module)
+    force_save_multi_output_must_save_ops(joint_module)
     force_save_bw_mutation_src(joint_module)
 
     if static_lifetime_input_indices is None:
@@ -1999,20 +2000,13 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
     saved, the with_effects op doesn't need to be recomputed in backward.
     """
 
-    def mark_getitem_outputs(node: fx.Node) -> None:
-        for user in node.users:
-            if user.target is operator.getitem:
-                mark_getitem_outputs(user)
-                if not isinstance(user.meta.get("val"), (tuple, list)):
-                    user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
-
     for node in joint_module.graph.nodes:
         if (
             is_with_effects(node)
             and not must_recompute(node)
             and not _has_tag_is_backward(node)
         ):
-            mark_getitem_outputs(node)
+            _mark_getitem_leaf_outputs_must_save(node)
 
 
 def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
@@ -2036,6 +2030,59 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
             # We do not want to iterate through all the joint graph,
             # so break at the first non-output, non-copy_ node.
             break
+
+
+def _is_multi_output_node(node: fx.Node) -> bool:
+    """Whether `node` is a tuple-/list-returning op whose users are all `getitem`.
+
+    A `MUST_SAVE` annotation on such a parent must be honored at the tensor-leaf
+    level instead, because `default_partition`'s saved-values loop (see the
+    ``if is_multi_output(node): continue`` skip earlier in this file) cannot
+    save tuple-typed values directly. The tensor leaves extracted via `getitem`
+    remain available for the cut and are routed via
+    ``force_save_multi_output_must_save_ops``.
+    """
+    return len(node.users) > 0 and all(
+        user.target == operator.getitem for user in node.users
+    )
+
+
+def _mark_getitem_leaf_outputs_must_save(node: fx.Node) -> None:
+    """Recursively mark the tensor-leaf getitem children of `node` as MUST_SAVE.
+
+    Used by both `force_save_effectful_ops` (for with_effects parents) and
+    `force_save_multi_output_must_save_ops` (for any tuple-/list-returning
+    op that selective-checkpoint policy tagged MUST_SAVE).
+    """
+    for user in node.users:
+        if user.target is operator.getitem:
+            _mark_getitem_leaf_outputs_must_save(user)
+            if not isinstance(user.meta.get("val"), (tuple, list)):
+                user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
+
+def force_save_multi_output_must_save_ops(joint_module: fx.GraphModule) -> None:
+    """
+    If a selective-checkpoint policy marks a tuple-/list-returning op as
+    MUST_SAVE, we cannot save the parent value directly because
+    `default_partition`'s saved-values loop (see the
+    ``if is_multi_output(node): continue`` skip earlier in this file) cannot
+    save tuple-typed values directly. Propagate MUST_SAVE to the tensor leaves
+    extracted via getitem so the partitioner can honor the policy without
+    re-running the parent op in backward.
+    """
+    for node in joint_module.graph.nodes:
+        if (
+            node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE
+            and _is_multi_output_node(node)
+            and not _has_tag_is_backward(node)
+        ):
+            log.debug(
+                "force_save_multi_output_must_save_ops: propagating MUST_SAVE "
+                "from %s to its getitem leaves",
+                node.name,
+            )
+            _mark_getitem_leaf_outputs_must_save(node)
 
 
 def is_getitem_of_multi_output(node: fx.Node) -> bool:
@@ -2201,10 +2248,19 @@ def solve_min_cut(
         """Returns reason string if node should be banned from recomputation, None otherwise."""
         if node.op != "call_function":
             return None
+        # MUST_SAVE must be honored BEFORE the generic getitem fast-path so
+        # that user-saved getitem leaves of tuple-returning ops are also
+        # banned from recomputation. Skip multi-output (tuple-returning)
+        # parents — `default_partition`'s saved-values loop (the
+        # ``if is_multi_output(node): continue`` skip earlier in this file)
+        # cannot save tuple-typed values directly; their tensor leaves are
+        # routed via `force_save_multi_output_must_save_ops` instead.
+        if node.meta.get(
+            "recompute", None
+        ) == CheckpointPolicy.MUST_SAVE and not _is_multi_output_node(node):
+            return "marked MUST_SAVE"
         if node.target is operator.getitem:
             return None
-        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
-            return "marked MUST_SAVE"
         if config.recompute_views and op_types.is_view(node):
             return None
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
@@ -3775,6 +3831,7 @@ def min_cut_rematerialization_partition(
         force_save_collectives(joint_module)
 
     force_save_effectful_ops(joint_module)
+    force_save_multi_output_must_save_ops(joint_module)
     force_save_bw_mutation_src(joint_module)
 
     if static_lifetime_input_indices is None:
