@@ -6992,6 +6992,53 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         finally:
             torch._C._set_cpu_allow_fp16_reduced_precision_reduction(prev)
 
+    # Regression for https://github.com/pytorch/pytorch/issues/146508 — fp16 matmul
+    # on CPUs without AVX512_FP16/AMX_FP16 previously dispatched to a naive scalar
+    # kernel that was ~100x slower than SGEMM and accumulated in fp16. The fp32
+    # SGEMM fallback in cpublas::gemm is strictly at least as accurate; tolerances
+    # here are derived from fp16 machine epsilon (~9.77e-4) scaled by ~10x to also
+    # accept the old fp16-accumulation path, so the test passes regardless of
+    # which code path is taken on the test CPU.
+    @onlyCPU
+    @parametrize("trans_a", [False, True])
+    @parametrize("trans_b", [False, True])
+    @parametrize("m,n,k", [(3, 4, 5), (8, 16, 32), (64, 64, 64), (127, 89, 193)])
+    def test_fp16_mm_cpu_fallback_146508(self, device, trans_a, trans_b, m, n, k):
+        torch.manual_seed(0)
+        a = torch.randn((k, m) if trans_a else (m, k), dtype=torch.float16, device=device)
+        b = torch.randn((n, k) if trans_b else (k, n), dtype=torch.float16, device=device)
+        A = a.t() if trans_a else a
+        B = b.t() if trans_b else b
+        ref = (A.to(torch.float64) @ B.to(torch.float64)).to(torch.float16)
+        res = torch.mm(A, B)
+        self.assertEqual(res, ref, atol=1e-2, rtol=1e-2)
+
+    @onlyCPU
+    @parametrize("batch,m,n,k", [(2, 8, 16, 32), (4, 64, 64, 64), (3, 127, 89, 193)])
+    def test_fp16_bmm_cpu_fallback_146508(self, device, batch, m, n, k):
+        torch.manual_seed(0)
+        a = torch.randn(batch, m, k, dtype=torch.float16, device=device)
+        b = torch.randn(batch, k, n, dtype=torch.float16, device=device)
+        ref = (a.to(torch.float64) @ b.to(torch.float64)).to(torch.float16)
+        res = torch.bmm(a, b)
+        self.assertEqual(res, ref, atol=1e-2, rtol=1e-2)
+
+    @onlyCPU
+    @parametrize("beta", [0.0, 0.5, 1.0])
+    @parametrize("m,n,k", [(8, 16, 32), (64, 64, 64), (127, 89, 193)])
+    def test_fp16_addmm_cpu_fallback_146508(self, device, beta, m, n, k):
+        torch.manual_seed(0)
+        a = torch.randn(m, k, dtype=torch.float16, device=device)
+        b = torch.randn(k, n, dtype=torch.float16, device=device)
+        # When beta == 0, self must be ignored even if it contains non-finite
+        # values; verify the fallback skips the pre-read of C in that case.
+        c = torch.full((m, n), float('inf'), dtype=torch.float16, device=device) \
+            if beta == 0.0 else torch.randn(m, n, dtype=torch.float16, device=device)
+        ab = a.to(torch.float64) @ b.to(torch.float64)
+        ref = (ab if beta == 0.0 else beta * c.to(torch.float64) + ab).to(torch.float16)
+        res = torch.addmm(c, a, b, beta=beta, alpha=1.0)
+        self.assertEqual(res, ref, atol=1e-2, rtol=1e-2)
+
     @slowTest
     @onlyNativeDeviceTypes
     # bfloat16 doesn't have sufficient precision to pass this test
