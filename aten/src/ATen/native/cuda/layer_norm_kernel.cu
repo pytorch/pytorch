@@ -1156,6 +1156,39 @@ void LayerNormKernelImplInternal(
     launch_vectorized_layer_norm_kernel<T, T_ACC, rms_norm>(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
   } else {
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
+#ifdef USE_ROCM
+  // ROCm rejects launches where gridDim.x * blockDim.x exceeds uint32_t max.
+  // Chunk the non-vectorized fallback just like the vectorized path above.
+  constexpr int64_t max_rowwise_blocks =
+      std::numeric_limits<uint32_t>::max() / cuda_utils::kCUDABlockReduceNumThreads;
+
+  int64_t remaining = M;
+  const T* X_data_cur = X_data;
+  T* Y_data_cur = Y_data;
+  T_ACC* mean_data_cur = mean_data;
+  T_ACC* rstd_data_cur = rstd_data;
+
+  while (remaining > 0) {
+    const int64_t rows = remaining > max_rowwise_blocks ? max_rowwise_blocks : remaining;
+    const dim3 blocks(static_cast<uint32_t>(rows));
+
+    RowwiseMomentsCUDAKernel<T, T_ACC, rms_norm>
+        <<<blocks, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
+            N, eps, X_data_cur, mean_data_cur, rstd_data_cur);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    LayerNormForwardCUDAKernel<T, T_ACC, rms_norm><<<blocks, kCUDANumThreads, 0, cuda_stream>>>(
+        N, X_data_cur, mean_data_cur, rstd_data_cur, gamma_data, beta_data, Y_data_cur);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+    X_data_cur += N * rows;
+    Y_data_cur += N * rows;
+    if constexpr (!rms_norm) {
+      mean_data_cur += rows;
+    }
+    rstd_data_cur += rows;
+    remaining -= rows;
+  }
+#else
   RowwiseMomentsCUDAKernel<T, T_ACC, rms_norm>
       <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
           N, eps, X_data, mean_data, rstd_data);
@@ -1163,6 +1196,7 @@ void LayerNormKernelImplInternal(
   LayerNormForwardCUDAKernel<T, T_ACC, rms_norm><<<M, kCUDANumThreads, 0, cuda_stream>>>(
       N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+#endif
   }
 }
 
