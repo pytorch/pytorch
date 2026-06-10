@@ -14,7 +14,7 @@ from torch.futures import Future
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 
 
 def create_work(result):
@@ -215,14 +215,14 @@ class TestPyProcessGroup(TestCase):
         pg.abort()
         pg.shutdown()
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda/xpu")
     def test_block_current_stream(self) -> None:
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
-        stream = torch.cuda.Stream()
+        stream = torch.Stream()
         with stream:
             # nothing in queue so instantly resolves
-            event1 = torch.cuda.Event()
+            event1 = torch.Event()
             event1.record()
             time.sleep(0.1)
             self.assertTrue(event1.query())
@@ -231,7 +231,7 @@ class TestPyProcessGroup(TestCase):
             work.block_current_stream()
 
             # stream is blocked so doesn't resolve
-            event = torch.cuda.Event()
+            event = torch.Event()
             event.record()
             time.sleep(0.1)
             self.assertFalse(event.query())
@@ -242,13 +242,13 @@ class TestPyProcessGroup(TestCase):
             stream.synchronize()
             self.assertTrue(event.query())
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda/xpu")
     def test_block_current_stream_use_after_free(self) -> None:
         """
         This tests that the CPU control tensor is not freed before the CUDA kernel executes.
         """
-        torch.cuda.synchronize()
-        stream = torch.cuda.Stream()
+        torch.accelerator.synchronize()
+        stream = torch.Stream()
         with stream:
             a = BlockWork()
             a.block_current_stream()
@@ -262,7 +262,7 @@ class TestPyProcessGroup(TestCase):
             del b
 
             # a is still blocking so this doesn't resolve
-            event = torch.cuda.Event()
+            event = torch.Event()
             event.record()
             time.sleep(0.1)
             self.assertFalse(event.query())

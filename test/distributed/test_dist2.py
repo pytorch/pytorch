@@ -9,11 +9,15 @@ import torch.distributed as dist
 import torch.distributed._dist2 as dist2
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    requires_accelerator_dist_backend,
     requires_gloo,
-    requires_nccl,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import IS_LINUX, run_tests, TestCase
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
 def synchronize_accelerator():
@@ -288,9 +292,9 @@ class ProcessGroupGlooTest(Dist2MultiProcessTestCase):
 class ProcessGroupNCCLTest(Dist2MultiProcessTestCase):
     @property
     def device(self) -> torch.device:
-        return torch.device("cuda", self.rank)
+        return torch.device(device_type, self.rank)
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     def new_group(self) -> torch.distributed.ProcessGroup:
         os.environ["RANK"] = str(self.rank)
@@ -299,16 +303,17 @@ class ProcessGroupNCCLTest(Dist2MultiProcessTestCase):
         os.environ["MASTER_PORT"] = "29501"
 
         return dist2.new_group(
-            backend="nccl",
+            backend=backend,
             timeout=timedelta(seconds=60),
             device=self.device,
         )
 
 
 if __name__ == "__main__":
-    if torch.cuda._initialized:
+    mod = torch.get_device_module(device_type)
+    if (device_type == "xpu" or device_type == "cuda") and mod._initialized:
         raise AssertionError(
-            "test_distributed must not have initialized CUDA context on main process"
+            "test_distributed must not have initialized accelerator context on main process"
         )
 
     run_tests()

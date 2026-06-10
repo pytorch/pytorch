@@ -313,7 +313,7 @@ class Backend(str):  # noqa: SLOT000
         NCCL: ["cuda"],
         XCCL: ["xpu"],
         UCC: ["cpu", "cuda"],
-        MPI: ["cpu", "cuda"],
+        MPI: ["cpu", "cuda", "xpu"],
         FAKE: ["cpu", "cuda", "hpu", "xpu"],
     }
 
@@ -363,8 +363,8 @@ class Backend(str):  # noqa: SLOT000
                                            will get an instance of ``c10d::DistributedBackendOptions``, and
                                            a process group options object as defined by the backend implementation.
             device (str or list of str, optional): device type this backend
-                            supports, e.g. "cpu", "cuda", etc. If `None`,
-                            assuming both "cpu" and "cuda"
+                supports, e.g. "cpu", "cuda", etc. If `None`,
+                assuming "cpu", "cuda", and "xpu"
 
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
@@ -395,9 +395,7 @@ class Backend(str):  # noqa: SLOT000
                 "`register_backend`.",
                 stacklevel=2,
             )
-            Backend.backend_capability[name.lower()] = (
-                ["cpu", "cuda", "xpu"] if torch.xpu.is_available() else ["cpu", "cuda"]
-            )
+            Backend.backend_capability[name.lower()] = ["cpu", "cuda", "xpu"]
         elif isinstance(devices, str):
             # Single device string specified. Simply convert to list.
             Backend.backend_capability[name.lower()] = [devices]

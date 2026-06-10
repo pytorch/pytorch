@@ -372,9 +372,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
         def test_reduce_scatter_tensor_coalesced_debug_mode(self):
-            torch.cuda.set_device(self.rank)
+            torch.accelerator.set_device_index(self.rank)
             pg = self._create_wrapper_pg(with_new_group=True)
-            dev = torch.cuda.current_device()
+            dev = torch.accelerator.current_accelerator()
 
             out_shapes = [(2, 2), (3, 3)]
             in_shapes = [(s[0] * self.world_size,) + s[1:] for s in out_shapes]
@@ -391,7 +391,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 )
                 self.assertTrue(torch.allclose(output, expected))
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
         @patch("torch.distributed.distributed_c10d._GLOO_AVAILABLE", False)

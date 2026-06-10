@@ -12,24 +12,29 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 from torch import nn
 from torch.cuda.amp import autocast
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyCUDA,
+    onlyOn,
     skipMeta,
 )
+from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
     _assertGradAndGradgradChecks,
     dtype2prec_DONTUSE,
     gradcheck,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfXpu,
+    TEST_MULTIACCELERATOR,
+    TEST_XPU,
     TestCase,
 )
 
 
 NO_NCCL = not hasattr(torch.distributed, "ProcessGroupNCCL")
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 # batched grad doesn't support data parallel
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
@@ -39,7 +44,11 @@ _assertGradAndGradgradChecks = functools.partial(
 
 
 class TestDataParallel(TestCase):
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_buffers_requiring_grad(self):
         class TestModule(nn.Module):
             def __init__(self, t):
@@ -51,19 +60,23 @@ class TestDataParallel(TestCase):
                 return x * self.t_rg + self.t_not_rg
 
         m = TestModule(
-            torch.randn(100, device="cuda", requires_grad=True, dtype=torch.double)
+            torch.randn(100, device=device_type, requires_grad=True, dtype=torch.double)
         )
         self.assertTrue(m.t_rg.requires_grad)
 
         dpm = nn.DataParallel(m, [0, 1])
-        inp = torch.randn(2, 100, device="cuda", dtype=torch.double)
+        inp = torch.randn(2, 100, device=device_type, dtype=torch.double)
 
         def fn(t):
             return dpm(inp)
 
         gradcheck(fn, (m.t_rg,))
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_rnn(self):
         class TestModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -98,7 +111,11 @@ class TestDataParallel(TestCase):
         for p1, p2 in zip(model.parameters(), model_dp.parameters()):
             self.assertEqual(p1, p2)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_lazy_linear(self):
         with self.assertRaisesRegex(
             ValueError, "Attempted to use an uninitialized parameter"
@@ -106,12 +123,14 @@ class TestDataParallel(TestCase):
             model_dp = torch.nn.DataParallel(torch.nn.LazyLinear(10).to(0))
             model_dp(torch.rand(10, 10).to(0))
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
     def test_parallel_apply(self):
-        l1 = nn.Linear(10, 5).to("cuda:0", torch.float)
-        l2 = nn.Linear(10, 5).to("cuda:1", torch.float)
-        i1 = torch.randn(2, 10, device="cuda:0", dtype=torch.float)
-        i2 = torch.randn(2, 10, device="cuda:1", dtype=torch.float)
+        l1 = nn.Linear(10, 5).to(0, torch.float)
+        l2 = nn.Linear(10, 5).to(1, torch.float)
+        i1 = torch.randn(2, 10, device=f"{device_type}:0", dtype=torch.float)
+        i2 = torch.randn(2, 10, device=f"{device_type}:1", dtype=torch.float)
         expected1 = l1(i1)
         expected2 = l2(i2)
         modules = (l1, l2)
@@ -124,12 +143,14 @@ class TestDataParallel(TestCase):
             for out, expected in zip(outputs, expected_outputs):
                 self.assertEqual(out, expected)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
     def test_parallel_apply_autocast(self):
-        l1 = nn.Linear(10, 5).to("cuda:0", torch.float)
-        l2 = nn.Linear(10, 5).to("cuda:1", torch.float)
-        i1 = torch.randn(2, 10, device="cuda:0", dtype=torch.float)
-        i2 = torch.randn(2, 10, device="cuda:1", dtype=torch.float)
+        l1 = nn.Linear(10, 5).to(0, torch.float)
+        l2 = nn.Linear(10, 5).to(1, torch.float)
+        i1 = torch.randn(2, 10, device=f"{device_type}:0", dtype=torch.float)
+        i2 = torch.randn(2, 10, device=f"{device_type}:1", dtype=torch.float)
         with autocast():
             expected1 = l1(i1)
             expected2 = l2(i2)
@@ -144,14 +165,16 @@ class TestDataParallel(TestCase):
             for out, expected in zip(outputs, expected_outputs):
                 self.assertEqual(out, expected)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "CUDA unavailable")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_CUDA and not TEST_XPU, "CUDA/XPU unavailable"
+    )
     def test_parallel_apply_passes_exception(self):
         # we define and instantiate a module that will throw a KeyError
         class TestModule(nn.Module):
             def forward(self, *args):
                 return {}["wonderful"]
 
-        l1 = TestModule().to("cuda", torch.float)
+        l1 = TestModule().to(device_type, torch.float)
         # and check that parallel_apply passes on the exception
         # (we can use a single device twice for this test)
         with self.assertRaisesRegex(
@@ -162,7 +185,10 @@ class TestDataParallel(TestCase):
         ):
             dp.parallel_apply(modules=(l1, l1), inputs=(None, None))
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_multiple_input(self):
         class TestModule(nn.Module):
             def forward(self, var1, var2, float1, var3=None):
@@ -229,20 +255,28 @@ class TestDataParallel(TestCase):
         out = dp.data_parallel(m, (var1, var2, float1), (0,), module_kwargs=kwarg_wrap)
         local_test(out)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_small_back(self):
-        l = nn.Linear(10, 5).float().cuda()
-        i = torch.randn(20, 10, dtype=torch.float, device="cuda")
+        l = nn.Linear(10, 5).float().to(device_type)
+        i = torch.randn(20, 10, dtype=torch.float, device=device_type)
         out = dp.data_parallel(l, i, (0, 1))
         self.assertEqual(out, l(i))
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_model_device(self):
         r"""Test device[0] check at forward time."""
         l = nn.Linear(2, 2)
         inp = torch.randn(2, 2)
-        inp_cuda0 = inp.cuda(0)
-        inp_cuda1 = inp.cuda(1)
+        inp_cuda0 = inp.to(0)
+        inp_cuda1 = inp.to(1)
 
         error_msg = "module must have its parameters and buffers on device {}"
 
@@ -252,12 +286,12 @@ class TestDataParallel(TestCase):
 
         def test(inner_m, dp_device, inp, device_ids, should_fail):
             if device_ids is None:
-                device_ids = list(range(torch.cuda.device_count()))
+                device_ids = list(range(torch.accelerator.device_count()))
 
             if isinstance(device_ids[0], torch.device):
                 expect_device = device_ids[0]
             else:
-                expect_device = torch.device(f"cuda:{device_ids[0]}")
+                expect_device = torch.device(f"{device_type}:{device_ids[0]}")
 
             if should_fail:
 
@@ -282,37 +316,41 @@ class TestDataParallel(TestCase):
                 nn.parallel.data_parallel(inner_m.to(dp_device), inp, device_ids)
 
         test(l.to("cpu"), None, inp, None, should_fail=True)
-        test(l.cuda(1), None, inp_cuda0, None, should_fail=True)
-        test(l.cuda(), None, inp_cuda0, [1, 0], should_fail=True)
+        test(l.to(1), None, inp_cuda0, None, should_fail=True)
+        test(l.to(device_type), None, inp_cuda0, [1, 0], should_fail=True)
 
-        test(l.cuda(), None, inp_cuda0, None, should_fail=False)
-        test(l.cpu(), "cuda", inp_cuda0, None, should_fail=False)
-        test(l.cuda(1), None, inp_cuda1, [1, 0], should_fail=False)
-        test(l.cpu(), "cuda:1", inp_cuda1, [1, 0], should_fail=False)
+        test(l.to(device_type), None, inp_cuda0, None, should_fail=False)
+        test(l.cpu(), device_type, inp_cuda0, None, should_fail=False)
+        test(l.to(1), None, inp_cuda1, [1, 0], should_fail=False)
+        test(l.cpu(), f"{device_type}:1", inp_cuda1, [1, 0], should_fail=False)
 
         s = nn.Sequential(l.cpu())
         test(s, None, inp, None, should_fail=True)
         test(s, None, inp, [0, 1], should_fail=True)
         test(s, None, inp, [1, 0], should_fail=True)
 
-        s = nn.Sequential(deepcopy(l).cpu(), l.cuda())
+        s = nn.Sequential(deepcopy(l).cpu(), l.to(device_type))
         test(s, None, inp, None, should_fail=True)
         test(s, None, inp, [0, 1], should_fail=True)
         test(s, None, inp, [1, 0], should_fail=True)
 
-        s = nn.Sequential(l.cuda(), deepcopy(l).cuda(1))
+        s = nn.Sequential(l.to(device_type), deepcopy(l).to(1))
         test(s, None, inp, None, should_fail=True)
         test(s, None, inp, [0, 1], should_fail=True)
         test(s, None, inp, [1, 0], should_fail=True)
 
-        s = nn.Sequential(l.cuda(), deepcopy(l).cuda())
+        s = nn.Sequential(l.to(device_type), deepcopy(l).to(device_type))
         test(s, None, inp, None, should_fail=False)
         test(s, None, inp, [0, 1], should_fail=False)
         test(s, None, inp, [1, 0], should_fail=True)
         test(s.cpu(), None, inp, [1, 0], should_fail=True)
-        test(s.cuda(1), None, inp, [1, 0], should_fail=False)
+        test(s.to(1), None, inp, [1, 0], should_fail=False)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_model_no_refcycles(self):
         # Python 2.7 will create reference cycles with the following
         # Module on multiple GPUs, but Python 3 shouldn't unless
@@ -328,14 +366,18 @@ class TestDataParallel(TestCase):
                 return self.linear(x)
 
         gc.collect()
-        model = nn.DataParallel(Model().cuda())
-        data = torch.randn(1, device="cuda")
+        model = nn.DataParallel(Model().to(device_type))
+        data = torch.randn(1, device=device_type)
         model(data)
 
         refcycles = gc.collect()
         self.assertEqual(refcycles, 0)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_no_grad(self):
         test = self
 
@@ -345,16 +387,20 @@ class TestDataParallel(TestCase):
                 return x
 
         l = Layer()
-        i = torch.randn(20, 10, dtype=torch.float, device="cuda")
+        i = torch.randn(20, 10, dtype=torch.float, device=device_type)
         with torch.no_grad():
             dp.data_parallel(l, i, (0, 1))
         self.assertRaises(AssertionError, lambda: dp.data_parallel(l, i, (0, 1)))
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel(self):
-        l = nn.Linear(10, 5).float().cuda()
-        i = torch.randn(20, 10, dtype=torch.float, device="cuda:1")
-        l.cuda(1)
+        l = nn.Linear(10, 5).float().to(device_type)
+        i = torch.randn(20, 10, dtype=torch.float, device=f"{device_type}:1")
+        l.to(1)
         expected_out = l(i)
         loss = expected_out.sum()
         loss.backward()
@@ -363,8 +409,8 @@ class TestDataParallel(TestCase):
             expected_grads.append(param.grad.clone())
         dev_ids_list = [(0, 1), (1, 0)]
         for dev_id in dev_ids_list:
-            with torch.cuda.device(dev_id[0]):
-                l.cuda()
+            with torch.device(dev_id[0]):
+                l.to(device_type)
                 l.zero_grad()
                 out = dp.data_parallel(l, i, dev_id)
                 loss = out.sum()
@@ -375,13 +421,17 @@ class TestDataParallel(TestCase):
                     self.assertEqual(param.grad, expected)
 
         # Check for None device_ids
-        l = l.cuda()
+        l = l.to(device_type)
         out = dp.data_parallel(l, i)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_sparse(self):
-        l = nn.Embedding(10, 5, sparse=True).to("cuda:1")
-        i = torch.randint(10, (20, 5), device="cuda:1", dtype=torch.long)
+        l = nn.Embedding(10, 5, sparse=True).to(1)
+        i = torch.randint(10, (20, 5), device=f"{device_type}:1", dtype=torch.long)
         expected_out = l(i)
         loss = expected_out.sum()
         loss.backward()
@@ -390,8 +440,8 @@ class TestDataParallel(TestCase):
             expected_grads.append(param.grad.clone())
         dev_ids_list = [(0, 1), (1, 0)]
         for dev_id in dev_ids_list:
-            with torch.cuda.device(dev_id[0]):
-                l.cuda()
+            with torch.device(dev_id[0]):
+                l.to(device_type)
                 l.zero_grad()
                 out = dp.data_parallel(l, i, dev_id)
                 loss = out.sum()
@@ -402,10 +452,14 @@ class TestDataParallel(TestCase):
                     self.assertEqual(param.grad.coalesce(), expected.coalesce())
 
         # Check for None device_ids
-        l = l.cuda()
+        l = l.to(device_type)
         out = dp.data_parallel(l, i)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_nested_output(self):
         def fn(input):
             return [
@@ -419,8 +473,8 @@ class TestDataParallel(TestCase):
             def forward(self, input):
                 return fn(input)
 
-        i = torch.randn(2, 2).float().cuda(1)
-        gpus = range(torch.cuda.device_count())
+        i = torch.randn(2, 2).float().to(1)
+        gpus = range(torch.accelerator.device_count())
         output = dp.data_parallel(Net(), i, gpus)
         self.assertEqual(output, fn(i))
         self.assertIsInstance(output[0], torch.Tensor)
@@ -438,7 +492,11 @@ class TestDataParallel(TestCase):
         self.assertIsInstance(output[3]["b"], list)
         self.assertIsInstance(output[3]["b"][0], torch.Tensor)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_nested_input(self):
         def fn(input):
             return input[1][0]
@@ -447,24 +505,30 @@ class TestDataParallel(TestCase):
             def forward(self, *input):
                 return fn(input)
 
-        i = torch.randn(20, 3, dtype=torch.float, device="cuda:1")
+        i = torch.randn(20, 3, dtype=torch.float, device=f"{device_type}:1")
         input = (i.cos(), (i.sin(), i), i.sin())
-        gpus = range(torch.cuda.device_count())
+        gpus = range(torch.accelerator.device_count())
         output = dp.data_parallel(Net(), input, gpus)
         self.assertEqual(output, fn(input))
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(
+        msg="torch._C._gather Not implemented on XPU, https://github.com/intel/torch-xpu-ops/issues/2737"
+    )
     def test_data_parallel_module_zero_inputs(self):
         class TestModule(nn.Module):
             def forward(self):
-                t = torch.eye(2, 3, device="cuda:0")
+                t = torch.eye(2, 3, device=f"{device_type}:0")
                 return t + (1 - t)
 
         def test_helper(output, expected):
             self.assertEqual(output.get_device(), 0)
             self.assertEqual(output, expected)
 
-        expected = torch.ones(2, 3, device="cuda:0")
+        expected = torch.ones(2, 3, device=f"{device_type}:0")
         model = TestModule()
 
         test_helper(nn.DataParallel(model, [0])(), expected)
@@ -472,10 +536,14 @@ class TestDataParallel(TestCase):
         test_helper(dp.data_parallel(model, None, [0]), expected)
         test_helper(dp.data_parallel(model, (), [0, 1]), expected)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_device_args(self):
-        cuda0 = torch.device("cuda:0")
-        cuda1 = torch.device("cuda:1")
+        cuda0 = torch.device(f"{device_type}:0")
+        cuda1 = torch.device(f"{device_type}:1")
 
         # test output_device
         l = nn.Linear(10, 5).to(cuda0, torch.float)
@@ -489,7 +557,11 @@ class TestDataParallel(TestCase):
         out = dp.data_parallel(l, i, device_ids=(cuda0, cuda1), output_device=cuda0)
         self.assertEqual(out, l(i))
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_function_deletion(self):
         # this test case is originated from #16532
         def gradient_penalty(net, x):
@@ -503,9 +575,9 @@ class TestDataParallel(TestCase):
             )[0].mean()
             return loss
 
-        net = nn.Linear(4, 1).cuda()
+        net = nn.Linear(4, 1).to(device_type)
         dpn = nn.DataParallel(net, [0, 1])
-        x = torch.ones(2, 4, requires_grad=True).cuda()
+        x = torch.ones(2, 4, requires_grad=True).to(device_type)
 
         dpn.zero_grad()
         loss = gradient_penalty(dpn, x)
@@ -513,9 +585,10 @@ class TestDataParallel(TestCase):
         grads = [p.grad for p in net.parameters()]
         self.assertEqual(2, len(grads))
         self.assertEqual(
-            torch.tensor([[0.25, 0.25, 0.25, 0.25]], device="cuda:0"), grads[0]
+            torch.tensor([[0.25, 0.25, 0.25, 0.25]], device=f"{device_type}:0"),
+            grads[0],
         )
-        self.assertEqual(torch.tensor([0.0], device="cuda:0"), grads[1])
+        self.assertEqual(torch.tensor([0.0], device=f"{device_type}:0"), grads[1])
 
     def _test_scatter(self, tensor):
         x = tensor.detach().requires_grad_()
@@ -531,15 +604,27 @@ class TestDataParallel(TestCase):
         self.assertEqual(x.grad[2:], grad.clone().zero_())
         _assertGradAndGradgradChecks(self, lambda y: dp.scatter(y, (0, 1)), (x,))
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_scatter_cpu(self):
         self._test_scatter(torch.randn((4, 4), dtype=torch.double))
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_scatter_gpu(self):
-        self._test_scatter(torch.randn((4, 4), dtype=torch.double).cuda())
+        self._test_scatter(torch.randn((4, 4), dtype=torch.double).to(device_type))
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_complex_parameters(self):
         # test that complex parameters are handled correctly by DataParallel
         class ComplexModel(torch.nn.Module):
@@ -554,11 +639,11 @@ class TestDataParallel(TestCase):
                 return self.fc2(x)
 
         torch.manual_seed(42)
-        model_single = ComplexModel().cuda()
+        model_single = ComplexModel().to(device_type)
         opt_single = torch.optim.SGD(model_single.parameters(), lr=0.01)
 
         torch.manual_seed(42)
-        model_dp_base = ComplexModel().cuda()
+        model_dp_base = ComplexModel().to(device_type)
         model_dp = torch.nn.DataParallel(model_dp_base)
         opt_dp = torch.optim.SGD(model_dp_base.parameters(), lr=0.01)
 
@@ -567,7 +652,7 @@ class TestDataParallel(TestCase):
 
         for epoch in range(num_epochs):
             torch.manual_seed(epoch * 100)
-            x = torch.randn(batch_size, 8, dtype=torch.cfloat, device="cuda")
+            x = torch.randn(batch_size, 8, dtype=torch.cfloat, device=device_type)
 
             # tolerance grows with epochs due to accumulated numerical differences
             atol = 1e-5 * (10**epoch)
@@ -612,7 +697,11 @@ class TestDataParallel(TestCase):
                     f"Epoch {epoch}: weights differ for {n1} after optimizer step",
                 )
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_data_parallel_complex_mixed_parameters(self):
         # test that mix complex and real parameters are handled correctly by DataParallel
         class MixedModel(torch.nn.Module):
@@ -632,11 +721,11 @@ class TestDataParallel(TestCase):
                 return r, c
 
         torch.manual_seed(42)
-        model_single = MixedModel().cuda()
+        model_single = MixedModel().to(device_type)
         opt_single = torch.optim.SGD(model_single.parameters(), lr=0.01)
 
         torch.manual_seed(42)
-        model_dp_base = MixedModel().cuda()
+        model_dp_base = MixedModel().to(device_type)
         model_dp = torch.nn.DataParallel(model_dp_base)
         opt_dp = torch.optim.SGD(model_dp_base.parameters(), lr=0.01)
 
@@ -645,8 +734,10 @@ class TestDataParallel(TestCase):
 
         for epoch in range(num_epochs):
             torch.manual_seed(epoch * 100)
-            x_real = torch.randn(batch_size, 8, device="cuda")
-            x_complex = torch.randn(batch_size, 8, dtype=torch.cfloat, device="cuda")
+            x_real = torch.randn(batch_size, 8, device=device_type)
+            x_complex = torch.randn(
+                batch_size, 8, dtype=torch.cfloat, device=device_type
+            )
 
             # tolerance grows with epochs due to accumulated numerical differences
             atol = 1e-5 * (10**epoch)
@@ -691,8 +782,12 @@ class TestDataParallel(TestCase):
 
     def _test_gather(self, output_device):
         inputs = (
-            torch.randn(2, 4, device="cuda:0", requires_grad=True, dtype=torch.double),
-            torch.randn(2, 4, device="cuda:1", requires_grad=True, dtype=torch.double),
+            torch.randn(
+                2, 4, device=f"{device_type}:0", requires_grad=True, dtype=torch.double
+            ),
+            torch.randn(
+                2, 4, device=f"{device_type}:1", requires_grad=True, dtype=torch.double
+            ),
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([4, 4]))
@@ -714,8 +809,12 @@ class TestDataParallel(TestCase):
 
         # test scalar inputs, should stack into a vector in this case
         inputs = (
-            torch.randn((), device="cuda:0", requires_grad=True, dtype=torch.double),
-            torch.randn((), device="cuda:1", requires_grad=True, dtype=torch.double),
+            torch.randn(
+                (), device=f"{device_type}:0", requires_grad=True, dtype=torch.double
+            ),
+            torch.randn(
+                (), device=f"{device_type}:1", requires_grad=True, dtype=torch.double
+            ),
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([2]))
@@ -724,10 +823,10 @@ class TestDataParallel(TestCase):
         if output_device != -1:
             self.assertEqual(result.get_device(), output_device)
         else:
-            self.assertFalse(result.is_cuda)
+            self.assertFalse(result.device.type == device_type)
         grad = torch.randn(2, dtype=torch.double)
         if output_device != -1:
-            grad = grad.cuda(output_device)
+            grad = grad.to(output_device)
         result.backward(grad)
         self.assertEqual(inputs[0].grad, grad[0])
         self.assertEqual(inputs[1].grad, grad[1])
@@ -735,44 +834,71 @@ class TestDataParallel(TestCase):
             self, lambda x, y: dp.gather((x, y), output_device), inputs
         )
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(
+        msg="torch._C._gather Not implemented on XPU, https://github.com/intel/torch-xpu-ops/issues/2737"
+    )
     def test_gather_cpu(self):
         self._test_gather(-1)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(
+        msg="torch._C._gather Not implemented on XPU, https://github.com/intel/torch-xpu-ops/issues/2737"
+    )
     def test_gather_gpu(self):
         self._test_gather(0)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_gather_different_len_dicts(self):
         inputs = (
-            {"a": torch.randn(1, 2, requires_grad=True, device="cuda:0")},
+            {"a": torch.randn(1, 2, requires_grad=True, device=f"{device_type}:0")},
             {
-                "b": torch.randn(1, 2, requires_grad=True, device="cuda:1"),
-                "a": torch.randn(1, 2, requires_grad=True, device="cuda:1"),
+                "b": torch.randn(1, 2, requires_grad=True, device=f"{device_type}:1"),
+                "a": torch.randn(1, 2, requires_grad=True, device=f"{device_type}:1"),
             },
         )
         with self.assertRaises(ValueError):
             _ = dp.gather(inputs, target_device=0)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(
+        msg="torch._C._broadcast_coalesced Not implemented on XPU, https://github.com/intel/torch-xpu-ops/issues/2228"
+    )
     def test_replicate(self):
-        module = nn.Linear(10, 5).float().cuda()
-        input = torch.randn(2, 10, dtype=torch.float, device="cuda")
+        module = nn.Linear(10, 5).float().to(device_type)
+        input = torch.randn(2, 10, dtype=torch.float, device=device_type)
         expected_output = module(input)
         for devices in [(0, 1), [0, 1]]:
             replicas = dp.replicate(module, devices)
             for i, replica in enumerate(replicas):
                 for p in replica.parameters():
                     self.assertEqual(p.get_device(), i)
-                replica_input = input.cuda(i)
+                replica_input = input.to(i)
                 self.assertEqual(replica(replica_input), expected_output)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(
+        msg="torch._C._broadcast_coalesced Not implemented on XPU, https://github.com/intel/torch-xpu-ops/issues/2228"
+    )
     def test_replicate_buffers(self):
         net = nn.Module()
         net.bn = nn.BatchNorm2d(10)
-        net.cuda()
+        net.to(device_type)
         for devices in [(0, 1), [0, 1]]:
             replicas = dp.replicate(net, devices)
             for i, replica in enumerate(replicas):
@@ -790,7 +916,11 @@ class TestDataParallel(TestCase):
                     msg="buffer on wrong device",
                 )
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_zero_grad(self):
         # zero_grad should warn about using gradients inside forward
 
@@ -807,35 +937,49 @@ class TestDataParallel(TestCase):
                     self.zero_grad()
                 return x
 
-        module = Net(self).cuda()
+        module = Net(self).to(device_type)
         dpm = dp.DataParallel(module)
         dpm(torch.rand(4, 3, 6, 5))
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_autocast(self):
         class Model(torch.nn.Linear):
             def __init__(self) -> None:
                 super().__init__(8, 8)
 
-            @torch.autocast(device_type="cuda")
+            @torch.autocast(device_type=device_type)
             def forward(self, input):
                 return super().forward(input)
 
-        model = dp.DataParallel(Model().cuda().to(dtype=torch.float32))
-        input = torch.randn((8, 8), dtype=torch.float32, device="cuda")
+        model = dp.DataParallel(Model().to(device_type).to(dtype=torch.float32))
+        input = torch.randn((8, 8), dtype=torch.float32, device=device_type)
         self.assertTrue(model(input).dtype is torch.float16)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(
+        msg="torch._C._broadcast_coalesced Not implemented on XPU, https://github.com/intel/torch-xpu-ops/issues/2228"
+    )
     def test_save_replica_module(self):
         # DataParallel replicas can be saved (gh-37182)
-        module = torch.nn.Linear(8, 8).cuda()
+        module = torch.nn.Linear(8, 8).to(device_type)
         dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=False)
         data = io.BytesIO()
         torch.save(dpm, data)
         dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=True)
         torch.save(dpm, data)
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_strided_grad_layout(self):
         class ConvNet(nn.Module):
             def __init__(self, layouts, dtype_list):
@@ -873,9 +1017,13 @@ class TestDataParallel(TestCase):
             [torch.half] * 4,
         )
 
-        ndevs = torch.cuda.device_count()
-        input = torch.randn(ndevs * 8, 8, 8, 8, device="cuda:0", dtype=torch.float)
-        target = torch.randn(ndevs * 8, 8, 4, 4, device="cuda:0", dtype=torch.float)
+        ndevs = torch.accelerator.device_count()
+        input = torch.randn(
+            ndevs * 8, 8, 8, 8, device=f"{device_type}:0", dtype=torch.float
+        )
+        target = torch.randn(
+            ndevs * 8, 8, 4, 4, device=f"{device_type}:0", dtype=torch.float
+        )
         device_ids = list(range(ndevs))
 
         with torch.backends.cudnn.flags(
@@ -884,7 +1032,7 @@ class TestDataParallel(TestCase):
             for formats, dtype_list in product(layer_formats, layer_dtypes):
                 model_msg = f"formats = {formats} dtypes = {dtypes}"
                 try:
-                    m = ConvNet(formats, dtype_list).cuda(device="cuda:0")
+                    m = ConvNet(formats, dtype_list).to(0)
                     m_dp = dp.DataParallel(deepcopy(m), device_ids=device_ids)
                     opt = torch.optim.SGD(m.parameters(), lr=0.1)
                     opt_dp = torch.optim.SGD(m_dp.parameters(), lr=0.1)
@@ -939,7 +1087,11 @@ class TestDataParallel(TestCase):
                         )
                         raise
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-GPU not supported"
+    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_parameter_list_dict_replica(self):
         class MyMod(torch.nn.Module):
             def __init__(self, data, check_fn):
@@ -964,25 +1116,28 @@ class TestDataParallel(TestCase):
             self.assertIsNotNone(self_.data[key0].grad_fn)
             self.assertIsNotNone(self_.data[key1].grad_fn)
 
-        module = MyMod(torch.nn.ParameterList([p1, p2]), check_fn).cuda()
+        module = MyMod(torch.nn.ParameterList([p1, p2]), check_fn).to(device_type)
         model = dp.DataParallel(module)
-        input = torch.randn((8, 8), device="cuda")
+        input = torch.randn((8, 8), device=device_type)
 
         # Runs the check_fn
         model(input)
 
         key0 = "0"
         key1 = "1"
-        module = MyMod(torch.nn.ParameterDict({"0": p1, "1": p2}), check_fn).cuda()
+        module = MyMod(torch.nn.ParameterDict({"0": p1, "1": p2}), check_fn).to(
+            device_type
+        )
         model = dp.DataParallel(module)
-        input = torch.randn((8, 8), device="cuda")
+        input = torch.randn((8, 8), device=device_type)
 
         # Runs the check_fn
         model(input)
 
 
 class TestDataParallelDeviceType(TestCase):
-    @onlyCUDA
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
+    @onlyOn(["cuda", "xpu"])
     @skipMeta
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module(self, device, dtype):
@@ -994,7 +1149,8 @@ class TestDataParallelDeviceType(TestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
-    @onlyCUDA
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
+    @onlyOn(["cuda", "xpu"])
     @skipMeta
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only(self, device, dtype):
@@ -1014,7 +1170,8 @@ class TestDataParallelDeviceType(TestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
-    @onlyCUDA
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
+    @onlyOn(["cuda", "xpu"])
     @skipMeta
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only_empty_list(self, device, dtype):
@@ -1034,7 +1191,8 @@ class TestDataParallelDeviceType(TestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
-    @onlyCUDA
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
+    @onlyOn(["cuda", "xpu"])
     @skipMeta
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only_empty_dict(self, device, dtype):
@@ -1054,7 +1212,8 @@ class TestDataParallelDeviceType(TestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
-    @onlyCUDA
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
+    @onlyOn(["cuda", "xpu"])
     @skipMeta
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only_empty_tuple(self, device, dtype):

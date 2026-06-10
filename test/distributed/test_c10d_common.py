@@ -365,7 +365,7 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device(f"cuda:{self.rank:d}")
+        device = devices[0] if devices else torch.device(f"{device_type}:{self.rank:d}")
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
@@ -1844,16 +1844,21 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # Ensure backend config can be created with the following arguments
         backend_config_strings_and_expected_values = [
             (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
+            (dist.Backend.XCCL, "xpu:xccl"),
             (dist.Backend.NCCL, "cuda:nccl"),
-            (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
+            (dist.Backend.MPI, "cpu:mpi,cuda:mpi,xpu:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
-            (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
-            ("DUMMY", "cpu:dummy,cuda:dummy"),
-            ("dummy", "cpu:dummy,cuda:dummy"),
+            (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy,xpu:dummy"),
+            ("DUMMY", "cpu:dummy,cuda:dummy,xpu:dummy"),
+            ("dummy", "cpu:dummy,cuda:dummy,xpu:dummy"),
             ("cpu:dummy,cuda:dummy", "cpu:dummy,cuda:dummy"),
             ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
             ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
             ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
+            ("cpu:dummy,xpu:dummy", "cpu:dummy,xpu:dummy"),
+            ("cpu:dummy,xpu:xccl", "cpu:dummy,xpu:xccl"),
+            ("cpu:gloo,xpu:dummy", "cpu:gloo,xpu:dummy"),
+            ("cpu:gloo,xpu:xccl", "cpu:gloo,xpu:xccl"),
         ]
 
         if TEST_XPU:
@@ -1892,6 +1897,8 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # Simple form maps to device(s) where the backend is the registered default.
         self.assertEqual(_parse_backend_string("nccl"), {"cuda": "nccl"})
         self.assertEqual(_parse_backend_string("NCCL"), {"cuda": "nccl"})
+        self.assertEqual(_parse_backend_string("xccl"), {"xpu": "xccl"})
+        self.assertEqual(_parse_backend_string("XCCL"), {"xpu": "xccl"})
         # gloo is the default for both cpu and mps in default_device_backend_map.
         self.assertEqual(_parse_backend_string("gloo"), {"cpu": "gloo", "mps": "gloo"})
 
@@ -1901,8 +1908,16 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             {"cpu": "gloo", "cuda": "nccl"},
         )
         self.assertEqual(
+            _parse_backend_string("cpu:gloo,xpu:xccl"),
+            {"cpu": "gloo", "xpu": "xccl"},
+        )
+        self.assertEqual(
             _parse_backend_string("CPU:GLOO , CUDA:NCCL"),
             {"cpu": "gloo", "cuda": "nccl"},
+        )
+        self.assertEqual(
+            _parse_backend_string("CPU:GLOO , XPU:XCCL"),
+            {"cpu": "gloo", "xpu": "xccl"},
         )
         # Unknown device types in merged form are accepted (no validation here).
         self.assertEqual(_parse_backend_string("xpu:nccl"), {"xpu": "nccl"})
@@ -2271,7 +2286,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
             store=store,
         )
         # TODO: this will be updated in the future to not be backend specific
-        device = "cuda" if backend == "nccl" else "cpu"
+        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
         tensors = [torch.ones(10, 10, device=torch.device(device))]
         dist.all_reduce_coalesced(tensors, dist.ReduceOp.SUM)
         for tensor in tensors:
