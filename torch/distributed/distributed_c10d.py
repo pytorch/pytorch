@@ -1349,24 +1349,6 @@ def is_ucc_available() -> bool:
     return _UCC_AVAILABLE
 
 
-def _spmd_no_typecheck():
-    """
-    Return a spmd_types no_typecheck context, or a no-op if not installed.
-    """
-    from torch.distributed import _is_spmd_types_available
-
-    if _is_spmd_types_available():
-        import spmd_types
-
-        return spmd_types.no_typecheck()
-
-    @contextlib.contextmanager
-    def no_typecheck():
-        yield
-
-    return no_typecheck()
-
-
 def is_xccl_available() -> bool:
     """Check if the XCCL backend is available."""
     return _XCCL_AVAILABLE
