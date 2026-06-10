@@ -265,6 +265,7 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
     """
 
     from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
         guard_or_true,
         is_nested_int,
         statically_known_true,
@@ -274,8 +275,18 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
         return bool(x)
 
     maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
-    maybe_statically_known_true = statically_known_true if false_if_dde else eval_eager
-    maybe_size_one = statically_known_true if false_if_dde else eval_eager
+
+    def maybe_size_one(x):
+        if not false_if_dde:
+            return bool(x)
+        if isinstance(x, torch.SymBool):
+            shape_env = getattr(x.node, "shape_env", None)
+            if (
+                shape_env is not None
+                and shape_env.prefer_deferred_runtime_asserts_over_guards
+            ):
+                return guard_or_false(x)
+        return statically_known_true(x)
 
     expected_stride = 1
     expected_stride_max = 1
@@ -286,16 +297,8 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
         if maybe_size_one(x == 1):
             continue
 
-        if false_if_dde and not (
-            maybe_statically_known_true(y == expected_stride)
-            or maybe_statically_known_true(y == expected_stride_max)
-        ):
-            return False
-
-        if (
-            not false_if_dde
-            and maybe_guard_or_true(y != expected_stride)
-            and maybe_guard_or_true(y != expected_stride_max)
+        if maybe_guard_or_true(y != expected_stride) and maybe_guard_or_true(
+            y != expected_stride_max
         ):
             return False
 
@@ -360,10 +363,7 @@ def is_channels_last_contiguous_2d(a: Tensor, false_if_dde=False) -> bool:
             continue
 
         stride = a.stride()[idx]
-        if false_if_dde and not statically_known_true(stride == expected_stride):
-            return False
-
-        if not false_if_dde and maybe_guard_or_true(stride != expected_stride):
+        if maybe_guard_or_true(stride != expected_stride):
             return False
 
         expected_stride *= length
@@ -394,10 +394,7 @@ def is_channels_last_contiguous_3d(a: Tensor, false_if_dde=False) -> bool:
             continue
 
         stride = a.stride()[idx]
-        if false_if_dde and not statically_known_true(stride == expected_stride):
-            return False
-
-        if not false_if_dde and maybe_guard_or_true(stride != expected_stride):
+        if maybe_guard_or_true(stride != expected_stride):
             return False
 
         expected_stride *= length
@@ -489,6 +486,32 @@ def is_channels_last_contiguous_or_false(a: Tensor) -> bool:
     ) or is_channels_last_contiguous_or_false_3d(a)
 
 
+# Defined at module scope so the class is built once, not rebuilt on every call.
+class K(NamedTuple):
+    size: int
+    stride: int
+
+    def __lt__(self, other):
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
+        # for backed symbols, this is practically a < operation
+        # for unbacked, we return True if < is statically known,
+        # then try to answer this symbolically, with stride ordering semantics
+        # (e.g. u0 < u0 is False, u0 < u1 is False with no axioms, u0 < 2 * u0 is True)
+        return (
+            guard_or_false(
+                self.stride < other.stride
+            )  # checks statically known inequality
+            or (
+                (
+                    guard_or_false(self.stride == 0)
+                    or guard_or_false(other.stride % self.stride == 0)
+                )
+                and guard_or_true(self.stride != other.stride)
+            )  # checks symbolic inequality (e.g. u0 < 2048 * u0)
+        )
+
+
 def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     """
     Helper function for is_non_overlapping_and_dense.
@@ -499,7 +522,7 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     this may be non-overlapping & dense at runtime, for values {u0: 4, u1: 4, u2: 4, u3: 1},
     but isn't true for all values.
     """
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
     from torch.utils._sympy.functions import Max
 
     # Short-circuits for 0/1-element tensors
@@ -517,28 +540,6 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     # This sort is done in a size-oblivious way, which helps if we do a
     # comparison like 2048*u0 > u0; we just want this to return True
     # (and not worry about what if u0 is zero).
-    class K(NamedTuple):
-        size: int
-        stride: int
-
-        def __lt__(self, other):
-            # for backed symbols, this is practically a < operation
-            # for unbacked, we return True if < is statically known,
-            # then try to answer this symbolically, with stride ordering semantics
-            # (e.g. u0 < u0 is False, u0 < u1 is False with no axioms, u0 < 2 * u0 is True)
-            return (
-                guard_or_false(
-                    self.stride < other.stride
-                )  # checks statically known inequality
-                or (
-                    (
-                        guard_or_false(self.stride == 0)
-                        or guard_or_false(other.stride % self.stride == 0)
-                    )
-                    and guard_or_true(self.stride != other.stride)
-                )  # checks symbolic inequality (e.g. u0 < 2048 * u0)
-            )
-
     lengths_and_strides = sorted(map(K, sizes, strides))
 
     # verify actual strides match the expected (composed sizes)

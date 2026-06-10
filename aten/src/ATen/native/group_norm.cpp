@@ -100,7 +100,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   Tensor rstd = at::empty({N, group}, X.options().dtype(dtype));
   GroupNormKernel(
       X.device().type(), X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
-  return std::make_tuple(Y, mean, rstd);
+  return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
 std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
@@ -212,15 +212,10 @@ Tensor group_norm(
           .statically_known_true(__FILE__, __LINE__)) {
     memory_format = at::MemoryFormat::ChannelsLast3d;
   }
-  const bool needs_symbolic_copy = has_symbolic_sizes_strides &&
-      !input.sym_is_contiguous(memory_format).statically_known_true(
-          __FILE__, __LINE__);
-  if (needs_symbolic_copy) {
-    memory_format = at::MemoryFormat::Contiguous;
-  }
   const auto& X = input.device().is_cpu() || input.is_privateuseone() ?
-                  (needs_symbolic_copy ? input.clone(memory_format)
-                                       : input.contiguous(memory_format))
+                  (has_symbolic_sizes_strides
+                       ? input.clone(memory_format)
+                       : input.contiguous(memory_format))
                   : input.contiguous();
   const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;

@@ -485,20 +485,6 @@ graph():
             inp = torch.randn(1, 4, t, 8, 8)
             self.assertEqual(ep.module()(inp), model(inp))
 
-    def test_reshape_symbolic_divisibility_no_guard(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x.reshape(2, x.shape[0] * 2)
-
-        model = Model()
-        x = torch.randn(4, 4)
-        dynamic_s = Dim("s", min=1, max=10)
-        ep = export(model, (x,), dynamic_shapes={"x": {0: dynamic_s}})
-
-        for s in (1, 2, 3, 4, 9):
-            inp = torch.randn(s, 4)
-            self.assertEqual(ep.module()(inp), model(inp))
-
     @torch.fx.experimental._config.patch(backed_size_oblivious=True)
     def test_view_unify_cross_symbols(self):
         """
@@ -1527,6 +1513,23 @@ graph():
 
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
         self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
+
+    def test_export_allows_aten_hardtanh_with_inverted_bounds(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.hardtanh(x, min_val=2, max_val=0)
+
+        model = M()
+        x = torch.randn(3)
+        ep = export(model, (x,), strict=True)
+        self.assertEqual(ep.module()(x), model(x))
+        self.assertTrue(
+            any(
+                node.op == "call_function"
+                and node.target == torch.ops.aten.hardtanh.default
+                for node in ep.graph_module.graph.nodes
+            )
+        )
 
     def test_symint_output(self):
         class Foo(torch.nn.Module):

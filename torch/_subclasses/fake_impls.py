@@ -523,6 +523,32 @@ def _spdiags(
     )
 
 
+@register_op_impl(aten._to_dense.default)
+def _to_dense(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    dtype: torch.dtype | None = None,
+    masked_grad: bool | None = None,
+) -> FakeTensor:
+    if self.layout is torch.sparse_coo:
+        if dtype is not None:
+            raise RuntimeError("dtype argument is not supported by sparse_to_dense")
+        with in_kernel_invocation_manager(fake_mode):
+            out = torch.empty(
+                tuple(self.shape),
+                dtype=self.dtype,
+                device="meta",
+            )
+        return FakeTensor(fake_mode, out, self.fake_device)
+
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(self, dtype=dtype, masked_grad=masked_grad)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, self.fake_device
+    )
+
+
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags
@@ -627,6 +653,20 @@ def unique2(
     return_counts: bool = False,
 ) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
+
+
+@register_op_impl(aten._unique.default)
+def unique(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    arg: FakeTensor,
+    sorted: bool = True,
+    return_inverse: bool = False,
+) -> tuple[FakeTensor, FakeTensor]:
+    uniques, inverse, _counts = _unique(
+        fake_mode, func, arg, None, sorted, return_inverse, False
+    )
+    return uniques, inverse
 
 
 @register_op_impl(aten.select.int)
@@ -1601,6 +1641,28 @@ def embedding_bag(
 
     with fake_mode:
         return meta_embedding_bag(*args, **kwargs)
+
+
+@register_op_impl(aten.embedding.default)
+def embedding(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> Any:
+    from torch._meta_registrations import embedding as meta_embedding
+
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    weight = new_kwargs["weight"]
+    indices = new_kwargs["indices"]
+    if (
+        weight.device != indices.device
+        and weight.device.type != "meta"
+        and indices.device.type != "meta"
+    ):
+        return NotImplemented
+
+    with fake_mode:
+        return typing_cast(FakeTensor, meta_embedding(*args, **kwargs))
 
 
 # takes in multiple-devices, don't default to default device handling

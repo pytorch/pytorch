@@ -1775,7 +1775,8 @@ std::
     }
   }
 
-  return std::make_tuple(new_sizes, new_strides, wrapped_dims);
+  return std::make_tuple(
+      std::move(new_sizes), std::move(new_strides), std::move(wrapped_dims));
 }
 
 Tensor permute(const Tensor& self, IntArrayRef dims) {
@@ -2010,8 +2011,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
-  if (self.sym_is_contiguous().statically_known_true(__FILE__, __LINE__) &&
-      !self.is_mkldnn()) {
+  if (self.is_contiguous_or_false() && !self.is_mkldnn()) {
     return self.view_symint(proposed_shape);
   }
 
@@ -2067,7 +2067,7 @@ Tensor _reshape_copy_symint(
     TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tensors");
   }
 
-  if (self.sym_is_contiguous().statically_known_true(__FILE__, __LINE__)) {
+  if (self.is_contiguous_or_false()) {
     return self.view_symint(shape).clone(at::MemoryFormat::Contiguous);
   } else {
     return at::_unsafe_view_symint(
@@ -2576,7 +2576,8 @@ Tensor index_select_sparse_cpu(
       // Short-circuit if empty intersection
       if (!res_len) {
         auto empty_idx = at::empty({0}, src.options());
-        return std::make_tuple(empty_idx, empty_idx);
+        auto empty_idx_copy = empty_idx;
+        return std::make_tuple(std::move(empty_idx), std::move(empty_idx_copy));
       }
 
       // Now that we know "i", "j" and the counts, we "unflatten"
@@ -2754,7 +2755,8 @@ Tensor index_select_sparse_cpu(
       // Short-circuit if empty intersection
       if (!res_len) {
         auto empty_idx = at::empty({0}, index.options());
-        return std::make_tuple(empty_idx, empty_idx);
+        auto empty_idx_copy = empty_idx;
+        return std::make_tuple(std::move(empty_idx), std::move(empty_idx_copy));
       }
       const auto intersection_offsets = intersection_counts.cumsum(0);
 
@@ -2939,7 +2941,8 @@ Tensor index_select_sparse_cpu(
               }
             });
 
-        return std::make_tuple(idx_selected, src_selected);
+        return std::make_tuple(
+            std::move(idx_selected), std::move(src_selected));
       }();
 
       return search_in_dim_indices
