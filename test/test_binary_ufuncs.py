@@ -2833,22 +2833,33 @@ class TestBinaryUfuncsDevice(TestCase):
             if self.device_type == "cpu":
                 with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
                     fn(x, zero)
-            elif torch.version.hip is not None:
-                # ROCm behavior: x % 0 is a no-op; x is returned
-                self.assertEqual(fn(x, zero), x)
             else:
-                # CUDA behavior: Different value for different dtype
-                # Due to it's an undefined behavior, CUDA returns a pattern of all 1s
-                # for integral dividend (other than int64) divided by zero. For int64,
-                # CUDA returns all 1s for negative dividend, half 1s for positive dividend.
-                # uint8: 0xff -> 255
-                # int32: 0xffffffff -> -1
-                if dtype == torch.int64:
-                    self.assertEqual(fn(x, zero) == 4294967295, x >= 0)
-                    self.assertEqual(fn(x, zero) == -1, x < 0)
+                # CUDA/ROCm: fmod always returns 0 for divide-by-zero.
+                # remainder returns 0 for all types except uint8 on
+                # non-ROCm CUDA, where it returns 255.
+                if (
+                    fn is torch.remainder
+                    and dtype == torch.uint8
+                    and torch.version.hip is None
+                ):
+                    expected_val = 255
                 else:
-                    value = 255 if dtype == torch.uint8 else -1
-                    self.assertTrue(torch.all(fn(x, zero) == value))
+                    expected_val = 0
+                expected = torch.full_like(x, expected_val)
+                self.assertEqual(fn(x, zero), expected)
+
+    @onlyNativeDeviceTypes
+    @dtypes(*integral_types())
+    def test_div_trunc_by_zero_integral(self, device, dtype):
+        x = make_tensor((10, 10), device=device, dtype=dtype, low=-9, high=9)
+        zero = torch.zeros_like(x)
+        if self.device_type == "cpu":
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                torch.div(x, zero, rounding_mode="trunc")
+        else:
+            expected = torch.zeros_like(x)
+            self.assertEqual(torch.div(x, zero, rounding_mode="trunc"), expected)
+            self.assertEqual(torch.div(x, 0, rounding_mode="trunc"), expected)
 
     @onlyNativeDeviceTypes
     @dtypes(*integral_types())
