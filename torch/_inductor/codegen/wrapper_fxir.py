@@ -1164,6 +1164,7 @@ class FxConverter:
                 "grid": wrapper_grid,
                 "tma_descriptor_metadata": {},
                 "kwargs": call_kwargs,
+                "backend_options": extra_options or {},
             },
         )
         if extra_options:

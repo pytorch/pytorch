@@ -3371,6 +3371,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
         variable: "TritonKernelVariable",
         grids: Any,
         combined_args: dict[str, Any],
+        backend_option_kwargs: dict[str, Any],
+        default_args: dict[str, Any],
         tx: "InstructionTranslatorBase",
     ) -> "variables.ConstantVariable":
         from .dicts import ConstDictVariable
@@ -3407,11 +3409,32 @@ class DynamoTritonHOPifier(TritonHOPifier):
             for k, v in combined_args.items()
             if isinstance(v, VariableTracker) and v.is_python_constant()
         }
+        constant_args.update(default_args)
         non_constant_args = {
             k: v
             for k, v in combined_args_vt.items()
             if not (isinstance(v, VariableTracker) and v.is_python_constant())
+            and k.as_python_constant() not in default_args
         }
+        backend_options = {
+            k: v.as_python_constant()
+            for k, v in backend_option_kwargs.items()
+            if isinstance(v, VariableTracker) and v.is_python_constant()
+        }
+        # backend_option_kwargs starts as the original Triton launch kwargs
+        # because direct Triton exposes that full kwargs dict to
+        # backend.parse_options(). This is an over-approximation: tensor and
+        # symbolic kwargs that bind real kernel parameters are not backend
+        # options, even though their names were included in the original
+        # launch kwargs. Only reject non-constant values that are not also
+        # legitimate non-constant kernel args.
+        missing_options = set(backend_option_kwargs) - set(backend_options)
+        missing_options -= {k.as_python_constant() for k in non_constant_args}
+        if missing_options:
+            self.raise_unsupported(
+                "Triton backend options must be Python constants: "
+                f"{sorted(missing_options)!r}."
+            )
 
         for v in non_constant_args.values():
             v = v.realize()
@@ -3432,6 +3455,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 "grid": grids,
                 "tma_descriptor_metadata": tma_descriptor_metadata,
                 "kwargs": meta.as_proxy(),
+                "backend_options": backend_options,
             },
         )
 

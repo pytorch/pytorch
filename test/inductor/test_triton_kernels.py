@@ -434,7 +434,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr'], backend_options = {});  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0'];  getitem = None
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
@@ -2288,7 +2288,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = arg0_1 + 256;  arg0_1 = None
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], backend_options = {});  floordiv = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2301,7 +2301,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = arg0_1 + 256
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([arg0_1], [256], 4)), 'in_desc_ptr1': ('experimental', ([arg0_1], [256], 4)), 'out_desc_ptr': ('experimental', ([arg0_1], [256], 4))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([arg0_1], [256], 4)), 'in_desc_ptr1': ('experimental', ([arg0_1], [256], 4)), 'out_desc_ptr': ('experimental', ([arg0_1], [256], 4))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], backend_options = {});  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2312,7 +2312,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], backend_options = {});  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2322,7 +2322,7 @@ def forward(self, arg0_1, arg1_1):
                     """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([301], [256], 4)), 'in_desc_ptr1': ('experimental', ([301], [256], 4)), 'out_desc_ptr': ('experimental', ([301], [256], 4))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([301], [256], 4)), 'in_desc_ptr1': ('experimental', ([301], [256], 4)), 'out_desc_ptr': ('experimental', ([301], [256], 4))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], backend_options = {});  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2669,6 +2669,168 @@ def forward(self, arg0_1, arg1_1):
 
         x = torch.randn(4, device=GPU_TYPE)
         f(x, x)
+
+    @requires_gpu
+    def test_triton_kernel_backend_options_without_signature(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                BLOCK_SIZE=128,
+                enable_fp_fusion=False,
+            )
+            return output
+
+        x = torch.randn(4, device=GPU_TYPE)
+        out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
+        self.assertEqual(out, x + x)
+        self.assertIn("'backend_options': {'enable_fp_fusion': False}", code)
+
+    @requires_gpu
+    def test_triton_kernel_backend_options_also_used_as_kernel_kwarg(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            enable_fp_fusion: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            if enable_fp_fusion:
+                result = x + y
+            else:
+                result = x * y
+            tl.store(out_ptr + offsets, result, mask=mask)
+
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                BLOCK_SIZE=128,
+                enable_fp_fusion=False,
+            )
+            return output
+
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
+        out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(out, x * y)
+        self.assertIn("'backend_options': {'enable_fp_fusion': False}", code)
+
+    @requires_gpu
+    def test_triton_kernel_backend_options_with_autotune(self):
+        @triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
+            key=[],
+        )
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                enable_fp_fusion=False,
+            )
+            return output
+
+        x = torch.randn(4, device=GPU_TYPE)
+        out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
+        self.assertEqual(out, x + x)
+        self.assertIn("@triton_heuristics.user_autotune", code)
+        self.assertIn("'backend_options': {'enable_fp_fusion': False}", code)
+
+    @requires_gpu
+    def test_triton_kernel_special_kwargs_with_autotune_use_configs(self):
+        @triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
+            key=[],
+        )
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                num_warps=8,
+            )
+            return output
+
+        x = torch.randn(4, device=GPU_TYPE)
+        out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
+        self.assertEqual(out, x + x)
+        self.assertIn("'num_warps': 8", code)
+        self.assertNotIn("backend_options", code)
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])

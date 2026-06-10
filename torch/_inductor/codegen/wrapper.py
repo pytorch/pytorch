@@ -2962,6 +2962,7 @@ class PythonWrapperCodegen(CodeGen):
         reset_to_zero_args,
         grids: list[list[int | sympy.Expr]],
         epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
+        backend_options: dict[str, Any],
     ):
         """Codegen a user-defined Triton kernel and return its cache entry.
 
@@ -3127,6 +3128,9 @@ class PythonWrapperCodegen(CodeGen):
 
         if reset_to_zero_args:
             triton_meta["reset_to_zero"] = tuple(reset_to_zero_args)
+
+        if backend_options:
+            triton_meta["backend_options"] = backend_options
 
         if len(grids) == 1:
             # compute the grid in the wrapper and pass it in as an arg
