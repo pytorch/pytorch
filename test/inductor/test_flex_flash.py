@@ -33,7 +33,6 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     xfailIfSM120OrLater,
     xfailIfSM12X,
-    xfailIfSM90,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
