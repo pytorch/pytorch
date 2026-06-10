@@ -66,7 +66,7 @@ namespace torch::utils {
 
 enum THPByteOrder { THP_LITTLE_ENDIAN = 0, THP_BIG_ENDIAN = 1 };
 
-TORCH_API constexpr THPByteOrder THP_nativeByteOrder();
+TORCH_API THPByteOrder THP_nativeByteOrder();
 
 template <typename T, typename U>
 TORCH_API void THP_decodeBuffer(T* dst, const uint8_t* src, U type, size_t len);
