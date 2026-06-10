@@ -10073,6 +10073,7 @@ class StorageBox(MutableBox):
 class Subgraph(IRNode):
     name: str
     graph_module: torch.fx.GraphModule
+    inductor_config_patches: dict[str, Any] | None = None
     graph: GraphLowering | None = None
 
 
@@ -10162,15 +10163,29 @@ class InvokeSubgraph(ExternKernel):
         # pyrefly: ignore [bad-assignment]
         operands = new_operands
 
+        if subgraph.inductor_config_patches is None:
+            nested_config = current_node.meta.get("custom", {}).get(
+                "nested_region_config"
+            )
+            subgraph.inductor_config_patches = getattr(
+                nested_config, "inductor_config_patches", None
+            )
+
         if subgraph.graph is None:
             # create and lower subgraphs
-            subgraph.graph = V.graph.make_subgraph(
-                gm=subgraph.graph_module,
-                example_inputs=fake_operands,
-                subgraph_name=subgraph.name,
+            ctx = (
+                config.patch(subgraph.inductor_config_patches)
+                if subgraph.inductor_config_patches
+                else nullcontext()
             )
-            with V.set_graph_handler(subgraph.graph):
-                subgraph.graph.run(*fake_operands)
+            with ctx:
+                subgraph.graph = V.graph.make_subgraph(
+                    gm=subgraph.graph_module,
+                    example_inputs=fake_operands,
+                    subgraph_name=subgraph.name,
+                )
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.run(*fake_operands)
 
         outputs = subgraph.graph.graph_outputs
 
