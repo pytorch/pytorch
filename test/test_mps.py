@@ -3098,6 +3098,58 @@ class TestMPS(TestCaseMPS):
         mps_x.transpose_(0, 1)
         self.assertEqual(cpu_x, mps_x.to('cpu'))
 
+
+    def test_cpu_to_mps_zero_copy(self):
+        # Correctness for the UMA zero-copy CPU->MPS fast path ([destBuffer contents] + memcpy).
+        # Covers: all float/int dtypes contiguous, non-contiguous (clone then fast path),
+        # storage_offset > 0, zero-size, non_blocking=True, dtype cast (goes through clone).
+        dtypes = [
+            torch.float32, torch.float16, torch.bfloat16,
+            torch.int32, torch.int64, torch.int8, torch.uint8, torch.bool,
+        ]
+        for dtype in dtypes:
+            if dtype.is_floating_point:
+                cpu_ref = torch.randn(128, 128).to(dtype)
+            elif dtype == torch.bool:
+                cpu_ref = torch.randint(0, 2, (128, 128), dtype=dtype)
+            else:
+                cpu_ref = torch.randint(0, 10, (128, 128), dtype=dtype)
+
+            # Contiguous same-dtype: fast path
+            mps_result = cpu_ref.to("mps")
+            self.assertEqual(cpu_ref, mps_result.cpu(), msg=f"contiguous {dtype}")
+
+            # Non-contiguous CPU tensor: cloned to contiguous first, then fast path
+            cpu_nc = cpu_ref[:, ::2]
+            self.assertFalse(cpu_nc.is_contiguous())
+            mps_nc = cpu_nc.to("mps")
+            self.assertEqual(cpu_nc, mps_nc.cpu(), msg=f"non-contiguous {dtype}")
+
+            # storage_offset > 0 on CPU src: dense_in_storage check passes (sliced rows)
+            cpu_sl = cpu_ref[1:, :]
+            mps_sl = cpu_sl.to("mps")
+            self.assertEqual(cpu_sl, mps_sl.cpu(), msg=f"storage_offset {dtype}")
+
+            # dtype cast: copy_to_mps_ handles this via src_.to(dst_.dtype()) before calling us
+            if dtype != torch.float32 and dtype.is_floating_point:
+                cpu_fp32 = cpu_ref.float()
+                mps_cast = cpu_ref.to("mps", dtype=torch.float32)
+                self.assertEqual(cpu_fp32, mps_cast.cpu(), msg=f"cast {dtype}->float32")
+
+        # zero-size tensor
+        z = torch.empty(0)
+        self.assertEqual(z.to("mps").cpu(), z)
+
+        # non_blocking=True: goes through blit path (fast path is gated on !non_blocking); result correct after sync
+        cpu_ref2 = torch.randn(64, 64)
+        mps_nb = cpu_ref2.to("mps", non_blocking=True)
+        torch.mps.synchronize()
+        self.assertEqual(cpu_ref2, mps_nb.cpu(), msg="non_blocking=True")
+
+        # round-trip: CPU->MPS->CPU
+        cpu_orig = torch.randn(256, 256)
+        self.assertEqual(cpu_orig, cpu_orig.to("mps").to("cpu"), msg="round-trip")
+
     def test_expand_cpu_to_mps_copy(self):
         # https://github.com/pytorch/pytorch/issues/78642
 

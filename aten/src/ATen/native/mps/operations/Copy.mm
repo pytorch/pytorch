@@ -180,7 +180,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 }
 
 // Copies tensor from cpu to mps backed by identical strided-contiguous data
-static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bool non_blocking) {
+static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bool non_blocking, bool is_direct = false) {
   MPSStream* stream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   auto dst_byte_offset = dst.storage_offset() * dst.itemsize();
@@ -190,6 +190,23 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
   const void* host_src = static_cast<const char*>(src.storage().data()) + src_byte_offset;
 
   TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_dense_in_storage(src));
+
+  // Fast path: on Apple Silicon (unified memory), MPS buffers use MTLStorageModeShared.
+  // CPU can write directly to the shared buffer without issuing a Metal blit command.
+  // Restrict this to strict tensor-to-tensor copies only; scalar/broadcast-style copy_
+  // semantics must go through the normal path to preserve correctness in compiled/dynamic
+  // shape flows.
+  const bool strict_elementwise_copy = src.numel() == dst.numel() && src.nbytes() == dst.nbytes() && src.numel() > 1;
+  if (is_direct && !non_blocking && strict_elementwise_copy && [destBuffer storageMode] == MTLStorageModeShared) {
+    // Preserve stream ordering semantics for blocking copy_: previous queued GPU writes to
+    // destination must complete before direct CPU write, otherwise later completion of those
+    // writes can clobber memcpy results (e.g. zeros_like + copy_(scalar) in compiled flows).
+    stream->synchronize(SyncType::COMMIT_AND_WAIT);
+
+    void* dst_ptr = static_cast<char*>([destBuffer contents]) + dst_byte_offset;
+    std::memcpy(dst_ptr, host_src, size_to_copy);
+    return;
+  }
 
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
@@ -237,8 +254,16 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
     needs_copy = true;
     dst = at::empty_like(src, at::device(at::kMPS));
   }
-  copy_to_mps_stride_contig(dst, src, non_blocking && !needs_copy);
-  return needs_copy ? dst_.copy_(dst) : dst_;
+  copy_to_mps_stride_contig(dst, src, non_blocking && !needs_copy, /*is_direct=*/!needs_copy);
+  if (needs_copy) {
+    dst_.copy_(dst);
+    // The scatter above reads from dst (an intermediate buffer that is freed when
+    // this function returns). Commit and wait while dst is still alive so the MPS
+    // driver cannot reuse its physical GPU memory before the scatter executes.
+    getCurrentMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
+    return dst_;
+  }
+  return dst_;
 }
 
 void copy_blit_mps(void* dst, const void* src, size_t size) {
