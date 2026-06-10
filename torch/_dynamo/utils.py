@@ -3185,6 +3185,10 @@ def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
 
 def set_getitem(s: set[T], n: int) -> T:
     # Set ordering might not be stable
+    if isinstance(s, set):
+        return list(set.__iter__(s))[n]
+    if isinstance(s, frozenset):
+        return list(frozenset.__iter__(s))[n]
     return list(s)[n]
 
 

@@ -1776,6 +1776,22 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(s1, s2)
         self.assertEqual(result, expected)
 
+    def test_set_subclass_comparison_ignores_overridden_iter(self):
+        class MySet(set):
+            def __iter__(self):
+                return iter([99])
+
+        def fn(s1, s2):
+            return s1 == s2
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        inputs = (
+            ({1, 2, 3}, MySet({1, 2, 3})),
+            ({1, 2, 4}, MySet({1, 2, 3})),
+        )
+        for s1, s2 in inputs:
+            self.assertEqual(compiled_fn(s1, s2), fn(s1, s2))
+
     # =====================================================================
     # Tensor vs non-proxyable types (followups)
     # =====================================================================

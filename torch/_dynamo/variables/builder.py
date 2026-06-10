@@ -2122,7 +2122,18 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
-            L = list(dict.fromkeys(value))
+            if isinstance(value, set):
+                set_vt_cls = SetVariable
+                base_iterator = set.__iter__(value)
+            else:
+                if not isinstance(value, frozenset):
+                    raise AssertionError(f"Expected frozenset, got {type(value)}")
+                set_vt_cls = FrozensetVariable
+                base_iterator = frozenset.__iter__(value)
+
+            # CPython's set operations inspect the internal table instead of
+            # dispatching to an overridden iterator on a subclass.
+            L = list(base_iterator)
             output = [
                 LazyVariableTracker.create(
                     list.__getitem__(L, i),
@@ -2131,12 +2142,6 @@ class VariableBuilder:
                 )
                 for i in range(list.__len__(L))
             ]
-            if isinstance(value, set):
-                set_vt_cls = SetVariable
-            else:
-                if not isinstance(value, frozenset):
-                    raise AssertionError(f"Expected frozenset, got {type(value)}")
-                set_vt_cls = FrozensetVariable
 
             set_vt = set_vt_cls(
                 output, source=self.source, mutation_type=ValueMutationExisting()
