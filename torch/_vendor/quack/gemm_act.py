@@ -14,7 +14,6 @@ from cutlass.cute.nvgpu import warp
 
 from .compile_utils import make_fake_tensor as fake_tensor
 from .cute_dsl_utils import (
-    ensure_varlen_n_supported,
     mlir_namedtuple,
     get_device_capacity,
     get_max_active_clusters,
@@ -653,7 +652,6 @@ def _compile_gemm_act(
     main_output_transform_group,
     varlen_m,
     varlen_k,
-    varlen_n,
     gather_A,
     concat_layout,
     device_capacity,
@@ -708,13 +706,12 @@ def _compile_gemm_act(
         c_major,
         varlen_m=varlen_m,
         varlen_k=varlen_k,
-        varlen_n=varlen_n,
         gather_A=gather_A,
     )
     pa_n = cute.sym_int() if gemm_cls_name in ("gated", "grouped_n_contract") else n
     div_pa = div_for_dtype(postact_dtype)
     pa_leading_dim = 1 if gemm_cls_name in ("gated", "grouped_n_contract") else pa_leading
-    pa_shape = (m, pa_n) if varlen_m or varlen_n else (m, pa_n, l)
+    pa_shape = (m, pa_n) if varlen_m else (m, pa_n, l)
     mAuxOut = fake_tensor(postact_dtype, pa_shape, leading_dim=pa_leading_dim, divisibility=div_pa)
 
     mRowVec = fake_tensor(rowvec_dtype, (l, n), leading_dim=1, divisibility=4)
@@ -824,11 +821,7 @@ def _compile_gemm_act(
         (is_dynamic_persistent and device_capacity[0] == 9), False, l
     )
     varlen_args = make_fake_varlen_args(
-        varlen_m,
-        varlen_k,
-        gather_A,
-        m if varlen_m else (k if varlen_k else None),
-        varlen_n=varlen_n,
+        varlen_m, varlen_k, gather_A, m if varlen_m else (k if varlen_k else None)
     )
     return compile_gemm_kernel(
         GemmCls,
@@ -873,7 +866,6 @@ def gemm_act(
     colvec_bias: Optional[Tensor] = None,  # (l, m), or (total_m,) if varlen_m
     cu_seqlens_m: Optional[Tensor] = None,  # (l+1,) cumulative sum of m values for variable length
     cu_seqlens_k: Optional[Tensor] = None,  # (l+1,) cumulative sum of k values for variable length
-    cu_seqlens_n: Optional[Tensor] = None,  # (l+1,) cumulative sum of n values for variable length
     A_idx: Optional[Tensor] = None,  # (total_m,) or (total_k,) if gather_A with varlen
     rounding_mode: int = RoundingMode.RN,
     sr_seed: int | Tensor = 0,
@@ -917,8 +909,7 @@ def gemm_act(
 
     varlen_m = cu_seqlens_m is not None
     varlen_k = cu_seqlens_k is not None
-    varlen_n = cu_seqlens_n is not None
-    assert sum((varlen_m, varlen_k, varlen_n)) <= 1, "Only one of cu_seqlens_m, cu_seqlens_k, and cu_seqlens_n"
+    assert not (varlen_m and varlen_k), "Only one of cu_seqlens_m and cu_seqlens_k"
     gather_A = A_idx is not None
     if varlen_m:
         assert persistent, "varlen_m requires persistent=True"
@@ -929,29 +920,12 @@ def gemm_act(
     if varlen_k:
         assert A.stride(-2) == 1, "varlen_k requires A to be m-major"
         assert B.stride(-2) == 1, "varlen_k requires B to be n-major"
-    if varlen_n:
-        ensure_varlen_n_supported(A)
-        assert persistent, "varlen_n requires persistent=True"
-        assert A.stride(-1) == 1, "varlen_n requires public A to be k-major"
-        assert B.stride(-2) == 1, "varlen_n requires B to be n-major after transpose"
-        if D is not None:
-            assert D.stride(-1) == 1, "varlen_n requires D to be n-major"
-        assert PostAct.stride(-1) == 1, "varlen_n requires PostAct to be n-major"
-        assert A_idx is None, "gather_A is not supported with varlen_n"
-        assert C is None and beta == 1.0, "C/beta are not supported with varlen_n"
-        assert rowvec_bias is None and colvec_bias is None, "biases are not supported with varlen_n"
-        assert not tensor_epilogue_rowvec_biases and not tensor_epilogue_colvec_biases
-        assert not tensor_epilogue_tile_biases, "tile epilogue args are not supported with varlen_n"
-        assert local_reduce_out is None, "local reductions are not supported with varlen_n"
-        assert main_output_transform_group is None, "shape-changing epilogues are not supported with varlen_n"
     if gather_A:
         assert varlen_m or varlen_k, "gather_A requires varlen"
         assert cluster_N == 1, "gather_A requires cluster_N=1"
 
-    A_p, B_p, D_p, C_p = perm3d(
-        A, B, D, C, varlen_m=varlen_m, varlen_k=varlen_k, varlen_n=varlen_n
-    )
-    PostAct_p = PostAct if varlen_n else perm3d_single(PostAct, varlen_m)
+    A_p, B_p, D_p, C_p = perm3d(A, B, D, C, varlen_m=varlen_m, varlen_k=varlen_k)
+    PostAct_p = perm3d_single(PostAct, varlen_m)
     tensor_epilogue_tile_biases_p = tuple(
         perm3d_single(tensor, varlen_m) for tensor in tensor_epilogue_tile_biases
     )
@@ -1046,7 +1020,6 @@ def gemm_act(
         0 if main_output_transform_group is None else main_output_transform_group,
         varlen_m,
         varlen_k,
-        varlen_n,
         gather_A,
         concat_layout,
         device_capacity,
@@ -1102,9 +1075,7 @@ def gemm_act(
         max_swizzle_size,
         tile_count_semaphore,
     )
-    varlen_args = make_varlen_args(
-        cu_seqlens_m, cu_seqlens_k, A_idx, cu_seqlens_n=cu_seqlens_n
-    )
+    varlen_args = make_varlen_args(cu_seqlens_m, cu_seqlens_k, A_idx)
 
     if device_capacity[0] in [10, 11]:
         compiled_fn(A_p, B_p, D_p, C_p, epi_args, scheduler_args, varlen_args, None, None, None)

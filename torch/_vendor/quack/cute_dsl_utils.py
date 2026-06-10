@@ -124,12 +124,6 @@ def get_device_capacity(
     return _get_device_capacity_cached(device)
 
 
-def ensure_varlen_n_supported(device: torch.device | torch.Tensor | None = None) -> None:
-    """Raise a clear error when varlen-N is requested on unsupported architectures."""
-    if get_device_capacity(device)[0] not in (10, 11):
-        raise NotImplementedError("varlen-N grouped GEMM is implemented only for SM100/SM110")
-
-
 def _partition_fields(obj):
     """Split dataclass fields into (constexpr_dict, non_constexpr_dict) by type."""
     all_fields = {field.name: getattr(obj, field.name) for field in fields(obj)}

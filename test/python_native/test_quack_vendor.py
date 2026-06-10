@@ -24,8 +24,6 @@ class TestQuackVendor(TestCase):
         from torch._vendor.quack.gemm_act import gemm_act
         from torch._vendor.quack.gemm_blockscaled_interface import (
             mxfp8_scaled_mm_epilogue,
-            mxfp8_varlen_k_scaled_mm_epilogue,
-            mxfp8_varlen_m_scaled_mm_epilogue,
         )
         from torch._vendor.quack.gemm_config import GemmConfig
         from torch._vendor.quack.trace import TraceContext
@@ -39,8 +37,6 @@ class TestQuackVendor(TestCase):
                     gemm_act,
                     GemmConfig,
                     mxfp8_scaled_mm_epilogue,
-                    mxfp8_varlen_m_scaled_mm_epilogue,
-                    mxfp8_varlen_k_scaled_mm_epilogue,
                 )
             )
         )
@@ -64,8 +60,8 @@ class TestQuackVendorScript(TestCase):
         )
         if not src and not allow_clone:
             self.skipTest(
-                "set QUACK_VENDOR_SRC to a local quack checkout, or "
-                "QUACK_VENDOR_ALLOW_CLONE=1 to clone the pinned SHA"
+                "set QUACK_VENDOR_SRC to a local quack checkout at the pinned SHA, "
+                "or QUACK_VENDOR_ALLOW_CLONE=1 to fetch upstream main"
             )
 
         cmd = ["bash", str(VENDOR_SCRIPT), "--check"]
@@ -74,8 +70,8 @@ class TestQuackVendorScript(TestCase):
         self.assertEqual(
             subprocess.run(cmd, cwd=str(REPO_ROOT)).returncode,
             0,
-            "vendor.sh --check reported drift; edit tools/vendoring/quack/patches, "
-            "not the vendored files",
+            "vendor.sh --check reported drift; edit the FlexGEMM patchset or "
+            "PyTorch vendoring patches, not the vendored files",
         )
 
 
