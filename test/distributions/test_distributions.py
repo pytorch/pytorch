@@ -1802,7 +1802,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertRaises(NotImplementedError, NegativeBinomial(10, p).entropy)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @expectedFailureMPS
     def test_negative_binomial_log_prob(self):
         probs = torch.arange(0.05, 1, 0.1)
         for total_count in [1, 2, 10]:
@@ -2065,11 +2064,9 @@ class TestDistributions(DistributionsTestCase):
         ]
         self._check_enumerate_support(OneHotCategorical, examples)
 
-    @expectedFailureMPS
     def test_poisson_forward_ad(self):
         self._check_forward_ad(torch.poisson)
 
-    @expectedFailureMPS
     def test_poisson_shape(self):
         rate = torch.randn(2, 3).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
@@ -2108,23 +2105,26 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(rate_zero.grad, torch.inf)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @expectedFailureMPS
-    def test_poisson_sample(self):
+    def test_poisson_sample(self, device):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         saved_dtype = torch.get_default_dtype()
-        for dtype in [torch.float, torch.double, torch.bfloat16, torch.half]:
-            torch.set_default_dtype(dtype)
-            for rate in [0.1, 1.0, 5.0]:
-                self._check_sampler_discrete(
-                    Poisson(rate),
-                    scipy.stats.poisson(rate),
-                    f"Poisson(lambda={rate})",
-                    failure_rate=1e-3,
-                )
-        torch.set_default_dtype(saved_dtype)
+        try:
+            dtypes = [torch.float, torch.bfloat16, torch.half]
+            if torch.device(device).type != "mps":
+                dtypes += [torch.double]
+            for dtype in dtypes:
+                torch.set_default_dtype(dtype)
+                for rate in [0.1, 1.0, 5.0]:
+                    self._check_sampler_discrete(
+                        Poisson(rate),
+                        scipy.stats.poisson(rate),
+                        f"Poisson(lambda={rate})",
+                        failure_rate=1e-3,
+                    )
+        finally:
+            torch.set_default_dtype(saved_dtype)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @expectedFailureMPS
     def test_poisson_tensor_sample(self):
         set_rng_seed(1)
         for rate in [0.12, 0.9, 4.0]:
