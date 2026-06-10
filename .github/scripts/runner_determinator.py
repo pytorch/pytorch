@@ -93,6 +93,7 @@ GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_AMI = "runner-ami"
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
 GH_OUTPUT_KEY_USE_ARC = "use-arc"
+GH_OUTPUT_KEY_AMD_DO_LABEL_TYPE = "amd-do-label-type"
 OPT_OUT_LABEL = "no-runner-experiments"
 
 SETTING_EXPERIMENTS = "experiments"
@@ -106,6 +107,9 @@ CANARY_FLEET_SUFFIX = ".c"
 
 ARC_LABEL_PREFIX = "mt-"
 ARC_CANARY_LABEL_PREFIX = "c-"
+
+AMD_DO_EXPERIMENT = "amd-do"
+AMD_DO_LABEL_PREFIX = "amd-do-"
 
 
 class Experiment(NamedTuple):
@@ -132,6 +136,9 @@ class Experiment(NamedTuple):
 class RunnerPrefixResult(NamedTuple):
     prefix: str
     use_arc: bool = False
+    # Dedicated prefix for the amd-do experiment, exposed via its own output
+    # (amd-do-label-type) instead of being folded into ``prefix``.
+    amd_do_prefix: str = ""
 
 
 class Settings(NamedTuple):
@@ -542,6 +549,7 @@ def get_runner_prefix(
     fleet_prefix = ""
     prefixes = []
     use_arc = False
+    amd_do_prefix = ""
     for experiment_name, experiment_settings in settings.experiments.items():
         if not experiment_settings.all_branches and is_exception_branch(branch):
             log.info(
@@ -658,6 +666,15 @@ def get_runner_prefix(
                 log.info(
                     f"ARC experiment enabled. Using ARC runner prefix ({'canary' if is_canary else 'production'})."
                 )
+            elif experiment_name == AMD_DO_EXPERIMENT:
+                # The amd-do experiment is exposed through its own
+                # amd-do-label-type output rather than being mixed into the
+                # shared label-type prefix, so it can be applied per-job
+                # (mirrors use-arc).
+                amd_do_prefix = AMD_DO_LABEL_PREFIX
+                log.info(
+                    "amd-do experiment enabled. Exposing 'amd-do-' prefix via the amd-do-label-type output."
+                )
             elif experiment_name == LF_FLEET_EXPERIMENT:
                 # We give some special treatment to the "lf" experiment since determines the fleet we use
                 #  - If it's enabled, then we always list it's prefix first
@@ -675,7 +692,9 @@ def get_runner_prefix(
             if is_canary
             else ARC_LABEL_PREFIX
         )
-        return RunnerPrefixResult(prefix=arc_prefix, use_arc=True)
+        return RunnerPrefixResult(
+            prefix=arc_prefix, use_arc=True, amd_do_prefix=amd_do_prefix
+        )
 
     if len(prefixes) > 1:
         log.error(
@@ -688,7 +707,7 @@ def get_runner_prefix(
         prefixes.insert(0, fleet_prefix)
 
     prefix = ".".join(prefixes) + "." if prefixes else ""
-    return RunnerPrefixResult(prefix=prefix)
+    return RunnerPrefixResult(prefix=prefix, amd_do_prefix=amd_do_prefix)
 
 
 def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -> str:
@@ -751,6 +770,7 @@ def main() -> None:
     args = parse_args()
 
     runner_label_prefix = DEFAULT_LABEL_PREFIX
+    amd_do_label_prefix = ""
 
     # Check if the PR is opt-out
     if args.pr_number:
@@ -760,6 +780,7 @@ def main() -> None:
                 f"Opt-out runner determinator because #{args.pr_number} has {OPT_OUT_LABEL} label"
             )
             set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
+            set_github_output(GH_OUTPUT_KEY_AMD_DO_LABEL_TYPE, amd_do_label_prefix)
             sys.exit()
 
     if args.workflow_name:
@@ -790,6 +811,7 @@ def main() -> None:
             workflow_name=args.workflow_name,
         )
         runner_label_prefix = result.prefix
+        amd_do_label_prefix = result.amd_do_prefix
         set_github_output(GH_OUTPUT_KEY_USE_ARC, str(result.use_arc).lower())
 
     except Exception as e:
@@ -798,6 +820,7 @@ def main() -> None:
         )
 
     set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
+    set_github_output(GH_OUTPUT_KEY_AMD_DO_LABEL_TYPE, amd_do_label_prefix)
 
 
 if __name__ == "__main__":

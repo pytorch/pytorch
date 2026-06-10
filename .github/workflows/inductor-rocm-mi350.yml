@@ -2,7 +2,7 @@
 # Unneeded for CI: trunk.yml covers the same ROCm testing.
 # Kept in-repo for metrics; auto-triggers below are commented out.
 # workflow_dispatch remains for manual runs.
-name: inductor-rocm-mi355
+name: inductor-rocm-mi350
 
 on:
   #push:
@@ -10,7 +10,7 @@ on:
   #    - main
   #    - release/*
   #  tags:
-  #    - ciflow/inductor-rocm-mi355/*
+  #    - ciflow/inductor-rocm-mi350/*
   workflow_dispatch:
 
 concurrency:
@@ -38,24 +38,25 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
+      check_experiments: amd-do
 
   linux-noble-rocm-py3_12-inductor-build:
-    name: linux-noble-rocm-py3.12-mi355
+    name: linux-noble-rocm-py3.12-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-noble-rocm-py3.12-mi355
+      runner_prefix: ""
+      build-environment: linux-noble-rocm-py3.12-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
         ]}
     secrets: inherit
 
   linux-noble-rocm-py3_12-inductor-test:
-    name: linux-noble-rocm-py3.12-mi355
+    name: linux-noble-rocm-py3.12-mi350
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-noble-rocm-py3_12-inductor-build
     with:
