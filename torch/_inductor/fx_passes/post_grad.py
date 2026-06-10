@@ -290,6 +290,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         spmd_check(gm)
 
+    if config.aten_distributed_optimizations.allow_comms_decompositions:
+        from torch._inductor.fx_passes.decomp_comms import decomp_comms
+
+        GraphTransformObserver(gm, "decomp_comms").apply_gm_pass(decomp_comms)
+
     collectives_bucketing: bool = False
 
     if config.dedup_reduce_scatters:
@@ -881,12 +886,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
 
 
 def register_lowering_pattern(
-    pattern,
-    extra_check=_return_true,
-    pass_number=1,
-    *,
-    output_metadata_ignores_input_storage: bool = False,
-    output_metadata_is_input: int | str | None = None,
+    pattern, extra_check=_return_true, pass_number=1
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Register an aten to inductor IR replacement pattern
@@ -896,8 +896,6 @@ def register_lowering_pattern(
         extra_check,
         # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[pass_number],
-        output_metadata_ignores_input_storage=output_metadata_ignores_input_storage,
-        output_metadata_is_input=output_metadata_is_input,
     )
 
 
@@ -1645,7 +1643,6 @@ def decompose_auto_functionalized(graph):
     ),
     pass_number=2,
     extra_check=is_valid_splitwithsizes_cat,
-    output_metadata_is_input="input_",
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
@@ -1700,7 +1697,6 @@ def is_valid_cat_splitwithsizes(match):
     ),
     pass_number=2,
     extra_check=is_valid_cat_splitwithsizes,
-    output_metadata_is_input="input_",
 )
 def cat_splitwithsizes_replace(match, input_):
     return input_
