@@ -224,7 +224,7 @@ static PyObject* THPModule_initExtension(
         oss << '#' << idx << ' ' << frame.funcname << " from " << frame.filename
             << ':' << frame.lineno << '\n';
       }
-      return oss.str();
+      return std::move(oss).str();
     });
   }
 #endif
@@ -2978,6 +2978,10 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_key_in_tls", [](const std::string& key) -> bool {
     return at::impl::ThreadLocalPythonObjects::get_state().contains(key);
+  });
+
+  py_module.def("_remove_obj_from_tls", [](const std::string& key) {
+    at::impl::ThreadLocalPythonObjects::erase(key);
   });
 
   py_module.def("_accelerator_hooks_device_count", []() {
