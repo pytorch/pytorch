@@ -1285,6 +1285,9 @@ class TritonKernelWrapperMutation(_TritonKernelWrapper):
 
 triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
+# Register as side-effectful so DCE (eliminate_dead_code) does not remove calls to it.
+from torch.fx.node import _side_effectful_functions  # noqa: E402
+_side_effectful_functions.add(triton_kernel_wrapper_mutation)
 
 # Used for wrapping a Triton Kernel in a functional manner
 class TritonKernelWrapperFunctional(_TritonKernelWrapper):

@@ -356,6 +356,28 @@ class TestDCE(TestCase):
         self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=False)
         torch.distributed.destroy_process_group()
 
+    def test_keep_triton_kernel_wrapper_mutation(self):
+        """
+        Test that DCE doesn't remove triton_kernel_wrapper_mutation nodes.
+        """
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_mutation,
+        )
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mutation_node = g.call_function(
+            triton_kernel_wrapper_mutation, args=(), kwargs={}
+        )
+        g.output(x)
+        gm = torch.fx.GraphModule({}, g)
+
+        self.assertTrue(mutation_node.is_impure())
+        changed = gm.graph.eliminate_dead_code()
+        self.assertFalse(changed)
+        call_fn_nodes = [n for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertEqual(len(call_fn_nodes), 1)
+        self.assertIs(call_fn_nodes[0].target, triton_kernel_wrapper_mutation)
+
     @unittest.skipIf(IS_MACOS, "Not working on macos")
     def test_keep_collectives_no_overload(self):
         """
