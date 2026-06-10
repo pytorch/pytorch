@@ -2494,15 +2494,19 @@ def _batch_norm_no_update(
 
 @register_decomposition(aten._fused_dropout)
 @out_wrapper("out0", "out1")
-@pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
     if generator is not None:
         raise AssertionError(
             f"generator must be None for _fused_dropout decomposition, got {generator}"
         )
-    mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
-    res = mask.type_as(input) * input * (1.0 / p)
-    return (res, mask)
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        input, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    input_acc = input.to(computation_dtype)
+    mask = (torch.rand_like(input_acc) < p).to(dtype=torch.uint8)
+    scale = torch.scalar_tensor(1.0, dtype=computation_dtype, device=input.device) / p
+    res = mask.to(computation_dtype) * input_acc * scale
+    return (res.to(result_dtype), mask)
 
 
 @register_decomposition(aten._to_copy)
